@@ -1139,7 +1139,7 @@ namespace Legion {
     void TraceCaptureOp::initialize_capture(InnerContext *ctx, bool has_block)
     //--------------------------------------------------------------------------
     {
-      initialize(ctx, EXECUTION_FENCE);
+      initialize(ctx, EXECUTION_FENCE, false/*need future*/);
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
       assert(trace->is_dynamic_trace());
@@ -1270,7 +1270,7 @@ namespace Legion {
     void TraceCompleteOp::initialize_complete(InnerContext *ctx, bool has_block)
     //--------------------------------------------------------------------------
     {
-      initialize(ctx, EXECUTION_FENCE);
+      initialize(ctx, EXECUTION_FENCE, false/*need future*/);
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
@@ -1443,7 +1443,7 @@ namespace Legion {
     void TraceReplayOp::initialize_replay(InnerContext *ctx, LegionTrace *trace)
     //--------------------------------------------------------------------------
     {
-      initialize(ctx, EXECUTION_FENCE);
+      initialize(ctx, EXECUTION_FENCE, false/*need future*/);
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
@@ -1595,7 +1595,7 @@ namespace Legion {
     void TraceBeginOp::initialize_begin(InnerContext *ctx, LegionTrace *trace)
     //--------------------------------------------------------------------------
     {
-      initialize(ctx, MAPPING_FENCE);
+      initialize(ctx, MAPPING_FENCE, false/*need future*/);
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
@@ -2079,7 +2079,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceConditionSet::make_ready(void)
+    void TraceConditionSet::make_ready(bool postcondition)
     //--------------------------------------------------------------------------
     {
       if (cached)
@@ -2103,13 +2103,56 @@ namespace Legion {
         }
       }
 
+      // Filter out views that overlap with some restricted views
+      if (postcondition)
+      {
+        for (LegionMap<Key,FieldMaskSet<InstanceView> >::aligned::iterator it =
+             views_by_regions.begin(); it != views_by_regions.end(); ++it)
+        {
+          EquivalenceSet *eq = it->first.second;
+          FieldMaskSet<InstanceView> &all_views = it->second;
+          if (!eq->has_restrictions(all_views.get_valid_mask())) continue;
+
+          FieldMaskSet<InstanceView> restricted_views;
+          FieldMask restricted_mask;
+          for (FieldMaskSet<InstanceView>::iterator vit = all_views.begin();
+               vit != all_views.end(); ++vit)
+          {
+            FieldMask restricted = eq->is_restricted(vit->first);
+            FieldMask overlap = restricted & vit->second;
+            if (!!overlap)
+            {
+              restricted_views.insert(vit->first, overlap);
+              restricted_mask |= overlap;
+            }
+          }
+
+          std::vector<InstanceView*> to_delete;
+          for (FieldMaskSet<InstanceView>::iterator vit = all_views.begin();
+               vit != all_views.end(); ++vit)
+          {
+            vit.filter(restricted_mask);
+            if (!vit->second)
+              to_delete.push_back(vit->first);
+          }
+
+          for (std::vector<InstanceView*>::iterator vit = to_delete.begin();
+               vit != to_delete.end(); ++vit)
+            all_views.erase(*vit);
+
+          for (FieldMaskSet<InstanceView>::iterator vit =
+               restricted_views.begin(); vit != restricted_views.end(); ++vit)
+            all_views.insert(vit->first, vit->second);
+        }
+      }
+
       unsigned idx = 0;
       version_infos.resize(views_by_regions.size());
       for (LegionMap<Key,FieldMaskSet<InstanceView> >::aligned::iterator it =
            views_by_regions.begin(); it != views_by_regions.end(); ++it)
       {
         views.push_back(it->second);
-        version_infos[idx++].record_equivalence_set(NULL, UINT_MAX,
+        version_infos[idx++].record_equivalence_set(NULL,
             it->first.second, it->second.get_valid_mask());
       }
     }
@@ -2420,8 +2463,8 @@ namespace Legion {
     void PhysicalTemplate::generate_conditions(void)
     //--------------------------------------------------------------------------
     {
-      pre.make_ready();
-      post.make_ready();
+      pre.make_ready(false /*postcondition*/);
+      post.make_ready(true /*postcondition*/);
     }
 
     //--------------------------------------------------------------------------
@@ -2638,6 +2681,12 @@ namespace Legion {
               used[gen[fill->precondition_idx]] = true;
               break;
             }
+          case SET_EFFECTS:
+            {
+              SetEffects *effects = inst->as_set_effects();
+              used[gen[effects->rhs]] = true;
+              break;
+            }
           case COMPLETE_REPLAY:
             {
               CompleteReplay *complete = inst->as_complete_replay();
@@ -2830,6 +2879,11 @@ namespace Legion {
                 event_to_check = &inst->as_issue_fill()->precondition_idx;
                 break;
               }
+            case SET_EFFECTS :
+              {
+                event_to_check = &inst->as_set_effects()->rhs;
+                break;
+              }
             case COMPLETE_REPLAY :
               {
                 event_to_check = &inst->as_complete_replay()->rhs;
@@ -2949,6 +3003,10 @@ namespace Legion {
               SetOpSyncEvent *sync = inst->as_set_op_sync_event();
               inv_topo_order[sync->lhs] = topo_order.size();
               topo_order.push_back(sync->lhs);
+              break;
+            }
+          case SET_EFFECTS :
+            {
               break;
             }
           case ASSIGN_FENCE_COMPLETION :
@@ -3189,6 +3247,13 @@ namespace Legion {
               int subst = substs[fill->precondition_idx];
               if (subst >= 0) fill->precondition_idx = (unsigned)subst;
               lhs = fill->lhs;
+              break;
+            }
+          case SET_EFFECTS :
+            {
+              SetEffects *effects = inst->as_set_effects();
+              int subst = substs[effects->rhs];
+              if (subst >= 0) effects->rhs = (unsigned)subst;
               break;
             }
           case SET_OP_SYNC_EVENT :
@@ -3945,6 +4010,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_set_effects(Memoizable *memo, ApEvent &rhs)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(memo != NULL);
+      assert(memo->is_memoizing());
+#endif
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
+
+      events.push_back(ApEvent());
+      insert_instruction(new SetEffects(*this, find_trace_local_id(memo),
+            find_event(rhs)));
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalTemplate::record_complete_replay(Memoizable* memo, ApEvent rhs)
     //--------------------------------------------------------------------------
     {
@@ -4540,6 +4623,49 @@ namespace Legion {
       ss << "events[" << lhs << "] = operations[" << owner
          << "].compute_sync_precondition()    (op kind: "
          << Operation::op_names[operations[owner]->get_memoizable_kind()] 
+         << ")";
+      return ss.str();
+    }
+
+    /////////////////////////////////////////////////////////////
+    // SetEffects
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    SetEffects::SetEffects(PhysicalTemplate& tpl, const TraceLocalID& l,
+                           unsigned r)
+      : Instruction(tpl, l), rhs(r)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(rhs < events.size());
+      assert(operations.find(owner) != operations.end());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void SetEffects::execute(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(operations.find(owner) != operations.end());
+      assert(operations.find(owner)->second != NULL);
+#endif
+      Memoizable *memoizable = operations[owner];
+#ifdef DEBUG_LEGION
+      assert(memoizable != NULL);
+#endif
+      memoizable->set_effects_postcondition(events[rhs]);
+    }
+
+    //--------------------------------------------------------------------------
+    std::string SetEffects::to_string(void)
+    //--------------------------------------------------------------------------
+    {
+      std::stringstream ss;
+      ss << "operations[" << owner << "].set_effects_postcondition(events["
+         << rhs << "])    (op kind: "
+         << Operation::op_names[operations[owner]->get_memoizable_kind()]
          << ")";
       return ss.str();
     }

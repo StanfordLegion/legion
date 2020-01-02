@@ -1818,6 +1818,7 @@ namespace Legion {
                                    const std::vector<Realm::FieldID> &field_ids,
                                    const std::vector<size_t> &field_sizes,
                                    const std::vector<const char*> &field_files,
+                                   const OrderingConstraint &dimension_order,
                                    bool read_only, ApEvent &ready_event) = 0;
       virtual PhysicalInstance create_external_instance(Memory memory,
                              uintptr_t base, Realm::InstanceLayoutGeneric *ilg,
@@ -2019,6 +2020,7 @@ namespace Legion {
                                    const std::vector<Realm::FieldID> &field_ids,
                                    const std::vector<size_t> &field_sizes,
                                    const std::vector<const char*> &field_files,
+                                   const OrderingConstraint &dimension_order,
                                    bool read_only, ApEvent &ready_event);
       virtual PhysicalInstance create_external_instance(Memory memory,
                              uintptr_t base, Realm::InstanceLayoutGeneric *ilg,

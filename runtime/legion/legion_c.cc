@@ -2408,6 +2408,14 @@ legion_argument_map_create()
   return CObjectWrapper::wrap(new ArgumentMap());
 }
 
+legion_argument_map_t
+legion_argument_map_from_future_map(legion_future_map_t map_)
+{
+  FutureMap *map = CObjectWrapper::unwrap(map_);
+
+  return CObjectWrapper::wrap(new ArgumentMap(*map));
+}
+
 void
 legion_argument_map_set_point(legion_argument_map_t map_,
                               legion_domain_point_t dp_,
@@ -2419,6 +2427,19 @@ legion_argument_map_set_point(legion_argument_map_t map_,
   TaskArgument arg = CObjectWrapper::unwrap(arg_);
 
   map->set_point(dp, arg, replace);
+}
+
+void
+legion_argument_map_set_future(legion_argument_map_t map_,
+                               legion_domain_point_t dp_,
+                               legion_future_t future_,
+                               bool replace)
+{
+  ArgumentMap *map = CObjectWrapper::unwrap(map_);
+  DomainPoint dp = CObjectWrapper::unwrap(dp_);
+  Future *future = CObjectWrapper::unwrap(future_);
+
+  map->set_point(dp, *future, replace);
 }
 
 void
@@ -2685,6 +2706,14 @@ legion_future_is_ready(legion_future_t handle_)
   Future *handle = CObjectWrapper::unwrap(handle_);
 
   return handle->is_ready();
+}
+
+bool
+legion_future_is_ready_subscribe(legion_future_t handle_, bool subscribe)
+{
+  Future *handle = CObjectWrapper::unwrap(handle_);
+
+  return handle->is_ready(subscribe);
 }
 
 const void *
@@ -3353,6 +3382,16 @@ legion_index_launcher_add_arrival_barrier(legion_index_launcher_t launcher_,
   PhaseBarrier bar = CObjectWrapper::unwrap(bar_);
 
   launcher->add_arrival_barrier(bar);
+}
+
+void
+legion_index_launcher_add_point_future(legion_index_launcher_t launcher_,
+                                       legion_argument_map_t map_)
+{
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  ArgumentMap *map = CObjectWrapper::unwrap(map_);
+
+  launcher->point_futures.push_back(*map);
 }
 
 void
@@ -4627,24 +4666,26 @@ legion_runtime_complete_frame(legion_runtime_t runtime_,
 // Fence Operations
 // -----------------------------------------------------------------------
 
-void
+legion_future_t
 legion_runtime_issue_mapping_fence(legion_runtime_t runtime_,
                                    legion_context_t ctx_)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
 
-  runtime->issue_mapping_fence(ctx);
+  Future *result = new Future(runtime->issue_mapping_fence(ctx));
+  return CObjectWrapper::wrap(result);
 }
 
-void
+legion_future_t
 legion_runtime_issue_execution_fence(legion_runtime_t runtime_,
                                      legion_context_t ctx_)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
 
-  runtime->issue_execution_fence(ctx);
+  Future *result = new Future(runtime->issue_execution_fence(ctx));
+  return CObjectWrapper::wrap(result);
 }
 
 // -----------------------------------------------------------------------
@@ -4685,6 +4726,15 @@ legion_runtime_get_executing_processor(legion_runtime_t runtime_,
 
   Processor proc = runtime->get_executing_processor(ctx);
   return CObjectWrapper::wrap(proc);
+}
+
+void
+legion_runtime_yield(legion_runtime_t runtime_, legion_context_t ctx_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+
+  runtime->yield(ctx);
 }
 
 void

@@ -173,6 +173,33 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ArgumentMapImpl::set_point(const DomainPoint &point, 
+                                    const Future &f, bool replace)
+    //--------------------------------------------------------------------------
+    {
+      if (future_map != NULL)
+        unfreeze();
+      std::map<DomainPoint,Future>::iterator finder = arguments.find(point);
+      if (finder != arguments.end())
+      {
+        // If it already exists and we're not replacing it then we're done
+        if (!replace)
+          return;
+        finder->second = f; 
+      }
+      else
+        arguments[point] = f;
+      // If we modified things then they are no longer equivalent
+      if (future_map != NULL)
+      {
+        equivalent = false;
+        if (future_map->remove_base_gc_ref(FUTURE_HANDLE_REF))
+          delete (future_map);
+        future_map = NULL;
+      }
+    }
+
+    //--------------------------------------------------------------------------
     bool ArgumentMapImpl::remove_point(const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
@@ -406,6 +433,40 @@ namespace Legion {
       assert(false);
       return *this;
     }
+
+    //--------------------------------------------------------------------------
+    void FutureImpl::wait(bool silence_warnings, const char *warning_string)
+    //--------------------------------------------------------------------------
+    {
+      if (runtime->runtime_warnings && !silence_warnings && 
+          (implicit_context != NULL))
+      {
+        if (!implicit_context->is_leaf_context())
+          REPORT_LEGION_WARNING(LEGION_WARNING_WAITING_FUTURE_NONLEAF, 
+             "Waiting on a future in non-leaf task %s "
+             "(UID %lld) is a violation of Legion's deferred execution model "
+             "best practices. You may notice a severe performance "
+             "degradation. Warning string: %s",
+             implicit_context->get_task_name(), 
+             implicit_context->get_unique_id(),
+             (warning_string == NULL) ? "" : warning_string)
+      }
+      if ((implicit_context != NULL) && !runtime->separate_runtime_instances)
+        implicit_context->record_blocking_call();
+      if (!future_complete.has_triggered())
+      {
+        TaskContext *context = implicit_context;
+        if (context != NULL)
+        {
+          context->begin_task_wait(false/*from runtime*/);
+          future_complete.wait();
+          context->end_task_wait();
+        }
+        else
+          future_complete.wait();
+      }
+      mark_sampled();
+    }
     
     //--------------------------------------------------------------------------
     void* FutureImpl::get_untyped_result(bool silence_warnings,
@@ -431,21 +492,18 @@ namespace Legion {
         if ((implicit_context != NULL) && !runtime->separate_runtime_instances)
           implicit_context->record_blocking_call();
       }
-      if (empty)
+      const ApEvent ready_event = empty ? subscribe() : future_complete;
+      if (!ready_event.has_triggered())
       {
-        const ApEvent ready_event = subscribe();
-        if (!ready_event.has_triggered())
+        TaskContext *context = implicit_context;
+        if (context != NULL)
         {
-          TaskContext *context = implicit_context;
-          if (context != NULL)
-          {
-            context->begin_task_wait(false/*from runtime*/);
-            ready_event.wait();
-            context->end_task_wait();
-          }
-          else
-            ready_event.wait();
+          context->begin_task_wait(false/*from runtime*/);
+          ready_event.wait();
+          context->end_task_wait();
         }
+        else
+          ready_event.wait();
       }
       if (check_size)
       {
@@ -498,9 +556,9 @@ namespace Legion {
         if (block && producer_op != NULL && Internal::implicit_context != NULL)
           Internal::implicit_context->record_blocking_call();
       }
-      if (empty && block)
+      if (block)
       {
-        const ApEvent ready_event = subscribe();
+        const ApEvent ready_event = empty ? subscribe() : future_complete;
         if (!ready_event.has_triggered())
         {
           TaskContext *context =
@@ -560,6 +618,13 @@ namespace Legion {
       {
         broadcast_result(subscribers, future_complete, false/*need lock*/);
         subscribers.clear();
+      }
+      if (subscription_event.exists())
+      {
+        Runtime::trigger_event(subscription_event);
+        subscription_event = ApUserEvent::NO_AP_USER_EVENT;
+        if (remove_base_resource_ref(RUNTIME_REF))
+          assert(false); // should always hold a reference from caller
       }
     }
 
@@ -751,26 +816,17 @@ namespace Legion {
             targets.begin(); it != targets.end(); it++)
       {
         if ((*it) == local_space)
+          continue;
+        Serializer rez;
         {
-#ifdef DEBUG_LEGION
-          assert(subscription_event.exists());
-#endif
-          Runtime::trigger_event(subscription_event, complete);
-          subscription_event = ApUserEvent::NO_AP_USER_EVENT;
+          rez.serialize(did);
+          RezCheck z(rez);
+          rez.serialize(result_size);
+          if (result_size > 0)
+            rez.serialize(result,result_size);
+          rez.serialize(complete);
         }
-        else
-        {
-          Serializer rez;
-          {
-            rez.serialize(did);
-            RezCheck z(rez);
-            rez.serialize(result_size);
-            if (result_size > 0)
-              rez.serialize(result,result_size);
-            rez.serialize(complete);
-          }
-          runtime->send_future_result(*it, rez);
-        }
+        runtime->send_future_result(*it, rez);
       }
     }
 
@@ -7204,6 +7260,11 @@ namespace Legion {
               runtime->handle_equivalence_set_remote_instances(derez);
               break;
             }
+          case SEND_EQUIVALENCE_SET_STALE_UPDATE:
+            {
+              runtime->handle_equivalence_set_stale_update(derez);
+              break;
+            }
           case SEND_INSTANCE_REQUEST:
             {
               runtime->handle_instance_request(derez, remote_address_space);
@@ -12723,23 +12784,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::issue_mapping_fence(Context ctx)
+    Future Runtime::issue_mapping_fence(Context ctx)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT(
             "Illegal dummy context issue mapping fence!");
-      ctx->issue_mapping_fence(); 
+      return ctx->issue_mapping_fence(); 
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::issue_execution_fence(Context ctx)
+    Future Runtime::issue_execution_fence(Context ctx)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT(
             "Illegal dummy context issue execution fence!");
-      ctx->issue_execution_fence(); 
+      return ctx->issue_execution_fence(); 
     }
 
     //--------------------------------------------------------------------------
@@ -13104,6 +13165,15 @@ namespace Legion {
       assert(false);
       if (ctx != DUMMY_CONTEXT)
         ctx->end_runtime_call();
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::yield(Context ctx)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx == DUMMY_CONTEXT)
+        REPORT_DUMMY_CONTEXT("Illegal dummy context yield");
+      ctx->yield();
     }
 
     //--------------------------------------------------------------------------
@@ -15845,6 +15915,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_stale_update(AddressSpaceID target,
+                                                    Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_EQUIVALENCE_SET_STALE_UPDATE, DEFAULT_VIRTUAL_CHANNEL, 
+          true/*flush*/, true/*return*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_instance_request(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -17227,6 +17307,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       PhysicalAnalysis::handle_remote_instances(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_stale_update(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      VersionManager::handle_stale_update(derez, this);
     }
 
     //--------------------------------------------------------------------------
@@ -22772,6 +22859,8 @@ namespace Legion {
             ReductionManager::handle_defer_manager(args, runtime);
             break;
           }
+        case LG_YIELD_TASK_ID:
+          break; // nothing to do here
         case LG_RETRY_SHUTDOWN_TASK_ID:
           {
             const ShutdownManager::RetryShutdownArgs *shutdown_args = 

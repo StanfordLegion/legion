@@ -1524,6 +1524,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RemoteMemoizable::set_effects_postcondition(ApEvent postcondition)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     void RemoteMemoizable::complete_replay(ApEvent complete_event)
     //--------------------------------------------------------------------------
     {
@@ -6991,14 +6999,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FenceOp::initialize(InnerContext *ctx, FenceKind kind)
+    Future FenceOp::initialize(InnerContext *ctx, FenceKind kind,
+                               bool need_future)
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
       fence_kind = kind;
+      if (need_future)
+      {
+        result = Future(new FutureImpl(runtime, true/*register*/,
+              runtime->get_available_distributed_id(),
+              runtime->address_space, completion_event));
+        // We can set the future result right now because we know that it
+        // will not be complete until we are complete ourselves
+        result.impl->set_result(NULL, 0, true/*own*/); 
+      }
       if (runtime->legion_spy_enabled)
         LegionSpy::log_fence_operation(parent_ctx->get_unique_id(),
                                        unique_op_id);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -7013,6 +7032,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_operation();
+      result = Future(); // clear out our future reference
       runtime->free_fence_op(this);
     }
 
@@ -7170,7 +7190,7 @@ namespace Legion {
     void FrameOp::initialize(InnerContext *ctx)
     //--------------------------------------------------------------------------
     {
-      FenceOp::initialize(ctx, EXECUTION_FENCE);
+      FenceOp::initialize(ctx, EXECUTION_FENCE, false/*need future*/);
       parent_ctx->issue_frame(this, completion_event); 
     }
 
@@ -15219,13 +15239,11 @@ namespace Legion {
         case EXTERNAL_POSIX_FILE:
           {
             if (launcher.file_fields.empty()) 
-            {
               REPORT_LEGION_WARNING(LEGION_WARNING_FILE_ATTACH_OPERATION,
                               "FILE ATTACH OPERATION ISSUED WITH NO "
                               "FIELD MAPPINGS IN TASK %s (ID %lld)! DID YOU "
                               "FORGET THEM?!?", parent_ctx->get_task_name(),
-                              parent_ctx->get_unique_id());
-            }
+                              parent_ctx->get_unique_id())
             file_name = strdup(launcher.file_name);
             // Construct the region requirement for this task
             requirement = RegionRequirement(launcher.handle, WRITE_DISCARD, 
@@ -15239,14 +15257,19 @@ namespace Legion {
           }
         case EXTERNAL_HDF5_FILE:
           {
+#ifndef USE_HDF
+            REPORT_LEGION_ERROR(ERROR_ATTACH_HDF5,
+                "Invalid attach HDF5 file in parent task %s (UID %lld). "
+                "Legion must be built with HDF5 support to attach regions "
+                "to HDF5 files", parent_ctx->get_task_name(),
+                parent_ctx->get_unique_id())
+#endif
             if (launcher.field_files.empty()) 
-            {
               REPORT_LEGION_WARNING(LEGION_WARNING_HDF5_ATTACH_OPERATION,
                             "HDF5 ATTACH OPERATION ISSUED WITH NO "
                             "FIELD MAPPINGS IN TASK %s (ID %lld)! DID YOU "
                             "FORGET THEM?!?", parent_ctx->get_task_name(),
-                            parent_ctx->get_unique_id());
-            }
+                            parent_ctx->get_unique_id())
             file_name = strdup(launcher.file_name);
             // Construct the region requirement for this task
             requirement = RegionRequirement(launcher.handle, WRITE_DISCARD, 
@@ -15259,6 +15282,66 @@ namespace Legion {
               field_map[it->first] = strdup(it->second);
             }
             file_mode = launcher.mode;
+            // For HDF5 we use the dimension ordering if there is one, 
+            // otherwise we'll fill it in ourselves
+            const OrderingConstraint &input_constraint = 
+              launcher.constraints.ordering_constraint;
+            OrderingConstraint &output_constraint = 
+              layout_constraint_set.ordering_constraint;
+            const int dims = launcher.handle.index_space.get_dim();
+            if (!input_constraint.ordering.empty())
+            {
+              bool has_dimf = false;
+              for (std::vector<DimensionKind>::const_iterator it = 
+                    input_constraint.ordering.begin(); it !=
+                    input_constraint.ordering.end(); it++)
+              {
+                // dimf should always be the last dimension for HDF5
+                if (has_dimf)
+                  REPORT_LEGION_ERROR(ERROR_ATTACH_HDF5_CONSTRAINT,
+                      "Invalid position of the field dimension for attach "
+                      "operation %lld in task %s (UID %lld). The field "
+                      "dimension must always be the last dimension for layout "
+                      "constraints for HDF5 files.", unique_op_id,
+                      parent_ctx->get_task_name(), parent_ctx->get_unique_id())
+                else if (*it == DIM_F)
+                  has_dimf = true;
+                else if (int(*it) > dims)
+                  REPORT_LEGION_ERROR(ERROR_ATTACH_HDF5_CONSTRAINT,
+                      "Invalid dimension %d for ordering constraint of HDF5 "
+                      "attach operation %lld in task %s (UID %lld). The "
+                      "index space %x only has %d dimensions and split "
+                      "dimensions are not permitted.", *it, unique_op_id,
+                      parent_ctx->get_task_name(), parent_ctx->get_unique_id(), 
+                      launcher.handle.index_space.get_id(), dims)
+                output_constraint.ordering.push_back(*it);
+              }
+              if (int(output_constraint.ordering.size()) != dims)
+                REPORT_LEGION_ERROR(ERROR_ATTACH_HDF5_CONSTRAINT,
+                    "Ordering constraint for attach %lld in task %s (UID %lld) "
+                    "does not contain all the dimensions required for index "
+                    "space %x which has %d dimensions.", unique_op_id,
+                    parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
+                    launcher.handle.index_space.get_id(), dims)
+              if (!input_constraint.contiguous)
+                REPORT_LEGION_ERROR(ERROR_ATTACH_HDF5_CONSTRAINT,
+                    "Ordering constraint for attach %lld in task %s (UID %lld) "
+                    "was not marked contiguous. All ordering constraints for "
+                    "HDF5 attach operations must be contiguous", unique_op_id,
+                    parent_ctx->get_task_name(), parent_ctx->get_unique_id())
+              if (!has_dimf)
+                output_constraint.ordering.push_back(DIM_F);
+            }
+            else
+            {
+              // Fill in the ordering constraints for dimensions based
+              // on the number of dimensions
+              for (int i = 0; i < dims; i++)
+                output_constraint.ordering.push_back(
+                    (DimensionKind)(DIM_X + i)); 
+              output_constraint.ordering.push_back(DIM_F);
+            }
+            output_constraint.contiguous = true;
             break;
           }
         case EXTERNAL_INSTANCE:
@@ -15329,6 +15412,7 @@ namespace Legion {
       privilege_path.clear();
       version_info.clear();
       map_applied_conditions.clear();
+      layout_constraint_set = LayoutConstraintSet();
       runtime->free_attach_op(this);
     }
 
@@ -15562,9 +15646,10 @@ namespace Legion {
             }
             // Now ask the low-level runtime to create the instance
             result = node->create_hdf5_instance(file_name,
-					field_ids, sizes, field_files,
-                                        (file_mode == LEGION_FILE_READ_ONLY),
-                                        ready_event);
+                                      field_ids, sizes, field_files,
+                                      layout_constraint_set.ordering_constraint,
+                                      (file_mode == LEGION_FILE_READ_ONLY),
+                                      ready_event);
             constraints.specialized_constraint = 
               SpecializedConstraint(HDF5_FILE_SPECIALIZE);
             constraints.field_constraint = 
@@ -15572,9 +15657,8 @@ namespace Legion {
                               false/*contiguous*/, false/*inorder*/);
             constraints.memory_constraint = 
               MemoryConstraint(result.get_location().kind());
-            // TODO: Fill in the other constraints: 
-            // OrderingConstraint, SplittingConstraints DimensionConstraints,
-            // AlignmentConstraints, OffsetConstraints
+            constraints.ordering_constraint = 
+              layout_constraint_set.ordering_constraint;
             break;
           }
         case EXTERNAL_INSTANCE:

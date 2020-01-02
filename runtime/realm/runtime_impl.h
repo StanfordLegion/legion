@@ -105,8 +105,10 @@ namespace Realm {
       }
     };
 
-    // use a wide tree for events - max depth will be 2
-    typedef DynamicTableAllocator<GenEventImpl, 11, 16> EventTableAllocator;
+    // use a wide tree for local events - max depth will be 2
+    typedef DynamicTableAllocator<GenEventImpl, 11, 16> LocalEventTableAllocator;
+    // use a narrow tree for remote events - depth is 3, leaves have 128 events
+    typedef DynamicTableAllocator<GenEventImpl, 10, 7> RemoteEventTableAllocator;
     typedef DynamicTableAllocator<BarrierImpl, 10, 4> BarrierTableAllocator;
     typedef DynamicTableAllocator<ReservationImpl, 10, 8> ReservationTableAllocator;
     typedef DynamicTableAllocator<ProcessorGroup, 10, 4> ProcessorGroupTableAllocator;
@@ -124,7 +126,7 @@ namespace Realm {
       std::vector<ProcessorImpl *> processors;
       std::vector<DMAChannel *> dma_channels;
 
-      DynamicTable<EventTableAllocator> events;
+      DynamicTable<RemoteEventTableAllocator> remote_events;
       DynamicTable<BarrierTableAllocator> barriers;
       DynamicTable<ReservationTableAllocator> reservations;
       DynamicTable<ProcessorGroupTableAllocator> proc_groups;
@@ -297,7 +299,8 @@ namespace Realm {
 #endif
 
       Node *nodes;
-      EventTableAllocator::FreeList *local_event_free_list;
+      DynamicTable<LocalEventTableAllocator> local_events;
+      LocalEventTableAllocator::FreeList *local_event_free_list;
       BarrierTableAllocator::FreeList *local_barrier_free_list;
       ReservationTableAllocator::FreeList *local_reservation_free_list;
       ProcessorGroupTableAllocator::FreeList *local_proc_group_free_list;

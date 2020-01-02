@@ -166,6 +166,7 @@ namespace Legion {
       bool has_point(const DomainPoint &point);
       void set_point(const DomainPoint &point, const TaskArgument &arg,
                      bool replace);
+      void set_point(const DomainPoint &point, const Future &f, bool replace);
       bool remove_point(const DomainPoint &point);
       TaskArgument get_point(const DomainPoint &point);
     public:
@@ -247,6 +248,8 @@ namespace Legion {
     public:
       FutureImpl& operator=(const FutureImpl &rhs);
     public:
+      // Wait without subscribing to the payload
+      void wait(bool silence_warnings, const char *warning_string);
       void* get_untyped_result(bool silence_warnings = true,
                                const char *warning_string = NULL,
                                bool internal = false,
@@ -2073,8 +2076,8 @@ namespace Legion {
     public:
       void issue_acquire(Context ctx, const AcquireLauncher &launcher);
       void issue_release(Context ctx, const ReleaseLauncher &launcher);
-      void issue_mapping_fence(Context ctx);
-      void issue_execution_fence(Context ctx);
+      Future issue_mapping_fence(Context ctx);
+      Future issue_execution_fence(Context ctx);
       void begin_trace(Context ctx, TraceID tid, bool logical_only);
       void end_trace(Context ctx, TraceID tid);
       void begin_static_trace(Context ctx, 
@@ -2105,6 +2108,7 @@ namespace Legion {
       Processor get_executing_processor(Context ctx);
       void raise_region_exception(Context ctx, PhysicalRegion region, 
                                   bool nuclear);
+      void yield(Context ctx);
     public:
       const std::map<int,AddressSpace>& find_forward_MPI_mapping(void);
       const std::map<AddressSpace,int>& find_reverse_MPI_mapping(void);
@@ -2415,6 +2419,8 @@ namespace Legion {
                                                Serializer &rez);
       void send_equivalence_set_remote_instances(AddressSpaceID target,
                                                  Serializer &rez);
+      void send_equivalence_set_stale_update(AddressSpaceID target, 
+                                             Serializer &rez);
       void send_instance_request(AddressSpaceID target, Serializer &rez);
       void send_instance_response(AddressSpaceID target, Serializer &rez);
       void send_external_create_request(AddressSpaceID target, Serializer &rez);
@@ -2646,14 +2652,7 @@ namespace Legion {
       void handle_equivalence_set_remote_filters(Deserializer &derez,
                                                  AddressSpaceID source);
       void handle_equivalence_set_remote_instances(Deserializer &derez);
-      void handle_version_state_request(Deserializer &derez,
-                                        AddressSpaceID source);
-      void handle_version_state_response(Deserializer &derez,
-                                         AddressSpaceID source);
-      void handle_version_state_update_request(Deserializer &derez);
-      void handle_version_state_update_response(Deserializer &derez);
-      void handle_version_state_valid_notification(Deserializer &derez,
-                                                   AddressSpaceID source);
+      void handle_equivalence_set_stale_update(Deserializer &derez); 
       void handle_instance_request(Deserializer &derez, AddressSpaceID source);
       void handle_instance_response(Deserializer &derez,AddressSpaceID source);
       void handle_external_create_request(Deserializer &derez,

@@ -432,7 +432,7 @@ def driver(prefix_dir=None, scratch_dir=None, cache=False,
         if not os.path.exists(cmake_dir):
             os.mkdir(cmake_dir)
 
-            proc_type = subprocess.check_output(['uname', '-p']).strip()
+            proc_type = subprocess.check_output(['uname', '-p']).decode('utf-8').strip()
             if proc_type != 'x86_64' and proc_type != 'i386':
                 raise Exception("Don't know how to download CMake binary for %s" % proc_type)
 

@@ -83,6 +83,10 @@ local default_options = {
   ["parallelize-global"] = true,
   ["parallelize-debug"] = false,
 
+  -- Experimental CUDA code generation flags:
+  ["cuda-2d-launch"] = true,
+  ["cuda-licm"] = true,
+
   -- Miscellaneous, internal or special-purpose flags:
   ["aligned-instances"] = false,
   ["cached-iterators"] = false,

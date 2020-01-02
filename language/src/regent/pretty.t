@@ -252,10 +252,12 @@ function pretty.metadata(cx, node)
     end
     return text.Lines { lines = terralib.newlist({ join(result) }) }
   elseif node:is(ast.metadata.Stat) then
+    local centers =
+      (node.centers and "{" ..  node.centers:map_list(function(k, _) return tostring(k) end):concat(",") .. "}") or
+      tostring(node.centers)
     return text.Lines {
       lines = terralib.newlist({
-        join({"-- ", "atomic: ", tostring(node.atomic),
-              ", scalar: ", tostring(node.scalar)})}),
+        join({"-- ", "centers: ", centers, ", scalar: ", tostring(node.scalar)})}),
     }
   else
     assert(false)

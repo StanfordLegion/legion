@@ -1233,6 +1233,13 @@ namespace Legion {
         }
         // For some reason we don't trace these, not sure why
         result = Runtime::merge_events(NULL, sync_preconditions);
+        if (!result.exists() ||
+            sync_preconditions.find(result) != sync_preconditions.end())
+        {
+          ApUserEvent rename = Runtime::create_ap_user_event();
+          Runtime::trigger_event(rename, result);
+          result = rename;
+        }
       }
       if ((info != NULL) && info->recording)
         info->record_op_sync_event(result);
@@ -3188,6 +3195,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void SingleTask::set_effects_postcondition(ApEvent postcondition)
+    //--------------------------------------------------------------------------
+    {
+      effects_postconditions.insert(postcondition);
+    }
+
+    //--------------------------------------------------------------------------
     InnerContext* SingleTask::create_implicit_context(void)
     //--------------------------------------------------------------------------
     {
@@ -4354,6 +4368,7 @@ namespace Legion {
       }
       // Remove our reference to the point arguments 
       point_arguments = FutureMap();
+      point_futures.clear();
       slices.clear(); 
       if (predicate_false_result != NULL)
       {
@@ -4558,6 +4573,8 @@ namespace Legion {
         }
       }
       this->point_arguments = rhs->point_arguments;
+      if (!rhs->point_futures.empty())
+        this->point_futures = rhs->point_futures;
       this->predicate_false_future = rhs->predicate_false_future;
       this->predicate_false_size = rhs->predicate_false_size;
       if (this->predicate_false_size > 0)
@@ -5142,6 +5159,8 @@ namespace Legion {
             result.impl->set_result(
                 predicate_false_future.impl->get_untyped_result(true,NULL,true),
                 result_size, false/*own*/);
+          else
+            result.impl->set_result(NULL, 0, false/*own*/);
         }
         else
         {
@@ -5160,6 +5179,8 @@ namespace Legion {
         if (predicate_false_size > 0)
           result.impl->set_result(predicate_false_result,
                                   predicate_false_size, false/*own*/);
+        else
+          result.impl->set_result(NULL, 0, false/*own*/);
       }
       // Then clean up this task instance
       complete_mapping();
@@ -5214,6 +5235,8 @@ namespace Legion {
           effects_postconditions.insert(done_event);
           done_event = 
             Runtime::merge_events(&trace_info, effects_postconditions);
+          if (is_recording())
+            trace_info.record_set_effects(this, done_event);
         }
         for (unsigned idx = 0; idx < grants.size(); idx++)
           grants[idx].impl->register_operation(done_event);
@@ -5811,6 +5834,10 @@ namespace Legion {
         if (!arrive_barriers.empty())
         {
           ApEvent done_event = get_task_completion();
+          if (effects_postconditions.size() > 0)
+            // done_event is already included in effects_postconditions
+            done_event = Runtime::merge_events(NULL, effects_postconditions);
+
           for (std::vector<PhaseBarrier>::const_iterator it =
                arrive_barriers.begin(); it !=
                arrive_barriers.end(); it++)
@@ -6131,6 +6158,8 @@ namespace Legion {
             TraceInfo(this) : TraceInfo(*remote_trace_info, this);
           effects_condition = 
             Runtime::merge_events(&trace_info, effects_postconditions);
+          if (is_recording())
+            trace_info.record_set_effects(this, effects_condition);
           effects_postconditions.clear();
         }
         // If we mapped remotely we might have a deferred complete mapping
@@ -6471,7 +6500,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PointTask::initialize_point(SliceTask *owner, const DomainPoint &point,
-                                     const FutureMap &point_arguments)
+                                    const FutureMap &point_arguments,
+                                    const std::vector<FutureMap> &point_futures)
     //--------------------------------------------------------------------------
     {
       slice_owner = owner;
@@ -6494,6 +6524,12 @@ namespace Legion {
                 f.impl->get_untyped_result(true, NULL, true), local_arglen);
           }
         }
+      }
+      if (!point_futures.empty())
+      {
+        for (std::vector<FutureMap>::const_iterator it = 
+              point_futures.begin(); it != point_futures.end(); it++)
+          this->futures.push_back(it->impl->get_future(point));
       }
       // Make a new termination event for this point
       point_termination = Runtime::create_ap_user_event();
@@ -6553,6 +6589,10 @@ namespace Legion {
             (*it)[idx].set_ready_event(instance_ready_event);
         update_no_access_regions();
         launch_task();
+        ApEvent postcondition = ApEvent::NO_AP_EVENT;
+        if (effects_postconditions.size() > 0)
+          postcondition = Runtime::merge_events(NULL, effects_postconditions);
+        slice_owner->record_child_mapped(RtEvent::NO_RT_EVENT, postcondition);
       }
     }
 
@@ -6719,6 +6759,14 @@ namespace Legion {
       }
       point_arguments = 
         FutureMap(launcher.argument_map.impl->freeze(parent_ctx));
+      const size_t num_point_futures = launcher.point_futures.size();
+      if (num_point_futures > 0)
+      {
+        point_futures.resize(num_point_futures);
+        for (unsigned idx = 0; idx < num_point_futures; idx++)
+          point_futures[idx] = 
+            FutureMap(launcher.point_futures[idx].impl->freeze(parent_ctx));
+      }
       map_id = launcher.map_id;
       tag = launcher.tag;
       is_index_space = true;
@@ -6801,6 +6849,14 @@ namespace Legion {
       }
       point_arguments = 
         FutureMap(launcher.argument_map.impl->freeze(parent_ctx));
+      const size_t num_point_futures = launcher.point_futures.size();
+      if (num_point_futures > 0)
+      {
+        point_futures.resize(num_point_futures);
+        for (unsigned idx = 0; idx < num_point_futures; idx++)
+          point_futures[idx] = 
+            FutureMap(launcher.point_futures[idx].impl->freeze(parent_ctx));
+      }
       map_id = launcher.map_id;
       tag = launcher.tag;
       is_index_space = true;
@@ -7082,6 +7138,8 @@ namespace Legion {
               Future f = future_map.impl->get_future(itr.p);
               if (result_size > 0)
                 f.impl->set_result(result, result_size, false/*own*/);
+              else
+                f.impl->set_result(NULL, 0, false/*own*/);
             }
           }
           else
@@ -7105,6 +7163,8 @@ namespace Legion {
             if (predicate_false_size > 0)
               f.impl->set_result(predicate_false_result,
                                  predicate_false_size, false/*own*/);
+            else
+              f.impl->set_result(NULL, 0, false/*own*/);
           }
         }
       }
@@ -7122,6 +7182,8 @@ namespace Legion {
               reduction_future.impl->set_result(
                 predicate_false_future.impl->get_untyped_result(true,NULL,true),
                 result_size, false/*own*/);
+            else
+              reduction_future.impl->set_result(NULL, 0, false/*own*/);
           }
           else
           {
@@ -7141,6 +7203,8 @@ namespace Legion {
           if (predicate_false_size > 0)
             reduction_future.impl->set_result(predicate_false_result,
                                   predicate_false_size, false/*own*/);
+          else
+            reduction_future.impl->set_result(NULL, 0, false/*own*/);
         }
       }
       // Then clean up this task execution
@@ -7686,16 +7750,6 @@ namespace Legion {
             const ApEvent done = 
               Runtime::merge_events(&trace_info, effects_postconditions);
             effects_postconditions.clear();
-            // TODO: Something needs to go here for this to work with tracing
-#if 0
-            if (is_recording())
-            {
-#ifdef DEBUG_LEGION
-              assert((tpl != NULL) && tpl->is_recording());
-#endif
-              tpl->record_trigger_event(to_trigger, done);
-            }
-#endif
             Runtime::trigger_event(to_trigger, done);
           }
           // Don't worry about the else case because that only happens
@@ -8571,6 +8625,13 @@ namespace Legion {
         }
         else
           rez.serialize<DistributedID>(0);
+        rez.serialize<size_t>(point_futures.size());
+        for (unsigned idx = 0; idx < point_futures.size(); idx++)
+        {
+          FutureMapImpl *impl = point_futures[idx].impl;
+          rez.serialize(impl->did);
+          rez.serialize(impl->get_ready_event());
+        }
       }
       bool deactivate_now = true;
       if (!is_remote() && is_origin_mapped())
@@ -8683,6 +8744,23 @@ namespace Legion {
                   future_map_did, parent_ctx, ready_event, &mutator);
           impl->add_base_gc_ref(FUTURE_HANDLE_REF, &mutator);
           point_arguments = FutureMap(impl, false/*need reference*/);
+        }
+        size_t num_point_futures;
+        derez.deserialize(num_point_futures);
+        if (num_point_futures > 0)
+        {
+          ApEvent ready_event;
+          point_futures.resize(num_point_futures);
+          WrapperReferenceMutator mutator(ready_events);
+          for (unsigned idx = 0; idx < num_point_futures; idx++)
+          {
+            derez.deserialize(future_map_did);
+            derez.deserialize(ready_event);
+            FutureMapImpl *impl = runtime->find_or_create_future_map(
+                    future_map_did, parent_ctx, ready_event, &mutator);
+            impl->add_base_gc_ref(FUTURE_HANDLE_REF, &mutator);
+            point_futures[idx] = FutureMap(impl, false/*need reference*/);
+          }
         }
       }
       // Return true to add this to the ready queue
@@ -8806,7 +8884,7 @@ namespace Legion {
       result->tpl = tpl;
       result->memo_state = memo_state;
       // Now figure out our local point information
-      result->initialize_point(this, point, point_arguments);
+      result->initialize_point(this, point, point_arguments, point_futures);
       // Grab any remote trace info that we need from the slice
       if (remote_trace_info != NULL)
       {
@@ -9438,7 +9516,6 @@ namespace Legion {
       {
         PointTask *point = points[idx];
         point->replay_analysis();
-        record_child_mapped(RtEvent::NO_RT_EVENT, ApEvent::NO_AP_EVENT);
       }
     }
 

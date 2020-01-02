@@ -2069,6 +2069,14 @@ extern "C" {
   legion_argument_map_create(void);
 
   /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::ArgumentMap::ArgumentMap()
+   */
+  legion_argument_map_t
+  legion_argument_map_from_future_map(legion_future_map_t map);
+
+  /**
    * @see Legion::ArgumentMap::set_point()
    */
   void
@@ -2076,6 +2084,15 @@ extern "C" {
                                 legion_domain_point_t dp,
                                 legion_task_argument_t arg,
                                 bool replace /* = true */);
+
+  /**
+   * @see Legion::ArgumentMap::set_point()
+   */
+  void
+  legion_argument_map_set_future(legion_argument_map_t map,
+                                 legion_domain_point_t dp,
+                                 legion_future_t future,
+                                 bool replace /* = true */);
 
   /**
    * @param handle Caller must have ownership of parameter `handle`.
@@ -2299,6 +2316,12 @@ extern "C" {
    */
   bool
   legion_future_is_ready(legion_future_t handle);
+
+  /**
+   * @see Legion::Future::is_ready()
+   */
+  bool
+  legion_future_is_ready_subscribe(legion_future_t handle, bool subscribe);
 
   /**
    * @see Legion::Future::get_untyped_pointer()
@@ -2792,6 +2815,13 @@ extern "C" {
   void
   legion_index_launcher_add_arrival_barrier(legion_index_launcher_t launcher,
                                             legion_phase_barrier_t bar);
+
+  /**
+   * @see Legion::IndexTaskLauncher::point_futures
+   */
+  void
+  legion_index_launcher_add_point_future(legion_index_launcher_t launcher,
+                                         legion_argument_map_t map);
 
   /**
    * @see Legion::IndexTaskLauncher::sharding_space
@@ -3695,14 +3725,14 @@ extern "C" {
   /**
    * @see Legion::Runtime::issue_mapping_fence()
    */
-  void
+  legion_future_t
   legion_runtime_issue_mapping_fence(legion_runtime_t runtime,
                                      legion_context_t ctx);
 
   /**
    * @see Legion::Runtime::issue_execution_fence()
    */
-  void
+  legion_future_t
   legion_runtime_issue_execution_fence(legion_runtime_t runtime,
                                        legion_context_t ctx);
 
@@ -3767,6 +3797,12 @@ extern "C" {
   legion_processor_t
   legion_runtime_get_executing_processor(legion_runtime_t runtime,
                                          legion_context_t ctx);
+
+  /**
+   * @see Legion::Runtime::yield()
+   */
+  void
+  legion_runtime_yield(legion_runtime_t runtime, legion_context_t ctx);
 
   void
   legion_runtime_enable_scheduler_lock(void);

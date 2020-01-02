@@ -313,6 +313,8 @@ def get_test_specs(legion_dir, use_run, use_spy, use_prof, use_hdf5, use_openmp,
           os.path.join('tests', 'bishop', 'run_pass'),
           os.path.join('examples'),
           os.path.join('..', 'tutorial'),
+          os.path.join('tests', 'runtime', 'bugs'),
+          os.path.join('tests', 'runtime', 'features'),
          )),
     ]
     prof = [

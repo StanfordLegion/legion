@@ -786,6 +786,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ArgumentMap::set_point(const DomainPoint &point, 
+                                const Future &f, bool replace/*= true*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+#endif
+      impl->set_point(point, f, replace);
+    }
+
+    //--------------------------------------------------------------------------
     bool ArgumentMap::remove_point(const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
@@ -2392,7 +2403,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
-        impl->get_untyped_result(silence_warnings, warning_string);
+        impl->wait(silence_warnings, warning_string);
     }
 
     //--------------------------------------------------------------------------
@@ -2407,11 +2418,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool Future::is_ready(void) const
+    bool Future::is_ready(bool subscribe) const
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
-        return impl->get_ready_event().has_triggered();
+      {
+        const Internal::ApEvent ready = subscribe ? 
+          impl->subscribe() : impl->get_ready_event();
+        // Always subscribe to the Realm event to know when it triggers
+        ready.subscribe();
+        return ready.has_triggered();
+      }
       return true; // Empty futures are always ready
     }
 
@@ -6097,14 +6114,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::issue_mapping_fence(Context ctx)
+    Future Runtime::issue_mapping_fence(Context ctx)
     //--------------------------------------------------------------------------
     {
       return runtime->issue_mapping_fence(ctx);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::issue_execution_fence(Context ctx)
+    Future Runtime::issue_execution_fence(Context ctx)
     //--------------------------------------------------------------------------
     {
       return runtime->issue_execution_fence(ctx);
@@ -6289,6 +6306,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       runtime->raise_region_exception(ctx, region, nuclear);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::yield(Context ctx)
+    //--------------------------------------------------------------------------
+    {
+      runtime->yield(ctx);
     }
 
     //--------------------------------------------------------------------------

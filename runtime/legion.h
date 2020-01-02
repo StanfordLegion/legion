@@ -663,6 +663,14 @@ namespace Legion {
       void set_point(const DomainPoint &point, const TaskArgument &arg,
                      bool replace = true);
       /**
+       * Associate a future with a domain point
+       * @param point the point to associate with the task argument
+       * @param future the future argument
+       * @param replace specify whether to overwrite an existing value
+       */
+      void set_point(const DomainPoint &point, const Future &f,
+                     bool replace = true);
+      /**
        * Remove a point from the argument map
        * @param point the point to be removed
        * @return true if the point was removed
@@ -1196,8 +1204,9 @@ namespace Legion {
        * true if the future can be used without blocking to wait
        * on the computation that the future represents, otherwise
        * it will return false.
+       * @param subscribe ask for the payload to be brought here when ready
        */
-      bool is_ready(void) const;
+      bool is_ready(bool subscribe = false) const;
     public:
       /**
        * Return a const reference to the future.
@@ -1544,6 +1553,9 @@ namespace Legion {
       std::vector<IndexSpaceRequirement> index_requirements;
       std::vector<RegionRequirement>     region_requirements;
       std::vector<Future>                futures;
+      // These are appended to the futures for the point
+      // task after the futures sent to all points above
+      std::vector<ArgumentMap>           point_futures;
       std::vector<Grant>                 grants;
       std::vector<PhaseBarrier>          wait_barriers;
       std::vector<PhaseBarrier>          arrive_barriers;
@@ -5951,7 +5963,7 @@ namespace Legion {
        * useful as a performance optimization to minimize the
        * number of mapping independence tests required.
        */
-      void issue_mapping_fence(Context ctx);
+      Future issue_mapping_fence(Context ctx);
 
       /**
        * Issue a Legion execution fence in the current context.  A 
@@ -5962,7 +5974,7 @@ namespace Legion {
        * such as modifications to the region tree made prior
        * to the fence visible to tasks issued after the fence.
        */
-      void issue_execution_fence(Context ctx); 
+      Future issue_execution_fence(Context ctx); 
     public:
       //------------------------------------------------------------------------
       // Tracing Operations 
@@ -6237,6 +6249,18 @@ namespace Legion {
        */
       void raise_region_exception(Context ctx, PhysicalRegion region, 
                                   bool nuclear);
+
+      /**
+       * Yield the task to allow other tasks on the processor. In most
+       * Legion programs calling this should never be necessary. However,
+       * sometimes an application may want to put its own polling loop 
+       * inside a task. If it does it may need to yield the processor that
+       * it is running on to allow other tasks to run on that processor.
+       * This can be accomplished by invoking this method. The task will
+       * be pre-empted and other eligible tasks will be permitted to run on 
+       * this processor.
+       */
+      void yield(Context ctx);
     public:
       //------------------------------------------------------------------------
       // MPI Interoperability 
