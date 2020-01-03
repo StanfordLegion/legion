@@ -137,6 +137,7 @@ variables:
 
 # These commands will run before each job.
 before_script:
+  - set -e
   - uname -a
   - |
     if [[ "$(uname)" = "Linux" ]]; then
