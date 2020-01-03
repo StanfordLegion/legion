@@ -542,8 +542,6 @@ namespace Legion {
     public:
       virtual bool has_space(const FieldMask &space_mask) const;
     public:
-      void copy_field(FieldID fid, std::vector<CopySrcDstField> &infos);
-    public:
       virtual void copy_to(const FieldMask &copy_mask, 
                    std::vector<CopySrcDstField> &dst_fields,
                            CopyAcrossHelper *across_helper = NULL);

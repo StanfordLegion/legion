@@ -2333,15 +2333,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MaterializedView::copy_field(FieldID fid,
-                                      std::vector<CopySrcDstField> &copy_fields)
-    //--------------------------------------------------------------------------
-    {
-      std::vector<FieldID> local_fields(1,fid);
-      manager->compute_copy_offsets(local_fields, copy_fields); 
-    }
-
-    //--------------------------------------------------------------------------
     void MaterializedView::copy_to(const FieldMask &copy_mask,
                                    std::vector<CopySrcDstField> &dst_fields,
                                    CopyAcrossHelper *across_helper)
