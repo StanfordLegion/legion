@@ -4713,8 +4713,8 @@ namespace Legion {
             for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it =
                   src_preconds.begin(); it != src_preconds.end(); it++)
             {
-              //if (it->second * dst_mask)
-              //  continue;
+              if (it->second * dst_mask)
+                continue;
               preconditions.insert(it->first);
             }
             if (!preconditions.empty())

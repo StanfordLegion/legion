@@ -323,25 +323,6 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void LayoutDescription::compute_copy_offsets(FieldID fid, 
-                 PhysicalManager *manager, std::vector<CopySrcDstField> &fields)
-    //--------------------------------------------------------------------------
-    {
-      std::map<FieldID,unsigned>::const_iterator finder = 
-        field_indexes.find(fid);
-#ifdef DEBUG_LEGION
-      assert(finder != field_indexes.end());
-#endif
-      fields.push_back(field_infos[finder->second]);
-      // Since instances are annonymous in layout descriptions we
-      // have to fill them in when we add the field info
-      fields.back().inst = manager->instance;
-#ifdef LEGION_SPY
-      fields.back().inst_event = manager->get_unique_event();
-#endif
-    }
-
-    //--------------------------------------------------------------------------
     void LayoutDescription::compute_copy_offsets(
                                    const std::vector<FieldID> &copy_fields, 
                                    PhysicalManager *manager,
@@ -1228,31 +1209,6 @@ namespace Legion {
 #endif
       // Pass in our physical instance so the layout knows how to specialize
       layout->compute_copy_offsets(copy_mask, this, fields);
-    }
-
-    //--------------------------------------------------------------------------
-    void InstanceManager::compute_copy_offsets(FieldID fid,
-                                           std::vector<CopySrcDstField> &fields)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(layout != NULL);
-#endif
-      // Pass in our physical instance so the layout knows how to specialize
-      layout->compute_copy_offsets(fid, this, fields);
-    }
-
-    //--------------------------------------------------------------------------
-    void InstanceManager::compute_copy_offsets(
-                                  const std::vector<FieldID> &copy_fields,
-                                  std::vector<CopySrcDstField> &fields)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(layout != NULL);
-#endif
-      // Pass in our physical instance so the layout knows how to specialize
-      layout->compute_copy_offsets(copy_fields, this, fields);
     }
 
     //--------------------------------------------------------------------------

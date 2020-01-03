@@ -59,8 +59,6 @@ namespace Legion {
       void compute_copy_offsets(const FieldMask &copy_mask, 
                                 PhysicalManager *manager,
                                 std::vector<CopySrcDstField> &fields);
-      void compute_copy_offsets(FieldID copy_field, PhysicalManager *manager,
-                                std::vector<CopySrcDstField> &fields);
       void compute_copy_offsets(const std::vector<FieldID> &copy_fields,
                                 PhysicalManager *manager,
                                 std::vector<CopySrcDstField> &fields);
@@ -350,10 +348,6 @@ namespace Legion {
       virtual InstanceView* create_instance_top_view(InnerContext *context,
                                             AddressSpaceID logical_owner);
       void compute_copy_offsets(const FieldMask &copy_mask,
-                                std::vector<CopySrcDstField> &fields);
-      void compute_copy_offsets(FieldID fid, 
-                                std::vector<CopySrcDstField> &fields);
-      void compute_copy_offsets(const std::vector<FieldID> &copy_fields,
                                 std::vector<CopySrcDstField> &fields);
       void initialize_across_helper(CopyAcrossHelper *across_helper,
                                     const FieldMask &mask,
