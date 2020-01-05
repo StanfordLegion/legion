@@ -582,7 +582,7 @@ namespace Legion {
         : regions(regs), constraints(cons), runtime(rt), memory_manager(memory),
           creator_id(cid), instance(PhysicalInstance::NO_INST), 
           field_space_node(NULL), instance_domain(NULL), tree_id(0),
-          redop_id(0), reduction_op(NULL), valid(false) { }
+          redop_id(0), reduction_op(NULL), realm_layout(NULL), valid(false) { }
       virtual ~InstanceBuilder(void);
     public:
       void initialize(RegionTreeForest *forest);
@@ -595,12 +595,6 @@ namespace Legion {
       void compute_space_and_domain(RegionTreeForest *forest);
     protected:
       void compute_layout_parameters(void);
-    public:
-      static void convert_layout_constraints(
-                    const LayoutConstraintSet &constraints,
-                    const std::vector<FieldID> &field_set,
-                    const std::vector<size_t> &field_sizes,
-                          Realm::InstanceLayoutConstraints &realm_constraints);
     protected:
       const std::vector<LogicalRegion> &regions;
       LayoutConstraintSet constraints;
@@ -622,7 +616,7 @@ namespace Legion {
       FieldMask instance_mask;
       ReductionOpID redop_id;
       const ReductionOp *reduction_op;
-      Realm::InstanceLayoutConstraints realm_constraints;
+      Realm::InstanceLayoutGeneric *realm_layout;
     public:
       bool valid;
     };
