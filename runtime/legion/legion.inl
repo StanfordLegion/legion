@@ -7937,12 +7937,12 @@ namespace Legion {
       dim_order[0] = DIM_F;
       if (column_major)
       {
-        for (unsigned idx = 0; idx < dims; idx++)
+        for (int idx = 0; idx < dims; idx++)
           dim_order[idx+1] = (DimensionKind)(DIM_X + idx); 
       }
       else
       {
-        for (unsigned idx = 0; idx < dims; idx++)
+        for (int idx = 0; idx < dims; idx++)
           dim_order[idx+1] = (DimensionKind)(DIM_X + (dims-1) - idx);
       }
       constraints.add_constraint(
@@ -7973,12 +7973,12 @@ namespace Legion {
       std::vector<DimensionKind> dim_order(dims+1);
       if (column_major)
       {
-        for (unsigned idx = 0; idx < dims; idx++)
+        for (int idx = 0; idx < dims; idx++)
           dim_order[idx] = (DimensionKind)(DIM_X + idx); 
       }
       else
       {
-        for (unsigned idx = 0; idx < dims; idx++)
+        for (int idx = 0; idx < dims; idx++)
           dim_order[idx] = (DimensionKind)(DIM_X + (dims-1) - idx);
       }
       // Field dimension last for SOA 
