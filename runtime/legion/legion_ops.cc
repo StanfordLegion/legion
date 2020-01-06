@@ -15766,19 +15766,13 @@ namespace Legion {
           }
         case EXTERNAL_INSTANCE:
           {
-            // Create the Instance Layout Generic object for realm
-            Realm::InstanceLayoutConstraints realm_constraints;
-            // Get some help from the instance builder to make this
-            InstanceBuilder::convert_layout_constraints(layout_constraint_set,
-                                          field_set, sizes, realm_constraints);
+            Realm::InstanceLayoutGeneric *ilg = 
+              node->create_layout(layout_constraint_set, field_set, sizes);
             const PointerConstraint &pointer = 
                                       layout_constraint_set.pointer_constraint;
 #ifdef DEBUG_LEGION
             assert(pointer.is_valid);
 #endif
-            Realm::InstanceLayoutGeneric *ilg = 
-              node->create_layout(realm_constraints, 
-                  layout_constraint_set.ordering_constraint);
             result = node->create_external_instance(pointer.memory, pointer.ptr,
                                                     ilg, ready_event);
             constraints = layout_constraint_set;

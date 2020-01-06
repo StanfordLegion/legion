@@ -7926,26 +7926,26 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(handle.exists());
       assert(resource == EXTERNAL_INSTANCE);
 #endif
       constraints.add_constraint(PointerConstraint(mem, uintptr_t(base)));
       constraints.add_constraint(MemoryConstraint(mem.kind()));
       constraints.add_constraint(
           FieldConstraint(fields, true/*contiugous*/, true/*inorder*/));
-      std::vector<DimensionKind> dim_order(4);
+      const int dims = handle.get_index_space().get_dim();
+      std::vector<DimensionKind> dim_order(dims+1);
       // Field dimension first for AOS
       dim_order[0] = DIM_F;
       if (column_major)
       {
-        dim_order[1] = DIM_X;
-        dim_order[2] = DIM_Y;
-        dim_order[3] = DIM_Z;
+        for (int idx = 0; idx < dims; idx++)
+          dim_order[idx+1] = (DimensionKind)(DIM_X + idx); 
       }
       else
       {
-        dim_order[1] = DIM_Z;
-        dim_order[2] = DIM_Y;
-        dim_order[3] = DIM_X;
+        for (int idx = 0; idx < dims; idx++)
+          dim_order[idx+1] = (DimensionKind)(DIM_X + (dims-1) - idx);
       }
       constraints.add_constraint(
           OrderingConstraint(dim_order, false/*contiguous*/));
@@ -7964,27 +7964,27 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(handle.exists());
       assert(resource == EXTERNAL_INSTANCE);
 #endif
       constraints.add_constraint(PointerConstraint(mem, uintptr_t(base)));
       constraints.add_constraint(MemoryConstraint(mem.kind()));
       constraints.add_constraint(
-          FieldConstraint(fields, true/*contiugous*/, true/*inorder*/));
-      std::vector<DimensionKind> dim_order(4);
+          FieldConstraint(fields, true/*contiguous*/, true/*inorder*/));
+      const int dims = handle.get_index_space().get_dim();
+      std::vector<DimensionKind> dim_order(dims+1);
       if (column_major)
       {
-        dim_order[0] = DIM_X;
-        dim_order[1] = DIM_Y;
-        dim_order[2] = DIM_Z;
+        for (int idx = 0; idx < dims; idx++)
+          dim_order[idx] = (DimensionKind)(DIM_X + idx); 
       }
       else
       {
-        dim_order[0] = DIM_Z;
-        dim_order[1] = DIM_Y;
-        dim_order[2] = DIM_X;
+        for (int idx = 0; idx < dims; idx++)
+          dim_order[idx] = (DimensionKind)(DIM_X + (dims-1) - idx);
       }
       // Field dimension last for SOA 
-      dim_order[3] = DIM_F;
+      dim_order[dims] = DIM_F;
       constraints.add_constraint(
           OrderingConstraint(dim_order, false/*contiguous*/));
       if (alignments != NULL)
