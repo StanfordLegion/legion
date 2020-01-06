@@ -2029,6 +2029,8 @@ namespace Legion {
     InstanceBuilder::~InstanceBuilder(void)
     //--------------------------------------------------------------------------
     {
+      if (realm_layout != NULL)
+        delete realm_layout;
     }
 
     //--------------------------------------------------------------------------
@@ -2049,17 +2051,25 @@ namespace Legion {
           *footprint = 0;
         return NULL;
       }
-      // Construct the realm layout each time since (realm will take ownership 
-      // after every instance call, so we need a new one each time)
-      Realm::InstanceLayoutGeneric *realm_layout = 
-        instance_domain->create_layout(realm_constraints, 
-                                       constraints.ordering_constraint);
+      if (realm_layout == NULL)
+      {
+        const std::vector<FieldID> &field_set = 
+          constraints.field_constraint.get_field_set();
+        realm_layout =
+          instance_domain->create_layout(constraints, field_set, field_sizes);
 #ifdef DEBUG_LEGION
-      assert(realm_layout != NULL);
+        assert(realm_layout != NULL);
+#endif
+      }
+      // Clone the realm layout each time since (realm will take ownership 
+      // after every instance call, so we need a new one each time)
+      Realm::InstanceLayoutGeneric *inst_layout = realm_layout->clone();
+#ifdef DEBUG_LEGION
+      assert(inst_layout != NULL);
 #endif
       // Have to grab this now since realm is going to take ownership of
       // the instance layout generic object once we do the creation call
-      const size_t instance_footprint = realm_layout->bytes_used;
+      const size_t instance_footprint = inst_layout->bytes_used;
       // Save the footprint size if we need to
       if (footprint != NULL)
         *footprint = instance_footprint;
@@ -2081,7 +2091,7 @@ namespace Legion {
       {
         runtime->profiler->add_inst_request(requests, creator_id);
         ready = ApEvent(PhysicalInstance::create_instance(instance,
-                  memory_manager->memory, realm_layout, requests));
+                  memory_manager->memory, inst_layout, requests));
         if (instance.exists())
         {
           unsigned long long creation_time = 
@@ -2092,7 +2102,7 @@ namespace Legion {
       }
       else
         ready = ApEvent(PhysicalInstance::create_instance(instance,
-                  memory_manager->memory, realm_layout, requests));
+                  memory_manager->memory, inst_layout, requests));
       // Wait for the profiling response
       if (!profiling_ready.has_triggered())
         profiling_ready.wait(); 
@@ -2344,15 +2354,7 @@ namespace Legion {
                   "Illegal ordering constraint used during instance "
                   "creation contained multiple instances of DIM_F")
             else
-            {
-              // Check for AOS or SOA for now
-              if ((idx > 0) && (idx != (ord.ordering.size()-1)))
-                REPORT_LEGION_FATAL(ERROR_UNSUPPORTED_LAYOUT_CONSTRAINT,
-                    "Ordering constraints must currently place DIM_F "
-                    "in the first or last position as only AOS and SOA "
-                    "layout constraints are currently supported")
               field_idx = idx;
-            }
           }
           else if (ord.ordering[idx] > DIM_F)
             REPORT_LEGION_FATAL(ERROR_UNSUPPORTED_LAYOUT_CONSTRAINT,
@@ -2504,124 +2506,8 @@ namespace Legion {
         default:
           assert(false); // unknown kind
       }
-      // Compute the field groups for realm 
-      convert_layout_constraints(constraints, field_set, 
-                                 field_sizes, realm_constraints); 
     }
 
-    //--------------------------------------------------------------------------
-    /*static*/ void InstanceBuilder::convert_layout_constraints(
-                    const LayoutConstraintSet &constraints,
-                    const std::vector<FieldID> &field_set,
-                    const std::vector<size_t> &field_sizes,
-                            Realm::InstanceLayoutConstraints &realm_constraints)
-    //--------------------------------------------------------------------------
-    {
-      const OrderingConstraint &ord = constraints.ordering_constraint;
-
-      std::map<FieldID, size_t> field_alignments;
-      if (ord.ordering.front() == DIM_F)
-      {
-        // AOS - all field in same group
-        // Use a GCD of field sizes by default to make fields tighly packed
-#ifdef DEBUG_LEGION
-        assert(field_set.size() > 0);
-        assert(field_sizes.size() > 0);
-#endif
-        // Start with an initial upper bound on alignment of 32
-        size_t gcd = 32;
-        for (unsigned idx = 0; idx < field_set.size(); idx++)
-        {
-          size_t next = field_sizes[idx];
-          while (next != 0)
-          {
-            size_t mod = gcd % next;
-            gcd = next;
-            next = mod;
-          }
-        }
-#ifdef DEBUG_LEGION
-        assert(gcd != 0);
-#endif
-        for (unsigned idx = 0; idx < field_set.size(); idx++)
-          field_alignments[field_set[idx]] = gcd;
-      }
-      else if (ord.ordering.back() == DIM_F)
-      {
-        // SOA - each field is its own group
-        // Use a GCD(sizeof(T),32)
-        for (unsigned idx = 0; idx < field_set.size(); idx++)
-          field_alignments[field_set[idx]] = 
-            (field_sizes[idx] | 32) & ~((field_sizes[idx] | 32) - 1);
-      }
-      else // Have to be AOS or SOA for now
-        assert(false);
-
-      const std::vector<AlignmentConstraint> &alignments =
-        constraints.alignment_constraints;
-      for (std::vector<AlignmentConstraint>::const_iterator it =
-           alignments.begin(); it != alignments.end(); ++it)
-      {
-        // TODO: We support only equality constraints for now
-        assert(it->eqk != EQ_EK);
-        field_alignments[it->fid] = it->alignment;
-      }
-
-      std::map<FieldID,off_t> offsets;
-      const std::vector<OffsetConstraint> &offset_constraints = 
-        constraints.offset_constraints;
-      for (std::vector<OffsetConstraint>::const_iterator it = 
-            offset_constraints.begin(); it != offset_constraints.end(); it++)
-        offsets[it->fid] = it->offset;
-
-      if (ord.ordering.front() == DIM_F)
-      {
-        // AOS - all field in same group
-        realm_constraints.field_groups.resize(1);
-        realm_constraints.field_groups[0].resize(field_set.size());
-        for (unsigned idx = 0; idx < field_set.size(); idx++)
-        {
-          const FieldID fid = field_set[idx];
-#ifdef DEBUG_LEGION
-          assert(field_alignments.find(fid) != field_alignments.end());
-#endif
-          realm_constraints.field_groups[0][idx].field_id = fid;
-          std::map<FieldID,off_t>::const_iterator finder = offsets.find(fid);
-          if (finder != offsets.end())
-            realm_constraints.field_groups[0][idx].offset = finder->second;
-          else
-            realm_constraints.field_groups[0][idx].offset = -1;
-          realm_constraints.field_groups[0][idx].size = field_sizes[idx];
-          realm_constraints.field_groups[0][idx].alignment =
-            field_alignments[field_set[idx]];
-        }
-      }
-      else if (ord.ordering.back() == DIM_F)
-      {
-        // SOA - each field is its own group
-        realm_constraints.field_groups.resize(field_set.size());
-        for (unsigned idx = 0; idx < field_set.size(); idx++)
-        {
-          const FieldID fid = field_set[idx];
-#ifdef DEBUG_LEGION
-          assert(field_alignments.find(fid) != field_alignments.end());
-#endif
-          realm_constraints.field_groups[idx].resize(1);
-          realm_constraints.field_groups[idx][0].field_id = fid;
-          std::map<FieldID,off_t>::const_iterator finder = offsets.find(fid);
-          if (finder != offsets.end())
-            realm_constraints.field_groups[idx][0].offset = finder->second;
-          else
-            realm_constraints.field_groups[idx][0].offset = -1;
-          realm_constraints.field_groups[idx][0].size = field_sizes[idx];
-          realm_constraints.field_groups[idx][0].alignment =
-            field_alignments[field_set[idx]];
-        }
-      }
-      else // Have to be AOS or SOA for now
-        assert(false);
-    }
-    
   }; // namespace Internal
 }; // namespace Legion
 
