@@ -83,6 +83,10 @@ namespace Legion {
 
 	// should this instance be placed in an RDMA-able memory if possible?
 	PREFER_RDMA_MEMORY = (1 << 3),
+
+        // prefer a CPU (instead of GPU) implementation of a task if both are
+        //  available
+        PREFER_CPU_VARIANT = (1 << 4),
       };
     protected: // Internal types
       struct VariantInfo {
