@@ -253,12 +253,14 @@ namespace Legion {
                                      const std::vector<unsigned> &field_indexes,
                                      const FieldID indirect_field,
                                      const TypeTag indirect_type,
-                                     const bool is_range,
+                                     const bool is_range, 
                                      const PhysicalInstance indirect_instance,
                                      const LegionVector<
                                             IndirectRecord>::aligned &records,
                                      std::vector<void*> &indirects,
-                                     std::vector<unsigned> &indirect_indexes)
+                                     std::vector<unsigned> &indirect_indexes,
+                                     const bool possible_out_of_range,
+                                     const bool possible_aliasing)
     //--------------------------------------------------------------------------
     {
       typedef std::vector<typename Realm::CopyIndirection<DIM,T>::Base*>
@@ -286,7 +288,8 @@ namespace Legion {
             field_sets.begin(); it != field_sets.end(); it++, index++)
       {
         UnstructuredIndirectionHelper<DIM,T> helper(indirect_field, is_range,
-                                              indirect_instance, it->elements);
+                                    indirect_instance, it->elements, 
+                                    possible_out_of_range, possible_aliasing);
         NT_TemplateHelper::demux<UnstructuredIndirectionHelper<DIM,T> >(
             indirect_type, &helper);
         indirections[offset+index] = helper.result;
@@ -976,17 +979,20 @@ namespace Legion {
                                      const std::vector<unsigned> &field_indexes,
                                      const FieldID indirect_field,
                                      const TypeTag indirect_type,
-                                     const bool is_range,
+                                     const bool is_range, 
                                      const PhysicalInstance indirect_instance,
                                      const LegionVector<
                                             IndirectRecord>::aligned &records,
                                      std::vector<void*> &indirections,
-                                     std::vector<unsigned> &indirect_indexes)
+                                     std::vector<unsigned> &indirect_indexes,
+                                     const bool possible_out_of_range,
+                                     const bool possible_aliasing)
     //--------------------------------------------------------------------------
     {
       construct_indirections_internal<DIM,T>(field_indexes, indirect_field,
                                  indirect_type, is_range, indirect_instance, 
-                                 records, indirections, indirect_indexes);
+                                 records, indirections, indirect_indexes,
+                                 possible_out_of_range, possible_aliasing);
     }
 
     //--------------------------------------------------------------------------
@@ -4702,12 +4708,15 @@ namespace Legion {
                                      const LegionVector<
                                             IndirectRecord>::aligned &records,
                                      std::vector<void*> &indirections,
-                                     std::vector<unsigned> &indirect_indexes)
+                                     std::vector<unsigned> &indirect_indexes,
+                                     const bool possible_out_of_range,
+                                     const bool possible_aliasing)
     //--------------------------------------------------------------------------
     {
       construct_indirections_internal<DIM,T>(field_indexes, indirect_field,
                                  indirect_type, is_range, indirect_instance,
-                                 records, indirections, indirect_indexes);
+                                 records, indirections, indirect_indexes,
+                                 possible_out_of_range, possible_aliasing);
     }
 
     //--------------------------------------------------------------------------

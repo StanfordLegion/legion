@@ -34,12 +34,21 @@ parser.add_argument('-R', '--max-retries', type=int,
 parser.add_argument('-d', '--retry-delay', type=int,
                     default = 3,
                     help = 'delay (in seconds) between retries')
+parser.add_argument('-t', '--tokenfile', type=str,
+                    help = 'file containing API authentication token')
+parser.add_argument('--partial', action='store_true',
+                    help = 'write partial issue list in case of errors')
 parser.add_argument('output', type=str,
                     help = 'output file location')
 
 args = parser.parse_args()
 
 issues = {}
+
+headers = {}
+if args.tokenfile:
+    token = open(args.tokenfile, 'r').read().strip()
+    headers['Authorization'] = 'token ' + token
 
 for page in range(1, 1000):
     url = '{}/repos/{}/{}/issues?state={}&count={}&page={}'.format(args.base_url,
@@ -54,13 +63,17 @@ for page in range(1, 1000):
     retry_count = 0
     while True:
         try:
-            r = urllib.request.urlopen(url)
+            req = urllib.request.Request(url, headers=headers)
+            r = urllib.request.urlopen(req)
             j = json.loads(r.read().decode('utf-8'))
             break
         except KeyboardInterrupt:
             exit(1)
         except Exception as e:
             if retry_count >= args.max_retries:
+                if args.partial:
+                    j = []
+                    break
                 raise
             if not args.quiet:
                 print('error: {}'.format(e))

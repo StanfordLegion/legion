@@ -1226,6 +1226,10 @@ namespace Legion {
       int                                 profiling_priority;
       mutable int             outstanding_profiling_requests;
       mutable RtUserEvent                 profiling_reported;
+    protected:
+      bool                            possible_src_indirect_out_of_range;
+      bool                            possible_dst_indirect_out_of_range;
+      bool                            possible_dst_indirect_aliasing;
     };
 
     /**

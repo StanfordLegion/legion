@@ -2507,7 +2507,8 @@ namespace Legion {
                                             const bool gather_is_range,
                                             const ApEvent precondition, 
                                             const PredEvent pred_guard,
-                                            const PhysicalTraceInfo &trace_info)
+                                            const PhysicalTraceInfo &trace_info,
+                                           const bool possible_src_out_of_range)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2545,7 +2546,8 @@ namespace Legion {
       copy_expr->construct_indirections(src_indexes, idx_field, 
                src_req.region.get_index_space().get_type_tag(), 
                gather_is_range, idx_target.get_manager()->get_instance(),
-               src_records, indirections, indirection_indexes);
+               src_records, indirections, indirection_indexes,
+               possible_src_out_of_range, false/*possible aliasing*/);
 #ifdef DEBUG_LEGION
       assert(indirection_indexes.size() == src_req.instance_fields.size());
 #endif
@@ -2631,7 +2633,9 @@ namespace Legion {
                                              const bool scatter_is_range,
                                              const ApEvent precondition, 
                                              const PredEvent pred_guard,
-                                            const PhysicalTraceInfo &trace_info)
+                                            const PhysicalTraceInfo &trace_info,
+                                           const bool possible_dst_out_of_range,
+                                             const bool possible_dst_aliasing)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2665,7 +2669,8 @@ namespace Legion {
       copy_expr->construct_indirections(dst_indexes, idx_field, 
                dst_req.region.get_index_space().get_type_tag(), 
                scatter_is_range, idx_target.get_manager()->get_instance(),
-               dst_records, indirections, indirection_indexes);
+               dst_records, indirections, indirection_indexes,
+               possible_dst_out_of_range, possible_dst_aliasing);
 #ifdef DEBUG_LEGION
       assert(indirection_indexes.size() == dst_req.instance_fields.size());
 #endif
@@ -2752,7 +2757,10 @@ namespace Legion {
                               const bool both_are_range,
                               const ApEvent precondition, 
                               const PredEvent pred_guard,
-                              const PhysicalTraceInfo &trace_info)
+                              const PhysicalTraceInfo &trace_info,
+                              const bool possible_src_out_of_range,
+                              const bool possible_dst_out_of_range,
+                              const bool possible_dst_aliasing)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2791,7 +2799,8 @@ namespace Legion {
       copy_expr->construct_indirections(src_indexes, src_idx_field,
                src_req.region.get_index_space().get_type_tag(),
                both_are_range, src_idx_target.get_manager()->get_instance(),
-               src_records, indirections, src_indirection_indexes);
+               src_records, indirections, src_indirection_indexes,
+               possible_src_out_of_range, false/*possible aliasing*/);
 #ifdef DEBUG_LEGION
       assert(src_indirection_indexes.size() == src_req.instance_fields.size());
 #endif
@@ -2799,7 +2808,8 @@ namespace Legion {
       copy_expr->construct_indirections(dst_indexes, dst_idx_field,
                dst_req.region.get_index_space().get_type_tag(),
                both_are_range, dst_idx_target.get_manager()->get_instance(),
-               dst_records, indirections, dst_indirection_indexes);
+               dst_records, indirections, dst_indirection_indexes,
+               possible_dst_out_of_range, possible_dst_aliasing);
 #ifdef DEBUG_LEGION
       assert(dst_indirection_indexes.size() == dst_req.instance_fields.size());
 #endif

@@ -3795,6 +3795,8 @@ namespace Legion {
                 "is no corresponding range indirection on the destination.",
                 idx, parent_ctx->get_task_name(), parent_ctx->get_unique_id())
         }
+        possible_src_indirect_out_of_range = 
+          launcher.possible_src_indirect_out_of_range;
       }
       if (!launcher.dst_indirect_requirements.empty())
       {
@@ -3835,6 +3837,10 @@ namespace Legion {
                   parent_ctx->get_unique_id())
           }
         }
+        possible_dst_indirect_out_of_range = 
+          launcher.possible_dst_indirect_out_of_range;
+        possible_dst_indirect_aliasing = 
+          launcher.possible_dst_indirect_aliasing;
       }
       grants = launcher.grants;
       // Register ourselves with all the grants
@@ -4821,7 +4827,8 @@ namespace Legion {
               dst_requirements[index], src_records,
               (*gather_targets)[0], dst_targets, this, 
               src_requirements.size() + index, gather_is_range[index],
-              local_init_precondition, predication_guard, trace_info);
+              local_init_precondition, predication_guard, trace_info,
+              possible_src_indirect_out_of_range);
           Runtime::trigger_event(indirect_done, local_done);
         }
       }
@@ -4834,7 +4841,9 @@ namespace Legion {
               src_requirements[index], dst_indirect_requirements[index],
               dst_requirements[index], src_targets, (*scatter_targets)[0],
               dst_records, this, index, scatter_is_range[index],
-              local_init_precondition, predication_guard, trace_info);
+              local_init_precondition, predication_guard, trace_info,
+              possible_dst_indirect_out_of_range, 
+              possible_dst_indirect_aliasing);
           Runtime::trigger_event(indirect_done, local_done);
         }
         else
@@ -4848,7 +4857,10 @@ namespace Legion {
               dst_requirements[index], dst_indirect_requirements[index],
               src_records, (*gather_targets)[0],
               dst_records, (*scatter_targets)[0], gather_is_range[index],
-              local_init_precondition, predication_guard, trace_info);
+              local_init_precondition, predication_guard, trace_info,
+              possible_src_indirect_out_of_range,
+              possible_dst_indirect_out_of_range,
+              possible_dst_indirect_aliasing);
           Runtime::trigger_event(indirect_done, local_done);
         }
       }
@@ -6005,6 +6017,8 @@ namespace Legion {
         src_exchange_events.resize(gather_size);
         src_merged.resize(gather_size);
         src_exchanged.resize(gather_size);
+        possible_src_indirect_out_of_range =
+          launcher.possible_src_indirect_out_of_range;
       }
       if (!launcher.dst_indirect_requirements.empty())
       {
@@ -6030,6 +6044,10 @@ namespace Legion {
         dst_exchange_events.resize(scatter_size);
         dst_merged.resize(scatter_size);
         dst_exchanged.resize(scatter_size);
+        possible_dst_indirect_out_of_range = 
+          launcher.possible_dst_indirect_out_of_range;
+        possible_dst_indirect_aliasing = 
+          launcher.possible_dst_indirect_aliasing;
       }
       grants = launcher.grants;
       // Register ourselves with all the grants

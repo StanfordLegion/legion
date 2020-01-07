@@ -543,7 +543,8 @@ namespace Legion {
                             const bool gather_is_range,
                             const ApEvent precondition, 
                             const PredEvent pred_guard,
-                            const PhysicalTraceInfo &trace_info);
+                            const PhysicalTraceInfo &trace_info,
+                            const bool possible_src_out_of_range);
       ApEvent scatter_across(const RegionRequirement &src_req,
                              const RegionRequirement &idx_req,
                              const RegionRequirement &dst_req,
@@ -554,7 +555,9 @@ namespace Legion {
                              const bool scatter_is_range,
                              const ApEvent precondition, 
                              const PredEvent pred_guard,
-                             const PhysicalTraceInfo &trace_info);
+                             const PhysicalTraceInfo &trace_info,
+                             const bool possible_dst_out_of_range,
+                             const bool possible_dst_aliasing);
       ApEvent indirect_across(const RegionRequirement &src_req,
                               const RegionRequirement &src_idx_req,
                               const RegionRequirement &dst_req,
@@ -566,7 +569,10 @@ namespace Legion {
                               const bool both_are_range,
                               const ApEvent precondition, 
                               const PredEvent pred_guard,
-                              const PhysicalTraceInfo &trace_info);
+                              const PhysicalTraceInfo &trace_info,
+                              const bool possible_src_out_of_range,
+                              const bool possible_dst_out_of_range,
+                              const bool possible_dst_aliasing);
       // This takes ownership of the value buffer
       ApEvent fill_fields(FillOp *op,
                           const RegionRequirement &req,
@@ -922,9 +928,11 @@ namespace Legion {
       struct UnstructuredIndirectionHelper {
       public:
         UnstructuredIndirectionHelper(FieldID fid, bool range, 
-            PhysicalInstance inst, const std::set<IndirectRecord*> &recs)
+            PhysicalInstance inst, const std::set<IndirectRecord*> &recs,
+            bool out_of_range, bool aliasing)
           : indirect_field(fid), indirect_inst(inst), 
-            records(recs), result(NULL), is_range(range) { }
+            records(recs), result(NULL), is_range(range),
+            possible_out_of_range(out_of_range), possible_aliasing(aliasing) { }
       public:
         template<typename N2, typename T2>
         static inline void demux(UnstructuredIndirectionHelper *helper)
@@ -935,6 +943,8 @@ namespace Legion {
           indirect->field_id = helper->indirect_field;
           indirect->inst = helper->indirect_inst;
           indirect->is_ranges = helper->is_range;
+          indirect->oor_possible = helper->possible_out_of_range;
+          indirect->aliasing_possible = helper->possible_aliasing;
           indirect->subfield_offset = 0;
           indirect->spaces.resize(helper->records.size());
           indirect->insts.resize(helper->records.size());
@@ -958,6 +968,8 @@ namespace Legion {
         const std::set<IndirectRecord*> &records;
         typename Realm::CopyIndirection<N1,T1>::Base *result;
         const bool is_range;
+        const bool possible_out_of_range;
+        const bool possible_aliasing;
       };
     public:
       IndexSpaceExpression(LocalLock &lock);
@@ -1018,7 +1030,9 @@ namespace Legion {
                            const LegionVector<
                                   IndirectRecord>::aligned &records,
                            std::vector<void*> &indirections,
-                           std::vector<unsigned> &indirect_indexes) = 0;
+                           std::vector<unsigned> &indirect_indexes,
+                           const bool possible_out_of_range,
+                           const bool possible_aliasing) = 0;
       virtual void destroy_indirections(std::vector<void*> &indirections) = 0;
       virtual ApEvent issue_indirect(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
@@ -1089,7 +1103,9 @@ namespace Legion {
                                const LegionVector<
                                       IndirectRecord>::aligned &records,
                                std::vector<void*> &indirections,
-                               std::vector<unsigned> &indirect_indexes);
+                               std::vector<unsigned> &indirect_indexes,
+                               const bool possible_out_of_range,
+                               const bool possible_aliasing);
       template<int DIM, typename T>
       inline void destroy_indirections_internal(
                                std::vector<void*> &indirections);
@@ -1280,7 +1296,9 @@ namespace Legion {
                            const LegionVector<
                                   IndirectRecord>::aligned &records,
                            std::vector<void*> &indirections,
-                           std::vector<unsigned> &indirect_indexes);
+                           std::vector<unsigned> &indirect_indexes,
+                           const bool possible_out_of_range,
+                           const bool possible_aliasing);
       virtual void destroy_indirections(std::vector<void*> &indirections);
       virtual ApEvent issue_indirect(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
@@ -2222,7 +2240,9 @@ namespace Legion {
                            const LegionVector<
                                   IndirectRecord>::aligned &records,
                            std::vector<void*> &indirections,
-                           std::vector<unsigned> &indirect_indexes);
+                           std::vector<unsigned> &indirect_indexes,
+                           const bool possible_out_of_range,
+                           const bool possible_aliasing);
       virtual void destroy_indirections(std::vector<void*> &indirections);
       virtual ApEvent issue_indirect(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
