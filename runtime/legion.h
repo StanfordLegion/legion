@@ -1711,6 +1711,14 @@ namespace Legion {
       // These will be ignored outside of static traces
       const std::vector<StaticDependence> *static_dependences;
     public:
+      // Whether the source and destination indirections can lead
+      // to out-of-range access into the instances to skip
+      bool                            possible_src_indirect_out_of_range;
+      bool                            possible_dst_indirect_out_of_range;
+      // Whether the destination indirection can lead to aliasing 
+      // in the destination instances requiring synchronization
+      bool                            possible_dst_indirect_aliasing;
+    public:
       bool                            silence_warnings;
     };
 
@@ -1778,6 +1786,14 @@ namespace Legion {
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
       const std::vector<StaticDependence> *static_dependences;
+    public:
+      // Whether the source and destination indirections can lead
+      // to out-of-range access into the instances to skip
+      bool                            possible_src_indirect_out_of_range;
+      bool                            possible_dst_indirect_out_of_range;
+      // Whether the destination indirection can lead to aliasing 
+      // in the destination instances requiring synchronization
+      bool                            possible_dst_indirect_aliasing;
     public:
       bool                            silence_warnings;
     };
