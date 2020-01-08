@@ -2581,6 +2581,20 @@ extern "C" {
                                           legion_index_space_t is);
 
   /**
+   * @see Legion::TaskLauncher::map_id
+   */
+  void
+  legion_task_launcher_set_mapper(legion_task_launcher_t launcher,
+                                  legion_mapper_id_t mapper_id); 
+
+  /**
+   * @see Legion::TaskLauncher::tag
+   */
+  void
+  legion_task_launcher_set_mapping_tag(legion_task_launcher_t launcher,
+                                       legion_mapping_tag_id_t tag);
+
+  /**
    * @return Caller takes ownership of return value.
    *
    * @see Legion::IndexTaskLauncher::IndexTaskLauncher()
@@ -2823,6 +2837,20 @@ extern "C" {
   void
   legion_index_launcher_set_sharding_space(legion_index_launcher_t launcher,
                                            legion_index_space_t is);
+
+  /**
+   * @see Legion::IndexTaskLauncher::map_id
+   */
+  void
+  legion_index_launcher_set_mapper(legion_index_launcher_t launcher,
+                                   legion_mapper_id_t mapper_id); 
+
+  /**
+   * @see Legion::IndexTaskLauncher::tag
+   */
+  void
+  legion_index_launcher_set_mapping_tag(legion_index_launcher_t launcher,
+                                        legion_mapping_tag_id_t tag);
 
   // -----------------------------------------------------------------------
   // Inline Mapping Operations
