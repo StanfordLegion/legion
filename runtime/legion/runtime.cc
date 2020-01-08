@@ -3394,12 +3394,10 @@ namespace Legion {
       shard_manager = new ShardManager(runtime, repl_context, true/*cr*/,
         true/*top level*/, total_shards, runtime->address_space, implicit_top);
       implicit_top->set_shard_manager(shard_manager);
-#ifdef DEBUG_LEGION
       // This is a dummy shard_mapping for now since we won't actually need
       // a real one, this just needs to make sure all the checks pass
       std::vector<Processor> shard_mapping(total_shards, Processor::NO_PROC);
       shard_manager->set_shard_mapping(shard_mapping);
-#endif
       std::vector<AddressSpaceID> address_spaces(total_shards);
       for (AddressSpaceID space = 0; 
             space < runtime->total_address_spaces; space++)
@@ -3417,7 +3415,7 @@ namespace Legion {
             space < runtime->total_address_spaces; space++)
         shard_manager->distribute_shards(space, empty_shards);
       // Then send any pending responses
-      if (remote_spaces.empty())
+      if (!remote_spaces.empty())
       {
         for (std::vector<std::pair<AddressSpaceID,void*> >::const_iterator it = 
               remote_spaces.begin(); it != remote_spaces.end(); it++)
