@@ -3057,6 +3057,24 @@ legion_task_launcher_set_sharding_space(legion_task_launcher_t launcher_,
   launcher->sharding_space = is;
 }
 
+void
+legion_task_launcher_set_mapper(legion_task_launcher_t launcher_,
+                                legion_mapper_id_t mapper_id)
+{
+  TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->map_id = mapper_id;
+}
+
+void
+legion_task_launcher_set_mapping_tag(legion_task_launcher_t launcher_,
+                                     legion_mapping_tag_id_t tag)
+{
+  TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->tag = tag;
+}
+
 legion_index_launcher_t
 legion_index_launcher_create(
   legion_task_id_t tid,
@@ -3402,6 +3420,24 @@ legion_index_launcher_set_sharding_space(legion_index_launcher_t launcher_,
   IndexSpace is = CObjectWrapper::unwrap(is_);
 
   launcher->sharding_space = is;
+}
+
+void
+legion_index_launcher_set_mapper(legion_index_launcher_t launcher_,
+                                 legion_mapper_id_t mapper_id)
+{
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->map_id = mapper_id;
+}
+
+void
+legion_index_launcher_set_mapping_tag(legion_index_launcher_t launcher_,
+                                      legion_mapping_tag_id_t tag)
+{
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->tag = tag;
 }
 
 // -----------------------------------------------------------------------
