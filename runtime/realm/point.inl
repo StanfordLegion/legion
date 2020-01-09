@@ -188,7 +188,7 @@ namespace Realm {
     __CUDA_HD__
     Point(void) {}
     __CUDA_HD__
-    Point(T val) : x(val), y(val), z(val) { }
+    explicit Point(T val) : x(val), y(val), z(val) { }
     __CUDA_HD__
     explicit Point(const T vals[3]) : x(vals[0]), y(vals[1]), z(vals[2]) {}
     __CUDA_HD__
@@ -231,7 +231,7 @@ namespace Realm {
     __CUDA_HD__
     Point(void) {}
     __CUDA_HD__
-    Point(T val) : x(val), y(val), z(val), w(val) { }
+    explicit Point(T val) : x(val), y(val), z(val), w(val) { }
     __CUDA_HD__
     explicit Point(const T vals[4]) : x(vals[0]), y(vals[1]), z(vals[2]), w(vals[3]) {}
     __CUDA_HD__
