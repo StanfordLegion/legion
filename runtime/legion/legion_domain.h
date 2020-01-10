@@ -42,6 +42,11 @@ namespace Legion {
    * Our way of importing the templated Realm Point class
    * into the Legion namespace without c++11 features
    */
+#define ONLY_IF_INTEGRAL(T) \
+  typename Realm::enable_if<Realm::is_integral<T2>::value, Realm::monostate>::type = Realm::monostate()
+#define ONLY_IF_INTEGRAL_DEFN(T) \
+  typename Realm::enable_if<Realm::is_integral<T2>::value, Realm::monostate>::type /*= Realm::monostate()*/
+
   template<int DIM, typename T = coord_t>
   struct Point : public Realm::Point<DIM,T> {
   public:
@@ -49,8 +54,13 @@ namespace Legion {
     Point(void);
     __CUDA_HD__
     explicit Point(T val); // same value for all dimensions
+    template <typename T2>
     __CUDA_HD__
-    explicit Point(const T vals[DIM]);
+    explicit Point(T2 val,
+		   ONLY_IF_INTEGRAL(T2)); // same value for all dimensions
+    template <typename T2>
+    __CUDA_HD__
+    explicit Point(T2 vals[DIM], ONLY_IF_INTEGRAL(T2));
     // copies allow type coercion (assuming the underlying type does)
     template<typename T2> __CUDA_HD__
     Point(const Point<DIM,T2> &rhs);
@@ -602,6 +612,11 @@ namespace Legion {
 }; // namespace Legion
 
 #include "legion/legion_domain.inl"
+
+#if __cplusplus < 201103L
+#undef ONLY_IF_INTEGRAL
+#undef ONLY_IF_INTEGRAL_DEFN
+#endif
 
 #endif // __LEGION_DOMAIN_H__
 

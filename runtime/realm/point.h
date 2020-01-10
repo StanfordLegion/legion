@@ -20,6 +20,11 @@
 
 #include "realm/realm_config.h"
 
+#include "realm/event.h"
+#include "realm/utils.h"
+
+#include <iostream>
+
 namespace Realm {
 
   template <int N, typename T = int> struct Point;
@@ -31,6 +36,13 @@ namespace Realm {
   struct CopySrcDstField;
   class ProfilingRequestSet;
 
+  // adding this as a parameter to a templated method uses SFINAE to only allow
+  //  the template to be instantiated with an integral type
+#define ONLY_IF_INTEGRAL(T) \
+  typename enable_if<is_integral<T2>::value, monostate>::type = monostate()
+#define ONLY_IF_INTEGRAL_DEFN(T) \
+  typename enable_if<is_integral<T2>::value, monostate>::type /*= monostate()*/
+  
   // a Point is a tuple describing a point in an N-dimensional space - the default "base type"
   //  for each dimension is int, but 64-bit indices are supported as well
 
@@ -49,9 +61,15 @@ namespace Realm {
     __CUDA_HD__
     Point(void);
     __CUDA_HD__
-    explicit Point(T val); // same value for all dimensions
+    explicit Point(T val);
+    // construct from any integral value
+    template <typename T2>
     __CUDA_HD__
-    explicit Point(const T vals[N]);
+    explicit Point(T2 val,
+		   ONLY_IF_INTEGRAL(T2)); // same value for all dimensions
+    template <typename T2>
+    __CUDA_HD__
+    explicit Point(T2 vals[N], ONLY_IF_INTEGRAL(T2));
     // copies allow type coercion (assuming the underlying type does)
     template <typename T2> __CUDA_HD__
     Point(const Point<N, T2>& copy_from);
@@ -65,7 +83,7 @@ namespace Realm {
 
     template <typename T2> __CUDA_HD__
     T dot(const Point<N, T2>& rhs) const;
-  public:
+
     __CUDA_HD__
     static Point<N,T> ZEROES(void);
     __CUDA_HD__
@@ -245,6 +263,9 @@ namespace std {
 };
 
 #include "realm/point.inl"
+
+#undef ONLY_IF_INTEGRAL
+#undef ONLY_IF_INTEGRAL_DEFN
 
 #endif // ifndef REALM_POINT_H
 

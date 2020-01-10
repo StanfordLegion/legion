@@ -33,15 +33,27 @@ namespace Realm {
   inline Point<N,T>::Point(void)
   {}
 
-  template <int N, typename T> __CUDA_HD__
+  template <int N, typename T>
+  __CUDA_HD__
   inline Point<N,T>::Point(T val)
   {
     for(int i = 0; i < N; i++)
       (&x)[i] = val;
   }
 
-  template <int N, typename T> __CUDA_HD__
-  inline Point<N,T>::Point(const T vals[N])
+  template <int N, typename T>
+  template <typename T2>
+  __CUDA_HD__
+  inline Point<N,T>::Point(T2 val, ONLY_IF_INTEGRAL_DEFN(T2))
+  {
+    for(int i = 0; i < N; i++)
+      (&x)[i] = val;
+  }
+
+  template <int N, typename T>
+  template <typename T2>
+  __CUDA_HD__
+  inline Point<N,T>::Point(T2 vals[N], ONLY_IF_INTEGRAL_DEFN(T2))
   {
     for(int i = 0; i < N; i++)
       (&x)[i] = vals[i];
@@ -104,14 +116,17 @@ namespace Realm {
     T x;
     __CUDA_HD__
     Point(void) {}
-    // No need for a static array constructor here
-    // __CUDA_HD__
-    // Point(T _x) : x(_x) {}
     __CUDA_HD__
-    Point(int _x) : x(_x) {}
+    Point(T _x) : x(_x) {}
+    template <typename T2>
     __CUDA_HD__
-    explicit Point(const T vals[1]) : x(vals[0]) {}
-  // copies allow type coercion (assuming the underlying type does)
+    Point(T2 _x, ONLY_IF_INTEGRAL(T2))
+      : x(_x) {}
+    template <typename T2>
+    __CUDA_HD__
+    explicit Point(T2 vals[1], ONLY_IF_INTEGRAL(T2))
+      : x(vals[0]) {}
+    // copies allow type coercion (assuming the underlying type does)
     template <typename T2> __CUDA_HD__
     Point(const Point<1, T2>& copy_from) : x(copy_from.x) {}
     template <typename T2> __CUDA_HD__
@@ -151,8 +166,14 @@ namespace Realm {
     Point(void) {}
     __CUDA_HD__
     explicit Point(T val) : x(val), y(val) { }
+    template <typename T2>
     __CUDA_HD__
-    explicit Point(const T vals[2]) : x(vals[0]), y(vals[1]) {}
+    explicit Point(T2 val, ONLY_IF_INTEGRAL(T2))
+      : x(val), y(val) { }
+    template <typename T2>
+    __CUDA_HD__
+    explicit Point(T2 vals[2], ONLY_IF_INTEGRAL(T2))
+      : x(vals[0]), y(vals[1]) {}
     __CUDA_HD__
     Point(T _x, T _y) : x(_x), y(_y) {}
     // copies allow type coercion (assuming the underlying type does)
@@ -193,8 +214,14 @@ namespace Realm {
     Point(void) {}
     __CUDA_HD__
     explicit Point(T val) : x(val), y(val), z(val) { }
+    template <typename T2>
     __CUDA_HD__
-    explicit Point(const T vals[3]) : x(vals[0]), y(vals[1]), z(vals[2]) {}
+    explicit Point(T2 val, ONLY_IF_INTEGRAL(T2))
+      : x(val), y(val), z(val) { }
+    template <typename T2>
+    __CUDA_HD__
+    explicit Point(T2 vals[3], ONLY_IF_INTEGRAL(T2))
+      : x(vals[0]), y(vals[1]), z(vals[2]) {}
     __CUDA_HD__
     Point(T _x, T _y, T _z) : x(_x), y(_y), z(_z) {}
     // copies allow type coercion (assuming the underlying type does)
@@ -233,11 +260,17 @@ namespace Realm {
   struct Point<4,T> {
     T x, y, z, w;
     __CUDA_HD__
-    Point(void) {}
+    Point(void) {} 
     __CUDA_HD__
     explicit Point(T val) : x(val), y(val), z(val), w(val) { }
+    template <typename T2>
     __CUDA_HD__
-    explicit Point(const T vals[4]) : x(vals[0]), y(vals[1]), z(vals[2]), w(vals[3]) {}
+    explicit Point(T2 val, ONLY_IF_INTEGRAL(T2))
+      : x(val), y(val), z(val), w(val) { }
+    template <typename T2>
+    __CUDA_HD__
+    explicit Point(T2 vals[4], ONLY_IF_INTEGRAL(T2))
+      : x(vals[0]), y(vals[1]), z(vals[2]), w(vals[3]) {}
     __CUDA_HD__
     Point(T _x, T _y, T _z, T _w) : x(_x), y(_y), z(_z), w(_w) {}
     // copies allow type coercion (assuming the underlying type does)
