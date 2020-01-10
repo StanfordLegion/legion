@@ -41,7 +41,7 @@ namespace Realm {
   // 4) default assignment operator
   // 5) operator[] to access individual components
 
-  // specializations for N <= 4 defined in indexspace.inl
+  // specializations for N <= 4 defined in point.inl
   template <int N, typename T>
   struct Point {
     T x, y, z, w;  T rest[N - 4];

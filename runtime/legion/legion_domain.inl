@@ -22,8 +22,12 @@ namespace Legion {
   public:
     __CUDA_HD__
     inline Point(void) : Realm::Point<1,T>() { }
+    // __CUDA_HD__
+    // inline Point(const T val) : Realm::Point<1,T>(val) { }
     __CUDA_HD__
-    inline Point(const T val) : Realm::Point<1,T>(val) { }
+    inline Point(const int val) : Realm::Point<1,T>(val) { }
+    __CUDA_HD__
+    inline explicit Point(const T vals[1]) : Realm::Point<1,T>(vals) { }
     // copies allow type coercion (assuming the underlying type does)
     template<typename T2> __CUDA_HD__
     inline Point(const Point<1,T2> &rhs) : Realm::Point<1,T>(rhs) { }

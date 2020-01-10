@@ -105,9 +105,13 @@ namespace Realm {
     __CUDA_HD__
     Point(void) {}
     // No need for a static array constructor here
+    // __CUDA_HD__
+    // Point(T _x) : x(_x) {}
     __CUDA_HD__
-    Point(T _x) : x(_x) {}
-    // copies allow type coercion (assuming the underlying type does)
+    Point(int _x) : x(_x) {}
+    __CUDA_HD__
+    explicit Point(const T vals[1]) : x(vals[0]) {}
+  // copies allow type coercion (assuming the underlying type does)
     template <typename T2> __CUDA_HD__
     Point(const Point<1, T2>& copy_from) : x(copy_from.x) {}
     template <typename T2> __CUDA_HD__
