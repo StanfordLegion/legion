@@ -427,7 +427,10 @@ do
       if std.is_bounded_type(binder_type) then
         binder_type = binder_type.index_type
       end
-      if std.type_eq(binder_type, arg_type) then
+      if std.type_eq(binder_type, arg_type) or
+         (std.is_region(binder_type) and std.is_region(arg_type) and
+          std.type_eq(binder_type:fspace(), arg_type:fspace()))
+      then
         binder = binders[idx]
       else
         new_binders:insert(binders[idx])
