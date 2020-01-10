@@ -4326,13 +4326,8 @@ namespace Legion {
       assert(!fills.empty());
       assert(!!fill_mask); 
 #endif
-      std::vector<CopySrcDstField> dst_fields;
-      target->copy_to(fill_mask, dst_fields, fills[0]->across_helper);
       const UniqueID op_id = op->get_unique_op_id();
-#ifdef LEGION_SPY
       PhysicalManager *manager = target->get_manager();
-      FieldSpaceNode *field_space_node = manager->field_space_node;
-#endif
       if (fills.size() == 1)
       {
         FillUpdate *update = fills[0];
@@ -4365,18 +4360,12 @@ namespace Legion {
           else
             tracing_dsts->insert(target, fill_mask);
         }
-        const ApEvent result = fill_expr->issue_fill(trace_info, dst_fields,
-                                                     fill_view->value->value,
-                                                   fill_view->value->value_size,
-#ifdef LEGION_SPY
-                                                     fill_view->fill_op_uid,
-                                                     field_space_node->handle,
-                                                     manager->tree_id,
-#endif
-                                                     precondition,
-                                                     predicate_guard,
-                                                     tracing_src_fills,
-                                                     tracing_dsts);
+        const ApEvent result = manager->fill_from(fill_view, precondition,
+                                                  predicate_guard, fill_expr,
+                                                  fill_mask, trace_info, 
+                                                  fills[0]->across_helper,
+                                                  tracing_src_fills, 
+                                                  tracing_dsts);
         // Record the fill result in the destination 
         if (result.exists())
         {
@@ -4455,18 +4444,12 @@ namespace Legion {
             tracing_src_fills->insert(it->first, fill_mask);
           }
           // See if we have any work to do for tracing
-          const ApEvent result = fill_expr->issue_fill(trace_info, dst_fields,
-                                                       it->first->value->value,
-                                                  it->first->value->value_size,
-#ifdef LEGION_SPY
-                                                       it->first->fill_op_uid,
-                                                       field_space_node->handle,
-                                                       manager->tree_id,
-#endif
-                                                       precondition,
-                                                       predicate_guard,
-                                                       tracing_src_fills,
-                                                       tracing_dsts);
+          const ApEvent result = manager->fill_from(it->first, precondition,
+                                                    predicate_guard, fill_expr,
+                                                    fill_mask, trace_info,
+                                                    fills[0]->across_helper,
+                                                    tracing_src_fills,
+                                                    tracing_dsts);
           if (result.exists())
           {
             target->add_copy_user(false/*reading*/,
@@ -4497,18 +4480,13 @@ namespace Legion {
       assert(!!copy_mask);
 #endif
       const UniqueID op_id = op->get_unique_op_id();
-#ifdef LEGION_SPY
-      PhysicalManager *manager = target->get_manager();
-      FieldSpaceNode *field_space_node = manager->field_space_node;
-#endif
+      PhysicalManager *target_manager = target->get_manager();
       for (std::map<InstanceView*,std::vector<CopyUpdate*> >::const_iterator
             cit = copies.begin(); cit != copies.end(); cit++)
       {
 #ifdef DEBUG_LEGION
         assert(!cit->second.empty());
 #endif
-        std::vector<CopySrcDstField> dst_fields, src_fields;
-        target->copy_to(copy_mask, dst_fields, cit->second[0]->across_helper);
         if (cit->second.size() == 1)
         {
           // Easy case of a single update copy
@@ -4518,7 +4496,6 @@ namespace Legion {
           assert(!(copy_mask - update->src_mask));
 #endif
           InstanceView *source = update->source;
-          source->copy_from(copy_mask, src_fields);
           IndexSpaceExpression *copy_expr = update->expr;
           // See if we have any work to do for tracing
           if (trace_info.recording)
@@ -4542,15 +4519,11 @@ namespace Legion {
             else
               tracing_dsts->insert(target, copy_mask);
           }
-          const ApEvent result = copy_expr->issue_copy(trace_info, 
-                                    dst_fields, src_fields, 
-#ifdef LEGION_SPY
-                                    field_space_node->handle,
-                                    source->get_manager()->tree_id,
-                                    manager->tree_id,
-#endif
-                                    precondition, predicate_guard,
-                                    update->redop, false/*fold*/,
+          const ApEvent result = target_manager->copy_from(
+                                    source->get_manager(), precondition,
+                                    predicate_guard, update->redop,
+                                    copy_expr, copy_mask, trace_info,
+                                    cit->second[0]->across_helper,
                                     tracing_srcs, tracing_dsts);
           if (result.exists())
           {
@@ -4620,8 +4593,6 @@ namespace Legion {
           {
             IndexSpaceExpression *copy_expr = (it->second.size() == 1) ? 
               *(it->second.begin()) : forest->union_index_spaces(it->second);
-            src_fields.clear();
-            it->first->copy_from(copy_mask, src_fields);
             // If we're tracing then get the source information
             if (trace_info.recording)
             {
@@ -4631,15 +4602,11 @@ namespace Legion {
                 tracing_srcs->clear();
               tracing_srcs->insert(it->first, copy_mask);
             }
-            const ApEvent result = copy_expr->issue_copy(trace_info, 
-                                    dst_fields, src_fields, 
-#ifdef LEGION_SPY
-                                    field_space_node->handle,
-                                    it->first->get_manager()->tree_id,
-                                    manager->tree_id,
-#endif
-                                    precondition, predicate_guard,
-                                    redop, false/*fold*/,
+            const ApEvent result = target_manager->copy_from(
+                                    it->first->get_manager(), precondition,
+                                    predicate_guard, redop, copy_expr,
+                                    copy_mask, trace_info, 
+                                    cit->second[0]->across_helper,
                                     tracing_srcs, tracing_dsts);
             if (result.exists())
             {

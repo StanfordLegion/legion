@@ -727,6 +727,53 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ApEvent PhysicalManager::fill_from(FillView *fill_view,ApEvent precondition,
+                                       PredEvent predicate_guard,
+                                       IndexSpaceExpression *expression,
+                                       const FieldMask &fill_mask,
+                                       const PhysicalTraceInfo &trace_info,
+                                       CopyAcrossHelper *across_helper,
+                                       FieldMaskSet<FillView> *tracing_srcs,
+                                       FieldMaskSet<InstanceView> *tracing_dsts)
+    //--------------------------------------------------------------------------
+    {
+      // Implement in derived classes
+      assert(false);
+      return ApEvent::NO_AP_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent PhysicalManager::copy_from(PhysicalManager *manager,
+                                       ApEvent precondition,
+                                       PredEvent predicate_guard, 
+                                       ReductionOpID reduction_op,
+                                       IndexSpaceExpression *expression,
+                                       const FieldMask &copy_mask,
+                                       const PhysicalTraceInfo &trace_info,
+                                       CopyAcrossHelper *across_helper,
+                                       FieldMaskSet<InstanceView> *tracing_srcs,
+                                       FieldMaskSet<InstanceView> *tracing_dsts)
+    //--------------------------------------------------------------------------
+    {
+      // Implement in derived classes
+      assert(false);
+      return ApEvent::NO_AP_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalManager::compute_copy_offsets(const FieldMask &copy_mask,
+                                           std::vector<CopySrcDstField> &fields)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(layout != NULL);
+      assert(instance.exists());
+#endif
+      // Pass in our physical instance so the layout knows how to specialize
+      layout->compute_copy_offsets(copy_mask, this, fields);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/void PhysicalManager::handle_manager_request(Deserializer &derez,
                                         Runtime *runtime, AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -1181,6 +1228,63 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ApEvent InstanceManager::fill_from(FillView *fill_view,ApEvent precondition,
+                                       PredEvent predicate_guard,
+                                       IndexSpaceExpression *fill_expression,
+                                       const FieldMask &fill_mask,
+                                       const PhysicalTraceInfo &trace_info,
+                                       CopyAcrossHelper *across_helper,
+                                       FieldMaskSet<FillView> *tracing_srcs,
+                                       FieldMaskSet<InstanceView> *tracing_dsts)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<CopySrcDstField> dst_fields;
+      if (across_helper == NULL)
+        compute_copy_offsets(fill_mask, dst_fields); 
+      else
+        across_helper->compute_across_offsets(fill_mask, dst_fields);
+      return fill_expression->issue_fill(trace_info, dst_fields, 
+                                         fill_view->value->value,
+                                         fill_view->value->value_size,
+#ifdef LEGION_SPY
+                                         fill_view->fill_op_uid,
+                                         field_space_node->handle,
+                                         tree_id,
+#endif
+                                         precondition, predicate_guard,
+                                         tracing_srcs, tracing_dsts);
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent InstanceManager::copy_from(PhysicalManager *source_manager,
+                                       ApEvent precondition,
+                                       PredEvent predicate_guard, 
+                                       ReductionOpID reduction_op,
+                                       IndexSpaceExpression *copy_expression,
+                                       const FieldMask &copy_mask,
+                                       const PhysicalTraceInfo &trace_info,
+                                       CopyAcrossHelper *across_helper,
+                                       FieldMaskSet<InstanceView> *tracing_srcs,
+                                       FieldMaskSet<InstanceView> *tracing_dsts)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<CopySrcDstField> dst_fields, src_fields;
+      if (across_helper == NULL)
+        compute_copy_offsets(copy_mask, dst_fields); 
+      else
+        across_helper->compute_across_offsets(copy_mask, dst_fields);
+      source_manager->compute_copy_offsets(copy_mask, src_fields);
+      return copy_expression->issue_copy(trace_info, dst_fields, src_fields,
+#ifdef LEGION_SPY
+                                         field_space_node->handle,
+                                         source_manager->tree_id, tree_id,
+#endif
+                                         precondition, predicate_guard,
+                                         reduction_op, false/*fold*/, 
+                                         tracing_srcs, tracing_dsts);
+    }
+
+    //--------------------------------------------------------------------------
     InstanceView* InstanceManager::create_instance_top_view(
                             InnerContext *own_ctx, AddressSpaceID logical_owner)
     //--------------------------------------------------------------------------
@@ -1197,19 +1301,7 @@ namespace Legion {
                                  context_uid, true/*register now*/);
       register_active_context(own_ctx);
       return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void InstanceManager::compute_copy_offsets(const FieldMask &copy_mask,
-                                           std::vector<CopySrcDstField> &fields)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(layout != NULL);
-#endif
-      // Pass in our physical instance so the layout knows how to specialize
-      layout->compute_copy_offsets(copy_mask, this, fields);
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void InstanceManager::initialize_across_helper(CopyAcrossHelper *helper,
@@ -1788,7 +1880,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ListReductionManager::find_field_offsets(const FieldMask &reduce_mask,
+    void ListReductionManager::compute_copy_offsets(const FieldMask &copy_mask,
                                            std::vector<CopySrcDstField> &fields)
     //--------------------------------------------------------------------------
     {
@@ -1804,6 +1896,24 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return ptr_space;
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent ListReductionManager::copy_from(PhysicalManager *source_manager,
+                                       ApEvent precondition,
+                                       PredEvent predicate_guard, 
+                                       ReductionOpID reduction_op,
+                                       IndexSpaceExpression *copy_expression,
+                                       const FieldMask &copy_mask,
+                                       const PhysicalTraceInfo &trace_info,
+                                       CopyAcrossHelper *across_helper,
+                                       FieldMaskSet<InstanceView> *tracing_srcs,
+                                       FieldMaskSet<InstanceView> *tracing_dsts)
+    //--------------------------------------------------------------------------
+    {
+      // TODO: implement this for list reductions
+      assert(false);
+      return ApEvent::NO_AP_EVENT;
     }
 
     /////////////////////////////////////////////////////////////
@@ -1907,22 +2017,42 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FoldReductionManager::find_field_offsets(const FieldMask &reduce_mask,
-                                           std::vector<CopySrcDstField> &fields)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(instance.exists());
-      assert(layout != NULL);
-#endif
-      layout->compute_copy_offsets(reduce_mask, this, fields);
-    }
-
-    //--------------------------------------------------------------------------
     Domain FoldReductionManager::get_pointer_space(void) const
     //--------------------------------------------------------------------------
     {
       return Domain::NO_DOMAIN;
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent FoldReductionManager::copy_from(PhysicalManager *source_manager,
+                                       ApEvent precondition,
+                                       PredEvent predicate_guard, 
+                                       ReductionOpID reduction_op,
+                                       IndexSpaceExpression *copy_expression,
+                                       const FieldMask &copy_mask,
+                                       const PhysicalTraceInfo &trace_info,
+                                       CopyAcrossHelper *across_helper,
+                                       FieldMaskSet<InstanceView> *tracing_srcs,
+                                       FieldMaskSet<InstanceView> *tracing_dsts)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(redop == reduction_op);
+#endif
+      std::vector<CopySrcDstField> dst_fields, src_fields;
+      if (across_helper == NULL)
+        compute_copy_offsets(copy_mask, dst_fields); 
+      else
+        across_helper->compute_across_offsets(copy_mask, dst_fields);
+      source_manager->compute_copy_offsets(copy_mask, src_fields);
+      return copy_expression->issue_copy(trace_info, dst_fields, src_fields,
+#ifdef LEGION_SPY
+                                         field_space_node->handle,
+                                         source_manager->tree_id, tree_id,
+#endif
+                                         precondition, predicate_guard,
+                                         reduction_op, true/*fold*/, 
+                                         tracing_srcs, tracing_dsts);
     }
 
     /////////////////////////////////////////////////////////////
