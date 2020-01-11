@@ -2557,7 +2557,7 @@ namespace Legion {
           else
           {
             // Remote but still need to map
-            RtEvent done_mapping = perform_mapping();
+            const RtEvent done_mapping = perform_mapping();
             if (done_mapping.exists() && !done_mapping.has_triggered())
               defer_launch_task(done_mapping);
             else
@@ -2572,11 +2572,7 @@ namespace Legion {
         early_map_task();
         // See if we have a must epoch in which case
         // we can simply record ourselves and we are done
-        if (must_epoch != NULL)
-        {
-          must_epoch->register_single_task(this, must_epoch_index);
-        }
-        else
+        if (must_epoch == NULL)
         {
 #ifdef DEBUG_LEGION
           assert(target_proc.exists());
@@ -2585,40 +2581,32 @@ namespace Legion {
           // remotely in which case we need to do the
           // mapping now, otherwise we can defer it
           // until the task ends up on the target processor
-          if (is_origin_mapped() && target_proc.exists() &&
-              !runtime->is_local(target_proc))
+          if (is_origin_mapped())
           {
-            RtEvent done_mapping = perform_mapping();
-            if (done_mapping.exists() && !done_mapping.has_triggered())
-              defer_distribute_task(done_mapping);
-            else
+            const RtEvent done_mapping = perform_mapping();
+            if (!done_mapping.exists() || done_mapping.has_triggered())
             {
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-              bool still_local = 
-#endif
-#endif
-              distribute_task();
-#ifdef DEBUG_LEGION
-              assert(!still_local);
-#endif
+              if (distribute_task())
+                launch_task();
             }
+            else
+              defer_distribute_task(done_mapping);
           }
           else
           {
             if (distribute_task())
             {
               // Still local so try mapping and launching
-              RtEvent done_mapping = perform_mapping();
-              if (done_mapping.exists() && !done_mapping.has_triggered())
-                defer_launch_task(done_mapping);
-              else
-              {
+              const RtEvent done_mapping = perform_mapping();
+              if (!done_mapping.exists() || done_mapping.has_triggered())
                 launch_task();
-              }
+              else
+                defer_launch_task(done_mapping);
             }
           }
         }
+        else
+          must_epoch->register_single_task(this, must_epoch_index);
       }
     } 
 
@@ -2765,6 +2753,7 @@ namespace Legion {
           validate_target_processors(output.target_procs);
         // Save the target processors from the output
         target_processors = output.target_procs;
+        target_proc = target_processors.front();
       }
       else
       {
@@ -3496,8 +3485,7 @@ namespace Legion {
         profiling_priority = output.profiling_priority;
       }
       // Now we can convert the mapper output into our physical instances
-      finalize_map_task_output(input, output, must_epoch_owner, 
-                               valid_instances);
+      finalize_map_task_output(input, output, must_epoch_owner,valid_instances);
 
       if (is_recording())
       {
@@ -4623,9 +4611,7 @@ namespace Legion {
         {
           if (is_sliced())
           {
-            if (must_epoch != NULL)
-              register_must_epoch();
-            else
+            if (must_epoch == NULL)
             {
               // See if we're going to send it
               // remotely.  If so we need to do
@@ -4634,21 +4620,14 @@ namespace Legion {
               // on the target processor.
               if (target_proc.exists() && !runtime->is_local(target_proc))
               {
-                RtEvent done_mapping = perform_mapping();
-                if (done_mapping.exists() && !done_mapping.has_triggered())
-                  defer_distribute_task(done_mapping);
-                else
+                const RtEvent done_mapping = perform_mapping();
+                if (!done_mapping.exists() || done_mapping.has_triggered())
                 {
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-                  bool still_local = 
-#endif
-#endif
-                  distribute_task();
-#ifdef DEBUG_LEGION
-                  assert(!still_local);
-#endif
+                  if (distribute_task())
+                    launch_task();
                 }
+                else
+                  defer_distribute_task(done_mapping);
               }
               else
               {
@@ -4656,12 +4635,12 @@ namespace Legion {
                 // of our local processors.  If it is
                 // still this processor then map and run it
                 if (distribute_task())
-                {
                   // Still local so we can map and launch it
                   map_and_launch();
-                }
               }
             }
+            else
+              register_must_epoch();
           }
           else
             slice_index_space();
