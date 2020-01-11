@@ -5095,7 +5095,7 @@ namespace Legion {
     {
       // Get the destination fields for this copy
       if (across_helper == NULL)
-        manager->find_field_offsets(copy_mask, dst_fields);
+        manager->compute_copy_offsets(copy_mask, dst_fields);
       else
         across_helper->compute_across_offsets(copy_mask, dst_fields);
     }
@@ -5108,7 +5108,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(FieldMask::pop_count(copy_mask) == 1); // only one field
 #endif
-      manager->find_field_offsets(copy_mask, src_fields);
+      manager->compute_copy_offsets(copy_mask, src_fields);
     }
 
     //--------------------------------------------------------------------------

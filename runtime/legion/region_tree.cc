@@ -2698,7 +2698,7 @@ namespace Legion {
           // We found it
           FieldMask copy_mask;
           copy_mask.set_bit(src_indexes[fidx]);
-          source_views[idx]->copy_to(copy_mask, src_fields);
+          source_views[idx]->copy_from(copy_mask, src_fields);
           copy_preconditions.insert(ref.get_ready_event());
 #ifdef DEBUG_LEGION
           found = true;

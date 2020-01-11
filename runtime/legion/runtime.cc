@@ -25310,7 +25310,8 @@ namespace Legion {
           {
             const TaskOp::DeferDistributeArgs *dargs = 
               (const TaskOp::DeferDistributeArgs*)args;
-            dargs->proxy_this->distribute_task();
+            if (dargs->proxy_this->distribute_task())
+              dargs->proxy_this->launch_task();
             break;
           }
         case LG_DEFER_PERFORM_MAPPING_TASK_ID:

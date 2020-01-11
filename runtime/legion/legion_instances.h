@@ -165,6 +165,27 @@ namespace Legion {
       virtual void notify_valid(ReferenceMutator *mutator);
       virtual void notify_invalid(ReferenceMutator *mutator);
     public:
+      virtual ApEvent fill_from(FillView *fill_view, ApEvent precondition,
+                                PredEvent predicate_guard,
+                                IndexSpaceExpression *expression,
+                                const FieldMask &fill_mask,
+                                const PhysicalTraceInfo &trace_info,
+                                CopyAcrossHelper *across_helper = NULL,
+                                std::set<RtEvent> *effects_applied = NULL,
+                                FieldMaskSet<FillView> *tracing_srcs=NULL,
+                                FieldMaskSet<InstanceView> *tracing_dsts=NULL);
+      virtual ApEvent copy_from(PhysicalManager *manager, ApEvent precondition,
+                                PredEvent predicate_guard, ReductionOpID redop,
+                                IndexSpaceExpression *expression,
+                                const FieldMask &copy_mask,
+                                const PhysicalTraceInfo &trace_info,
+                                CopyAcrossHelper *across_helper = NULL,
+                                std::set<RtEvent> *effects_applied = NULL,
+                                FieldMaskSet<InstanceView> *tracing_srcs=NULL,
+                                FieldMaskSet<InstanceView> *tracing_dsts=NULL);
+      virtual void compute_copy_offsets(const FieldMask &copy_mask,
+                                        std::vector<CopySrcDstField> &fields);
+    public:
       virtual void send_manager(AddressSpaceID target) = 0; 
       static void handle_manager_request(Deserializer &derez, 
                           Runtime *runtime, AddressSpaceID source);
@@ -345,10 +366,27 @@ namespace Legion {
       virtual ApEvent get_use_event(void) const { return use_event; }
       virtual ApEvent get_unique_event(void) const { return unique_event; }
     public:
+      virtual ApEvent fill_from(FillView *fill_view, ApEvent precondition,
+                                PredEvent predicate_guard,
+                                IndexSpaceExpression *expression,
+                                const FieldMask &fill_mask,
+                                const PhysicalTraceInfo &trace_info,
+                                CopyAcrossHelper *across_helper = NULL,
+                                std::set<RtEvent> *effects_applied = NULL,
+                                FieldMaskSet<FillView> *tracing_srcs=NULL,
+                                FieldMaskSet<InstanceView> *tracing_dsts=NULL);
+      virtual ApEvent copy_from(PhysicalManager *manager, ApEvent precondition,
+                                PredEvent predicate_guard, ReductionOpID redop,
+                                IndexSpaceExpression *expression,
+                                const FieldMask &copy_mask,
+                                const PhysicalTraceInfo &trace_info,
+                                CopyAcrossHelper *across_helper = NULL,
+                                std::set<RtEvent> *effects_applied = NULL,
+                                FieldMaskSet<InstanceView> *tracing_srcs=NULL,
+                                FieldMaskSet<InstanceView> *tracing_dsts=NULL);
+    public:
       virtual InstanceView* create_instance_top_view(InnerContext *context,
-                                            AddressSpaceID logical_owner);
-      void compute_copy_offsets(const FieldMask &copy_mask,
-                                std::vector<CopySrcDstField> &fields);
+                                            AddressSpaceID logical_owner); 
       void initialize_across_helper(CopyAcrossHelper *across_helper,
                                     const FieldMask &mask,
                                     const std::vector<unsigned> &src_indexes,
@@ -430,8 +468,6 @@ namespace Legion {
           get_field_accessor(FieldID fid) const = 0;
     public:
       virtual bool is_foldable(void) const = 0;
-      virtual void find_field_offsets(const FieldMask &reduce_mask,
-          std::vector<CopySrcDstField> &fields) = 0;
       virtual Domain get_pointer_space(void) const = 0;
     public:
       virtual ApEvent get_use_event(void) const { return use_event; }
@@ -494,9 +530,19 @@ namespace Legion {
           get_field_accessor(FieldID fid) const;
     public:
       virtual bool is_foldable(void) const;
-      virtual void find_field_offsets(const FieldMask &reduce_mask,
+      virtual void compute_copy_offsets(const FieldMask &reduce_mask,
           std::vector<CopySrcDstField> &fields);
       virtual Domain get_pointer_space(void) const;
+    public:
+      virtual ApEvent copy_from(PhysicalManager *manager, ApEvent precondition,
+                                PredEvent predicate_guard, ReductionOpID redop,
+                                IndexSpaceExpression *expression,
+                                const FieldMask &copy_mask,
+                                const PhysicalTraceInfo &trace_info,
+                                CopyAcrossHelper *across_helper = NULL,
+                                std::set<RtEvent> *effects_applied = NULL,
+                                FieldMaskSet<InstanceView> *tracing_srcs=NULL,
+                                FieldMaskSet<InstanceView> *tracing_dsts=NULL);
     protected:
       const Domain ptr_space;
     };
@@ -533,9 +579,17 @@ namespace Legion {
           get_field_accessor(FieldID fid) const;
     public:
       virtual bool is_foldable(void) const;
-      virtual void find_field_offsets(const FieldMask &reduce_mask,
-          std::vector<CopySrcDstField> &fields);
       virtual Domain get_pointer_space(void) const;
+    public:
+      virtual ApEvent copy_from(PhysicalManager *manager, ApEvent precondition,
+                                PredEvent predicate_guard, ReductionOpID redop,
+                                IndexSpaceExpression *expression,
+                                const FieldMask &copy_mask,
+                                const PhysicalTraceInfo &trace_info,
+                                CopyAcrossHelper *across_helper = NULL,
+                                std::set<RtEvent> *effects_applied = NULL,
+                                FieldMaskSet<InstanceView> *tracing_srcs=NULL,
+                                FieldMaskSet<InstanceView> *tracing_dsts=NULL);
     public:
       const ApEvent use_event;
     };

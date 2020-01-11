@@ -213,6 +213,10 @@ namespace Legion {
       virtual void send_view(AddressSpaceID target) = 0; 
     public:
       // Getting field information for performing copies
+      // We used to use these calls for all copy calls, but
+      // now they are primarily used by region-to-region copy
+      // calls as we use the extra layer of indirection below
+      // to issue calls for collective cases
       virtual void copy_to(const FieldMask &copy_mask, 
                    std::vector<CopySrcDstField> &dst_fields,
                            CopyAcrossHelper *across_helper = NULL) = 0;
