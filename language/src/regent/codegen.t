@@ -951,7 +951,7 @@ function value:new(node, value_expr, value_type, field_path)
   return values.value(node, value_expr, value_type, field_path)
 end
 
-function value:address()
+function value:address(cx)
   assert(false)
 end
 
@@ -1324,7 +1324,7 @@ function ref:__ref(cx, expr_type)
   return actions, values, value_type, field_paths, field_types
 end
 
-function ref:address()
+function ref:address(cx)
   return values.value(self.node, self.expr, self.value_type)
 end
 
@@ -1628,7 +1628,7 @@ function aref:get_index(cx, node, index, result_type)
   return values.rawref(node, result, &result_type, data.newtuple())
 end
 
-function aref:address()
+function aref:address(cx)
   return values.value(self.node, self.expr, self.value_type)
 end
 
@@ -1705,7 +1705,7 @@ function vref:__unpack(cx)
   return field_paths, field_types, region_types, base_pointers_by_region
 end
 
-function vref:address()
+function vref:address(cx)
   assert(false)
 end
 
@@ -2034,9 +2034,10 @@ function rawref:__ref(cx)
   return expr.just(actions, result)
 end
 
-function rawref:address()
-  local actions = self.expr.actions
-  local result = `(&[self.expr.value])
+function rawref:address(cx)
+  local value_expr = self:__ref(cx)
+  local actions = value_expr.actions
+  local result = `(&[value_expr.value])
   return values.value(self.node, expr.just(actions, result), self.value_type)
 end
 
@@ -7659,7 +7660,7 @@ end
 
 function codegen.expr_address_of(cx, node)
   local value = codegen.expr(cx, node.value)
-  return value:address()
+  return value:address(cx)
 end
 
 function codegen.expr_future(cx, node)

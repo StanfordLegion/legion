@@ -3280,6 +3280,10 @@ function type_check.expr_address_of(cx, node)
     report.error(node, "attempting to take address of a non-l-value " .. tostring(ref_type))
   end
 
+  if std.is_ref(ref_type) and #ref_type.field_path > 0 then
+    report.error(node, "attempting to take address of a field of an element in a region")
+  end
+
   local expr_type = ref_type.pointer_type
 
   return ast.typed.expr.AddressOf {
