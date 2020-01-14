@@ -1383,39 +1383,20 @@ function parser.expr_primary_continuation(p, expr)
   while true do
     if p:nextif(".") then
       local field_names = nil
-      if std.config["allow-multi-field-expansion"] then
-        field_names = terralib.newlist()
-        if p:nextif("{") then
-          repeat
-            if p:matches("}") then break end
-            field_names:insert(p:field_names())
-          until not p:sep()
-          p:expect("}")
-        else
-          field_names:insert(p:field_names())
-        end
-        expr = ast.unspecialized.expr.FieldAccess {
-          value = expr,
-          field_names = field_names,
+      if p:matches("{") then
+        expr = ast.unspecialized.expr.Projection {
+          region = expr,
+          fields = p:projection_fields(),
           annotations = ast.default_annotations(),
           span = ast.span(start, p),
         }
       else
-        if p:matches("{") then
-          expr = ast.unspecialized.expr.Projection {
-            region = expr,
-            fields = p:projection_fields(),
-            annotations = ast.default_annotations(),
-            span = ast.span(start, p),
-          }
-        else
-          expr = ast.unspecialized.expr.FieldAccess {
-            value = expr,
-            field_names = terralib.newlist({p:field_names()}),
-            annotations = ast.default_annotations(),
-            span = ast.span(start, p),
-          }
-        end
+        expr = ast.unspecialized.expr.FieldAccess {
+          value = expr,
+          field_names = terralib.newlist({p:field_names()}),
+          annotations = ast.default_annotations(),
+          span = ast.span(start, p),
+        }
       end
 
     elseif p:nextif("[") then

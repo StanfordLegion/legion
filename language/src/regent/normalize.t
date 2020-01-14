@@ -51,24 +51,16 @@ local function get_num_accessed_fields(node)
     return 1
 
   elseif node:is(ast.specialized.expr.FieldAccess) then
-    if std.config["allow-multi-field-expansion"] then
-      if terralib.islist(node.field_name) then
-        return get_num_accessed_fields(node.value) * #node.field_name
-      else
-        return get_num_accessed_fields(node.value)
+    -- We only need to know if there is any multi-field access
+    -- as we are going to use this only to reject it.
+    local fields = node.field_name
+    while fields do
+      if #fields > 1 then
+        return #fields
       end
-    else
-      -- We only need to know if there is any multi-field access
-      -- as we are going to use this only to reject it.
-      local fields = node.field_name
-      while fields do
-        if #fields > 1 then
-          return #fields
-        end
-        fields = fields[1].fields
-      end
-      return 1
+      fields = fields[1].fields
     end
+    return 1
 
   elseif node:is(ast.specialized.expr.IndexAccess) then
     if get_num_accessed_fields(node.value) > 1 then return false end
@@ -254,23 +246,8 @@ local function has_all_valid_field_accesses(node)
       local num_accessed_fields =
         join_num_accessed_fields(num_accessed_fields_lh,
                                  num_accessed_fields_rh)
-      if not std.config["allow-multi-field-expansion"] then
-        if not num_accessed_fields or num_accessed_fields > 1 then
-          report.error(node, message)
-        end
-      else
-        if print_warning then
-          report.warn(node, message)
-          print_warning = false
-        end
-        if not num_accessed_fields then
-          valid = false
-        -- Special case when there is only one assignee for multiple
-        -- values on the RHS
-        elseif num_accessed_fields_lh == 1 and
-               num_accessed_fields_rh > 1 then
-          valid = false
-        end
+      if not num_accessed_fields or num_accessed_fields > 1 then
+        report.error(node, message)
       end
     end
   end)
@@ -333,33 +310,7 @@ local function flatten_multifield_accesses(node)
     report.error(node, "invalid use of multi-field access")
   end
 
-  if not std.config["allow-multi-field-expansion"] then
-    return node
-  end
-
-  local flattened_lhs = terralib.newlist()
-  local flattened_rhs = terralib.newlist()
-
-  data.zip(node.lhs, node.rhs):map(function(pair)
-    local lh, rh = unpack(pair)
-    local num_accessed_fields =
-      join_num_accessed_fields(get_num_accessed_fields(lh),
-                               get_num_accessed_fields(rh))
-    assert(num_accessed_fields ~= false, "unreachable")
-    for idx = 1, num_accessed_fields do
-      flattened_lhs:insert(get_nth_field_access(lh, idx))
-      flattened_rhs:insert(get_nth_field_access(rh, idx))
-    end
-  end)
-
-  if #node.lhs == flattened_lhs and #node.rhs == flattened_rhs then
-    return node
-  else
-    return node {
-      lhs = flattened_lhs,
-      rhs = flattened_rhs,
-    }
-  end
+  return node
 end
 
 -- Normalization for Expressions
@@ -455,13 +406,11 @@ end)
 local function expr_field_access(stats, expr)
   local value = normalize.expr(stats, expr.value, true)
   local field_name = expr.field_name
-  if not std.config["allow-multi-field-expansion"] then
-    if type(field_name[1]) == "string" then
-      if #field_name > 1 then
-        report.error(expr, "multi-field access is not allowed")
-      end
-      field_name = field_name[1]
+  if type(field_name[1]) == "string" then
+    if #field_name > 1 then
+      report.error(expr, "multi-field access is not allowed")
     end
+    field_name = field_name[1]
   end
   return expr {
     value = value,

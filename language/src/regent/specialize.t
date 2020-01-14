@@ -530,41 +530,22 @@ end
 function specialize.expr_field_access(cx, node, allow_lists)
   local value = specialize.expr(cx, node.value)
 
-  if std.config["allow-multi-field-expansion"] then
-    local field_names = data.flatmap(
-      function(field_name) return specialize.field_names(cx, field_name) end,
-      node.field_names)
-    local field_name = field_names -- this will be flattened in the normalizer
-    if #field_names == 1 then field_name = field_names[1] end
+  local fields = data.flatmap(function(field_name)
+    return specialize.field_names(cx, field_name)
+  end, node.field_names)
 
-    if value:is(ast.specialized.expr.LuaTable) then
-      return convert_lua_value(cx, node, value.value[field_name])
-    else
-      return ast.specialized.expr.FieldAccess {
-        value = value,
-        field_name = field_name,
-        annotations = node.annotations,
-        span = node.span,
-      }
+  if value:is(ast.specialized.expr.LuaTable) then
+    if #fields > 1 then
+      report.error(node, "unable to specialize multi-field access")
     end
+    return convert_lua_value(cx, node, value.value[fields[1]])
   else
-    local fields = data.flatmap(function(field_name)
-      return specialize.field_names(cx, field_name)
-    end, node.field_names)
-
-    if value:is(ast.specialized.expr.LuaTable) then
-      if #fields > 1 then
-        report.error(node, "unable to specialize multi-field access")
-      end
-      return convert_lua_value(cx, node, value.value[fields[1]])
-    else
-      return ast.specialized.expr.FieldAccess {
-        value = value,
-        field_name = fields,
-        annotations = node.annotations,
-        span = node.span,
-      }
-    end
+    return ast.specialized.expr.FieldAccess {
+      value = value,
+      field_name = fields,
+      annotations = node.annotations,
+      span = node.span,
+    }
   end
 end
 
