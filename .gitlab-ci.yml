@@ -48,8 +48,8 @@ variables:
 .release: &release
   DEBUG: "0"
 
-.max_dim4: &max_dim4
-  MAX_DIM: "4"
+.maxdim5: &maxdim5
+  MAX_DIM: "5"      # test up to 5-D (useful because 1-4 have special cases)
 
 .cxx98_normal: &cxx98_normal
   CC_FLAGS: "-std=c++98"
@@ -382,6 +382,15 @@ gcc49_cxx11_release_legion:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*gcc49, *terra38, *release, *cxx11_normal, *legion]
+#   * higher dimension support (5-D), with both c++98 and c++11
+gcc49_cxx98_release_maxdim5_regent:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra38, *release, *cxx98_normal, *maxdim5, *regent, *parallel]
+clang38_cxx11_release_maxdim5_regent:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*clang38, *terra38, *release, *cxx11_normal, *maxdim5, *regent, *parallel]
 # * Features: one test per feature
 #   * OpenMP
 gcc49_cxx98_debug_openmp_legion:
