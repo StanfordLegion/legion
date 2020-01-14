@@ -4468,8 +4468,10 @@ function codegen.expr_region(cx, node)
       [actions];
       var [tag] = 0
       [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
+      -- Note: it's safe to make this unconditionally write-discard
+      -- because this is guarranteed to be the first use of the region
       var il = c.legion_inline_launcher_create_logical_region(
-        [lr], c.READ_WRITE, c.EXCLUSIVE, [lr], 0, false, 0, [tag]);
+        [lr], c.WRITE_DISCARD, c.EXCLUSIVE, [lr], 0, false, 0, [tag]);
       [data.zip(field_ids, field_types):map(
          function(field)
            local field_id, field_type = unpack(field)
