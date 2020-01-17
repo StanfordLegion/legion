@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -248,7 +248,40 @@ namespace Realm {
 
   template <typename T>
   std::ostream& operator<<(std::ostream& os, const PrettyVector<T>& pv);
-  
+
+
+  // metaprogramming stuff that's standard in c++11 and beyond
+#if __cplusplus >= 201103L
+  using std::is_integral;
+  using std::enable_if;
+#else
+  // roll our own...
+  template <typename T> struct is_integral { static const bool value = false; };
+  // we need to cover both const and non-const, so some macro helpers
+#define IS_INTEGRAL(T) \
+  template <> struct is_integral<T> { static const bool value = true; }; \
+  template <> struct is_integral<const T> { static const bool value = true; }
+  IS_INTEGRAL(bool);
+  IS_INTEGRAL(char);
+  IS_INTEGRAL(unsigned char);
+  IS_INTEGRAL(short);
+  IS_INTEGRAL(unsigned short);
+  IS_INTEGRAL(int);
+  IS_INTEGRAL(unsigned int);
+  IS_INTEGRAL(long);
+  IS_INTEGRAL(unsigned long);
+  IS_INTEGRAL(long long);
+  IS_INTEGRAL(unsigned long long);
+#undef IS_INTEGRAL
+
+  template <bool B, typename T> struct enable_if {};
+  template <typename T> struct enable_if<true, T> { typedef T type; };
+#endif
+
+  // TODO: get this from <variant> for c++17 and up?
+  struct monostate {};
+
+
 }; // namespace Realm
 
 #include "utils.inl"

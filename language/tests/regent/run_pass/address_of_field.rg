@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University
+-- Copyright 2020 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -12,26 +12,21 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- runs-with:
--- [[ "-fallow-multi-field-expansion", "1" ]]
-
 import "regent"
 
-local fields = terralib.newlist({"a", "b", "c"})
-
-local elt = terralib.types.newstruct("elt")
-elt.entries = fields:map(function(field) return { field, int } end)
+struct st
+{
+  a : int;
+  b : int;
+}
 
 task main()
-  var r = region(ispace(ptr, 3), elt)
-
-  fill(r.[fields], 2)
-  for e in r do
-    e.[fields] = 1
-  end
-
-  for x in r do
-    regentlib.assert(x.a + x.b + x.c == 3, "test failed")
-  end
+  var s : st
+  var pa = &s.a
+  var pb = &s.b
+  @pa = 123
+  @pb = 456
+  regentlib.assert(s.a == 123, "test failed")
+  regentlib.assert(s.b == 456, "test failed")
 end
 regentlib.start(main)

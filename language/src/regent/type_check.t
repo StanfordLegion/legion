@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University, NVIDIA Corporation
+-- Copyright 2020 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -3278,6 +3278,10 @@ function type_check.expr_address_of(cx, node)
   if not (std.is_ref(ref_type) or std.is_rawref(ref_type))
   then
     report.error(node, "attempting to take address of a non-l-value " .. tostring(ref_type))
+  end
+
+  if std.is_ref(ref_type) and #ref_type.field_path > 0 then
+    report.error(node, "attempting to take address of a field of an element in a region")
   end
 
   local expr_type = ref_type.pointer_type
