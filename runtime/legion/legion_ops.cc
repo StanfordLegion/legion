@@ -883,7 +883,7 @@ namespace Legion {
       parent_ctx->invalidate_trace_cache(trace, this);
 
       // See if we have any fence dependences
-      execution_fence_event = parent_ctx->register_fence_dependence(this);
+      execution_fence_event = parent_ctx->register_implicit_dependences(this);
     }
 
     //--------------------------------------------------------------------------
@@ -12880,6 +12880,9 @@ namespace Legion {
                                                    requirement,
                                                    projection_info,
                                                    privilege_path);
+      // Record this dependent partition op with the context so that it 
+      // can track implicit dependences on it for later operations
+      parent_ctx->update_current_deppart(this);
     }
 
     //--------------------------------------------------------------------------

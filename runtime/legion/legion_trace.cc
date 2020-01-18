@@ -1098,7 +1098,7 @@ namespace Legion {
       // Make a dependence tracker
       mapping_tracker = new MappingDependenceTracker();
       // See if we have any fence dependences
-      execution_fence_event = parent_ctx->register_fence_dependence(this);
+      execution_fence_event = parent_ctx->register_implicit_dependences(this);
       parent_ctx->invalidate_trace_cache(local_trace, this);
 
       trigger_dependence_analysis();
