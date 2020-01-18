@@ -336,7 +336,7 @@ namespace Legion {
       virtual void register_child_complete(Operation *op) = 0;
       virtual void register_child_commit(Operation *op) = 0; 
       virtual void unregister_child_operation(Operation *op) = 0;
-      virtual ApEvent register_fence_dependence(Operation *op) = 0;
+      virtual ApEvent register_implicit_dependences(Operation *op) = 0;
     public:
       virtual RtEvent get_current_mapping_fence_event(void) = 0;
       virtual ApEvent get_current_execution_fence_event(void) = 0;
@@ -345,9 +345,10 @@ namespace Legion {
       // one-sided fences (e.g. waiting on everything before) but not
       // preventing re-ordering for things afterwards
       virtual ApEvent perform_fence_analysis(Operation *op, 
-                                             bool mapping, bool execution) = 0;
+                                        bool mapping, bool execution) = 0;
       virtual void update_current_fence(FenceOp *op, 
                                         bool mapping, bool execution) = 0;
+      virtual void update_current_deppart(DependentPartitionOp *op) = 0;
     public:
       virtual void begin_trace(TraceID tid, bool logical_only) = 0;
       virtual void end_trace(TraceID tid) = 0;
@@ -990,7 +991,7 @@ namespace Legion {
       virtual void register_child_complete(Operation *op);
       virtual void register_child_commit(Operation *op); 
       virtual void unregister_child_operation(Operation *op);
-      virtual ApEvent register_fence_dependence(Operation *op);
+      virtual ApEvent register_implicit_dependences(Operation *op);
     public:
       virtual RtEvent get_current_mapping_fence_event(void);
       virtual ApEvent get_current_execution_fence_event(void);
@@ -998,6 +999,7 @@ namespace Legion {
                                              bool mapping, bool execution);
       virtual void update_current_fence(FenceOp *op,
                                         bool mapping, bool execution);
+      virtual void update_current_deppart(DependentPartitionOp *op);
     public:
       virtual void begin_trace(TraceID tid, bool logical_only);
       virtual void end_trace(TraceID tid);
@@ -1183,6 +1185,14 @@ namespace Legion {
       unsigned current_mapping_fence_index;
       ApEvent current_execution_fence_event;
       unsigned current_execution_fence_index;
+      // We currently do not track dependences for dependent partitioning
+      // operations on index partitions and their subspaces directly, so 
+      // we instead use this to ensure mapping dependence ordering with 
+      // any operations which might need downstream information about 
+      // partitions or subspaces. Note that this means that all dependent
+      // partitioning operations are guaranteed to map in order currently
+      DependentPartitionOp *last_deppart;
+      GenerationID last_deppart_gen;
     protected:
       // For managing changing task priorities
       ApEvent realm_done_event;
@@ -1606,7 +1616,7 @@ namespace Legion {
       virtual void register_child_complete(Operation *op);
       virtual void register_child_commit(Operation *op); 
       virtual void unregister_child_operation(Operation *op);
-      virtual ApEvent register_fence_dependence(Operation *op);
+      virtual ApEvent register_implicit_dependences(Operation *op);
     public:
       virtual RtEvent get_current_mapping_fence_event(void);
       virtual ApEvent get_current_execution_fence_event(void);
@@ -1614,6 +1624,7 @@ namespace Legion {
                                              bool mapping, bool execution);
       virtual void update_current_fence(FenceOp *op,
                                         bool mapping, bool execution);
+      virtual void update_current_deppart(DependentPartitionOp *op);
     public:
       virtual void begin_trace(TraceID tid, bool logical_only);
       virtual void end_trace(TraceID tid);
@@ -1935,7 +1946,7 @@ namespace Legion {
       virtual void register_child_complete(Operation *op);
       virtual void register_child_commit(Operation *op); 
       virtual void unregister_child_operation(Operation *op);
-      virtual ApEvent register_fence_dependence(Operation *op);
+      virtual ApEvent register_implicit_dependences(Operation *op);
     public:
       virtual RtEvent get_current_mapping_fence_event(void);
       virtual ApEvent get_current_execution_fence_event(void);
@@ -1943,6 +1954,7 @@ namespace Legion {
                                              bool mapping, bool execution);
       virtual void update_current_fence(FenceOp *op,
                                         bool mapping, bool execution);
+      virtual void update_current_deppart(DependentPartitionOp *op);
     public:
       virtual void begin_trace(TraceID tid, bool logical_only);
       virtual void end_trace(TraceID tid);

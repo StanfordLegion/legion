@@ -2907,7 +2907,7 @@ namespace Legion {
         outstanding_subtasks(0), pending_subtasks(0), pending_frames(0), 
         currently_active_context(false), current_mapping_fence(NULL), 
         mapping_fence_gen(0), current_mapping_fence_index(0), 
-        current_execution_fence_index(0) 
+        current_execution_fence_index(0), last_deppart(NULL),last_deppart_gen(0)
     //--------------------------------------------------------------------------
     {
       // Set some of the default values for a context
@@ -6229,9 +6229,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent InnerContext::register_fence_dependence(Operation *op)
+    ApEvent InnerContext::register_implicit_dependences(Operation *op)
     //--------------------------------------------------------------------------
     {
+      // If there are any outstanding unmapped dependent partition operations
+      // outstanding then we might have an implicit dependence on its execution
+      // so we always record a dependence on it
+      if (last_deppart != NULL)
+      {
+#ifdef LEGION_SPY
+        // Can't prune when doing legion spy
+        op->register_dependence(last_deppart, last_deppart_gen);
+#else
+        if (op->register_dependence(last_deppart, last_deppart_gen))
+          last_deppart = NULL;
+#endif
+      }
       if (current_mapping_fence != NULL)
       {
 #ifdef LEGION_SPY
@@ -6313,7 +6326,7 @@ namespace Legion {
         const Operation::OpKind op_kind = op->get_operation_kind();
         // It's alright if you hit this assertion for a new operation kind
         // Just add the new operation kind here and then update the check
-        // in register_fence_dependence that looks for all these kinds too
+        // in register_implicit_dependences that looks for all these kinds too
         // so that we do not run into trouble when running with Legion Spy.
         assert((op_kind == Operation::FENCE_OP_KIND) || 
                (op_kind == Operation::FRAME_OP_KIND) || 
@@ -6539,6 +6552,16 @@ namespace Legion {
         current_execution_fence_event = op->get_completion_event();
         current_execution_fence_index = op->get_ctx_index();
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::update_current_deppart(DependentPartitionOp *op)
+    //--------------------------------------------------------------------------
+    {
+      // Just overwrite since we know we already recorded a dependence
+      // between this operation and the previous last deppart op
+      last_deppart = op;
+      last_deppart_gen = op->get_generation();
     }
 
     //--------------------------------------------------------------------------
@@ -10066,7 +10089,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent LeafContext::register_fence_dependence(Operation *op)
+    ApEvent LeafContext::register_implicit_dependences(Operation *op)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -10091,6 +10114,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LeafContext::update_current_deppart(DependentPartitionOp *op) 
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     RtEvent LeafContext::get_current_mapping_fence_event(void)
     //--------------------------------------------------------------------------
     {
@@ -10105,7 +10135,6 @@ namespace Legion {
       assert(false);
       return ApEvent::NO_AP_EVENT;
     }
-
 
     //--------------------------------------------------------------------------
     void LeafContext::begin_trace(TraceID tid, bool logical_only)
@@ -11287,10 +11316,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent InlineContext::register_fence_dependence(Operation *op)
+    ApEvent InlineContext::register_implicit_dependences(Operation *op)
     //--------------------------------------------------------------------------
     {
-      return enclosing->register_fence_dependence(op);
+      return enclosing->register_implicit_dependences(op);
     }
 
     //--------------------------------------------------------------------------
@@ -11307,6 +11336,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       enclosing->update_current_fence(op, mapping, execution);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::update_current_deppart(DependentPartitionOp *op) 
+    //--------------------------------------------------------------------------
+    {
+      enclosing->update_current_deppart(op);
     }
 
     //--------------------------------------------------------------------------
