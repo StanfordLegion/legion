@@ -598,18 +598,18 @@ namespace Legion {
       MappingCallInfo *executing_call; 
       // Calls yet to start running
       std::deque<MappingCallInfo*> pending_calls; 
-      // Number of calls paused due to runtime work
-      unsigned paused_calls;
       // Calls that are ready to resume after runtime work
       std::deque<MappingCallInfo*> ready_calls;
-      // Calls that are waiting for diabling of reentrancy
-      std::deque<MappingCallInfo*> non_reentrant_calls;
+      // Number of calls paused due to runtime work
+      unsigned paused_calls;
+      // Whether this mapper supports reentrant mapper calls
+      const bool allow_reentrant;
       // Whether or not we are currently supporting reentrant calls
       bool permit_reentrant;
       // A flag checking whether we have a pending paused mapper call
-      bool pending_pause_call;
+      volatile bool pending_pause_call;
       // A flag checking whether we have a pending finished call
-      bool pending_finish_call;
+      volatile bool pending_finish_call;
     };
 
     /**

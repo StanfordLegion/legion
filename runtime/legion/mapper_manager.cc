@@ -3284,15 +3284,15 @@ namespace Legion {
     SerializingManager::SerializingManager(Runtime *rt, Mapping::Mapper *mp,
                              MapperID map_id, Processor p, bool init_reentrant)
       : MapperManager(rt, mp, map_id, p), executing_call(NULL), paused_calls(0),
-        permit_reentrant(init_reentrant), pending_pause_call(false),
-        pending_finish_call(false)
+        allow_reentrant(init_reentrant), permit_reentrant(init_reentrant), 
+        pending_pause_call(false), pending_finish_call(false)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     SerializingManager::SerializingManager(const SerializingManager &rhs)
-      : MapperManager(NULL,NULL,0,Processor::NO_PROC)
+      : MapperManager(NULL,NULL,0,Processor::NO_PROC), allow_reentrant(false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -3361,6 +3361,18 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(executing_call == info);
 #endif
+      if (!allow_reentrant)
+        REPORT_LEGION_ERROR(ERROR_MAPPER_SYNCHRONIZATION,
+                        "Illegal 'enable_reentrant' call performed in mapper "
+                        "%s with the SERIALIZED_NON_REENTRANT_MAPPER_MODEL. "
+                        "Reentrant calls are never allowed with this model.", 
+                        get_mapper_name())
+      else if (permit_reentrant)
+        REPORT_LEGION_ERROR(ERROR_MAPPER_SYNCHRONIZATION,
+                        "Illegal 'disable_reentrant' call performed in mapper "
+                        "%s. Reentrant calls were already enabled and we do "
+                        "not support nested calls to enable them.",
+                        get_mapper_name())
       // No need to hold the lock since we know we are exclusive 
       permit_reentrant = true;
     }
@@ -3372,50 +3384,20 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(executing_call == info);
 #endif
+      if (!allow_reentrant)
+        REPORT_LEGION_ERROR(ERROR_MAPPER_SYNCHRONIZATION,
+                        "Illegal 'disable_reentrant' call performed in mapper "
+                        "%s with the SERIALIZED_NON_REENTRANT_MAPPER_MODEL. "
+                        "Reentrant calls are already disallowed with this "
+                        "model.", get_mapper_name())
+      else if (!permit_reentrant)
+        REPORT_LEGION_ERROR(ERROR_MAPPER_SYNCHRONIZATION,
+                        "Illegal 'disable_reentrant' call performed in mapper "
+                        "%s. Reentrant calls were already disabled and we do "
+                        "not support nested calls to disable them.",
+                        get_mapper_name())
       // No need to hold the lock since we know we are exclusive
-      if (permit_reentrant)
-      {
-        // We're going to pretent to do a pause here
-        pending_pause_call = true; 
-        // If there are paused calls, we need to wait for them all 
-        // to finish before we can continue execution 
-        RtUserEvent to_trigger;
-        RtEvent ready_event;
-        {
-          AutoLock m_lock(mapper_lock);
-          if (pending_pause_call)
-            to_trigger = complete_pending_pause_mapper_call();
-#ifdef DEBUG_LEGION
-          assert(paused_calls > 0);
-          assert(!info->resume.exists() || info->resume.has_triggered());
-#endif
-          // remove our pretend pause call
-          paused_calls--;
-          // If there are any paused calls or an already executing call or 
-          // then we can't run since we need everything to be done
-          if ((paused_calls > 0) || (executing_call != NULL))
-          {
-            info->resume = Runtime::create_rt_user_event();
-            ready_event = info->resume;
-            non_reentrant_calls.push_back(info);
-          }
-          else // There are no more outstanding calls other than us
-          {
-            executing_call = info;
-            permit_reentrant = false;
-          }
-        }
-        // If we have an event to trigger do that first
-        if (to_trigger.exists())
-          Runtime::trigger_event(to_trigger);
-        // Then wait if we have to in order to be notified we can run
-        if (ready_event.exists())
-          ready_event.wait();
-        // At this point we should be non-reentrant
-#ifdef DEBUG_LEGION
-        assert(!permit_reentrant);
-#endif
-      }
+      permit_reentrant = false;
     }
 
     //--------------------------------------------------------------------------
@@ -3502,14 +3484,19 @@ namespace Legion {
         assert(paused_calls > 0);
 #endif
         paused_calls--;
-        if (executing_call != NULL)
+        // If the executing call is ourself then we are the only ones
+        // that are allowed to resume because reentrant is disabled
+        if (executing_call != info)
         {
-          info->resume = Runtime::create_rt_user_event();
-          wait_on = info->resume;
-          ready_calls.push_back(info);
+          if (executing_call != NULL)
+          {
+            info->resume = Runtime::create_rt_user_event();
+            wait_on = info->resume;
+            ready_calls.push_back(info);
+          }
+          else
+            executing_call = info;
         }
-        else
-          executing_call = info;
       }
       if (wait_on.exists())
         wait_on.wait();
@@ -3562,22 +3549,25 @@ namespace Legion {
       pending_pause_call = false;
       // Increment the count of the paused mapper calls
       paused_calls++;
-      if (permit_reentrant && !ready_calls.empty())
+      if (permit_reentrant)
       {
-        // Get the next ready call to continue executing
-        executing_call = ready_calls.front();
-        ready_calls.pop_front();
-        return executing_call->resume;
-      }
-      else if (permit_reentrant && !pending_calls.empty())
-      {
-        // Get the next available call to handle
-        executing_call = pending_calls.front();
-        pending_calls.pop_front();
-        return executing_call->resume; 
-      }
-      else // No one to wake up
+        if (!ready_calls.empty())
+        {
+          executing_call = ready_calls.front();
+          ready_calls.pop_front();
+          return executing_call->resume;
+        }
+        else if (!pending_calls.empty())
+        {
+          executing_call = pending_calls.front();
+          pending_calls.pop_front();
+          return executing_call->resume;
+        }
+        // If we are allowing reentrant calls then clear the executing
+        // call which will allow other resuming calls to run
         executing_call = NULL;
+      }
+      // No one to wake up
       return RtUserEvent::NO_RT_USER_EVENT;
     }
 
@@ -3590,17 +3580,11 @@ namespace Legion {
       assert(pending_finish_call);
 #endif
       pending_finish_call = false;
-      // See if can start a non-reentrant task
-      if (!non_reentrant_calls.empty() && 
-          (paused_calls == 0) && ready_calls.empty())
-      {
-        // Mark that we are now not permitting re-entrant
-        permit_reentrant = false;
-        executing_call = non_reentrant_calls.front();
-        non_reentrant_calls.pop_front();
-        return executing_call->resume;
-      }
-      else if (!ready_calls.empty())
+      // If we allow reentrant calls then reset whether we are permitting
+      // reentrant calls in case the user forgot to do it at the end of call
+      if (allow_reentrant && !permit_reentrant)
+        permit_reentrant = true;
+      if (!ready_calls.empty())
       {
         executing_call = ready_calls.front();
         ready_calls.pop_front();
@@ -3613,8 +3597,10 @@ namespace Legion {
         return executing_call->resume;
       }
       else
+      {
         executing_call = NULL;
-      return RtUserEvent::NO_RT_USER_EVENT;
+        return RtUserEvent::NO_RT_USER_EVENT;
+      }
     }
 
     /////////////////////////////////////////////////////////////
