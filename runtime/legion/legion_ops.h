@@ -2795,6 +2795,8 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
+      // A method for override with control replication
+      virtual void finalize_mapping(void);
       virtual ApEvent trigger_thunk(IndexSpace handle,
                                     const InstanceSet &mapped_instances,
                                     const PhysicalTraceInfo &info);

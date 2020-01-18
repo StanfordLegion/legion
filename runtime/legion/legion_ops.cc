@@ -13042,10 +13042,7 @@ namespace Legion {
                                          mapped_instances, trace_info);
       // Once we are done running these routines, we can mark
       // that the handles have all been completed
-      if (!map_applied_conditions.empty())
-        complete_mapping(Runtime::merge_events(map_applied_conditions));
-      else
-        complete_mapping();
+      finalize_mapping(); 
 #ifdef LEGION_SPY
       if (runtime->legion_spy_enabled)
         LegionSpy::log_operation_events(unique_op_id, done_event,
@@ -13053,6 +13050,16 @@ namespace Legion {
 #endif
       request_early_complete(done_event);
       complete_execution(Runtime::protect_event(done_event));
+    }
+
+    //--------------------------------------------------------------------------
+    void DependentPartitionOp::finalize_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+      if (!map_applied_conditions.empty())
+        complete_mapping(Runtime::merge_events(map_applied_conditions));
+      else
+        complete_mapping();
     }
 
     //--------------------------------------------------------------------------

@@ -1434,7 +1434,8 @@ namespace Legion {
       void initialize_by_field(ReplicateContext *ctx, ShardID target,
                                ApEvent ready_event, IndexPartition pid,
                                LogicalRegion handle, LogicalRegion parent,
-                               FieldID fid, MapperID id, MappingTagID tag);
+                               FieldID fid, MapperID id, MappingTagID tag,
+                               RtBarrier &dependent_partition_bar);
       void initialize_by_image(ReplicateContext *ctx,
 #ifndef SHARD_BY_IMAGE
                                ShardID target,
@@ -1443,7 +1444,8 @@ namespace Legion {
                                LogicalPartition projection,
                                LogicalRegion parent, FieldID fid,
                                MapperID id, MappingTagID tag,
-                               ShardID shard, size_t total_shards);
+                               ShardID shard, size_t total_shards,
+                               RtBarrier &dependent_partition_bar);
       void initialize_by_image_range(ReplicateContext *ctx,
 #ifndef SHARD_BY_IMAGE
                                ShardID target,
@@ -1452,18 +1454,24 @@ namespace Legion {
                                LogicalPartition projection,
                                LogicalRegion parent, FieldID fid,
                                MapperID id, MappingTagID tag,
-                               ShardID shard, size_t total_shards);
+                               ShardID shard, size_t total_shards,
+                               RtBarrier &dependent_partition_bar);
       void initialize_by_preimage(ReplicateContext *ctx, ShardID target,
                                ApEvent ready_event, IndexPartition pid,
                                IndexPartition projection, LogicalRegion handle,
                                LogicalRegion parent, FieldID fid,
-                               MapperID id, MappingTagID tag);
+                               MapperID id, MappingTagID tag,
+                               RtBarrier &dependent_partition_bar);
       void initialize_by_preimage_range(ReplicateContext *ctx, ShardID target, 
                                ApEvent ready_event, IndexPartition pid,
                                IndexPartition projection, LogicalRegion handle,
                                LogicalRegion parent, FieldID fid,
-                               MapperID id, MappingTagID tag);
-      // nothing special about association for control replication
+                               MapperID id, MappingTagID tag,
+                               RtBarrier &dependent_partition_bar);
+      void initialize_by_association(ReplicateContext *ctx,LogicalRegion domain,
+                               LogicalRegion domain_parent, FieldID fid,
+                               IndexSpace range, MapperID id, MappingTagID tag,
+                               RtBarrier &dependent_partition_bar);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1471,10 +1479,10 @@ namespace Legion {
       // Need to pick our sharding functor
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_ready(void);  
+      virtual void finalize_mapping(void);
     protected:
       ShardingID sharding_functor;
-      CollectiveID mapped_collective_id;
-      ShardEventTree *mapped_collective;
+      RtBarrier mapping_barrier;
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)
@@ -1952,6 +1960,8 @@ namespace Legion {
         { return attach_broadcast_barrier; }
       inline ApBarrier get_attach_reduce_barrier(void) const
         { return attach_reduce_barrier; }
+      inline RtBarrier get_dependent_partition_barrier(void) const
+        { return dependent_partition_barrier; }
 #ifdef DEBUG_LEGION_COLLECTIVES
       inline RtBarrier get_collective_check_barrier(void) const
         { return collective_check_barrier; }
@@ -2086,6 +2096,7 @@ namespace Legion {
       ApBarrier execution_fence_barrier;
       ApBarrier attach_broadcast_barrier;
       ApBarrier attach_reduce_barrier;
+      RtBarrier dependent_partition_barrier;
 #ifdef DEBUG_LEGION_COLLECTIVES
       RtBarrier collective_check_barrier;
       RtBarrier close_check_barrier;

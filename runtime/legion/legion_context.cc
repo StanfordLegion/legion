@@ -8728,6 +8728,7 @@ namespace Legion {
       execution_fence_barrier = manager->get_execution_fence_barrier();
       attach_broadcast_barrier = manager->get_attach_broadcast_barrier();
       attach_reduce_barrier = manager->get_attach_reduce_barrier();
+      dependent_partition_barrier = manager->get_dependent_partition_barrier();
 #ifdef DEBUG_LEGION_COLLECTIVES
       collective_check_barrier = manager->get_collective_check_barrier();
       close_check_barrier = manager->get_close_check_barrier();
@@ -10057,7 +10058,7 @@ namespace Legion {
                                     0/*owner shard*/, COLLECTIVE_LOC_37));
 #endif
       part_op->initialize_by_association(this, domain, domain_parent, 
-                                         domain_fid, range, id, tag);
+          domain_fid, range, id, tag, dependent_partition_barrier);
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
       if (!runtime->unsafe_launch)
@@ -10288,8 +10289,9 @@ namespace Legion {
       }
       advance_replicate_barrier(creation_barrier, total_shards-1);
       part_op->initialize_by_field(this, index_partition_allocator_shard,
-                                   pending_partition_barrier,
-                                   pid, handle, parent_priv, fid, id, tag);
+                                   pending_partition_barrier, pid, handle, 
+                                   parent_priv, fid, id, tag,
+                                   dependent_partition_barrier);
 #ifdef DEBUG_LEGION
       part_op->set_sharding_collective(new ShardingGatherCollective(this, 
                                     0/*owner shard*/, COLLECTIVE_LOC_38));
@@ -10430,7 +10432,8 @@ namespace Legion {
 #endif
                                    pending_partition_barrier, 
                                    pid, projection, parent, fid, id, tag,
-                                   owner_shard->shard_id, total_shards);
+                                   owner_shard->shard_id, total_shards,
+                                   dependent_partition_barrier);
 #ifdef DEBUG_LEGION
       part_op->set_sharding_collective(new ShardingGatherCollective(this, 
                                     0/*owner shard*/, COLLECTIVE_LOC_39));
@@ -10571,7 +10574,8 @@ namespace Legion {
 #endif
                                          pending_partition_barrier,
                                          pid, projection, parent, fid, id, tag,
-                                         owner_shard->shard_id, total_shards);
+                                         owner_shard->shard_id, total_shards,
+                                         dependent_partition_barrier);
 #ifdef DEBUG_LEGION
       part_op->set_sharding_collective(new ShardingGatherCollective(this, 
                                     0/*owner shard*/, COLLECTIVE_LOC_40));
@@ -10725,7 +10729,8 @@ namespace Legion {
       part_op->initialize_by_preimage(this, index_partition_allocator_shard,
                                       pending_partition_barrier,
                                       pid, projection, handle,
-                                      parent, fid, id, tag);
+                                      parent, fid, id, tag, 
+                                      dependent_partition_barrier);
 #ifdef DEBUG_LEGION
       part_op->set_sharding_collective(new ShardingGatherCollective(this, 
                                     0/*owner shard*/, COLLECTIVE_LOC_41));
@@ -10864,7 +10869,8 @@ namespace Legion {
                                             index_partition_allocator_shard, 
                                             pending_partition_barrier,
                                             pid, projection, handle,
-                                            parent, fid, id, tag);
+                                            parent, fid, id, tag,
+                                            dependent_partition_barrier);
 #ifdef DEBUG_LEGION
       part_op->set_sharding_collective(new ShardingGatherCollective(this, 
                                     0/*owner shard*/, COLLECTIVE_LOC_42));

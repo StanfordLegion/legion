@@ -2796,7 +2796,8 @@ namespace Legion {
                                                        LogicalRegion parent,
                                                        FieldID fid,
                                                        MapperID id, 
-                                                       MappingTagID t)
+                                                       MappingTagID t,
+                                                       RtBarrier &deppart_bar)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2823,8 +2824,8 @@ namespace Legion {
       assert(thunk == NULL);
 #endif
       thunk = new ReplByFieldThunk(ctx, target, pid);
-      mapped_collective_id = 
-        ctx->get_next_collective_index(COLLECTIVE_LOC_76);
+      mapping_barrier = deppart_bar;
+      ctx->advance_replicate_barrier(deppart_bar, ctx->total_shards);
       partition_ready = ready_event;
       if (runtime->legion_spy_enabled)
         perform_logging();
@@ -2840,7 +2841,8 @@ namespace Legion {
                                                    LogicalPartition projection,
                                              LogicalRegion parent, FieldID fid,
                                                    MapperID id, MappingTagID t,
-                                                   ShardID shard, size_t total)
+                                                   ShardID shard, size_t total,
+                                                        RtBarrier &deppart_bar)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2875,8 +2877,8 @@ namespace Legion {
                                    projection.get_index_partition(),
                                    shard, total);
 #endif
-      mapped_collective_id = 
-        ctx->get_next_collective_index(COLLECTIVE_LOC_76);
+      mapping_barrier = deppart_bar;
+      ctx->advance_replicate_barrier(deppart_bar, ctx->total_shards);
       partition_ready = ready_event;
       if (runtime->legion_spy_enabled)
         perform_logging();
@@ -2894,7 +2896,8 @@ namespace Legion {
                                                 LogicalRegion parent,
                                                 FieldID fid, MapperID id,
                                                 MappingTagID t, ShardID shard, 
-                                                size_t total_shards) 
+                                                size_t total_shards,
+                                                RtBarrier &deppart_bar) 
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2930,8 +2933,8 @@ namespace Legion {
                                         projection.get_index_partition(),
                                         shard, total_shards);
 #endif
-      mapped_collective_id = 
-        ctx->get_next_collective_index(COLLECTIVE_LOC_76);
+      mapping_barrier = deppart_bar;
+      ctx->advance_replicate_barrier(deppart_bar, ctx->total_shards);
       partition_ready = ready_event;
       if (runtime->legion_spy_enabled)
         perform_logging();
@@ -2942,7 +2945,8 @@ namespace Legion {
                                     ShardID target_shard, ApEvent ready_event,
                                     IndexPartition pid, IndexPartition proj,
                                     LogicalRegion handle, LogicalRegion parent,
-                                    FieldID fid, MapperID id, MappingTagID t)
+                                    FieldID fid, MapperID id, MappingTagID t,
+                                    RtBarrier &deppart_bar)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2968,8 +2972,8 @@ namespace Legion {
       assert(thunk == NULL);
 #endif
       thunk = new ReplByPreimageThunk(ctx, target_shard, pid, proj);
-      mapped_collective_id = 
-        ctx->get_next_collective_index(COLLECTIVE_LOC_76);
+      mapping_barrier = deppart_bar;
+      ctx->advance_replicate_barrier(deppart_bar, ctx->total_shards);
       partition_ready = ready_event;
       if (runtime->legion_spy_enabled)
         perform_logging();
@@ -2981,7 +2985,8 @@ namespace Legion {
                                     ApEvent ready_event,
                                     IndexPartition pid, IndexPartition proj,
                                     LogicalRegion handle, LogicalRegion parent,
-                                    FieldID fid, MapperID id, MappingTagID t)
+                                    FieldID fid, MapperID id, MappingTagID t,
+                                    RtBarrier &deppart_bar)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3007,11 +3012,25 @@ namespace Legion {
       assert(thunk == NULL);
 #endif
       thunk = new ReplByPreimageRangeThunk(ctx, target_shard, pid, proj);
-      mapped_collective_id = 
-        ctx->get_next_collective_index(COLLECTIVE_LOC_76);
+      mapping_barrier = deppart_bar;
+      ctx->advance_replicate_barrier(deppart_bar, ctx->total_shards);
       partition_ready = ready_event;
       if (runtime->legion_spy_enabled)
         perform_logging();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplDependentPartitionOp::initialize_by_association(
+                               ReplicateContext *ctx, LogicalRegion domain,
+                               LogicalRegion domain_parent, FieldID fid,
+                               IndexSpace range, MapperID id, MappingTagID tag,
+                               RtBarrier &deppart_bar)
+    //--------------------------------------------------------------------------
+    {
+      mapping_barrier = deppart_bar;
+      ctx->advance_replicate_barrier(deppart_bar, ctx->total_shards);
+      DependentPartitionOp::initialize_by_association(ctx, domain, 
+                                domain_parent, fid, range, id, tag);
     }
 
     //--------------------------------------------------------------------------
@@ -3020,8 +3039,6 @@ namespace Legion {
     {
       activate_dependent_op();
       sharding_functor = UINT_MAX;
-      mapped_collective_id = UINT_MAX;
-      mapped_collective = NULL;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL;
 #endif
@@ -3032,8 +3049,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_dependent_op();
-      if (mapped_collective != NULL)
-        delete mapped_collective;
 #ifdef DEBUG_LEGION
       if (sharding_collective != NULL)
         delete sharding_collective;
@@ -3117,7 +3132,8 @@ namespace Legion {
           // We can try to early-complete this operation too
           request_early_complete(done_event);
           // We have no local points, so we can just trigger
-          complete_mapping();
+          Runtime::phase_barrier_arrive(mapping_barrier, 1/*count*/);
+          complete_mapping(mapping_barrier);
           complete_execution(Runtime::protect_event(done_event));
         }
         else // If we have valid points then we do the base call
@@ -3133,11 +3149,6 @@ namespace Legion {
       }
       else
       {
-#ifdef DEBUG_LEGION
-        assert(mapped_collective == NULL);
-#endif
-        mapped_collective = 
-          new ShardEventTree(repl_ctx, 0/*zero owner*/, mapped_collective_id);
         // Inform the thunk that we're eliding collectives since this
         // is a singular operation and not an index operation
         thunk->elide_collectives();
@@ -3152,17 +3163,24 @@ namespace Legion {
 #endif
           // We don't own it, so we can pretend like we
           // mapped and executed this task already
-          RtEvent local_done = mapped_collective->get_local_event();
-          complete_mapping(local_done);
+          Runtime::phase_barrier_arrive(mapping_barrier, 1/*count*/);
+          complete_mapping(mapping_barrier);
           complete_execution();
         }
         else // If we're the shard then we do the base call
-        {
-          // Signal the tree when we are done our mapping
-          mapped_collective->signal_tree(mapped_event);
           DependentPartitionOp::trigger_ready();
-        }
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplDependentPartitionOp::finalize_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent precondition;
+      if (!map_applied_conditions.empty())
+        precondition = Runtime::merge_events(map_applied_conditions);
+      Runtime::phase_barrier_arrive(mapping_barrier, 1/*count*/, precondition);
+      complete_mapping(mapping_barrier);
     }
 
     //--------------------------------------------------------------------------
@@ -5443,7 +5461,7 @@ namespace Legion {
       // Make a dependence tracker
       mapping_tracker = new MappingDependenceTracker();
       // See if we have any fence dependences
-      execution_fence_event = parent_ctx->register_fence_dependence(this);
+      execution_fence_event = parent_ctx->register_implicit_dependences(this);
       parent_ctx->invalidate_trace_cache(local_trace, this);
 
       trigger_dependence_analysis();
@@ -6529,6 +6547,8 @@ namespace Legion {
           ApBarrier(Realm::Barrier::create_barrier(1));
         attach_reduce_barrier = 
           ApBarrier(Realm::Barrier::create_barrier(total_shards));
+        dependent_partition_barrier = 
+          RtBarrier(Realm::Barrier::create_barrier(total_shards));
 #ifdef DEBUG_LEGION_COLLECTIVES
         collective_check_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards,
@@ -6584,6 +6604,7 @@ namespace Legion {
           execution_fence_barrier.destroy_barrier();
           attach_broadcast_barrier.destroy_barrier();
           attach_reduce_barrier.destroy_barrier();
+          dependent_partition_barrier.destroy_barrier();
 #ifdef DEBUG_LEGION_COLLECTIVES
           collective_check_barrier.destroy_barrier();
           close_check_barrier.destroy_barrier();
@@ -6741,6 +6762,7 @@ namespace Legion {
           assert(execution_fence_barrier.exists());
           assert(attach_broadcast_barrier.exists());
           assert(attach_reduce_barrier.exists());
+          assert(dependent_partition_barrier.exists());
           assert(shard_mapping.size() == total_shards);
 #endif
           rez.serialize(pending_partition_barrier);
@@ -6752,6 +6774,7 @@ namespace Legion {
           rez.serialize(execution_fence_barrier);
           rez.serialize(attach_broadcast_barrier);
           rez.serialize(attach_reduce_barrier);
+          rez.serialize(dependent_partition_barrier);
 #ifdef DEBUG_LEGION_COLLECTIVES
           assert(collective_check_barrier.exists());
           rez.serialize(collective_check_barrier);
@@ -6799,6 +6822,7 @@ namespace Legion {
         derez.deserialize(execution_fence_barrier);
         derez.deserialize(attach_broadcast_barrier);
         derez.deserialize(attach_reduce_barrier);
+        derez.deserialize(dependent_partition_barrier);
 #ifdef DEBUG_LEGION_COLLECTIVES
         derez.deserialize(collective_check_barrier);
         derez.deserialize(close_check_barrier);
