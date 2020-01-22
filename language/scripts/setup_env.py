@@ -333,7 +333,7 @@ def check_dirty_build(name, build_result, component_dir):
 def driver(prefix_dir=None, scratch_dir=None, cache=False,
            legion_use_cmake=False, llvm_version=None,
            terra_url=None, terra_branch=None, terra_use_cmake=None,
-           insecure=False):
+           thread_count=None, insecure=False):
     if not cache:
         if 'CC' not in os.environ:
             raise Exception('Please set CC in your environment')
@@ -368,8 +368,8 @@ def driver(prefix_dir=None, scratch_dir=None, cache=False,
     else:
         raise Exception('Unrecognized LLVM version %s' % llvm_version)
 
-    if llvm_use_cmake and terra_use_cmake is None:
-        terra_use_cmake = True
+    if terra_use_cmake is None:
+        terra_use_cmake = llvm_use_cmake
 
     if terra_use_cmake and not llvm_use_cmake:
         raise Exception('Terra with CMake requires LLVM to be built with CMake')
@@ -382,7 +382,8 @@ def driver(prefix_dir=None, scratch_dir=None, cache=False,
     else:
         prefix_dir = os.path.abspath(prefix_dir)
 
-    thread_count = multiprocessing.cpu_count()
+    if thread_count is None:
+        thread_count = multiprocessing.cpu_count()
 
     gasnet_release_dir = None
     conduit = None
@@ -528,5 +529,8 @@ if __name__ == '__main__':
     parser.add_argument(
         '--no-terra-cmake', dest='terra_use_cmake', action='store_false', default=None,
         help='Use CMake to build Terra.')
+    parser.add_argument(
+        '-j', dest='thread_count', nargs='?', type=int,
+        help='Number threads used to compile.')
     args = parser.parse_args()
     driver(**vars(args))
