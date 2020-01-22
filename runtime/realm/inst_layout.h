@@ -40,9 +40,10 @@ namespace Realm {
 
     struct FieldInfo {
       FieldID field_id;
-      int offset;
-      int size;
-      int alignment;
+      bool fixed_offset;
+      size_t offset;  // used if `fixed_offset` is true
+      size_t size;
+      size_t alignment;
     };
     typedef std::vector<FieldInfo> FieldGroup;
 

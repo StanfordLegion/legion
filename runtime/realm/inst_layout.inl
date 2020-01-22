@@ -144,7 +144,7 @@ namespace Realm {
 	  it2 != fg.end();
 	  ++it2) {
 	size_t offset;
-	if(it2->offset >= 0) {
+	if(it2->fixed_offset) {
 	  offset = it2->offset;
 	} else {
 	  // if not specified, field goes at the end of all known fields
