@@ -139,10 +139,6 @@ namespace Realm {
       ReservationImpl lock;
     };
 
-    // helper function to figure out which field we're in
-    void find_field_start(const std::vector<size_t>& field_sizes, off_t byte_offset,
-			  size_t size, off_t& field_start, int& field_size);
-
     // active messages
 
     struct InstanceMetadataPrefetchRequest {
