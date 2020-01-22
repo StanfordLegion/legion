@@ -282,10 +282,12 @@ namespace Realm {
   
   
   // append a URL to the format string that links to the online message documentation
-  inline const char *formatLink(const char *type, LoggerMessageID messageID, char *buffer)
+  inline const char *formatLink(const char *type, LoggerMessageID messageID,
+				char *buffer, size_t maxlen)
   {
       const char *legionURL = "http://legion.stanford.edu/messages";
-      sprintf(buffer, "\nFor more information see:\n%s/%s_code.html#%s_code_%d\n",
+      snprintf(buffer, maxlen,
+	       "\nFor more information see:\n%s/%s_code.html#%s_code_%d\n",
 	      legionURL, type, type, int(messageID));
       return buffer;
   }
@@ -314,8 +316,9 @@ namespace Realm {
     
     va_list args;
     va_start(args, fmt);
-      char buffer[LENGTH_LONGEST_FORMAT_STRING];
-      spew().vprintf("spew", messageID, fmt, args).vprintf("spew", messageID, formatLink("spew", messageID, buffer), args);
+    char buffer[LENGTH_LONGEST_FORMAT_STRING];
+    formatLink("spew", messageID, buffer, LENGTH_LONGEST_FORMAT_STRING);
+    spew().vprintf("spew", messageID, fmt, args) << buffer;
     va_end(args);
 #endif
   }
@@ -341,8 +344,9 @@ namespace Realm {
     
     va_list args;
     va_start(args, fmt);
-      char buffer[LENGTH_LONGEST_FORMAT_STRING];
-      debug().vprintf("debug", messageID, fmt, args).vprintf("debug", messageID, formatLink("debug", messageID, buffer), args);
+    char buffer[LENGTH_LONGEST_FORMAT_STRING];
+    formatLink("debug", messageID, buffer, LENGTH_LONGEST_FORMAT_STRING);
+    debug().vprintf("debug", messageID, fmt, args) << buffer;
     va_end(args);
 #endif
   }
@@ -368,8 +372,9 @@ namespace Realm {
     
     va_list args;
     va_start(args, fmt);
-      char buffer[LENGTH_LONGEST_FORMAT_STRING];
-      info().vprintf("info", messageID, fmt, args).vprintf("info", messageID, formatLink("info", messageID, buffer), args);
+    char buffer[LENGTH_LONGEST_FORMAT_STRING];
+    formatLink("info", messageID, buffer, LENGTH_LONGEST_FORMAT_STRING);
+    info().vprintf("info", messageID, fmt, args) << buffer;
     va_end(args);
 #endif
   }
@@ -395,8 +400,9 @@ namespace Realm {
     
     va_list args;
     va_start(args, fmt);
-      char buffer[LENGTH_LONGEST_FORMAT_STRING];
-      print().vprintf("print", messageID, fmt, args).vprintf("print", messageID, formatLink("print", messageID, buffer), args);
+    char buffer[LENGTH_LONGEST_FORMAT_STRING];
+    formatLink("print", messageID, buffer, LENGTH_LONGEST_FORMAT_STRING);
+    print().vprintf("print", messageID, fmt, args) << buffer;
     va_end(args);
 #endif
   }
@@ -422,8 +428,9 @@ namespace Realm {
     
     va_list args;
     va_start(args, fmt);
-      char buffer[LENGTH_LONGEST_FORMAT_STRING];
-      warning().vprintf("warning", messageID, fmt, args).vprintf("warning", messageID, formatLink("warning", messageID, buffer), args);
+    char buffer[LENGTH_LONGEST_FORMAT_STRING];
+    formatLink("warning", messageID, buffer, LENGTH_LONGEST_FORMAT_STRING);
+    warning().vprintf("warning", messageID, fmt, args) << buffer;
     va_end(args);
 #endif
   }
@@ -449,8 +456,9 @@ namespace Realm {
     
     va_list args;
     va_start(args, fmt);
-      char buffer[LENGTH_LONGEST_FORMAT_STRING];
-      error().vprintf("error", messageID, fmt, args).vprintf("error", messageID, formatLink("error", messageID, buffer), args);
+    char buffer[LENGTH_LONGEST_FORMAT_STRING];
+    formatLink("error", messageID, buffer, LENGTH_LONGEST_FORMAT_STRING);
+    error().vprintf("error", messageID, fmt, args) << buffer;
     va_end(args);
 #endif
   }
@@ -476,8 +484,9 @@ namespace Realm {
     
     va_list args;
     va_start(args, fmt);
-      char buffer[LENGTH_LONGEST_FORMAT_STRING];
-      fatal().vprintf("fatal", messageID, fmt, args).vprintf("fatal", messageID, formatLink("fatal", messageID, buffer), args);
+    char buffer[LENGTH_LONGEST_FORMAT_STRING];
+    formatLink("fatal", messageID, buffer, LENGTH_LONGEST_FORMAT_STRING);
+    fatal().vprintf("fatal", messageID, fmt, args) << buffer;
     va_end(args);
 #endif
   }
