@@ -371,9 +371,6 @@ def driver(prefix_dir=None, scratch_dir=None, cache=False,
     if terra_use_cmake is None:
         terra_use_cmake = llvm_use_cmake
 
-    if terra_use_cmake and not llvm_use_cmake:
-        raise Exception('Terra with CMake requires LLVM to be built with CMake')
-
     root_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
     legion_dir = os.path.dirname(root_dir)
 
