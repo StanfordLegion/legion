@@ -218,7 +218,7 @@ namespace Realm {
       //  the count to 2 instead of 1
       bool registered = SparsityMapImpl<N,T>::lookup(parent_space.sparsity)->add_waiter(this, true /*precise*/);
       if(registered)
-	__sync_fetch_and_add(&wait_count, 1);
+	wait_count.fetch_add(1);
     }
     
     finish_dispatch(op, inline_ok);

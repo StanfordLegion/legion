@@ -109,7 +109,7 @@ namespace Realm {
 
     void finish_dispatch(PartitioningOperation *op, bool inline_ok);
 
-    int wait_count;  // how many sparsity maps are we still waiting for?
+    atomic<int> wait_count;  // how many sparsity maps are we still waiting for?
     NodeID requestor;
     AsyncMicroOp *async_microop;
 

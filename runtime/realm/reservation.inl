@@ -62,7 +62,7 @@ namespace Realm {
     State old_state = 0;
     State new_state = STATE_WRITER;
 
-    bool got_lock = __sync_bool_compare_and_swap(&state, old_state, new_state);
+    bool got_lock = state.compare_exchange(old_state, new_state);
     if(__builtin_expect(got_lock, true))
       return Event::NO_EVENT;
 
@@ -101,12 +101,12 @@ namespace Realm {
     // note that a sleeper is ok, as long as it's a reader
     State cur_state = (volatile const State&)state;
     if(__builtin_expect((cur_state & ~(STATE_SLEEPER | STATE_READER_COUNT_MASK)) == 0, 1)) {
-      State orig_state = __sync_fetch_and_add(&state, 1);
+      State orig_state = state.fetch_add(1);
       if(__builtin_expect((orig_state & ~(STATE_SLEEPER | STATE_READER_COUNT_MASK)) == 0, 1)) {
 	return Event::NO_EVENT;
       } else {
 	// put the count back before we go down the slow path
-	__sync_fetch_and_sub(&state, 1);
+        state.fetch_sub(1);
       }
     }
 
@@ -160,7 +160,7 @@ namespace Realm {
 					STATE_SLEEPER |
 					STATE_BASE_RSRV_WAITING)) == 0, 1)) {
 	State new_state = cur_state - STATE_WRITER;
-	bool ok = __sync_bool_compare_and_swap(&state, cur_state, new_state);
+	bool ok = state.compare_exchange(cur_state, new_state);
 	if(__builtin_expect(ok, 1))
 	  return;
       }
@@ -169,7 +169,7 @@ namespace Realm {
 			  ((cur_state & (STATE_WRITER |
 					 STATE_BASE_RSRV_WAITING)) == 0), 1)) {
 	State new_state = cur_state - 1;
-	bool ok = __sync_bool_compare_and_swap(&state, cur_state, new_state);
+	bool ok = state.compare_exchange(cur_state, new_state);
 	if(__builtin_expect(ok, 1))
 	  return;
       }
@@ -198,7 +198,7 @@ namespace Realm {
     State old_state = 0;
     State new_state = STATE_WRITER;
 
-    bool got_lock = __sync_bool_compare_and_swap(&state, old_state, new_state);
+    bool got_lock = state.compare_exchange(old_state, new_state);
     if(__builtin_expect(got_lock, true))
       return true;
 
@@ -237,12 +237,12 @@ namespace Realm {
     // note that a sleeper is ok, as long as it's a reader
     State cur_state = (volatile const State&)state;
     if(__builtin_expect((cur_state & ~(STATE_SLEEPER | STATE_READER_COUNT_MASK)) == 0, 1)) {
-      State orig_state = __sync_fetch_and_add(&state, 1);
+      State orig_state = state.fetch_add(1);
       if(__builtin_expect((orig_state & ~(STATE_SLEEPER | STATE_READER_COUNT_MASK)) == 0, 1)) {
 	return true;
       } else {
 	// put the count back before we go down the slow path
-	__sync_fetch_and_sub(&state, 1);
+	state.fetch_sub(1);
       }
     }
 
