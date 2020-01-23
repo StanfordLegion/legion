@@ -2620,9 +2620,13 @@ std.wild = std.newsymbol(std.wild_type, "wild")
 std.disjoint = ast.disjointness_kind.Disjoint {}
 std.aliased = ast.disjointness_kind.Aliased {}
 
+-- Import completeness type into std
+std.complete   = ast.completeness_kind.Complete {}
+std.incomplete = ast.completeness_kind.Incomplete {}
+
 do
   local next_partition_id = 1
-  function std.partition(disjointness, region_symbol, colors_symbol)
+  function std.partition(disjointness, completeness, region_symbol, colors_symbol)
     if colors_symbol == nil then
       colors_symbol = std.newsymbol(std.ispace(std.ptr))
     end
@@ -2632,8 +2636,9 @@ do
 
     assert(disjointness:is(ast.disjointness_kind),
            "Partition type requires disjointness to be one of disjoint or aliased")
-    assert(std.is_symbol(region_symbol),
-           "Partition type requires region to be a symbol")
+    assert(completeness:is(ast.completeness_kind),
+           "Partition type requires completeness to be one of complete or incomplete")
+    assert(std.is_symbol(region_symbol), "Partition type requires region to be a symbol")
     if region_symbol:hastype() then
       assert(terralib.types.istype(region_symbol:gettype()) and
                std.is_region(region_symbol:gettype()),

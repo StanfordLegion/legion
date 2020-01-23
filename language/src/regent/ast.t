@@ -174,6 +174,11 @@ ast.disjointness_kind:leaf("Aliased"):set_memoize():set_print_custom("aliased")
 ast.disjointness_kind:leaf("Disjoint"):set_memoize():set_print_custom(
   "disjoint")
 
+-- Create completeness type
+ast:inner("completeness_kind")
+ast.completeness_kind:leaf("Complete"):set_memoize():set_print_custom("complete")
+ast.completeness_kind:leaf("Incomplete"):set_memoize():set_print_custom("incomplete")
+
 ast:inner("fence_kind")
 ast.fence_kind:leaf("Execution"):set_memoize():set_print_custom("__execution")
 ast.fence_kind:leaf("Mapping"):set_memoize():set_print_custom("__mapping")
