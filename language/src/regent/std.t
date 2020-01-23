@@ -2626,7 +2626,7 @@ std.incomplete = ast.completeness_kind.Incomplete {}
 
 do
   local next_partition_id = 1
-  function std.partition(disjointness, completeness, region_symbol, colors_symbol)
+  function std.partition(completeness, disjointness, region_symbol, colors_symbol)
     if colors_symbol == nil then
       colors_symbol = std.newsymbol(std.ispace(std.ptr))
     end

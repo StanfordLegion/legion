@@ -3,5 +3,5 @@
 
 import "regent"
 
-task name(r: region(int), p : partition(disjoint, complete, r))
+task name(r: region(int), p : partition(complete, disjoint, r))
 end
