@@ -3962,7 +3962,7 @@ namespace Legion {
           {
             // Indirect copy
             IndexSpace src_indirect_space = 
-              src_requirements[idx].region.get_index_space();
+              src_indirect_requirements[idx].region.get_index_space();
             IndexSpace dst_indirect_space= 
               dst_indirect_requirements[idx].region.get_index_space();
             // Just check compatibility here since it's really hard to
