@@ -751,12 +751,12 @@ namespace Realm {
   // class AffineAccessor<FT,N,T>
 
   template <typename FT, int N, typename T>
-  __CUDA_HD__
+  REALM_CUDA_HD
   inline AffineAccessor<FT,N,T>::AffineAccessor(void)
   {}  
 
   template <typename FT, int N, typename T>
-  __CUDA_HD__
+  REALM_CUDA_HD
   inline void AffineAccessor<FT,N,T>::reset()
   {
     base = 0;
@@ -988,7 +988,8 @@ namespace Realm {
 #endif
   }
 
-  template <typename FT, int N, typename T> __CUDA_HD__
+  template <typename FT, int N, typename T>
+  REALM_CUDA_HD
   inline AffineAccessor<FT,N,T>::~AffineAccessor(void)
   {}
 
@@ -1123,31 +1124,36 @@ namespace Realm {
     return true;
   }
 
-  template <typename FT, int N, typename T> __CUDA_HD__
+  template <typename FT, int N, typename T>
+  REALM_CUDA_HD
   inline FT *AffineAccessor<FT,N,T>::ptr(const Point<N,T>& p) const
   {
     return this->get_ptr(p);
   }
 
-  template <typename FT, int N, typename T> __CUDA_HD__
+  template <typename FT, int N, typename T>
+  REALM_CUDA_HD
   inline FT AffineAccessor<FT,N,T>::read(const Point<N,T>& p) const
   {
     return *(this->get_ptr(p));
   }
 
-  template <typename FT, int N, typename T> __CUDA_HD__
+  template <typename FT, int N, typename T>
+  REALM_CUDA_HD
   inline void AffineAccessor<FT,N,T>::write(const Point<N,T>& p, FT newval) const
   {
     *(this->get_ptr(p)) = newval;
   }
 
-  template <typename FT, int N, typename T> __CUDA_HD__
+  template <typename FT, int N, typename T>
+  REALM_CUDA_HD
   inline FT& AffineAccessor<FT,N,T>::operator[](const Point<N,T>& p) const
   {
     return *(this->get_ptr(p));
   }
 
-  template <typename FT, int N, typename T> __CUDA_HD__
+  template <typename FT, int N, typename T>
+  REALM_CUDA_HD
   inline bool AffineAccessor<FT,N,T>::is_dense_arbitrary(const Rect<N,T> &bounds) const
   {
     ptrdiff_t exp_offset = sizeof(FT);
@@ -1168,7 +1174,8 @@ namespace Realm {
     return true;
   }
 
-  template <typename FT, int N, typename T> __CUDA_HD__
+  template <typename FT, int N, typename T>
+  REALM_CUDA_HD
   inline bool AffineAccessor<FT,N,T>::is_dense_col_major(const Rect<N,T> &bounds) const
   {
     ptrdiff_t exp_offset = sizeof(FT);
@@ -1179,7 +1186,8 @@ namespace Realm {
     return true;
   }
 
-  template <typename FT, int N, typename T> __CUDA_HD__
+  template <typename FT, int N, typename T>
+  REALM_CUDA_HD
   inline bool AffineAccessor<FT,N,T>::is_dense_row_major(const Rect<N,T> &bounds) const
   {
     ptrdiff_t exp_offset = sizeof(FT);
@@ -1190,7 +1198,8 @@ namespace Realm {
     return true;
   }
 
-  template <typename FT, int N, typename T> __CUDA_HD__
+  template <typename FT, int N, typename T>
+  REALM_CUDA_HD
   inline FT *AffineAccessor<FT,N,T>::get_ptr(const Point<N,T>& p) const
   {
     intptr_t rawptr = base;

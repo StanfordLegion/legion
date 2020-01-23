@@ -50,7 +50,7 @@ namespace Realm {
     return id != rhs.id;
   }
 
-  __CUDA_HD__
+  REALM_CUDA_HD
   inline bool RegionInstance::exists(void) const
   {
     return id != 0;

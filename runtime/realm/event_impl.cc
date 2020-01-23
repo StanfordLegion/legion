@@ -34,7 +34,7 @@ namespace Realm {
   // turn nested event triggers into a list walk instead - keeps from blowing
   //  out the stack
   namespace ThreadLocal {
-    __thread EventWaiter::EventWaiterList *nested_wake_list = 0;
+    REALM_THREAD_LOCAL EventWaiter::EventWaiterList *nested_wake_list = 0;
   };
 
 #if 0
@@ -1413,7 +1413,7 @@ namespace Realm {
     {
       // common case: no poisoned generations
       int npg_cached = num_poisoned_generations.load_acquire();
-      if(__builtin_expect((npg_cached == 0), 1))
+      if(REALM_LIKELY(npg_cached == 0))
 	return false;
       
       for(int i = 0; i < npg_cached; i++)

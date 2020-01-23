@@ -143,7 +143,8 @@ namespace Realm {
     // we will make use of atomics for the fast path, so make sure we take
     //  a full cache line for our data to avoid false sharing
     static const size_t CACHE_LINE_SIZE = 64;
-    atomic<State> state __attribute((aligned(16)));
+    REALM_ALIGNED_TYPE_CONST(State_aligned, atomic<State>, 16);
+    State_aligned state;
     // this is slightly fragile, but we want to have enough room to store
     //  the implementation-specific stuff without another layer of
     //  indirection

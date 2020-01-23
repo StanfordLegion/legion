@@ -25,7 +25,7 @@
 #include <iostream>
 
 // we need intptr_t - make it if needed
-#if __cplusplus >= 201103L
+#if REALM_CXX_STANDARD >= 11
 #include <stdint.h>
 #else
 #include <stddef.h>

@@ -43,7 +43,7 @@ namespace Realm {
     static FastReservationDebugInfo *lookup_debuginfo(void);
   };
   namespace ThreadLocal {
-    extern __thread FastReservationDebugInfo *frsv_debug;
+    extern REALM_THREAD_LOCAL FastReservationDebugInfo *frsv_debug;
   };
 #endif
 
@@ -63,7 +63,7 @@ namespace Realm {
     State new_state = STATE_WRITER;
 
     bool got_lock = state.compare_exchange(old_state, new_state);
-    if(__builtin_expect(got_lock, true))
+    if(REALM_LIKELY(got_lock))
       return Event::NO_EVENT;
 
     // contention or some exceptional condition?  take slow path
@@ -100,9 +100,9 @@ namespace Realm {
     //  a pending writer doesn't get interference from new attempted readers)
     // note that a sleeper is ok, as long as it's a reader
     State cur_state = (volatile const State&)state;
-    if(__builtin_expect((cur_state & ~(STATE_SLEEPER | STATE_READER_COUNT_MASK)) == 0, 1)) {
+    if(REALM_LIKELY((cur_state & ~(STATE_SLEEPER | STATE_READER_COUNT_MASK)) == 0)) {
       State orig_state = state.fetch_add(1);
-      if(__builtin_expect((orig_state & ~(STATE_SLEEPER | STATE_READER_COUNT_MASK)) == 0, 1)) {
+      if(REALM_LIKELY((orig_state & ~(STATE_SLEEPER | STATE_READER_COUNT_MASK)) == 0)) {
 	return Event::NO_EVENT;
       } else {
 	// put the count back before we go down the slow path
@@ -156,21 +156,21 @@ namespace Realm {
     State cur_state = (volatile const State&)state;
 
     if((cur_state & STATE_WRITER) != 0) {
-      if(__builtin_expect((cur_state & (STATE_READER_COUNT_MASK |
-					STATE_SLEEPER |
-					STATE_BASE_RSRV_WAITING)) == 0, 1)) {
+      if(REALM_LIKELY((cur_state & (STATE_READER_COUNT_MASK |
+				    STATE_SLEEPER |
+				    STATE_BASE_RSRV_WAITING)) == 0)) {
 	State new_state = cur_state - STATE_WRITER;
 	bool ok = state.compare_exchange(cur_state, new_state);
-	if(__builtin_expect(ok, 1))
+	if(REALM_LIKELY(ok))
 	  return;
       }
     } else {
-      if(__builtin_expect(((cur_state & STATE_READER_COUNT_MASK) != 0) &&
-			  ((cur_state & (STATE_WRITER |
-					 STATE_BASE_RSRV_WAITING)) == 0), 1)) {
+      if(REALM_LIKELY(((cur_state & STATE_READER_COUNT_MASK) != 0) &&
+		      ((cur_state & (STATE_WRITER |
+				     STATE_BASE_RSRV_WAITING)) == 0))) {
 	State new_state = cur_state - 1;
 	bool ok = state.compare_exchange(cur_state, new_state);
-	if(__builtin_expect(ok, 1))
+	if(REALM_LIKELY(ok))
 	  return;
       }
     }
@@ -199,7 +199,7 @@ namespace Realm {
     State new_state = STATE_WRITER;
 
     bool got_lock = state.compare_exchange(old_state, new_state);
-    if(__builtin_expect(got_lock, true))
+    if(REALM_LIKELY(got_lock))
       return true;
 
     // contention or some exceptional condition?  take slow path
@@ -236,9 +236,9 @@ namespace Realm {
     //  a pending writer doesn't get interference from new attempted readers)
     // note that a sleeper is ok, as long as it's a reader
     State cur_state = (volatile const State&)state;
-    if(__builtin_expect((cur_state & ~(STATE_SLEEPER | STATE_READER_COUNT_MASK)) == 0, 1)) {
+    if(REALM_LIKELY((cur_state & ~(STATE_SLEEPER | STATE_READER_COUNT_MASK)) == 0)) {
       State orig_state = state.fetch_add(1);
-      if(__builtin_expect((orig_state & ~(STATE_SLEEPER | STATE_READER_COUNT_MASK)) == 0, 1)) {
+      if(REALM_LIKELY((orig_state & ~(STATE_SLEEPER | STATE_READER_COUNT_MASK)) == 0)) {
 	return true;
       } else {
 	// put the count back before we go down the slow path

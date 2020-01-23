@@ -27,8 +27,6 @@
 #include <cassert>
 #include <sstream>
 
-#define WARN_UNUSED __attribute__((warn_unused_result))
-
 namespace Realm {
     
   // helpers for deleting contents STL containers of pointers-to-things
@@ -148,7 +146,9 @@ namespace Realm {
 
   protected:
     T *ptr;  // needed to avoid type-punning complaints
-    char raw_storage[sizeof(T)] __attribute((aligned(__alignof__(T))));
+    typedef char Storage_unaligned[sizeof(T)];
+    REALM_ALIGNED_TYPE_SAMEAS(Storage_aligned, Storage_unaligned, T);
+    Storage_aligned raw_storage;
   };
 
 
@@ -251,7 +251,7 @@ namespace Realm {
 
 
   // metaprogramming stuff that's standard in c++11 and beyond
-#if __cplusplus >= 201103L
+#if REALM_CXX_STANDARD >= 11
   using std::is_integral;
   using std::enable_if;
 #else

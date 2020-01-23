@@ -934,7 +934,7 @@ namespace Realm {
   } 
 
   namespace ThreadLocal {
-    __thread FastReservationDebugInfo *frsv_debug = 0;
+    REALM_THREAD_LOCAL FastReservationDebugInfo *frsv_debug = 0;
   };
 #endif
 

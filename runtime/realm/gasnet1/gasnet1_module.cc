@@ -34,9 +34,9 @@
 #include <gasnet.h>
 #include <gasnet_coll.h>
 // eliminate GASNet warnings for unused static functions
-static const void *ignore_gasnet_warning1 __attribute__((unused)) = (void *)_gasneti_threadkey_init;
+REALM_ATTR_UNUSED(static const void *ignore_gasnet_warning1) = (void *)_gasneti_threadkey_init;
 #ifdef _INCLUDED_GASNET_TOOLS_H
-static const void *ignore_gasnet_warning2 __attribute__((unused)) = (void *)_gasnett_trace_printf_noop;
+REALM_ATTR_UNUSED(static const void *ignore_gasnet_warning2) = (void *)_gasnett_trace_printf_noop;
 #endif
 
 #define CHECK_GASNET(cmd) do { \

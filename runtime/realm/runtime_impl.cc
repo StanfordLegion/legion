@@ -33,10 +33,6 @@
 // For backwards compatibility with old accessors
 #include "legion/accessor.h"
 
-// For doing backtraces
-#include <execinfo.h> // symbols
-#include <cxxabi.h>   // demangling
-
 // remote copy active messages from from lowlevel_dma.h for now
 #include "realm/transfer/lowlevel_dma.h"
 

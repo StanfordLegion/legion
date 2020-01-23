@@ -32,7 +32,7 @@
 #include <vector>
 
 // we need intptr_t - make it if needed
-#if __cplusplus >= 201103L
+#if REALM_CXX_STANDARD >= 11
 #include <stdint.h>
 #else
 typedef ptrdiff_t intptr_t;
@@ -68,7 +68,7 @@ namespace Realm {
 
     static const RegionInstance NO_INST;
 
-    __CUDA_HD__
+    REALM_CUDA_HD
     bool exists(void) const;
 
     Memory get_location(void) const;

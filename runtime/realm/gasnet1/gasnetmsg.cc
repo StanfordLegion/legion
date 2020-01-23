@@ -49,8 +49,8 @@
 #include <gasnet_tools.h>
 
 // eliminate GASNet warnings for unused static functions
-static const void *ignore_gasnet_warning1 __attribute__((unused)) = (void *)_gasneti_threadkey_init;
-static const void *ignore_gasnet_warning2 __attribute__((unused)) = (void *)_gasnett_trace_printf_noop;
+REALM_ATTR_UNUSED(static const void *ignore_gasnet_warning1) = (void *)_gasneti_threadkey_init;
+REALM_ATTR_UNUSED(static const void *ignore_gasnet_warning2) = (void *)_gasnett_trace_printf_noop;
 
 #define NO_DEBUG_AMREQUESTS
 
@@ -280,7 +280,7 @@ size_t SrcDataPool::print_spill_step = 1 << 30;       // default = 1 GB
 
 // certain threads are exempt from the max spillage due to deadlock concerns
 namespace ThreadLocal {
-  __thread bool always_allow_spilling = false;
+  REALM_THREAD_LOCAL bool always_allow_spilling = false;
 };
 
 // wrapper so we don't have to expose SrcDataPool implementation

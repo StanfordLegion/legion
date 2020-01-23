@@ -58,35 +58,38 @@ namespace Realm {
   struct Point {
     T x, y, z, w;  T rest[N - 4];
 
-    __CUDA_HD__
+    REALM_CUDA_HD
     Point(void);
-    __CUDA_HD__
+    REALM_CUDA_HD
     explicit Point(T val);
     // construct from any integral value
     template <typename T2>
-    __CUDA_HD__
+    REALM_CUDA_HD
     explicit Point(T2 val,
 		   ONLY_IF_INTEGRAL(T2)); // same value for all dimensions
     template <typename T2>
-    __CUDA_HD__
+    REALM_CUDA_HD
     explicit Point(T2 vals[N], ONLY_IF_INTEGRAL(T2));
     // copies allow type coercion (assuming the underlying type does)
-    template <typename T2> __CUDA_HD__
+    template <typename T2>
+    REALM_CUDA_HD
     Point(const Point<N, T2>& copy_from);
-    template <typename T2> __CUDA_HD__
+    template <typename T2>
+    REALM_CUDA_HD
     Point<N,T>& operator=(const Point<N, T2>& copy_from);
 
-    __CUDA_HD__
+    REALM_CUDA_HD
     T& operator[](int index);
-    __CUDA_HD__
+    REALM_CUDA_HD
     const T& operator[](int index) const;
 
-    template <typename T2> __CUDA_HD__
+    template <typename T2>
+    REALM_CUDA_HD
     T dot(const Point<N, T2>& rhs) const;
 
-    __CUDA_HD__
+    REALM_CUDA_HD
     static Point<N,T> ZEROES(void);
-    __CUDA_HD__
+    REALM_CUDA_HD
     static Point<N,T> ONES(void);
   };
 
@@ -94,30 +97,30 @@ namespace Realm {
   std::ostream& operator<<(std::ostream& os, const Point<N,T>& p);
 
   // component-wise operators defined on Point<N,T> (with optional coercion)
-  template <int N, typename T, typename T2> __CUDA_HD__
+  template <int N, typename T, typename T2> REALM_CUDA_HD
   bool operator==(const Point<N,T>& lhs, const Point<N,T2>& rhs);
-  template <int N, typename T, typename T2> __CUDA_HD__
+  template <int N, typename T, typename T2> REALM_CUDA_HD
   bool operator!=(const Point<N,T>& lhs, const Point<N,T2>& rhs);
 
-  template <int N, typename T, typename T2> __CUDA_HD__
+  template <int N, typename T, typename T2> REALM_CUDA_HD
   Point<N,T> operator+(const Point<N,T>& lhs, const Point<N,T2>& rhs);
-  template <int N, typename T, typename T2> __CUDA_HD__
+  template <int N, typename T, typename T2> REALM_CUDA_HD
   Point<N,T>& operator+=(Point<N,T>& lhs, const Point<N,T2>& rhs);
-  template <int N, typename T, typename T2> __CUDA_HD__
+  template <int N, typename T, typename T2> REALM_CUDA_HD
   Point<N,T> operator-(const Point<N,T>& lhs, const Point<N,T2>& rhs);
-  template <int N, typename T, typename T2> __CUDA_HD__
+  template <int N, typename T, typename T2> REALM_CUDA_HD
   Point<N,T>& operator-=(Point<N,T>& lhs, const Point<N,T2>& rhs);
-  template <int N, typename T, typename T2> __CUDA_HD__
+  template <int N, typename T, typename T2> REALM_CUDA_HD
   Point<N,T> operator*(const Point<N,T>& lhs, const Point<N,T2>& rhs);
-  template <int N, typename T, typename T2> __CUDA_HD__
+  template <int N, typename T, typename T2> REALM_CUDA_HD
   Point<N,T>& operator*=(Point<N,T>& lhs, const Point<N,T2>& rhs);
-  template <int N, typename T, typename T2> __CUDA_HD__
+  template <int N, typename T, typename T2> REALM_CUDA_HD
   Point<N,T> operator/(const Point<N,T>& lhs, const Point<N,T2>& rhs);
-  template <int N, typename T, typename T2> __CUDA_HD__
+  template <int N, typename T, typename T2> REALM_CUDA_HD
   Point<N,T>& operator/=(Point<N,T>& lhs, const Point<N,T2>& rhs);
-  template <int N, typename T, typename T2> __CUDA_HD__
+  template <int N, typename T, typename T2> REALM_CUDA_HD
   Point<N,T> operator%(const Point<N,T>& lhs, const Point<N,T2>& rhs);
-  template <int N, typename T, typename T2> __CUDA_HD__
+  template <int N, typename T, typename T2> REALM_CUDA_HD
   Point<N,T>& operator%=(Point<N,T>& lhs, const Point<N,T2>& rhs);
 
   // a Rect is a pair of points defining the lower and upper bounds of an N-D rectangle
@@ -127,44 +130,46 @@ namespace Realm {
   struct Rect {
     Point<N,T> lo, hi;
 
-    __CUDA_HD__
+    REALM_CUDA_HD
     Rect(void);
-    __CUDA_HD__
+    REALM_CUDA_HD
     Rect(const Point<N,T>& _lo, const Point<N,T>& _hi);
     // copies allow type coercion (assuming the underlying type does)
-    template <typename T2> __CUDA_HD__
+    template <typename T2>
+    REALM_CUDA_HD
     Rect(const Rect<N, T2>& copy_from);
-    template <typename T2> __CUDA_HD__
+    template <typename T2>
+    REALM_CUDA_HD
     Rect<N,T>& operator=(const Rect<N, T2>& copy_from);
 
     // constructs a guaranteed-empty rectangle
-    __CUDA_HD__
+    REALM_CUDA_HD
     static Rect<N,T> make_empty(void);
 
-    __CUDA_HD__
+    REALM_CUDA_HD
     bool empty(void) const;
-    __CUDA_HD__
+    REALM_CUDA_HD
     size_t volume(void) const;
 
-    __CUDA_HD__
+    REALM_CUDA_HD
     bool contains(const Point<N,T>& p) const;
 
     // true if all points in other are in this rectangle
-    __CUDA_HD__
+    REALM_CUDA_HD
     bool contains(const Rect<N,T>& other) const;
-    __CUDA_HD__
+    REALM_CUDA_HD
     bool contains(const IndexSpace<N,T>& is) const;
 
     // true if there are any points in the intersection of the two rectangles
-    __CUDA_HD__
+    REALM_CUDA_HD
     bool overlaps(const Rect<N,T>& other) const;
 
-    __CUDA_HD__
+    REALM_CUDA_HD
     Rect<N,T> intersection(const Rect<N,T>& other) const;
 
     // returns the _bounding box_ of the union of two rectangles (the actual union
     //  might not be a rectangle)
-    __CUDA_HD__
+    REALM_CUDA_HD
     Rect<N,T> union_bbox(const Rect<N,T>& other) const;
 
     // copy and fill operations (wrappers for IndexSpace versions)
@@ -190,42 +195,44 @@ namespace Realm {
   template <int N, typename T>
   std::ostream& operator<<(std::ostream& os, const Rect<N,T>& p);
 
-  template <int N, typename T, typename T2> __CUDA_HD__
+  template <int N, typename T, typename T2> REALM_CUDA_HD
   bool operator==(const Rect<N,T>& lhs, const Rect<N,T2>& rhs);
-  template <int N, typename T, typename T2> __CUDA_HD__
+  template <int N, typename T, typename T2> REALM_CUDA_HD
   bool operator!=(const Rect<N,T>& lhs, const Rect<N,T2>& rhs);
 
   // rectangles may be displaced by a vector (i.e. point)
-  template <int N, typename T, typename T2> __CUDA_HD__
+  template <int N, typename T, typename T2> REALM_CUDA_HD
   Rect<N,T> operator+(const Rect<N,T>& lhs, const Point<N,T2>& rhs);
-  template <int N, typename T, typename T2> __CUDA_HD__
+  template <int N, typename T, typename T2> REALM_CUDA_HD
   Rect<N,T>& operator+=(Rect<N,T>& lhs, const Point<N,T2>& rhs);
-  template <int N, typename T, typename T2> __CUDA_HD__
+  template <int N, typename T, typename T2> REALM_CUDA_HD
   Rect<N,T> operator-(const Rect<N,T>& lhs, const Point<N,T2>& rhs);
-  template <int N, typename T, typename T2> __CUDA_HD__
+  template <int N, typename T, typename T2> REALM_CUDA_HD
   Rect<N,T>& operator-=(Rect<N,T>& lhs, const Rect<N,T2>& rhs);
 
   template <int M, int N, typename T>
   struct Matrix {
     Point<N,T> rows[M];
 
-    __CUDA_HD__
+    REALM_CUDA_HD
     Matrix(void);
     // copies allow type coercion (assuming the underlying type does)
-    template <typename T2> __CUDA_HD__
+    template <typename T2>
+    REALM_CUDA_HD
     Matrix(const Matrix<M, N, T2>& copy_from);
-    template <typename T2> __CUDA_HD__
+    template <typename T2>
+    REALM_CUDA_HD
     Matrix<M, N, T>& operator=(const Matrix<M, N, T2>& copy_from);
 
-    __CUDA_HD__
+    REALM_CUDA_HD
     Point<N,T>& operator[](int index);
-    __CUDA_HD__
+    REALM_CUDA_HD
     const Point<N,T>& operator[](int index) const;
   };
 
-  template <int M, int N, typename T, typename T2> __CUDA_HD__
+  template <int M, int N, typename T, typename T2> REALM_CUDA_HD
   Point<M, T> operator*(const Matrix<M, N, T>& m, const Point<N, T2>& p);
-  template <int M, int P, int N, typename T, typename T2> __CUDA_HD__
+  template <int M, int P, int N, typename T, typename T2> REALM_CUDA_HD
   Matrix<M, N, T> operator*(const Matrix<M, P, T>& m, const Matrix<P, N, T2>& n);
 
   template <int N, typename T>
@@ -236,13 +243,13 @@ namespace Realm {
     Rect<N,T> rect;
     bool fortran_order;
 
-    __CUDA_HD__
+    REALM_CUDA_HD
     PointInRectIterator(void);
-    __CUDA_HD__
+    REALM_CUDA_HD
     PointInRectIterator(const Rect<N,T>& _r, bool _fortran_order = true);
-    __CUDA_HD__
+    REALM_CUDA_HD
     void reset(const Rect<N,T>& _r, bool _fortran_order = true);
-    __CUDA_HD__
+    REALM_CUDA_HD
     bool step(void);
   };
 

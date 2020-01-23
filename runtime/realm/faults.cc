@@ -19,13 +19,15 @@
 #include "realm/profiling.h"
 
 #include <stdlib.h>
-#ifndef __FreeBSD__
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS)
 // FreeBSD defines alloca() in stdlib.h
 #include <alloca.h>
 #endif
 #include <assert.h>
 #include <execinfo.h>
+#ifdef REALM_HAVE_CXXABI_H
 #include <cxxabi.h>
+#endif
 #include <iomanip>
 
 namespace Realm {
@@ -180,6 +182,7 @@ namespace Realm {
         char *s = (char *)(bt.symbols[i].c_str());
         char *lp = s;
         bool print_raw = true;
+#ifdef REALM_HAVE_CXXABI_H
         while(*lp && (*lp != '(')) lp++;
         if(*lp && (lp[1] != '+')) {
           char *rp = ++lp;
@@ -187,7 +190,7 @@ namespace Realm {
           if(*rp) {
             char orig_rp = *rp;
             *rp = 0;
-            int status;
+            int status = -4;
             char *result = abi::__cxa_demangle(lp, demangle_buffer, &demangle_len, &status);
             *rp = orig_rp;
             if(status == 0) {
@@ -200,6 +203,7 @@ namespace Realm {
             }
           }
         }
+#endif
         if(print_raw)
 	  os << bt.symbols[i];
       } else {
