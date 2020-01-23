@@ -268,6 +268,7 @@ local node_usage = {
   [ast.annotation]              = uses_nothing,
   [ast.condition_kind]          = uses_nothing,
   [ast.disjointness_kind]       = uses_nothing,
+  [ast.completeness_kind]       = uses_nothing,
   [ast.fence_kind]              = uses_nothing,
 }
 

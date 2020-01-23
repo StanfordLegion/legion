@@ -297,6 +297,7 @@ local node_vars_are_valid = {
   [ast.annotation]        = continue,
   [ast.condition_kind]    = continue,
   [ast.disjointness_kind] = continue,
+  [ast.completeness_kind] = continue,
   [ast.fence_kind]        = continue,
   [ast.metadata]          = continue,
 }
