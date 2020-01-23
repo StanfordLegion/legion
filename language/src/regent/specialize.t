@@ -395,6 +395,14 @@ function specialize.expr_conditions(cx, node)
     function(condition) return specialize.expr_condition(cx, condition) end)
 end
 
+function specialize.completeness_kind(cx, node)
+  if node:is(ast.completeness_kind) then
+    return node
+  else
+    assert(false, "unexpected node type " .. tostring(node:type()))
+  end
+end
+
 function specialize.disjointness_kind(cx, node)
   if node:is(ast.disjointness_kind) then
     return node
@@ -862,6 +870,7 @@ end
 
 function specialize.expr_partition_by_field(cx, node, allow_lists)
   return ast.specialized.expr.PartitionByField {
+    completeness = specialize.completeness_kind(cx, node.completeness),
     region = specialize.expr_region_root(cx, node.region),
     colors = specialize.expr(cx, node.colors),
     annotations = node.annotations,

@@ -199,6 +199,7 @@ local node_is_leaf = {
   [ast.annotation]              = always_true,
   [ast.condition_kind]          = always_true,
   [ast.disjointness_kind]       = always_true,
+  [ast.completeness_kind]       = always_true,
   [ast.fence_kind]              = always_true,
   [ast.metadata]                = always_true,
 }
@@ -337,6 +338,7 @@ local node_is_inner = {
   [ast.annotation]              = always_true,
   [ast.condition_kind]          = always_true,
   [ast.disjointness_kind]       = always_true,
+  [ast.completeness_kind]       = always_true,
   [ast.fence_kind]              = always_true,
   [ast.metadata]                = always_true,
 }
@@ -477,6 +479,7 @@ local node_is_idempotent = {
   [ast.annotation]              = always_true,
   [ast.condition_kind]          = always_true,
   [ast.disjointness_kind]       = always_true,
+  [ast.completeness_kind]       = always_true,
   [ast.fence_kind]              = always_true,
   [ast.metadata]                = always_true,
 }
@@ -627,6 +630,7 @@ local node_is_replicable = {
   [ast.annotation]              = always_true,
   [ast.condition_kind]          = always_true,
   [ast.disjointness_kind]       = always_true,
+  [ast.completeness_kind]       = always_true,
   [ast.fence_kind]              = always_true,
   [ast.metadata]                = always_true,
 }

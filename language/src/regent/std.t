@@ -2659,6 +2659,7 @@ do
 
     st.is_partition = true
     st.disjointness = disjointness
+    st.completeness = completeness
     st.parent_region_symbol = region_symbol
     st.colors_symbol = colors_symbol
     st.index_expr = false

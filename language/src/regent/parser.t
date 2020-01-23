@@ -439,9 +439,9 @@ end
 function parser.completeness_kind(p)
   local start = ast.save(p)
   if p:nextif("incomplete") then
-    return ast.completeness_kind.Complete {}
-  elseif p:nextif("complete") then
     return ast.completeness_kind.Incomplete {}
+  elseif p:nextif("complete") then
+    return ast.completeness_kind.Complete {}
   else
     p:error("expected completeness")
   end
@@ -708,10 +708,19 @@ function parser.expr_prefix(p)
 
   elseif p:nextif("partition") then
     p:expect("(")
-    -- if p:is_completeness_kind() then
-    --   local completeness = p:completeness_kind()
-    --   p:expect(",")
-    if p:is_disjointness_kind() then
+    if p:nextif("equal") then
+      p:expect(",")
+      local region = p:expr()
+      p:expect(",")
+      local colors = p:expr()
+      p:expect(")")
+      return ast.unspecialized.expr.PartitionEqual {
+        region = region,
+        colors = colors,
+        annotations = ast.default_annotations(),
+        span = ast.span(start, p),
+      }
+    elseif p:is_disjointness_kind() then
       local disjointness = p:disjointness_kind()
       p:expect(",")
       local region = p:expr()
@@ -731,13 +740,15 @@ function parser.expr_prefix(p)
         annotations = ast.default_annotations(),
         span = ast.span(start, p),
       }
-    elseif p:nextif("equal") then
+    elseif p:is_completeness_kind() then
+      local completeness = p:completeness_kind()
       p:expect(",")
-      local region = p:expr()
+      local region = p:expr_region_root()
       p:expect(",")
       local colors = p:expr()
       p:expect(")")
-      return ast.unspecialized.expr.PartitionEqual {
+      return ast.unspecialized.expr.PartitionByField {
+        completeness = completeness,
         region = region,
         colors = colors,
         annotations = ast.default_annotations(),
@@ -748,7 +759,10 @@ function parser.expr_prefix(p)
       p:expect(",")
       local colors = p:expr()
       p:expect(")")
+      print("this should not print")
+      local completeness = ast.completeness_kind.Complete {}
       return ast.unspecialized.expr.PartitionByField {
+        completeness = completeness,
         region = region,
         colors = colors,
         annotations = ast.default_annotations(),

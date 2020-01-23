@@ -1744,7 +1744,7 @@ function type_check.expr_partition_by_field(cx, node)
   else
     colors_symbol = std.newsymbol(colors_type)
   end
-  local expr_type = std.partition(std.disjoint, region_symbol, colors_symbol)
+  local expr_type = std.partition(std.complete, std.disjoint, region_symbol, colors_symbol)
 
   if not std.check_privilege(cx, std.reads, region_type, region.fields[1]) then
     report.error(
@@ -1761,6 +1761,7 @@ function type_check.expr_partition_by_field(cx, node)
   assert(expr_type.parent_region_symbol:gettype() == region_type)
 
   return ast.typed.expr.PartitionByField {
+    completeness = node.completeness,
     region = region,
     colors = colors,
     expr_type = expr_type,
