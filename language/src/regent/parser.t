@@ -432,6 +432,21 @@ function parser.constraint(p)
   }
 end
 
+function parser.is_completeness_kind(p)
+  return p:matches("complete") or p:matches("incomplete")
+end
+
+function parser.completeness_kind(p)
+  local start = ast.save(p)
+  if p:nextif("incomplete") then
+    return ast.completeness_kind.Complete {}
+  elseif p:nextif("complete") then
+    return ast.completeness_kind.Incomplete {}
+  else
+    p:error("expected completeness")
+  end
+end
+
 function parser.is_disjointness_kind(p)
   return p:matches("aliased") or p:matches("disjoint")
 end
@@ -693,6 +708,9 @@ function parser.expr_prefix(p)
 
   elseif p:nextif("partition") then
     p:expect("(")
+    -- if p:is_completeness_kind() then
+    --   local completeness = p:completeness_kind()
+    --   p:expect(",")
     if p:is_disjointness_kind() then
       local disjointness = p:disjointness_kind()
       p:expect(",")
