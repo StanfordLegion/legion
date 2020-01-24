@@ -4396,11 +4396,11 @@ namespace Legion {
     IndexPartition Runtime::create_partition_by_field(Context ctx,
                    LogicalRegion handle, LogicalRegion parent, FieldID fid, 
                    IndexSpace color_space, Color color, 
-                   MapperID id, MappingTagID tag)
+                   MapperID id, MappingTagID tag, PartitionKind part_kind)
     //--------------------------------------------------------------------------
     {
       return runtime->create_partition_by_field(ctx, handle, parent, fid,
-                                                color_space, color, id, tag);
+                                  color_space, color, id, tag, part_kind);
     }
 
     //--------------------------------------------------------------------------

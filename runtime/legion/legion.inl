@@ -8805,12 +8805,13 @@ namespace Legion {
                                     LogicalRegionT<DIM,T> parent,
                                     FieldID fid,
                                     IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
-                                    Color color, MapperID id, MappingTagID tag)
+                                    Color color, MapperID id, MappingTagID tag,
+                                    PartitionKind part_kind)
     //--------------------------------------------------------------------------
     {
       return IndexPartitionT<DIM,T>(create_partition_by_field(ctx,
             LogicalRegion(handle), LogicalRegion(parent), fid, 
-            IndexSpace(color_space), color, id, tag));
+            IndexSpace(color_space), color, id, tag, part_kind));
     }
 
     //--------------------------------------------------------------------------
