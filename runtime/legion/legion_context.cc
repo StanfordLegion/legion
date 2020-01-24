@@ -10202,7 +10202,8 @@ namespace Legion {
                                               FieldID fid,
                                               IndexSpace color_space,
                                               Color color,
-                                              MapperID id, MappingTagID tag)
+                                              MapperID id, MappingTagID tag,
+                                              PartitionKind part_kind)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -10233,7 +10234,7 @@ namespace Legion {
                                            index_partition_allocator_shard,
                                            this, pid, parent, 
                                            color_space, part_color,
-                                           DISJOINT_COMPLETE_KIND, did, NULL,
+                                           part_kind, did, NULL,
                                            pending_partition_barrier,
                                            shard_manager->get_mapping(),
                                            creation_barrier);
@@ -10278,7 +10279,7 @@ namespace Legion {
                                          index_partition_allocator_shard,
                                          this, pid, parent, 
                                          color_space, part_color,
-                                         DISJOINT_COMPLETE_KIND, value.did,NULL,
+                                         part_kind, value.did,NULL,
                                          pending_partition_barrier,
                                          shard_manager->get_mapping(),
                                          creation_barrier);
