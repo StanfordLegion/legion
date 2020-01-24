@@ -123,8 +123,8 @@ namespace Realm {
     T *pop_front(PT min_priority);
 
     // calls callback for each element in list
-    template <typename CALLBACK>
-    void foreach(CALLBACK& cb);
+    template <typename CALLABLE>
+    void foreach(CALLABLE& cb);
 
     // we don't maintain the size, so this is slow - use only for debugging
     size_t size(void) const;

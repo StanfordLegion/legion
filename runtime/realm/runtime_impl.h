@@ -42,10 +42,6 @@
 #include "realm/module.h"
 #include "realm/network.h"
 
-#if __cplusplus >= 201103L
-#define typeof decltype
-#endif
-
 namespace Realm {
 
   class ProcessorGroup;

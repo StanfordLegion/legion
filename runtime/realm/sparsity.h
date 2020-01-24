@@ -62,7 +62,7 @@ namespace Realm {
     bool operator!=(const SparsityMap<N,T> &rhs) const;
 
     //static const SparsityMap<N,T> NO_SPACE;
-    __CUDA_HD__
+    REALM_CUDA_HD
     bool exists(void) const;
 
     // looks up the public subset of the implementation object

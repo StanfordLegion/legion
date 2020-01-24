@@ -100,19 +100,6 @@ namespace Realm {
 			     Event before_copy,
 			     Event after_copy = Event::NO_EVENT);
     */
-
-    // helper methods used in other places
-    static inline off_t calc_mem_loc(off_t alloc_offset, off_t field_start, int field_size, size_t elmt_size,
-				     size_t block_size, off_t index)
-    {
-      return (alloc_offset +                                      // start address
-	      ((index / block_size) * block_size * elmt_size) +   // full blocks
-	      (field_start * block_size) +                        // skip other fields
-	      ((index % block_size) * field_size));               // some some of our fields within our block
-    }
-
-    void find_field_start(const std::vector<size_t>& field_sizes, off_t byte_offset,
-			  size_t size, off_t& field_start, int& field_size);
     
     class DmaRequestQueue;
     // for now we use a single queue for all (local) dmas

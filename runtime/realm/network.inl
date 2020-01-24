@@ -26,7 +26,7 @@ namespace Realm {
     inline NetworkModule *get_network(NodeID node)
     {
 #ifdef REALM_USE_MULTIPLE_NETWORKS
-      if(__builtin_expect(single_network == 0, 0)) {
+      if(REALM_UNLILELY(single_network == 0)) {
       } else
 #endif
 	return single_network;
@@ -35,7 +35,7 @@ namespace Realm {
     inline void barrier(void)
     {
 #ifdef REALM_USE_MULTIPLE_NETWORKS
-      if(__builtin_expect(single_network == 0, 0)) {
+      if(REALM_UNLIKELY(single_network == 0)) {
       } else
 #endif
 	single_network->barrier();
@@ -67,7 +67,7 @@ namespace Realm {
 			  const void *val_in, void *val_out, size_t bytes)
     {
 #ifdef REALM_USE_MULTIPLE_NETWORKS
-      if(__builtin_expect(single_network == 0, 0)) {
+      if(REALM_UNLIKELY(single_network == 0)) {
       } else
 #endif
 	single_network->broadcast(root, val_in, val_out, bytes);
@@ -77,7 +77,7 @@ namespace Realm {
 		       const void *val_in, void *vals_out, size_t bytes)
     {
 #ifdef REALM_USE_MULTIPLE_NETWORKS
-      if(__builtin_expect(single_network == 0, 0)) {
+      if(REALM_UNLIKELY(single_network == 0)) {
       } else
 #endif
 	single_network->gather(root, val_in, vals_out, bytes);
@@ -92,7 +92,7 @@ namespace Realm {
 							 size_t storage_size)
     {
 #ifdef REALM_USE_MULTIPLE_NETWORKS
-      if(__builtin_expect(single_network == 0, 0)) {
+      if(REALM_UNLIKELY(single_network == 0)) {
       } else
 #endif
 	return single_network->create_active_message_impl(target,
@@ -112,7 +112,7 @@ namespace Realm {
 							 size_t storage_size)
     {
 #ifdef REALM_USE_MULTIPLE_NETWORKS
-      if(__builtin_expect(single_network == 0, 0)) {
+      if(REALM_UNLIKELY(single_network == 0)) {
       } else
 #endif
 	return single_network->create_active_message_impl(targets,

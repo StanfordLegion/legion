@@ -356,7 +356,8 @@ namespace Realm {
   }
     
   // true if there is no sparsity map (i.e. the bounds fully define the domain)
-  template <int N, typename T>  __CUDA_HD__
+  template <int N, typename T>
+  REALM_CUDA_HD
   inline bool IndexSpace<N,T>::dense(void) const
   {
     return !sparsity.exists();

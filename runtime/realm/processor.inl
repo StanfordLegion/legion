@@ -31,7 +31,7 @@ namespace Realm {
   // use compiler-provided TLS for quickly finding our thread - stick this in another
   //  namespace to make it obvious
   namespace ThreadLocal {
-    extern __thread Processor current_processor;
+    extern REALM_THREAD_LOCAL Processor current_processor;
   };
 
   /*static*/ inline Processor Processor::get_executing_processor(void)

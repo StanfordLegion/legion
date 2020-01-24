@@ -44,7 +44,7 @@ namespace Realm {
 
     friend class PartitioningMicroOp;
     template <typename S>
-    bool serialize_params(S& s) const WARN_UNUSED;
+    REALM_ATTR_WARN_UNUSED(bool serialize_params(S& s) const);
 
     // construct from received packet
     template <typename S>
@@ -79,7 +79,7 @@ namespace Realm {
 
     friend class PartitioningMicroOp;
     template <typename S>
-    bool serialize_params(S& s) const WARN_UNUSED;
+    REALM_ATTR_WARN_UNUSED(bool serialize_params(S& s) const);
 
     // construct from received packet
     template <typename S>
@@ -113,7 +113,7 @@ namespace Realm {
 
     friend class PartitioningMicroOp;
     template <typename S>
-    bool serialize_params(S& s) const WARN_UNUSED;
+    REALM_ATTR_WARN_UNUSED(bool serialize_params(S& s) const);
 
     // construct from received packet
     template <typename S>

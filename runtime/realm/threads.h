@@ -24,7 +24,7 @@
 #include "realm/utils.h"
 
 #ifdef REALM_USE_USER_THREADS
-#ifdef __MACH__
+#ifdef REALM_ON_MACOS
 #define _XOPEN_SOURCE
 #endif
 #endif

@@ -4664,12 +4664,12 @@ void
 legion_runtime_begin_trace(legion_runtime_t runtime_,
                            legion_context_t ctx_,
                            legion_trace_id_t tid,
-                           bool memoize)
+                           bool logical_only)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
 
-  runtime->begin_trace(ctx, tid, memoize);
+  runtime->begin_trace(ctx, tid, logical_only);
 }
 
 void

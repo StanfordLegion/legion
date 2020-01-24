@@ -19,7 +19,7 @@
 #ifndef REALM_ATOMICS_H
 #define REALM_ATOMICS_H
 
-#if __cplusplus >= 201103L
+#if (REALM_CXX_STANDARD >= 11) && !defined(REALM_NO_USE_STD_ATOMIC)
 #define REALM_USE_STD_ATOMIC
 #endif
 

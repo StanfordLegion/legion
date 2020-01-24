@@ -21,7 +21,7 @@
 namespace Realm {
 
   namespace ThreadLocal {
-    extern __thread ThreadPool::WorkerInfo *threadpool_workerinfo;
+    extern REALM_THREAD_LOCAL ThreadPool::WorkerInfo *threadpool_workerinfo;
   };
 
   ////////////////////////////////////////////////////////////////////////

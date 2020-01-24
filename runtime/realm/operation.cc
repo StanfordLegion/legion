@@ -41,27 +41,25 @@ namespace Realm {
   bool Operation::mark_ready(void)
   {
     // attempt to switch from WAITING -> READY
-    Status::Result prev = __sync_val_compare_and_swap(&status.result,
-						      Status::WAITING,
-						      Status::READY);
-    switch(prev) {
-    case Status::WAITING:
-      {
-	// normal behavior
-	if(wants_timeline)
-	  timeline.record_ready_time();
-	return true;
-      }
+    Status::Result prev = Status::WAITING;
 
-    case Status::CANCELLED:
-      {
-	// lost the race to a cancellation request
-	return false;
-      }
+    if(state.compare_exchange(prev, Status::READY)) {
+      // normal behavior
+      if(wants_timeline)
+	timeline.record_ready_time();
+      return true;
+    } else {
+      switch(prev) {
+      case Status::CANCELLED:
+	{
+	  // lost the race to a cancellation request
+	  return false;
+	}
 
-    default:
-      {
-	assert(0 && "mark_ready called when not WAITING or CANCELLED");
+      default:
+	{
+	  assert(0 && "mark_ready called when not WAITING or CANCELLED");
+	}
       }
     }
     return false;
@@ -70,27 +68,24 @@ namespace Realm {
   bool Operation::mark_started(void)
   {
     // attempt to switch from READY -> RUNNING
-    Status::Result prev = __sync_val_compare_and_swap(&status.result,
-						      Status::READY,
-						      Status::RUNNING);
-    switch(prev) {
-    case Status::READY:
-      {
-	// normal behavior
-	if(wants_timeline)
-	  timeline.record_start_time();
-	return true;
-      }
+    Status::Result prev = Status::READY;
+    if(state.compare_exchange(prev, Status::RUNNING)) {
+      // normal behavior
+      if(wants_timeline)
+	timeline.record_start_time();
+      return true;
+    } else {
+      switch(prev) {
+      case Status::CANCELLED:
+	{
+	  // lost the race to a cancellation request
+	  return false;
+	}
 
-    case Status::CANCELLED:
-      {
-	// lost the race to a cancellation request
-	return false;
-      }
-
-    default:
-      {
-	assert(0 && "mark_started called when not READY or CANCELLED");
+      default:
+	{
+	  assert(0 && "mark_started called when not READY or CANCELLED");
+	}
       }
     }
     return false;
@@ -103,10 +98,10 @@ namespace Realm {
 
     // update this count first
     if(!successful)
-      __sync_fetch_and_add(&failed_work_items, 1);
+      failed_work_items.fetch_add(1);
 
     // do an atomic decrement of the work counter to see if we're also complete
-    int remaining = __sync_sub_and_fetch(&pending_work_items, 1);
+    int remaining = pending_work_items.fetch_sub(1) - 1;
 
     if(remaining == 0)
       mark_completed();    
@@ -115,28 +110,29 @@ namespace Realm {
   void Operation::mark_terminated(int error_code, const ByteArray& details)
   {
     // attempt to switch from RUNNING -> TERMINATED_EARLY
-    Status::Result prev = __sync_val_compare_and_swap(&status.result,
-						      Status::RUNNING,
-						      Status::TERMINATED_EARLY);
-    if(prev == Status::RUNNING) {
+    Status::Result prev = Status::RUNNING;
+    if(state.compare_exchange(prev, Status::TERMINATED_EARLY)) {
+      status.result = Status::TERMINATED_EARLY;
       status.error_code = error_code;
       status.error_details = details;
     } else {
       // if that didn't work, try going from INTERRUPT_REQUESTED -> TERMINATED_EARLY
-#ifndef NDEBUG
-      prev =
-#endif
-        __sync_val_compare_and_swap(&status.result,
-				    Status::INTERRUPT_REQUESTED,
-				    Status::TERMINATED_EARLY);
-      assert(prev == Status::INTERRUPT_REQUESTED);
-      // don't update error_code/details - that was already provided in the interrupt request
+      if(prev == Status::INTERRUPT_REQUESTED) {
+	if(state.compare_exchange(prev, Status::TERMINATED_EARLY)) {
+	  status.result = Status::TERMINATED_EARLY;
+	  // don't update error_code/details - that was already provided in the interrupt request
+	} else {
+	  assert(0);
+	}
+      } else {
+	assert(0);
+      }
     }
 
     if(wants_timeline)
       timeline.record_complete_time();
 
-    __sync_fetch_and_add(&failed_work_items, 1);
+    failed_work_items.fetch_add(1);
 
     // if this operation has async work items, try to cancel them
     if(!all_work_items.empty()) {
@@ -147,7 +143,7 @@ namespace Realm {
     }
 
     // can't trigger the finish event immediately if async work items are pending
-    int remaining = __sync_sub_and_fetch(&pending_work_items, 1);
+    int remaining = pending_work_items.fetch_sub(1) - 1;
 
     if(remaining == 0)
       mark_completed();    
@@ -155,19 +151,19 @@ namespace Realm {
 
   void Operation::mark_completed(void)
   {
+    bool had_failures = failed_work_items.load() != 0;
+    
     // don't overwrite a TERMINATED_EARLY or CANCELLED status
-    Status::Result newresult = ((failed_work_items == 0) ?
-  				  Status::COMPLETED_SUCCESSFULLY :
-				  Status::COMPLETED_WITH_ERRORS);
-#ifndef NDEBUG
-    Status::Result prev =
-#endif
-      __sync_val_compare_and_swap(&status.result,
-				  Status::RUNNING,
-				  newresult);
-    assert((prev == Status::RUNNING) ||
-	   (prev == Status::TERMINATED_EARLY) ||
-	   (prev == Status::CANCELLED));
+    Status::Result newresult = (had_failures ? 
+  				  Status::COMPLETED_WITH_ERRORS :
+				  Status::COMPLETED_SUCCESSFULLY);
+    Status::Result prev = Status::RUNNING;
+    if(state.compare_exchange(prev, newresult)) {
+      status.result = newresult;
+    } else {
+      assert((prev == Status::TERMINATED_EARLY) ||
+	     (prev == Status::CANCELLED));
+    }
 
     if(wants_timeline) {
       timeline.record_complete_time();
@@ -177,7 +173,7 @@ namespace Realm {
 
     // trigger the finish event last - the OperationTable will delete us shortly after we do
     // poison if there were any failed work items
-    trigger_finish_event(failed_work_items != 0);
+    trigger_finish_event(had_failures);
   }
 
   bool Operation::attempt_cancellation(int error_code,
@@ -186,8 +182,16 @@ namespace Realm {
     // all we know how to do here is convert from WAITING or READY to CANCELLED
     // there's no mutex, so we'll attempt to update the status with a sequence of 
     //  compare_and_swap's, making sure to follow the normal progression of status updates
-    if(__sync_bool_compare_and_swap(&status.result, Status::WAITING, Status::CANCELLED) ||
-       __sync_bool_compare_and_swap(&status.result, Status::READY, Status::CANCELLED)) {
+    Status::Result prev = Status::WAITING;
+    bool cancelled = false;
+    if(state.compare_exchange(prev, Status::CANCELLED)) {
+      cancelled = true;
+    } else {
+      if(prev == Status::READY)
+	cancelled = state.compare_exchange(prev, Status::CANCELLED);
+    }
+    if(cancelled) {
+      status.result = Status::CANCELLED;
       status.error_code = error_code;
       status.error_details.set(reason_data, reason_size);
 
@@ -199,10 +203,10 @@ namespace Realm {
     }
 
     // if the task is in a terminal state, no subclass will be able to do anything either
-    if((status.result == Status::COMPLETED_SUCCESSFULLY) ||
-       (status.result == Status::COMPLETED_WITH_ERRORS) ||
-       (status.result == Status::TERMINATED_EARLY) ||
-       (status.result == Status::CANCELLED))
+    if((prev == Status::COMPLETED_SUCCESSFULLY) ||
+       (prev == Status::COMPLETED_WITH_ERRORS) ||
+       (prev == Status::TERMINATED_EARLY) ||
+       (prev == Status::CANCELLED))
       return true;
 
     // otherwise we return false - a subclass might override and add additional ways to
@@ -221,12 +225,16 @@ namespace Realm {
   {
     // there should be no race conditions for this - state should be WAITING because we
     //  know there's a precondition that didn't successfully trigger
-    assert(status.result == Status::WAITING);
-    status.error_code = Faults::ERROR_POISONED_PRECONDITION;
-    status.error_details.set(&pre, sizeof(pre));
+    Status::Result prev = Status::WAITING;
+    if(state.compare_exchange(prev, Status::CANCELLED)) {
+      status.result = Status::CANCELLED;
+      status.error_code = Faults::ERROR_POISONED_PRECONDITION;
+      status.error_details.set(&pre, sizeof(pre));
 
-    status.result = Status::CANCELLED;
-    mark_finished(false /*unsuccessful*/);
+      mark_finished(false /*unsuccessful*/);
+    } else {
+      assert(0);
+    }
   }
 
   void Operation::send_profiling_data(void)
@@ -282,10 +290,10 @@ namespace Realm {
   std::ostream& operator<<(std::ostream& os, const Operation *op)
   {
     op->print(os);
-    os << " status=" << op->status.result
+    os << " status=" << op->state.load()
        << "(" << op->timeline.ready_time
        << "," << op->timeline.start_time
-       << ") work=" << op->pending_work_items;
+       << ") work=" << op->pending_work_items.load();
     if(!op->all_work_items.empty()) {
       os << " { ";
       std::set<Operation::AsyncWorkItem *>::const_iterator it = op->all_work_items.begin();

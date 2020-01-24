@@ -85,25 +85,22 @@ namespace Realm {
     LoggerMessage newmsg(LoggingLevel level);
     
     // old printf-style interface
-    void spew(const char *fmt, ...) __attribute__((format (printf, 2, 3)));
-    void debug(const char *fmt, ...) __attribute__((format (printf, 2, 3)));
-    void info(const char *fmt, ...) __attribute__((format (printf, 2, 3)));
-    void print(const char *fmt, ...) __attribute__((format (printf, 2, 3)));
-    void warning(const char *fmt, ...) __attribute__((format (printf, 2, 3)));
-    void error(const char *fmt, ...) __attribute__((format (printf, 2, 3)));
-    void fatal(const char *fmt, ...) __attribute__((format (printf, 2, 3)));
+    REALM_ATTR_PRINTF_FORMAT(void spew(const char *fmt, ...), 2, 3);
+    REALM_ATTR_PRINTF_FORMAT(void debug(const char *fmt, ...), 2, 3);
+    REALM_ATTR_PRINTF_FORMAT(void info(const char *fmt, ...), 2, 3);
+    REALM_ATTR_PRINTF_FORMAT(void print(const char *fmt, ...), 2, 3);
+    REALM_ATTR_PRINTF_FORMAT(void warning(const char *fmt, ...), 2, 3);
+    REALM_ATTR_PRINTF_FORMAT(void error(const char *fmt, ...), 2, 3);
+    REALM_ATTR_PRINTF_FORMAT(void fatal(const char *fmt, ...), 2, 3);
     
     // newer collated messages
-    void spew(LoggerMessageID, const char *fmt, ...) __attribute__((format (printf, 3, 4)));
-    void debug(LoggerMessageID, const char *fmt, ...) __attribute__((format (printf, 3, 4)));
-    void info(LoggerMessageID, const char *fmt, ...) __attribute__((format (printf, 3, 4)));
-    void print(LoggerMessageID, const char *fmt, ...) __attribute__((format (printf, 3, 4)));
-    void warning(LoggerMessageID, const char *fmt, ...) __attribute__((format (printf, 3, 4)));
-    void error(LoggerMessageID, const char *fmt, ...) __attribute__((format (printf, 3, 4)));
-    void fatal(LoggerMessageID, const char *fmt, ...) __attribute__((format (printf, 3, 4)));
-    
-    
-    
+    REALM_ATTR_PRINTF_FORMAT(void spew(LoggerMessageID, const char *fmt, ...), 3, 4);
+    REALM_ATTR_PRINTF_FORMAT(void debug(LoggerMessageID, const char *fmt, ...), 3, 4);
+    REALM_ATTR_PRINTF_FORMAT(void info(LoggerMessageID, const char *fmt, ...), 3, 4);
+    REALM_ATTR_PRINTF_FORMAT(void print(LoggerMessageID, const char *fmt, ...), 3, 4);
+    REALM_ATTR_PRINTF_FORMAT(void warning(LoggerMessageID, const char *fmt, ...), 3, 4);
+    REALM_ATTR_PRINTF_FORMAT(void error(LoggerMessageID, const char *fmt, ...), 3, 4);
+    REALM_ATTR_PRINTF_FORMAT(void fatal(LoggerMessageID, const char *fmt, ...), 3, 4);
     
   protected:
     friend class LoggerMessage;

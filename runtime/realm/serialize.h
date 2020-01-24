@@ -18,6 +18,7 @@
 #ifndef REALM_SERIALIZE_H
 #define REALM_SERIALIZE_H
 
+#include "realm/realm_config.h"
 #include "realm/bytearray.h"
 
 #include <stddef.h>

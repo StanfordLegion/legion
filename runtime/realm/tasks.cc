@@ -105,9 +105,8 @@ namespace Realm {
       return true;
 
     // for a running task, see if we can signal it to stop
-    if(__sync_bool_compare_and_swap(&status.result,
-				    Status::RUNNING,
-				    Status::INTERRUPT_REQUESTED)) {
+    Status::Result prev = Status::RUNNING;
+    if(state.compare_exchange(prev, Status::INTERRUPT_REQUESTED)) {
       status.error_code = error_code;
       status.error_details.set(reason_data, reason_size);
       Thread *t = executing_thread;
@@ -1373,7 +1372,7 @@ namespace Realm {
   namespace ThreadLocal {
     // you can't delete a user thread until you've switched off of it, so
     //  use TLS to mark when that should happen
-    static __thread Thread *terminated_user_thread = 0;
+    static REALM_THREAD_LOCAL Thread *terminated_user_thread = 0;
   };
 
   inline void UserThreadTaskScheduler::request_user_thread_cleanup(Thread *thread)

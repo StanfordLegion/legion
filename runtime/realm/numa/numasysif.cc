@@ -27,7 +27,7 @@
 
 #include <vector>
 
-#ifdef __linux__
+#ifdef REALM_ON_LINUX
 #include <alloca.h>
 #include <unistd.h>
 #include <sys/syscall.h>
@@ -67,7 +67,7 @@ namespace Realm {
   // as soon as we get more than one real version of these, split them out into
   //  separate files
 
-#ifdef __linux__
+#ifdef REALM_ON_LINUX
   namespace {
     // Linux wants you to guess how many nodes there are, and if you're wrong,
     //  it just tells you to try again - save the answer here so we only have
@@ -88,7 +88,7 @@ namespace Realm {
   // is NUMA support available in the system?
   bool numasysif_numa_available(void)
   {
-#ifdef __linux__
+#ifdef REALM_ON_LINUX
     int policy;
     unsigned char *nmask = (unsigned char *)alloca(max_supported_node_count >> 3);
     while(1) {
@@ -127,7 +127,7 @@ namespace Realm {
   bool numasysif_get_mem_info(std::map<int, NumaNodeMemInfo>& info,
 			      bool only_available /*= true*/)
   {
-#ifdef __linux__
+#ifdef REALM_ON_LINUX
     int policy = -1;
     unsigned char *nmask = (unsigned char *)alloca(detected_node_count >> 3);
     for(int i = 0; i < detected_node_count >> 3; i++)
@@ -199,7 +199,7 @@ namespace Realm {
   bool numasysif_get_cpu_info(std::map<int, NumaNodeCpuInfo>& info,
 			      bool only_available /*= true*/)
   {
-#ifdef __linux__
+#ifdef REALM_ON_LINUX
     // if we're restricting to what's been made available, find what's been 
     //  made available
     cpu_set_t avail_cpus;
@@ -265,7 +265,7 @@ namespace Realm {
   //  per hop
   int numasysif_get_distance(int node1, int node2)
   {
-#ifdef __linux__
+#ifdef REALM_ON_LINUX
     static std::map<int, std::vector<int> > saved_distances;
 
     std::map<int, std::vector<int> >::iterator it = saved_distances.find(node1);
@@ -315,7 +315,7 @@ namespace Realm {
   // allocate memory on a given NUMA node - pin if requested
   void *numasysif_alloc_mem(int node, size_t bytes, bool pin)
   {
-#ifdef __linux__
+#ifdef REALM_ON_LINUX
     // get memory from mmap
     // TODO: hugetlbfs, if possible
     void *base = mmap(0,
@@ -341,7 +341,7 @@ namespace Realm {
   // free memory allocated on a given NUMA node
   bool numasysif_free_mem(int node, void *base, size_t bytes)
   {
-#ifdef __linux__
+#ifdef REALM_ON_LINUX
     int ret = munmap(base, bytes);
     return(ret == 0);
 #else
@@ -353,7 +353,7 @@ namespace Realm {
   // may fail if the memory has already been touched
   bool numasysif_bind_mem(int node, void *base, size_t bytes, bool pin)
   {
-#ifdef __linux__
+#ifdef REALM_ON_LINUX
     int policy = MPOL_BIND;
     if((node < 0) || (node >= detected_node_count)) {
       fprintf(stderr, "bind request for node out of range: %d\n", node);

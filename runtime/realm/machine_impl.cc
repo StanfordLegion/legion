@@ -3057,11 +3057,7 @@ namespace Realm {
   {
     // wait until we hear from everyone else?
     while((int)announcements_received < Network::max_node_id) {
-#ifdef __MACH__
-      sched_yield();
-#else
-      pthread_yield();
-#endif
+      Thread::yield();
       //do_some_polling();
     }
 

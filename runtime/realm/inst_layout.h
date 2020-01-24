@@ -40,9 +40,10 @@ namespace Realm {
 
     struct FieldInfo {
       FieldID field_id;
-      int offset;
-      int size;
-      int alignment;
+      bool fixed_offset;
+      size_t offset;  // used if `fixed_offset` is true
+      size_t size;
+      size_t alignment;
     };
     typedef std::vector<FieldInfo> FieldGroup;
 
@@ -291,12 +292,13 @@ namespace Realm {
   template <typename FT, int N, typename T = int>
   class AffineAccessor {
   public:
-    // Note: All constructors except the default one must currently be called 
-    // on the host so there are no __CUDA_HD__ qualifiers
+    // NOTE: even when compiling with nvcc, non-default constructors are only
+    //  available in host code
 
     // TODO: Sean check if this is safe for a default constructor
-    __CUDA_HD__
+    REALM_CUDA_HD
     AffineAccessor(void);
+
     // NOTE: these constructors will die horribly if the conversion is not
     //  allowed - call is_compatible(...) first if you're not sure
 
@@ -327,7 +329,7 @@ namespace Realm {
 		   FieldID field_id, const Rect<N,T>& subrect,
 		   size_t subfield_offset = 0);
 
-    __CUDA_HD__
+    REALM_CUDA_HD
     ~AffineAccessor(void);
 
     static bool is_compatible(RegionInstance inst, FieldID field_id);
@@ -344,7 +346,7 @@ namespace Realm {
 			      FieldID field_id, const Rect<N,T>& subrect);
 
     // used by constructors or can be called directly
-    __CUDA_HD__
+    REALM_CUDA_HD
     void reset();
     void reset(RegionInstance inst,
 	       FieldID field_id, size_t subfield_offset = 0);
@@ -363,21 +365,21 @@ namespace Realm {
 	       FieldID field_id, const Rect<N,T>& subrect,
 	       size_t subfield_offset = 0);
   
-    __CUDA_HD__
+    REALM_CUDA_HD
     FT *ptr(const Point<N,T>& p) const;
-    __CUDA_HD__
+    REALM_CUDA_HD
     FT read(const Point<N,T>& p) const;
-    __CUDA_HD__
+    REALM_CUDA_HD
     void write(const Point<N,T>& p, FT newval) const;
 
-    __CUDA_HD__
+    REALM_CUDA_HD
     FT& operator[](const Point<N,T>& p) const;
 
-    __CUDA_HD__
+    REALM_CUDA_HD
     bool is_dense_arbitrary(const Rect<N,T> &bounds) const; // any dimension ordering
-    __CUDA_HD__
+    REALM_CUDA_HD
     bool is_dense_col_major(const Rect<N,T> &bounds) const; // Fortran dimension ordering
-    __CUDA_HD__
+    REALM_CUDA_HD
     bool is_dense_row_major(const Rect<N,T> &bounds) const; // C dimension ordering
 
   //protected:
@@ -394,7 +396,7 @@ namespace Realm {
     intptr_t base;
     Point<N, ptrdiff_t> strides;
   protected:
-    __CUDA_HD__
+    REALM_CUDA_HD
     FT* get_ptr(const Point<N,T>& p) const;
   };
 
