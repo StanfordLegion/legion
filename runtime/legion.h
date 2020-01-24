@@ -4106,6 +4106,7 @@ namespace Legion {
        * @param color optional new color for the index partition
        * @param id the ID of the mapper to use for mapping the fields
        * @param tag the context tag to pass to the mapper
+       * @param part_kind the kind of the partition
        * @return a new index partition of the index space of the logical region
        */
       IndexPartition create_partition_by_field(Context ctx,
@@ -4115,7 +4116,9 @@ namespace Legion {
                                                IndexSpace color_space,
                                                Color color = AUTO_GENERATE_ID,
                                                MapperID id = 0,
-                                               MappingTagID tag = 0);
+                                               MappingTagID tag = 0,
+                                               PartitionKind part_kind = 
+                                                                 DISJOINT_KIND);
       template<int DIM, typename COORD_T, 
                int COLOR_DIM, typename COLOR_COORD_T>
       IndexPartitionT<DIM,COORD_T> create_partition_by_field(Context ctx,
@@ -4124,7 +4127,8 @@ namespace Legion {
                           FieldID fid, // type: Point<COLOR_DIM,COLOR_COORD_T>
                           IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
                           Color color = AUTO_GENERATE_ID,
-                          MapperID id = 0, MappingTagID tag = 0);
+                          MapperID id = 0, MappingTagID tag = 0,
+                          PartitionKind part_kind = DISJOINT_KIND);
       ///@}
       ///@{
       /**

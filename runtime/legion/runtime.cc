@@ -12843,13 +12843,14 @@ namespace Legion {
                                                       IndexSpace color_space,
                                                       Color color,
                                                       MapperID id, 
-                                                      MappingTagID tag)
+                                                      MappingTagID tag,
+                                                      PartitionKind part_kind)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT("Illegal dummy context partition by field!");
       return ctx->create_partition_by_field(forest, handle, parent_priv, fid,
-                                            color_space, color, id, tag);
+                                      color_space, color, id, tag, part_kind);
     }
 
     //--------------------------------------------------------------------------

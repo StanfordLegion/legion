@@ -8384,8 +8384,7 @@ namespace Legion {
 #endif
         const RtEvent done = 
           Runtime::protect_merge_events(effects_postconditions);
-        if (done.exists() && !done.has_triggered())
-          done.wait();
+        complete_preconditions.insert(done);
       }
       if (!complete_preconditions.empty())
         complete_operation(Runtime::merge_events(complete_preconditions));

@@ -3947,7 +3947,8 @@ namespace Legion {
                                               FieldID fid,
                                               IndexSpace color_space,
                                               Color color,
-                                              MapperID id, MappingTagID tag)
+                                              MapperID id, MappingTagID tag,
+                                              PartitionKind part_kind)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -3968,7 +3969,7 @@ namespace Legion {
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition 
       RtEvent safe = forest->create_pending_partition(this, pid, parent, 
-                      color_space, part_color, DISJOINT_KIND, did, term_event);
+                      color_space, part_color, part_kind, did, term_event);
       // Do this after creating the pending partition so the node exists
       // in case we need to look at it during initialization
       part_op->initialize_by_field(this, pid, handle, parent_priv, fid, id,tag);
@@ -14906,7 +14907,8 @@ namespace Legion {
                                                 FieldID fid,
                                                 IndexSpace color_space,
                                                 Color color,
-                                                MapperID id, MappingTagID tag)
+                                                MapperID id, MappingTagID tag,
+                                                PartitionKind part_kind)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_PARTITION_FIELD,
@@ -16399,11 +16401,12 @@ namespace Legion {
                                                       IndexSpace color_space,
                                                       Color color,
                                                       MapperID id, 
-                                                      MappingTagID tag)
+                                                      MappingTagID tag,
+                                                      PartitionKind part_kind)
     //--------------------------------------------------------------------------
     {
       return enclosing->create_partition_by_field(forest, handle, parent_priv,
-                                            fid, color_space, color, id, tag);
+                                  fid, color_space, color, id, tag, part_kind);
     }
 
     //--------------------------------------------------------------------------

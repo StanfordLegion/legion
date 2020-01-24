@@ -174,7 +174,8 @@ namespace Legion {
                                             FieldID fid,
                                             IndexSpace color_space,
                                             Color color,
-                                            MapperID id, MappingTagID tag) = 0;
+                                            MapperID id, MappingTagID tag,
+                                            PartitionKind part_kind) = 0;
       virtual IndexPartition create_partition_by_image(
                                             RegionTreeForest *forest,
                                             IndexSpace handle,
@@ -889,7 +890,8 @@ namespace Legion {
                                             FieldID fid,
                                             IndexSpace color_space,
                                             Color color,
-                                            MapperID id, MappingTagID tag);
+                                            MapperID id, MappingTagID tag,
+                                            PartitionKind part_kind);
       virtual IndexPartition create_partition_by_image(
                                             RegionTreeForest *forest,
                                             IndexSpace handle,
@@ -2065,7 +2067,8 @@ namespace Legion {
                                             FieldID fid,
                                             IndexSpace color_space,
                                             Color color,
-                                            MapperID id, MappingTagID tag);
+                                            MapperID id, MappingTagID tag,
+                                            PartitionKind part_kind);
       virtual IndexPartition create_partition_by_image(
                                             RegionTreeForest *forest,
                                             IndexSpace handle,
@@ -2406,7 +2409,8 @@ namespace Legion {
                                             FieldID fid,
                                             IndexSpace color_space,
                                             Color color,
-                                            MapperID id, MappingTagID tag);
+                                            MapperID id, MappingTagID tag,
+                                            PartitionKind part_kind);
       virtual IndexPartition create_partition_by_image(
                                             RegionTreeForest *forest,
                                             IndexSpace handle,
