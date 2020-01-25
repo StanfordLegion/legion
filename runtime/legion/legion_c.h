@@ -3862,6 +3862,14 @@ extern "C" {
   legion_physical_region_destroy(legion_physical_region_t handle);
 
   /**
+   * @return Caller takes ownership of return value
+   *
+   * @see Legion::PhysicalRegion::PhysicalRegion
+   */
+  legion_physical_region_t
+  legion_physical_region_copy(legion_physical_region_t handle);
+
+  /**
    * @see Legion::PhysicalRegion::is_mapped()
    */
   bool

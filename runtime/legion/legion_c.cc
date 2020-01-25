@@ -4819,6 +4819,15 @@ legion_physical_region_destroy(legion_physical_region_t handle_)
   delete handle;
 }
 
+legion_physical_region_t
+legion_physical_region_copy(legion_physical_region_t handle_)
+{
+  PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
+
+  PhysicalRegion *result = new PhysicalRegion(*handle);
+  return CObjectWrapper::wrap(result);
+}
+
 bool
 legion_physical_region_is_mapped(legion_physical_region_t handle_)
 {
