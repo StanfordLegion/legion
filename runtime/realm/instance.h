@@ -38,16 +38,6 @@
 typedef ptrdiff_t intptr_t;
 #endif
 
-namespace LegionRuntime {
-  namespace Accessor {
-    #define REGION_ACCESSOR_ALREADY_PROTOTYPED
-    template <typename AT, typename ET = void, typename PT = ET> struct RegionAccessor;
-    namespace AccessorType {
-      struct Generic;
-    };
-  };
-};
-
 namespace Realm {
 
   typedef int FieldID;
@@ -209,8 +199,6 @@ namespace Realm {
 
     template <int N>
     IndexSpace<N,int> get_indexspace(void) const;
-
-    LegionRuntime::Accessor::RegionAccessor<LegionRuntime::Accessor::AccessorType::Generic> get_accessor(void) const;
 
     // used for accessor construction
     bool increment_accessor_count(void);
