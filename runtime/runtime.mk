@@ -618,6 +618,7 @@ REALM_SRC 	+= $(LG_RT_DIR)/realm/hdf5/hdf5_module.cc \
 		   $(LG_RT_DIR)/realm/hdf5/hdf5_access.cc
 endif
 REALM_SRC 	+= $(LG_RT_DIR)/realm/activemsg.cc \
+                   $(LG_RT_DIR)/realm/nodeset.cc \
                    $(LG_RT_DIR)/realm/network.cc
 GPU_RUNTIME_SRC +=
 

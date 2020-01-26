@@ -1427,29 +1427,6 @@ namespace Realm {
     // Events
 
 
-  template <typename T>
-  struct MediumBroadcastHelper : public T::RequestArgs {
-    inline void apply(NodeID target)
-    {
-      T::Message::request(target, *this, payload, payload_size, payload_mode);
-    }
-
-    void broadcast(const NodeSet& targets,
-		   const void *_payload, size_t _payload_size,
-		   int _payload_mode)
-    {
-      payload = _payload;
-      payload_size = _payload_size;
-      payload_mode = _payload_mode;
-      assert((payload_mode != PAYLOAD_FREE) && "cannot use PAYLOAD_FREE with broadcast!");
-      targets.map(*this);
-    }
-
-    const void *payload;
-    size_t payload_size;
-    int payload_mode;
-  };
-  
     // only called for generational events
     /*static*/ void EventSubscribeMessage::handle_message(NodeID sender, const EventSubscribeMessage &args,
 							  const void *data, size_t datalen)
