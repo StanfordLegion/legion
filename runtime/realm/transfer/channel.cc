@@ -3596,35 +3596,29 @@ namespace Realm {
 	  xd->deferred_enqueue.defer(xferDes_queue, xd, wait_on);
 	  return;
 	}
-	
-#ifdef REALM_USE_SUBPROCESSES
-	guid_lock.lock();
-#else
-        pthread_rwlock_wrlock(&guid_lock);
-#endif
-        std::map<XferDesID, XferDesWithUpdates>::iterator git = guid_to_xd.find(xd->guid);
-        if (git != guid_to_xd.end()) {
-          // xerDes_queue has received updates of this xferdes
-          // need to integrate these updates into xferdes
-          assert(git->second.xd == NULL);
-	  git->second.xd = xd;
-	  for(std::map<int, size_t>::const_iterator it = git->second.pre_bytes_total.begin();
-	      it != git->second.pre_bytes_total.end();
-	      ++it)
-	    xd->input_ports[it->first].remote_bytes_total = it->second;
-	  for(std::map<int, SequenceAssembler>::iterator it = git->second.seq_pre_write.begin();
-	      it != git->second.seq_pre_write.end();
-	      ++it)
-	    xd->input_ports[it->first].seq_remote.swap(it->second);
-        } else {
-	  XferDesWithUpdates& xdup = guid_to_xd[xd->guid];
-	  xdup.xd = xd;
-        }
-#ifdef REALM_USE_SUBPROCESSES
-	guid_lock.unlock();
-#else
-        pthread_rwlock_unlock(&guid_lock);
-#endif
+
+	{
+	  RWLock::AutoWriterLock al(guid_lock);
+	  std::map<XferDesID, XferDesWithUpdates>::iterator git = guid_to_xd.find(xd->guid);
+	  if (git != guid_to_xd.end()) {
+	    // xerDes_queue has received updates of this xferdes
+	    // need to integrate these updates into xferdes
+	    assert(git->second.xd == NULL);
+	    git->second.xd = xd;
+	    for(std::map<int, size_t>::const_iterator it = git->second.pre_bytes_total.begin();
+		it != git->second.pre_bytes_total.end();
+		++it)
+	      xd->input_ports[it->first].remote_bytes_total = it->second;
+	    for(std::map<int, SequenceAssembler>::iterator it = git->second.seq_pre_write.begin();
+		it != git->second.seq_pre_write.end();
+		++it)
+	      xd->input_ports[it->first].seq_remote.swap(it->second);
+	  } else {
+	    XferDesWithUpdates& xdup = guid_to_xd[xd->guid];
+	    xdup.xd = xd;
+	  }
+	}
+
         std::map<Channel*, DMAThread*>::iterator it;
         it = channel_to_dma_thread.find(xd->channel);
         assert(it != channel_to_dma_thread.end());

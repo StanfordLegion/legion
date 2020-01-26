@@ -52,6 +52,8 @@ REALM_ATTR_UNUSED(static const void *ignore_gasnet_warning2) = (void *)_gasnett_
 
 #define REALM_MUTEX_IMPL   gasnet_hsl_t mutex
 #define REALM_CONDVAR_IMPL gasnett_cond_t condvar
+// gasnet doesn't provide an rwlock?
+#define REALM_RWLOCK_IMPL  pthread_rwlock_t rwlock
 
 #else
 
@@ -61,6 +63,7 @@ REALM_ATTR_UNUSED(static const void *ignore_gasnet_warning2) = (void *)_gasnett_
 
 #define REALM_MUTEX_IMPL   pthread_mutex_t mutex
 #define REALM_CONDVAR_IMPL pthread_cond_t  condvar
+#define REALM_RWLOCK_IMPL  pthread_rwlock_t rwlock
 #endif
 
 #include "realm/mutex.h"
@@ -192,6 +195,52 @@ namespace Realm {
     // TODO: check other error codes?
     return true;
 #endif
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class RWLock
+  //
+
+  RWLock::RWLock(void)
+    : writer(*this)
+    , reader(*this)
+  {
+    assert(sizeof(rwlock) <= sizeof(placeholder));
+    pthread_rwlock_init(&rwlock, 0);
+  }
+
+  RWLock::~RWLock(void)
+  {
+    pthread_rwlock_destroy(&rwlock);
+  }
+
+  void RWLock::wrlock(void)
+  {
+    pthread_rwlock_wrlock(&rwlock);
+  }
+
+  void RWLock::rdlock(void)
+  {
+    pthread_rwlock_rdlock(&rwlock);
+  }
+
+  void RWLock::unlock(void)
+  {
+    pthread_rwlock_unlock(&rwlock);
+  }
+
+  bool RWLock::trywrlock(void)
+  {
+    int ret = pthread_rwlock_trywrlock(&rwlock);
+    return (ret == 0);
+  }
+
+  bool RWLock::tryrdlock(void)
+  {
+    int ret = pthread_rwlock_trywrlock(&rwlock);
+    return (ret == 0);
   }
 
 
