@@ -284,6 +284,6 @@ namespace Realm {
 
 }; // namespace Realm
 
-#include "utils.inl"
+#include "realm/utils.inl"
 
 #endif // ifndef REALM_UTILS_H
