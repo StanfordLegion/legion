@@ -759,8 +759,7 @@ function parser.expr_prefix(p)
       p:expect(",")
       local colors = p:expr()
       p:expect(")")
-      print("this should not print")
-      local completeness = ast.completeness_kind.Complete {}
+      local completeness = false -- unspecified
       return ast.unspecialized.expr.PartitionByField {
         completeness = completeness,
         region = region,

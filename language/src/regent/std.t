@@ -2626,6 +2626,7 @@ std.incomplete = ast.completeness_kind.Incomplete {}
 
 do
   local next_partition_id = 1
+  -- TODO flip order of completeness and disjointness so disjointness comes first
   function std.partition(completeness, disjointness, region_symbol, colors_symbol)
     if colors_symbol == nil then
       colors_symbol = std.newsymbol(std.ispace(std.ptr))
