@@ -539,22 +539,22 @@ class Base(object):
             for src,refs in iteritems(self.nested_gc_refs):
                 if refs is 0:
                     continue
-                src.check_for_cycles_by_kind(stack, kind)
+                src.check_for_cycles_by_kind(assert_on_error, stack, kind)
         if kind == VALID_REF_KIND and self.nested_valid_refs:
             for src,refs in iteritems(self.nested_valid_refs):
                 if refs is 0:
                     continue
-                src.check_for_cycles_by_kind(stack, kind)
+                src.check_for_cycles_by_kind(assert_on_error, stack, kind)
         if kind == REMOTE_REF_KIND and self.nested_remote_refs:
             for src,refs in iteritems(self.nested_remote_refs):
                 if refs is 0:
                     continue
-                src.check_for_cycles_by_kind(stack, kind)
+                src.check_for_cycles_by_kind(assert_on_error, stack, kind)
         if kind == RESOURCE_REF_KIND and self.nested_resource_refs:
             for src,refs in iteritems(self.nested_resource_refs):
                 if refs is 0:
                     continue
-                src.check_for_cycles_by_kind(stack, kind)
+                src.check_for_cycles_by_kind(assert_on_error, stack, kind)
         stack.pop()
         self.on_stack = False
 
