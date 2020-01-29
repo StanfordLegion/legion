@@ -1336,7 +1336,7 @@ class Ipartition(object):
             region.raw_value(),
             region.parent.raw_value() if region.parent is not None else region.raw_value(),
             region.fspace.field_ids[field],
-            color_space.raw_value(), color)
+            color_space.raw_value(), color, 0, 0, disjoint.value)
         return Ipartition(handle, region.ispace, color_space)
 
     @staticmethod
