@@ -14,16 +14,16 @@
 
 import "regent"
 
-fspace t { a : int }
-
-task f()
-  return t { a = 2 }
+task t()
+  var c : int[1]
+  c[0] = 1
+  return c
 end
 
 task main()
-  var x : t
-  x.a = 1
-  x = f()
-  regentlib.assert(x.a == 2, "test failed")
+  var a = t()
+  regentlib.assert(a[0] == 1, "test failed")
+  a[0] = 2
+  regentlib.assert(a[0] == 2, "test failed")
 end
 regentlib.start(main)

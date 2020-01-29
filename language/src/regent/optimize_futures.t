@@ -1459,27 +1459,27 @@ function optimize_futures.stat_break(cx, node)
   return terralib.newlist({node})
 end
 
-local function unwrap_field_access(node)
-  if node:is(ast.typed.expr.FieldAccess) then
-    return unwrap_field_access(node.value)
+local function unwrap_access(node)
+  if node:is(ast.typed.expr.FieldAccess) or node:is(ast.typed.expr.IndexAccess) then
+    return unwrap_access(node.value)
   end
   return node
 end
 
-local function rewrap_field_access(node, replacement)
-  if node:is(ast.typed.expr.FieldAccess) then
-    return node { value = rewrap_field_access(node.value, replacement) }
+local function rewrap_access(node, replacement)
+  if node:is(ast.typed.expr.FieldAccess) or node:is(ast.typed.expr.IndexAccess) then
+    return node { value = rewrap_access(node.value, replacement) }
   end
   return replacement
 end
 
-local function is_future_field_assignment(node)
-  return node:is(ast.typed.expr.FieldAccess) and
-    unwrap_field_access(node):is(ast.typed.expr.FutureGetResult)
+local function is_future_modify_assignment(node)
+  return (node:is(ast.typed.expr.FieldAccess) or node:is(ast.typed.expr.IndexAccess)) and
+    unwrap_access(node):is(ast.typed.expr.FutureGetResult)
 end
 
-local function handle_future_field_assignment(cx, lhs, rhs)
-  local lhs_value = unwrap_field_access(lhs)
+local function handle_future_modify_assignment(cx, lhs, rhs)
+  local lhs_value = unwrap_access(lhs)
   local lhs_type = std.as_read(lhs_value.expr_type)
   local symbol = std.newsymbol(lhs_type)
 
@@ -1499,7 +1499,7 @@ local function handle_future_field_assignment(cx, lhs, rhs)
       span = lhs.span,
     },
     ast.typed.stat.Assignment {
-      lhs = rewrap_field_access(lhs, symbol_value),
+      lhs = rewrap_access(lhs, symbol_value),
       rhs = rhs,
       metadata = false,
       annotations = ast.default_annotations(),
@@ -1534,8 +1534,8 @@ function optimize_futures.stat_assignment(cx, node)
 
   -- Hack: Can't write directly to the field of a future; must write
   -- an entire struct. Generate an updated struct and assign it.
-  if is_future_field_assignment(lhs) then
-    return handle_future_field_assignment(cx, lhs, normalized_rhs)
+  if is_future_modify_assignment(lhs) then
+    return handle_future_modify_assignment(cx, lhs, normalized_rhs)
   end
 
   return terralib.newlist({
