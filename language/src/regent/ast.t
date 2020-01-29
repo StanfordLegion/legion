@@ -147,8 +147,6 @@ ast.convention:leaf("Manual", {"params"}):set_memoize():set_print_custom(
 ast:inner("constraint_kind")
 ast.constraint_kind:leaf("Subregion"):set_memoize():set_print_custom("<=")
 ast.constraint_kind:leaf("Disjointness"):set_memoize():set_print_custom("*")
--- TODO get complete symbol
-ast.constraint_kind:leaf("Completeness"):set_memoize():set_print_custom("compl")
 
 ast:inner("privilege_kind")
 ast.privilege_kind:leaf("Reads"):set_memoize():set_print_custom("reads")
