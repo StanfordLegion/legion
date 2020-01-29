@@ -4568,7 +4568,7 @@ function codegen.expr_partition(cx, node)
     assert(false)
   end
 
-  args:insert(-1) -- AUTO_GENERATE_ID
+  args:insert(c.AUTO_GENERATE_ID)
 
 
   local ip = terralib.newsymbol(c.legion_index_partition_t, "ip")
@@ -4609,7 +4609,7 @@ function codegen.expr_partition_equal(cx, node)
         [cx.runtime], [colors.value].impl)
       var [ip] = c.legion_index_partition_create_equal(
         [cx.runtime], [cx.context], [region.value].impl.index_space,
-        [colors.value].impl, 1 --[[ granularity ]], -1 --[[ AUTO_GENERATE_ID ]])
+        [colors.value].impl, 1 --[[ granularity ]], c.AUTO_GENERATE_ID)
       var [lp] = c.legion_logical_partition_create(
         [cx.runtime], [cx.context], [region.value].impl, [ip])
     end
@@ -4665,12 +4665,12 @@ function codegen.expr_partition_equal(cx, node)
           [cx.runtime], [cx.context], [region.value].impl.index_space,
           [colors.value].impl,
           dtransform, dextent, c.DISJOINT_KIND,
-          -1 --[[ AUTO_GENERATE_ID ]])
+          c.AUTO_GENERATE_ID)
       else
         [ip] = c.legion_index_partition_create_equal(
           [cx.runtime], [cx.context], [region.value].impl.index_space,
           [colors.value].impl, 1,
-          -1 --[[ AUTO_GENERATE_ID ]])
+          c.AUTO_GENERATE_ID)
       end
       var [lp] = c.legion_logical_partition_create(
         [cx.runtime], [cx.context], [region.value].impl, [ip])
@@ -4714,7 +4714,7 @@ function codegen.expr_partition_by_field(cx, node)
     [actions]
     var [ip] = c.legion_index_partition_create_by_field(
       [cx.runtime], [cx.context], [region.value].impl, [parent_region].impl,
-      field_id, [colors.value].impl, -1)
+      field_id, [colors.value].impl, c.AUTO_GENERATE_ID, 0, 0, c.DISJOINT_KIND)
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [region.value].impl, [ip])
     [tag_imported(cx, lp)]
