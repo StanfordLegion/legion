@@ -2058,6 +2058,7 @@ end
 
 function type_check.expr_preimage(cx, node)
   local disjointness = node.disjointness
+  local completeness = node.completeness
   local parent = type_check.expr(cx, node.parent)
   local parent_type = std.check_read(cx, parent)
   local partition = type_check.expr(cx, node.partition)
@@ -2137,7 +2138,7 @@ function type_check.expr_preimage(cx, node)
   else
     disjointness = disjointness or partition_type.disjointness
   end
-  local expr_type = std.partition(disjointness, parent_symbol, partition_type.colors_symbol)
+  local expr_type = std.partition(disjointness, completeness or std.incomplete, parent_symbol, partition_type.colors_symbol)
 
   -- Hack: Stuff the region type back into the partition's region
   -- argument, if necessary.
@@ -2176,6 +2177,7 @@ function type_check.expr_preimage(cx, node)
 
   return ast.typed.expr.Preimage {
     disjointness = node.disjointness,
+    completeness = node.completeness,
     partition = partition,
     region = region,
     parent = parent,
