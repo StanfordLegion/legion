@@ -308,8 +308,10 @@ def get_test_specs(legion_dir, use_run, use_spy, use_gc, use_prof, use_hdf5, use
         'REALM_BACKTRACE': '1',
     }
 
-    run_pass_tests = (
+    unit_tests = (
         os.path.join('tests', 'regent', 'unit_test'),
+    )
+    run_pass_tests = (
         os.path.join('tests', 'regent', 'run_pass'),
         os.path.join('tests', 'regent', 'perf'),
         os.path.join('tests', 'regent', 'bugs'),
@@ -331,11 +333,11 @@ def get_test_specs(legion_dir, use_run, use_spy, use_gc, use_prof, use_hdf5, use
     ]
     pretty = [
         ('pretty', (test_run_pass, (['-fpretty', '1'] + extra_flags, base_env)),
-         run_pass_tests),
+         unit_tests + run_pass_tests),
     ]
     run = [
         ('run_pass', (test_run_pass, ([] + extra_flags, run_env)),
-         run_pass_tests),
+         unit_tests + run_pass_tests),
     ]
     spy = [
         ('spy', (test_spy, ([] + extra_flags, base_env)),
