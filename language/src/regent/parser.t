@@ -708,6 +708,7 @@ function parser.expr_prefix(p)
 
   elseif p:nextif("partition") then
     p:expect("(")
+    -- case 1: equal partition
     if p:nextif("equal") then
       p:expect(",")
       local region = p:expr()
@@ -720,6 +721,9 @@ function parser.expr_prefix(p)
         annotations = ast.default_annotations(),
         span = ast.span(start, p),
       }
+    -- case 2: old-style partition
+    -- partition(disjointness, [completeness ,] region, colorring [,colorspace])
+    -- TODO @ndrewtl add completeness parameter here
     elseif p:is_disjointness_kind() then
       local disjointness = p:disjointness_kind()
       p:expect(",")
@@ -740,6 +744,8 @@ function parser.expr_prefix(p)
         annotations = ast.default_annotations(),
         span = ast.span(start, p),
       }
+    -- case 3: new-style partition
+    -- partition([completeness ,] region, colorspace)
     elseif p:is_completeness_kind() then
       local completeness = p:completeness_kind()
       p:expect(",")
