@@ -11,11 +11,6 @@
 -- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
--- @andy this test should be pretty much valid as it is
--- this test will fail
--- 1. undefined keyword
--- 2. can't parse
--- 3. every other stage in the compiler will be upset that you don't
 
 import "regent"
 
