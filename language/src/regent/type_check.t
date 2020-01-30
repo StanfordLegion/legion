@@ -1864,6 +1864,7 @@ end
 
 function type_check.expr_image(cx, node)
   local disjointness = node.disjointness or std.aliased
+  local completeness = node.completeness or false
   local parent = type_check.expr(cx, node.parent)
   local parent_type = std.check_read(cx, parent)
   local partition = type_check.expr(cx, node.partition)
@@ -1938,7 +1939,7 @@ function type_check.expr_image(cx, node)
   else
     parent_symbol = std.newsymbol()
   end
-  local expr_type = std.partition(disjointness, parent_symbol, partition_type.colors_symbol)
+  local expr_type = std.partition(disjointness, completeness, parent_symbol, partition_type.colors_symbol)
 
   -- Hack: Stuff the region type back into the partition's region
   -- argument, if necessary.
