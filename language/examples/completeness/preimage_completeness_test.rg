@@ -35,6 +35,7 @@ task f()
   -- This file is identical to the region_partition_by_field.rg except this line, which adds a
   -- (hopefully) well-formed call to image
   var pimg = preimage(aliased, complete, r, p, r.color)
+  var pimg2 = preimage(disjoint, r, p, r.color)
 
   for i = 0, 3 do
     var ri = p[i]
