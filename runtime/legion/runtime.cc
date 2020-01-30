@@ -625,8 +625,10 @@ namespace Legion {
         // subscription event immediately on the owner node but you can't
         // because we still rely on futures to propagate privileges when
         // return region tree types
-        //Runtime::trigger_event(subscription_event, future_complete);
-        Runtime::trigger_event(subscription_event);
+        if (future_complete != subscription_event)
+          Runtime::trigger_event(subscription_event, future_complete);
+        else
+          Runtime::trigger_event(subscription_event);
         subscription_event = ApUserEvent::NO_AP_USER_EVENT;
         if (remove_base_resource_ref(RUNTIME_REF))
           assert(false); // should always hold a reference from caller
