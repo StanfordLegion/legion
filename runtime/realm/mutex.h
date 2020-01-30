@@ -18,6 +18,8 @@
 #ifndef REALM_MUTEX_H
 #define REALM_MUTEX_H
 
+#include "realm/realm_config.h"
+
 #include <stdint.h>
 
 namespace Realm {
@@ -157,7 +159,12 @@ namespace Realm {
     //  rules type-punning, so use macros to let mutex.cc's inclusion
     //  of this file behave a little differently
     union {
+#ifdef REALM_ON_MACOS
+      // apparently pthread_rwlock_t's are LARGE on macOS
+      uint64_t placeholder[32]; // 256 bytes, at least 8 byte aligned
+#else
       uint64_t placeholder[8]; // 64 bytes, at least 8 byte aligned
+#endif
 #ifdef REALM_RWLOCK_IMPL
       REALM_RWLOCK_IMPL;
 #endif
