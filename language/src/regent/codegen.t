@@ -4873,6 +4873,8 @@ function codegen.expr_preimage(cx, node)
   local partition = codegen.expr(cx, node.partition):read(cx)
   local region_type = std.as_read(node.region.expr_type)
   local region = codegen.expr_region_root(cx, node.region):read(cx)
+  local disjointness = node.disjointness
+  local completeness = node.completeness
 
   local result_type = std.as_read(node.expr_type)
   local actions = quote
@@ -4915,14 +4917,10 @@ function codegen.expr_preimage(cx, node)
     [actions]
     var colors = c.legion_index_partition_get_color_space(
       [cx.runtime], [partition.value].impl.index_partition)
-    var disjointness = [(node.disjointness and
-      ((node.disjointness:is(ast.disjointness_kind.Disjoint) and c.DISJOINT_KIND)
-       or c.ALIASED_KIND))
-      or c.COMPUTE_KIND]
     var [ip] = [create_partition](
       [cx.runtime], [cx.context], [partition.value].impl.index_partition,
       [parent.value].impl, [region_parent].impl, field_id, colors,
-      disjointness, -1)
+      [get_legion_partition_kind(disjointness, completeness)], -1)
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [region.value].impl, [ip])
     [tag_imported(cx, lp)]
