@@ -775,11 +775,18 @@ function parser.expr_prefix(p)
       }
     end
 
+    -- parse an expression of the form:
+    -- image([disjoint ,] [complete ,] region, source_partition, data_region_field)
   elseif p:nextif("image") then
     p:expect("(")
     local disjointness = false
     if p:is_disjointness_kind() then
        disjointness = p:disjointness_kind()
+       p:expect(",")
+    end
+    local completeness = false
+    if p:is_completeness_kind() then
+      completeness = p:completeness_kind()
        p:expect(",")
     end
     local parent = p:expr()
@@ -790,6 +797,7 @@ function parser.expr_prefix(p)
     p:expect(")")
     return ast.unspecialized.expr.Image {
       disjointness = disjointness,
+      completeness = completeness,
       parent = parent,
       partition = partition,
       region = region,

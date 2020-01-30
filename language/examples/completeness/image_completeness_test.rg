@@ -34,7 +34,7 @@ task f()
   var p = partition(complete, r.color, ispace(int1d, 3))
   -- This file is identical to the region_partition_by_field.rg except this line, which adds a
   -- (hopefully) well-formed call to image
-  var pdst = image(r, p, r.color)
+  var pdst = image(complete, r, p, r.color)
 
   for i = 0, 3 do
     var ri = p[i]

@@ -893,6 +893,7 @@ end
 function specialize.expr_image(cx, node, allow_lists)
   return ast.specialized.expr.Image {
     disjointness = node.disjointness and specialize.disjointness_kind(cx, node.disjointness),
+    completeness = specialize.completeness_kind(cx, node.completeness),
     parent = specialize.expr(cx, node.parent),
     partition = specialize.expr(cx, node.partition),
     region = specialize.expr_region_root(cx, node.region),
