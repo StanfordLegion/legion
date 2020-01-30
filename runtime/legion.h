@@ -197,7 +197,7 @@ namespace Legion {
      * to create non-empty field spaces.  Fields within a field space
      * are allocated using field space allocators
      *
-     * @see FieldSpaceAllocator
+     * @see FieldAllocator
      */
     class FieldSpace {
     public:
