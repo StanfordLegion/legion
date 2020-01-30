@@ -499,7 +499,7 @@ ast.typed.expr:leaf("Partition", {"disjointness", "region", "coloring",
 ast.typed.expr:leaf("PartitionEqual", {"region", "colors"})
 ast.typed.expr:leaf("PartitionByField", {"region", "colors", "completeness"})
 ast.typed.expr:leaf("PartitionByRestriction", {"disjointness", "region", "transform", "extent", "colors"})
-ast.typed.expr:leaf("Image", {"disjointness", "parent", "partition", "region"})
+ast.typed.expr:leaf("Image", {"disjointness", "completeness", "parent", "partition", "region"})
 ast.typed.expr:leaf("ImageByTask", {"parent", "partition", "task"})
 ast.typed.expr:leaf("Preimage", {"disjointness", "parent", "partition", "region"})
 ast.typed.expr:leaf("CrossProduct", {"args"})

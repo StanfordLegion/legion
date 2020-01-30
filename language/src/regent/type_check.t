@@ -1978,6 +1978,7 @@ function type_check.expr_image(cx, node)
 
   return ast.typed.expr.Image {
     disjointness = node.disjointness,
+    completeness = node.completeness,
     parent = parent,
     partition = partition,
     region = region,
