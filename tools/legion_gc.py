@@ -19,6 +19,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import argparse
 import sys, os, shutil, gc
 import string, re
 from math import sqrt, log
@@ -350,7 +351,7 @@ class Base(object):
             self.nested_resource_adds = new_resource_adds
             self.nested_resource_rems = new_resource_rems
 
-    def check_for_leaks(self, verbose):
+    def check_for_leaks(self, assert_on_error, verbose):
         if self.deleted:
             if verbose:
                 print("----------------------------------------------------------------")
@@ -512,45 +513,48 @@ class Base(object):
         printer.up()
         return False
 
-    def check_for_cycles(self):
+    def check_for_cycles(self, assert_on_error):
         stack = list()
-        self.check_for_cycles_by_kind(stack, GC_REF_KIND)
+        self.check_for_cycles_by_kind(assert_on_error, stack, GC_REF_KIND)
         stack = list()
-        self.check_for_cycles_by_kind(stack, VALID_REF_KIND)
+        self.check_for_cycles_by_kind(assert_on_error, stack, VALID_REF_KIND)
         stack = list()
-        self.check_for_cycles_by_kind(stack, REMOTE_REF_KIND)
+        self.check_for_cycles_by_kind(assert_on_error, stack, REMOTE_REF_KIND)
         stack = list()
-        self.check_for_cycles_by_kind(stack, RESOURCE_REF_KIND)
+        self.check_for_cycles_by_kind(assert_on_error, stack, RESOURCE_REF_KIND)
 
-    def check_for_cycles_by_kind(self, stack, kind):
+    def check_for_cycles_by_kind(self, assert_on_error, stack, kind):
         if self.on_stack:
             print('CYCLE DETECTED!')
             for obj in stack:
                 print('  '+repr(obj))
-            print('Exiting...')
-            sys.exit(0)
+            if assert_on_error:
+                assert False
+            else:
+                print('Exiting...')
+                sys.exit(0)
         stack.append(self)
         self.on_stack = True
         if kind == GC_REF_KIND and self.nested_gc_refs:
             for src,refs in iteritems(self.nested_gc_refs):
                 if refs is 0:
                     continue
-                src.check_for_cycles_by_kind(stack, kind)
+                src.check_for_cycles_by_kind(assert_on_error, stack, kind)
         if kind == VALID_REF_KIND and self.nested_valid_refs:
             for src,refs in iteritems(self.nested_valid_refs):
                 if refs is 0:
                     continue
-                src.check_for_cycles_by_kind(stack, kind)
+                src.check_for_cycles_by_kind(assert_on_error, stack, kind)
         if kind == REMOTE_REF_KIND and self.nested_remote_refs:
             for src,refs in iteritems(self.nested_remote_refs):
                 if refs is 0:
                     continue
-                src.check_for_cycles_by_kind(stack, kind)
+                src.check_for_cycles_by_kind(assert_on_error, stack, kind)
         if kind == RESOURCE_REF_KIND and self.nested_resource_refs:
             for src,refs in iteritems(self.nested_resource_refs):
                 if refs is 0:
                     continue
-                src.check_for_cycles_by_kind(stack, kind)
+                src.check_for_cycles_by_kind(assert_on_error, stack, kind)
         stack.pop()
         self.on_stack = False
 
@@ -1093,42 +1097,42 @@ class State(object):
         self.unknowns[key] = Base(did, node)
         return self.unknowns[key]
 
-    def check_for_cycles(self):
+    def check_for_cycles(self, assert_on_error):
         for did,manager in iteritems(self.managers):
             print("Checking for cycles in "+repr(manager))
-            manager.check_for_cycles()
+            manager.check_for_cycles(assert_on_error)
         for did,view in iteritems(self.views):
             print("Checking for cycles in "+repr(view))
-            view.check_for_cycles()
+            view.check_for_cycles(assert_on_error)
         for did,future in iteritems(self.futures):
             print("Checking for cycles in "+repr(future))
-            future.check_for_cycles()
+            future.check_for_cycles(assert_on_error)
         for did,future_map in iteritems(self.future_maps):
             print("Checking for cycles in "+repr(future_map))
-            future_map.check_for_cycles()
+            future_map.check_for_cycles(assert_on_error)
         for did,eq in iteritems(self.equivalence_sets):
             print("Checking for cycles in "+repr(eq))
-            eq.check_for_cycles()
+            eq.check_for_cycles(assert_on_error)
         for did,constraint in iteritems(self.constraints):
             print("Checking for cycles in "+repr(constraint))
-            constraint.check_for_cycles()
+            constraint.check_for_cycles(assert_on_error)
         for did,index_space in iteritems(self.index_spaces):
             print("Checking for cycles in "+repr(index_space))
-            index_space.check_for_cycles()
+            index_space.check_for_cycles(assert_on_error)
         for did,index_part in iteritems(self.index_partitions):
             print("Checking for cycles in "+repr(index_part))
-            index_part.check_for_cycles()
+            index_part.check_for_cycles(assert_on_error)
         for did,field_space in iteritems(self.field_spaces):
             print("Checking for cycles in "+repr(field_space))
-            field_space.check_for_cycles();
+            field_space.check_for_cycles(assert_on_error)
         for did,region in iteritems(self.regions):
             print("Checking for cycles in "+repr(region))
-            region.check_for_cycles()
+            region.check_for_cycles(assert_on_error)
         for did,partition in iteritems(self.partitions):
             print("Checking for cycles in "+repr(partition))
         print("NO CYCLES")
 
-    def check_for_leaks(self, verbose): 
+    def check_for_leaks(self, assert_on_error, verbose): 
         leaked_futures = 0
         leaked_future_maps = 0
         leaked_constraints = 0
@@ -1142,116 +1146,131 @@ class State(object):
         leaked_regions = 0
         leaked_partitions = 0
         for future in itervalues(self.futures):
-            if not future.check_for_leaks(verbose):
+            if not future.check_for_leaks(assert_on_error, verbose):
                 leaked_futures += 1
         for future_map in itervalues(self.future_maps):
-            if not future_map.check_for_leaks(verbose):
+            if not future_map.check_for_leaks(assert_on_error, verbose):
                 leaked_future_maps += 1
         for constraint in itervalues(self.constraints):
-            if not constraint.check_for_leaks(verbose): 
+            if not constraint.check_for_leaks(assert_on_error, verbose): 
                 leaked_constraints += 1
         for manager in itervalues(self.managers):
-            deleted,pinned = manager.check_for_leaks(verbose)
+            deleted,pinned = manager.check_for_leaks(assert_on_error, verbose)
             if not deleted:
                 if pinned:
                     pinned_managers += 1
                 else:
                     leaked_managers += 1
         for view in itervalues(self.views):
-            if not view.check_for_leaks(verbose):
+            if not view.check_for_leaks(assert_on_error, verbose):
                 leaked_views += 1
         for eq in itervalues(self.equivalence_sets):
-            if not eq.check_for_leaks(verbose):
+            if not eq.check_for_leaks(assert_on_error, verbose):
                 leaked_eq_sets += 1
         for index_space in itervalues(self.index_spaces):
-            if not index_space.check_for_leaks(verbose):
+            if not index_space.check_for_leaks(assert_on_error, verbose):
                 leaked_index_spaces += 1
         for index_part in itervalues(self.index_partitions):
-            if not index_part.check_for_leaks(verbose):
+            if not index_part.check_for_leaks(assert_on_error, verbose):
                 leaked_index_partitions += 1
         for field_space in itervalues(self.field_spaces):
-            if not field_space.check_for_leaks(verbose):
+            if not field_space.check_for_leaks(assert_on_error, verbose):
                 leaked_field_spaces += 1
         for region in itervalues(self.regions):
-            if not region.check_for_leaks(verbose):
+            if not region.check_for_leaks(assert_on_error, verbose):
                 leaked_regions += 1
         for partition in itervalues(self.partitions):
-            if not partition.check_for_leaks(verbose):
+            if not partition.check_for_leaks(assert_on_error, verbose):
                 leaked_partitions += 1
         print("LEAK SUMMARY")
         if leaked_futures > 0:
             print("  LEAKED FUTURES: "+str(leaked_futures))
+            if assert_on_error: assert False
         else:
             print("  Leaked Futures: "+str(leaked_futures))
         if leaked_future_maps > 0:
             print("  LEAKD FUTURE MAPS: "+str(leaked_future_maps))
+            if assert_on_error: assert False
         else:
             print("  Leaked Future Maps: "+str(leaked_future_maps))
         if leaked_constraints > 0:
             print("  LEAKED CONSTRAINTS: "+str(leaked_constraints))
+            if assert_on_error: assert False
         else:
             print("  Leaked Constraints: "+str(leaked_constraints))
         if leaked_managers > 0:
             print("  LEAKED MANAGERS: "+str(leaked_managers))
+            if assert_on_error: assert False
         else:
             print("  Leaked Managers: "+str(leaked_managers))
         if pinned_managers > 0:
             print("  PINNED MANAGERS: "+str(pinned_managers))
+            if assert_on_error: assert False
         else:
             print("  Pinned Managers: "+str(pinned_managers))
         if leaked_views > 0:
             print("  LEAKED VIEWS: "+str(leaked_views))
+            if assert_on_error: assert False
         else:
             print("  Leaked Views: "+str(leaked_views))
         if leaked_eq_sets > 0:
             print("  LEAKED EQUIVALENCE SETS: "+str(leaked_eq_sets))
+            if assert_on_error: assert False
         else:
             print("  Leaked Equivalence Sets: "+str(leaked_eq_sets))
         if leaked_index_spaces > 0:
             print("  LEAKED INDEX SPACES: "+str(leaked_index_spaces))
+            if assert_on_error: assert False
         else:
             print("  Leaked Index Spaces: "+str(leaked_index_spaces))
         if leaked_index_partitions > 0:
             print("  LEAKED INDEX PARTITIONS: "+str(leaked_index_partitions))
+            if assert_on_error: assert False
         else:
             print("  Leaked Index Partitions: "+str(leaked_index_partitions))
         if leaked_field_spaces > 0:
             print("  LEAKED FIELD SPACES: "+str(leaked_field_spaces))
+            if assert_on_error: assert False
         else:
             print("  Leaked Field Spaces: "+str(leaked_field_spaces))
         if leaked_regions > 0:
             print("  LEAKED REGIONS: "+str(leaked_regions))
+            if assert_on_error: assert False
         else:
             print("  Leaked Regions: "+str(leaked_regions))
         if leaked_partitions > 0:
             print("  LEAKED PARTITIONS: "+str(leaked_partitions))
+            if assert_on_error: assert False
         else:
             print("  Leaked Partitions: "+str(leaked_partitions))
 
-def usage():
-    print('Usage: '+sys.argv[0]+' [-c -l -v] <file_names>+')
-    print('  -c : check for cycles')
-    print('  -l : check for leaks')
-    print('  -v : verbose')
-    sys.exit(1)
-
 def main():
-    opts, args = getopt(sys.argv[1:],'clv')
-    opts = dict(opts)
-    if len(args) == 0:
-        usage()
-    check_cycles = False
-    check_leaks = False
-    verbose = False
-    if '-c' in opts:
-        check_cycles = True
-    if '-l' in opts:
-        check_leaks = True
-    if '-v' in opts:
-        verbose = True
+    parser = argparse.ArgumentParser(
+        description='Legion GC analysis and verification')
+    parser.add_argument(
+        '-l', '--leaks', action='store_true',
+        help='check for leaks')
+    parser.add_argument(
+        '-c', '--cycles', action='store_true',
+        help='check for cycles')
+    parser.add_argument(
+        '-a', '--assert', dest='assert_on_error', action='store_true',
+        help='assert on errors')
+    parser.add_argument(
+        '-v', '--verbose', action='store_true',
+        help='verbose output')
+    parser.add_argument(
+        dest='filenames', nargs='+',
+        help='input log filenames')
+    args = parser.parse_args()
 
-    file_names = args
-    
+    check_cycles = args.cycles
+    check_leaks = args.leaks
+    assert_on_error = args.assert_on_error
+    verbose = args.verbose
+
+    file_names = args.filenames
+
     state = State()
     has_matches = False
     for file_name in file_names:
@@ -1267,9 +1286,9 @@ def main():
     state.post_parse()
   
     if check_cycles:
-        state.check_for_cycles()
+        state.check_for_cycles(assert_on_error)
     if check_leaks:
-        state.check_for_leaks(verbose)
+        state.check_for_leaks(assert_on_error, verbose)
 
 
 if __name__ == '__main__':

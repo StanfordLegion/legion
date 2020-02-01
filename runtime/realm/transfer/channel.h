@@ -1261,9 +1261,6 @@ namespace Realm {
         } else {
           core_rsrv = new CoreReservation("DMA threads", crs, CoreReservationParameters());
         }
-#ifndef REALM_USE_SUBPROCESSES
-        pthread_rwlock_init(&guid_lock, NULL);
-#endif
         // reserve the first several guid
         next_to_assign_idx = 10;
         num_threads = 0;
@@ -1280,9 +1277,6 @@ namespace Realm {
           delete it2->second;
         }
 	queues_lock.unlock();
-#ifndef REALM_USE_SUBPROCESSES
-        pthread_rwlock_destroy(&guid_lock);
-#endif
       }
 
       XferDesID get_guid(NodeID execution_node)
@@ -1301,11 +1295,7 @@ namespace Realm {
       {
         NodeID execution_node = xd_guid >> (NODE_BITS + INDEX_BITS);
         if (execution_node == Network::my_node_id) {
-#ifdef REALM_USE_SUBPROCESSES
-	  guid_lock.lock();
-#else
-          pthread_rwlock_wrlock(&guid_lock);
-#endif
+	  RWLock::AutoWriterLock al(guid_lock);
           std::map<XferDesID, XferDesWithUpdates>::iterator it = guid_to_xd.find(xd_guid);
           if (it != guid_to_xd.end()) {
             if (it->second.xd != NULL) {
@@ -1330,11 +1320,6 @@ namespace Realm {
 	    xdup.seq_pre_write[port_idx].add_span(span_start, span_size);
 	    xdup.pre_bytes_total[port_idx] = pre_bytes_total;
           }
-#ifdef REALM_USE_SUBPROCESSES
-	  guid_lock.unlock();
-#else
-          pthread_rwlock_unlock(&guid_lock);
-#endif
         }
         else {
           // send a active message to remote node
@@ -1350,11 +1335,7 @@ namespace Realm {
       {
         NodeID execution_node = xd_guid >> (NODE_BITS + INDEX_BITS);
         if (execution_node == Network::my_node_id) {
-#ifdef REALM_USE_SUBPROCESSES
-	  guid_lock.lock();
-#else
-          pthread_rwlock_rdlock(&guid_lock);
-#endif
+	  RWLock::AutoReaderLock al(guid_lock);
           std::map<XferDesID, XferDesWithUpdates>::iterator it = guid_to_xd.find(xd_guid);
           if (it != guid_to_xd.end()) {
 	    assert(it->second.xd != NULL);
@@ -1363,11 +1344,6 @@ namespace Realm {
             // This means this update goes slower than future updates, which marks
             // completion of xfer des (ID = xd_guid). In this case, it is safe to drop the update
 	  }
-#ifdef REALM_USE_SUBPROCESSES
-	  guid_lock.unlock();
-#else
-          pthread_rwlock_unlock(&guid_lock);
-#endif
         }
         else {
           // send a active message to remote node
@@ -1389,21 +1365,15 @@ namespace Realm {
       }
 
       void destroy_xferDes(XferDesID guid) {
-#ifdef REALM_USE_SUBPROCESSES
-	guid_lock.lock();
-#else
-        pthread_rwlock_wrlock(&guid_lock);
-#endif
-        std::map<XferDesID, XferDesWithUpdates>::iterator it = guid_to_xd.find(guid);
-        assert(it != guid_to_xd.end());
-        assert(it->second.xd != NULL);
-        XferDes* xd = it->second.xd;
-        guid_to_xd.erase(it);
-#ifdef REALM_USE_SUBPROCESSES
-	guid_lock.unlock();
-#else
-        pthread_rwlock_unlock(&guid_lock);
-#endif
+	XferDes *xd;
+	{
+	  RWLock::AutoWriterLock al(guid_lock);
+	  std::map<XferDesID, XferDesWithUpdates>::iterator it = guid_to_xd.find(guid);
+	  assert(it != guid_to_xd.end());
+	  assert(it->second.xd != NULL);
+	  xd = it->second.xd;
+	  guid_to_xd.erase(it);
+	}
         delete xd;
       }
 
@@ -1420,12 +1390,7 @@ namespace Realm {
       std::map<Channel*, PriorityXferDesQueue*> queues;
       std::map<XferDesID, XferDesWithUpdates> guid_to_xd;
       Mutex queues_lock;
-#ifdef REALM_USE_SUBPROCESSES
-      // TODO: gasnet-friendly rwlock?
-      Mutex guid_lock;
-#else
-      pthread_rwlock_t guid_lock;
-#endif
+      RWLock guid_lock;
       XferDesID next_to_assign_idx;
       CoreReservation* core_rsrv;
       int num_threads, num_memcpy_threads;

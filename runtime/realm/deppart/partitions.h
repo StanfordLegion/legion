@@ -241,7 +241,7 @@ namespace Realm {
 
 };
 
-#include "partitions.inl"
+#include "realm/deppart/partitions.inl"
 
 #endif // REALM_PARTITIONS_H
 

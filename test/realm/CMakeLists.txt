@@ -37,6 +37,7 @@ list(APPEND REALM_TESTS
   compqueue
   event_subscribe
   deferred_allocs
+  test_nodeset
   )
 
 # TODO: build memspeed properly with cuda enabled...

@@ -153,7 +153,7 @@ namespace Realm {
 	
 }; // namespace Realm
 
-#include "reservation.inl"
+#include "realm/reservation.inl"
 
 #endif // ifndef REALM_RESERVATION_H
 

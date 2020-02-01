@@ -1190,7 +1190,10 @@ extern "C" {
                                          legion_logical_region_t parent,
                                          legion_field_id_t fid,
                                          legion_index_space_t color_space,
-                                         int color /* = AUTO_GENERATE_ID */);
+                                         int color /* = AUTO_GENERATE_ID */,
+                                         legion_mapper_id_t id /* = 0 */,
+                                         legion_mapping_tag_id_t tag /* = 0 */,
+                                         legion_partition_kind_t part_kind /* = DISJOINT_KIND */);
 
   /**
    * @return Caller takes ownership of return value.
@@ -3860,6 +3863,14 @@ extern "C" {
    */
   void
   legion_physical_region_destroy(legion_physical_region_t handle);
+
+  /**
+   * @return Caller takes ownership of return value
+   *
+   * @see Legion::PhysicalRegion::PhysicalRegion
+   */
+  legion_physical_region_t
+  legion_physical_region_copy(legion_physical_region_t handle);
 
   /**
    * @see Legion::PhysicalRegion::is_mapped()

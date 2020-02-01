@@ -23,8 +23,6 @@
 #ifdef USE_HDF
 #include "realm/hdf5/hdf5_access.h"
 #endif
-// For backwards compatability accessors
-#include "legion/accessor.h"
 
 TYPE_IS_SERIALIZABLE(Realm::InstanceLayoutGeneric::FieldLayout);
 
@@ -328,20 +326,6 @@ namespace Realm {
     }
 
     /*static*/ const RegionInstance RegionInstance::NO_INST = { 0 };
-
-    // a generic accessor just holds a pointer to the impl and passes all 
-    //  requests through
-    LegionRuntime::Accessor::RegionAccessor<LegionRuntime::Accessor::AccessorType::Generic> RegionInstance::get_accessor(void) const
-    {
-      // request metadata (if needed), but don't block on it yet
-      RegionInstanceImpl *i_impl = get_runtime()->get_instance_impl(*this);
-      // metadata must already be available
-      assert(i_impl->metadata.is_valid() &&
-	     "instance metadata must be valid before accesses are performed");
-      assert(i_impl->metadata.layout);
-	
-      return LegionRuntime::Accessor::RegionAccessor<LegionRuntime::Accessor::AccessorType::Generic>(LegionRuntime::Accessor::AccessorType::Generic::Untyped(*this));
-    }
 
     // before you can get an instance's index space or construct an accessor for
     //  a given processor, the necessary metadata for the instance must be

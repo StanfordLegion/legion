@@ -60,6 +60,11 @@ local c = terralib.includecstring([[
 ]], {"-DLEGION_REDOP_COMPLEX"})
 base.c = c
 
+-- Hack: Terra's parser isn't smart enough to read the value of
+-- AUTO_GENERATE_ID, so just force it here so we don't have to
+-- hard-code its value elsewhere in the compiler.
+c.AUTO_GENERATE_ID = -1
+
 local max_dim = c.LEGION_MAX_DIM
 base.max_dim = max_dim
 

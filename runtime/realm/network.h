@@ -28,7 +28,7 @@
 
 namespace Realm {
 
-  typedef int NodeID;
+  // NodeID defined in nodeset.h
 
   class NetworkModule;
   class MemoryImpl;

@@ -30,9 +30,6 @@
 
 #include "realm/utils.h"
 
-// For backwards compatibility with old accessors
-#include "legion/accessor.h"
-
 // remote copy active messages from from lowlevel_dma.h for now
 #include "realm/transfer/lowlevel_dma.h"
 
@@ -65,21 +62,6 @@ TYPE_IS_SERIALIZABLE(Realm::Memory);
 TYPE_IS_SERIALIZABLE(Realm::Memory::Kind);
 TYPE_IS_SERIALIZABLE(Realm::Channel::SupportedPath);
 TYPE_IS_SERIALIZABLE(Realm::XferDesKind);
-
-namespace LegionRuntime {
-  namespace Accessor {
-    namespace DebugHooks {
-      // these are calls that can be implemented by a higher level (e.g. Legion) to
-      //  perform privilege/bounds checks on accessor reference and produce more useful
-      //  information for debug
-
-      /*extern*/ void (*check_bounds_ptr)(void *region, ptr_t ptr) = 0;
-      /*extern*/ void (*check_bounds_dpoint)(void *region, const Legion::DomainPoint &dp) = 0;
-
-      /*extern*/ const char *(*find_privilege_task_name)(void *region) = 0;
-    };
-  };
-};
 
 namespace Realm {
 
@@ -1111,6 +1093,11 @@ namespace Realm {
       // are hyperthreads considered to share a physical core
       bool hyperthread_sharing = true;
       bool pin_dma_threads = false;
+      size_t bitset_chunk_size = 32 << 10; // 32KB
+      // based on some empirical measurements, 1024 nodes seems like
+      //  a reasonable cutoff for switching to twolevel nodeset bitmasks
+      //  (measured on an E5-2698 v4)
+      int bitset_twolevel = -1024; // i.e. yes if > 1024 nodes
 
       CommandLineParser cp;
       cp.add_option_int_units("-ll:rsize", reg_mem_size, 'm')
@@ -1121,7 +1108,9 @@ namespace Realm {
         .add_option_bool("-ll:pin_dma", pin_dma_threads)
 	.add_option_int("-ll:dummy_rsrv_ok", dummy_reservation_ok)
 	.add_option_bool("-ll:show_rsrv", show_reservations)
-	.add_option_int("-ll:ht_sharing", hyperthread_sharing);
+	.add_option_int("-ll:ht_sharing", hyperthread_sharing)
+	.add_option_int_units("-ll:bitset_chunk", bitset_chunk_size, 'k')
+	.add_option_int("-ll:bitset_twolevel", bitset_twolevel);
 
       std::string event_trace_file, lock_trace_file;
 
@@ -1175,14 +1164,6 @@ namespace Realm {
 		       "of bits in ID", Network::max_node_id+1, (ID::MAX_NODE_ID + 1));
         exit(1);
       }
-      if ((Network::max_node_id+1) > REALM_MAX_NUM_NODES)
-      {
-        fprintf(stderr,"ERROR: Launched %d nodes, but REALM_MAX_NUM_NODES are only "
-                       "configured for at most %d nodes. Update the macro "
-                       "REALM_MAX_NUM_NODES in nodeset.h",
-		        Network::max_node_id+1, REALM_MAX_NUM_NODES);
-        exit(1);
-      }
 
       // if compiled in and not explicitly disabled, check our user threading
       //  support
@@ -1205,6 +1186,25 @@ namespace Realm {
       BarrierImpl::barrier_adjustment_timestamp = (((Barrier::timestamp_t)(Network::my_node_id)) << BarrierImpl::BARRIER_TIMESTAMP_NODEID_SHIFT) + 1;
 
       nodes = new Node[Network::max_node_id + 1];
+
+      // configure the bit sets used by NodeSet
+      {
+	// choose a chunk size that's roughly the requested size, but
+	//  clamp to [8,1024]
+	size_t bitsets_per_chunk = ((bitset_chunk_size << 3) /
+				    (Network::max_node_id + 1));
+	if(bitsets_per_chunk < 8)
+	  bitsets_per_chunk = 8;
+	if(bitsets_per_chunk > 1024)
+	  bitsets_per_chunk = 1024;
+	// negative values of bitset_twolevel are a threshold
+	bool use_twolevel = ((bitset_twolevel > 0) ||
+			     ((bitset_twolevel < 0) &&
+			      (Network::max_node_id >= -bitset_twolevel)));
+	NodeSetBitmask::configure_allocator(Network::max_node_id,
+					    bitsets_per_chunk,
+					    use_twolevel);
+      }
 
       // create allocators for local node events/locks/index spaces - do this before we start handling
       //  active messages
@@ -2196,6 +2196,8 @@ namespace Realm {
 
 	// same for code translators
 	delete_container_contents(code_translators);
+
+	NodeSetBitmask::free_allocations();
 
 	for(std::vector<Module *>::iterator it = modules.begin();
 	    it != modules.end();

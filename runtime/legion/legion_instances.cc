@@ -24,6 +24,21 @@
 #include "legion/legion_instances.h"
 #include "legion/legion_views.h"
 
+namespace LegionRuntime {
+  namespace Accessor {
+    namespace DebugHooks {
+      // these are calls that can be implemented by a higher level (e.g. Legion) to
+      //  perform privilege/bounds checks on accessor reference and produce more useful
+      //  information for debug
+
+      /*extern*/ void (*check_bounds_ptr)(void *region, ptr_t ptr) = 0;
+      /*extern*/ void (*check_bounds_dpoint)(void *region, const Legion::DomainPoint &dp) = 0;
+
+      /*extern*/ const char *(*find_privilege_task_name)(void *region) = 0;
+    };
+  };
+};
+
 namespace Legion {
   namespace Internal {
 
@@ -1209,7 +1224,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(instance.exists());
 #endif
-      return instance.get_accessor();
+      return LegionRuntime::Accessor::RegionAccessor<
+	LegionRuntime::Accessor::AccessorType::Generic>(instance);
     }
 
     //--------------------------------------------------------------------------
@@ -1224,8 +1240,7 @@ namespace Legion {
 #endif
       const CopySrcDstField &info = layout->find_field_info(fid);
       LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic> temp = 
-                                                    instance.get_accessor();
+        LegionRuntime::Accessor::AccessorType::Generic> temp(instance);
       return temp.get_untyped_field_accessor(info.field_id, info.size);
     }
 
@@ -1864,7 +1879,8 @@ namespace Legion {
     {
       // TODO: Implement this 
       assert(false);
-      return instance.get_accessor();
+      return LegionRuntime::Accessor::RegionAccessor<
+	LegionRuntime::Accessor::AccessorType::Generic>(instance);
     }
 
     //--------------------------------------------------------------------------
@@ -1875,7 +1891,8 @@ namespace Legion {
     {
       // should never be called
       assert(false);
-      return instance.get_accessor();
+      return LegionRuntime::Accessor::RegionAccessor<
+	LegionRuntime::Accessor::AccessorType::Generic>(instance);
     }
 
     //--------------------------------------------------------------------------
@@ -1996,7 +2013,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(instance.exists());
 #endif
-      return instance.get_accessor();
+      return LegionRuntime::Accessor::RegionAccessor<
+	LegionRuntime::Accessor::AccessorType::Generic>(instance);
     }
 
     //--------------------------------------------------------------------------
@@ -2011,8 +2029,7 @@ namespace Legion {
 #endif
       const CopySrcDstField &info = layout->find_field_info(fid);
       LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic> temp = 
-                                                    instance.get_accessor();
+        LegionRuntime::Accessor::AccessorType::Generic> temp(instance);
       return temp.get_untyped_field_accessor(info.field_id, info.size);
     }
 
@@ -2114,7 +2131,9 @@ namespace Legion {
     {
       // should never be called
       assert(false);
-      return PhysicalInstance::NO_INST.get_accessor();
+      return LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic>
+	(PhysicalInstance::NO_INST);
     }
 
     //--------------------------------------------------------------------------
@@ -2125,7 +2144,9 @@ namespace Legion {
     {
       // should never be called
       assert(false);
-      return PhysicalInstance::NO_INST.get_accessor();
+      return LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic>
+	(PhysicalInstance::NO_INST);
     }
 
     //--------------------------------------------------------------------------

@@ -130,15 +130,6 @@ namespace Realm {
       bool is_locked(unsigned check_mode, bool excl_ok);
 
       void release_reservation(void);
-
-      struct PackFunctor {
-      public:
-        PackFunctor(int *p) : pos(p) { }
-      public:
-        inline void apply(int target) { *pos++ = target; }
-      public:
-        int *pos;
-      };
     };
 
   // active messages

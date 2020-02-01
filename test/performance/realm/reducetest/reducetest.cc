@@ -168,12 +168,14 @@ static void run_case(const char *name, int task_id,
 		     bool use_lock)
 {
   // clear histogram
+#if 0
   if(0) {
     RegionAccessor<AccessorType::Generic,BucketType> ria = hbargs.inst.get_accessor().typeify<BucketType>();
 
     for(unsigned i = 0; i < hbargs.buckets; i++)
       ria.write(ptr_t(i), 0);
   }
+#endif
 
   log_app.info("starting %s histogramming...\n", name);
 
@@ -357,7 +359,8 @@ void hist_batch_task(const void *args, size_t arglen,
   const HistBatchArgs<BucketType> *hbargs = (const HistBatchArgs<BucketType> *)args;
 
   // get a reduction accessor for the instance
-  RegionAccessor<AccessorType::Generic,BucketType> ria = hbargs->inst.get_accessor().typeify<BucketType>();
+  RegionAccessor<AccessorType::Generic> untyped(hbargs->inst);
+  RegionAccessor<AccessorType::Generic,BucketType> ria = untyped.typeify<BucketType>();
 
   for(unsigned i = 0; i < hbargs->count; i++) {
     unsigned rval = myrand(hbargs->start + i, hbargs->seed1, hbargs->seed2);
@@ -394,7 +397,8 @@ void hist_batch_localize_task(const void *args, size_t arglen,
 		      ProfilingRequestSet()).wait();
 
   // get an array accessor for the instance
-  RegionAccessor<AccessorType::SOA<0>,BucketType> ria = lclinst.get_accessor().typeify<BucketType>().convert<AccessorType::SOA<0> >();
+  RegionAccessor<AccessorType::Generic> untyped(lclinst);
+  RegionAccessor<AccessorType::SOA<0>,BucketType> ria = untyped.typeify<BucketType>().convert<AccessorType::SOA<0> >();
 
   for(unsigned i = 0; i < hbargs->count; i++) {
     unsigned rval = myrand(hbargs->start + i, hbargs->seed1, hbargs->seed2);
@@ -437,7 +441,8 @@ void hist_batch_redfold_task(const void *args, size_t arglen,
 		      &BucketReduction::identity, fld[0].size).wait();
 
   // get a reduction accessor for the instance
-  RegionAccessor<AccessorType::ReductionFold<REDOP>, BucketType> ria = redinst.get_accessor().typeify<BucketType>().convert<AccessorType::ReductionFold<REDOP> >();
+  RegionAccessor<AccessorType::Generic> untyped(redinst);
+  RegionAccessor<AccessorType::ReductionFold<REDOP>, BucketType> ria = untyped.typeify<BucketType>().convert<AccessorType::ReductionFold<REDOP> >();
 
   for(unsigned i = 0; i < hbargs->count; i++) {
     unsigned rval = myrand(hbargs->start + i, hbargs->seed1, hbargs->seed2);

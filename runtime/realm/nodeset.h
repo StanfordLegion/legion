@@ -18,66 +18,153 @@
 #ifndef REALM_NODESET_H
 #define REALM_NODESET_H
 
-#include "bitmask.h"
-#include "realm_c.h"
+#include "realm/realm_config.h"
+#include "realm/mutex.h"
 
-#ifndef REALM_MAX_NUM_NODES
-#define REALM_MAX_NUM_NODES         1024 // must be a power of 2
+#include <stdint.h>
+#include <iterator>
+
+#ifdef DEBUG_REALM
+#define DEBUG_REALM_NODESET
 #endif
 
-// The following macros are used in the NodeMask instantiation of BitMask
-// If you change one you probably have to change the others too
-#define REALM_NODE_MASK_NODE_TYPE           uint64_t
-#define REALM_NODE_MASK_NODE_SHIFT          6
-#define REALM_NODE_MASK_NODE_MASK           0x3F
-#define REALM_NODE_MASK_NODE_ALL_ONES       0xFFFFFFFFFFFFFFFF
+#ifdef DEBUG_REALM_NODESET
+#include <set>
+#endif
+
 namespace Realm {
-#if defined(__AVX__)
-#if (REALM_MAX_NUM_NODES > 256)
-    typedef AVXTLBitMask<REALM_MAX_NUM_NODES> NodeMask;
-#elif (REALM_MAX_NUM_NODES > 128)
-    typedef AVXBitMask<REALM_MAX_NUM_NODES> NodeMask;
-#elif (REALM_MAX_NUM_NODES > 64)
-    typedef SSEBitMask<REALM_MAX_NUM_NODES> NodeMask;
-#else
-    typedef BitMask<REALM_NODE_MASK_NODE_TYPE,REALM_MAX_NUM_NODES,
-                    REALM_NODE_MASK_NODE_SHIFT,
-                    REALM_NODE_MASK_NODE_MASK> NodeMask;
+
+  // TODO: optimize for fairly-common case of 'short' being sufficient?
+  typedef int NodeID;
+
+  class NodeSet;
+
+  // we do not support mutation of a nodeset, so we're a const_iterator
+  class NodeSetIterator : public std::iterator<std::input_iterator_tag, NodeID> {
+  public:
+    NodeSetIterator();
+    NodeSetIterator(const NodeSet& _nodeset);
+
+    bool operator==(const NodeSetIterator& compare_to) const;
+    bool operator!=(const NodeSetIterator& compare_to) const;
+
+    NodeID operator*() const;
+    const NodeID *operator->() const;
+
+    NodeSetIterator& operator++(/*prefix*/);
+    NodeSetIterator operator++(int /*postfix*/);
+
+  protected:
+    const NodeSet *nodeset;
+    NodeID cur_node;
+    short iter_pos; // needed for non-bitmask encodings
+  };
+
+  class NodeSetBitmask {
+  protected:
+    NodeSetBitmask();
+
+  public:
+    static void configure_allocator(NodeID _max_node_id,
+				    size_t _bitsets_per_chunk,
+				    bool _use_twolevel);
+    static void free_allocations();
+
+    static NodeSetBitmask *acquire_bitmask();
+    static NodeSetBitmask *clone_bitmask(const NodeSetBitmask *clone_from);
+
+    static void release_bitmask(NodeSetBitmask *bitmask, bool already_empty);
+
+    size_t set_bit(NodeID id);
+    size_t clear_bit(NodeID id);
+
+    size_t set_range(NodeID lo, NodeID hi);
+    size_t clear_range(NodeID lo, NodeID hi);
+
+    bool is_set(NodeID id) const;
+
+    NodeID first_set() const;
+    NodeID next_set(NodeID after) const;
+
+    void copy(const NodeSetBitmask *copy_from);
+
+  protected:
+    void l2_set(int elmt_idx);
+    void l2_clear(int elmt_idx);
+    int l2_find(int first_idx) const;
+
+    typedef uint64_t bitmask_elem_t;
+
+    static const size_t BITS_PER_ELEM = 8 * sizeof(bitmask_elem_t);
+
+    bitmask_elem_t bits[1];
+
+    static NodeID max_node_id;
+    static size_t bitset_elements, bitsets_per_chunk;
+    static size_t bitset_twolevel;
+    static uintptr_t alloc_chain_head, free_list_head;
+    static Mutex free_list_mutex;
+  };
+
+  class NodeSet {
+  public:
+    NodeSet();
+    ~NodeSet();
+
+    NodeSet(const NodeSet& copy_from);
+
+    NodeSet& operator=(const NodeSet& copy_from);
+
+    void swap(NodeSet& swap_with);
+
+    bool empty() const;
+    size_t size() const;
+
+    void add(NodeID id);
+    void remove(NodeID id);
+
+    void add_range(NodeID lo, NodeID hi);
+    void remove_range(NodeID lo, NodeID hi);
+
+    void clear();
+
+    bool contains(NodeID id) const;
+
+    typedef NodeSetIterator const_iterator;
+
+    const_iterator begin() const;
+    const_iterator end() const;
+
+  protected:
+    friend class NodeSetIterator;
+
+    unsigned count;
+
+    enum {
+      ENC_EMPTY,
+      ENC_VALS, // one or more distinct values
+      ENC_RANGES, // one or more non-overlapping ranges
+      ENC_BITMASK, // full (externally-allocated) bitmask
+    };
+    unsigned char enc_format;
+    short range_count;
+    static const short MAX_VALUES = 4;
+    static const short MAX_RANGES = 2;
+    union EncodingUnion {
+      NodeID values[MAX_VALUES];
+      struct { NodeID lo,hi; } ranges[MAX_RANGES];
+      NodeSetBitmask *bitmask;
+    };
+    EncodingUnion data;
+#ifdef DEBUG_REALM_NODESET
+    std::set<NodeID> reference_set;
 #endif
-#elif defined(__SSE2__)
-#if (REALM_MAX_NUM_NODES > 128)
-    typedef SSETLBitMask<REALM_MAX_NUM_NODES> NodeMask;
-#elif (REALM_MAX_NUM_NODES > 64)
-    typedef SSEBitMask<REALM_MAX_NUM_NODES> NodeMask;
-#else
-    typedef BitMask<REALM_NODE_MASK_NODE_TYPE,REALM_MAX_NUM_NODES,
-                    REALM_NODE_MASK_NODE_SHIFT,
-                    REALM_NODE_MASK_NODE_MASK> NodeMask;
-#endif
-#elif defined(__ALTIVEC__)
-#if (REALM_MAX_NUM_NODES > 128)
-    typedef PPCTLBitMask<REALM_MAX_NUM_NODES> NodeMask;
-#elif (REALM_MAX_NUM_NODES > 64)
-    typedef PPCBitMask<REALM_MAX_NUM_NODES> NodeMask;
-#else
-    typedef BitMask<REALM_NODE_MASK_NODE_TYPE,REALM_MAX_NUM_NODES,
-                    REALM_NODE_MASK_NODE_SHIFT,
-                    REALM_NODE_MASK_NODE_MASK> NodeMask;
-#endif
-#else
-#if (REALM_MAX_NUM_NODES > 64)
-    typedef TLBitMask<REALM_NODE_MASK_NODE_TYPE,REALM_MAX_NUM_NODES,
-                      REALM_NODE_MASK_NODE_SHIFT,
-                      REALM_NODE_MASK_NODE_MASK> NodeMask;
-#else
-    typedef BitMask<REALM_NODE_MASK_NODE_TYPE,REALM_MAX_NUM_NODES,
-                    REALM_NODE_MASK_NODE_SHIFT,
-                    REALM_NODE_MASK_NODE_MASK> NodeMask;
-#endif
-#endif
-    typedef IntegerSet<realm_address_space_t,NodeMask> NodeSet;
+
+    void convert_to_bitmask();
+  };
+
 };
-#undef REALM_NODE_MASK_NODE_SHIFT
-#undef REALM_NODE_MASK_NODE_MASK
+
+#include "realm/nodeset.inl"
 
 #endif // ifndef REALM_NODESET_H

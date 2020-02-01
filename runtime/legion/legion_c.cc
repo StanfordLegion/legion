@@ -1243,7 +1243,10 @@ legion_index_partition_create_by_field(legion_runtime_t runtime_,
                                        legion_logical_region_t parent_,
                                        legion_field_id_t fid,
                                        legion_index_space_t color_space_,
-                                       int color /* = AUTO_GENERATE_ID */)
+                                       int color /* = AUTO_GENERATE_ID */,
+                                       legion_mapper_id_t id /* = 0 */,
+                                       legion_mapping_tag_id_t tag /* = 0 */,
+                                       legion_partition_kind_t part_kind /* = DISJOINT_KIND */)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
@@ -1253,7 +1256,7 @@ legion_index_partition_create_by_field(legion_runtime_t runtime_,
 
   IndexPartition ip =
     runtime->create_partition_by_field(ctx, handle, parent, fid, color_space,
-                                       color);
+                                       color, id, tag, part_kind);
 
   return CObjectWrapper::wrap(ip);
 }
@@ -4817,6 +4820,15 @@ legion_physical_region_destroy(legion_physical_region_t handle_)
   PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
 
   delete handle;
+}
+
+legion_physical_region_t
+legion_physical_region_copy(legion_physical_region_t handle_)
+{
+  PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
+
+  PhysicalRegion *result = new PhysicalRegion(*handle);
+  return CObjectWrapper::wrap(result);
 }
 
 bool

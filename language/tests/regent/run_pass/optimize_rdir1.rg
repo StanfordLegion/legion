@@ -12,18 +12,27 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- runs-with:
+-- [
+--   ["-fflow", "1"],
+--   ["-fflow", "0"]
+-- ]
+
 import "regent"
 
-fspace t { a : int }
+-- This tests https://github.com/StanfordLegion/legion/issues/727
 
 task f()
-  return t { a = 2 }
+  var x = 0
+  var y = 0
+  x = 123
+  y = 2 * 10 * x
+  x = 456
+  return y
 end
 
 task main()
-  var x : t
-  x.a = 1
-  x = f()
-  regentlib.assert(x.a == 2, "test failed")
+  regentlib.c.printf("%d\n", f())
+  regentlib.assert(f() == 2460, "test failed")
 end
 regentlib.start(main)

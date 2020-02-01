@@ -18,6 +18,8 @@
 #ifndef REALM_MUTEX_H
 #define REALM_MUTEX_H
 
+#include "realm/realm_config.h"
+
 #include <stdint.h>
 
 namespace Realm {
@@ -97,7 +99,77 @@ namespace Realm {
     bool held;
   };
 
-  
+  // a reader/writer lock allows one or more readers OR one writer at a time
+  class RWLock {
+  public:
+    RWLock();
+    ~RWLock();
+
+    // should never be copied (or moved)
+#if REALM_CXX_STANDARD >= 11
+    RWLock(const RWLock&) = delete;
+    RWLock(RWLock&&) = delete;
+    RWLock& operator=(const RWLock&) = delete;
+    RWLock& operator=(RWLock&&) = delete;
+#else
+  private:
+    RWLock(const RWLock&) : writer(*this), reader(*this) {}
+    RWLock& operator=(const RWLock&) { return *this; }
+  public:
+#endif
+
+    void wrlock();
+    bool trywrlock();
+    void rdlock();
+    bool tryrdlock();
+    void unlock();
+
+    // to allow use with AutoLock<T>, the RWLock provides "aspects" that
+    //  look like normal locks
+    struct Writer {
+      Writer(RWLock& _rwlock) : rwlock(_rwlock) {}
+      void lock() { rwlock.wrlock(); }
+      void trylock() { rwlock.trywrlock(); }
+      void unlock() { rwlock.unlock(); }
+    protected:
+      RWLock& rwlock;
+    };
+
+    struct Reader {
+      Reader(RWLock& _rwlock) : rwlock(_rwlock) {}
+      void lock() { rwlock.rdlock(); }
+      void trylock() { rwlock.tryrdlock(); }
+      void unlock() { rwlock.unlock(); }
+    protected:
+      RWLock& rwlock;
+    };
+
+    typedef AutoLock<Writer> AutoWriterLock;
+    typedef AutoLock<Reader> AutoReaderLock;
+
+    // allow free coercion to these aspects
+    operator Writer&() { return writer; }
+    operator Reader&() { return reader; }
+
+  protected:
+    Writer writer;
+    Reader reader;
+    // the actual implementation of the rwlock is hidden
+    //  but if we don't define it here, we run afoul of
+    //  rules type-punning, so use macros to let mutex.cc's inclusion
+    //  of this file behave a little differently
+    union {
+#ifdef REALM_ON_MACOS
+      // apparently pthread_rwlock_t's are LARGE on macOS
+      uint64_t placeholder[32]; // 256 bytes, at least 8 byte aligned
+#else
+      uint64_t placeholder[8]; // 64 bytes, at least 8 byte aligned
+#endif
+#ifdef REALM_RWLOCK_IMPL
+      REALM_RWLOCK_IMPL;
+#endif
+    };
+  };
 };
 
 #include "realm/mutex.inl"

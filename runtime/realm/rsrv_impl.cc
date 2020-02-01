@@ -775,10 +775,10 @@ namespace Realm {
         int *payload = (int*)malloc(payload_size);
 	int *pos = payload;
 	*pos++ = waiter_count;
-	// TODO: switch to iterator
-        PackFunctor functor(pos);
-        copy_waiters.map(functor);
-        pos = functor.pos;
+	for(NodeSet::const_iterator it = copy_waiters.begin();
+	    it != copy_waiters.end();
+	    ++it)
+	  *pos++ = *it;
 	//for(int i = 0; i < MAX_NUM_NODES; i++)
 	//  if(copy_waiters.contains(i))
 	//    *pos++ = i;
@@ -1671,10 +1671,10 @@ namespace Realm {
         int *payload = (int*)malloc(payload_size);
 	int *pos = payload;
 	*pos++ = waiter_count;
-	// TODO: switch to iterator
-        ReservationImpl::PackFunctor functor(pos);
-        copy_waiters.map(functor);
-        pos = functor.pos;
+	for(NodeSet::const_iterator it = copy_waiters.begin();
+	    it != copy_waiters.end();
+	    ++it)
+	  *pos++ = *it;
 	//for(int i = 0; i < MAX_NUM_NODES; i++)
 	//  if(copy_waiters.contains(i))
 	//    *pos++ = i;
