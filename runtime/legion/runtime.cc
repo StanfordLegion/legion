@@ -2325,22 +2325,21 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // MPI Legion Handshake Impl 
+    // Legion Handshake Impl 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    MPILegionHandshakeImpl::MPILegionHandshakeImpl(bool init_mpi, int mpi_parts,
+    LegionHandshakeImpl::LegionHandshakeImpl(bool init_ext, int ext_parts,
                                                    int legion_parts)
-      : init_in_MPI(init_mpi), mpi_participants(mpi_parts), 
+      : init_in_ext(init_ext), ext_participants(ext_parts), 
         legion_participants(legion_parts)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    MPILegionHandshakeImpl::MPILegionHandshakeImpl(
-                                              const MPILegionHandshakeImpl &rhs)
-      : init_in_MPI(false), mpi_participants(-1), legion_participants(-1)
+    LegionHandshakeImpl::LegionHandshakeImpl(const LegionHandshakeImpl &rhs)
+      : init_in_ext(false), ext_participants(-1), legion_participants(-1)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -2348,16 +2347,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    MPILegionHandshakeImpl::~MPILegionHandshakeImpl(void)
+    LegionHandshakeImpl::~LegionHandshakeImpl(void)
     //--------------------------------------------------------------------------
     {
-      mpi_wait_barrier.get_barrier().destroy_barrier();
+      ext_wait_barrier.get_barrier().destroy_barrier();
       legion_wait_barrier.get_barrier().destroy_barrier();
     }
 
     //--------------------------------------------------------------------------
-    MPILegionHandshakeImpl& MPILegionHandshakeImpl::operator=(
-                                              const MPILegionHandshakeImpl &rhs)
+    LegionHandshakeImpl& LegionHandshakeImpl::operator=(
+                                                 const LegionHandshakeImpl &rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -2366,50 +2365,50 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MPILegionHandshakeImpl::initialize(void)
+    void LegionHandshakeImpl::initialize(void)
     //--------------------------------------------------------------------------
     {
-      mpi_wait_barrier = PhaseBarrier(ApBarrier(
+      ext_wait_barrier = PhaseBarrier(ApBarrier(
             Realm::Barrier::create_barrier(legion_participants)));
       legion_wait_barrier = PhaseBarrier(ApBarrier(
-            Realm::Barrier::create_barrier(mpi_participants)));
-      mpi_arrive_barrier = legion_wait_barrier;
-      legion_arrive_barrier = mpi_wait_barrier;
+            Realm::Barrier::create_barrier(ext_participants)));
+      ext_arrive_barrier = legion_wait_barrier;
+      legion_arrive_barrier = ext_wait_barrier;
       // Advance the two wait barriers
-      Runtime::advance_barrier(mpi_wait_barrier);
+      Runtime::advance_barrier(ext_wait_barrier);
       Runtime::advance_barrier(legion_wait_barrier);
       // Whoever is waiting first, we have to advance their arrive barriers
-      if (init_in_MPI)
+      if (init_in_ext)
       {
         Runtime::phase_barrier_arrive(legion_arrive_barrier, legion_participants);
-        Runtime::advance_barrier(mpi_wait_barrier);
+        Runtime::advance_barrier(ext_wait_barrier);
       }
       else
       {
-        Runtime::phase_barrier_arrive(mpi_arrive_barrier, mpi_participants);
+        Runtime::phase_barrier_arrive(ext_arrive_barrier, ext_participants);
         Runtime::advance_barrier(legion_wait_barrier);
       }
     }
 
     //--------------------------------------------------------------------------
-    void MPILegionHandshakeImpl::mpi_handoff_to_legion(void)
+    void LegionHandshakeImpl::ext_handoff_to_legion(void)
     //--------------------------------------------------------------------------
     {
       // Just have to do our arrival
-      Runtime::phase_barrier_arrive(mpi_arrive_barrier, 1);
+      Runtime::phase_barrier_arrive(ext_arrive_barrier, 1);
     }
 
     //--------------------------------------------------------------------------
-    void MPILegionHandshakeImpl::mpi_wait_on_legion(void)
+    void LegionHandshakeImpl::ext_wait_on_legion(void)
     //--------------------------------------------------------------------------
     {
       // When we get this call, we know we have done 
       // all the arrivals so we can advance it
-      Runtime::advance_barrier(mpi_arrive_barrier);
-      // Wait for mpi to be ready to run
+      Runtime::advance_barrier(ext_arrive_barrier);
+      // Wait for ext  to be ready to run
       // Note we use the external wait to be sure 
       // we don't get drafted by the Realm runtime
-      ApBarrier previous = Runtime::get_previous_phase(mpi_wait_barrier);
+      ApBarrier previous = Runtime::get_previous_phase(ext_wait_barrier);
       if (!previous.has_triggered())
       {
         // We can't call external wait directly on the barrier
@@ -2420,11 +2419,11 @@ namespace Legion {
         wait_on.external_wait();
       }
       // Now we can advance our wait barrier
-      Runtime::advance_barrier(mpi_wait_barrier);
+      Runtime::advance_barrier(ext_wait_barrier);
     }
 
     //--------------------------------------------------------------------------
-    void MPILegionHandshakeImpl::legion_handoff_to_mpi(void)
+    void LegionHandshakeImpl::legion_handoff_to_ext(void)
     //--------------------------------------------------------------------------
     {
       // Just have to do our arrival
@@ -2432,7 +2431,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MPILegionHandshakeImpl::legion_wait_on_mpi(void)
+    void LegionHandshakeImpl::legion_wait_on_ext(void)
     //--------------------------------------------------------------------------
     {
       Runtime::advance_barrier(legion_arrive_barrier);
@@ -2445,21 +2444,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhaseBarrier MPILegionHandshakeImpl::get_legion_wait_phase_barrier(void)
+    PhaseBarrier LegionHandshakeImpl::get_legion_wait_phase_barrier(void)
     //--------------------------------------------------------------------------
     {
       return legion_wait_barrier;
     }
 
     //--------------------------------------------------------------------------
-    PhaseBarrier MPILegionHandshakeImpl::get_legion_arrive_phase_barrier(void)
+    PhaseBarrier LegionHandshakeImpl::get_legion_arrive_phase_barrier(void)
     //--------------------------------------------------------------------------
     {
       return legion_arrive_barrier;
     }
 
     //--------------------------------------------------------------------------
-    void MPILegionHandshakeImpl::advance_legion_handshake(void)
+    void LegionHandshakeImpl::advance_legion_handshake(void)
     //--------------------------------------------------------------------------
     {
       Runtime::advance_barrier(legion_wait_barrier);
@@ -2467,7 +2466,7 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // MPI Legion Handshake Impl 
+    // MPI Rank Table
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
@@ -20841,10 +20840,10 @@ namespace Legion {
       if (config.legion_spy_enabled)
         LegionSpy::log_legion_spy_config();
       // Configure MPI Interoperability
-      const std::vector<MPILegionHandshake> &pending_handshakes =
+      const std::vector<LegionHandshake> &pending_handshakes =
         get_pending_handshake_table();
       if ((mpi_rank >= 0) || (!pending_handshakes.empty()))
-        configure_mpi_interoperability(config.separate_runtime_instances);
+        configure_interoperability(config.separate_runtime_instances);
       // Construct our runtime objects 
       Processor::Kind startup_kind = Processor::NO_KIND;
       const RtEvent tasks_registered = configure_runtime(argc, argv,
@@ -21393,24 +21392,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::configure_mpi_interoperability(
+    /*static*/ void Runtime::configure_interoperability(
                                                 bool separate_runtime_instances)
     //--------------------------------------------------------------------------
     {
-      if (separate_runtime_instances)
+      if (separate_runtime_instances && (mpi_rank > 0))
         REPORT_LEGION_ERROR(ERROR_MPI_INTEROP_MISCONFIGURATION,
             "Legion-MPI Interoperability is not supported when running "
             "with separate runtime instances for each processor")
-      if (mpi_rank < 0)
-        REPORT_LEGION_ERROR(ERROR_MPI_INTEROP_MISCONFIGURATION,
-            "Legion detected the presence of Legion-MPI handshake objects "
-            "without a set MPI rank. An MPI rank must be set to use any "
-            "Legion-MPI handhshake objects")
-      const std::vector<MPILegionHandshake> &pending_handshakes = 
+      const std::vector<LegionHandshake> &pending_handshakes = 
         get_pending_handshake_table();
       if (!pending_handshakes.empty())
       {
-        for (std::vector<MPILegionHandshake>::const_iterator it = 
+        for (std::vector<LegionHandshake>::const_iterator it = 
               pending_handshakes.begin(); it != pending_handshakes.end(); it++)
           it->impl->initialize();
       }
@@ -21691,7 +21685,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::register_handshake(MPILegionHandshake &handshake)
+    /*static*/ void Runtime::register_handshake(LegionHandshake &handshake)
     //--------------------------------------------------------------------------
     {
       // See if the runtime is started or not
@@ -21702,7 +21696,7 @@ namespace Legion {
       }
       else
       {
-        std::vector<MPILegionHandshake> &pending_handshakes = 
+        std::vector<LegionHandshake> &pending_handshakes = 
           get_pending_handshake_table();
         pending_handshakes.push_back(handshake);
       }
@@ -21968,11 +21962,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ std::vector<MPILegionHandshake>& 
+    /*static*/ std::vector<LegionHandshake>& 
                                       Runtime::get_pending_handshake_table(void)
     //--------------------------------------------------------------------------
     {
-      static std::vector<MPILegionHandshake> pending_handshakes_table;
+      static std::vector<LegionHandshake> pending_handshakes_table;
       return pending_handshakes_table;
     }
 

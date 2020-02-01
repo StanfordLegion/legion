@@ -158,6 +158,7 @@ namespace Legion {
   class Partition;
   class MustEpoch;
   class Runtime;
+  class LegionHandshake;
   class MPILegionHandshake;
   // For backwards compatibility
   typedef Runtime HighLevelRuntime;
@@ -1312,7 +1313,7 @@ namespace Legion {
     class PhysicalRegionImpl;
     class GrantImpl;
     class PredicateImpl;
-    class MPILegionHandshakeImpl;
+    class LegionHandshakeImpl;
     class ProcessorManager;
     class MemoryManager;
     class VirtualChannel;
@@ -1641,7 +1642,7 @@ namespace Legion {
     friend class Internal::TreeStateLogger;                 \
     friend class Internal::MapperManager;                   \
     friend class Internal::InstanceRef;                     \
-    friend class Internal::MPILegionHandshakeImpl;          \
+    friend class Internal::LegionHandshakeImpl;             \
     friend class Internal::ArgumentMapImpl;                 \
     friend class Internal::FutureMapImpl;                   \
     friend class Internal::TaskContext;                     \

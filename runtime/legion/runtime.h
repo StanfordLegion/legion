@@ -542,36 +542,36 @@ namespace Legion {
       mutable LocalLock grant_lock;
     };
 
-    class MPILegionHandshakeImpl : public Collectable,
-                       public LegionHeapify<MPILegionHandshakeImpl> {
+    class LegionHandshakeImpl : public Collectable,
+                       public LegionHeapify<LegionHandshakeImpl> {
     public:
       static const AllocationType alloc_type = MPI_HANDSHAKE_ALLOC;
     public:
-      MPILegionHandshakeImpl(bool init_in_MPI, int mpi_participants, 
-                             int legion_participants);
-      MPILegionHandshakeImpl(const MPILegionHandshakeImpl &rhs);
-      ~MPILegionHandshakeImpl(void);
+      LegionHandshakeImpl(bool init_in_ext, int ext_participants, 
+                          int legion_participants);
+      LegionHandshakeImpl(const LegionHandshakeImpl &rhs);
+      ~LegionHandshakeImpl(void);
     public:
-      MPILegionHandshakeImpl& operator=(const MPILegionHandshakeImpl &rhs);
+      LegionHandshakeImpl& operator=(const LegionHandshakeImpl &rhs);
     public:
       void initialize(void);
     public:
-      void mpi_handoff_to_legion(void);
-      void mpi_wait_on_legion(void);
+      void ext_handoff_to_legion(void);
+      void ext_wait_on_legion(void);
     public:
-      void legion_handoff_to_mpi(void);
-      void legion_wait_on_mpi(void);
+      void legion_handoff_to_ext(void);
+      void legion_wait_on_ext(void);
     public:
       PhaseBarrier get_legion_wait_phase_barrier(void);
       PhaseBarrier get_legion_arrive_phase_barrier(void);
       void advance_legion_handshake(void);
     private:
-      const bool init_in_MPI;
-      const int mpi_participants;
+      const bool init_in_ext;
+      const int ext_participants;
       const int legion_participants;
     private:
-      PhaseBarrier mpi_wait_barrier;
-      PhaseBarrier mpi_arrive_barrier;
+      PhaseBarrier ext_wait_barrier;
+      PhaseBarrier ext_arrive_barrier;
       PhaseBarrier legion_wait_barrier; // copy of mpi_arrive_barrier
       PhaseBarrier legion_arrive_barrier; // copy of mpi_wait_barrier
     };
@@ -3308,7 +3308,7 @@ namespace Legion {
       static RealmRuntime initialize(int *argc, char ***argv);
       static LegionConfiguration parse_arguments(int argc, char **argv);
       static void perform_slow_config_checks(const LegionConfiguration &config);
-      static void configure_mpi_interoperability(bool separate_runtimes);
+      static void configure_interoperability(bool separate_runtimes);
       static RtEvent configure_runtime(int argc, char **argv,
           const LegionConfiguration &config, RealmRuntime &realm,
           Processor::Kind &startup_kind);
@@ -3325,7 +3325,7 @@ namespace Legion {
       static void set_top_level_task_id(TaskID top_id);
       static void set_top_level_task_mapper_id(MapperID mapper_id);
       static void configure_MPI_interoperability(int rank);
-      static void register_handshake(MPILegionHandshake &handshake);
+      static void register_handshake(LegionHandshake &handshake);
       static const ReductionOp* get_reduction_op(ReductionOpID redop_id,
                                                  bool has_lock = false);
       static const SerdezOp* get_serdez_op(CustomSerdezID serdez_id,
@@ -3352,7 +3352,7 @@ namespace Legion {
                                 get_pending_constraint_table(void);
       static std::map<ProjectionID,ProjectionFunctor*>&
                                 get_pending_projection_table(void);
-      static std::vector<MPILegionHandshake>&
+      static std::vector<LegionHandshake>&
                                 get_pending_handshake_table(void);
       static std::vector<RegistrationCallbackFnptr>&
                                 get_pending_registration_callbacks(void);

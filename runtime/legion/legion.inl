@@ -7275,15 +7275,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void TaskLauncher::add_wait_handshake(MPILegionHandshake handshake)
+    inline void TaskLauncher::add_wait_handshake(LegionHandshake handshake)
     //--------------------------------------------------------------------------
     {
       wait_barriers.push_back(handshake.get_legion_wait_phase_barrier());
     }
 
     //--------------------------------------------------------------------------
-    inline void TaskLauncher::add_arrival_handshake(
-                                                   MPILegionHandshake handshake)
+    inline void TaskLauncher::add_arrival_handshake(LegionHandshake handshake)
     //--------------------------------------------------------------------------
     {
       arrive_barriers.push_back(handshake.get_legion_arrive_phase_barrier());
@@ -7369,8 +7368,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void IndexTaskLauncher::add_wait_handshake(
-                                                   MPILegionHandshake handshake)
+    inline void IndexTaskLauncher::add_wait_handshake(LegionHandshake handshake)
     //--------------------------------------------------------------------------
     {
       wait_barriers.push_back(handshake.get_legion_wait_phase_barrier());
@@ -7378,7 +7376,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     inline void IndexTaskLauncher::add_arrival_handshake(
-                                                   MPILegionHandshake handshake)
+                                                      LegionHandshake handshake)
     //--------------------------------------------------------------------------
     {
       arrive_barriers.push_back(handshake.get_legion_arrive_phase_barrier());
@@ -7437,15 +7435,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void InlineLauncher::add_wait_handshake(MPILegionHandshake handshake)
+    inline void InlineLauncher::add_wait_handshake(LegionHandshake handshake)
     //--------------------------------------------------------------------------
     {
       wait_barriers.push_back(handshake.get_legion_wait_phase_barrier());
     }
 
     //--------------------------------------------------------------------------
-    inline void InlineLauncher::add_arrival_handshake(
-                                                   MPILegionHandshake handshake)
+    inline void InlineLauncher::add_arrival_handshake(LegionHandshake handshake)
     //--------------------------------------------------------------------------
     {
       arrive_barriers.push_back(handshake.get_legion_arrive_phase_barrier());
@@ -7549,15 +7546,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void CopyLauncher::add_wait_handshake(MPILegionHandshake handshake)
+    inline void CopyLauncher::add_wait_handshake(LegionHandshake handshake)
     //--------------------------------------------------------------------------
     {
       wait_barriers.push_back(handshake.get_legion_wait_phase_barrier());
     }
 
     //--------------------------------------------------------------------------
-    inline void CopyLauncher::add_arrival_handshake(
-                                                   MPILegionHandshake handshake)
+    inline void CopyLauncher::add_arrival_handshake(LegionHandshake handshake)
     //--------------------------------------------------------------------------
     {
       arrive_barriers.push_back(handshake.get_legion_arrive_phase_barrier());
@@ -7663,8 +7659,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void IndexCopyLauncher::add_wait_handshake(
-                                                   MPILegionHandshake handshake)
+    inline void IndexCopyLauncher::add_wait_handshake(LegionHandshake handshake)
     //--------------------------------------------------------------------------
     {
       wait_barriers.push_back(handshake.get_legion_wait_phase_barrier());
@@ -7672,7 +7667,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     inline void IndexCopyLauncher::add_arrival_handshake(
-                                                   MPILegionHandshake handshake)
+                                                      LegionHandshake handshake)
     //--------------------------------------------------------------------------
     {
       arrive_barriers.push_back(handshake.get_legion_arrive_phase_barrier());
@@ -7709,8 +7704,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void AcquireLauncher::add_wait_handshake(
-                                                   MPILegionHandshake handshake)
+    inline void AcquireLauncher::add_wait_handshake(LegionHandshake handshake)
     //--------------------------------------------------------------------------
     {
       wait_barriers.push_back(handshake.get_legion_wait_phase_barrier());
@@ -7718,7 +7712,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     inline void AcquireLauncher::add_arrival_handshake(
-                                                   MPILegionHandshake handshake)
+                                                      LegionHandshake handshake)
     //--------------------------------------------------------------------------
     {
       arrive_barriers.push_back(handshake.get_legion_arrive_phase_barrier());
@@ -7755,8 +7749,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void ReleaseLauncher::add_wait_handshake(
-                                                   MPILegionHandshake handshake)
+    inline void ReleaseLauncher::add_wait_handshake(LegionHandshake handshake)
     //--------------------------------------------------------------------------
     {
       wait_barriers.push_back(handshake.get_legion_wait_phase_barrier());
@@ -7764,7 +7757,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     inline void ReleaseLauncher::add_arrival_handshake(
-                                                   MPILegionHandshake handshake)
+                                                      LegionHandshake handshake)
     //--------------------------------------------------------------------------
     {
       arrive_barriers.push_back(handshake.get_legion_arrive_phase_barrier());
@@ -7815,15 +7808,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void FillLauncher::add_wait_handshake(MPILegionHandshake handshake)
+    inline void FillLauncher::add_wait_handshake(LegionHandshake handshake)
     //--------------------------------------------------------------------------
     {
       wait_barriers.push_back(handshake.get_legion_wait_phase_barrier());
     }
 
     //--------------------------------------------------------------------------
-    inline void FillLauncher::add_arrival_handshake(
-                                                   MPILegionHandshake handshake)
+    inline void FillLauncher::add_arrival_handshake(LegionHandshake handshake)
     //--------------------------------------------------------------------------
     {
       arrive_barriers.push_back(handshake.get_legion_arrive_phase_barrier());
@@ -7874,8 +7866,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void IndexFillLauncher::add_wait_handshake(
-                                                   MPILegionHandshake handshake)
+    inline void IndexFillLauncher::add_wait_handshake(LegionHandshake handshake)
     //--------------------------------------------------------------------------
     {
       wait_barriers.push_back(handshake.get_legion_wait_phase_barrier());
@@ -7883,7 +7874,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     inline void IndexFillLauncher::add_arrival_handshake(
-                                                   MPILegionHandshake handshake)
+                                                      LegionHandshake handshake)
     //--------------------------------------------------------------------------
     {
       arrive_barriers.push_back(handshake.get_legion_arrive_phase_barrier());

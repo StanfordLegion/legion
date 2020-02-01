@@ -1442,8 +1442,8 @@ namespace Legion {
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
       inline void add_arrival_barrier(PhaseBarrier bar);
-      inline void add_wait_handshake(MPILegionHandshake handshake);
-      inline void add_arrival_handshake(MPILegionHandshake handshake);
+      inline void add_wait_handshake(LegionHandshake handshake);
+      inline void add_arrival_handshake(LegionHandshake handshake);
     public:
       inline void set_predicate_false_future(Future f);
       inline void set_predicate_false_result(TaskArgument arg);
@@ -1536,8 +1536,8 @@ namespace Legion {
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
       inline void add_arrival_barrier(PhaseBarrier bar);
-      inline void add_wait_handshake(MPILegionHandshake handshake);
-      inline void add_arrival_handshake(MPILegionHandshake handshake);
+      inline void add_wait_handshake(LegionHandshake handshake);
+      inline void add_arrival_handshake(LegionHandshake handshake);
     public:
       inline void set_predicate_false_future(Future f);
       inline void set_predicate_false_result(TaskArgument arg);
@@ -1618,8 +1618,8 @@ namespace Legion {
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
       inline void add_arrival_barrier(PhaseBarrier bar);
-      inline void add_wait_handshake(MPILegionHandshake handshake);
-      inline void add_arrival_handshake(MPILegionHandshake handshake);
+      inline void add_wait_handshake(LegionHandshake handshake);
+      inline void add_arrival_handshake(LegionHandshake handshake);
     public:
       RegionRequirement               requirement;
       std::vector<Grant>              grants;
@@ -1686,8 +1686,8 @@ namespace Legion {
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
       inline void add_arrival_barrier(PhaseBarrier bar);
-      inline void add_wait_handshake(MPILegionHandshake handshake);
-      inline void add_arrival_handshake(MPILegionHandshake handshake); 
+      inline void add_wait_handshake(LegionHandshake handshake);
+      inline void add_arrival_handshake(LegionHandshake handshake); 
     public:
       std::vector<RegionRequirement>  src_requirements;
       std::vector<RegionRequirement>  dst_requirements;
@@ -1762,8 +1762,8 @@ namespace Legion {
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
       inline void add_arrival_barrier(PhaseBarrier bar);
-      inline void add_wait_handshake(MPILegionHandshake handshake);
-      inline void add_arrival_handshake(MPILegionHandshake handshake);
+      inline void add_wait_handshake(LegionHandshake handshake);
+      inline void add_arrival_handshake(LegionHandshake handshake);
     public:
       std::vector<RegionRequirement>  src_requirements;
       std::vector<RegionRequirement>  dst_requirements;
@@ -1820,8 +1820,8 @@ namespace Legion {
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
       inline void add_arrival_barrier(PhaseBarrier bar);
-      inline void add_wait_handshake(MPILegionHandshake handshake);
-      inline void add_arrival_handshake(MPILegionHandshake handshake);
+      inline void add_wait_handshake(LegionHandshake handshake);
+      inline void add_arrival_handshake(LegionHandshake handshake);
     public:
       LogicalRegion                   handle;
       LogicalRegion                   parent;
@@ -1908,8 +1908,8 @@ namespace Legion {
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
       inline void add_arrival_barrier(PhaseBarrier bar);
-      inline void add_wait_handshake(MPILegionHandshake handshake);
-      inline void add_arrival_handshake(MPILegionHandshake handshake);
+      inline void add_wait_handshake(LegionHandshake handshake);
+      inline void add_arrival_handshake(LegionHandshake handshake);
     public:
       Domain                          launch_domain;
       IndexSpace                      launch_space;
@@ -2553,8 +2553,8 @@ namespace Legion {
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier pb);
       inline void add_arrival_barrier(PhaseBarrier pb);
-      inline void add_wait_handshake(MPILegionHandshake handshake);
-      inline void add_arrival_handshake(MPILegionHandshake handshake);
+      inline void add_wait_handshake(LegionHandshake handshake);
+      inline void add_arrival_handshake(LegionHandshake handshake);
     public:
       LogicalRegion                   logical_region;
       LogicalRegion                   parent_region;
@@ -2595,8 +2595,8 @@ namespace Legion {
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier pb);
       inline void add_arrival_barrier(PhaseBarrier pb);
-      inline void add_wait_handshake(MPILegionHandshake handshake);
-      inline void add_arrival_handshake(MPILegionHandshake handshake);
+      inline void add_wait_handshake(LegionHandshake handshake);
+      inline void add_arrival_handshake(LegionHandshake handshake);
     public:
       LogicalRegion                   logical_region;
       LogicalRegion                   parent_region;
@@ -2659,48 +2659,59 @@ namespace Legion {
     };
 
     //==========================================================================
-    //                     MPI Interoperability Classes
+    //                     Interoperability Classes
     //==========================================================================
 
-    class MPILegionHandshake : public Unserializable<MPILegionHandshake> {
+    /**
+     * \class LegionHandshake
+     * This class provides a light-weight synchronization primitive for
+     * external applications to use when performing synchronization with
+     * Legion tasks. It allows for control to be passed from the external
+     * application into Legion and then for control to be handed back to
+     * the external application from Legion. The user can configure which
+     * direction occurs first when constructing the handshake object.
+     * @see Runtime::create_external_handshake
+     */
+    class LegionHandshake : public Unserializable<LegionHandshake> {
     public:
-      MPILegionHandshake(void);
-      MPILegionHandshake(const MPILegionHandshake &rhs);
-      ~MPILegionHandshake(void);
-    private:
-      Internal::MPILegionHandshakeImpl *impl;
+      LegionHandshake(void);
+      LegionHandshake(const LegionHandshake &rhs);
+      ~LegionHandshake(void);
+    protected:
+      Internal::LegionHandshakeImpl *impl;
     protected:
       // Only the runtime should be able to make these
       FRIEND_ALL_RUNTIME_CLASSES
-      explicit MPILegionHandshake(Internal::MPILegionHandshakeImpl *impl);
+      explicit LegionHandshake(Internal::LegionHandshakeImpl *impl);
     public:
-      bool operator==(const MPILegionHandshake &h) const
+      bool operator==(const LegionHandshake &h) const
         { return impl == h.impl; }
-      bool operator<(const MPILegionHandshake &h) const
+      bool operator<(const LegionHandshake &h) const
         { return impl < h.impl; }
-      MPILegionHandshake& operator=(const MPILegionHandshake &rhs);
+      LegionHandshake& operator=(const LegionHandshake &rhs);
     public:
       /**
        * Non-blocking call to signal to Legion that this participant
        * is ready to pass control to Legion.
        */
-      void mpi_handoff_to_legion(void) const;
+      void ext_handoff_to_legion(void) const;
       /**
        * A blocking call that will cause this participant to wait
-       * for all Legion participants to hand over control to MPI.
+       * for all Legion participants to hand over control to the
+       * external application.
        */
-      void mpi_wait_on_legion(void) const;
+      void ext_wait_on_legion(void) const;
     public:
       /**
-       * A non-blocking call to signal to MPI that this participant
-       * is ready to pass control to MPI.
+       * A non-blocking call to signal to the external application 
+       * that this participant is ready to pass control to to it.
        */
-      void legion_handoff_to_mpi(void) const;
+      void legion_handoff_to_ext(void) const;
       /**
        * A blocking call that will cause this participant to wait
-       * for all MPI participants to hand over control to Legion.
+       * for all external participants to hand over control to Legion.
        */
-      void legion_wait_on_mpi(void) const;
+      void legion_wait_on_ext(void) const;
     public:
       /*
        * For asynchronous Legion execution, you can use these
@@ -2719,6 +2730,50 @@ namespace Legion {
        * Advance the handshake associated with the Legion side
        */
       void advance_legion_handshake(void) const;
+    };
+
+    /**
+     * \class MPILegionHandshake
+     * This class is only here for legacy reasons. In general we encourage
+     * users to use the generic LegionHandshake
+     */
+    class MPILegionHandshake : public LegionHandshake {
+    public:
+      MPILegionHandshake(void);
+      MPILegionHandshake(const MPILegionHandshake &rhs);
+      ~MPILegionHandshake(void);
+    protected:
+      // Only the runtime should be able to make these
+      FRIEND_ALL_RUNTIME_CLASSES
+      explicit MPILegionHandshake(Internal::LegionHandshakeImpl *impl);
+    public:
+      bool operator==(const MPILegionHandshake &h) const
+        { return impl == h.impl; }
+      bool operator<(const MPILegionHandshake &h) const
+        { return impl < h.impl; }
+      MPILegionHandshake& operator=(const MPILegionHandshake &rhs);
+    public:
+      /**
+       * Non-blocking call to signal to Legion that this participant
+       * is ready to pass control to Legion.
+       */
+      inline void mpi_handoff_to_legion(void) const { ext_handoff_to_legion(); }
+      /**
+       * A blocking call that will cause this participant to wait
+       * for all Legion participants to hand over control to MPI.
+       */
+      inline void mpi_wait_on_legion(void) const { ext_wait_on_legion(); }
+    public:
+      /**
+       * A non-blocking call to signal to MPI that this participant
+       * is ready to pass control to MPI.
+       */
+      inline void legion_handoff_to_mpi(void) const { legion_handoff_to_ext(); }
+      /**
+       * A blocking call that will cause this participant to wait
+       * for all MPI participants to hand over control to Legion.
+       */
+      inline void legion_wait_on_mpi(void) const { legion_wait_on_ext(); }
     };
 
     //==========================================================================
@@ -7225,6 +7280,23 @@ namespace Legion {
        * @param rank the integer naming this MPI rank
        */
       static void configure_MPI_interoperability(int rank);
+
+      /**
+       * Create a handshake object for exchanging control between an
+       * external application and Legion. We make this a static method so that 
+       * it can be created before the Legion runtime is initialized.
+       * @param init_in_ext who owns initial control of the handshake,
+       *                    by default it is the external application
+       * @param ext_participants number of calls that need to be made to the 
+       *                    handshake to pass control from the external 
+       *                    application to Legion
+       * @param legion_participants number of calls that need to be made to
+       *                    the handshake to pass control from Legion to the
+       *                    external application
+       */
+      static LegionHandshake create_external_handshake(bool init_in_ext = true,
+                                                   int ext_participants = 1,
+                                                   int legion_participants = 1);
 
       /**
        * Create a handshake object for exchanging control between MPI
