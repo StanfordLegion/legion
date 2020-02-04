@@ -377,27 +377,27 @@ namespace Legion {
     }; 
 
     // Runtime task numbering 
-#ifdef LEGION_SEPARATE_META_TASKS
     enum {
       LG_INITIALIZE_TASK_ID   = Realm::Processor::TASK_ID_PROCESSOR_INIT,
       LG_SHUTDOWN_TASK_ID     = Realm::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
-      LG_TASK_ID              = Realm::Processor::TASK_ID_FIRST_AVAILABLE,
-      LG_LEGION_PROFILING_ID  = Realm::Processor::TASK_ID_FIRST_AVAILABLE+LG_LAST_TASK_ID+1,
-      LG_STARTUP_TASK_ID      = Realm::Processor::TASK_ID_FIRST_AVAILABLE+LG_LAST_TASK_ID+2,
-      LG_ENDPOINT_TASK_ID     = Realm::Processor::TASK_ID_FIRST_AVAILABLE+LG_LAST_TASK_ID+3,
-      LG_TASK_ID_AVAILABLE    = Realm::Processor::TASK_ID_FIRST_AVAILABLE+LG_LAST_TASK_ID+4,
-    };
+#ifdef LEGION_GPU_REDUCTIONS
+      LG_REDOP_TASK_ID        = Realm::Processor::TASK_ID_FIRST_AVAILABLE,
+      LG_TASK_ID              = LG_REDOP_TASK_ID + LEGION_REDOP_LAST - LEGION_REDOP_BASE,
 #else
-    enum {
-      LG_INITIALIZE_TASK_ID   = Realm::Processor::TASK_ID_PROCESSOR_INIT,
-      LG_SHUTDOWN_TASK_ID     = Realm::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
       LG_TASK_ID              = Realm::Processor::TASK_ID_FIRST_AVAILABLE,
-      LG_LEGION_PROFILING_ID  = Realm::Processor::TASK_ID_FIRST_AVAILABLE+1,
-      LG_STARTUP_TASK_ID      = Realm::Processor::TASK_ID_FIRST_AVAILABLE+2,
-      LG_ENDPOINT_TASK_ID     = Realm::Processor::TASK_ID_FIRST_AVAILABLE+3,
-      LG_TASK_ID_AVAILABLE    = Realm::Processor::TASK_ID_FIRST_AVAILABLE+4,
-    };
 #endif
+#ifdef LEGION_SEPARATE_META_TASKS
+      LG_LEGION_PROFILING_ID  = LG_TASK_ID+LG_LAST_TASK_ID+1,
+      LG_STARTUP_TASK_ID      = LG_TASK_ID+LG_LAST_TASK_ID+2,
+      LG_ENDPOINT_TASK_ID     = LG_TASK_ID+LG_LAST_TASK_ID+3,
+      LG_TASK_ID_AVAILABLE    = LG_TASK_ID+LG_LAST_TASK_ID+4,
+#else
+      LG_LEGION_PROFILING_ID  = LG_TASK_ID+1,
+      LG_STARTUP_TASK_ID      = LG_TASK_ID+2,
+      LG_ENDPOINT_TASK_ID     = LG_TASK_ID+3,
+      LG_TASK_ID_AVAILABLE    = LG_TASK_ID+4,
+#endif
+    };
 
     // Make this a macro so we can keep it close to 
     // declaration of the task IDs themselves

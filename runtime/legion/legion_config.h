@@ -1507,6 +1507,7 @@ typedef enum legion_builtin_redop_t {
   LEGION_REDOP_MIN_FLOAT32    = LEGION_REDOP_VALUE(MIN,FLOAT32),
   LEGION_REDOP_MIN_FLOAT64    = LEGION_REDOP_VALUE(MIN,FLOAT64),
   // No definitions of min for complex types
+  LEGION_REDOP_LAST,
 } legion_builtin_redop_t;
 
 #undef LEGION_REDOP_KIND_SUM_VALUE
