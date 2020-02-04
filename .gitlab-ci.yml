@@ -81,6 +81,7 @@ variables:
   USE_PYTHON: "1"
   # FIXME: It would be nice to find a better way to do this,
   # but the alternatives look scary
+  PYTHON_EXE: "python3"
   PYTHON_LIB: "/usr/lib/x86_64-linux-gnu/libpython3.5m.so"
   PYTHON_VERSION_MAJOR: "3"
   TEST_PYTHON_EXE: "python3"
