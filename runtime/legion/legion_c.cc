@@ -1271,7 +1271,9 @@ legion_index_partition_create_by_image(
   legion_field_id_t fid,
   legion_index_space_t color_space_,
   legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-  int color /* = AUTO_GENERATE_ID */)
+  int color /* = AUTO_GENERATE_ID */,
+  legion_mapper_id_t id /* = 0 */,
+  legion_mapping_tag_id_t tag /* = 0 */)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
@@ -1282,7 +1284,7 @@ legion_index_partition_create_by_image(
 
   IndexPartition ip =
     runtime->create_partition_by_image(
-      ctx, handle, projection, parent, fid, color_space, part_kind, color);
+      ctx, handle, projection, parent, fid, color_space, part_kind, color, id, tag);
 
   return CObjectWrapper::wrap(ip);
 }
@@ -1297,7 +1299,9 @@ legion_index_partition_create_by_preimage(
   legion_field_id_t fid,
   legion_index_space_t color_space_,
   legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-  int color /* = AUTO_GENERATE_ID */)
+  int color /* = AUTO_GENERATE_ID */,
+  legion_mapper_id_t id /* = 0 */,
+  legion_mapping_tag_id_t tag /* = 0 */)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
@@ -1308,7 +1312,7 @@ legion_index_partition_create_by_preimage(
 
   IndexPartition ip =
     runtime->create_partition_by_preimage(
-      ctx, projection, handle, parent, fid, color_space, part_kind, color);
+      ctx, projection, handle, parent, fid, color_space, part_kind, color, id, tag);
 
   return CObjectWrapper::wrap(ip);
 }
@@ -1323,7 +1327,9 @@ legion_index_partition_create_by_image_range(
   legion_field_id_t fid,
   legion_index_space_t color_space_,
   legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-  int color /* = AUTO_GENERATE_ID */)
+  int color /* = AUTO_GENERATE_ID */,
+  legion_mapper_id_t id /* = 0 */,
+  legion_mapping_tag_id_t tag /* = 0 */)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
@@ -1334,7 +1340,7 @@ legion_index_partition_create_by_image_range(
 
   IndexPartition ip =
     runtime->create_partition_by_image_range(
-      ctx, handle, projection, parent, fid, color_space, part_kind, color);
+      ctx, handle, projection, parent, fid, color_space, part_kind, color, id, tag);
 
   return CObjectWrapper::wrap(ip);
 }
@@ -1349,7 +1355,9 @@ legion_index_partition_create_by_preimage_range(
   legion_field_id_t fid,
   legion_index_space_t color_space_,
   legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-  int color /* = AUTO_GENERATE_ID */)
+  int color /* = AUTO_GENERATE_ID */,
+  legion_mapper_id_t id /* = 0 */,
+  legion_mapping_tag_id_t tag /* = 0 */)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
@@ -1360,7 +1368,7 @@ legion_index_partition_create_by_preimage_range(
 
   IndexPartition ip =
     runtime->create_partition_by_preimage_range(
-      ctx, projection, handle, parent, fid, color_space, part_kind, color);
+      ctx, projection, handle, parent, fid, color_space, part_kind, color, id, tag);
 
   return CObjectWrapper::wrap(ip);
 }
