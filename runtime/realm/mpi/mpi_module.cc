@@ -594,7 +594,6 @@ namespace Realm {
         seg_base += (*it)->bytes;
     }
 
-    activemsg_handler_table.construct_handler_table();
     g_am_manager.init_corereservation(*(runtime->core_reservations));
     g_am_manager.start_thread();
   }
