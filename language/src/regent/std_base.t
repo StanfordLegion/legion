@@ -1377,6 +1377,32 @@ function base.task:get_task_id()
   return self.taskid
 end
 
+function base.task:has_mapper_id()
+  return self.mapper_id
+end
+
+function base.task:get_mapper_id()
+  assert(self.mapper_id)
+  return self.mapper_id
+end
+
+function base.task:set_mapper_id(mapper_id)
+  self.mapper_id = terralib.constant(c.legion_mapper_id_t, mapper_id)
+end
+
+function base.task:has_mapping_tag_id()
+  return self.mapping_tag_id
+end
+
+function base.task:get_mapping_tag_id()
+  assert(self.mapping_tag_id)
+  return self.mapping_tag_id
+end
+
+function base.task:set_mapping_tag_id(tag)
+  self.mapping_tag_id = terralib.constant(c.legion_mapping_tag_id_t, tag)
+end
+
 function base.task:set_name(name)
   if type(name) == "string" then
     name = data.newtuple(name)
@@ -1523,6 +1549,10 @@ do
       taskid = terralib.constant(c.legion_task_id_t, task_id),
       variants = terralib.newlist(),
       calling_convention = false,
+
+      -- User-configurable task metadata:
+      mapper_id = false,
+      mapping_tag_id = false,
 
       -- Metadata for the Regent calling convention:
       param_symbols = false,

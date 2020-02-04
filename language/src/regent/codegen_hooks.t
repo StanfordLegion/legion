@@ -20,8 +20,9 @@ function codegen_hooks.set_update_mapping_tag(fn)
   codegen_hooks.update_mapping_tag = fn
 end
 
-function codegen_hooks.gen_update_mapping_tag(tag_var, task_var)
+function codegen_hooks.gen_update_mapping_tag(tag_var, has_tag, task_var)
   if codegen_hooks.update_mapping_tag then
+    assert(not has_tag, "attempting to update mapping tag on task which already has one set")
     return quote
       [tag_var] =
         [codegen_hooks.update_mapping_tag]([task_var])
