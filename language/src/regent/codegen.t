@@ -3548,11 +3548,12 @@ function codegen.expr_call(cx, node)
     local launcher_setup = quote
       var [task_args]
       [task_args_setup]
-      var [tag] = 0
-      [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
+      var mapper = [fn.value:has_mapper_id() or 0]
+      var [tag] = [fn.value:has_mapping_tag_id() or 0]
+      [codegen_hooks.gen_update_mapping_tag(tag, fn.value:has_mapping_tag_id(), cx.task)]
       var [launcher] = c.legion_task_launcher_create(
         [fn.value:get_task_id()], [task_args],
-        c.legion_predicate_true(), 0, [tag])
+        c.legion_predicate_true(), [mapper], [tag])
       [args_setup]
     end
 
@@ -9376,12 +9377,13 @@ local function stat_index_launch_setup(cx, node, domain, actions)
     var g_args : c.legion_task_argument_t
     g_args.args = nil
     g_args.arglen = 0
-    var [tag] = 0
-    [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
+    var mapper = [fn.value:has_mapper_id() or 0]
+    var [tag] = [fn.value:has_mapping_tag_id() or 0]
+    [codegen_hooks.gen_update_mapping_tag(tag, fn.value:has_mapping_tag_id(), cx.task)]
     var [launcher] = c.legion_index_launcher_create(
       [fn.value:get_task_id()],
       [domain], g_args, [argument_map],
-      c.legion_predicate_true(), false, 0, [tag])
+      c.legion_predicate_true(), false, [mapper], [tag])
     do
       var it = c.legion_domain_point_iterator_create([domain])
       var args_uninitialized = true
