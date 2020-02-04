@@ -4827,7 +4827,7 @@ function codegen.expr_image(cx, node)
       [cx.runtime], [cx.context],
       [parent.value].impl.index_space,
       [partition.value].impl, [region_parent].impl, field_id,
-      colors, disjointness, -1)
+      colors, disjointness, c.AUTO_GENERATE_ID, 0, 0)
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [parent.value].impl, [ip])
     [tag_imported(cx, lp)]
@@ -4895,7 +4895,7 @@ function codegen.expr_preimage(cx, node)
     var [ip] = [create_partition](
       [cx.runtime], [cx.context], [partition.value].impl.index_partition,
       [parent.value].impl, [region_parent].impl, field_id, colors,
-      disjointness, -1)
+      disjointness, c.AUTO_GENERATE_ID, 0, 0)
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [region.value].impl, [ip])
     [tag_imported(cx, lp)]

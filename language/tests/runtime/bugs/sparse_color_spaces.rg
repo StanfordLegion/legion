@@ -40,7 +40,9 @@ do
                                                           fid,
                                                           __raw(clusters.ispace),
                                                           c.DISJOINT_KIND,
-                                                          -1)
+                                                          c.AUTO_GENERATE_ID,
+                                                          0,
+                                                          0)
 
   var raw_part = c.legion_logical_partition_create(__runtime(), __context(), __raw(mat), ip)
 
