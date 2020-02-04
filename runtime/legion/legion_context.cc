@@ -2070,6 +2070,20 @@ namespace Legion {
           if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
             has_conflict = true;
         }
+        for (unsigned idx = 0; !has_conflict &&
+              (idx < copy->src_indirect_requirements.size()); idx++)
+        {
+          const RegionRequirement &req = copy->src_indirect_requirements[idx];
+          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
+            has_conflict = true;
+        }
+        for (unsigned idx = 0; !has_conflict &&
+              (idx < copy->dst_indirect_requirements.size()); idx++)
+        {
+          const RegionRequirement &req = copy->dst_indirect_requirements[idx];
+          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
+            has_conflict = true;
+        }
         if (has_conflict)
           conflicting.push_back(physical_regions[our_idx]);
       }
@@ -2098,6 +2112,20 @@ namespace Legion {
               (idx < copy->dst_requirements.size()); idx++)
         {
           const RegionRequirement &req = copy->dst_requirements[idx];
+          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
+            has_conflict = true;
+        }
+        for (unsigned idx = 0; !has_conflict &&
+              (idx < copy->src_indirect_requirements.size()); idx++)
+        {
+          const RegionRequirement &req = copy->src_indirect_requirements[idx];
+          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
+            has_conflict = true;
+        }
+        for (unsigned idx = 0; !has_conflict &&
+              (idx < copy->dst_indirect_requirements.size()); idx++)
+        {
+          const RegionRequirement &req = copy->dst_indirect_requirements[idx];
           if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
             has_conflict = true;
         }
