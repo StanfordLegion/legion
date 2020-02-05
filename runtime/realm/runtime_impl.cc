@@ -2091,27 +2091,6 @@ namespace Realm {
       //  things that try to run during teardown
       shutdown_in_progress.store(true);
       
-#if 0
-      // filter out duplicate requests
-      bool already_started = (__sync_fetch_and_add(&shutdown_count, 1) > 0);
-      if(already_started)
-	return;
-
-      if(local_request) {
-	log_runtime.info("shutdown request - notifying other nodes");
-	NodeSet targets;
-	for(NodeID i = 0; i <= Network::max_node_id; i++)
-	  if(i != Network::my_node_id)
-	    targets.add(i);
-
-	ActiveMessage<RuntimeShutdownMessage> amsg(targets);
-	amsg->result_code = result_code;
-	amsg.commit();
-      }
-
-      log_runtime.info("shutdown request - cleaning up local processors");
-#endif
-
       // Shutdown all the threads
 
       // threads that cause inter-node communication have to stop first
