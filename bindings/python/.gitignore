@@ -1,3 +1,7 @@
-/build
+.eggs
+dist
+*.egg-info
+
 /cached_legion.h
+/legion_cffi.py
 /legion_python

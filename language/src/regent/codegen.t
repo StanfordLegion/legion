@@ -3548,11 +3548,12 @@ function codegen.expr_call(cx, node)
     local launcher_setup = quote
       var [task_args]
       [task_args_setup]
-      var [tag] = 0
-      [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
+      var mapper = [fn.value:has_mapper_id() or 0]
+      var [tag] = [fn.value:has_mapping_tag_id() or 0]
+      [codegen_hooks.gen_update_mapping_tag(tag, fn.value:has_mapping_tag_id(), cx.task)]
       var [launcher] = c.legion_task_launcher_create(
         [fn.value:get_task_id()], [task_args],
-        c.legion_predicate_true(), 0, [tag])
+        c.legion_predicate_true(), [mapper], [tag])
       [args_setup]
     end
 
@@ -4467,7 +4468,7 @@ function codegen.expr_region(cx, node)
     actions = quote
       [actions];
       var [tag] = 0
-      [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
+      [codegen_hooks.gen_update_mapping_tag(tag, false, cx.task)]
       -- Note: it's safe to make this unconditionally write-discard
       -- because this is guarranteed to be the first use of the region
       var il = c.legion_inline_launcher_create_logical_region(
@@ -4827,7 +4828,7 @@ function codegen.expr_image(cx, node)
       [cx.runtime], [cx.context],
       [parent.value].impl.index_space,
       [partition.value].impl, [region_parent].impl, field_id,
-      colors, disjointness, -1)
+      colors, disjointness, c.AUTO_GENERATE_ID, 0, 0)
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [parent.value].impl, [ip])
     [tag_imported(cx, lp)]
@@ -4895,7 +4896,7 @@ function codegen.expr_preimage(cx, node)
     var [ip] = [create_partition](
       [cx.runtime], [cx.context], [partition.value].impl.index_partition,
       [parent.value].impl, [region_parent].impl, field_id, colors,
-      disjointness, -1)
+      disjointness, c.AUTO_GENERATE_ID, 0, 0)
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [region.value].impl, [ip])
     [tag_imported(cx, lp)]
@@ -6400,7 +6401,7 @@ local function expr_copy_setup_region(
   local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
   actions:insert(quote
     var [tag] = 0
-    [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
+    [codegen_hooks.gen_update_mapping_tag(tag, false, cx.task)]
     var [launcher] = c.legion_copy_launcher_create(
       c.legion_predicate_true(), 0, [tag])
   end)
@@ -6780,7 +6781,7 @@ local function expr_acquire_setup_region(
   local launcher = terralib.newsymbol(c.legion_acquire_launcher_t, "launcher")
   actions:insert(quote
     var tag = 0
-    [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
+    [codegen_hooks.gen_update_mapping_tag(tag, false, cx.task)]
     var [launcher] = c.legion_acquire_launcher_create(
       [dst_value].impl, [dst_parent],
       c.legion_predicate_true(), 0, tag)
@@ -6904,7 +6905,7 @@ local function expr_release_setup_region(
   local launcher = terralib.newsymbol(c.legion_release_launcher_t, "launcher")
   actions:insert(quote
     var tag = 0
-    [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
+    [codegen_hooks.gen_update_mapping_tag(tag, false, cx.task)]
     var [launcher] = c.legion_release_launcher_create(
       [dst_value].impl, [dst_parent],
       c.legion_predicate_true(), 0, tag)
@@ -7902,7 +7903,7 @@ function codegen.expr_import_region(cx, node)
     actions = quote
       [actions];
       var [tag] = 0
-      [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
+      [codegen_hooks.gen_update_mapping_tag(tag, false, cx.task)]
       var il = c.legion_inline_launcher_create_logical_region(
         [lr], c.READ_WRITE, c.EXCLUSIVE, [lr], 0, false, 0, [tag]);
       [data.zip(field_ids, field_types):map(
@@ -9098,7 +9099,7 @@ function codegen.stat_must_epoch(cx, node)
   local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
   local actions = quote
     var [tag] = 0
-    [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
+    [codegen_hooks.gen_update_mapping_tag(tag, false, cx.task)]
     var [must_epoch] = c.legion_must_epoch_launcher_create(0, [tag])
     var [must_epoch_point] = 0
     [cleanup_after(cx, codegen.block(cx, node.block))]
@@ -9376,12 +9377,13 @@ local function stat_index_launch_setup(cx, node, domain, actions)
     var g_args : c.legion_task_argument_t
     g_args.args = nil
     g_args.arglen = 0
-    var [tag] = 0
-    [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
+    var mapper = [fn.value:has_mapper_id() or 0]
+    var [tag] = [fn.value:has_mapping_tag_id() or 0]
+    [codegen_hooks.gen_update_mapping_tag(tag, fn.value:has_mapping_tag_id(), cx.task)]
     var [launcher] = c.legion_index_launcher_create(
       [fn.value:get_task_id()],
       [domain], g_args, [argument_map],
-      c.legion_predicate_true(), false, 0, [tag])
+      c.legion_predicate_true(), false, [mapper], [tag])
     do
       var it = c.legion_domain_point_iterator_create([domain])
       var args_uninitialized = true

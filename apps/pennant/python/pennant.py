@@ -26,13 +26,9 @@ import legion
 from legion import index_launch, print_once, task, Fspace, Future, IndexLaunch, Ipartition, Ispace, ID, N, Partition, R, Reduce, Region, RW
 
 root_dir = os.path.dirname(__file__)
-try:
-    prefix_dir = legion.prefix_dir
-except AttributeError:
-    prefix_dir, legion_h_path = legion.find_legion_header()
 pennant_header = subprocess.check_output(
     [
-        "gcc", "-I", prefix_dir, "-DLEGION_USE_PYTHON_CFFI", "-E", "-P",
+        "gcc", "-DLEGION_USE_PYTHON_CFFI", "-E", "-P",
         os.path.join(root_dir, "pennant_config.h")
     ]).decode("utf-8")
 ffi = legion.ffi

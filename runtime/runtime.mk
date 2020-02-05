@@ -343,6 +343,9 @@ LEGION_LD_FLAGS	+= -L$(CUDA)/lib -lcuda
 else
 LEGION_LD_FLAGS	+= -L$(CUDA)/lib64 -L$(CUDA)/lib64/stubs -lcuda -Xlinker -rpath=$(CUDA)/lib64
 endif
+# Add support for Legion GPU reductions
+CC_FLAGS	+= -DLEGION_GPU_REDUCTIONS
+NVCC_FLAGS	+= -DLEGION_GPU_REDUCTIONS
 # CUDA arch variables
 
 # translate legacy arch names into numbers
@@ -620,7 +623,7 @@ endif
 REALM_SRC 	+= $(LG_RT_DIR)/realm/activemsg.cc \
                    $(LG_RT_DIR)/realm/nodeset.cc \
                    $(LG_RT_DIR)/realm/network.cc
-GPU_RUNTIME_SRC +=
+GPU_RUNTIME_SRC += $(LG_RT_DIR)/legion/legion_redop.cu
 
 REALM_SRC 	+= $(LG_RT_DIR)/realm/logging.cc \
 	           $(LG_RT_DIR)/realm/cmdline.cc \
@@ -717,7 +720,7 @@ $(OUTFILE) : $(GEN_OBJS) $(GEN_GPU_OBJS) $(SLIB_LEGION) $(SLIB_REALM)
 	@echo "---> Linking objects into one binary: $(OUTFILE)"
 	$(CXX) -o $(OUTFILE) $(GEN_OBJS) $(GEN_GPU_OBJS) $(LD_FLAGS) $(LEGION_LIBS) $(LEGION_LD_FLAGS) $(GASNET_FLAGS)
 
-$(SLIB_LEGION) : $(LEGION_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS)
+$(SLIB_LEGION) : $(LEGION_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(GPU_RUNTIME_OBJS)
 	rm -f $@
 	$(AR) rc $@ $^
 

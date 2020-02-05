@@ -72,8 +72,7 @@ namespace Legion {
       : Realm::Point<2,T>(v,v) { }
     __CUDA_HD__
     inline Point(T v1, T v2) : Realm::Point<2,T>(v1,v2) { }
-    __CUDA_HD__
-    template <typename T2>
+    template <typename T2> __CUDA_HD__
     inline explicit Point(T2 vals[2], ONLY_IF_INTEGRAL(T2))
       : Realm::Point<2,T>(vals) { }
     // copies allow type coercion (assuming the underlying type does)

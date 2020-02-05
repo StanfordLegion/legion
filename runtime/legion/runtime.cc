@@ -24015,6 +24015,11 @@ namespace Legion {
       }
     }
 
+#ifdef LEGION_GPU_REDUCTIONS
+    extern void register_builtin_gpu_reduction_tasks(
+        const std::set<Processor> &gpus, std::set<RtEvent> &registered_events);
+#endif
+
     //--------------------------------------------------------------------------
     /*static*/ RtEvent Runtime::configure_runtime(int argc, char **argv,
                              const LegionConfiguration &config,
@@ -24201,6 +24206,14 @@ namespace Legion {
               it->first.register_task(LG_LEGION_PROFILING_ID, rt_profiling_task,
                 no_requests, &it->second, sizeof(it->second))));
       }
+#ifdef LEGION_GPU_REDUCTIONS
+      std::set<Processor> gpu_procs;
+      for (std::set<Processor>::const_iterator it = 
+            local_procs.begin(); it != local_procs.end(); it++)
+        if (it->kind() == Processor::TOC_PROC)
+          gpu_procs.insert(*it);
+      register_builtin_gpu_reduction_tasks(gpu_procs, registered_events); 
+#endif
 
       // Lastly do any other registrations we might have
 #ifdef DEBUG_LEGION_COLLECTIVES

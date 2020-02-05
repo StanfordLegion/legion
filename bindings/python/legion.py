@@ -17,7 +17,6 @@
 
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-import cffi
 try:
     import cPickle as pickle
 except ImportError:
@@ -63,60 +62,7 @@ from io import StringIO
 
 _pickle_version = pickle.HIGHEST_PROTOCOL # Use latest Pickle protocol
 
-def find_legion_header():
-    def try_prefix(prefix_dir):
-        legion_h_path = os.path.join(prefix_dir, 'legion.h')
-        if os.path.exists(legion_h_path):
-            return prefix_dir, legion_h_path
-
-    # For in-source builds, find the header relative to the bindings
-    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
-    runtime_dir = os.path.join(root_dir, 'runtime')
-    result = try_prefix(runtime_dir)
-    if result:
-        return result
-
-    # If this was installed to a non-standard prefix, we might be able
-    # to guess from the directory structures
-    if os.path.basename(root_dir) == 'lib':
-        include_dir = os.path.join(os.path.dirname(root_dir), 'include')
-        result = try_prefix(include_dir)
-        if result:
-            return result
-
-    # Otherwise we have to hope that Legion is installed in a standard location
-    result = try_prefix('/usr/include')
-    if result:
-        return result
-
-    result = try_prefix('/usr/local/include')
-    if result:
-        return result
-
-    raise Exception('Unable to locate legion.h header file')
-
-try:
-    with open(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'cached_legion.h'), 'r') as f:
-        header = f.read()
-except IOError as e:
-    print('Unable to find cached_legion.h, falling back to reading legion.h')
-    prefix_dir, legion_h_path = find_legion_header()
-
-    # If we're running from a local Python build, we need to include
-    # the path where legion.py is located in order to find
-    # legion_defines.h.
-    legion_py_dir = os.path.dirname(os.path.realpath(__file__))
-
-    # If we're running inside of Regent, try to parse the include path
-    # since we'll need it to locate legion_defines.h.
-    include_path = os.environ.get('INCLUDE_PATH', '').split(';')
-    include_path = [x for y in include_path for x in ['-I', y]]
-
-    header = subprocess.check_output(['gcc', '-I', prefix_dir, '-I', legion_py_dir] + include_path + ['-DLEGION_USE_PYTHON_CFFI', '-E', '-P', legion_h_path]).decode('utf-8')
-
-ffi = cffi.FFI()
-ffi.cdef(header)
-c = ffi.dlopen(None)
+from legion_cffi import ffi, lib as c
 
 _max_dim = None
 for dim in range(1, 9):
@@ -1356,7 +1302,7 @@ class Ipartition(object):
             ispace.raw_value(), projection.raw_value(),
             parent.parent.raw_value() if parent.parent is not None else parent.raw_value(),
             parent.fspace.field_ids[field],
-            color_space.raw_value(), part_kind.value, color)
+            color_space.raw_value(), part_kind.value, color, 0, 0)
         return Ipartition(handle, parent.ispace, color_space)
 
     @staticmethod
@@ -1375,7 +1321,7 @@ class Ipartition(object):
             projection.raw_value(), region.raw_value(),
             region.parent.raw_value() if region.parent is not None else region.raw_value(),
             region.fspace.field_ids[field],
-            color_space.raw_value(), part_kind.value, color)
+            color_space.raw_value(), part_kind.value, color, 0, 0)
         return Ipartition(handle, region.ispace, color_space)
 
     @staticmethod
