@@ -33,12 +33,35 @@ namespace Legion {
     template<typename REDOP, int N, typename T, bool EXCLUSIVE>
     __global__ void
     __launch_bounds__(THREADS_PER_BLOCK,MIN_BLOCKS_PER_SM)
-    reduction_kernel(const Realm::AffineAccessor<typename REDOP::LHS,N,T> dst,
-                     const Realm::AffineAccessor<typename REDOP::RHS,N,T> src,
-                     const DimOrder<N> order,
-                     const Realm::Point<N,T> lo,
-                     const Realm::Point<N,T> extents,
-                     const size_t max_offset)
+    fold_kernel(const Realm::AffineAccessor<typename REDOP::RHS,N,T> dst,
+                const Realm::AffineAccessor<typename REDOP::RHS,N,T> src,
+                const DimOrder<N> order,
+                const Realm::Point<N,T> lo,
+                const Realm::Point<N,T> extents,
+                const size_t max_offset)
+    {
+      size_t offset = blockIdx.x * blockDim.x + threadIdx.x;
+      if (offset >= max_offset)
+        return;
+      Point<N,T> point = lo;
+      for (int i = 0; i < N; i++)
+      {
+        const int index = order.index[i];
+        point[index] += (offset / extents[index]);
+        offset = offset % extents[index];
+      }
+      REDOP::template fold<EXCLUSIVE>(dst[point], src[point]);
+    }
+
+    template<typename REDOP, int N, typename T, bool EXCLUSIVE>
+    __global__ void
+    __launch_bounds__(THREADS_PER_BLOCK,MIN_BLOCKS_PER_SM)
+    apply_kernel(const Realm::AffineAccessor<typename REDOP::LHS,N,T> dst,
+                 const Realm::AffineAccessor<typename REDOP::RHS,N,T> src,
+                 const DimOrder<N> order,
+                 const Realm::Point<N,T> lo,
+                 const Realm::Point<N,T> extents,
+                 const size_t max_offset)
     {
       size_t offset = blockIdx.x * blockDim.x + threadIdx.x;
       if (offset >= max_offset)
@@ -51,7 +74,7 @@ namespace Legion {
         offset = offset % extents[index];
       }
       REDOP::template apply<EXCLUSIVE>(dst[point], src[point]);
-    }
+    } 
 
     template<typename REDOP>
     struct ReductionRunner {
@@ -75,15 +98,15 @@ namespace Legion {
           *((const Realm::RegionInstance*)buffer);
         buffer += sizeof(src);
         const bool exclusive = *((const bool*)buffer);
-        
-        const Realm::AffineAccessor<typename REDOP::LHS,N,T> 
-          src_accessor(src, field_id, space.bounds);
-        const Realm::AffineAccessor<typename REDOP::RHS,N,T> 
-          dst_accessor(dst, field_id, space.bounds);
+        buffer += sizeof(exclusive);
+        const bool fold = *((const bool*)buffer);
 
-        // Compute the order of dimensions to walk based on sorting the strides
-        // for the source accessor, we'll optimistically assume the two 
-        // instances are laid out the same way
+        const Realm::AffineAccessor<typename REDOP::RHS,N,T> 
+            src_accessor(src, field_id, space.bounds);
+        // Compute the order of dimensions to walk based on sorting the 
+        // strides for the source accessor, we'll optimistically assume 
+        // the two instances are laid out the same way, if we're wrong
+        // it will still be correct, just slow
         std::map<ptrdiff_t,int> strides;
         for (int i = 0; i < N; i++)
         {
@@ -97,13 +120,45 @@ namespace Legion {
         std::map<ptrdiff_t,int>::const_reverse_iterator rit = strides.rbegin();
         for (int i = 0; i < N; i++, rit++)
           order.index[i] = rit->second;
-        if (!space.dense()) 
+        
+        if (fold)
         {
-          // The index space is not dense so launch a kernel for each rectangle
-          Realm::IndexSpaceIterator<N,T> iterator(space);
-          while (true)
+          const Realm::AffineAccessor<typename REDOP::RHS,N,T> 
+            dst_accessor(dst, field_id, space.bounds);
+          if (!space.dense()) 
           {
-            const size_t volume = iterator.rect.volume();
+            // The index space is not dense so launch a kernel for each rect
+            Realm::IndexSpaceIterator<N,T> iterator(space);
+            while (true)
+            {
+              const size_t volume = iterator.rect.volume();
+              const size_t blocks = 
+                (volume + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
+              Point<N,T> extents;
+              size_t pitch = 1;
+              for (std::map<ptrdiff_t,int>::const_iterator it = 
+                    strides.begin(); it != strides.end(); it++)
+              {
+                extents[it->second] = pitch;
+                pitch *= ((iterator.rect.hi[it->second] - 
+                            iterator.rect.lo[it->second]) + 1);
+              }
+              if (exclusive)
+                fold_kernel<REDOP,N,T,true><<<blocks,THREADS_PER_BLOCK>>>(
+                    dst_accessor, src_accessor, order, 
+                    iterator.rect.lo, extents, volume); 
+              else
+                fold_kernel<REDOP,N,T,false><<<blocks,THREADS_PER_BLOCK>>>(
+                    dst_accessor, src_accessor, order, 
+                    iterator.rect.lo, extents, volume);
+              if (!iterator.step())
+                break;
+            }
+          }
+          else
+          {
+            // Space is dense so we just need a single kernel launch here
+            const size_t volume = space.bounds.volume();
             const size_t blocks = 
               (volume + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
             Point<N,T> extents;
@@ -112,50 +167,83 @@ namespace Legion {
                   strides.begin(); it != strides.end(); it++)
             {
               extents[it->second] = pitch;
-              pitch *= ((iterator.rect.hi[it->second] - 
-                          iterator.rect.lo[it->second]) + 1);
+              pitch *= ((space.bounds.hi[it->second] - 
+                          space.bounds.lo[it->second]) + 1);
             }
             if (exclusive)
-              reduction_kernel<REDOP,N,T,true><<<blocks,THREADS_PER_BLOCK>>>(
+              fold_kernel<REDOP,N,T,true><<<blocks,THREADS_PER_BLOCK>>>(
                   dst_accessor, src_accessor, order, 
-                  iterator.rect.lo, extents, volume); 
+                  space.bounds.lo, extents, volume);
             else
-              reduction_kernel<REDOP,N,T,false><<<blocks,THREADS_PER_BLOCK>>>(
+              fold_kernel<REDOP,N,T,false><<<blocks,THREADS_PER_BLOCK>>>(
                   dst_accessor, src_accessor, order, 
-                  iterator.rect.lo, extents, volume);
-            if (!iterator.step())
-              break;
+                  space.bounds.lo, extents, volume);
           }
         }
         else
         {
-          // Space is dense so we just need a single kernel launch here
-          const size_t volume = space.bounds.volume();
-          const size_t blocks = 
-            (volume + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
-          Point<N,T> extents;
-          size_t pitch = 1;
-          for (std::map<ptrdiff_t,int>::const_iterator it = 
-                strides.begin(); it != strides.end(); it++)
+          const Realm::AffineAccessor<typename REDOP::LHS,N,T> 
+            dst_accessor(dst, field_id, space.bounds);
+          if (!space.dense()) 
           {
-            extents[it->second] = pitch;
-            pitch *= ((space.bounds.hi[it->second] - 
-                        space.bounds.lo[it->second]) + 1);
+            // The index space is not dense so launch a kernel for each rect
+            Realm::IndexSpaceIterator<N,T> iterator(space);
+            while (true)
+            {
+              const size_t volume = iterator.rect.volume();
+              const size_t blocks = 
+                (volume + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
+              Point<N,T> extents;
+              size_t pitch = 1;
+              for (std::map<ptrdiff_t,int>::const_iterator it = 
+                    strides.begin(); it != strides.end(); it++)
+              {
+                extents[it->second] = pitch;
+                pitch *= ((iterator.rect.hi[it->second] - 
+                            iterator.rect.lo[it->second]) + 1);
+              }
+              if (exclusive)
+                apply_kernel<REDOP,N,T,true><<<blocks,THREADS_PER_BLOCK>>>(
+                    dst_accessor, src_accessor, order, 
+                    iterator.rect.lo, extents, volume); 
+              else
+                apply_kernel<REDOP,N,T,false><<<blocks,THREADS_PER_BLOCK>>>(
+                    dst_accessor, src_accessor, order, 
+                    iterator.rect.lo, extents, volume);
+              if (!iterator.step())
+                break;
+            }
           }
-          if (exclusive)
-            reduction_kernel<REDOP,N,T,true><<<blocks,THREADS_PER_BLOCK>>>(
-                dst_accessor, src_accessor, order, 
-                space.bounds.lo, extents, volume);
           else
-            reduction_kernel<REDOP,N,T,false><<<blocks,THREADS_PER_BLOCK>>>(
-                dst_accessor, src_accessor, order, 
-                space.bounds.lo, extents, volume);
+          {
+            // Space is dense so we just need a single kernel launch here
+            const size_t volume = space.bounds.volume();
+            const size_t blocks = 
+              (volume + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
+            Point<N,T> extents;
+            size_t pitch = 1;
+            for (std::map<ptrdiff_t,int>::const_iterator it = 
+                  strides.begin(); it != strides.end(); it++)
+            {
+              extents[it->second] = pitch;
+              pitch *= ((space.bounds.hi[it->second] - 
+                          space.bounds.lo[it->second]) + 1);
+            }
+            if (exclusive)
+              apply_kernel<REDOP,N,T,true><<<blocks,THREADS_PER_BLOCK>>>(
+                  dst_accessor, src_accessor, order, 
+                  space.bounds.lo, extents, volume);
+            else
+              apply_kernel<REDOP,N,T,false><<<blocks,THREADS_PER_BLOCK>>>(
+                  dst_accessor, src_accessor, order, 
+                  space.bounds.lo, extents, volume);
+          }
         }
       }
 
       template<typename N, typename T>
       __host__
-      static inline void demux(ReductionRunner *runner)
+      static inline void demux(ReductionRunner<REDOP> *runner)
       {
         runner->run<N::N,T>();
       }
