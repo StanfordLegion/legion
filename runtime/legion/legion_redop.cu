@@ -266,14 +266,14 @@ namespace Legion {
       NT_TemplateHelper::demux<ReductionRunner<REDOP> >(type_tag, &runner);
     }
 
-#define REGISTER_GPU_REDUCTION_TASK(id, type)                 \
-    {                                                         \
-      CodeDescriptor desc(reduction_helper<type>);            \
-      for (std::set<Processor>::const_iterator it =           \
-            gpus.begin(); it != gpus.end(); it++)             \
-        registered_events.insert(RtEvent(                     \
-              it->register_task(LG_REDOP_TASK_ID + id, desc,  \
-              no_requests, NULL, 0)));                        \
+#define REGISTER_GPU_REDUCTION_TASK(id, type)                               \
+    {                                                                       \
+      CodeDescriptor desc(reduction_helper<type>);                          \
+      for (std::set<Processor>::const_iterator it =                         \
+            gpus.begin(); it != gpus.end(); it++)                           \
+        registered_events.insert(RtEvent(                                   \
+              it->register_task(LG_REDOP_TASK_ID + id - LEGION_REDOP_BASE,  \
+                desc, no_requests, NULL, 0)));                              \
     }
 
     __host__
