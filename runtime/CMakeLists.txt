@@ -448,7 +448,23 @@ if(Legion_USE_Fortran)
   )
 endif()               
 
-add_library(LegionRuntime ${MAPPER_SRC} ${LEGION_SRC} ${LEGION_FORTRAN_SRC})
+if(Legion_USE_CUDA)
+  list(APPEND LEGION_SRC
+    legion/legion_redop.cu
+  )
+endif()
+
+if(Legion_USE_CUDA)
+  macro(Legion_add_library)
+    cuda_add_library(${ARGV})
+  endmacro(Legion_add_library)
+else()
+  macro(Legion_add_library)
+    add_library(${ARGV})
+  endmacro(Legion_add_library)
+endif()
+
+Legion_add_library(LegionRuntime ${MAPPER_SRC} ${LEGION_SRC} ${LEGION_FORTRAN_SRC})
 target_link_libraries(LegionRuntime PUBLIC RealmRuntime)
 if(Legion_USE_ZLIB)
   target_link_libraries(LegionRuntime PRIVATE ZLIB::ZLIB)
@@ -458,6 +474,9 @@ set_target_properties(LegionRuntime PROPERTIES OUTPUT_NAME "legion${INSTALL_SUFF
 set_target_properties(LegionRuntime PROPERTIES SOVERSION ${SOVERSION})
 target_compile_definitions(LegionRuntime PUBLIC LEGION_USE_CMAKE)
 target_compile_options(LegionRuntime PRIVATE ${CXX_BUILD_WARNING_FLAGS})
+if(Legion_USE_CUDA)
+  target_compile_definitions(LegionRuntime PRIVATE LEGION_GPU_REDUCTIONS)
+endif()
 
 target_include_directories(LegionRuntime
   INTERFACE
