@@ -36,6 +36,26 @@ namespace Realm {
   {}
 
   template <typename T>
+  inline atomic<T>::atomic(const atomic<T>& copy_from)
+#ifdef REALM_USE_STD_ATOMIC
+    : value(copy_from.value.load())
+#else
+    : value(copy_from.value)
+#endif
+  {}
+
+  template <typename T>
+  inline atomic<T>& atomic<T>::operator=(const atomic<T>& copy_from)
+  {
+#ifdef REALM_USE_STD_ATOMIC
+    value.store(copy_from.value.load());
+#else
+    value = copy_from.value;
+#endif
+    return *this;
+  }
+
+  template <typename T>
   inline T atomic<T>::load(void) const
   {
 #ifdef REALM_USE_STD_ATOMIC

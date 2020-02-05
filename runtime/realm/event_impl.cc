@@ -495,7 +495,7 @@ namespace Realm {
 
   Barrier Barrier::alter_arrival_count(int delta) const
   {
-    timestamp_t timestamp = __sync_fetch_and_add(&BarrierImpl::barrier_adjustment_timestamp, 1);
+    timestamp_t timestamp = BarrierImpl::barrier_adjustment_timestamp.fetch_add(1);
 #ifdef EVENT_GRAPH_TRACE
     Event enclosing = find_enclosing_termination_event();
     log_event_graph.info("Barrier Alter: (" IDFMT ",%d) (" IDFMT
@@ -714,7 +714,7 @@ namespace Realm {
       assert(event_impl->make_event(finish_gen) == _finish_event);
       ignore_faults = _ignore_faults;
       count_needed.store(1);  // this matches the subsequent call to arm()
-      faults_observed = 0;
+      faults_observed.store(0);
       num_preconditions = 0;
       // resize the precondition array if needed
       if(_max_preconditions > max_preconditions) {
@@ -735,7 +735,7 @@ namespace Realm {
       if(wait_for.has_triggered_faultaware(poisoned)) {
 	if(poisoned) {
 	  // always count faults, but don't necessarily propagate
-	  bool first_fault = (__sync_fetch_and_add(&faults_observed, 1) == 0);
+	  bool first_fault = (faults_observed.fetch_add(1) == 0);
 	  if(first_fault && !ignore_faults) {
             log_poison.info() << "event merger early poison: after=" << event_impl->make_event(finish_gen);
 	    event_impl->trigger(finish_gen, Network::my_node_id, true /*poisoned*/);
@@ -764,7 +764,7 @@ namespace Realm {
     {
       // if the input is poisoned, we propagate that poison eagerly
       if(poisoned) {
-	bool first_fault = (__sync_fetch_and_add(&faults_observed, 1) == 0);
+	bool first_fault = (faults_observed.fetch_add(1) == 0);
 	if(first_fault && !ignore_faults) {
 	  log_poison.info() << "event merger poisoned: after=" << event_impl->make_event(finish_gen);
 	  event_impl->trigger(finish_gen, Network::my_node_id, true /*poisoned*/);
@@ -781,7 +781,7 @@ namespace Realm {
       bool last_trigger = (count_left == 1);
 
       // trigger on the last input event, unless we did an early poison propagation
-      if(last_trigger && (ignore_faults || (faults_observed == 0))) {
+      if(last_trigger && (ignore_faults || (faults_observed.load() == 0))) {
 	event_impl->trigger(finish_gen, Network::my_node_id, false /*!poisoned*/);
       }
 
@@ -1525,7 +1525,7 @@ namespace Realm {
     }
 
 
-  /*static*/ Barrier::timestamp_t BarrierImpl::barrier_adjustment_timestamp;
+  /*static*/ atomic<Barrier::timestamp_t> BarrierImpl::barrier_adjustment_timestamp(0);
 
 
 

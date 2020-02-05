@@ -317,7 +317,7 @@ namespace Realm {
 
       //PriorityIBQueue priority_ib_queue;
       //PendingIBRequests pending_ib_requests;
-      size_t ib_responses_needed;
+      atomic<size_t> ib_responses_needed;
       // operations on ib_by_inst are protected by ib_mutex
       //IBByInst ib_by_inst;
       //Mutex ib_mutex;

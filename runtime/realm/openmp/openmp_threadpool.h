@@ -36,9 +36,9 @@ namespace Realm {
       int prev_thread_id;
       int prev_num_threads;
       WorkItem *parent_work_item;
-      int remaining_workers;
-      int single_winner;  // worker currently assigned as the "single" one
-      int barrier_count;
+      atomic<int> remaining_workers;
+      atomic<int> single_winner;  // worker currently assigned as the "single" one
+      atomic<int> barrier_count;
     };
 
     struct WorkerInfo {
@@ -50,7 +50,7 @@ namespace Realm {
 	WORKER_ACTIVE,
 	WORKER_SHUTDOWN,
       };
-      int /*Status*/ status; // int allows CAS primitives
+      atomic<int> /*Status*/ status; // int allows CAS primitives
       ThreadPool *pool;
       int thread_id;  // in current team
       int num_threads; // in current team

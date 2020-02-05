@@ -95,9 +95,11 @@ namespace Realm {
 
     // choose an ID by finding an info to change from STARTING->IDLE
     int id = 1;
-    while(!__sync_bool_compare_and_swap(&(worker_infos[id].status),
-					WorkerInfo::WORKER_STARTING,
-					WorkerInfo::WORKER_IDLE)) {
+    while(true) {
+      int expval = WorkerInfo::WORKER_STARTING;
+      if(worker_infos[id].status.compare_exchange(expval,
+						  WorkerInfo::WORKER_IDLE))
+	break;
       id++;
       assert(id <= num_workers);
     }
@@ -112,7 +114,7 @@ namespace Realm {
 
     bool worker_shutdown = false;
     while(!worker_shutdown) {
-      switch(wi->status) {
+      switch(wi->status.load()) {
       case WorkerInfo::WORKER_IDLE:
       case WorkerInfo::WORKER_CLAIMED:
 	{
@@ -125,8 +127,8 @@ namespace Realm {
 	  log_pool.info() << "worker " << wi->thread_id << "/" << wi->num_threads << " executing: " << (void *)(wi->fnptr) << "(" << wi->data << ")";
 	  (wi->fnptr)(wi->data);
 	  log_pool.info() << "worker " << wi->thread_id << "/" << wi->num_threads << " done";
-	  __sync_fetch_and_sub(&(wi->work_item->remaining_workers), 1);
-	  wi->status = WorkerInfo::WORKER_IDLE;
+	  wi->work_item->remaining_workers.fetch_sub(1);
+	  wi->status.store(WorkerInfo::WORKER_IDLE);
 	  break;
 	}
 
@@ -150,10 +152,10 @@ namespace Realm {
     for(std::vector<WorkerInfo>::iterator it = worker_infos.begin();
 	it != worker_infos.end();
 	++it) {
-      if(it->status == WorkerInfo::WORKER_MASTER) continue;
-      bool ok = __sync_bool_compare_and_swap(&(it->status),
-					     WorkerInfo::WORKER_IDLE,
-					     WorkerInfo::WORKER_SHUTDOWN);
+      if(it->status.load() == WorkerInfo::WORKER_MASTER) continue;
+      int expval = WorkerInfo::WORKER_IDLE;
+      bool ok = it->status.compare_exchange(expval,
+					    WorkerInfo::WORKER_SHUTDOWN);
       assert(ok);
     }
 
@@ -169,16 +171,17 @@ namespace Realm {
   void ThreadPool::claim_workers(int count, std::set<int>& worker_ids)
   {
     int remaining = count;
-    for(size_t i = 0; i < worker_infos.size(); i++)
+    for(size_t i = 0; i < worker_infos.size(); i++) {
       // attempt atomic change from IDLE -> CLAIMED
-      if(__sync_bool_compare_and_swap(&(worker_infos[i].status),
-				      WorkerInfo::WORKER_IDLE,
-				      WorkerInfo::WORKER_CLAIMED)) {
+      int expval = WorkerInfo::WORKER_IDLE;
+      if(worker_infos[i].status.compare_exchange(expval,
+						 WorkerInfo::WORKER_CLAIMED)) {
 	worker_ids.insert(i);
 	remaining -= 1;
 	if(remaining == 0)
 	  break;
       }
+    }
 
     log_pool.info() << "claim_workers requested " << count << ", got " << worker_ids.size();
   }
@@ -191,16 +194,17 @@ namespace Realm {
     assert((worker_id >= 0) && (worker_id <= num_workers));
     WorkerInfo *wi = &worker_infos[worker_id];
     
-    assert(wi->status == WorkerInfo::WORKER_CLAIMED);
+    assert(wi->status.load() == WorkerInfo::WORKER_CLAIMED);
     wi->thread_id = thread_id;
     wi->num_threads = num_threads;
     wi->app_num_threads = 0;
     wi->fnptr = fnptr;
     wi->data = data;
     wi->work_item = work_item;
-    __sync_bool_compare_and_swap(&(wi->status),
-				 WorkerInfo::WORKER_CLAIMED,
-				 WorkerInfo::WORKER_ACTIVE);
+    int expval = WorkerInfo::WORKER_CLAIMED;
+    bool ok = wi->status.compare_exchange(expval,
+					  WorkerInfo::WORKER_ACTIVE);
+    assert(ok);
   }
 
 };

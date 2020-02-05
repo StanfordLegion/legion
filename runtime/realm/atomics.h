@@ -35,6 +35,10 @@ namespace Realm {
     atomic(void);
     atomic(T _value);
 
+    // copy constructors are needed if atomics are put in a container
+    atomic(const atomic<T>& copy_from);
+    atomic<T>& operator=(const atomic<T>& copy_from);
+
     T load(void) const;
     T load_acquire(void) const;
 

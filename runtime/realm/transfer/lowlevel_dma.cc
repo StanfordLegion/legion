@@ -674,7 +674,7 @@ namespace Realm {
 					 off_t ib_offset)
     {
       ibinfo->offset = ib_offset;
-      size_t remaining = __sync_sub_and_fetch(&ib_responses_needed, 1);
+      size_t remaining = ib_responses_needed.fetch_sub(1) - 1;
       log_ib_alloc.debug() << "received: req=" << ((void *)this) << " info=" << ((void *)ibinfo) << " offset=" << ib_offset << " remain=" << remaining;
       if(remaining == 0) {
 	// all IB responses have been retrieved, so advance the copy request
@@ -1052,7 +1052,7 @@ namespace Realm {
 	} else {
 	  // increase the count by one to prevent a trigger before we finish
 	  //  this loop
-	  ib_responses_needed = ib_edges.size() + 1;
+	  ib_responses_needed.store(ib_edges.size() + 1);
 
 	  // sort requests by target memory to reduce risk of resource deadlock
 	  PendingIBRequests pending;
@@ -1091,14 +1091,14 @@ namespace Realm {
 	  state = STATE_WAIT_IB;
 
 	  // fall through if this ends up being the last decrement
-	  if(__sync_sub_and_fetch(&ib_responses_needed, 1) > 0)
+	  if(ib_responses_needed.fetch_sub(1) > 1)
 	    return false;
 	}
       }
 
       if(state == STATE_WAIT_IB) {
 	// we should never get here unless the count is already 0
-	assert(ib_responses_needed == 0);
+	assert(ib_responses_needed.load() == 0);
 	state = STATE_READY;
       }
 
@@ -1149,7 +1149,7 @@ namespace Realm {
     }
 
 
-    static unsigned rdma_sequence_no = 1;
+    static atomic<unsigned> rdma_sequence_no(1);
 
     static AsyncFileIOContext *aio_context = 0;
 
@@ -2482,7 +2482,7 @@ namespace Realm {
       bool dst_is_remote = ((dst_mem->kind == MemoryImpl::MKIND_REMOTE) ||
 			    (dst_mem->kind == MemoryImpl::MKIND_RDMA));
       unsigned rdma_sequence_id = (dst_is_remote ?
-				     __sync_fetch_and_add(&rdma_sequence_no, 1) :
+				     rdma_sequence_no.fetch_add(1) :
 				     0);
       unsigned rdma_count = 0;
 

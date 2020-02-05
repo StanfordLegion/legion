@@ -203,9 +203,9 @@ namespace Realm {
       size_t add_span(size_t pos, size_t count);
 
     protected:
+      atomic<size_t> contig_amount;  // everything from [0, contig_amount) is covered
+      atomic<size_t> first_noncontig; // nothing in [contig_amount, first_noncontig) 
       Mutex *mutex;
-      size_t contig_amount;  // everything from [0, contig_amount) is covered
-      size_t first_noncontig; // nothing in [contig_amount, first_noncontig) 
       std::map<size_t, size_t> spans;  // noncontiguous spans
     };
 
@@ -308,7 +308,8 @@ namespace Realm {
 	XferDesID peer_guid;
 	int peer_port_idx;
 	int indirect_port_idx;
-	uint64_t local_bytes_total, local_bytes_cons, remote_bytes_total;
+	uint64_t local_bytes_total;
+	atomic<uint64_t> local_bytes_cons, remote_bytes_total;
 	SequenceAssembler seq_local, seq_remote;
 	// used to free up intermediate input buffers as soon as all data
 	//  has been read (rather than waiting for overall transfer chain
@@ -763,7 +764,7 @@ namespace Realm {
       std::deque<MemcpyRequest*> pending_queue, finished_queue;
       Mutex pending_lock, finished_lock;
       CondVar pending_cond;
-      long capacity;
+      atomic<long> capacity;
       bool sleep_threads;
       //std::vector<MemcpyRequest*> available_cb;
       //MemcpyRequest** cbs;
@@ -777,7 +778,7 @@ namespace Realm {
       void pull();
       long available();
     private:
-      long capacity;
+      atomic<long> capacity;
     };
 
     class RemoteWriteChannel : public Channel {
@@ -787,14 +788,13 @@ namespace Realm {
       long submit(Request** requests, long nr);
       void pull();
       long available();
-      void notify_completion() {
-        __sync_fetch_and_add(&capacity, 1);
-      }
+      void notify_completion();
+
     private:
       // RemoteWriteChannel is maintained by dma threads
       // and active message threads, so we need atomic ops
       // for preventing data race
-      long capacity;
+      atomic<long> capacity;
     };
    
 #ifdef USE_CUDA
@@ -807,7 +807,7 @@ namespace Realm {
       long available();
     private:
       Cuda::GPU* src_gpu;
-      long capacity;
+      atomic<long> capacity;
       std::deque<Request*> pending_copies;
     };
 #endif
@@ -821,7 +821,7 @@ namespace Realm {
       void pull();
       long available();
     private:
-      long capacity;
+      atomic<long> capacity;
     };
 #endif
 
@@ -1262,7 +1262,7 @@ namespace Realm {
           core_rsrv = new CoreReservation("DMA threads", crs, CoreReservationParameters());
         }
         // reserve the first several guid
-        next_to_assign_idx = 10;
+        next_to_assign_idx.store(10);
         num_threads = 0;
         num_memcpy_threads = 0;
         dma_threads = NULL;
@@ -1285,7 +1285,7 @@ namespace Realm {
         // First NODE_BITS indicates which node will execute this xd
         // Next NODE_BITS indicates on which node this xd is generated
         // Last INDEX_BITS means a unique idx, which is used to resolve conflicts
-        XferDesID idx = __sync_fetch_and_add(&next_to_assign_idx, 1);
+        XferDesID idx = next_to_assign_idx.fetch_add(1);
         return (((XferDesID)execution_node << (NODE_BITS + INDEX_BITS)) | ((XferDesID)Network::my_node_id << INDEX_BITS) | idx);
       }
 
@@ -1391,7 +1391,7 @@ namespace Realm {
       std::map<XferDesID, XferDesWithUpdates> guid_to_xd;
       Mutex queues_lock;
       RWLock guid_lock;
-      XferDesID next_to_assign_idx;
+      atomic<XferDesID> next_to_assign_idx;
       CoreReservation* core_rsrv;
       int num_threads, num_memcpy_threads;
       DMAThread** dma_threads;
