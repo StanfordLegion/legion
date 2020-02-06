@@ -539,12 +539,43 @@ local function stat_for_list(stats, stat)
 end
 
 local function stat_repeat(stats, stat)
-  local block = normalize.block(stat.block)
-  local block_stats = block.stats
-  local until_cond = normalize.expr(block_stats, stat.until_cond, true)
-  stats:insert(stat {
-    until_cond = until_cond,
-    block = block { stats = block_stats },
+  local cond_var = std.newsymbol(bool)
+  stats:insert(ast.specialized.stat.Var {
+    symbols = cond_var,
+    values = ast.specialized.expr.Constant {
+      value = true,
+      expr_type = bool,
+      span = stat.until_cond.span,
+      annotations = ast.default_annotations(),
+    },
+    span = stat.span,
+    annotations = ast.default_annotations(),
+  })
+
+  local cond = ast.specialized.expr.ID {
+    value = cond_var,
+    span = stat.until_cond.span,
+    annotations = ast.default_annotations(),
+  }
+
+  local block = stat.block
+  block.stats:insert(ast.specialized.stat.Assignment {
+    lhs = terralib.newlist({cond}),
+    rhs = terralib.newlist({ ast.specialized.expr.Unary {
+      op = "not",
+      rhs = stat.until_cond,
+      span = stat.until_cond.span,
+      annotations = ast.default_annotations(),
+    }}),
+    span = stat.until_cond.span,
+    annotations = ast.default_annotations(),
+  })
+
+  normalize.stat(stats, ast.specialized.stat.While {
+    cond = cond,
+    block = block,
+    span = stat.span,
+    annotations = stat.annotations,
   })
 end
 
