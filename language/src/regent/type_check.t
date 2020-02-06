@@ -1772,6 +1772,7 @@ end
 
 function type_check.expr_partition_by_restriction(cx, node)
   local disjointness = node.disjointness or std.aliased
+  local completeness = node.completeness or std.incomplete
 
   local region = type_check.expr(cx, node.region)
   local region_type = std.check_read(cx, region)
@@ -1852,6 +1853,7 @@ function type_check.expr_partition_by_restriction(cx, node)
 
   return ast.typed.expr.PartitionByRestriction {
     disjointness = node.disjointness,
+    completeness = node.completeness,
     region = region,
     transform = transform,
     extent = extent,

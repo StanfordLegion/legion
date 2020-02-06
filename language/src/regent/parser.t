@@ -842,6 +842,11 @@ function parser.expr_prefix(p)
        disjointness = p:disjointness_kind()
        p:expect(",")
     end
+    local completeness = false
+    if p:is_completeness_kind() then
+       completeness = p:completeness_kind()
+       p:expect(",")
+    end
     local region = p:expr()
     p:expect(",")
     local transform = p:expr()
@@ -852,6 +857,7 @@ function parser.expr_prefix(p)
     p:expect(")")
     return ast.unspecialized.expr.PartitionByRestriction {
       disjointness = disjointness,
+      completeness = completeness,
       region = region,
       transform = transform,
       extent = extent,

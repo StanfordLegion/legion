@@ -881,6 +881,7 @@ end
 function specialize.expr_partition_by_restriction(cx, node, allow_lists)
   return ast.specialized.expr.PartitionByRestriction {
     disjointness = node.disjointness and specialize.disjointness_kind(cx, node.disjointness),
+    completeness = node.completeness and specialize.completeness_kind(cx, node.completeness),
     region = specialize.expr(cx, node.region),
     transform = specialize.expr(cx, node.transform),
     extent = specialize.expr(cx, node.extent),
