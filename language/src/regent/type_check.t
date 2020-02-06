@@ -1852,8 +1852,8 @@ function type_check.expr_partition_by_restriction(cx, node)
   assert(expr_type.parent_region_symbol:gettype() == region_type)
 
   return ast.typed.expr.PartitionByRestriction {
-    disjointness = node.disjointness,
-    completeness = node.completeness,
+    disjointness = disjointness,
+    completeness = completeness,
     region = region,
     transform = transform,
     extent = extent,

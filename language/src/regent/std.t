@@ -2634,10 +2634,16 @@ do
       colors_symbol = std.newsymbol(colors_symbol)
     end
 
-    -- @param completeness argument can be omitted. If this is the case, then
-    -- shift the remaining arguments backward and make completeness false
+    -- @param disjointness, completeness can be omitted. If this is the case, then
+    -- shift the remaining arguments (except colors symbol) backward and default to aliased or
+    -- incomplete
+    if(not ast.is_node(disjointness)) then
+      region_symbol = completeness
+      completeness = disjointness
+      disjointness = std.aliased
+    end
+
     if(not ast.is_node(completeness)) then
-      colors_symbol = region_symbol
       region_symbol = completeness
       completeness = std.incomplete
     end
