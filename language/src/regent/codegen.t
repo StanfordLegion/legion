@@ -4756,6 +4756,8 @@ function codegen.expr_partition_by_field(cx, node)
 end
 
 function codegen.expr_partition_by_restriction(cx, node)
+  local disjointness = node.disjointness
+  local completeness = node.completeness
   local region_type = std.as_read(node.region.expr_type)
   local region = codegen.expr(cx, node.region):read(cx)
   local transform_type = std.as_read(node.transform.expr_type)
@@ -4779,15 +4781,11 @@ function codegen.expr_partition_by_restriction(cx, node)
   local lp = terralib.newsymbol(c.legion_logical_partition_t, "lp")
   actions = quote
     [actions]
-    var disjointness = [(node.disjointness and
-      ((node.disjointness:is(ast.disjointness_kind.Disjoint) and c.DISJOINT_KIND)
-       or c.ALIASED_KIND))
-      or c.COMPUTE_KIND]
     var [ip] = c.legion_index_partition_create_by_restriction(
       [cx.runtime], [cx.context],
       [region.value].impl.index_space,
       [colors.value].impl,
-      [transform.value], [extent.value], disjointness, -1)
+      [transform.value], [extent.value], [get_legion_partition_kind(disjointness, completeness)], -1)
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [region.value].impl, [ip])
     [tag_imported(cx, lp)]
