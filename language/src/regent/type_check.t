@@ -1864,7 +1864,7 @@ end
 
 function type_check.expr_image(cx, node)
   local disjointness = node.disjointness or std.aliased
-  local completeness = node.completeness or false
+  local completeness = node.completeness or std.incomplete
   local parent = type_check.expr(cx, node.parent)
   local parent_type = std.check_read(cx, parent)
   local partition = type_check.expr(cx, node.partition)
