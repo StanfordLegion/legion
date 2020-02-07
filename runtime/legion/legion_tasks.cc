@@ -4149,6 +4149,10 @@ namespace Legion {
           Realm::ProfilingRequest &request = profiling_requests.add_request(
               runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
               &base, sizeof(base));
+          // Always make sure that we have a operation processor usage
+          // here so that we can recognize it when we get the response
+          // See SingleTask::handle_profiling_response
+          realm_measurements.insert(Realm::PMID_OP_PROC_USAGE);
           request.add_measurements(realm_measurements);
           int previous = 
             __sync_fetch_and_add(&outstanding_profiling_requests, 1);
