@@ -21,6 +21,7 @@
 #include "realm/machine.h"
 #include "realm/network.h"
 #include "realm/mutex.h"
+#include "realm/atomics.h"
 
 #include <vector>
 #include <set>
@@ -230,7 +231,7 @@ namespace Realm {
       Processor cache_next(Processor after);
 
     protected:
-      int references;
+      atomic<int> references;
       MachineImpl *machine;
       bool is_restricted_node;
       int restricted_node_id;
@@ -345,7 +346,7 @@ namespace Realm {
       Memory mutated_cached_query(Memory p);
 
     protected:
-      int references;
+      atomic<int> references;
       MachineImpl *machine;
       bool is_restricted_node;
       int restricted_node_id;

@@ -201,7 +201,7 @@ namespace Realm {
 #endif
 
     // we're interacting with the scheduler, so check for signals first
-    if(thread->signal_count > 0)
+    if(thread->signal_count.load() > 0)
       thread->process_signals();
 
     // first, indicate our intent to sleep
@@ -224,7 +224,7 @@ namespace Realm {
 
     // check signals again on the way out (async ones should have woken us already,
     //  but synchronous ones do not)
-    if(thread->signal_count > 0)
+    if(thread->signal_count.load() > 0)
       thread->process_signals();
 
     // finally, resume any performance counters

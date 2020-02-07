@@ -110,8 +110,8 @@ namespace Realm {
     Mutex mutex;
     OverlapTester<N2,T2> *overlap_tester;
     std::map<int, std::vector<Rect<N2,T2> > > pending_sparse_images;
-    int remaining_sparse_images;
-    std::vector<int> contrib_counts;
+    atomic<int> remaining_sparse_images;
+    std::vector<atomic<int> > contrib_counts;
     AsyncMicroOp *dummy_overlap_uop;
   };
 

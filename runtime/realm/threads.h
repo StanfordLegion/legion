@@ -221,7 +221,7 @@ namespace Realm {
     ThreadScheduler *scheduler;
     Operation *current_op;
     int exception_handler_count;
-    int signal_count;
+    atomic<int> signal_count;
     Mutex signal_mutex;
     std::deque<Signal> signal_queue;
 

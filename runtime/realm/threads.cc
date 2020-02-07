@@ -543,7 +543,7 @@ namespace Realm {
   //
   // class Thread
 
-  static bool handler_registered = false;
+  static atomic<bool> handler_registered(false);
   // Valgrind uses SIGUSR2 on Darwin
   static int handler_signal = SIGUSR1;
 
@@ -565,7 +565,9 @@ namespace Realm {
 
   static void register_handler(void)
   {
-    if(!__sync_bool_compare_and_swap(&handler_registered, false, true)) return;
+    bool expval = false;
+    if(!handler_registered.compare_exchange(expval, true))
+      return;
 
     struct sigaction act;
     bzero(&act, sizeof(act));
@@ -582,17 +584,17 @@ namespace Realm {
       AutoLock<> a(signal_mutex);
       signal_queue.push_back(sig);
     }
-    int prev = __sync_fetch_and_add(&signal_count, 1);
+    int prev = signal_count.fetch_add(1);
     if((prev == 0) && asynchronous)
       alert_thread();
   }
 
   Thread::Signal Thread::pop_signal(void)
   {
-    if(signal_count) {
+    if(signal_count.load() > 0) {
       Signal sig;
-      __sync_fetch_and_sub(&signal_count, 1);
       AutoLock<> a(signal_mutex);
+      signal_count.fetch_sub(1);
       sig = signal_queue.front();
       signal_queue.pop_front();
       return sig;
@@ -605,10 +607,10 @@ namespace Realm {
     // should only be called from the thread itself
     assert(this == Thread::self());
 
-    while(signal_count > 0) {
+    while(signal_count.load() > 0) {
       Signal sig;
       {
-	__sync_fetch_and_sub(&signal_count, 1);
+	signal_count.fetch_sub(1);
 	AutoLock<> a(signal_mutex);
 	// should never be empty, as there's no race conditions on emptying the queue
 	assert(!signal_queue.empty());
@@ -893,13 +895,13 @@ namespace Realm {
 
 #ifdef REALM_USE_USER_THREADS
   namespace {
-    int uswitch_test_check_flag = 1;
+    atomic<int> uswitch_test_check_flag(1);
     ucontext_t uswitch_test_ctx1, uswitch_test_ctx2;
 
     void uswitch_test_entry(int arg)
     {
-      log_thread.debug() << "uswitch test: adding: " << uswitch_test_check_flag << " " << arg;
-      __sync_fetch_and_add(&uswitch_test_check_flag, arg);
+      log_thread.debug() << "uswitch test: adding: " << uswitch_test_check_flag.load() << " " << arg;
+      uswitch_test_check_flag.fetch_add(arg);
       errno = 0;
       int ret = swapcontext(&uswitch_test_ctx2, &uswitch_test_ctx1);
       if(ret != 0) {
@@ -942,7 +944,7 @@ namespace Realm {
       return false;
     }
 
-    int val = __sync_fetch_and_add(&uswitch_test_check_flag, 0);
+    int val = uswitch_test_check_flag.load();
     if(val != 67) {
       log_thread.info() << "uswitch test: val mismatch: " << val << " != 67";
       free(stack_base);

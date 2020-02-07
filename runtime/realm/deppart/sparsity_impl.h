@@ -24,6 +24,7 @@
 
 #include "realm/activemsg.h"
 #include "realm/nodeset.h"
+#include "realm/atomics.h"
 
 namespace Realm {
 
@@ -96,7 +97,7 @@ namespace Realm {
     static ActiveMessageHandlerReg<RemoteSparsityContrib> remote_sparsity_contrib_reg;
     static ActiveMessageHandlerReg<SetContribCountMessage> set_contrib_count_msg_reg;
 
-    int remaining_contributor_count;
+    atomic<int> remaining_contributor_count;
     Mutex mutex;
     std::vector<PartitioningMicroOp *> approx_waiters, precise_waiters;
     bool precise_requested, approx_requested;
@@ -118,8 +119,8 @@ namespace Realm {
     ID me;
     unsigned owner;
     SparsityMapImplWrapper *next_free;
-    DynamicTemplates::TagType type_tag;
-    void *map_impl;  // actual implementation
+    atomic<DynamicTemplates::TagType> type_tag;
+    atomic<void *> map_impl;  // actual implementation
 
     template <int N, typename T>
     SparsityMapImpl<N,T> *get_or_create(SparsityMap<N,T> me);
@@ -146,7 +147,7 @@ namespace Realm {
     bool add_fragment(NodeID sender, int sequence_id, int sequence_count);
 
   protected:
-    int next_sequence_id;
+    atomic<int> next_sequence_id;
     Mutex mutex; // protects the fragments map
     std::map<NodeID, std::map<int, int> > fragments;
   };
