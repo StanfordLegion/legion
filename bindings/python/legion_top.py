@@ -58,7 +58,10 @@ def input_args(filter_runtime_options=False):
                 match = True
             if match:
                 args.pop(i)
-                args.pop(i) # Assume that every option has an argument
+                # Assume that every option has an argument, as long as
+                # the subsequent value does **NOT** start with a dash.
+                if i < len(args) and not args[i].startswith('-'):
+                    args.pop(i)
                 continue
             i += 1
     return args
