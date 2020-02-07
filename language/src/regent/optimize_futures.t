@@ -510,7 +510,7 @@ local function promote(cx, node, expected_type)
     -- FIXME: This requires a cast. For now, just concretize and re-promote.
     return promote(cx, concretize(cx, node), expected_type)
   end
-  return normalize_compound_expr(cx, node)
+  return normalize(cx, node)
 end
 
 function optimize_futures.expr_region_root(cx, node)
