@@ -17,12 +17,12 @@
 
 from __future__ import print_function
 
-import legion
-from legion import task
+import pygion
+from pygion import task
 
 @task
 def main():
-    legion.print_once("Hello, Legion!")
+    pygion.print_once("Hello, Legion!")
 
 if __name__ == '__main__':
     main()

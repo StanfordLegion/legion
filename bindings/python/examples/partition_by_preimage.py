@@ -17,8 +17,8 @@
 
 from __future__ import print_function
 
-import legion
-from legion import task, Partition, Region, RW, WD
+import pygion
+from pygion import task, Partition, Region, RW, WD
 import numpy as np
 
 @task(privileges=[WD])
@@ -33,7 +33,7 @@ def init_field(R):
 
 @task
 def main():
-    R = Region([4, 4], {'point': legion.int2d})
+    R = Region([4, 4], {'point': pygion.int2d})
     init_field(R)
 
     P = Partition.restrict(R, [2, 2], np.eye(2)*2, [2, 2])

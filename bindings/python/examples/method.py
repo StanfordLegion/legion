@@ -17,7 +17,7 @@
 
 from __future__ import print_function
 
-from legion import task
+from pygion import task
 
 class A:
     # Note: @task is like @staticmethod so no 'self' argument

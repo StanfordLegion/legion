@@ -19,8 +19,8 @@ from __future__ import print_function
 
 import numpy
 
-import legion
-from legion import index_launch, task, IndexLaunch, ID, Partition, R, Region, RW, Trace
+import pygion
+from pygion import index_launch, task, IndexLaunch, ID, Partition, R, Region, RW, Trace
 
 @task(privileges=[R])
 def look(R, i):
@@ -32,9 +32,9 @@ def incr(R, i):
 
 @task
 def main():
-    R = Region([4, 4], {'x': legion.float64})
+    R = Region([4, 4], {'x': pygion.float64})
     P = Partition.equal(R, [2, 2])
-    legion.fill(R, 'x', 0)
+    pygion.fill(R, 'x', 0)
 
     trace1 = Trace()
     for t in range(5):

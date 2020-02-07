@@ -17,8 +17,8 @@
 
 from __future__ import print_function
 
-import legion
-from legion import index_launch, task, IndexLaunch
+import pygion
+from pygion import index_launch, task, IndexLaunch
 import numpy
 
 @task

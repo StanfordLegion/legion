@@ -17,8 +17,8 @@
 
 from __future__ import print_function
 
-import legion
-from legion import task, Domain, Partition, Region, RW
+import pygion
+from pygion import task, Domain, Partition, Region, RW
 import numpy as np
 
 @task(privileges=[RW])
@@ -30,9 +30,9 @@ def check_subregion(R):
 
 @task
 def main():
-    R = Region([4, 4], {'x': legion.float64})
+    R = Region([4, 4], {'x': pygion.float64})
 
-    legion.fill(R, 'x', 0)
+    pygion.fill(R, 'x', 0)
 
     # Create a partition of R.
     colors = [2, 2]

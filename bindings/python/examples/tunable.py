@@ -17,12 +17,12 @@
 
 from __future__ import print_function
 
-import legion
-from legion import task
+import pygion
+from pygion import task
 
 @task
 def main():
-    nprocs = legion.Tunable.select(legion.Tunable.GLOBAL_PYS).get()
+    nprocs = pygion.Tunable.select(pygion.Tunable.GLOBAL_PYS).get()
     print("Number of Python processors: %s" % nprocs)
 
 if __name__ == '__main__':

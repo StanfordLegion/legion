@@ -17,8 +17,8 @@
 
 from __future__ import print_function
 
-import legion
-from legion import task, R, RW, WD, N, Reduce
+import pygion
+from pygion import task, R, RW, WD, N, Reduce
 import numpy
 
 @task
