@@ -2112,6 +2112,16 @@ extern "C" {
   // -----------------------------------------------------------------------
 
   /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::Runtime::create_predicate()
+   */
+  legion_predicate_t
+  legion_predicate_create(legion_runtime_t runtime,
+                          legion_context_t ctx,
+                          legion_future_t f);
+
+  /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
    * @see Legion::Predicate::~Predicate()

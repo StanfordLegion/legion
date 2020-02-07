@@ -405,7 +405,4 @@ messageEnumNames = loadMessageNames(remediesListFile)
 connection = sqlite3.connect(":memory:")
 parseSourceFiles(connection, enums)
 
-if args.prefix != None:
-    args.prefix = args.prefix.replace("//", "/")
-
 writeHtmlOutput(connection, args.prefix, args.strip, args.glossaryFile, args.glossaryURL, args.outputDir, args.remediesDir, messageEnumNames)

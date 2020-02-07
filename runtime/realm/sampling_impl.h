@@ -151,8 +151,8 @@ namespace Realm {
     size_t cfg_sample_interval;
     size_t cfg_buffer_size;
     std::vector<std::string> cfg_patterns;
-    int next_sampler_id;
-    int next_sample_index;
+    atomic<int> next_sampler_id;
+    atomic<int> next_sample_index;
 
     bool pattern_match(const std::string &name) const;
     

@@ -4331,13 +4331,13 @@ namespace Legion {
             physical_instances[idx].update_wait_on_events(ready_events);
         }
         wait_on_events.insert(Runtime::merge_events(NULL, ready_events));
+        for (unsigned idx = 0; idx < futures.size(); idx++)
+        {
+          FutureImpl *impl = futures[idx].impl; 
+          wait_on_events.insert(impl->subscribe());
+        }
       }
       // Now add get all the other preconditions for the launch
-      for (unsigned idx = 0; idx < futures.size(); idx++)
-      {
-        FutureImpl *impl = futures[idx].impl; 
-        wait_on_events.insert(impl->subscribe());
-      }
       for (unsigned idx = 0; idx < grants.size(); idx++)
       {
         GrantImpl *impl = grants[idx].impl;

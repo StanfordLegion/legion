@@ -1144,6 +1144,7 @@ namespace Realm {
 
     void MachineImpl::invalidate_query_caches()
     {
+#ifndef REALM_DISABLE_MACHINE_QUERY_CACHE
       while (!__sync_bool_compare_and_swap(&MemoryQueryImpl::init,0,1))
         continue;
       __sync_fetch_and_add(&MemoryQueryImpl::cache_invalid_count,1);
@@ -1156,6 +1157,7 @@ namespace Realm {
       (void)__sync_val_compare_and_swap(&ProcessorQueryImpl::global_valid_cache,1,0);
       __sync_sub_and_fetch(&ProcessorQueryImpl::init,1);
        log_query.debug("invalidate_query_caches complete ProcessorQueryImpl::cache_invalid_count = %d \n", ProcessorQueryImpl::cache_invalid_count);
+#endif
     }
 
   void cleanup_query_caches()
@@ -1530,7 +1532,7 @@ namespace Realm {
 
   ProcessorQueryImpl::~ProcessorQueryImpl(void)
   {
-    assert(references == 0);
+    assert(references.load() == 0);
     for(std::vector<ProcQueryPredicate *>::iterator it = predicates.begin();
 	it != predicates.end();
 	it++)
@@ -1544,12 +1546,12 @@ namespace Realm {
 
   void ProcessorQueryImpl::add_reference(void)
   {
-    __sync_fetch_and_add(&references, 1);
+    references.fetch_add(1);
   }
 
   void ProcessorQueryImpl::remove_reference(void)
   {
-    int left = __sync_sub_and_fetch(&references, 1);
+    int left = references.fetch_sub(1) - 1;
     if(left == 0)
       delete this;
   }
@@ -1558,7 +1560,7 @@ namespace Realm {
   {
     // safe to test without an atomic because we are a reference, and if the count is 1,
     //  there can be no others
-    if(references == 1) {
+    if(references.load() == 1) {
       return this;
     } else {
       ProcessorQueryImpl *copy = new ProcessorQueryImpl(*this);
@@ -1721,6 +1723,7 @@ namespace Realm {
     if (!Config::use_machine_query_cache)
       return is_valid;
 
+#ifndef REALM_DISABLE_MACHINE_QUERY_CACHE
     while (true) {
       if (__sync_bool_compare_and_swap(&init,0,1)) {
         std::vector<Processor>* clist = NULL;
@@ -1742,6 +1745,7 @@ namespace Realm {
         return is_valid;
       }
     }
+#endif
     return is_valid;
   }
 
@@ -1751,6 +1755,7 @@ namespace Realm {
     if (!Config::use_machine_query_cache)
       return is_valid;
 
+#ifndef REALM_DISABLE_MACHINE_QUERY_CACHE
     while (true) {
       if (__sync_bool_compare_and_swap(&init,0,1)) {
         if (invalid_count != cache_invalid_count) {
@@ -1770,6 +1775,7 @@ namespace Realm {
         return is_valid;
       }
     }
+#endif
     return is_valid;
   }
 
@@ -1778,6 +1784,8 @@ namespace Realm {
     bool is_valid = false;
     if (!Config::use_machine_query_cache)
       return is_valid;
+
+#ifndef REALM_DISABLE_MACHINE_QUERY_CACHE
     while (true) {
       if (__sync_bool_compare_and_swap(&init,0,1)) {
         std::vector<Processor>* clist = NULL;
@@ -1789,6 +1797,7 @@ namespace Realm {
         return is_valid;
       }
     }
+#endif
     return is_valid;
   }
 
@@ -2410,7 +2419,7 @@ namespace Realm {
 
   MemoryQueryImpl::~MemoryQueryImpl(void)
   {
-    assert(references == 0);
+    assert(references.load() == 0);
     for(std::vector<MemoryQueryPredicate *>::iterator it = predicates.begin();
 	it != predicates.end();
 	it++)
@@ -2421,12 +2430,12 @@ namespace Realm {
 
   void MemoryQueryImpl::add_reference(void)
   {
-    __sync_fetch_and_add(&references, 1);
+    references.fetch_add(1);
   }
 
   void MemoryQueryImpl::remove_reference(void)
   {
-    int left = __sync_sub_and_fetch(&references, 1);
+    int left = references.fetch_sub(1) - 1;
     if(left == 0)
       delete this;
   }
@@ -2435,7 +2444,7 @@ namespace Realm {
   {
     // safe to test without an atomic because we are a reference, and if the count is 1,
     //  there can be no others
-    if(references == 1) {
+    if(references.load() == 1) {
       return this;
     } else {
       MemoryQueryImpl *copy = new MemoryQueryImpl(*this);
@@ -2544,6 +2553,7 @@ namespace Realm {
     if (!Config::use_machine_query_cache)
       return is_valid;
 
+#ifndef REALM_DISABLE_MACHINE_QUERY_CACHE
     while (true) {
       if (__sync_bool_compare_and_swap(&init,0,1)) {
         std::vector<Memory>* clist = NULL;
@@ -2565,6 +2575,7 @@ namespace Realm {
         return is_valid;
       }
     }
+#endif
     return is_valid;
   }
 
@@ -2574,6 +2585,7 @@ namespace Realm {
     if (!Config::use_machine_query_cache)
       return is_valid;
 
+#ifndef REALM_DISABLE_MACHINE_QUERY_CACHE
     while (true) {
       if (__sync_bool_compare_and_swap(&init,0,1)) {
         if (invalid_count != cache_invalid_count) {
@@ -2593,6 +2605,7 @@ namespace Realm {
         return is_valid;
       }
     }
+#endif
     return is_valid;
   }
 
@@ -2601,6 +2614,8 @@ namespace Realm {
     bool is_valid = false;
     if (!Config::use_machine_query_cache)
       return is_valid;
+
+#ifndef REALM_DISABLE_MACHINE_QUERY_CACHE
     while (true) {
       if (__sync_bool_compare_and_swap(&init,0,1)) {
         std::vector<Memory>* clist = NULL;
@@ -2612,6 +2627,7 @@ namespace Realm {
         return is_valid;
       }
     }
+#endif
     return is_valid;
   }
 
@@ -3024,7 +3040,7 @@ namespace Realm {
   // class NodeAnnounceMessage
   //
 
-  static int announcements_received = 0;
+  static atomic<int> announcements_received(0);
 
   /*static*/ void NodeAnnounceMessage::handle_message(NodeID sender, const NodeAnnounceMessage &args,
 						      const void *data, size_t datalen)
@@ -3049,14 +3065,14 @@ namespace Realm {
 					      args.num_memories, args.num_ib_memories,
 					      data, datalen, true);
 
-      __sync_fetch_and_add(&announcements_received, 1);
+      announcements_received.fetch_add(1);
     }
   }
 
   /*static*/ void NodeAnnounceMessage::await_all_announcements(void)
   {
     // wait until we hear from everyone else?
-    while((int)announcements_received < Network::max_node_id) {
+    while(announcements_received.load() < Network::max_node_id) {
       Thread::yield();
       //do_some_polling();
     }

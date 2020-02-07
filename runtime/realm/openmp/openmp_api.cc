@@ -77,7 +77,7 @@ namespace Realm {
       if(wi) {
 	Realm::ThreadPool::WorkItem *item = wi->work_item;
 	if(item) {
-	  if((wi->num_threads > 1) && (item->single_winner == -1))
+	  if((wi->num_threads > 1) && (item->single_winner.load() == -1))
 	    return 1;
 	  else
 	    return 0;  // single inside parallel
@@ -143,9 +143,9 @@ namespace Realm {
       ThreadPool::WorkItem *work = wi->pop_work_item();
       assert(work != 0);
       // make sure all workers have finished
-      if(__sync_sub_and_fetch(&(work->remaining_workers), 1) > 0) {
+      if(work->remaining_workers.fetch_sub(1) > 1) {
 	log_omp.info() << "waiting for workers to complete";
-	while(__sync_sub_and_fetch(&(work->remaining_workers), 0) > 0)
+	while(work->remaining_workers.load() > 0)
 	  sched_yield();
       }
       delete work;
@@ -173,13 +173,12 @@ namespace Realm {
 
       // try to become the "single" winner - the intent in OpenMP is that the
       //  first worker to get here should do the work
-      int prev = __sync_val_compare_and_swap(&wi->work_item->single_winner,
-					     -1, wi->thread_id);
-      //log_omp.print() << "single claim: me=" << wi->thread_id << " winner=" << prev;
-      if((prev == -1) || (prev == wi->thread_id)) {
+      int prev = -1;
+      if(wi->work_item->single_winner.compare_exchange(prev, wi->thread_id)) {
 	return true;
       } else {
-	return false;
+	// if we were already the winner, that's ok too
+	return (prev == wi->thread_id);
       }
     }
 
@@ -197,23 +196,26 @@ namespace Realm {
 	// step 1: observe that barrier is not still being exited
 	int c;
 	do {
-	  c = __sync_fetch_and_add(&wi->work_item->barrier_count, 0);
+	  c = wi->work_item->barrier_count.load();
 	} while(c >= wi->num_threads);
 	// step 2: increment counter to enter
-	c = __sync_add_and_fetch(&wi->work_item->barrier_count, 1);
+	c = wi->work_item->barrier_count.fetch_add(1) + 1;
 	if(c == wi->num_threads) {
 	  // last arriver - reset count once all others have exited
 	  //   reset "single" winner too
 	  wi->work_item->single_winner = -1;
-	  while(!__sync_bool_compare_and_swap(&wi->work_item->barrier_count,
-					      2 * wi->num_threads - 1, 0)) {}
+	  while(true) {
+	    int expval = 2 * wi->num_threads - 1;
+	    if(wi->work_item->barrier_count.compare_exchange(expval, 0))
+	      break;
+	  }
 	} else {
 	  // step 3: observe that all threads have entered
 	  do {
-	    c = __sync_fetch_and_add(&wi->work_item->barrier_count, 0);
+	    c = wi->work_item->barrier_count.load();
 	  } while(c < wi->num_threads);
 	  // step 4: increment counter again to exit
-	  __sync_fetch_and_add(&wi->work_item->barrier_count, 1);
+	  wi->work_item->barrier_count.fetch_add(1);
 	}
       } else {
 	// not inside a larger construct - nothing to do
@@ -520,9 +522,9 @@ namespace Realm {
     ThreadPool::WorkItem *work2 = wi->pop_work_item();
     assert(work == work2);
     // make sure all workers have finished
-    if(__sync_sub_and_fetch(&(work->remaining_workers), 1) > 0) {
+    if(work->remaining_workers.fetch_sub(1) > 1) {
       log_omp.info() << "waiting for workers to complete";
-      while(__sync_sub_and_fetch(&(work->remaining_workers), 0) > 0)
+      while(work->remaining_workers.load() > 0)
 	sched_yield();
     }
     delete work;
@@ -667,7 +669,7 @@ namespace Realm {
     // pop the top work item and make sure we're the only worker
     ThreadPool::WorkItem *work = wi->pop_work_item();
     assert(work != 0);
-    assert(work->remaining_workers == 1);
+    assert(work->remaining_workers.load() == 1);
     delete work;
   }
 
@@ -686,13 +688,12 @@ namespace Realm {
 
     // try to become the "single" winner - the intent in OpenMP is that the
     //  first worker to get here should do the work
-    int prev = __sync_val_compare_and_swap(&wi->work_item->single_winner,
-					   -1, wi->thread_id);
-    //log_omp.print() << "single claim: me=" << wi->thread_id << " winner=" << prev;
-    if((prev == -1) || (prev == wi->thread_id)) {
+    int prev = -1;
+    if(wi->work_item->single_winner.compare_exchange(prev, wi->thread_id)) {
       return 1;
     } else {
-      return 0;
+      // if we were already the winner, that's ok too
+      return (prev == wi->thread_id) ? 1 : 0;
     }
   }
 
@@ -715,23 +716,26 @@ namespace Realm {
       // step 1: observe that barrier is not still being exited
       int c;
       do {
-	c = __sync_fetch_and_add(&wi->work_item->barrier_count, 0);
+	c = wi->work_item->barrier_count.load();
       } while(c >= wi->num_threads);
       // step 2: increment counter to enter
-      c = __sync_add_and_fetch(&wi->work_item->barrier_count, 1);
+      c = wi->work_item->barrier_count.fetch_add(1) + 1;
       if(c == wi->num_threads) {
 	// last arriver - reset count once all others have exited
 	//   reset "single" winner too
 	wi->work_item->single_winner = -1;
-	while(!__sync_bool_compare_and_swap(&wi->work_item->barrier_count,
-					    2 * wi->num_threads - 1, 0)) {}
+	while(true) {
+	  int expval = 2 * wi->num_threads - 1;
+	  if(wi->work_item->barrier_count.compare_exchange(expval, 0))
+	    break;
+	}
       } else {
 	// step 3: observe that all threads have entered
 	do {
-	  c = __sync_fetch_and_add(&wi->work_item->barrier_count, 0);
+	  c = wi->work_item->barrier_count.load();
 	} while(c < wi->num_threads);
 	// step 4: increment counter again to exit
-	__sync_fetch_and_add(&wi->work_item->barrier_count, 1);
+	wi->work_item->barrier_count.fetch_add(1);
       }
     } else {
       // not inside a larger construct - nothing to do

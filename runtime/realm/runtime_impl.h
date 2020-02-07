@@ -130,7 +130,7 @@ namespace Realm {
 
       // sparsity maps can be created by other nodes, so keep a
       //  map per-creator_node
-      std::vector<DynamicTable<SparsityMapTableAllocator> *> sparsity_maps;
+      std::vector<atomic<DynamicTable<SparsityMapTableAllocator> *> > sparsity_maps;
     };
 
     class RemoteIDAllocator {

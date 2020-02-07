@@ -2091,27 +2091,6 @@ namespace Realm {
       //  things that try to run during teardown
       shutdown_in_progress.store(true);
       
-#if 0
-      // filter out duplicate requests
-      bool already_started = (__sync_fetch_and_add(&shutdown_count, 1) > 0);
-      if(already_started)
-	return;
-
-      if(local_request) {
-	log_runtime.info("shutdown request - notifying other nodes");
-	NodeSet targets;
-	for(NodeID i = 0; i <= Network::max_node_id; i++)
-	  if(i != Network::my_node_id)
-	    targets.add(i);
-
-	ActiveMessage<RuntimeShutdownMessage> amsg(targets);
-	amsg->result_code = result_code;
-	amsg.commit();
-      }
-
-      log_runtime.info("shutdown request - cleaning up local processors");
-#endif
-
       // Shutdown all the threads
 
       // threads that cause inter-node communication have to stop first
@@ -2183,7 +2162,11 @@ namespace Realm {
 	  delete_container_contents(n.processors);
 	  delete_container_contents(n.ib_memories);
 	  delete_container_contents(n.dma_channels);
-	  delete_container_contents(n.sparsity_maps);
+
+	  for(std::vector<atomic<DynamicTable<SparsityMapTableAllocator> *> >::iterator it = n.sparsity_maps.begin();
+	      it != n.sparsity_maps.end();
+	      ++it)
+	    delete it->load();
 	}
 	
 	delete[] nodes;
@@ -2288,16 +2271,19 @@ namespace Realm {
       }
 
       Node *n = &nodes[id.sparsity_owner_node()];
-      DynamicTable<SparsityMapTableAllocator> *& m = n->sparsity_maps[id.sparsity_creator_node()];
+      atomic<DynamicTable<SparsityMapTableAllocator> *>& m = n->sparsity_maps[id.sparsity_creator_node()];
       // might need to construct this (in a lock-free way)
-      if(m == 0) {
+      DynamicTable<SparsityMapTableAllocator> *mptr = m.load();
+      if(mptr == 0) {
 	// construct one and try to swap it in
 	DynamicTable<SparsityMapTableAllocator> *newm = new DynamicTable<SparsityMapTableAllocator>;
-	if(!__sync_bool_compare_and_swap(&m, 0, newm))
-	  delete newm;  // somebody else made it faster
+	if(m.compare_exchange(mptr, newm))
+	  mptr = newm;  // we're using the one we made
+	else
+	  delete newm;  // somebody else made it faster (mptr has winner)
       }
-      SparsityMapImplWrapper *impl = m->lookup_entry(id.sparsity_sparsity_idx(),
-						     id.sparsity_owner_node());
+      SparsityMapImplWrapper *impl = mptr->lookup_entry(id.sparsity_sparsity_idx(),
+							id.sparsity_owner_node());
       // creator node isn't always right, so try to fix it
       if(impl->me != id) {
 	if(impl->me.sparsity_creator_node() == 0)

@@ -133,6 +133,7 @@ function context:new_local_scope(divergence, must_epoch, must_epoch_point, break
     bounds_checks = self.bounds_checks,
     codegen_contexts = self.codegen_contexts,
     loop_symbol = self.loop_symbol,
+    parent = self,
   }, context)
 end
 
@@ -161,7 +162,8 @@ function context:new_task_scope(expected_return_type, constraints, orderings, le
     cleanup_items = terralib.newlist(),
     bounds_checks = bounds_checks,
     codegen_contexts = data.newmap(),
-    loop_symbol = false
+    loop_symbol = false,
+    parent = false,
   }, context)
 end
 
@@ -496,6 +498,28 @@ function context:get_cleanup_items()
     items:insert(self.cleanup_items[i])
   end
   return quote [items] end
+end
+
+function context:get_all_cleanup_items_for_break()
+  local break_label = self.break_label
+  assert(break_label)
+  local items = terralib.newlist()
+  local ctx = self
+  while ctx and ctx.break_label == break_label do
+    items:insert(ctx:get_cleanup_items())
+    ctx = ctx.parent
+  end
+  return items
+end
+
+function context:get_all_cleanup_items_for_return()
+  local items = terralib.newlist()
+  local ctx = self
+  while ctx do
+    items:insert(ctx:get_cleanup_items())
+    ctx = ctx.parent
+  end
+  return items
 end
 
 local function physical_region_get_base_pointer_setup(index_type, field_type, fastest_index, expected_stride,
@@ -9718,6 +9742,7 @@ function codegen.stat_return(cx, node)
   if result_type == terralib.types.unit then
     return quote
       [actions]
+      [cx:get_all_cleanup_items_for_return()]
       return
     end
   else
@@ -9737,6 +9762,7 @@ function codegen.stat_return(cx, node)
         value = buffer,
         size = buffer_size,
       }
+      [cx:get_cleanup_items()]
       return
       -- Task wrapper is responsible for calling free.
     end
@@ -9745,7 +9771,7 @@ end
 
 function codegen.stat_break(cx, node)
   assert(cx.break_label)
-  return quote goto [cx.break_label] end
+  return quote [cx:get_all_cleanup_items_for_break()]; goto [cx.break_label] end
 end
 
 function codegen.stat_assignment(cx, node)

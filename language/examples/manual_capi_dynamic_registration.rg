@@ -69,6 +69,7 @@ terra top_level_task(task : c.legion_task_t,
     c.printf("abort\n")
     c.abort()
   end
+  c.legion_future_destroy(f)
 end
 
 local args = require("manual_capi_args")

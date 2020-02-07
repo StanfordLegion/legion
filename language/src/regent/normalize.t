@@ -539,12 +539,79 @@ local function stat_for_list(stats, stat)
 end
 
 local function stat_repeat(stats, stat)
-  local block = normalize.block(stat.block)
-  local block_stats = block.stats
-  local until_cond = normalize.expr(block_stats, stat.until_cond, true)
-  stats:insert(stat {
-    until_cond = until_cond,
-    block = block { stats = block_stats },
+  -- Unfortunately, we need to keep the original reapeat loop
+  -- in the program to make it type checked correctly.
+  local dead_code = nil
+  do
+    -- Make a local context to normalize the repeat loop
+    -- that will later be eliminated.
+    local stats = terralib.newlist()
+    local until_cond = normalize.expr(stats, stat.until_cond)
+    local block = normalize.block(stat.block)
+    stats:insert(stat {
+      until_cond = until_cond,
+      block = block,
+    })
+    dead_code = ast.specialized.Block {
+      stats = stats,
+      span = stat.span,
+    }
+  end
+  stats:insert(ast.specialized.stat.If {
+    cond = ast.specialized.expr.Constant {
+      value = false,
+      expr_type = bool,
+      span = stat.span,
+      annotations = ast.default_annotations(),
+    },
+    then_block = dead_code,
+    elseif_blocks = terralib.newlist(),
+    else_block = ast.specialized.Block {
+      stats = terralib.newlist(),
+      span = stat.span,
+    },
+    span = stat.span,
+    annotations = ast.default_annotations(),
+  })
+
+  local cond_var = std.newsymbol(bool)
+  stats:insert(ast.specialized.stat.Var {
+    symbols = cond_var,
+    values = ast.specialized.expr.Constant {
+      value = true,
+      expr_type = bool,
+      span = stat.until_cond.span,
+      annotations = ast.default_annotations(),
+    },
+    span = stat.span,
+    annotations = ast.default_annotations(),
+  })
+
+  local cond = ast.specialized.expr.ID {
+    value = cond_var,
+    span = stat.until_cond.span,
+    annotations = ast.default_annotations(),
+  }
+
+  local block_stats = terralib.newlist()
+  block_stats:insertall(stat.block.stats)
+  block_stats:insert(ast.specialized.stat.Assignment {
+    lhs = terralib.newlist({cond}),
+    rhs = terralib.newlist({ ast.specialized.expr.Unary {
+      op = "not",
+      rhs = stat.until_cond,
+      span = stat.until_cond.span,
+      annotations = ast.default_annotations(),
+    }}),
+    span = stat.until_cond.span,
+    annotations = ast.default_annotations(),
+  })
+
+  normalize.stat(stats, ast.specialized.stat.While {
+    cond = cond,
+    block = stat.block { stats = block_stats },
+    span = stat.span,
+    annotations = stat.annotations,
   })
 end
 

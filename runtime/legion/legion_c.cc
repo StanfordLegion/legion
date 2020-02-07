@@ -2465,6 +2465,19 @@ legion_argument_map_destroy(legion_argument_map_t map_)
 // Predicate Operations
 //------------------------------------------------------------------------
 
+legion_predicate_t
+legion_predicate_create(legion_runtime_t runtime_,
+                        legion_context_t ctx_,
+                        legion_future_t f_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  Future *f = CObjectWrapper::unwrap(f_);
+
+  Predicate result = runtime->create_predicate(ctx, f);
+  return CObjectWrapper::wrap(new Predicate(result));
+}
+
 void
 legion_predicate_destroy(legion_predicate_t handle_)
 {

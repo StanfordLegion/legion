@@ -840,7 +840,7 @@ namespace Realm {
 							addr_max_bytes);
 	    if(addr_max_bytes == 0) {
 	      // end of data?
-	      if(iip.remote_bytes_total == iip.local_bytes_total)
+	      if(iip.remote_bytes_total.load() == iip.local_bytes_total)
 		this->is_done = true;
 	      return nonempty;
 	    }
@@ -1102,7 +1102,7 @@ namespace Realm {
 							addr_max_bytes);
 	    if(addr_max_bytes == 0) {
 	      // end of data?
-	      if(iip.remote_bytes_total == iip.local_bytes_total)
+	      if(iip.remote_bytes_total.load() == iip.local_bytes_total)
 	      	this->is_done = true;
 	      return nonempty;
 	    }

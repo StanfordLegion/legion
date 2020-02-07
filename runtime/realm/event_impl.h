@@ -134,7 +134,7 @@ namespace Realm {
       EventImpl::gen_t finish_gen;
       bool ignore_faults;
       atomic<int> count_needed;
-      int faults_observed;
+      atomic<int> faults_observed;
 
       static const size_t MAX_INLINE_PRECONDITIONS = 6;
       MergeEventPrecondition inline_preconditions[MAX_INLINE_PRECONDITIONS];
@@ -256,7 +256,7 @@ namespace Realm {
       static const ID::ID_Types ID_TYPE = ID::ID_BARRIER;
 
       static const int BARRIER_TIMESTAMP_NODEID_SHIFT = 48;
-      static Barrier::timestamp_t barrier_adjustment_timestamp;
+      static atomic<Barrier::timestamp_t> barrier_adjustment_timestamp;
 
       BarrierImpl(void);
       ~BarrierImpl(void);
