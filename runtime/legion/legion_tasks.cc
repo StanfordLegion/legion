@@ -2326,6 +2326,7 @@ namespace Legion {
       selected_variant = 0;
       task_priority = 0;
       perform_postmap = false;
+      first_mapping = true;
       execution_context = NULL;
       remote_trace_info = NULL;
       leaf_cached = false;
@@ -2581,8 +2582,9 @@ namespace Legion {
           // remotely in which case we need to do the
           // mapping now, otherwise we can defer it
           // until the task ends up on the target processor
-          if (is_origin_mapped())
+          if (is_origin_mapped() && first_mapping)
           {
+            first_mapping = false;
             const RtEvent done_mapping = perform_mapping();
             if (!done_mapping.exists() || done_mapping.has_triggered())
             {
@@ -4321,6 +4323,7 @@ namespace Legion {
       serdez_redop_fns = NULL;
       reduction_state_size = 0;
       reduction_state = NULL;
+      first_mapping = true;
       children_complete_invoked = false;
       children_commit_invoked = false;
       predicate_false_result = NULL;
@@ -4613,13 +4616,10 @@ namespace Legion {
           {
             if (must_epoch == NULL)
             {
-              // See if we're going to send it
-              // remotely.  If so we need to do
-              // the mapping now.  Otherwise we
-              // can defer the mapping until we get
-              // on the target processor.
-              if (target_proc.exists() && !runtime->is_local(target_proc))
+              // See if we've done our first mapping yet or not
+              if (first_mapping)
               {
+                first_mapping = false;
                 const RtEvent done_mapping = perform_mapping();
                 if (!done_mapping.exists() || done_mapping.has_triggered())
                 {
@@ -8740,6 +8740,8 @@ namespace Legion {
             point_futures[idx] = FutureMap(impl, false/*need reference*/);
           }
         }
+        // Set the first mapping to false since we know things are mapped
+        first_mapping = false;
       }
       // Return true to add this to the ready queue
       return true;
