@@ -550,6 +550,8 @@ local function analyze_is_side_effect_free_node(cx)
       node:is(ast.typed.expr.UnsafeCast) or
       node:is(ast.typed.expr.ListInvert) or
       node:is(ast.typed.expr.ListRange) or
+      node:is(ast.typed.expr.ListIspace) or
+      node:is(ast.typed.expr.ListFromElement) or
       node:is(ast.typed.expr.DynamicCollectiveGetResult) or
       node:is(ast.typed.expr.Advance) or
       node:is(ast.typed.expr.WithScratchFields) or
@@ -643,6 +645,8 @@ local function analyze_is_loop_invariant_node(cx)
       node:is(ast.typed.expr.UnsafeCast) or
       node:is(ast.typed.expr.ListInvert) or
       node:is(ast.typed.expr.ListRange) or
+      node:is(ast.typed.expr.ListIspace) or
+      node:is(ast.typed.expr.ListFromElement) or
       node:is(ast.typed.expr.Advance) or
       node:is(ast.typed.expr.WithScratchFields) or
       node:is(ast.typed.expr.RegionRoot) or

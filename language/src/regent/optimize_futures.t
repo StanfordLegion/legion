@@ -431,7 +431,10 @@ local optimize_futures = {}
 local function normalize_compound_expr(cx, expr)
   if expr:is(ast.typed.expr.Cast) or
      expr:is(ast.typed.expr.Unary) or
-     expr:is(ast.typed.expr.Binary)
+     expr:is(ast.typed.expr.Binary) or
+     expr:is(ast.typed.expr.Call) or
+     expr:is(ast.typed.expr.Future) or
+     expr:is(ast.typed.expr.DynamicCollectiveGetResult)
   then
     local temp_var = std.newsymbol(expr.expr_type, "__normalized_in_future_opt")
     cx:add_spill(ast.typed.stat.Var {
@@ -496,17 +499,18 @@ local function promote(cx, node, expected_type)
 
   local expr_type = std.as_read(node.expr_type)
   if not std.is_future(expr_type) then
-    return ast.typed.expr.Future {
-      value = node,
-      expr_type = expected_type,
-      annotations = node.annotations,
-      span = node.span,
-    }
+    return normalize_compound_expr(cx,
+      ast.typed.expr.Future {
+        value = node,
+        expr_type = expected_type,
+        annotations = node.annotations,
+        span = node.span,
+      })
   elseif not std.type_eq(expr_type, expected_type) then
     -- FIXME: This requires a cast. For now, just concretize and re-promote.
-    return promote(concretize(cx, node), expected_type)
+    return promote(cx, concretize(cx, node), expected_type)
   end
-  return node
+  return normalize_compound_expr(cx, node)
 end
 
 function optimize_futures.expr_region_root(cx, node)
@@ -570,6 +574,14 @@ function optimize_futures.expr_call(cx, node)
   if not std.is_task(node.fn.value) then
     args = args:map(
       function(arg) return concretize(cx, arg) end)
+  else
+    args = args:map(function(arg)
+      if std.is_future(arg.expr_type) then
+          return normalize_compound_expr(cx, arg)
+      else
+        return arg
+      end
+    end)
   end
   local expr_type = node.expr_type
   if std.is_task(node.fn.value) and expr_type ~= terralib.types.unit then
@@ -1382,9 +1394,11 @@ function optimize_futures.stat_index_launch_num(cx, node)
     local args = terralib.newlist()
     for i, arg in ipairs(call.args) do
       if std.is_future(std.as_read(arg.expr_type)) and
-        not node.args_provably.invariant[i]
+         not node.args_provably.invariant[i]
       then
         arg = concretize(cx, arg)
+      elseif std.is_future(std.as_read(arg.expr_type)) then
+        arg = normalize_compound_expr(cx, arg)
       end
       args:insert(arg)
     end
@@ -1441,9 +1455,11 @@ function optimize_futures.stat_index_launch_list(cx, node)
     local args = terralib.newlist()
     for i, arg in ipairs(call.args) do
       if std.is_future(std.as_read(arg.expr_type)) and
-        not node.args_provably.invariant[i]
+         not node.args_provably.invariant[i]
       then
         arg = concretize(cx, arg)
+      elseif std.is_future(std.as_read(arg.expr_type)) then
+        arg = normalize_compound_expr(cx, arg)
       end
       args:insert(arg)
     end
@@ -1527,8 +1543,8 @@ function optimize_futures.stat_var(cx, node)
         span = node.span,
       }
 
-      new_value = promote(cx, empty_ref, new_type)
       cx:add_spill(empty_var)
+      new_value = promote(cx, empty_ref, new_type)
     end
   end
 
@@ -1770,30 +1786,31 @@ function optimize_futures.top_task_param(cx, param)
 
     local new_symbol = cx:symbol(param.symbol)
 
-    local new_var = ast.typed.stat.Var {
+    local cx = cx:new_stat_scope()
+    local value = promote(cx,
+      ast.typed.expr.ID {
+        value = param.symbol,
+        expr_type = std.rawref(&param.param_type),
+        annotations = param.annotations,
+        span = param.span,
+      },
+      new_type)
+    return cx:add_spill(ast.typed.stat.Var {
       symbol = new_symbol,
       type = new_type,
-      value = promote(cx,
-        ast.typed.expr.ID {
-          value = param.symbol,
-          expr_type = std.rawref(&param.param_type),
-          annotations = param.annotations,
-          span = param.span,
-        },
-        new_type),
+      value = value,
       annotations = param.annotations,
       span = param.span,
-    }
-
-    return new_var
+    }):get_spills()
   end
 end
 
 function optimize_futures.top_task_params(cx, node)
   local actions = terralib.newlist()
   for _, param in ipairs(node.params) do
-    local action = optimize_futures.top_task_param(cx, param)
-    if action then actions:insert(action) end
+    local param_actions =
+      optimize_futures.top_task_param(cx, param)
+    if param_actions then actions:insertall(param_actions) end
   end
   return actions
 end
