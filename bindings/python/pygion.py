@@ -22,6 +22,7 @@ try:
 except ImportError:
     import pickle
 import collections
+from io import StringIO
 import itertools
 import math
 import numpy
@@ -58,10 +59,9 @@ try:
 except:
     zip_longest = itertools.zip_longest # Python 3
 
-from io import StringIO
-
 _pickle_version = pickle.HIGHEST_PROTOCOL # Use latest Pickle protocol
 
+import legion_top
 from legion_cffi import ffi, lib as c
 
 _max_dim = None
@@ -78,7 +78,7 @@ AUTO_GENERATE_ID = -1
 
 # Note: don't use __file__ here, it may return either .py or .pyc and cause
 # non-deterministic failures.
-library_name = "legion.py"
+library_name = "pygion.py"
 max_legion_python_tasks = 1000000
 next_legion_task_id = c.legion_runtime_generate_library_task_ids(
                         c.legion_runtime_get_runtime(),
@@ -97,34 +97,7 @@ def inside_legion_executable():
     else:
         return True
 
-def input_args(filter_runtime_options=False):
-    raw_args = c.legion_runtime_get_input_args()
-
-    args = []
-    for i in range(raw_args.argc):
-        args.append(ffi.string(raw_args.argv[i]).decode('utf-8'))
-
-    if filter_runtime_options:
-        i = 1 # Skip program name
-
-        prefixes = ['-lg:', '-hl:', '-realm:', '-ll:', '-cuda:', '-numa:',
-                    '-dm:', '-bishop:']
-        while i < len(args):
-            match = False
-            for prefix in prefixes:
-                if args[i].startswith(prefix):
-                    match = True
-                    break
-            if args[i] == '-level':
-                match = True
-            if args[i] == '-logfile':
-                match = True
-            if match:
-                args.pop(i)
-                args.pop(i) # Assume that every option has an argument
-                continue
-            i += 1
-    return args
+input_args = legion_top.input_args
 
 def execute_as_script():
     args = input_args(True)
@@ -2387,45 +2360,23 @@ class Trace(object):
         c.legion_runtime_end_trace(_my.ctx.runtime, _my.ctx.context, self.trace_id)
 
 if is_script:
-    # We can't use runpy for this since runpy is aggressive about
-    # cleaning up after itself and removes the module before execution
-    # has completed.
-    def run_path(filename, run_name=None):
-        import imp
-        module = imp.new_module(run_name)
-        setattr(module, '__name__', run_name)
-        setattr(module, '__file__', filename)
-        setattr(module, '__loader__', None)
-        setattr(module, '__package__', run_name.rpartition('.')[0])
+    _my.ctx = Context(
+        legion_top.top_level.context,
+        legion_top.top_level.runtime,
+        legion_top.top_level.task,
+        [])
 
-        # Hide the current module if it exists.
-        old_module = sys.modules[run_name] if run_name in sys.modules else None
-        sys.modules[run_name] = module
+    def _cleanup():
+        del _my.ctx
 
-        sys.path.append(os.path.dirname(filename))
+    legion_top.top_level.cleanup_items.append(_cleanup)
 
-        with open(filename) as f:
-            code = compile(f.read(), filename, 'exec')
-            exec(code, module.__dict__)
+    # FIXME: Really this should be the number of control replicated shards at this level
+    c.legion_runtime_enable_scheduler_lock()
+    num_procs = Tunable.select(Tunable.GLOBAL_PYS).get()
+    c.legion_runtime_disable_scheduler_lock()
 
-        # FIXME: Can't restore the old module because tasks may be
-        # continuing to execute asynchronously. We could fix this with
-        # an execution fence but it doesn't seem worth it given that
-        # we'll be cleaning up the process right after this.
-
-        # sys.modules[run_name] = old_module
-
-    @task(top_level=True, replicable=True)
-    def legion_main():
-        # FIXME: Really this should be the number of control replicated shards at this level
-        global global_task_registration_barrier
-        num_procs = Tunable.select(Tunable.GLOBAL_PYS).get()
-        global_task_registration_barrier = c.legion_phase_barrier_create(_my.ctx.runtime, _my.ctx.context, num_procs)
-
-        args = input_args(True)
-        assert len(args) >= 2
-        sys.argv = list(args)
-        run_path(args[1], run_name='__main__')
+    global_task_registration_barrier = c.legion_phase_barrier_create(_my.ctx.runtime, _my.ctx.context, num_procs)
 elif is_legion_python:
     print('WARNING: Executing Python modules via legion_python has been deprecated.')
     print('It is now recommended to run the script directly by passing the path')

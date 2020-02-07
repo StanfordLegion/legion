@@ -22,6 +22,7 @@ class my_build_py(build_py):
 setup(name='legion',
       version='0.1',
       py_modules=[
-          'legion',
+          'legion_top',
+          'pygion',
       ],
       cmdclass={'build_py': my_build_py})

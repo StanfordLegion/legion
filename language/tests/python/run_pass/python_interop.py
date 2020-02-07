@@ -17,8 +17,8 @@
 
 from __future__ import print_function
 
-import legion
+import pygion
 
-@legion.task(task_id=2)
+@pygion.task(task_id=2)
 def hello():
     print('hello from Python')

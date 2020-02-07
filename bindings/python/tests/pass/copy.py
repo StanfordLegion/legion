@@ -17,20 +17,20 @@
 
 from __future__ import print_function
 
-import legion
-from legion import task, Fspace, Ispace, Region, RW
+import pygion
+from pygion import task, Fspace, Ispace, Region, RW
 import numpy
 
 @task
 def main():
-    R = Region([4, 4], {'x': legion.int32, 'y': legion.int32, 'z': legion.int32, 'w': legion.int32})
-    legion.fill(R, 'x', 1)
-    legion.fill(R, 'y', 20)
-    legion.fill(R, ['z', 'w'], 100)
+    R = Region([4, 4], {'x': pygion.int32, 'y': pygion.int32, 'z': pygion.int32, 'w': pygion.int32})
+    pygion.fill(R, 'x', 1)
+    pygion.fill(R, 'y', 20)
+    pygion.fill(R, ['z', 'w'], 100)
 
-    legion.copy(R, ['x', 'y'], R, ['z', 'w'], redop='+')
-    legion.copy(R, 'x', R, 'y', redop='+')
-    legion.copy(R, 'y', R, 'x')
+    pygion.copy(R, ['x', 'y'], R, ['z', 'w'], redop='+')
+    pygion.copy(R, 'x', R, 'y', redop='+')
+    pygion.copy(R, 'y', R, 'x')
 
     assert R.x[0, 0] == 21
     assert R.y[0, 0] == 21

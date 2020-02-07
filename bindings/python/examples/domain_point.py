@@ -17,8 +17,8 @@
 
 from __future__ import print_function
 
-import legion
-from legion import task, DomainPoint, RW
+import pygion
+from pygion import task, DomainPoint, RW
 import numpy as np
 
 @task
