@@ -17,10 +17,10 @@
 
 from __future__ import print_function
 
-import legion
-from legion import task, WD
+import pygion
+from pygion import task, WD
 
-@task(return_type=legion.complex64)
+@task(return_type=pygion.complex64)
 def complex_plus_one(x):
     return x + 1
 
@@ -44,27 +44,27 @@ def do_local_fills(R):
 
 @task
 def main():
-    R = legion.Region(
+    R = pygion.Region(
         [10],
         {
-            'b': legion.bool_,
-            'c64': legion.complex64,
-            'c128': legion.complex128,
-            'f32': legion.float32,
-            'f64': legion.float64,
-            'i8': legion.int8,
-            'i16': legion.int16,
-            'i32': legion.int32,
-            'i64': legion.int64,
-            'u8': legion.uint8,
-            'u16': legion.uint16,
-            'u32': legion.uint32,
-            'u64': legion.uint64,
+            'b': pygion.bool_,
+            'c64': pygion.complex64,
+            'c128': pygion.complex128,
+            'f32': pygion.float32,
+            'f64': pygion.float64,
+            'i8': pygion.int8,
+            'i16': pygion.int16,
+            'i32': pygion.int32,
+            'i64': pygion.int64,
+            'u8': pygion.uint8,
+            'u16': pygion.uint16,
+            'u32': pygion.uint32,
+            'u64': pygion.uint64,
         })
 
     do_local_fills(R)
     
-    legion.fill(R, 'c64', 5+6j)
+    pygion.fill(R, 'c64', 5+6j)
 
     print('value of R.c64[0] after remote fill %s' % R.c64[1])
 

@@ -17,8 +17,8 @@
 
 from __future__ import print_function
 
-import legion
-from legion import task, R, Region, RW, WD, N
+import pygion
+from pygion import task, R, Region, RW, WD, N
 import numpy
 
 @task(privileges=[RW('x')])
@@ -45,9 +45,9 @@ def saxpy(R, a):
 
 @task
 def main():
-    R = Region([4, 4], {'x': legion.float64, 'y': legion.float64})
-    legion.fill(R, 'x', 101)
-    legion.fill(R, 'y', 102)
+    R = Region([4, 4], {'x': pygion.float64, 'y': pygion.float64})
+    pygion.fill(R, 'x', 101)
+    pygion.fill(R, 'y', 102)
     init_x(R)
     init_y(R)
     inc(R, 1000)

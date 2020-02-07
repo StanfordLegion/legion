@@ -78,7 +78,7 @@ AUTO_GENERATE_ID = -1
 
 # Note: don't use __file__ here, it may return either .py or .pyc and cause
 # non-deterministic failures.
-library_name = "legion.py"
+library_name = "pygion.py"
 max_legion_python_tasks = 1000000
 next_legion_task_id = c.legion_runtime_generate_library_task_ids(
                         c.legion_runtime_get_runtime(),

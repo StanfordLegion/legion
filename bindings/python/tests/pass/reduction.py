@@ -17,21 +17,21 @@
 
 from __future__ import print_function
 
-import legion
-from legion import task, R, Region, Reduce
+import pygion
+from pygion import task, R, Region, Reduce
 import numpy
 
 fspace = {
-    'i16': legion.int16,
-    'i32': legion.int32,
-    'i64': legion.int64,
-    'u16': legion.uint16,
-    'u32': legion.uint32,
-    'u64': legion.uint64,
-    'f32': legion.float32,
-    'f64': legion.float64,
-    'c64': legion.complex64,
-    'c128': legion.complex128,
+    'i16': pygion.int16,
+    'i32': pygion.int32,
+    'i64': pygion.int64,
+    'u16': pygion.uint16,
+    'u32': pygion.uint32,
+    'u64': pygion.uint64,
+    'f32': pygion.float32,
+    'f64': pygion.float64,
+    'c64': pygion.complex64,
+    'c128': pygion.complex128,
 }
 
 fields_except_c128 = tuple(set(fspace.keys()) - set(['c128']))
@@ -62,7 +62,7 @@ def check_except_c128(R, expected):
 def main():
     R = Region([4], fspace)
     for field_name in R.keys():
-        legion.fill(R, field_name, 0)
+        pygion.fill(R, field_name, 0)
     inc(R, 20)
     check(R, 20)
     mul(R, 3)

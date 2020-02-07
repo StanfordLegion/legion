@@ -17,8 +17,8 @@
 
 from __future__ import print_function
 
-import legion
-from legion import task, RW
+import pygion
+from pygion import task, RW
 
 @task(privileges=[RW])
 def hello_subregion(R):
@@ -26,9 +26,9 @@ def hello_subregion(R):
 
 @task
 def main():
-    R = legion.Region([4, 4], {'x': legion.float64})
-    legion.fill(R, 'x', 0)
-    P = legion.Partition.equal(R, [2, 2])
+    R = pygion.Region([4, 4], {'x': pygion.float64})
+    pygion.fill(R, 'x', 0)
+    P = pygion.Partition.equal(R, [2, 2])
     hello_subregion(P[0, 0]) # this should work
     try:
         hello_subregion(P) # this should fail
