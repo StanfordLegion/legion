@@ -368,7 +368,7 @@ namespace Realm {
     if(owner != Network::my_node_id) {
       // send the data to the owner to collect
       const size_t max_to_send = DeppartConfig::cfg_max_bytes_per_packet / sizeof(Rect<N,T>);
-      const Rect<N,T> *rdata = &rects[0];
+      const Rect<N,T> *rdata = (rects.empty() ? 0 : &rects[0]);
       size_t num_pieces = 0;
       size_t remaining = rects.size();
       // send partial messages first
@@ -397,7 +397,7 @@ namespace Realm {
     }
 
     // local contribution is done as a single piece
-    contribute_raw_rects(&rects[0], rects.size(), 1);
+    contribute_raw_rects((rects.empty() ? 0 : &rects[0]), rects.size(), 1);
   }
 
   template <int N, typename T>

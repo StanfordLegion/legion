@@ -444,7 +444,7 @@ namespace Realm {
   class RectListAdapter {
   public:
     RectListAdapter(const std::vector<Rect<1,T> >& _rects)
-      : rects(&_rects[0]), count(_rects.size()) {}
+      : rects(_rects.empty() ? 0 : &_rects[0]), count(_rects.size()) {}
     RectListAdapter(const Rect<1,T> *_rects, size_t _count)
       : rects(_rects), count(_count) {}
     size_t size(void) const { return count; }
