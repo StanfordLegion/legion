@@ -517,8 +517,8 @@ namespace Legion {
                                  UniqueID uid, DepPartOpKind part_op);
     public:
       // Process low-level runtime profiling results
-      virtual void handle_profiling_response(
-                            const Realm::ProfilingResponse &response);
+      virtual void handle_profiling_response(const ProfilingResponseBase *base,
+                                      const Realm::ProfilingResponse &response);
     public:
       // Dump all the results
       void finalize(void);

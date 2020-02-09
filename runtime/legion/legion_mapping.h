@@ -673,11 +673,15 @@ namespace Legion {
        * operations that were issued on behalf of mapping the task.
        * If the 'task_response' field is set to true this is the
        * profiling callback for the task itself, otherwise it is a
-       * callback for one of the copies for the task'.
+       * callback for one of the copies for the task'. If it is a
+       * response for a copy the 'region_requirement_index' will say
+       * for which region requirement the copy was issued.
        */
       struct TaskProfilingInfo {
 	ProfilingResponse                       profiling_responses;
+        unsigned                                region_requirement_index;
         bool                                    task_response;
+        bool                                    fill_response;
       };
       //------------------------------------------------------------------------
       virtual void report_profiling(const MapperContext      ctx,
@@ -770,6 +774,7 @@ namespace Legion {
        */
       struct InlineProfilingInfo {
 	ProfilingResponse                       profiling_responses;
+        bool                                    fill_response;
       };
       //------------------------------------------------------------------------
       virtual void report_profiling(const MapperContext         ctx,
@@ -905,6 +910,9 @@ namespace Legion {
        */
       struct CopyProfilingInfo {
 	ProfilingResponse                       profiling_responses;
+        unsigned                                src_index;
+        unsigned                                dst_index;
+        bool                                    fill_response;
       };
       //------------------------------------------------------------------------
       virtual void report_profiling(const MapperContext      ctx,
@@ -969,6 +977,7 @@ namespace Legion {
        */
       struct CloseProfilingInfo {
 	ProfilingResponse                       profiling_responses;
+        bool                                    fill_response;
       };
       //------------------------------------------------------------------------
       virtual void report_profiling(const MapperContext       ctx,
@@ -1024,6 +1033,7 @@ namespace Legion {
        */
       struct AcquireProfilingInfo {
 	ProfilingResponse                       profiling_responses;
+        bool                                    fill_response;
       };
       //------------------------------------------------------------------------
       virtual void report_profiling(const MapperContext         ctx,
@@ -1116,6 +1126,7 @@ namespace Legion {
        */
       struct ReleaseProfilingInfo {
 	ProfilingResponse                       profiling_responses;
+        bool                                    fill_response;
       };
       //------------------------------------------------------------------------
       virtual void report_profiling(const MapperContext         ctx,
@@ -1245,6 +1256,7 @@ namespace Legion {
        */
       struct PartitionProfilingInfo {
 	ProfilingResponse                       profiling_responses;
+        bool                                    fill_response;
       };
       //------------------------------------------------------------------------
       virtual void report_profiling(const MapperContext              ctx,

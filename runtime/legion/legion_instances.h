@@ -637,8 +637,8 @@ namespace Legion {
       PhysicalManager* create_physical_instance(RegionTreeForest *forest,
                                                 size_t *footprint = NULL);
     public:
-      virtual void handle_profiling_response(
-                    const Realm::ProfilingResponse &response);
+      virtual void handle_profiling_response(const ProfilingResponseBase *base,
+                                      const Realm::ProfilingResponse &response);
     protected:
       void compute_space_and_domain(RegionTreeForest *forest);
     protected:

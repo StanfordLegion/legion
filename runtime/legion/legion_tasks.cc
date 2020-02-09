@@ -4145,14 +4145,10 @@ namespace Legion {
         }
         if (!realm_measurements.empty())
         {
-          ProfilingResponseBase base(this);
+          OpProfilingResponse response(this, 0, 0, false/*fill*/, true/*task*/);
           Realm::ProfilingRequest &request = profiling_requests.add_request(
               runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
-              &base, sizeof(base));
-          // Always make sure that we have a operation processor usage
-          // here so that we can recognize it when we get the response
-          // See SingleTask::handle_profiling_response
-          realm_measurements.insert(Realm::PMID_OP_PROC_USAGE);
+              &response, sizeof(response));
           request.add_measurements(realm_measurements);
           int previous = 
             __sync_fetch_and_add(&outstanding_profiling_requests, 1);
@@ -4231,17 +4227,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::add_copy_profiling_request(
-                                           Realm::ProfilingRequestSet &requests)
+    void SingleTask::add_copy_profiling_request(unsigned src_index,
+            unsigned dst_index, Realm::ProfilingRequestSet &requests, bool fill)
     //--------------------------------------------------------------------------
     {
       // Nothing to do if we don't have any copy profiling requests
       if (copy_profiling_requests.empty())
         return;
-      ProfilingResponseBase base(this);
+#ifdef DEBUG_LEGION
+      assert(src_index == dst_index);
+#endif
+      OpProfilingResponse response(this, src_index, dst_index, fill);
       Realm::ProfilingRequest &request = requests.add_request(
         runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
-        &base, sizeof(base));
+        &response, sizeof(response));
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             copy_profiling_requests.begin(); it != 
             copy_profiling_requests.end(); it++)
@@ -4253,6 +4252,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void SingleTask::handle_profiling_response(
+                                       const ProfilingResponseBase *base,
                                        const Realm::ProfilingResponse &response)
     //--------------------------------------------------------------------------
     {
@@ -4260,10 +4260,11 @@ namespace Legion {
         mapper = runtime->find_mapper(current_proc, map_id); 
       Mapping::Mapper::TaskProfilingInfo info;
       info.profiling_responses.attach_realm_profiling_response(response);
-      if (response.has_measurement<
-           Mapping::ProfilingMeasurements::OperationProcessorUsage>())
+      const OpProfilingResponse *task_prof= 
+        static_cast<const OpProfilingResponse*>(base);
+      info.task_response = task_prof->task;
+      if (info.task_response)
       {
-        info.task_response = true;
         // If we had an overhead tracker 
         // see if this is the callback for the task
         if (execution_context->overhead_tracker != NULL)
@@ -4275,8 +4276,8 @@ namespace Legion {
           execution_context->overhead_tracker = NULL;
         }
       }
-      else
-        info.task_response = false;
+      info.region_requirement_index = task_prof->src;
+      info.fill_response = task_prof->fill;
       mapper->invoke_task_report_profiling(this, &info);
       handle_profiling_update(-1);
     } 
@@ -7611,7 +7612,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::add_copy_profiling_request(Realm::ProfilingRequestSet &reqs)
+    void IndexTask::add_copy_profiling_request(unsigned src_index,
+                unsigned dst_index, Realm::ProfilingRequestSet &reqs, bool fill)
     //--------------------------------------------------------------------------
     {
       // Nothing to do, there are no copy profiling requests for premap_task
