@@ -1931,7 +1931,7 @@ namespace Legion {
         {
           to_delete.insert(it->first, overlap);
         }
-        else if (expr1->get_volume() == expr2->get_volume())
+        else if (expr1->get_volume() >= expr2->get_volume())
         {
           IndexSpaceExpression *diff =
             forest->subtract_index_spaces(expr2, expr1);
@@ -1975,7 +1975,7 @@ namespace Legion {
         {
           non_dominated -= overlap;
         }
-        else if (expr1->get_volume() == expr2->get_volume())
+        else if (expr1->get_volume() <= expr2->get_volume())
         {
           IndexSpaceExpression *diff =
             forest->subtract_index_spaces(expr1, expr2);
