@@ -871,7 +871,7 @@ namespace Legion {
       const unsigned replay_parallelism;
     private:
       std::map<TraceLocalID,Memoizable*> operations;
-      std::map<TraceLocalID,unsigned>    memo_entries;
+      std::map<TraceLocalID,std::pair<unsigned,bool/*task*/> > memo_entries;
     private:
       CachedMappings cached_mappings;
       bool has_virtual_mapping;

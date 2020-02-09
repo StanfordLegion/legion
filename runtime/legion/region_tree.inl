@@ -61,7 +61,8 @@ namespace Legion {
       // Now that we know we're going to do this fill add any profiling requests
       Realm::ProfilingRequestSet requests;
       if (trace_info.op != NULL)
-        trace_info.op->add_copy_profiling_request(requests);
+        trace_info.op->add_copy_profiling_request(trace_info.index,
+            trace_info.dst_index, requests, true/*fill*/);
       if (forest->runtime->profiler != NULL)
         forest->runtime->profiler->add_fill_request(requests, trace_info.op);
 #ifdef LEGION_SPY
@@ -179,7 +180,8 @@ namespace Legion {
       // Now that we know we're going to do this copy add any profling requests
       Realm::ProfilingRequestSet requests;
       if (trace_info.op != NULL)
-        trace_info.op->add_copy_profiling_request(requests);
+        trace_info.op->add_copy_profiling_request(trace_info.index,
+            trace_info.dst_index, requests, false/*fill*/);
       if (forest->runtime->profiler != NULL)
         forest->runtime->profiler->add_copy_request(requests, trace_info.op);
 #ifdef LEGION_SPY
@@ -350,7 +352,8 @@ namespace Legion {
       // Now that we know we're going to do this copy add any profling requests
       Realm::ProfilingRequestSet requests;
       if (trace_info.op != NULL)
-        trace_info.op->add_copy_profiling_request(requests);
+        trace_info.op->add_copy_profiling_request(trace_info.index,
+            trace_info.dst_index, requests, false/*fill*/);
       if (forest->runtime->profiler != NULL)
         forest->runtime->profiler->add_copy_request(requests, trace_info.op);
 #ifdef LEGION_SPY

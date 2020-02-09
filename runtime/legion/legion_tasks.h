@@ -538,10 +538,10 @@ namespace Legion {
       void send_remote_context(AddressSpaceID target, RemoteTask *dst);
     public:
       virtual void pack_profiling_requests(Serializer &rez) const;
-      virtual void add_copy_profiling_request(
-                                      Realm::ProfilingRequestSet &requests);
-      virtual void handle_profiling_response(
-                                const Realm::ProfilingResponse &respone);
+      virtual void add_copy_profiling_request(unsigned src_index,
+          unsigned dst_index, Realm::ProfilingRequestSet &requests, bool fill);
+      virtual void handle_profiling_response(const ProfilingResponseBase *base,
+                                      const Realm::ProfilingResponse &respone);
       virtual void handle_profiling_update(int count);
     public:
       virtual void activate(void) = 0;
@@ -1102,8 +1102,8 @@ namespace Legion {
     public:
       virtual void handle_future(const DomainPoint &point, const void *result,
                                  size_t result_size, bool owner);
-      virtual void add_copy_profiling_request(
-                                      Realm::ProfilingRequestSet &requests);
+      virtual void add_copy_profiling_request(unsigned src_index,
+          unsigned dst_index, Realm::ProfilingRequestSet &requests, bool fill);
     public:
       virtual void register_must_epoch(void);
     public:

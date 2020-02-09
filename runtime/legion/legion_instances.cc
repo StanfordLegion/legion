@@ -2415,6 +2415,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InstanceBuilder::handle_profiling_response(
+                                       const ProfilingResponseBase *base,
                                        const Realm::ProfilingResponse &response)
     //--------------------------------------------------------------------------
     {

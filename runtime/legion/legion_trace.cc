@@ -1992,7 +1992,7 @@ namespace Legion {
         {
           to_delete.insert(it->first, overlap);
         }
-        else if (expr1->get_volume() == expr2->get_volume())
+        else if (expr1->get_volume() >= expr2->get_volume())
         {
           IndexSpaceExpression *diff =
             forest->subtract_index_spaces(expr2, expr1);
@@ -2040,7 +2040,7 @@ namespace Legion {
         {
           non_dominated -= overlap;
         }
-        else if (expr1->get_volume() == expr2->get_volume())
+        else if (expr1->get_volume() <= expr2->get_volume())
         {
           IndexSpaceExpression *diff =
             forest->subtract_index_spaces(expr1, expr2);
@@ -2873,11 +2873,11 @@ namespace Legion {
       round_robin_for_tasks = distinct_targets.size() < replay_parallelism;
 
       unsigned next_slice_id = 0;
-      for (std::map<TraceLocalID, Memoizable*>::iterator it =
-           operations.begin(); it != operations.end(); ++it)
+      for (std::map<TraceLocalID,std::pair<unsigned,bool> >::const_iterator 
+            it = memo_entries.begin(); it != memo_entries.end(); ++it)
       {
         unsigned slice_index = -1U;
-        if (!round_robin_for_tasks && it->second->is_memoizable_task())
+        if (!round_robin_for_tasks && it->second.second)
         {
           CachedMappings::iterator finder = cached_mappings.find(it->first);
 #ifdef DEBUG_LEGION
@@ -2901,7 +2901,7 @@ namespace Legion {
         assert(slice_index != -1U);
 #endif
         slice_indices_by_owner[it->first] = slice_index;
-        if (it->second->is_memoizable_task())
+        if (it->second.second)
           slice_tasks[slice_index].push_back(it->first);
       }
       for (unsigned idx = 1; idx < instructions.size(); ++idx)
@@ -4309,12 +4309,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       TraceLocalID op_key = find_trace_local_id(memo);
-      std::map<TraceLocalID, unsigned>::iterator entry_finder =
+      std::map<TraceLocalID,std::pair<unsigned,bool> >::iterator entry_finder =
         memo_entries.find(op_key);
 #ifdef DEBUG_LEGION
       assert(entry_finder != memo_entries.end());
 #endif
-      return entry_finder->second;
+      return entry_finder->second.first;
     }
 
     //--------------------------------------------------------------------------
@@ -4328,7 +4328,8 @@ namespace Legion {
       assert(memo_entries.find(key) == memo_entries.end());
 #endif
       operations[key] = memo;
-      memo_entries[key] = entry;
+      const bool is_task = memo->is_memoizable_task();
+      memo_entries[key] = std::pair<unsigned,bool>(entry,is_task);
       return key;
     }
 

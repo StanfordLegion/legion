@@ -885,6 +885,8 @@ namespace Legion {
                                                            NULL/*op*/, runtime);
             tpl->record_get_term_event(memo);
             Runtime::trigger_event(applied);
+            if (memo->get_origin_space() != runtime->address_space)
+              delete memo;
             break;
           }
         case REMOTE_TRACE_REQUEST_TERM_EVENT:
@@ -919,6 +921,8 @@ namespace Legion {
                                                            NULL/*op*/, runtime);
             tpl->record_create_ap_user_event(lhs, memo);
             Runtime::trigger_event(applied);
+            if (memo->get_origin_space() != runtime->address_space)
+              delete memo;
             break;
           }
         case REMOTE_TRACE_TRIGGER_EVENT:
@@ -986,6 +990,8 @@ namespace Legion {
             }
             else // didn't change so just trigger
               Runtime::trigger_event(done);
+            if (memo->get_origin_space() != runtime->address_space)
+              delete memo;
             break;
           }
         case REMOTE_TRACE_ISSUE_COPY:
@@ -1095,6 +1101,8 @@ namespace Legion {
               Runtime::trigger_event(applied, Runtime::merge_events(effects));
             else
               Runtime::trigger_event(applied);
+            if (memo->get_origin_space() != runtime->address_space)
+              delete memo;
             break;
           }
         case REMOTE_TRACE_ISSUE_FILL:
@@ -1199,6 +1207,8 @@ namespace Legion {
               Runtime::trigger_event(applied, Runtime::merge_events(effects));
             else
               Runtime::trigger_event(applied);
+            if (memo->get_origin_space() != runtime->address_space)
+              delete memo;
             break;
           }
         case REMOTE_TRACE_RECORD_OP_VIEW:
@@ -1229,6 +1239,8 @@ namespace Legion {
               Runtime::trigger_event(applied, Runtime::merge_events(effects));
             else
               Runtime::trigger_event(applied);
+            if (memo->get_origin_space() != runtime->address_space)
+              delete memo;
             break;
           }
         case REMOTE_TRACE_SET_OP_SYNC:
@@ -1257,6 +1269,8 @@ namespace Legion {
             }
             else // lhs didn't change
               Runtime::trigger_event(done);
+            if (memo->get_origin_space() != runtime->address_space)
+              delete memo;
             break;
           }
         case REMOTE_TRACE_RECORD_MAPPER_OUTPUT:
@@ -1289,6 +1303,8 @@ namespace Legion {
             }
             tpl->record_mapper_output(memo, output, physical_instances);
             Runtime::trigger_event(applied);
+            if (memo->get_origin_space() != runtime->address_space)
+              delete memo;
             break;
           }
         case REMOTE_TRACE_GET_REDUCTION_EVENTS:
@@ -1319,6 +1335,8 @@ namespace Legion {
             }
             else
               Runtime::trigger_event(done);
+            if (memo->get_origin_space() != runtime->address_space)
+              delete memo;
             break;
           }
         case REMOTE_TRACE_SET_EFFECTS:
@@ -1331,6 +1349,8 @@ namespace Legion {
             derez.deserialize(postcondition);
             tpl->record_set_effects(memo, postcondition);
             Runtime::trigger_event(applied);
+            if (memo->get_origin_space() != runtime->address_space)
+              delete memo;
             break;
           }
         case REMOTE_TRACE_COMPLETE_REPLAY:
@@ -1343,6 +1363,8 @@ namespace Legion {
             derez.deserialize(ready_event);
             tpl->record_complete_replay(memo, ready_event);
             Runtime::trigger_event(applied);
+            if (memo->get_origin_space() != runtime->address_space)
+              delete memo;
             break;
           }
         default:
@@ -1517,6 +1539,7 @@ namespace Legion {
       {
         Memoizable *memo = 
           RemoteMemoizable::unpack_remote_memoizable(derez, op, runtime); 
+        // PhysicalTraceRecord takes possible ownership of memoizable
         PhysicalTraceRecorder *rec = 
           RemoteTraceRecorder::unpack_remote_recorder(derez, runtime, memo);
         return new TraceInfo(op, memo, rec, true/*recording*/);
@@ -1634,6 +1657,7 @@ namespace Legion {
         derez.deserialize(dst_index);
         bool update_validity;
         derez.deserialize(update_validity);
+        // PhysicalTraceRecord takes possible ownership of memoizable
         PhysicalTraceRecorder *recorder = 
           RemoteTraceRecorder::unpack_remote_recorder(derez, runtime, memo);
         return PhysicalTraceInfo(op, memo, index, dst_index,
@@ -1662,6 +1686,7 @@ namespace Legion {
         derez.deserialize(dst_index);
         bool update_validity;
         derez.deserialize(update_validity);
+        // PhysicalTraceRecord takes possible ownership of memoizable
         RemoteTraceRecorder *recorder = 
           RemoteTraceRecorder::unpack_remote_recorder(derez, runtime, memo);
         return PhysicalTraceInfo(op, memo, index, dst_index,
@@ -8616,39 +8641,6 @@ namespace Legion {
                                                     RtUserEvent deferral_event)
     //--------------------------------------------------------------------------
     {
-      // Handle a special case to avoid over-decomposing with larger index
-      // spaces unnecessarily. If it does need to be refined later then 
-      // we'll do that as part of an acquire operation. This is only
-      // a performance optimization for getting better BVH shapes and
-      // does not impact the correctness of the code
-      if (handle.exists() && (index_space_node != NULL) &&
-          (index_space_node->handle == handle))
-      {
-#ifdef DEBUG_LEGION
-        assert(!deferral_event.exists());
-#endif
-        // Just record this as one of the results
-        if (source != runtime->address_space)
-        {
-          // Not local so we need to send a message
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(did);
-            rez.serialize(ray_mask);
-            rez.serialize(target);
-            rez.serialize(trace_done);
-          }
-          runtime->send_equivalence_set_ray_trace_response(source, rez);
-          return;
-        }
-        else // Local so we can update this directly
-        {
-          target->record_equivalence_set(this, ray_mask);
-          Runtime::trigger_event(trace_done);
-          return;
-        }
-      }
       RegionTreeForest *forest = runtime->forest;
 #ifdef DEBUG_LEGION
       assert(expr != NULL);
@@ -8722,6 +8714,37 @@ namespace Legion {
                                  trace_done, deferral_event, ray_mask);
           runtime->issue_runtime_meta_task(args,
                             LG_THROUGHPUT_DEFERRED_PRIORITY, transition_event);
+          return;
+        }
+        // Handle the special case where we are exactly representing the
+        // index space and we have not been refined yet. This a performance
+        // optimization only and is not required for correctness
+        if (handle.exists() && (index_space_node != NULL) &&
+            (index_space_node->handle == handle) && 
+            (subsets.empty() || (ray_mask * subsets.get_valid_mask())))
+        {
+          // Just record this as one of the results
+          if (source != runtime->address_space)
+          {
+            // Not local so we need to send a message
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(did);
+              rez.serialize(ray_mask);
+              rez.serialize(target);
+              rez.serialize(trace_done);
+            }
+            runtime->send_equivalence_set_ray_trace_response(source, rez);
+          }
+          else // Local so we can update this directly
+          {
+            target->record_equivalence_set(this, ray_mask);
+            Runtime::trigger_event(trace_done);
+          } 
+          // We're done with our traversal so trigger the deferral event
+          if (deferral_event.exists())
+            Runtime::trigger_event(deferral_event);
           return;
         }
         // First check to see which fields are in a disjoint refinement

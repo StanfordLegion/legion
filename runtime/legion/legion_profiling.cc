@@ -1813,6 +1813,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfiler::handle_profiling_response(
+                                       const ProfilingResponseBase *base,
                                        const Realm::ProfilingResponse &response)
     //--------------------------------------------------------------------------
     {

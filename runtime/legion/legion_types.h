@@ -1505,9 +1505,11 @@ namespace Legion {
     class ShardingFunction;
     class Runtime;
     // A small interface class for handling profiling responses
+    struct ProfilingResponseBase;
     class ProfilingResponseHandler {
     public:
       virtual void handle_profiling_response(
+                const ProfilingResponseBase *base,
                 const Realm::ProfilingResponse &response) = 0;
     };
     struct ProfilingResponseBase {
