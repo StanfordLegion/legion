@@ -847,6 +847,8 @@ namespace Legion {
                                                            NULL/*op*/, runtime);
             tpl->record_get_term_event(memo);
             Runtime::trigger_event(applied);
+            if (memo->get_origin_space() != runtime->address_space)
+              delete memo;
             break;
           }
         case REMOTE_TRACE_CREATE_USER_EVENT:
@@ -859,6 +861,8 @@ namespace Legion {
                                                            NULL/*op*/, runtime);
             tpl->record_create_ap_user_event(lhs, memo);
             Runtime::trigger_event(applied);
+            if (memo->get_origin_space() != runtime->address_space)
+              delete memo;
             break;
           }
         case REMOTE_TRACE_TRIGGER_EVENT:
@@ -926,6 +930,8 @@ namespace Legion {
             }
             else // didn't change so just trigger
               Runtime::trigger_event(done);
+            if (memo->get_origin_space() != runtime->address_space)
+              delete memo;
             break;
           }
         case REMOTE_TRACE_ISSUE_COPY:
@@ -1028,6 +1034,8 @@ namespace Legion {
             }
             else // lhs was unchanged
               Runtime::trigger_event(done);
+            if (memo->get_origin_space() != runtime->address_space)
+              delete memo;
             break;
           }
         case REMOTE_TRACE_ISSUE_FILL:
@@ -1124,6 +1132,8 @@ namespace Legion {
             }
             else // lhs was unchanged
               Runtime::trigger_event(done);
+            if (memo->get_origin_space() != runtime->address_space)
+              delete memo;
             break;
           }
         case REMOTE_TRACE_RECORD_OP_VIEW:
@@ -1150,6 +1160,8 @@ namespace Legion {
             tpl->record_op_view(memo, index, view, usage, 
                                 user_mask, update_validity);
             Runtime::trigger_event(applied);
+            if (memo->get_origin_space() != runtime->address_space)
+              delete memo;
             break;
           }
         case REMOTE_TRACE_SET_OP_SYNC:
@@ -1178,6 +1190,8 @@ namespace Legion {
             }
             else // lhs didn't change
               Runtime::trigger_event(done);
+            if (memo->get_origin_space() != runtime->address_space)
+              delete memo;
             break;
           }
         case REMOTE_TRACE_RECORD_MAPPER_OUTPUT:
@@ -1210,6 +1224,8 @@ namespace Legion {
             }
             tpl->record_mapper_output(memo, output, physical_instances);
             Runtime::trigger_event(applied);
+            if (memo->get_origin_space() != runtime->address_space)
+              delete memo;
             break;
           }
         case REMOTE_TRACE_GET_REDUCTION_EVENTS:
@@ -1240,6 +1256,8 @@ namespace Legion {
             }
             else
               Runtime::trigger_event(done);
+            if (memo->get_origin_space() != runtime->address_space)
+              delete memo;
             break;
           }
         case REMOTE_TRACE_SET_EFFECTS:
@@ -1252,6 +1270,8 @@ namespace Legion {
             derez.deserialize(postcondition);
             tpl->record_set_effects(memo, postcondition);
             Runtime::trigger_event(applied);
+            if (memo->get_origin_space() != runtime->address_space)
+              delete memo;
             break;
           }
         case REMOTE_TRACE_COMPLETE_REPLAY:
@@ -1264,6 +1284,8 @@ namespace Legion {
             derez.deserialize(ready_event);
             tpl->record_complete_replay(memo, ready_event);
             Runtime::trigger_event(applied);
+            if (memo->get_origin_space() != runtime->address_space)
+              delete memo;
             break;
           }
         default:
@@ -1437,6 +1459,7 @@ namespace Legion {
       {
         Memoizable *memo = 
           RemoteMemoizable::unpack_remote_memoizable(derez, op, runtime); 
+        // PhysicalTraceRecord takes possible ownership of memoizable
         PhysicalTraceRecorder *rec = 
           RemoteTraceRecorder::unpack_remote_recorder(derez, runtime, memo);
         return new TraceInfo(op, memo, rec, true/*recording*/);
@@ -1554,6 +1577,7 @@ namespace Legion {
         derez.deserialize(dst_index);
         bool update_validity;
         derez.deserialize(update_validity);
+        // PhysicalTraceRecord takes possible ownership of memoizable
         PhysicalTraceRecorder *recorder = 
           RemoteTraceRecorder::unpack_remote_recorder(derez, runtime, memo);
         return PhysicalTraceInfo(op, memo, index, dst_index,
@@ -1582,6 +1606,7 @@ namespace Legion {
         derez.deserialize(dst_index);
         bool update_validity;
         derez.deserialize(update_validity);
+        // PhysicalTraceRecord takes possible ownership of memoizable
         RemoteTraceRecorder *recorder = 
           RemoteTraceRecorder::unpack_remote_recorder(derez, runtime, memo);
         return PhysicalTraceInfo(op, memo, index, dst_index,
