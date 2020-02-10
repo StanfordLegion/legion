@@ -3342,7 +3342,7 @@ namespace Legion {
       // Make an index space for the color space
       IndexSpace index_color_space = create_index_space(ctx, color_space);
       IndexPartition result = create_partition_by_domain(ctx, parent, domains,
-          index_color_space, false/*perform intersections*/, part_kind, color);
+          index_color_space, true/*perform intersections*/, part_kind, color);
       return result;
     }
 
@@ -3411,7 +3411,7 @@ namespace Legion {
       IndexSpaceT<1,coord_t> index_color_space = 
                                   create_index_space(ctx, color_space);
       IndexPartition result = create_partition_by_domain(ctx, parent, domains,
-          index_color_space, false/*perform intersections*/,
+          index_color_space, true/*perform intersections*/,
           (disjoint ? DISJOINT_KIND : ALIASED_KIND), part_color);
       return result;
     }
@@ -3427,7 +3427,7 @@ namespace Legion {
       // Make an index space for the color space
       IndexSpace index_color_space = create_index_space(ctx, color_space);
       IndexPartition result = create_partition_by_domain(ctx, parent, coloring,
-          index_color_space, false/*perform intersections*/, part_kind, color);
+          index_color_space, true/*perform intersections*/, part_kind, color);
       return result;
     }
 
@@ -3449,7 +3449,7 @@ namespace Legion {
       // Make an index space for the color space
       IndexSpace index_color_space = create_index_space(ctx, color_space);
       IndexPartition result = create_partition_by_domain(ctx, parent, domains,
-          index_color_space, false/*perform intersections*/,
+          index_color_space, true/*perform intersections*/,
           (disjoint ? DISJOINT_KIND : ALIASED_KIND), part_color);
       return result;
     }
@@ -3500,7 +3500,7 @@ namespace Legion {
       // Make an index space for the color space
       IndexSpace index_color_space = create_index_space(ctx, color_space);
       IndexPartition result = create_partition_by_domain(ctx, parent, domains,
-        index_color_space, false/*perform intersections*/, part_kind, color);
+        index_color_space, true/*perform intersections*/, part_kind, color);
       return result;
     }
 
@@ -3551,7 +3551,7 @@ namespace Legion {
       // Make an index space for the color space
       IndexSpace index_color_space = create_index_space(ctx, color_space);
       IndexPartition result = create_partition_by_domain(ctx, parent, domains,
-        index_color_space, false/*perform intersections*/, 
+        index_color_space, true/*perform intersections*/, 
         (disjoint ? DISJOINT_KIND : ALIASED_KIND), part_color);
       return result;
     }
