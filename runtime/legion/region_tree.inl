@@ -3284,7 +3284,8 @@ namespace Legion {
                   "call. All futures must contain Domain objects.")
             const Domain *domain = static_cast<Domain*>(
                 future->get_untyped_result(true, NULL, true/*internal*/));
-            child_space = DomainT<DIM,T>(*domain);
+            const DomainT<DIM,T> domaint = *domain;
+            child_space = domaint;
             if (perform_intersections)
             {
               Realm::ProfilingRequestSet requests;
