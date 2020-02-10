@@ -671,6 +671,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ApEvent RegionTreeForest::create_partition_by_domain(Operation *op,
+                                                    IndexPartition pid,
+                                                    const FutureMap &future_map,
+                                                    bool perform_intersections) 
+    //--------------------------------------------------------------------------
+    {
+      IndexPartNode *new_part = get_node(pid);
+      return new_part->parent->create_by_domain(op, new_part, future_map.impl, 
+                                              perform_intersections);
+    }
+
+    //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_cross_product_partitions(Operation *op,
                                                          IndexPartition base,
                                                          IndexPartition source,

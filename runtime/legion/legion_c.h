@@ -1179,6 +1179,40 @@ extern "C" {
     int color /* = AUTO_GENERATE_ID */);
 
   /**
+   * @return Caller takes ownership of return value
+   *
+   * @see Legion::Runtime::create_partition_by_domain
+   */
+  legion_index_partition_t
+  legion_index_partition_create_by_domain(
+      legion_runtime_t runtime,
+      legion_context_t ctx,
+      legion_index_space_t parent,
+      legion_domain_point_t *colors,
+      legion_domain_t *domains,
+      size_t num_color_domains,
+      legion_index_space_t color_space,
+      bool perform_intersections /* = true */,
+      legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
+      int color /* = AUTO_GENERATE_ID */);
+
+  /**
+   * @return Caller takes ownership of return value
+   *
+   * @see Legion::Runtime::create_partition_by_domain
+   */
+  legion_index_partition_t
+  legion_index_partition_create_by_future_map(
+      legion_runtime_t runtime,
+      legion_context_t ctx,
+      legion_index_space_t parent,
+      legion_future_map_t future_map,
+      legion_index_space_t color_space,
+      bool perform_intersections /* = true */,
+      legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
+      int color /* = AUTO_GENERATE_ID */);
+
+  /**
    * @return Caller takes ownership of return value.
    *
    * @see Legion::Runtime::create_partition_by_field()

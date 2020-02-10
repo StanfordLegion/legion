@@ -239,6 +239,11 @@ namespace Legion {
                                               const void *extent,
                                               ShardID shard = 0,
                                               size_t total_shards = 1);
+      ApEvent create_partition_by_domain(Operation *op, IndexPartition pid,
+                                         const FutureMap &future_map,
+                                         bool perform_intersections,
+                                         ShardID shard = 0,
+                                         size_t total_shards = 1);
       ApEvent create_cross_product_partitions(Operation *op,
                                               IndexPartition base,
                                               IndexPartition source,
@@ -1913,6 +1918,10 @@ namespace Legion {
                                             int partition_dim,
                                             ShardID shard,
                                             size_t total_shards) = 0;
+      virtual ApEvent create_by_domain(Operation *op,
+                                       IndexPartNode *partition,
+                                       FutureMapImpl *future_map,
+                                       bool perform_intersections) = 0;
       virtual ApEvent create_by_field(Operation *op,
                                       IndexPartNode *partition,
                 const std::vector<FieldDataDescriptor> &instances,
@@ -2118,6 +2127,15 @@ namespace Legion {
                                    const Realm::Matrix<N,DIM,T> &transform,
                                    const Realm::Rect<N,T> &extent,
                                    ShardID shard, size_t total_shards);
+      virtual ApEvent create_by_domain(Operation *op,
+                                       IndexPartNode *partition,
+                                       FutureMapImpl *future_map,
+                                       bool perform_intersections);
+      template<int COLOR_DIM, typename COLOR_T>
+      ApEvent create_by_domain_helper(Operation *op,
+                                      IndexPartNode *partition,
+                                      FutureMapImpl *future_map,
+                                      bool perform_intersections);
       virtual ApEvent create_by_field(Operation *op,
                                       IndexPartNode *partition,
                 const std::vector<FieldDataDescriptor> &instances,
@@ -2273,6 +2291,28 @@ namespace Legion {
       Realm::Point<DIM,long long> offset;
       bool linearization_ready;
     public:
+      struct CreateByDomainHelper {
+      public:
+        CreateByDomainHelper(IndexSpaceNodeT<DIM,T> *n,
+                              IndexPartNode *p, Operation *o,
+                              FutureMapImpl *fm, bool inter)
+          : node(n), partition(p), op(o), future_map(fm), intersect(inter) { }
+      public:
+        template<typename COLOR_DIM, typename COLOR_T>
+        static inline void demux(CreateByDomainHelper *creator)
+        {
+          creator->result = creator->node->template 
+            create_by_domain_helper<COLOR_DIM::N,COLOR_T>(creator->op,
+                creator->partition, creator->future_map, creator->intersect);
+        }
+      public:
+        IndexSpaceNodeT<DIM,T> *const node;
+        IndexPartNode *const partition;
+        Operation *const op;
+        FutureMapImpl *const future_map;
+        const bool intersect;
+        ApEvent result;
+      };
       struct CreateByFieldHelper {
       public:
         CreateByFieldHelper(IndexSpaceNodeT<DIM,T> *n,
@@ -2649,6 +2689,7 @@ namespace Legion {
                               ShardID shard, size_t total_shards);
       ApEvent create_by_restriction(const void *transform, const void *extent,
                                     ShardID shard, size_t total_shards);
+      ApEvent create_by_domain(FutureMapImpl *future_map);
     public:
       bool compute_complete(void);
       bool intersects_with(IndexSpaceNode *other, bool compute = true);

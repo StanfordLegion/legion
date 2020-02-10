@@ -1237,6 +1237,57 @@ legion_index_partition_create_by_difference(
 }
 
 legion_index_partition_t
+legion_index_partition_create_by_domain(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_space_t parent_,
+  legion_domain_point_t *colors_,
+  legion_domain_t *domains_,
+  size_t num_color_domains,
+  legion_index_space_t color_space_,
+  bool perform_intersections /* = true */,
+  legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
+  int color /* = AUTO_GENERATE_ID */)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexSpace parent = CObjectWrapper::unwrap(parent_);
+  IndexSpace color_space = CObjectWrapper::unwrap(color_space_);
+  std::map<DomainPoint,Domain> domains;
+  for (unsigned idx = 0; idx < num_color_domains; idx++)
+    domains[CObjectWrapper::unwrap(colors_[idx])] = 
+      CObjectWrapper::unwrap(domains_[idx]);
+
+  IndexPartition ip =
+    runtime->create_partition_by_domain(ctx, parent, domains, 
+        color_space, perform_intersections, part_kind, color);
+  return CObjectWrapper::wrap(ip);
+}
+
+legion_index_partition_t
+legion_index_partition_create_by_future_map(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_space_t parent_,
+  legion_future_map_t future_map_,
+  legion_index_space_t color_space_,
+  bool perform_intersections,
+  legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
+  int color /* = AUTO_GENERATE_ID */)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexSpace parent = CObjectWrapper::unwrap(parent_);
+  FutureMap *future_map = CObjectWrapper::unwrap(future_map_);
+  IndexSpace color_space = CObjectWrapper::unwrap(color_space_);
+
+  IndexPartition ip =
+    runtime->create_partition_by_domain(ctx, parent, *future_map,
+        color_space, perform_intersections, part_kind, color);
+  return CObjectWrapper::wrap(ip);
+}
+
+legion_index_partition_t
 legion_index_partition_create_by_field(legion_runtime_t runtime_,
                                        legion_context_t ctx_,
                                        legion_logical_region_t handle_,

@@ -52,58 +52,6 @@ code, __FILE__, __LINE__, message);                       \
 }
 
 namespace Legion {
-#ifndef DISABLE_PARTITION_SHIM
-#define PARTITION_SHIM_MAPPER_ID                      (1729)
-  // An internal namespace with some classes for providing help
-  // with backwards compatibility for partitioning operations
-  namespace PartitionShim {
-
-    template<int COLOR_DIM>
-    class ColorPoints : public TaskLauncher {
-    public:
-      ColorPoints(const Coloring &coloring, LogicalRegion region,
-                  FieldID color_field, FieldID pointer_field);
-      ColorPoints(const PointColoring &coloring, LogicalRegion region,
-                  FieldID color_field, FieldID pointer_field);
-    protected:
-      Serializer rez;
-    public:
-      static TaskID TASK_ID;
-      static void register_task(void);
-      static void cpu_variant(const Task *task,
-          const std::vector<PhysicalRegion> &regions, 
-          Context ctx, Runtime *runtime);
-    };
-
-    template<int COLOR_DIM, int RANGE_DIM>
-    class ColorRects : public TaskLauncher {
-    public:
-      ColorRects(const DomainColoring &coloring, LogicalRegion region,
-                 FieldID color_field, FieldID range_field);
-      ColorRects(const MultiDomainColoring &coloring, LogicalRegion region, 
-                 FieldID color_field, FieldID range_field);
-    public:
-      ColorRects(const DomainPointColoring &coloring,
-          LogicalRegion region, FieldID color_field, FieldID range_field);
-      ColorRects(const MultiDomainPointColoring &coloring,
-          LogicalRegion region, FieldID color_field, FieldID range_field);
-    public:
-      ColorRects(const Coloring &coloring, LogicalRegion region,
-                 FieldID color_field, FieldID range_field);
-      ColorRects(const PointColoring &coloring, LogicalRegion region,
-                 FieldID color_field, FieldID range_field);
-    protected:
-      Serializer rez;
-    public:
-      static TaskID TASK_ID;
-      static void register_task(void);
-      static void cpu_variant(const Task *task,
-          const std::vector<PhysicalRegion> &regions, 
-          Context ctx, Runtime *runtime);
-    };
-  };
-#endif
-
   namespace Internal { 
 
     // Special helper for when we need a dummy context
@@ -365,6 +313,8 @@ namespace Legion {
       virtual Future get_future(const DomainPoint &point, 
                                 bool internal_only,
                                 RtEvent *wait_on = NULL);
+      // Will return NULL if it does not exist
+      FutureImpl* find_future(const DomainPoint &point);
       void set_future(const DomainPoint &point, FutureImpl *impl,
                       ReferenceMutator *mutator);
       void get_void_result(const DomainPoint &point, 
@@ -2105,6 +2055,12 @@ namespace Legion {
                                                  size_t extent_size,
                                                  PartitionKind part_kind,
                                                  Color color);
+      IndexPartition create_partition_by_domain(Context ctx, IndexSpace parent,
+                                                const FutureMap &domains,
+                                                IndexSpace color_space,
+                                                bool perform_intersections,
+                                                PartitionKind part_kind,
+                                                Color color);
       IndexPartition create_partition_by_field(Context ctx, 
                                                LogicalRegion handle,
                                                LogicalRegion parent,

@@ -4053,6 +4053,7 @@ namespace Legion {
                               MapperID id = 0,
                               MappingTagID tag = 0);
       ///@}
+      ///@{
       /**
        * Create partition by restriction will make a new partition of a
        * logical region by computing new restriction bounds for each 
@@ -4092,7 +4093,8 @@ namespace Legion {
                                 Rect<DIM,COORD_T> extent,
                                 PartitionKind part_kind = COMPUTE_KIND,
                                 Color color = AUTO_GENERATE_ID);
-
+      ///@}
+      ///@{
       /**
        * Create partition by blockify is a special (but common) case of 
        * create partition by restriction, that is guaranteed to create a 
@@ -4138,6 +4140,76 @@ namespace Legion {
                                     Point<DIM,COORD_T> blocking_factor,
                                     Point<DIM,COORD_T> origin,
                                     Color color = AUTO_GENERATE_ID);
+      ///@}
+      ///@{
+      /**
+       * Create partition by domain allows users to specify an explicit
+       * Domain object to use for one or more subregions directly.
+       * This is similar to the old (deprecated) coloring APIs.
+       * However, instead of specifying colors for each element, we 
+       * encourage users to create domains that express as few dense
+       * rectangles in them as necessary for expressing the index space.
+       * The runtime will not attempt to coalesce the rectangles in 
+       * each domain further.
+       * @param ctx the enclosing task context
+       * @param parent the parent index space to be partitioned
+       * @param domains map of points in the color space points to domains
+       * @param color_space the color space for the partition
+       * @param perform_intersections intersect domains with parent space
+       * @param part_kind specify the partition kind or ask to compute it 
+       * @param color the color of the result of the partition
+       * @return a new index partition of the parent index space
+       */
+      IndexPartition create_partition_by_domain(Context ctx,
+                                    IndexSpace parent,
+                                    const std::map<DomainPoint,Domain> &domains,
+                                    IndexSpace color_space,
+                                    bool perform_intersections = true,
+                                    PartitionKind part_kind = COMPUTE_KIND,
+                                    Color color = AUTO_GENERATE_ID);
+      template<int DIM, typename COORD_T, int COLOR_DIM, typename COLOR_COORD_T>
+      IndexPartitionT<DIM,COORD_T> create_partition_by_domain(Context ctx,
+                                    IndexSpaceT<DIM,COORD_T> parent,
+                                    const std::map<
+                                           Point<COLOR_DIM,COLOR_COORD_T>,
+                                             DomainT<DIM,COORD_T> > &domains,
+                                    IndexSpaceT<COLOR_DIM,
+                                                COLOR_COORD_T> color_space,
+                                    bool perform_intersections = true,
+                                    PartitionKind part_kind = COMPUTE_KIND,
+                                    Color color = AUTO_GENERATE_ID);
+      /**
+       * This is an alternate version of create_partition_by_domain that
+       * instead takes a future map for the list of domains to be used.
+       * The runtime will automatically interpret the results in the 
+       * individual futures as domains for creating the partition. This
+       * allows users to create this partition without blocking.
+       * @param ctx the enclosing task context
+       * @param parent the parent index space to be partitioned
+       * @param domains future map of points to domains
+       * @param color_space the color space for the partition
+       * @param perform_intersections intersect domains with parent space
+       * @param part_kind specify the partition kind or ask to compute it 
+       * @param color the color of the result of the partition
+       * @return a new index partition of the parent index space
+       */
+      IndexPartition create_partition_by_domain(Context ctx,
+                                      IndexSpace parent,
+                                      const FutureMap &domain_future_map,
+                                      IndexSpace color_space,
+                                      bool perform_intersections = true,
+                                      PartitionKind part_kind = COMPUTE_KIND,
+                                      Color color = AUTO_GENERATE_ID);
+      template<int DIM, typename COORD_T, int COLOR_DIM, typename COLOR_COORD_T>
+      IndexPartitionT<DIM,COORD_T> create_partition_by_domain(Context ctx,
+                                      IndexSpaceT<DIM,COORD_T> parent,
+                                      const FutureMap &domain_future_map,
+                                      IndexSpaceT<COLOR_DIM,
+                                                  COLOR_COORD_T> color_space,
+                                      bool perform_intersections = true,
+                                      PartitionKind part_kind = COMPUTE_KIND,
+                                      Color color = AUTO_GENERATE_ID);
+      ///@}
       ///@{
       /**
        * Create partition by field uses an existing field in a logical
