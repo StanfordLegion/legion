@@ -3873,6 +3873,43 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition InnerContext::create_partition_by_domain(
+                                                RegionTreeForest *forest,
+                                                IndexSpace parent,
+                                                const FutureMap &domains,
+                                                IndexSpace color_space,
+                                                bool perform_intersections,
+                                                PartitionKind part_kind,
+                                                Color color)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id(), parent.get_type_tag());
+      DistributedID did = runtime->get_available_distributed_id();
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating partition by domain in task %s (ID %lld)", 
+                      get_task_name(), get_unique_id());
+#endif
+      LegionColor part_color = INVALID_COLOR;
+      if (color != AUTO_GENERATE_ID)
+        part_color = color; 
+      PendingPartitionOp *part_op = 
+        runtime->get_available_pending_partition_op();
+      part_op->initialize_by_domain(this, pid, domains, perform_intersections);
+      ApEvent term_event = part_op->get_completion_event();
+      // Tell the region tree forest about this partition
+      RtEvent safe = forest->create_pending_partition(this, pid, parent, 
+                      color_space, part_color, part_kind, did, term_event);
+      // Now we can add the operation to the queue
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      // Wait for any notifications to occur before returning
+      if (safe.exists())
+        safe.wait();
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition InnerContext::create_partition_by_field(
                                               RegionTreeForest *forest,
                                               LogicalRegion handle,
@@ -9389,6 +9426,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition LeafContext::create_partition_by_domain(
+                                                RegionTreeForest *forest,
+                                                IndexSpace parent,
+                                                const FutureMap &domains,
+                                                IndexSpace color_space,
+                                                bool perform_intersections,
+                                                PartitionKind part_kind,
+                                                Color color)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_PARTITION_BY_DOMAIN,
+          "Illegal create partition by domain performed in leaf "
+          "task %s (UID %lld)", get_task_name(), get_unique_id())
+      return IndexPartition::NO_PART;
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition LeafContext::create_partition_by_field(
                                                 RegionTreeForest *forest,
                                                 LogicalRegion handle,
@@ -10788,6 +10842,21 @@ namespace Legion {
       return enclosing->create_restricted_partition(forest, parent, color_space,
                                  transform, transform_size, extent, extent_size,
                                  part_kind, color);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InlineContext::create_partition_by_domain(
+                                                RegionTreeForest *forest,
+                                                IndexSpace parent,
+                                                const FutureMap &domains,
+                                                IndexSpace color_space,
+                                                bool perform_intersections,
+                                                PartitionKind part_kind,
+                                                Color color)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_partition_by_domain(forest, parent, domains,
+                      color_space, perform_intersections, part_kind, color);
     }
 
     //--------------------------------------------------------------------------

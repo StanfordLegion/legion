@@ -2370,6 +2370,7 @@ namespace Legion {
         INTERSECTION_WITH_REGION,
         DIFFERENCE_PARTITION,
         RESTRICTED_PARTITION,
+        BY_DOMAIN_PARTITION,
       };
       // Track pending partition operations as thunks
       class PendingPartitionThunk {
@@ -2479,6 +2480,22 @@ namespace Legion {
         void *const transform;
         void *const extent;
       };
+      class FutureMapThunk : public PendingPartitionThunk {
+      public:
+        FutureMapThunk(IndexPartition id, const FutureMap &fm, bool inter)
+          : pid(id), future_map(fm), perform_intersections(inter) { }
+        virtual ~FutureMapThunk(void) { }
+      public:
+        virtual ApEvent perform(PendingPartitionOp *op,
+                                RegionTreeForest *forest)
+        { return forest->create_partition_by_domain(op, pid, future_map,
+                                              perform_intersections); }
+        virtual void perform_logging(PendingPartitionOp *op);
+      protected:
+        IndexPartition pid;
+        FutureMap future_map;
+        bool perform_intersections;
+      };
       class CrossProductThunk : public PendingPartitionThunk {
       public:
         CrossProductThunk(IndexPartition b, IndexPartition s, LegionColor c)
@@ -2564,6 +2581,9 @@ namespace Legion {
                                            size_t transform_size,
                                            const void *extent,
                                            size_t extent_size);
+      void initialize_by_domain(InnerContext *ctx, IndexPartition pid,
+                                const FutureMap &future_map,
+                                bool perform_intersections);
       void initialize_cross_product(InnerContext *ctx, IndexPartition base, 
                                     IndexPartition source, LegionColor color);
       void initialize_index_space_union(InnerContext *ctx, IndexSpace target, 
@@ -2582,6 +2602,7 @@ namespace Legion {
                                         const std::vector<IndexSpace> &handles);
       void perform_logging();
     public:
+      virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
       virtual bool is_partition_op(void) const { return true; } 
@@ -2592,6 +2613,7 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
     protected:
       PendingPartitionThunk *thunk;
+      FutureMap future_map;
     };
 
     /**

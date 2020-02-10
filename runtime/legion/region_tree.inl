@@ -3195,6 +3195,25 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    ApEvent IndexSpaceNodeT<DIM,T>::create_by_domain(Operation *op,
+                                                    IndexPartNode *partition,
+                                                    FutureMapImpl *future_map,
+                                                    bool perform_intersections)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(partition->parent == this);
+#endif
+      // Demux the color space type to do the actual operations 
+      CreateByDomainHelper creator(this, partition, op, 
+                                    future_map, perform_intersections);
+      NT_TemplateHelper::demux<CreateByDomainHelper>(
+                   partition->color_space->handle.get_type_tag(), &creator);
+      return creator.result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     ApEvent IndexSpaceNodeT<DIM,T>::create_by_field(Operation *op,
                                                     IndexPartNode *partition,
                               const std::vector<FieldDataDescriptor> &instances,
@@ -3214,6 +3233,84 @@ namespace Legion {
 #endif // defined(DEFINE_NT_TEMPLATES)
 
 #ifdef DEFINE_NTNT_TEMPLATES
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T> template<int COLOR_DIM, typename COLOR_T>
+    ApEvent IndexSpaceNodeT<DIM,T>::create_by_domain_helper(Operation *op,
+                          IndexPartNode *partition, FutureMapImpl *future_map,
+                          bool perform_intersections)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceNodeT<COLOR_DIM,COLOR_T> *color_space = 
+       static_cast<IndexSpaceNodeT<COLOR_DIM,COLOR_T>*>(partition->color_space);
+      // Enumerate the color space
+      Realm::IndexSpace<COLOR_DIM,COLOR_T> realm_color_space;
+      color_space->get_realm_index_space(realm_color_space, true/*tight*/);
+
+      std::set<ApEvent> result_events;
+      Realm::IndexSpace<DIM,T> parent_space;
+      ApEvent parent_ready;
+      if (perform_intersections)
+      {
+        parent_ready = get_realm_index_space(parent_space, false/*tight*/);
+        if (op->has_execution_fence_event())
+        {
+          if (parent_ready.exists())
+            parent_ready = Runtime::merge_events(NULL, parent_ready,
+                                    op->get_execution_fence_event());
+          else
+            parent_ready = op->get_execution_fence_event();
+        }
+      }
+      // Make all the entries for the color space
+      for (Realm::IndexSpaceIterator<COLOR_DIM,COLOR_T> 
+            rect_iter(realm_color_space); rect_iter.valid; rect_iter.step())
+      {
+        for (Realm::PointInRectIterator<COLOR_DIM,COLOR_T> 
+              itr(rect_iter.rect); itr.valid; itr.step())
+        {
+          LegionColor child_color = color_space->linearize_color(&itr.p,
+                                        color_space->handle.get_type_tag());
+          IndexSpaceNodeT<DIM,T> *child = static_cast<IndexSpaceNodeT<DIM,T>*>(
+                                            partition->get_child(child_color));
+          Realm::IndexSpace<DIM,T> child_space;
+          const DomainPoint key(Point<COLOR_DIM,COLOR_T>(itr.p));
+          FutureImpl *future = future_map->find_future(key);
+          if (future != NULL)
+          {
+            if (future->get_untyped_size(true/*internal*/) != 
+                  sizeof(Domain))
+              REPORT_LEGION_ERROR(ERROR_INVALID_PARTITION_BY_DOMAIN_VALUE,
+                  "An invalid future size was found in a partition by domain "
+                  "call. All futures must contain Domain objects.")
+            const Domain *domain = static_cast<Domain*>(
+                future->get_untyped_result(true, NULL, true/*internal*/));
+            child_space = DomainT<DIM,T>(*domain);
+            if (perform_intersections)
+            {
+              Realm::ProfilingRequestSet requests;
+              if (context->runtime->profiler != NULL)
+                context->runtime->profiler->add_partition_request(requests,
+                                                op, DEP_PART_INTERSECTIONS);
+              Realm::IndexSpace<DIM,T> result;
+              ApEvent ready(Realm::IndexSpace<DIM,T>::compute_intersection(
+                    parent_space, child_space, result, requests, parent_ready));
+              child_space = result;
+              if (ready.exists())
+                result_events.insert(ready);
+            }
+          }
+          else
+            child_space = Realm::IndexSpace<DIM,T>::make_empty();
+          if (child->set_realm_index_space(context->runtime->address_space,
+                                           child_space))
+            assert(false); // should never hit this
+        }
+      }
+      if (result_events.empty())
+        return ApEvent::NO_AP_EVENT;
+      return Runtime::merge_events(NULL, result_events);
+    }
+
     //--------------------------------------------------------------------------
     template<int DIM, typename T> template<int COLOR_DIM, typename COLOR_T>
     ApEvent IndexSpaceNodeT<DIM,T>::create_by_field_helper(Operation *op,

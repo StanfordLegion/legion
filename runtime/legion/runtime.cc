@@ -1241,6 +1241,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    FutureImpl* FutureMapImpl::find_future(const DomainPoint &point)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock fm_lock(future_map_lock,1,false/*exclusive*/);
+      std::map<DomainPoint,Future>::const_iterator finder = futures.find(point);
+      if (finder != futures.end())
+        return finder->second.impl;
+      else
+        return NULL;
+    }
+
+    //--------------------------------------------------------------------------
     void FutureMapImpl::set_future(const DomainPoint &point, FutureImpl *impl,
                                    ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
@@ -2880,12 +2892,6 @@ namespace Legion {
       if (check && (mid == 0))
         REPORT_LEGION_ERROR(ERROR_RESERVED_MAPPING_ID, 
                             "Invalid mapping ID. ID 0 is reserved.");
-#ifndef DISABLE_PARTITION_SHIM
-      if (check && (mid == PARTITION_SHIM_MAPPER_ID))
-        REPORT_LEGION_ERROR(ERROR_RESERVED_MAPPING_ID,
-                            "Invalid mapper ID. %d is reserved for the "
-                            "partition shim mapper", PARTITION_SHIM_MAPPER_ID)
-#endif
       AutoLock m_lock(mapper_lock);
       std::map<MapperID,std::pair<MapperManager*,bool> >::iterator finder = 
         mappers.find(mid);
@@ -10831,19 +10837,6 @@ namespace Legion {
             MapperManager *wrapper = wrap_mapper(this, mapper, 0, it->first);
             it->second->add_mapper(0, wrapper, false/*check*/, true/*owns*/);
           }
-#ifndef DISABLE_PARTITION_SHIM
-          // Make default mappers for the partition shim 
-          for (std::map<Processor,ProcessorManager*>::const_iterator it = 
-                proc_managers.begin(); it != proc_managers.end(); it++)
-          {
-            Mapper *mapper = 
-              new Mapping::DefaultMapper(mapper_runtime, machine, it->first);
-            MapperManager *wrapper = wrap_mapper(this, mapper, 
-                                        PARTITION_SHIM_MAPPER_ID, it->first);
-            it->second->add_mapper(PARTITION_SHIM_MAPPER_ID, wrapper, 
-                                   false/*check*/, true/*owns*/);
-          }
-#endif
           // Now ask the application what it wants to do
           const std::vector<RegistrationCallbackFnptr> &registration_callbacks
             = get_pending_registration_callbacks();
@@ -11311,6 +11304,32 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
                             "Disjointness test failure for create restricted "
                             "partition in task %s (UID %lld)",
+                            ctx->get_task_name(), ctx->get_unique_id())
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition Runtime::create_partition_by_domain(Context ctx,
+                                                     IndexSpace parent,
+                                                     const FutureMap &domains,
+                                                     IndexSpace color_space,
+                                                     bool perform_intersections,
+                                                     PartitionKind part_kind,
+                                                     Color color)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx == DUMMY_CONTEXT)
+        REPORT_DUMMY_CONTEXT(
+            "Illegal dummy context create partition by domain!");
+      IndexPartition result = ctx->create_partition_by_domain(forest, parent,
+              domains, color_space, perform_intersections, part_kind, color);
+      if (verify_disjointness && ((part_kind == DISJOINT_KIND) ||
+           (part_kind == DISJOINT_COMPLETE_KIND) ||
+           (part_kind == DISJOINT_INCOMPLETE_KIND)) && 
+          !forest->is_disjoint(result))
+        REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
+                            "Disjointness test failure for create partition "
+                            "by domains in task %s (UID %lld)",
                             ctx->get_task_name(), ctx->get_unique_id())
       return result;
     }
@@ -20807,17 +20826,6 @@ namespace Legion {
       LEGION_STATIC_ASSERT(LEGION_DEFAULT_MIN_TASKS_TO_SCHEDULE > 0);
       LEGION_STATIC_ASSERT(LEGION_DEFAULT_MAX_MESSAGE_SIZE > 0); 
 
-#ifndef DISABLE_PARTITION_SHIM
-      // Preregister any partition shim task variants we need 
-#define COLOR_POINTS(DIM) \
-      PartitionShim::ColorPoints<DIM>::register_task();
-      LEGION_FOREACH_N(COLOR_POINTS)
-#undef COLOR_POINTS
-#define COLOR_RECTS(D1,D2) \
-      PartitionShim::ColorRects<D1,D2>::register_task();
-      LEGION_FOREACH_NN(COLOR_RECTS)
-#undef COLOR_RECTS
-#endif
       // Register builtin reduction operators
       register_builtin_reduction_operators();
 

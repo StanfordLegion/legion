@@ -12258,6 +12258,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PendingPartitionOp::initialize_by_domain(InnerContext *ctx,
+                                                  IndexPartition pid,
+                                                  const FutureMap &fm,
+                                                  bool perform_intersections)
+    //--------------------------------------------------------------------------
+    {
+      initialize_operation(ctx, true/*track*/);
+#ifdef DEBUG_LEGION
+      assert(thunk == NULL);
+#endif
+      thunk = new FutureMapThunk(pid, fm, perform_intersections);
+      // Also save this locally for analysis
+      future_map = fm;
+
+      if (runtime->legion_spy_enabled)
+        perform_logging();
+    }
+
+    //--------------------------------------------------------------------------
     void PendingPartitionOp::initialize_cross_product(InnerContext *ctx,
                                                       IndexPartition base,
                                                       IndexPartition source,
@@ -12358,13 +12377,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PendingPartitionOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      if ((future_map.impl != NULL) && (future_map.impl->op != NULL))
+        register_dependence(future_map.impl->op, future_map.impl->op_gen);
+    }
+
+    //--------------------------------------------------------------------------
     void PendingPartitionOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
       // Give these slightly higher priority since they are likely
       // needed by later operations
-      enqueue_ready_operation(RtEvent::NO_RT_EVENT, 
-                              LG_THROUGHPUT_DEFERRED_PRIORITY);
+      if (future_map.impl != NULL)
+        enqueue_ready_operation(Runtime::protect_event(
+              future_map.impl->get_ready_event()), 
+            LG_THROUGHPUT_DEFERRED_PRIORITY);
+      else
+        enqueue_ready_operation(RtEvent::NO_RT_EVENT, 
+                                LG_THROUGHPUT_DEFERRED_PRIORITY);
     }
 
     //--------------------------------------------------------------------------
@@ -12398,6 +12430,7 @@ namespace Legion {
       if (thunk != NULL)
         delete thunk;
       thunk = NULL;
+      future_map = FutureMap(); // clear any references
       runtime->free_pending_partition_op(this);
     }
 
@@ -12467,6 +12500,15 @@ namespace Legion {
     {
       LegionSpy::log_target_pending_partition(op->unique_op_id, pid.id,
           RESTRICTED_PARTITION);
+    }
+
+    //--------------------------------------------------------------------------
+    void PendingPartitionOp::FutureMapThunk::perform_logging(
+                                                         PendingPartitionOp *op)
+    //--------------------------------------------------------------------------
+    {
+      LegionSpy::log_target_pending_partition(op->unique_op_id, pid.id,
+          BY_DOMAIN_PARTITION);
     }
 
     //--------------------------------------------------------------------------

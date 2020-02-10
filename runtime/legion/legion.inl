@@ -8791,6 +8791,41 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    IndexPartitionT<DIM,T> Runtime::create_partition_by_domain(
+                                    Context ctx, IndexSpaceT<DIM,T> parent,
+                                    const std::map<Point<COLOR_DIM,COLOR_T>,
+                                                   DomainT<DIM,T> > &domains,
+                                    IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
+                                    bool perform_intersections,
+                                    PartitionKind part_kind, Color color)
+    //--------------------------------------------------------------------------
+    {
+      std::map<DomainPoint,Domain> converted_domains;
+      for (typename std::map<Point<COLOR_DIM,COLOR_T>,DomainT<DIM,T> >::
+            const_iterator it = domains.begin(); it != domains.end(); it++)
+        converted_domains[DomainPoint(it->first)] = Domain(it->second);
+      return IndexPartitionT<DIM,T>(create_partition_by_domain(ctx,
+              IndexSpace(parent), converted_domains, IndexSpace(color_space),
+              perform_intersections, part_kind, color));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    IndexPartitionT<DIM,T> Runtime::create_partition_by_domain(
+                                    Context ctx, IndexSpaceT<DIM,T> parent,
+                                    const FutureMap &domain_future_map,
+                                    IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
+                                    bool perform_intersections,
+                                    PartitionKind part_kind, Color color)
+    //--------------------------------------------------------------------------
+    {
+      return IndexPartitionT<DIM,T>(create_partition_by_domain(ctx,
+              IndexSpace(parent), domain_future_map, IndexSpace(color_space),
+              perform_intersections, part_kind, color));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
     IndexPartitionT<DIM,T> Runtime::create_partition_by_field(Context ctx,
                                     LogicalRegionT<DIM,T> handle,
                                     LogicalRegionT<DIM,T> parent,
