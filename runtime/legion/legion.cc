@@ -3478,7 +3478,10 @@ namespace Legion {
               unsigned index = 0;                                       \
               for (std::set<Domain>::const_iterator it =                \
                     cit->second.begin(); it != cit->second.end(); it++) \
-                subspaces[index++] = DomainT<DIM,coord_t>(*it);         \
+              {                                                         \
+                const DomainT<DIM,coord_t> domaint = *it;               \
+                subspaces[index++] = domaint;                           \
+              }                                                         \
               Realm::IndexSpace<DIM,coord_t> summary;                   \
               Internal::LgEvent wait_on(                                \
                   Realm::IndexSpace<DIM,coord_t>::compute_union(        \
@@ -3525,7 +3528,10 @@ namespace Legion {
               unsigned index = 0;                                       \
               for (std::set<Domain>::const_iterator it =                \
                     cit->second.begin(); it != cit->second.end(); it++) \
-                subspaces[index++] = DomainT<DIM,coord_t>(*it);         \
+              {                                                         \
+                const DomainT<DIM,coord_t> domaint = *it;               \
+                subspaces[index++] = domaint;                           \
+              }                                                         \
               Realm::IndexSpace<DIM,coord_t> summary;                   \
               Internal::LgEvent wait_on(                                \
                   Realm::IndexSpace<DIM,coord_t>::compute_union(        \
