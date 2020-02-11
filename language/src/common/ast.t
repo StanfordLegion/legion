@@ -538,14 +538,70 @@ function ast.mapreduce_node_postorder(map_fn, reduce_fn, node, init)
   return init
 end
 
-function ast.traverse_expr_postorder(fn, node)
-  ast.traverse_node_postorder(
-    function(child)
-      if rawget(child, "expr_type") then
-        fn(child)
+function ast.flatmap_node_continuation(fn, node)
+  local function continuation(node, continuing)
+    if ast.is_node(node) then
+      -- First entry: invoke the callback.
+      if continuing == nil then
+        return fn(node, continuation)
+
+      -- Second entry: (if true) continue to children.
+      elseif continuing then
+        local tmp = {}
+        for k, child in pairs(node) do
+          if k ~= "node_type" and k ~= "node_id" then
+            tmp[k] = continuation(child)
+            local is_src_list = terralib.islist(child)
+            local is_dst_list = terralib.islist(tmp[k])
+            assert((is_src_list and is_dst_list) or (not is_src_list and not is_dst_list),
+                   "flatmap only flattens a list of statements")
+          end
+        end
+        return node(tmp)
       end
-    end,
-    node)
+    elseif terralib.islist(node) then
+      local tmp = terralib.newlist()
+      for _, child in ipairs(node) do
+        child = continuation(child)
+        if terralib.islist(child) then
+          tmp:insertall(child)
+        else
+          tmp:insert(child)
+        end
+      end
+      return tmp
+    end
+    return node
+  end
+  return continuation(node)
+end
+
+function ast.flatmap_node_postorder(fn, node)
+  if ast.is_node(node) then
+    local tmp = {}
+    for k, child in pairs(node) do
+       if k ~= "node_type" and k ~= "node_id" then
+        tmp[k] = ast.flatmap_node_postorder(fn, child)
+        local is_src_list = terralib.islist(child)
+        local is_dst_list = terralib.islist(tmp[k])
+        assert((is_src_list and is_dst_list) or (not is_src_list and not is_dst_list),
+               "flatmap only flattens a list of statements")
+      end
+    end
+    return fn(node(tmp))
+  elseif terralib.islist(node) then
+    local tmp = terralib.newlist()
+    for _, child in ipairs(node) do
+      local child = ast.flatmap_node_postorder(fn, child)
+      if terralib.islist(child) then
+        tmp:insertall(child)
+      else
+        tmp:insert(child)
+      end
+    end
+    return tmp
+  end
+  return node
 end
 
 -- Location
