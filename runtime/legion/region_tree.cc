@@ -3362,7 +3362,9 @@ namespace Legion {
         {
           result->add_base_valid_ref(APPLICATION_REF, &mutator);
           // Also add references to our color space
-          color_space->add_nested_valid_ref(did, &mutator);
+          // Only need the valid ref if our color space is not our parent
+          if (color_space != parent)
+            color_space->add_nested_valid_ref(did, &mutator);
           color_space->add_nested_resource_ref(did);
         }
         else
@@ -3422,7 +3424,9 @@ namespace Legion {
         {
           result->add_base_valid_ref(APPLICATION_REF, &mutator);
           // Also add references to our color space
-          color_space->add_nested_valid_ref(did, &mutator);
+          // Only need the valid ref if our color space is not our parent
+          if (color_space != parent)
+            color_space->add_nested_valid_ref(did, &mutator);
           color_space->add_nested_resource_ref(did);
         }
         else
@@ -7701,7 +7705,8 @@ namespace Legion {
       {
         // Remove the valid reference that we hold on the color space
         // No need to check for deletion since we have a resource ref too
-        color_space->remove_nested_valid_ref(did, mutator);
+        if (color_space != parent)
+          color_space->remove_nested_valid_ref(did, mutator);
         // Remove gc references from our remote nodes
         if (has_remote_instances())
         {
