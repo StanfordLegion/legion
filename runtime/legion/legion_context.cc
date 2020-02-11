@@ -10292,20 +10292,57 @@ namespace Legion {
                                                 Color color)
     //--------------------------------------------------------------------------
     {
+      Domain fm_domain;
+      RtUserEvent deletion_precondition;
+      // Have to include all the points in the domain computation
+      switch (color_space.get_dim())
+      {
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            std::vector<Realm::Point<DIM,coord_t> > points(domains.size());\
+            unsigned index = 0; \
+            for (std::map<DomainPoint,Domain>::const_iterator it = \
+                  domains.begin(); it != domains.end(); it++) \
+            { \
+              const Point<DIM,coord_t> point = it->first; \
+              points[index++] = point; \
+            } \
+            Realm::IndexSpace<DIM,coord_t> space(points); \
+            const DomainT<DIM,coord_t> domaint(space); \
+            fm_domain = domaint; \
+            if (!space.dense()) \
+            { \
+              deletion_precondition = Runtime::create_rt_user_event(); \
+              space.destroy(deletion_precondition); \
+            } \
+            break; \
+          }
+          LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+        default:
+          assert(false);
+      }
+      const DistributedID did = runtime->get_available_distributed_id();
+      FutureMap future_map(new FutureMapImpl(this, runtime, fm_domain, did,
+            runtime->address_space, ApEvent::NO_AP_EVENT, true/*reg now*/,
+            deletion_precondition));
       // Prune out every N-th one for this shard and then pass through
       // the subset to the normal InnerContext variation of this
-      std::map<DomainPoint,Domain> subdomains;
       ShardID shard = 0;
+      std::map<DomainPoint,Future> shard_futures;
       for (std::map<DomainPoint,Domain>::const_iterator it = 
             domains.begin(); it != domains.end(); it++)
       {
         if (shard++ == owner_shard->shard_id)
-          subdomains.insert(*it);
+          shard_futures[it->first] = Future::from_untyped_pointer(
+              runtime->external, &it->second, sizeof(it->second));
         if (shard == total_shards)
           shard = 0;
       }
-      return InnerContext::create_partition_by_domain(parent, subdomains,
-                    color_space, perform_intersections, part_kind, color);
+      future_map.impl->set_all_futures(shard_futures);
+      return create_partition_by_domain(runtime->forest, parent, future_map,
+                      color_space, perform_intersections, part_kind, color);
     }
 
     //--------------------------------------------------------------------------
