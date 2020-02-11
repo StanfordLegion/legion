@@ -85,21 +85,29 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ArgumentMapImpl::ArgumentMapImpl(void)
       : Collectable(), runtime(implicit_runtime),
-        future_map(NULL), equivalent(false)
+        future_map(NULL), point_set(Domain::NO_DOMAIN), dimensionality(0), 
+        update_point_set(false), own_point_set(false), equivalent(false)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     ArgumentMapImpl::ArgumentMapImpl(const FutureMap &rhs)
-      : Collectable(), runtime(implicit_runtime),
-        future_map(rhs.impl), equivalent(false)
+      : Collectable(), runtime(implicit_runtime), future_map(rhs.impl), 
+        update_point_set(false), own_point_set(false), equivalent(false)
     //--------------------------------------------------------------------------
     {
       if (future_map != NULL)
       {
+        point_set = future_map->get_domain();
+        dimensionality = point_set.get_dim();
         future_map->add_base_gc_ref(FUTURE_HANDLE_REF);
         future_map->argument_map_wrap();
+      }
+      else
+      {
+        point_set = Domain::NO_DOMAIN;
+        dimensionality = 0;
       }
     }
 
@@ -116,6 +124,8 @@ namespace Legion {
     ArgumentMapImpl::~ArgumentMapImpl(void)
     //--------------------------------------------------------------------------
     {
+      if (own_point_set)
+        free_point_set(); 
       if ((future_map != NULL) && 
             future_map->remove_base_gc_ref(FUTURE_HANDLE_REF))
         delete (future_map);
@@ -134,6 +144,18 @@ namespace Legion {
     bool ArgumentMapImpl::has_point(const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
+      if (dimensionality > 0)
+      {
+        const unsigned point_dim = point.get_dim();
+        if (point_dim != dimensionality)
+          REPORT_LEGION_ERROR(ERROR_ARGUMENT_MAP_DIMENSIONALITY,
+              "Mismatch in dimensionality in 'has_point' on ArgumentMap "
+              "with %d dimensions and point with %d dimensions. ArgumentMaps "
+              "must always contain points of the same dimensionality.",
+              dimensionality, point_dim)
+      }
+      if (point_set.exists() && !update_point_set && point_set.contains(point))
+        return true;
       if (future_map != NULL)
         unfreeze();
       return (arguments.find(point) != arguments.end());
@@ -145,6 +167,26 @@ namespace Legion {
                                 bool replace)
     //--------------------------------------------------------------------------
     {
+      if (dimensionality > 0)
+      {
+        const unsigned point_dim = point.get_dim();
+        if (point_dim != dimensionality)
+          REPORT_LEGION_ERROR(ERROR_ARGUMENT_MAP_DIMENSIONALITY,
+              "Mismatch in dimensionality in 'set_point' on ArgumentMap "
+              "with %d dimensions and point with %d dimensions. ArgumentMaps "
+              "must always contain points of the same dimensionality.",
+              dimensionality, point_dim)
+      }
+      else
+      {
+        dimensionality = point.get_dim();
+#ifdef DEBUG_LEGION
+        assert(dimensionality > 0);
+#endif
+      }
+      if (!replace and point_set.exists() && !update_point_set &&
+          point_set.contains(point))
+        return;
       if (future_map != NULL)
         unfreeze();
       std::map<DomainPoint,Future>::iterator finder = arguments.find(point);
@@ -168,6 +210,8 @@ namespace Legion {
                                          arg.get_ptr(), arg.get_size());
         else
           arguments[point] = Future();
+        // Had to add a new point so the point set is no longer value
+        update_point_set = true;
       }
       // If we modified things then they are no longer equivalent
       if (future_map != NULL)
@@ -184,6 +228,26 @@ namespace Legion {
                                     const Future &f, bool replace)
     //--------------------------------------------------------------------------
     {
+      if (dimensionality > 0)
+      {
+        const unsigned point_dim = point.get_dim();
+        if (point_dim != dimensionality)
+          REPORT_LEGION_ERROR(ERROR_ARGUMENT_MAP_DIMENSIONALITY,
+              "Mismatch in dimensionality in 'set_point' on ArgumentMap "
+              "with %d dimensions and point with %d dimensions. ArgumentMaps "
+              "must always contain points of the same dimensionality.",
+              dimensionality, point_dim)
+      }
+      else
+      {
+        dimensionality = point.get_dim();
+#ifdef DEBUG_LEGION
+        assert(dimensionality > 0);
+#endif
+      }
+      if (!replace and point_set.exists() && !update_point_set &&
+          point_set.contains(point))
+        return;
       if (future_map != NULL)
         unfreeze();
       std::map<DomainPoint,Future>::iterator finder = arguments.find(point);
@@ -195,7 +259,11 @@ namespace Legion {
         finder->second = f; 
       }
       else
+      {
         arguments[point] = f;
+        // Had to add a new point so the point set is no longer valid
+        update_point_set = true;
+      }
       // If we modified things then they are no longer equivalent
       if (future_map != NULL)
       {
@@ -210,6 +278,25 @@ namespace Legion {
     bool ArgumentMapImpl::remove_point(const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
+      if (dimensionality > 0)
+      {
+        const unsigned point_dim = point.get_dim();
+        if (point_dim != dimensionality)
+          REPORT_LEGION_ERROR(ERROR_ARGUMENT_MAP_DIMENSIONALITY,
+              "Mismatch in dimensionality in 'remove_point' on ArgumentMap "
+              "with %d dimensions and point with %d dimensions. ArgumentMaps "
+              "must always contain points of the same dimensionality.",
+              dimensionality, point_dim)
+      }
+      else
+      {
+        dimensionality = point.get_dim();
+#ifdef DEBUG_LEGION
+        assert(dimensionality > 0);
+#endif
+      }
+      if (point_set.exists() && !update_point_set && !point_set.contains(point))
+        return false;
       if (future_map != NULL)
         unfreeze();
       std::map<DomainPoint,Future>::iterator finder = arguments.find(point);
@@ -224,6 +311,8 @@ namespace Legion {
             delete (future_map);
           future_map = NULL;
         }
+        // We removed a point so the point set is no longer valid
+        update_point_set = true;
         return true;
       }
       return false;
@@ -233,6 +322,18 @@ namespace Legion {
     TaskArgument ArgumentMapImpl::get_point(const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
+      if (dimensionality > 0)
+      {
+        const unsigned point_dim = point.get_dim();
+        if (point_dim != dimensionality)
+          REPORT_LEGION_ERROR(ERROR_ARGUMENT_MAP_DIMENSIONALITY,
+              "Mismatch in dimensionality in 'get_point' on ArgumentMap "
+              "with %d dimensions and point with %d dimensions. ArgumentMaps "
+              "must always contain points of the same dimensionality.",
+              dimensionality, point_dim)
+      }
+      if (point_set.exists() && !update_point_set && !point_set.contains(point))
+        return TaskArgument();
       if (future_map != NULL)
         unfreeze();
       std::map<DomainPoint,Future>::const_iterator finder=arguments.find(point);
@@ -252,18 +353,63 @@ namespace Legion {
       // If we have no futures then we can return an empty map
       if (arguments.empty())
         return NULL;
+      // Compute the point set if needed
+      if (update_point_set)
+      {
+        // Free the existing point set if we're going to make a new one
+        if (own_point_set)
+          free_point_set();
+        if (!arguments.empty())
+        {
+          switch (dimensionality)
+          {
+#define DIMFUNC(DIM) \
+            case DIM: \
+            { \
+              std::vector<Realm::Point<DIM,coord_t> > points(arguments.size());\
+              unsigned index = 0; \
+              for (std::map<DomainPoint,Future>::const_iterator it = \
+                    arguments.begin(); it != arguments.end(); it++) \
+              { \
+                const Point<DIM,coord_t> point = it->first; \
+                points[index++] = point; \
+              } \
+              const Realm::IndexSpace<DIM,coord_t> space(points); \
+              const DomainT<DIM,coord_t> domaint(space); \
+              point_set = domaint; \
+              break; \
+            }
+            LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+            default:
+              assert(false);
+          }
+          // We only need to count as owning this if it is not dense
+          own_point_set = !point_set.dense();
+        }
+        else
+        {
+          point_set = Domain::NO_DOMAIN;
+          own_point_set = false;
+        }
+        update_point_set = false;
+      }
       // Otherwise we have to make a future map and set all the futures
       // We know that they are already completed 
       DistributedID did = runtime->get_available_distributed_id();
-      future_map = new FutureMapImpl(ctx, runtime, did,
-          runtime->address_space, ApEvent::NO_AP_EVENT);
+      RtUserEvent deletion_precondition;
+      // If we own the point set then we need to know when everyone is
+      // done using it so we can delete it
+      if (own_point_set)
+      {
+        deletion_precondition = Runtime::create_rt_user_event();
+        point_set_deletion_preconditions.insert(deletion_precondition);
+      }
+      future_map = new FutureMapImpl(ctx, runtime, point_set, did,
+          runtime->address_space, ApEvent::NO_AP_EVENT, true/*reg now*/,
+          deletion_precondition);
       future_map->add_base_gc_ref(FUTURE_HANDLE_REF);
       future_map->set_all_futures(arguments);
-#ifdef DEBUG_LEGION
-      for (std::map<DomainPoint,Future>::const_iterator it = 
-            arguments.begin(); it != arguments.end(); it++)
-        future_map->add_valid_point(it->first);
-#endif
       equivalent = true; // mark that these are equivalent
       return future_map;
     }
@@ -280,7 +426,40 @@ namespace Legion {
         return;
       // Otherwise we need to make them equivalent
       future_map->get_all_futures(arguments);
+      point_set = future_map->get_domain();
+      update_point_set = false;
+      own_point_set = false;
       equivalent = true;
+    }
+
+    //--------------------------------------------------------------------------
+    void ArgumentMapImpl::free_point_set(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(own_point_set);
+      assert(point_set.exists());
+#endif
+      RtEvent precondition;
+      if (!point_set_deletion_preconditions.empty())
+      {
+        precondition = Runtime::merge_events(point_set_deletion_preconditions);
+        point_set_deletion_preconditions.clear();
+      }
+      switch (dimensionality)
+      {
+#define DIMFUNC(DIM) \
+        case DIM: \
+        { \
+          DomainT<DIM,coord_t> is = point_set; \
+          is.destroy(precondition); \
+          break; \
+        }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+        default:
+          assert(false);
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -1181,14 +1360,20 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    FutureMapImpl::FutureMapImpl(TaskContext *ctx, Operation *o, Runtime *rt,
-                                 DistributedID did, AddressSpaceID owner_space)
+    FutureMapImpl::FutureMapImpl(TaskContext *ctx, Operation *o, 
+                                 const Domain &domain, Runtime *rt,
+                                 DistributedID did, AddressSpaceID owner_space,
+                                 RtUserEvent deleted)
       : DistributedCollectable(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC),  owner_space), 
-        context(ctx), op(o), op_gen(o->get_generation()),
-        ready_event(o->get_completion_event())
+        context(ctx), op(o), op_gen(o->get_generation()), 
+        future_map_domain(domain), ready_event(o->get_completion_event()),
+        delete_event(deleted)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(future_map_domain.exists());
+#endif
 #ifdef LEGION_GC
       log_garbage.info("GC Future Map %lld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
@@ -1196,15 +1381,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMapImpl::FutureMapImpl(TaskContext *ctx, Runtime *rt,
+    FutureMapImpl::FutureMapImpl(TaskContext *ctx, Runtime *rt, const Domain &d,
                                  DistributedID did, AddressSpaceID owner_space,
-                                 ApEvent ready, bool register_now)
+                                 ApEvent ready, bool register_now, 
+                                 RtUserEvent deleted)
       : DistributedCollectable(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC), 
           owner_space, register_now), 
-        context(ctx), op(NULL), op_gen(0), ready_event(ready)
+        context(ctx), op(NULL), op_gen(0), 
+        future_map_domain(d), ready_event(ready), delete_event(deleted)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(future_map_domain.exists());
+#endif
 #ifdef LEGION_GC
       log_garbage.info("GC Future Map %lld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
@@ -1225,6 +1415,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       futures.clear();
+      if (delete_event.exists())
+        Runtime::trigger_event(delete_event);
     }
 
     //--------------------------------------------------------------------------
@@ -1275,6 +1467,16 @@ namespace Legion {
                                      bool internal, RtEvent *wait_on)
     //--------------------------------------------------------------------------
     {
+#ifndef DEBUG_LEGION
+      if (!internal)
+#endif
+      {
+        if (!future_map_domain.contains(point))
+          REPORT_LEGION_ERROR(ERROR_INVALID_FUTURE_MAP_POINT,
+              "Invalid request for a point not contained in the "
+              "domain of a future map in task %s (UID %lld).",
+              context->get_task_name(), context->get_unique_id())
+      }
       if (!is_owner())
       {
         // See if we already have it
@@ -1314,25 +1516,6 @@ namespace Legion {
       }
       else
       {
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-        // Check to make sure we are asking for something in the domain
-        if (valid_points.find(point) == valid_points.end())
-        {
-          bool is_valid_point = false;
-          for (std::vector<Domain>::const_iterator it = 
-                valid_domains.begin(); it != valid_domains.end(); it++)
-          {
-            if (it->contains(point))
-            {
-              is_valid_point = true;
-              break;
-            }
-          }
-          assert(is_valid_point);
-        }
-#endif
-#endif
         AutoLock fm_lock(future_map_lock);
         // Check to see if we already have a future for the point
         std::map<DomainPoint,Future>::const_iterator finder = 
@@ -1348,18 +1531,6 @@ namespace Legion {
                          result.impl->get_ready_event(), point);
         return result;
       }
-    }
-
-    //--------------------------------------------------------------------------
-    FutureImpl* FutureMapImpl::find_future(const DomainPoint &point)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock fm_lock(future_map_lock,1,false/*exclusive*/);
-      std::map<DomainPoint,Future>::const_iterator finder = futures.find(point);
-      if (finder != futures.end())
-        return finder->second.impl;
-      else
-        return NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -1472,23 +1643,33 @@ namespace Legion {
       futures = others;
     }
 
-#ifdef DEBUG_LEGION
     //--------------------------------------------------------------------------
-    void FutureMapImpl::add_valid_domain(const Domain &d)
+    FutureImpl* FutureMapImpl::find_shard_local_future(const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
-      assert(is_owner());
-      valid_domains.push_back(d);
+      // Wait for all the futures to be ready
+      if (!ready_event.has_triggered())
+        ready_event.wait();
+      // No need for the lock since the map should be fixed now
+      std::map<DomainPoint,Future>::const_iterator finder = futures.find(point);
+      if (finder != futures.end())
+        return finder->second.impl;
+      else
+        return NULL;
     }
 
     //--------------------------------------------------------------------------
-    void FutureMapImpl::add_valid_point(const DomainPoint &dp)
+    void FutureMapImpl::get_shard_local_futures(
+                                      std::map<DomainPoint,FutureImpl*> &others)
     //--------------------------------------------------------------------------
     {
-      assert(is_owner());
-      valid_points.insert(dp);
+      // Wait for all the futures to be ready
+      if (!ready_event.has_triggered())
+        ready_event.wait();
+      for (std::map<DomainPoint,Future>::const_iterator it = 
+            futures.begin(); it != futures.end(); it++)
+        others[it->first] = it->second.impl;
     }
-#endif
 
     //--------------------------------------------------------------------------
     void FutureMapImpl::record_future_map_registered(ReferenceMutator *mutator)
@@ -1582,9 +1763,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplFutureMapImpl::ReplFutureMapImpl(ReplicateContext *ctx, Operation *op,
+                                         const Domain &domain,
                                          const Domain &shard_dom, Runtime *rt, 
-                                         DistributedID did,AddressSpaceID owner)
-      : FutureMapImpl(ctx, op, rt, did, owner), 
+                                         DistributedID did,AddressSpaceID owner,
+                                         RtUserEvent deletion_trigger)
+      : FutureMapImpl(ctx, op, domain, rt, did, owner, deletion_trigger), 
         repl_ctx(ctx), shard_domain(shard_dom),
         future_map_barrier_index(ctx->peek_next_future_map_barrier_index()),
         future_map_barrier(ctx->get_next_future_map_barrier()),
@@ -1778,6 +1961,44 @@ namespace Legion {
       // as well as on the ready events of all other shards
       std::map<DomainPoint,Future> dummy_others;
       get_all_futures(dummy_others);
+    }
+
+    //--------------------------------------------------------------------------
+    FutureImpl* ReplFutureMapImpl::find_shard_local_future(
+                                                       const DomainPoint &point)
+    //--------------------------------------------------------------------------
+    {
+      if (!sharding_function_ready.has_triggered())
+        sharding_function_ready.wait();
+      // Check to see if we own this point or not
+      const ShardID shard = sharding_function->find_owner(point, shard_domain);
+      if (shard != repl_ctx->owner_shard->shard_id)
+        return NULL;
+      return FutureMapImpl::find_shard_local_future(point);
+    }
+    
+    //--------------------------------------------------------------------------
+    void ReplFutureMapImpl::get_shard_local_futures(
+                                      std::map<DomainPoint,FutureImpl*> &others)
+    //--------------------------------------------------------------------------
+    {
+      FutureMapImpl::get_shard_local_futures(others);
+      const ShardID local_shard = repl_ctx->owner_shard->shard_id;
+      if (!sharding_function_ready.has_triggered())
+        sharding_function_ready.wait();
+      for (std::map<DomainPoint,FutureImpl*>::iterator it = 
+            others.begin(); it != others.end(); /*nothing*/)
+      {
+        const ShardID shard = 
+          sharding_function->find_owner(it->first, shard_domain);
+        if (shard != local_shard)
+        {
+          std::map<DomainPoint,FutureImpl*>::iterator to_delete = it++;
+          others.erase(to_delete);
+        }
+        else
+          it++;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -20742,7 +20963,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMapImpl* Runtime::find_or_create_future_map(DistributedID did,
-                  TaskContext *ctx, ApEvent complete, ReferenceMutator *mutator)
+                                    TaskContext *ctx, const Domain &domain,
+                                    ApEvent complete, ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       did &= LEGION_DISTRIBUTED_ID_MASK;
@@ -20765,8 +20987,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(owner_space != address_space);
 #endif
-      FutureMapImpl *result = new FutureMapImpl(ctx, this, did, owner_space,
-                                          complete, false/*register now */);
+      FutureMapImpl *result = new FutureMapImpl(ctx, this, domain, did, 
+                        owner_space, complete, false/*register now */);
       // Retake the lock and see if we lost the race
       {
         AutoLock d_lock(distributed_collectable_lock);

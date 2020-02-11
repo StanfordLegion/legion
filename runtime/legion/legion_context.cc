@@ -3969,6 +3969,26 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexPartition InnerContext::create_partition_by_domain(
+                                                IndexSpace parent,
+                                    const std::map<DomainPoint,Domain> &domains,
+                                                IndexSpace color_space,
+                                                bool perform_intersections,
+                                                PartitionKind part_kind,
+                                                Color color)
+    //--------------------------------------------------------------------------
+    {
+      ArgumentMap argmap;
+      for (std::map<DomainPoint,Domain>::const_iterator it = 
+            domains.begin(); it != domains.end(); it++)
+        argmap.set_point(it->first,
+            TaskArgument(&it->second, sizeof(it->second)));
+      FutureMap future_map(argmap.impl->freeze(this));
+      return create_partition_by_domain(runtime->forest, parent, future_map,
+                    color_space, perform_intersections, part_kind, color);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InnerContext::create_partition_by_domain(
                                                 RegionTreeForest *forest,
                                                 IndexSpace parent,
                                                 const FutureMap &domains,
@@ -4934,11 +4954,23 @@ namespace Legion {
         return result;
       }
       AutoRuntimeCall call(this);
+      if (launcher.launch_domain.exists() && 
+          (launcher.launch_domain.get_volume() == 0))
+      {
+        REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_EMPTY_INDEX_TASK_LAUNCH,
+          "Ignoring empty index task launch in task %s (ID %lld)",
+                        get_task_name(), get_unique_id());
+        return FutureMap();
+      }
       // Quick out for predicate false
       if (launcher.predicate == Predicate::FALSE_PRED)
       {
-        FutureMapImpl *result = new FutureMapImpl(this, runtime,
-            runtime->get_available_distributed_id(),
+        Domain launch_domain = launcher.launch_domain;
+        if (!launch_domain.exists())
+          runtime->forest->find_launch_space_domain(launcher.launch_space,
+                                                    launch_domain);
+        FutureMapImpl *result = new FutureMapImpl(this, runtime, 
+            launch_domain, runtime->get_available_distributed_id(),
             runtime->address_space, ApEvent::NO_AP_EVENT);
         if (launcher.predicate_false_future.impl != NULL)
         {
@@ -5009,15 +5041,7 @@ namespace Legion {
           }
         }
         return FutureMap(result);
-      }
-      if (launcher.launch_domain.exists() && 
-          (launcher.launch_domain.get_volume() == 0))
-      {
-        REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_EMPTY_INDEX_TASK_LAUNCH,
-          "Ignoring empty index task launch in task %s (ID %lld)",
-                        get_task_name(), get_unique_id());
-        return FutureMap();
-      }
+      } 
       IndexSpace launch_space = launcher.launch_space;
       if (!launch_space.exists())
         launch_space = find_index_launch_space(launcher.launch_domain);
@@ -5539,8 +5563,7 @@ namespace Legion {
       log_run.debug("Executing a must epoch in task %s (ID %lld)",
                     get_task_name(), get_unique_id());
 #endif
-      FutureMap result = 
-        epoch_op->initialize(this, launcher, launcher.launch_space);
+      FutureMap result = epoch_op->initialize(this, launcher);
       // Now find all the parent task regions we need to invalidate
       std::vector<PhysicalRegion> unmapped_regions;
       if (!runtime->unsafe_launch)
@@ -10261,6 +10284,32 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexPartition ReplicateContext::create_partition_by_domain(
+                                                IndexSpace parent,
+                                    const std::map<DomainPoint,Domain> &domains,
+                                                IndexSpace color_space,
+                                                bool perform_intersections,
+                                                PartitionKind part_kind,
+                                                Color color)
+    //--------------------------------------------------------------------------
+    {
+      // Prune out every N-th one for this shard and then pass through
+      // the subset to the normal InnerContext variation of this
+      std::map<DomainPoint,Domain> subdomains;
+      ShardID shard = 0;
+      for (std::map<DomainPoint,Domain>::const_iterator it = 
+            domains.begin(); it != domains.end(); it++)
+      {
+        if (shard++ == owner_shard->shard_id)
+          subdomains.insert(*it);
+        if (shard == total_shards)
+          shard = 0;
+      }
+      return InnerContext::create_partition_by_domain(parent, subdomains,
+                    color_space, perform_intersections, part_kind, color);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition ReplicateContext::create_partition_by_domain(
                                                     RegionTreeForest *forest,
                                                     IndexSpace parent,
                                                     const FutureMap &domains,
@@ -11932,11 +11981,22 @@ namespace Legion {
         return result;
       }
       AutoRuntimeCall call(this);
+      if (launcher.launch_domain.exists() && 
+          (launcher.launch_domain.get_volume() == 0))
+      {
+        log_run.warning("Ignoring empty index task launch in task %s (ID %lld)",
+                        get_task_name(), get_unique_id());
+        return FutureMap();
+      }
       // Quick out for predicate false
       if (launcher.predicate == Predicate::FALSE_PRED)
       {
+        Domain launch_domain = launcher.launch_domain;
+        if (!launch_domain.exists())
+          runtime->forest->find_launch_space_domain(launcher.launch_space,
+                                                    launch_domain);
         FutureMapImpl *result = new FutureMapImpl(this, runtime,
-            runtime->get_available_distributed_id(), 
+            launch_domain, runtime->get_available_distributed_id(), 
             runtime->address_space, ApEvent::NO_AP_EVENT);
         if (launcher.predicate_false_future.impl != NULL)
         {
@@ -12004,14 +12064,7 @@ namespace Legion {
           }
         }
         return FutureMap(result);
-      }
-      if (launcher.launch_domain.exists() && 
-          (launcher.launch_domain.get_volume() == 0))
-      {
-        log_run.warning("Ignoring empty index task launch in task %s (ID %lld)",
-                        get_task_name(), get_unique_id());
-        return FutureMap();
-      }
+      } 
       IndexSpace launch_space = launcher.launch_space;
       if (!launch_space.exists())
         launch_space = find_index_launch_space(launcher.launch_domain);
@@ -12465,36 +12518,7 @@ namespace Legion {
 #endif
       AutoRuntimeCall call(this);
       ReplMustEpochOp *epoch_op = runtime->get_available_repl_epoch_op();
-      IndexSpace launch_space = launcher.launch_space;
-      if (!launch_space.exists())
-      {
-        if (!launcher.launch_domain.exists())
-        {
-          REPORT_LEGION_WARNING(LEGION_WARNING_MISSING_MUST_EPOCH_DOMAIN,
-                        "Must epoch launch in control replicated task %s "
-                        "(UID %lld) is missing an explicit launch index space "
-                        "or launch domain. These are required for must epoch "
-                        "launches in control replicated tasks.",
-                        get_task_name(), get_unique_id())
-          if (!launcher.single_tasks.empty() || 
-              (launcher.index_tasks.size() > 1))
-          {
-            launch_space = ReplMustEpochOp::create_temporary_launch_space(
-                                  runtime, runtime->forest, this, launcher);
-          }
-          else
-          {
-            // We have exactly one index space so we can just use it
-            launch_space = launcher.index_tasks[0].launch_space;
-            if (!launch_space.exists())
-              launch_space = 
-                find_index_launch_space(launcher.index_tasks[0].launch_domain);
-          }
-        }
-        else
-          launch_space = find_index_launch_space(launcher.launch_domain);
-      }
-      FutureMap result = epoch_op->initialize(this, launcher, launch_space);
+      FutureMap result = epoch_op->initialize(this, launcher);
 #ifdef DEBUG_LEGION
       if (owner_shard->shard_id == 0)
         log_run.debug("Executing a must epoch in task %s (ID %lld)",
@@ -15078,6 +15102,22 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexPartition LeafContext::create_partition_by_domain(
+                                                IndexSpace parent,
+                                    const std::map<DomainPoint,Domain> &domains,
+                                                IndexSpace color_space,
+                                                bool perform_intersections,
+                                                PartitionKind part_kind,
+                                                Color color)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_PARTITION_BY_DOMAIN,
+          "Illegal create partition by domain performed in leaf "
+          "task %s (UID %lld)", get_task_name(), get_unique_id())
+      return IndexPartition::NO_PART;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition LeafContext::create_partition_by_domain(
                                                 RegionTreeForest *forest,
                                                 IndexSpace parent,
                                                 const FutureMap &domains,
@@ -16584,6 +16624,20 @@ namespace Legion {
       return enclosing->create_restricted_partition(forest, parent, color_space,
                                  transform, transform_size, extent, extent_size,
                                  part_kind, color);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InlineContext::create_partition_by_domain(
+                                                IndexSpace parent,
+                                    const std::map<DomainPoint,Domain> &domains,
+                                                IndexSpace color_space,
+                                                bool perform_intersections,
+                                                PartitionKind part_kind,
+                                                Color color)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_partition_by_domain(parent, domains,
+              color_space, perform_intersections, part_kind, color);
     }
 
     //--------------------------------------------------------------------------

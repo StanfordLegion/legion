@@ -3662,15 +3662,17 @@ namespace Legion {
     ApEvent IndexSpaceNodeT<DIM,T>::create_by_domain(Operation *op,
                                                     IndexPartNode *partition,
                                                     FutureMapImpl *future_map,
-                                                    bool perform_intersections)
+                                                    bool perform_intersections,
+                                                    ShardID shard, 
+                                                    size_t total_shards)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(partition->parent == this);
 #endif
       // Demux the color space type to do the actual operations 
-      CreateByDomainHelper creator(this, partition, op, 
-                                    future_map, perform_intersections);
+      CreateByDomainHelper creator(this, partition, op, future_map, 
+                        perform_intersections, shard, total_shards);
       NT_TemplateHelper::demux<CreateByDomainHelper>(
                    partition->color_space->handle.get_type_tag(), &creator);
       return creator.result;
@@ -3700,7 +3702,8 @@ namespace Legion {
     template<int DIM, typename T> template<int COLOR_DIM, typename COLOR_T>
     ApEvent IndexSpaceNodeT<DIM,T>::create_by_domain_helper(Operation *op,
                           IndexPartNode *partition, FutureMapImpl *future_map,
-                          bool perform_intersections)
+                          bool perform_intersections, 
+                          ShardID local_shard, size_t total_shards)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNodeT<COLOR_DIM,COLOR_T> *color_space = 
@@ -3724,50 +3727,123 @@ namespace Legion {
             parent_ready = op->get_execution_fence_event();
         }
       }
-      // Make all the entries for the color space
-      for (Realm::IndexSpaceIterator<COLOR_DIM,COLOR_T> 
-            rect_iter(realm_color_space); rect_iter.valid; rect_iter.step())
+      DomainT<COLOR_DIM,COLOR_T> future_map_space = future_map->get_domain();
+      // We'll check for the case where future map space is the same as
+      // the color space as we can implement this much more effeciently
+      // and it is the most common case for 
+      if ((future_map_space.bounds == realm_color_space.bounds) &&
+          (future_map_space.sparsity.id == realm_color_space.sparsity.id))
       {
-        for (Realm::PointInRectIterator<COLOR_DIM,COLOR_T> 
-              itr(rect_iter.rect); itr.valid; itr.step())
+        // Fast case for when we know that the bounds of future map
+        // is the same as the color space of the new partition
+        // Get the shard-local futures for this future map            
+        std::map<DomainPoint,FutureImpl*> shard_local_futures;
+        future_map->get_shard_local_futures(shard_local_futures);
+        for (std::map<DomainPoint,FutureImpl*>::const_iterator it = 
+             shard_local_futures.begin(); it != shard_local_futures.end(); it++)
         {
-          LegionColor child_color = color_space->linearize_color(&itr.p,
+          const Point<COLOR_DIM,COLOR_T> point = it->first;
+          LegionColor child_color = color_space->linearize_color(&point,
                                         color_space->handle.get_type_tag());
           IndexSpaceNodeT<DIM,T> *child = static_cast<IndexSpaceNodeT<DIM,T>*>(
                                             partition->get_child(child_color));
-          Realm::IndexSpace<DIM,T> child_space;
-          const DomainPoint key(Point<COLOR_DIM,COLOR_T>(itr.p));
-          FutureImpl *future = future_map->find_future(key);
-          if (future != NULL)
+          if (it->second->get_untyped_size(true/*internal*/) != sizeof(Domain))
+            REPORT_LEGION_ERROR(ERROR_INVALID_PARTITION_BY_DOMAIN_VALUE,
+                "An invalid future size was found in a partition by domain "
+                "call. All futures must contain Domain objects.")
+          const Domain *domain = static_cast<Domain*>(
+              it->second->get_untyped_result(true, NULL, true/*internal*/));
+          const DomainT<DIM,T> domaint = *domain;
+          Realm::IndexSpace<DIM,T> child_space = domaint;
+          if (perform_intersections)
           {
-            if (future->get_untyped_size(true/*internal*/) != 
-                  sizeof(Domain))
-              REPORT_LEGION_ERROR(ERROR_INVALID_PARTITION_BY_DOMAIN_VALUE,
-                  "An invalid future size was found in a partition by domain "
-                  "call. All futures must contain Domain objects.")
-            const Domain *domain = static_cast<Domain*>(
-                future->get_untyped_result(true, NULL, true/*internal*/));
-            const DomainT<DIM,T> domaint = *domain;
-            child_space = domaint;
-            if (perform_intersections)
-            {
-              Realm::ProfilingRequestSet requests;
-              if (context->runtime->profiler != NULL)
-                context->runtime->profiler->add_partition_request(requests,
-                                                op, DEP_PART_INTERSECTIONS);
-              Realm::IndexSpace<DIM,T> result;
-              ApEvent ready(Realm::IndexSpace<DIM,T>::compute_intersection(
-                    parent_space, child_space, result, requests, parent_ready));
-              child_space = result;
-              if (ready.exists())
-                result_events.insert(ready);
-            }
+            Realm::ProfilingRequestSet requests;
+            if (context->runtime->profiler != NULL)
+              context->runtime->profiler->add_partition_request(requests,
+                                              op, DEP_PART_INTERSECTIONS);
+            Realm::IndexSpace<DIM,T> result;
+            ApEvent ready(Realm::IndexSpace<DIM,T>::compute_intersection(
+                  parent_space, child_space, result, requests, parent_ready));
+            child_space = result;
+            if (ready.exists())
+              result_events.insert(ready);
           }
-          else
-            child_space = Realm::IndexSpace<DIM,T>::make_empty();
           if (child->set_realm_index_space(context->runtime->address_space,
                                            child_space))
             assert(false); // should never hit this
+        }
+      }
+      else
+      {
+        // This is the slow case where the color space is not the same
+        // as the domain of the future map
+        // Make all the entries for the color space
+        ShardID next_local_shard = 0;
+        const Domain &future_map_domain = future_map->get_domain();
+        for (Realm::IndexSpaceIterator<COLOR_DIM,COLOR_T> 
+              rect_iter(realm_color_space); rect_iter.valid; rect_iter.step())
+        {
+          for (Realm::PointInRectIterator<COLOR_DIM,COLOR_T> 
+                itr(rect_iter.rect); itr.valid; itr.step())
+          {
+            const DomainPoint key(Point<COLOR_DIM,COLOR_T>(itr.p));
+            FutureImpl *future = NULL;
+            // Check to see if the future is contained in the future map
+            if (future_map_domain.contains(key))
+            {
+              // If the future map can have this future, see if it is
+              // a local future
+              future = future_map->find_shard_local_future(key);
+              if (future == NULL)
+                continue;
+            }
+            else
+            {
+              // If this not a point in the future map we round-robin
+              // responsibility for these across the shards
+              const ShardID shard = next_local_shard++;
+              if (next_local_shard == total_shards)
+                next_local_shard = 0;
+              if (shard != local_shard)
+                continue;
+            }
+            LegionColor child_color = color_space->linearize_color(&itr.p,
+                                          color_space->handle.get_type_tag());
+            IndexSpaceNodeT<DIM,T> *child = 
+              static_cast<IndexSpaceNodeT<DIM,T>*>(
+                  partition->get_child(child_color));
+            Realm::IndexSpace<DIM,T> child_space;
+            if (future != NULL)
+            {
+              if (future->get_untyped_size(true/*internal*/) != 
+                    sizeof(Domain))
+                REPORT_LEGION_ERROR(ERROR_INVALID_PARTITION_BY_DOMAIN_VALUE,
+                    "An invalid future size was found in a partition by domain "
+                    "call. All futures must contain Domain objects.")
+              const Domain *domain = static_cast<Domain*>(
+                  future->get_untyped_result(true, NULL, true/*internal*/));
+              const DomainT<DIM,T> domaint = *domain;
+              child_space = domaint;
+              if (perform_intersections)
+              {
+                Realm::ProfilingRequestSet requests;
+                if (context->runtime->profiler != NULL)
+                  context->runtime->profiler->add_partition_request(requests,
+                                                  op, DEP_PART_INTERSECTIONS);
+                Realm::IndexSpace<DIM,T> result;
+                ApEvent ready(Realm::IndexSpace<DIM,T>::compute_intersection(
+                    parent_space, child_space, result, requests, parent_ready));
+                child_space = result;
+                if (ready.exists())
+                  result_events.insert(ready);
+              }
+            }
+            else
+              child_space = Realm::IndexSpace<DIM,T>::make_empty();
+            if (child->set_realm_index_space(context->runtime->address_space,
+                                             child_space))
+              assert(false); // should never hit this
+          }
         }
       }
       if (result_events.empty())

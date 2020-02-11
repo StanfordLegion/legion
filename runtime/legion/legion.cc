@@ -3789,14 +3789,8 @@ namespace Legion {
                  PartitionKind part_kind, Color color)
     //--------------------------------------------------------------------------
     {
-      ArgumentMap argmap;
-      for (std::map<DomainPoint,Domain>::const_iterator it = 
-            domains.begin(); it != domains.end(); it++)
-        argmap.set_point(it->first,
-            TaskArgument(&it->second, sizeof(it->second)));
-      FutureMap future_map(argmap.impl->freeze(ctx));
-      return runtime->create_partition_by_domain(ctx, parent, future_map,
-                    color_space, perform_intersections, part_kind, color);
+      return ctx->create_partition_by_domain(parent, domains, color_space,
+                                  perform_intersections, part_kind, color);
     }
 
     //--------------------------------------------------------------------------

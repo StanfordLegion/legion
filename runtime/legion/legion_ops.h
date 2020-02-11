@@ -2221,13 +2221,11 @@ namespace Legion {
       virtual size_t get_context_index(void) const;
       virtual int get_depth(void) const;
     public:
-      FutureMap initialize(InnerContext *ctx,
-                           const MustEpochLauncher &launcher,
-                           IndexSpace launch_space);
+      FutureMap initialize(InnerContext *ctx,const MustEpochLauncher &launcher);
       // Make this a virtual method so it can be overridden for
       // control replicated version of must epoch op
       virtual FutureMapImpl* create_future_map(TaskContext *ctx,
-                 IndexSpace launch_space, IndexSpace shard_space);
+          const Domain &domain, IndexSpace shard_space, RtUserEvent deleted);
       // Another virtual method to override for control replication
       virtual void instantiate_tasks(InnerContext *ctx,
                                      const MustEpochLauncher &launcher);
@@ -2302,8 +2300,8 @@ namespace Legion {
     public:
       static void handle_map_task(const void *args);
     protected:
-      // Make this virtual so we can override it for control replication
       void distribute_tasks(void) const;
+      RtUserEvent compute_launch_space(const MustEpochLauncher &launcher);
     public:
       static void handle_distribute_task(const void *args);
       static void handle_launch_task(const void *args);

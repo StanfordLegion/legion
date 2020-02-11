@@ -1503,12 +1503,12 @@ namespace Legion {
       ReplMustEpochOp(const ReplMustEpochOp &rhs);
       virtual ~ReplMustEpochOp(void);
     public:
-      ReplMustEpochOp& operator=(const ReplMustEpochOp &rhs); 
+      ReplMustEpochOp& operator=(const ReplMustEpochOp &rhs);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
       virtual FutureMapImpl* create_future_map(TaskContext *ctx,
-                 IndexSpace launch_space, IndexSpace shard_space);
+          const Domain &domain, IndexSpace shard_space, RtUserEvent deleted);
       virtual void instantiate_tasks(InnerContext *ctx,
                                      const MustEpochLauncher &launcher);
       virtual MapperManager* invoke_mapper(void);
@@ -1522,10 +1522,6 @@ namespace Legion {
     public:
       void initialize_replication(ReplicateContext *ctx);
       Domain get_shard_domain(void) const;
-    public:
-      static IndexSpace create_temporary_launch_space(Runtime *runtime,
-                                  RegionTreeForest *forest, Context ctx, 
-                                  const MustEpochLauncher &launcher);
     protected:
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;

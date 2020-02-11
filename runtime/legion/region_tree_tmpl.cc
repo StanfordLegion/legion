@@ -69,7 +69,7 @@ namespace Legion {
     create_by_domain_helper<INST_N2,T2>(Operation *,    \
                                      IndexPartNode *,     \
                                      FutureMapImpl *,     \
-                                     bool); \
+                                     bool, ShardID, size_t); \
   template ApEvent IndexSpaceNodeT<INST_N1,T1>:: \
     create_by_field_helper<INST_N2,T2>(Operation *,	\
 				     IndexPartNode *,	  \

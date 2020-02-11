@@ -5336,9 +5336,6 @@ namespace Legion {
     {
       set_must_epoch(epoch, index, do_registration);
       FutureMap map = epoch->get_future_map();
-#ifdef DEBUG_LEGION
-      map.impl->add_valid_point(index_point);
-#endif
       result = map.impl->get_future(index_point, true/*internal only*/);
     }
 
@@ -7782,9 +7779,6 @@ namespace Legion {
                              launcher.predicate_false_result);
       future_map = FutureMap(
         create_future_map(ctx, launch_space->handle, launcher.sharding_space));
-#ifdef DEBUG_LEGION
-      future_map.impl->add_valid_domain(index_domain);
-#endif
       check_empty_field_requirements(); 
 
       if (runtime->legion_spy_enabled)
@@ -7962,11 +7956,6 @@ namespace Legion {
     {
       set_must_epoch(epoch, index, do_registration);
       future_map = epoch->get_future_map();
-#ifdef DEBUG_LEGION
-      Domain launch_domain;
-      launch_space->get_launch_space_domain(launch_domain);
-      future_map.impl->add_valid_domain(launch_domain);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -8656,7 +8645,7 @@ namespace Legion {
                              IndexSpace launch_space, IndexSpace sharding_space) 
     //--------------------------------------------------------------------------
     {
-      return new FutureMapImpl(ctx, this, runtime,
+      return new FutureMapImpl(ctx, this, index_domain, runtime,
             runtime->get_available_distributed_id(), runtime->address_space);
     }
 
@@ -9592,6 +9581,7 @@ namespace Legion {
         assert(future_map.impl != NULL);
 #endif
         rez.serialize(future_map.impl->did);
+        rez.serialize(future_map.impl->future_map_domain);
         rez.serialize(future_map.impl->get_ready_event());
       }
       if (predicate_false_future.impl != NULL)
@@ -9639,6 +9629,7 @@ namespace Legion {
         if (point_arguments.impl != NULL)
         {
           rez.serialize(point_arguments.impl->did);
+          rez.serialize(point_arguments.impl->future_map_domain);
           rez.serialize(point_arguments.impl->get_ready_event());
         }
         else
@@ -9648,6 +9639,7 @@ namespace Legion {
         {
           FutureMapImpl *impl = point_futures[idx].impl;
           rez.serialize(impl->did);
+          rez.serialize(impl->future_map_domain);
           rez.serialize(impl->get_ready_event());
         }
       }
@@ -9705,12 +9697,14 @@ namespace Legion {
       {
         DistributedID future_map_did;
         derez.deserialize(future_map_did);
+        Domain future_map_domain;
+        derez.deserialize(future_map_domain);
         ApEvent ready_event;
         derez.deserialize(ready_event);
         WrapperReferenceMutator mutator(ready_events);
         future_map = FutureMap(
             runtime->find_or_create_future_map(future_map_did, parent_ctx, 
-                                               ready_event, &mutator)); 
+                                future_map_domain, ready_event, &mutator)); 
       }
       // Unpack the predicate false infos
       DistributedID pred_false_did;
@@ -9755,11 +9749,14 @@ namespace Legion {
         derez.deserialize(future_map_did);
         if (future_map_did > 0)
         {
+          Domain future_map_domain;
+          derez.deserialize(future_map_domain);
           ApEvent ready_event;
           derez.deserialize(ready_event);
           WrapperReferenceMutator mutator(ready_events);
           FutureMapImpl *impl = runtime->find_or_create_future_map(
-                  future_map_did, parent_ctx, ready_event, &mutator);
+              future_map_did, parent_ctx, future_map_domain, 
+              ready_event, &mutator);
           impl->add_base_gc_ref(FUTURE_HANDLE_REF, &mutator);
           point_arguments = FutureMap(impl, false/*need reference*/);
         }
@@ -9768,14 +9765,17 @@ namespace Legion {
         if (num_point_futures > 0)
         {
           ApEvent ready_event;
+          Domain future_map_domain;
           point_futures.resize(num_point_futures);
           WrapperReferenceMutator mutator(ready_events);
           for (unsigned idx = 0; idx < num_point_futures; idx++)
           {
             derez.deserialize(future_map_did);
+            derez.deserialize(future_map_domain);
             derez.deserialize(ready_event);
             FutureMapImpl *impl = runtime->find_or_create_future_map(
-                    future_map_did, parent_ctx, ready_event, &mutator);
+                    future_map_did, parent_ctx, future_map_domain,
+                    ready_event, &mutator);
             impl->add_base_gc_ref(FUTURE_HANDLE_REF, &mutator);
             point_futures[idx] = FutureMap(impl, false/*need reference*/);
           }

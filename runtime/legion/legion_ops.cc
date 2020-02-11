@@ -11185,29 +11185,34 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMap MustEpochOp::initialize(InnerContext *ctx,
-                                      const MustEpochLauncher &launcher,
-                                      IndexSpace launch_space)
+                                      const MustEpochLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       // Initialize this operation
       initialize_operation(ctx, true/*track*/);
+      // Compute our launch domain if we need it
+      launch_domain = launcher.launch_domain;
+      RtUserEvent future_deletion;
+      if (!launch_domain.exists())
+      {
+        if (!launcher.launch_space.exists())
+          future_deletion = compute_launch_space(launcher); 
+        else
+          runtime->forest->find_launch_space_domain(launcher.launch_space, 
+                                                    launch_domain);
+#ifdef DEBUG_LEGION
+        assert(launch_domain.exists());
+#endif
+      }
       // Make a new future map for storing our results
       // We'll fill it in later
-      result_map = FutureMap(
-          create_future_map(ctx, launch_space, IndexSpace::NO_SPACE));
+      sharding_space = launcher.sharding_space;
+      result_map = FutureMap(create_future_map(ctx, launch_domain, 
+                             sharding_space, future_deletion));
       instantiate_tasks(ctx, launcher); 
       map_id = launcher.map_id;
       tag = launcher.mapping_tag;
-      if (launch_space.exists())
-        runtime->forest->find_launch_space_domain(launch_space, launch_domain);
-      sharding_space = launcher.sharding_space;
       parent_task = ctx->get_task();
-#ifdef DEBUG_LEGION
-      for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
-        result_map.impl->add_valid_point(indiv_tasks[idx]->index_point);
-      for (unsigned idx = 0; idx < index_tasks.size(); idx++)
-        result_map.impl->add_valid_domain(index_tasks[idx]->index_domain);
-#endif
       if (runtime->legion_spy_enabled)
         LegionSpy::log_must_epoch_operation(ctx->get_unique_id(), unique_op_id);
       return result_map;
@@ -11215,11 +11220,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMapImpl* MustEpochOp::create_future_map(TaskContext *ctx,
-                                IndexSpace launch_space, IndexSpace shard_space)
+              const Domain &domain, IndexSpace shard_space, RtUserEvent deleted)
     //--------------------------------------------------------------------------
     {
-      return new FutureMapImpl(ctx, this, runtime,
-            runtime->get_available_distributed_id(), runtime->address_space);
+      return new FutureMapImpl(ctx, this, domain, runtime,
+            runtime->get_available_distributed_id(), 
+            runtime->address_space, deleted);
     }
 
     //--------------------------------------------------------------------------
@@ -11259,12 +11265,6 @@ namespace Legion {
           index_tasks[idx]->set_trace(trace, !trace->is_fixed(), NULL);
       }
       index_triggered.resize(index_tasks.size(), false);
-#ifdef DEBUG_LEGION
-      for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
-        result_map.impl->add_valid_point(indiv_tasks[idx]->index_point);
-      for (unsigned idx = 0; idx < index_tasks.size(); idx++)
-        result_map.impl->add_valid_domain(index_tasks[idx]->index_domain);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -11775,6 +11775,128 @@ namespace Legion {
         RtEvent dist_event = Runtime::merge_events(wait_events);
         dist_event.wait();
       }
+    }
+
+    //--------------------------------------------------------------------------
+    RtUserEvent MustEpochOp::compute_launch_space(
+                                              const MustEpochLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      const size_t single_tasks = launcher.single_tasks.size();
+      const size_t multi_tasks = launcher.index_tasks.size();
+#ifdef DEBUG_LEGION
+      assert(!launch_domain.exists());
+      assert((single_tasks > 0) || (multi_tasks > 0));
+#endif
+      RtUserEvent result;
+      if (multi_tasks > 0)
+      {
+        RegionTreeForest *forest = runtime->forest;
+        if ((single_tasks > 0) || (multi_tasks > 1))
+        {
+          Realm::ProfilingRequestSet no_reqs;
+          // Need to compute the index tasks
+          switch (launcher.index_tasks[0].launch_domain.get_dim())
+          {
+#define DIMFUNC(DIM) \
+            case DIM: \
+              { \
+                std::vector<Realm::IndexSpace<DIM,coord_t> > \
+                    subspaces(single_tasks + multi_tasks); \
+                for (unsigned idx = 0; idx < multi_tasks; idx++) \
+                { \
+                  if (launcher.index_tasks[idx].launch_domain.exists()) \
+                  { \
+                    const Rect<DIM,coord_t> rect = \
+                      launcher.index_tasks[idx].launch_domain; \
+                    subspaces[idx] = rect; \
+                  } \
+                  else \
+                  { \
+                    Domain domain; \
+                    forest->find_launch_space_domain( \
+                        launcher.index_tasks[idx].launch_space, domain); \
+                    const DomainT<DIM,coord_t> domaint = domain; \
+                    subspaces[idx] = domaint; \
+                  } \
+                } \
+                for (unsigned idx = 0; idx < single_tasks; idx++) \
+                { \
+                  const Point<DIM,coord_t> p = \
+                    launcher.single_tasks[idx].point; \
+                  const Rect<DIM,coord_t> rect(p,p); \
+                  subspaces[multi_tasks + idx] = \
+                    Realm::IndexSpace<DIM,coord_t>(rect); \
+                } \
+                Realm::IndexSpace<DIM,coord_t> space; \
+                const RtEvent wait_on(\
+                    Realm::IndexSpace<DIM,coord_t>::compute_union( \
+                      subspaces, space, no_reqs)); \
+                const DomainT<DIM,coord_t> domaint(space); \
+                launch_domain = domaint; \
+                if (!space.dense()) \
+                { \
+                  result = Runtime::create_rt_user_event(); \
+                  space.destroy(result); \
+                } \
+                if (wait_on.exists()) \
+                  wait_on.wait(); \
+                break; \
+              }
+            LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+            default:
+              assert(false);
+          }
+        }
+        else // Easy case of a single index task
+        {
+          launch_domain = launcher.index_tasks[0].launch_domain;
+          if (!launch_domain.exists())
+            forest->find_launch_space_domain(
+                launcher.index_tasks[0].launch_space, launch_domain);
+        }
+      }
+      else
+      {
+        // These are just point tasks
+        if (single_tasks > 1)
+        {
+          switch (launcher.single_tasks[0].point.get_dim())
+          {
+#define DIMFUNC(DIM) \
+            case DIM: \
+              { \
+                std::vector<Realm::Point<DIM,coord_t> > points(single_tasks); \
+                for (unsigned idx = 0; idx < single_tasks; idx++) \
+                { \
+                  const Point<DIM,coord_t> point = \
+                    launcher.single_tasks[idx].point; \
+                  points[idx] = point; \
+                } \
+                Realm::IndexSpace<DIM,coord_t> space(points); \
+                const DomainT<DIM,coord_t> domaint(space); \
+                launch_domain = domaint; \
+                if (!space.dense()) \
+                { \
+                  result = Runtime::create_rt_user_event(); \
+                  space.destroy(result); \
+                } \
+                break; \
+              }
+            LEGION_FOREACH_N(DIMFUNC) 
+#undef DIMFUNC
+            default:
+              assert(false);
+          }
+        }
+        else // Easy case of a single point task
+        {
+          DomainPoint point = launcher.single_tasks[0].point;
+          launch_domain = Domain(point, point);
+        }
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------

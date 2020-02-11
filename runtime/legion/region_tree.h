@@ -1921,7 +1921,9 @@ namespace Legion {
       virtual ApEvent create_by_domain(Operation *op,
                                        IndexPartNode *partition,
                                        FutureMapImpl *future_map,
-                                       bool perform_intersections) = 0;
+                                       bool perform_intersections,
+                                       ShardID shard,
+                                       size_t total_shards) = 0;
       virtual ApEvent create_by_field(Operation *op,
                                       IndexPartNode *partition,
                 const std::vector<FieldDataDescriptor> &instances,
@@ -2130,12 +2132,14 @@ namespace Legion {
       virtual ApEvent create_by_domain(Operation *op,
                                        IndexPartNode *partition,
                                        FutureMapImpl *future_map,
-                                       bool perform_intersections);
+                                       bool perform_intersections,
+                                       ShardID shard, size_t total_shards);
       template<int COLOR_DIM, typename COLOR_T>
       ApEvent create_by_domain_helper(Operation *op,
                                       IndexPartNode *partition,
                                       FutureMapImpl *future_map,
-                                      bool perform_intersections);
+                                      bool perform_intersections,
+                                      ShardID shard, size_t total_shards);
       virtual ApEvent create_by_field(Operation *op,
                                       IndexPartNode *partition,
                 const std::vector<FieldDataDescriptor> &instances,
@@ -2295,21 +2299,26 @@ namespace Legion {
       public:
         CreateByDomainHelper(IndexSpaceNodeT<DIM,T> *n,
                               IndexPartNode *p, Operation *o,
-                              FutureMapImpl *fm, bool inter)
-          : node(n), partition(p), op(o), future_map(fm), intersect(inter) { }
+                              FutureMapImpl *fm, bool inter,
+                              bool s, size_t total)
+          : node(n), partition(p), op(o), future_map(fm), 
+            shard(s), total_shards(total), intersect(inter) { }
       public:
         template<typename COLOR_DIM, typename COLOR_T>
         static inline void demux(CreateByDomainHelper *creator)
         {
           creator->result = creator->node->template 
             create_by_domain_helper<COLOR_DIM::N,COLOR_T>(creator->op,
-                creator->partition, creator->future_map, creator->intersect);
+                creator->partition, creator->future_map, creator->intersect,
+                creator->shard, creator->total_shards);
         }
       public:
         IndexSpaceNodeT<DIM,T> *const node;
         IndexPartNode *const partition;
         Operation *const op;
         FutureMapImpl *const future_map;
+        const ShardID shard;
+        const size_t total_shards;
         const bool intersect;
         ApEvent result;
       };
