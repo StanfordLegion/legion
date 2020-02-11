@@ -290,20 +290,12 @@ local node_vars_are_valid = {
   [ast.typed.stat.UnmapRegions]    = continue,
 
   [ast.typed.stat.Internal]        = unreachable,
-
-  -- Miscellaneous:
-  [ast.typed.Block]       = continue,
-  [ast.location]          = continue,
-  [ast.annotation]        = continue,
-  [ast.condition_kind]    = continue,
-  [ast.disjointness_kind] = continue,
-  [ast.fence_kind]        = continue,
-  [ast.metadata]          = continue,
 }
 
 local validate_vars_node = ast.make_single_dispatch(
   node_vars_are_valid,
-  {ast.typed.expr, ast.typed.stat})
+  {ast.typed.expr, ast.typed.stat},
+  continue)
 
 local function validate_variables(cx, node)
   ast.traverse_node_continuation(validate_vars_node(cx), node)

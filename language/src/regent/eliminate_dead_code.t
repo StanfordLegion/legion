@@ -50,21 +50,13 @@ local dce_table = {
   [ast.typed.stat.Block]           = apply_dce_block_stat,
   [ast.typed.stat.ParallelizeWith] = apply_dce_block_stat,
 
-  [ast.typed.expr] = do_nothing,
-  [ast.typed.stat] = do_nothing,
-
   [ast.typed.Block]             = apply_dce_block,
-  [ast.IndexLaunchArgsProvably] = do_nothing,
-  [ast.location]                = do_nothing,
-  [ast.annotation]              = do_nothing,
-  [ast.condition_kind]          = do_nothing,
-  [ast.disjointness_kind]       = do_nothing,
-  [ast.fence_kind]              = do_nothing,
 }
 
 local apply_dce_node = ast.make_single_dispatch(
   dce_table,
-  {})
+  {},
+  do_nothing)
 
 function eliminate_dead_code.top(node)
   if node:is(ast.typed.top.Task) then

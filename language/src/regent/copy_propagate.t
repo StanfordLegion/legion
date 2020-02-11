@@ -84,11 +84,9 @@ do
     [ast.typed.expr.Deref]        = function(expr) return strip_expr(expr.value) end,
     [ast.typed.expr.IndexAccess]  = function(expr) return strip_expr(expr.value) end,
     [ast.typed.expr.ID]           = function(expr) return expr.value end,
-
-    [ast.typed.expr]              = function(expr) return false end,
   }
 
-  strip_expr = ast.make_single_dispatch(strip_expr_table, {ast.typed.expr})()
+  strip_expr = ast.make_single_dispatch(strip_expr_table, {}, function(expr) return false end)()
 end
 
 -- We run a flow-insensitive analysis to collect all potential kills of definitions

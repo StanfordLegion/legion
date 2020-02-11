@@ -539,20 +539,8 @@ local is_expr_table = {
   [ast.typed.stat]  = return_true,
   [ast.typed.Block] = return_true,
   [ast.typed.top]   = return_true,
-
-  [ast.typed]       = return_false,
-
-  [ast.annotation]  = return_false,
-  [ast.condition_kind] = return_false,
-  [ast.constraint] = return_false,
-  [ast.disjointness_kind] = return_false,
-  [ast.fence_kind]  = return_false,
-  [ast.location]    = return_false,
-  [ast.metadata]    = return_false,
-  [ast.privilege]   = return_false,
-  [ast.TaskConfigOptions] = return_false,
 }
-local is_expr_node = ast.make_single_dispatch(is_expr_table, {})()
+local is_expr_node = ast.make_single_dispatch(is_expr_table, {}, return_false)()
 
 function ast.traverse_expr_postorder(fn, node)
   ast.traverse_node_postorder(
@@ -575,24 +563,23 @@ function ast.map_expr_postorder(fn, node)
     node, is_expr_node)
 end
 
+function ast.mapreduce_expr_postorder(map_fn, reduce_fn, node, init)
+  return ast.mapreduce_node_postorder(
+    function(node)
+      if node:is(ast.typed.expr) then
+        return map_fn(node)
+      end
+      return init
+    end,
+    reduce_fn, node, init, is_expr_node)
+end
+
 local is_stat_table = {
   [ast.typed.stat]  = return_true,
   [ast.typed.Block] = return_true,
   [ast.typed.top]   = return_true,
-
-  [ast.typed]       = return_false,
-
-  [ast.annotation]  = return_false,
-  [ast.condition_kind] = return_false,
-  [ast.constraint] = return_false,
-  [ast.disjointness_kind] = return_false,
-  [ast.fence_kind]  = return_false,
-  [ast.location]    = return_false,
-  [ast.metadata]    = return_false,
-  [ast.privilege]   = return_false,
-  [ast.TaskConfigOptions] = return_false,
 }
-local is_stat_node = ast.make_single_dispatch(is_stat_table, {})()
+local is_stat_node = ast.make_single_dispatch(is_stat_table, {}, return_false)()
 
 function ast.traverse_stat_postorder(fn, node)
   ast.traverse_node_postorder(
@@ -613,6 +600,17 @@ function ast.map_stat_postorder(fn, node)
       return node
     end,
     node, is_stat_node)
+end
+
+function ast.mapreduce_stat_postorder(map_fn, reduce_fn, node, init)
+  return ast.mapreduce_node_postorder(
+    function(node)
+      if node:is(ast.typed.stat) then
+        return map_fn(node)
+      end
+      return init
+    end,
+    reduce_fn, node, init, is_stat_node)
 end
 
 return ast

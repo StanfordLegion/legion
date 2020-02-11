@@ -360,7 +360,7 @@ local function check_dispatch_completeness(table, node_type)
   assert(false, "dispatch table is missing node type " .. tostring(node_type))
 end
 
-function ast.make_single_dispatch(table, required_cases)
+function ast.make_single_dispatch(table, required_cases, default_handler)
   assert(table and required_cases)
 
   for _, parent_type in ipairs(required_cases) do
@@ -376,6 +376,8 @@ function ast.make_single_dispatch(table, required_cases)
         end
         if table[node_type] then
           return table[node_type](cx, node, ...)
+        elseif default_handler then
+          return default_handler(cx, node, ...)
         else
           assert(false, "unexpected node type " .. tostring(node.node_type))
         end
@@ -388,6 +390,8 @@ function ast.make_single_dispatch(table, required_cases)
         end
         if table[node_type] then
           return table[node_type](node, ...)
+        elseif default_handler then
+          return default_handler(node, ...)
         else
           assert(false, "unexpected node type " .. tostring(node.node_type))
         end

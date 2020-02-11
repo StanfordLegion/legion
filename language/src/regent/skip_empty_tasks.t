@@ -193,12 +193,12 @@ local skip_empty_tasks_stat_table = {
   [ast.typed.stat.If]        = skip_empty_tasks_if,
   [ast.typed.stat.Elseif]    = skip_empty_tasks_elseif,
   [ast.typed.stat.Expr]      = skip_empty_tasks_sat_expr,
-  [ast.typed.stat]           = do_nothing,
 }
 
 local skip_empty_tasks_stat = ast.make_single_dispatch(
   skip_empty_tasks_stat_table,
-  {})
+  {},
+  do_nothing)
 
 function skip_empty_tasks.stat(cx, node)
   return skip_empty_tasks_stat(cx)(node)

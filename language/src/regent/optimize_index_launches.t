@@ -1221,14 +1221,12 @@ local function do_nothing(cx, node) return node end
 local optimize_index_launches_stat_table = {
   [ast.typed.stat.ForNum]    = optimize_index_launch.stat_for_num,
   [ast.typed.stat.ForList]   = optimize_index_launch.stat_for_list,
-
-  [ast.typed.stat]           = do_nothing,
-  [ast.typed.Block]          = do_nothing,
 }
 
 local optimize_index_launches_stat = ast.make_single_dispatch(
   optimize_index_launches_stat_table,
-  {})
+  {},
+  do_nothing)
 
 function optimize_index_launches.stat(cx, node)
   return optimize_index_launches_stat(cx)(node)
