@@ -24,18 +24,6 @@ for k, v in pairs(common_ast) do
   ast[k] = v
 end
 
--- Traversal
-
-function ast.traverse_expr_postorder(fn, node)
-  ast.traverse_node_postorder(
-    function(child)
-      if rawget(child, "expr_type") then
-        fn(child)
-      end
-    end,
-    node)
-end
-
 -- Annotation
 
 ast:inner("annotation")
@@ -540,5 +528,91 @@ ast:inner("metadata")
 ast.metadata:leaf("Task", {"reduction", "op"})
 ast.metadata:leaf("Loop", {"parallelizable", "reductions"})
 ast.metadata:leaf("Stat", {"centers", "scalar"})
+
+-- Traversal
+
+local function return_true(node) return true end
+local function return_false(node) return false end
+
+local is_expr_table = {
+  [ast.typed.expr]  = return_true,
+  [ast.typed.stat]  = return_true,
+  [ast.typed.Block] = return_true,
+  [ast.typed.top]   = return_true,
+
+  [ast.typed]       = return_false,
+
+  [ast.annotation]  = return_false,
+  [ast.condition_kind] = return_false,
+  [ast.constraint] = return_false,
+  [ast.disjointness_kind] = return_false,
+  [ast.fence_kind]  = return_false,
+  [ast.location]    = return_false,
+  [ast.metadata]    = return_false,
+  [ast.privilege]   = return_false,
+  [ast.TaskConfigOptions] = return_false,
+}
+local is_expr_node = ast.make_single_dispatch(is_expr_table, {})()
+
+function ast.traverse_expr_postorder(fn, node)
+  ast.traverse_node_postorder(
+    function(node)
+      if node:is(ast.typed.expr) then
+        fn(node)
+      end
+    end,
+    node, is_expr_node)
+end
+
+function ast.map_expr_postorder(fn, node)
+  return ast.map_node_postorder(
+    function(node)
+      if node:is(ast.typed.expr) then
+        return fn(node)
+      end
+      return node
+    end,
+    node, is_expr_node)
+end
+
+local is_stat_table = {
+  [ast.typed.stat]  = return_true,
+  [ast.typed.Block] = return_true,
+  [ast.typed.top]   = return_true,
+
+  [ast.typed]       = return_false,
+
+  [ast.annotation]  = return_false,
+  [ast.condition_kind] = return_false,
+  [ast.constraint] = return_false,
+  [ast.disjointness_kind] = return_false,
+  [ast.fence_kind]  = return_false,
+  [ast.location]    = return_false,
+  [ast.metadata]    = return_false,
+  [ast.privilege]   = return_false,
+  [ast.TaskConfigOptions] = return_false,
+}
+local is_stat_node = ast.make_single_dispatch(is_stat_table, {})()
+
+function ast.traverse_stat_postorder(fn, node)
+  ast.traverse_node_postorder(
+    function(node)
+      if node:is(ast.typed.stat) then
+        fn(node)
+      end
+    end,
+    node, is_stat_node)
+end
+
+function ast.map_stat_postorder(fn, node)
+  return ast.map_node_postorder(
+    function(node)
+      if node:is(ast.typed.stat) then
+        return fn(node)
+      end
+      return node
+    end,
+    node, is_stat_node)
+end
 
 return ast

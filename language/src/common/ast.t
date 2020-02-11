@@ -449,83 +449,96 @@ function ast.map_node_continuation(fn, node)
   return continuation(node)
 end
 
-function ast.traverse_node_postorder(fn, node)
+function ast.traverse_node_postorder(fn, node, filter_fn)
   if ast.is_node(node) then
-    for _, child in pairs(node) do
-      ast.traverse_node_postorder(fn, child)
+    if not filter_fn or filter_fn(node) then
+      for _, child in pairs(node) do
+        ast.traverse_node_postorder(fn, child, filter_fn)
+      end
+      fn(node)
     end
-    fn(node)
   elseif terralib.islist(node) then
     for _, child in ipairs(node) do
-      ast.traverse_node_postorder(fn, child)
+      ast.traverse_node_postorder(fn, child, filter_fn)
     end
   end
 end
 
-function ast.traverse_node_prepostorder(pre_fn, post_fn, node)
+function ast.traverse_node_prepostorder(pre_fn, post_fn, node, filter_fn)
   if ast.is_node(node) then
-    pre_fn(node)
-    for k, child in pairs(node) do
-      if k ~= "node_type" and k ~= "node_id" then
-        ast.traverse_node_prepostorder(pre_fn, post_fn, child)
+    if not filter_fn or filter_fn(node) then
+      pre_fn(node)
+      for k, child in pairs(node) do
+        if k ~= "node_type" and k ~= "node_id" then
+          ast.traverse_node_prepostorder(pre_fn, post_fn, child, filter_fn)
+        end
       end
+      post_fn(node)
     end
-    post_fn(node)
   elseif terralib.islist(node) then
     for _, child in ipairs(node) do
-      ast.traverse_node_prepostorder(pre_fn, post_fn, child)
+      ast.traverse_node_prepostorder(pre_fn, post_fn, child, filter_fn)
     end
   end
 end
 
-function ast.map_node_postorder(fn, node)
+function ast.map_node_postorder(fn, node, filter_fn)
   if ast.is_node(node) then
-    local tmp = {}
-    for k, child in pairs(node) do
-      if k ~= "node_type" and k ~= "node_id" then
-        tmp[k] = ast.map_node_postorder(fn, child)
+    if not filter_fn or filter_fn(node) then
+      local tmp = {}
+      for k, child in pairs(node) do
+        if k ~= "node_type" and k ~= "node_id" then
+          tmp[k] = ast.map_node_postorder(fn, child, filter_fn)
+        end
       end
+      return fn(node(tmp))
     end
-    return fn(node(tmp))
+    return node
   elseif terralib.islist(node) then
     local tmp = terralib.newlist()
     for _, child in ipairs(node) do
-      tmp:insert(ast.map_node_postorder(fn, child))
+      tmp:insert(ast.map_node_postorder(fn, child, filter_fn))
     end
     return tmp
   end
   return node
 end
 
-function ast.map_node_prepostorder(pre_fn, post_fn, node)
+function ast.map_node_prepostorder(pre_fn, post_fn, node, filter_fn)
   if ast.is_node(node) then
-    local new_node = pre_fn(node)
-    local tmp = {}
-    for k, child in pairs(new_node) do
-      if k ~= "node_type" and k ~= "node_id" then
-        tmp[k] = ast.map_node_prepostorder(pre_fn, post_fn, child)
+    if not filter_fn or filter_fn(node) then
+      local new_node = pre_fn(node)
+      local tmp = {}
+      for k, child in pairs(new_node) do
+        if k ~= "node_type" and k ~= "node_id" then
+          tmp[k] = ast.map_node_prepostorder(pre_fn, post_fn, child, filter_fn)
+        end
       end
+      return post_fn(new_node(tmp))
     end
-    return post_fn(new_node(tmp))
+    return node
   elseif terralib.islist(node) then
     local tmp = terralib.newlist()
     for _, child in ipairs(node) do
-      tmp:insert(ast.map_node_prepostorder(pre_fn, post_fn, child))
+      tmp:insert(ast.map_node_prepostorder(pre_fn, post_fn, child, filter_fn))
     end
     return tmp
   end
   return node
 end
 
-function ast.mapreduce_node_postorder(map_fn, reduce_fn, node, init)
+function ast.mapreduce_node_postorder(map_fn, reduce_fn, node, init, filter_fn)
   if ast.is_node(node) then
-    local result = init
-    for _, child in pairs(node) do
-      result = reduce_fn(
-        result,
-        ast.mapreduce_node_postorder(map_fn, reduce_fn, child, init))
+    if not filter_fn or filter_fn(node) then
+      local result = init
+      for _, child in pairs(node) do
+        result = reduce_fn(
+          result,
+          ast.mapreduce_node_postorder(map_fn, reduce_fn, child, init, filter_fn))
+      end
+      return reduce_fn(result, map_fn(node))
     end
-    return reduce_fn(result, map_fn(node))
+    return init
   elseif terralib.islist(node) then
     local result = init
     for _, child in ipairs(node) do

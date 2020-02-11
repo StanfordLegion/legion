@@ -1216,44 +1216,14 @@ function optimize_index_launch.stat_for_list(cx, node)
   }
 end
 
-function optimize_index_launches.stat_block(cx, node)
-  return node {
-    block = optimize_index_launches.block(cx, node.block),
-  }
-end
-
-function optimize_index_launches.stat_if(cx, node)
-  local then_block = optimize_index_launches.block(cx, node.then_block)
-  local elseif_blocks = node.elseif_blocks:map(function(elseif_block)
-    return optimize_index_launches.stat(cx, elseif_block)
-  end)
-  local else_block = optimize_index_launches.block(cx, node.else_block)
-  return node {
-    then_block = then_block,
-    elseif_blocks = elseif_blocks,
-    else_block = else_block,
-  }
-end
-
-function optimize_index_launches.stat_elseif(cx, node)
-  local block = optimize_index_launches.block(cx, node.block)
-  return node { block = block }
-end
-
 local function do_nothing(cx, node) return node end
 
 local optimize_index_launches_stat_table = {
   [ast.typed.stat.ForNum]    = optimize_index_launch.stat_for_num,
   [ast.typed.stat.ForList]   = optimize_index_launch.stat_for_list,
 
-  [ast.typed.stat.While]     = optimize_index_launches.stat_block,
-  [ast.typed.stat.Repeat]    = optimize_index_launches.stat_block,
-  [ast.typed.stat.Block]     = optimize_index_launches.stat_block,
-  [ast.typed.stat.MustEpoch] = optimize_index_launches.stat_block,
-  [ast.typed.stat.While]     = optimize_index_launches.stat_block,
-  [ast.typed.stat.If]        = optimize_index_launches.stat_if,
-  [ast.typed.stat.Elseif]    = optimize_index_launches.stat_elseif,
   [ast.typed.stat]           = do_nothing,
+  [ast.typed.Block]          = do_nothing,
 }
 
 local optimize_index_launches_stat = ast.make_single_dispatch(
@@ -1276,9 +1246,7 @@ function optimize_index_launches.top_task(cx, node)
   if not node.body then return node end
 
   local cx = cx:new_task_scope(node.prototype:get_constraints())
-  local body = optimize_index_launches.block(cx, node.body)
-
-  return node { body = body }
+  return ast.map_stat_postorder(optimize_index_launches_stat(cx), node)
 end
 
 function optimize_index_launches.top(cx, node)
