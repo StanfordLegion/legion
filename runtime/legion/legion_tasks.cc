@@ -4640,8 +4640,8 @@ namespace Legion {
                 // of our local processors.  If it is
                 // still this processor then map and run it
                 if (distribute_task())
-                  // Still local so we can map and launch it
-                  map_and_launch();
+                  // Still local so we can launch it
+                  launch_task();
               }
             }
             else
