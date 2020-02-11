@@ -535,16 +535,9 @@ namespace Realm {
     wait_value.store(old_counter);
 #endif
 
-    // the re-load of counter below needs to happen, and c++98's version of
-    //  atomics aren't strong enough to force it, so use the big hammer here -
-    // not a huge deal since we're probably going to sleep anyway
-#ifndef REALM_USE_STD_ATOMIC
-    __sync_synchronize();
-#endif
-
-    // now that people know we're waiting, wait until the counter updates - check before
-    //  each wait
-    while(counter.load_acquire() == old_counter) {
+    // now that people know we're waiting, wait until the counter updates -
+    //  check before each wait and use a fetch_add to force the reload
+    while(counter.fetch_add(0) == old_counter) {
       // sanity-check
 #ifndef NDEBUG
       long long wv_check = wait_value.load();
