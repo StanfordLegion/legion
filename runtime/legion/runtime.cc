@@ -20983,6 +20983,26 @@ namespace Legion {
           return result;
         }
       }
+      // Check to see if we need to prefetch sparsity map data to this node
+      if (!domain.dense())
+      {
+        switch (domain.get_dim())
+        {
+#define DIMFUNC(DIM) \
+          case DIM: \
+            { \
+              const DomainT<DIM,coord_t> domaint = domain; \
+              const RtEvent wait_on(domaint.make_valid()); \
+              if (wait_on.exists() && !wait_on.has_triggered()) \
+                wait_on.wait(); \
+              break; \
+            }
+          LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+          default:
+            assert(false);
+        }
+      }
       const AddressSpaceID owner_space = determine_owner(did);
 #ifdef DEBUG_LEGION
       assert(owner_space != address_space);
