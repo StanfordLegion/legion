@@ -3362,8 +3362,30 @@ namespace Legion {
         {
           result->add_base_valid_ref(APPLICATION_REF, &mutator);
           // Also add references to our color space
-          // Only need the valid ref if our color space is not our parent
-          if (color_space != parent)
+          // See if the color space is from the same tree
+          // If it's one of our ancestors we can skip the valid
+          // reference to avoid a cycle on valid references, 
+          // otherwise we need to add the valid ref to keep it live
+          if (color_space->handle.get_tree_id() == p.get_tree_id())
+          {
+            bool is_ancestor = false;
+            IndexSpaceNode *ancestor = parent;
+            while (true)
+            {
+              if (ancestor == color_space)
+              {
+                is_ancestor = true;
+                break;
+              }
+              else if (ancestor->parent == NULL)
+                break;
+              else
+                ancestor = ancestor->parent->parent;
+            }
+            if (!is_ancestor)
+              color_space->add_nested_valid_ref(did, &mutator);
+          }
+          else
             color_space->add_nested_valid_ref(did, &mutator);
           color_space->add_nested_resource_ref(did);
         }
@@ -3424,8 +3446,30 @@ namespace Legion {
         {
           result->add_base_valid_ref(APPLICATION_REF, &mutator);
           // Also add references to our color space
-          // Only need the valid ref if our color space is not our parent
-          if (color_space != parent)
+          // See if the color space is from the same tree
+          // If it's one of our ancestors we can skip the valid
+          // reference to avoid a cycle on valid references, 
+          // otherwise we need to add the valid ref to keep it live
+          if (color_space->handle.get_tree_id() == p.get_tree_id())
+          {
+            bool is_ancestor = false;
+            IndexSpaceNode *ancestor = parent;
+            while (true)
+            {
+              if (ancestor == color_space)
+              {
+                is_ancestor = true;
+                break;
+              }
+              else if (ancestor->parent == NULL)
+                break;
+              else
+                ancestor = ancestor->parent->parent;
+            }
+            if (!is_ancestor)
+              color_space->add_nested_valid_ref(did, &mutator);
+          }
+          else
             color_space->add_nested_valid_ref(did, &mutator);
           color_space->add_nested_resource_ref(did);
         }
@@ -7705,7 +7749,28 @@ namespace Legion {
       {
         // Remove the valid reference that we hold on the color space
         // No need to check for deletion since we have a resource ref too
-        if (color_space != parent)
+        // Check to see if it is an ancestor in which case we do not need
+        // to remove valid reference because we did not add it initially
+        if (color_space->handle.get_tree_id() == handle.get_tree_id())
+        {
+          bool is_ancestor = false;
+          IndexSpaceNode *ancestor = parent;
+          while (true)
+          {
+            if (ancestor == color_space)
+            {
+              is_ancestor = true;
+              break;
+            }
+            else if (ancestor->parent == NULL)
+              break;
+            else
+              ancestor = ancestor->parent->parent;
+          }
+          if (!is_ancestor)
+            color_space->remove_nested_valid_ref(did, mutator);
+        }
+        else
           color_space->remove_nested_valid_ref(did, mutator);
         // Remove gc references from our remote nodes
         if (has_remote_instances())
