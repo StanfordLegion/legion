@@ -3283,7 +3283,7 @@ class State(object):
     # Here, we read the legion spy data! We will use this to draw dependency
     # lines in the prof
     def get_op_dependencies(self, file_names):
-        self.spy_state = legion_spy.State(False, True, True, True)
+        self.spy_state = legion_spy.State(None, False, True, True, True, False)
 
         total_matches = 0
 
@@ -3359,7 +3359,7 @@ class State(object):
         self.spy_state.post_parse(False, True)
 
         print("Performing physical analysis...")
-        self.spy_state.perform_physical_analysis(False, False, False)
+        self.spy_state.perform_physical_analysis(False, False)
         self.spy_state.simplify_physical_graph(need_cycle_check=False)
 
         op = self.spy_state.get_operation(self.spy_state.top_level_uid)
@@ -3397,7 +3397,7 @@ class State(object):
 
         # compute implicit dependencies
         for op in itervalues(self.spy_state.ops):
-            if op.context is not None:
+            if op.context is not None and op.context.op is not None:
                 child_uid = op.uid
                 parent_uid = op.context.op.uid
                 if child_uid not in op_dependencies:
