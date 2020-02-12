@@ -22865,15 +22865,9 @@ namespace Legion {
                                        Operation *op /*= NULL*/)
     //--------------------------------------------------------------------------
     {
-      if ((op == NULL) && (implicit_context != NULL))
-        return Future(new FutureImpl(this, true/*register*/,
+      return Future(new FutureImpl(this, true/*register*/,
                                    get_available_distributed_id(),
-                                   address_space, complete_event,
-                                   implicit_context->owner_task));
-      else
-        return Future(new FutureImpl(this, true/*register*/,
-                                     get_available_distributed_id(),
-                                     address_space, complete_event, op));
+                                   address_space, complete_event, op));
     }
 
     //--------------------------------------------------------------------------
