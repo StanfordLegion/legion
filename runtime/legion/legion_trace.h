@@ -610,7 +610,6 @@ namespace Legion {
     public:
       PhysicalTemplate(PhysicalTrace *trace, ApEvent fence_event);
       PhysicalTemplate(const PhysicalTemplate &rhs);
-    private:
       virtual ~PhysicalTemplate(void);
     public:
       void initialize(Runtime *runtime, ApEvent fence_completion,
