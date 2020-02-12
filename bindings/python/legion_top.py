@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2020 Stanford University
+# Copyright 2020 Stanford University, NVIDIA Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,8 +17,10 @@
 
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+import gc
 import os
 import sys
+import code
 import threading
 
 from legion_cffi import ffi, lib as c
@@ -67,6 +69,26 @@ def input_args(filter_runtime_options=False):
     return args
 
 
+def run_repl():
+    try:
+        shell = code.InteractiveConsole()
+        shell.interact(banner='Welcome to Legion Python interactive console')
+    except SystemExit:
+        pass
+
+
+def run_cmd(cmd, run_name=None):
+    import imp
+    module = imp.new_module(run_name)
+    setattr(module, '__name__', run_name)
+    setattr(module, '__package__', None)
+
+    # Hide the current module if it exists.
+    sys.modules[run_name] = module
+    code = compile(cmd, '<string>', 'eval')
+    exec(code, module.__dict__)
+
+
 # We can't use runpy for this since runpy is aggressive about
 # cleaning up after itself and removes the module before execution
 # has completed.
@@ -96,7 +118,7 @@ def run_path(filename, run_name=None):
     # sys.modules[run_name] = old_module
 
 
-def legion_main(raw_args, user_data, proc):
+def python_main(raw_args, user_data, proc):
     raw_arg_ptr = ffi.new('char[]', bytes(raw_args))
     raw_arg_size = len(raw_args)
 
@@ -115,9 +137,14 @@ def legion_main(raw_args, user_data, proc):
 
     # Run user's script.
     args = input_args(True)
-    assert len(args) >= 2
-    sys.argv = list(args)
-    run_path(args[1], run_name='__main__')
+    if len(args) < 2 or args[1] == '-':
+        run_repl()
+    elif args[1] == '-c':
+        run_cmd(args[2], run_name='__main__')
+    else:
+        assert len(args) >= 2
+        sys.argv = list(args)
+        run_path(args[1], run_name='__main__')
 
     # # Hack: Keep this thread alive because otherwise Python will reuse
     # # it for task execution and Pygion's thread-local state (_my.ctx)
@@ -133,5 +160,10 @@ def legion_main(raw_args, user_data, proc):
     del top_level.task
     del top_level.cleanup_items
 
+    # Force a garbage collection so that we know that all objects whic can 
+    # be collected are actually collected before we exit the top-level task
+    gc.collect()
+
     # Execute postamble.
     c.legion_task_postamble(runtime[0], context[0], ffi.NULL, 0)
+
