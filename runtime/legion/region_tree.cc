@@ -251,14 +251,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::create_pending_cross_product(TaskContext *ctx,
-                                                        IndexPartition handle1,
-                                                        IndexPartition handle2,
+                                                 IndexPartition handle1,
+                                                 IndexPartition handle2,
                              std::map<IndexSpace,IndexPartition> &user_handles,
-                                                        PartitionKind kind,
-                                                        LegionColor &part_color,
-                                                        ApEvent domain_ready,
-                                                        ShardID shard,
-                                                        size_t total_shards)
+                                                 PartitionKind kind,
+                                                 LegionColor &part_color,
+                                                 ApEvent domain_ready,
+                                                 std::set<RtEvent> &safe_events,
+                                                 ShardID shard,
+                                                 size_t total_shards)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *base = get_node(handle1);
@@ -343,14 +344,17 @@ namespace Legion {
                              handle1.get_tree_id(), handle1.get_type_tag()); 
           DistributedID did = 
             runtime->get_available_distributed_id();
-          create_pending_partition(ctx, pid, child_node->handle, 
-                                   source->color_space->handle, 
-                                   part_color, kind, did, domain_ready); 
+          const RtEvent safe =
+            create_pending_partition(ctx, pid, child_node->handle, 
+                                     source->color_space->handle, 
+                                     part_color, kind, did, domain_ready); 
           // If the user requested the handle for this point return it
           std::map<IndexSpace,IndexPartition>::iterator finder = 
             user_handles.find(child_node->handle);
           if (finder != user_handles.end())
             finder->second = pid;
+          if (safe.exists())
+            safe_events.insert(safe);
         }
       }
       else
@@ -372,9 +376,10 @@ namespace Legion {
                              handle1.get_tree_id(), handle1.get_type_tag()); 
           DistributedID did = 
             runtime->get_available_distributed_id();
-          create_pending_partition(ctx, pid, child_node->handle, 
-                                   source->color_space->handle, 
-                                   part_color, kind, did, domain_ready); 
+          const RtEvent safe = 
+            create_pending_partition(ctx, pid, child_node->handle, 
+                                     source->color_space->handle, 
+                                     part_color, kind, did, domain_ready); 
           // If the user requested the handle for this point return it
           std::map<IndexSpace,IndexPartition>::iterator finder = 
             user_handles.find(child_node->handle);
@@ -387,6 +392,8 @@ namespace Legion {
             if (!itr->is_valid())
               break;
           }
+          if (safe.exists())
+            safe_events.insert(safe);
         }
         delete itr;
       }

@@ -3879,11 +3879,18 @@ namespace Legion {
         runtime->get_available_pending_partition_op();
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
+      std::set<RtEvent> safe_events;
       forest->create_pending_cross_product(this, handle1, handle2, handles, 
-                                           kind, partition_color, term_event);
+                                kind, partition_color, term_event, safe_events);
       part_op->initialize_cross_product(this, handle1, handle2,partition_color);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      if (!safe_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(safe_events);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
       return partition_color;
     }
 
@@ -10080,10 +10087,19 @@ namespace Legion {
       if (owner_shard->shard_id == index_partition_allocator_shard)
       {
         // Do the call on the owner node
+        std::set<RtEvent> safe_events;
         forest->create_pending_cross_product(this, handle1, handle2, handles,
                                              kind, partition_color, term_event,
-                                             owner_shard->shard_id,
+                                             safe_events, owner_shard->shard_id,
                                              total_shards);
+        // We need to wait on the safe event here to make sure effects
+        // have been broadcast before letting the other shard to their part
+        if (!safe_events.empty())
+        {
+          const RtEvent wait_on = Runtime::merge_events(safe_events);
+          if (wait_on.exists() && !wait_on.has_triggered())
+            wait_on.wait();
+        }
         // Now broadcast the chosen color to all the other shards
         ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_15);
         color_collective.broadcast(partition_color);
@@ -10100,12 +10116,16 @@ namespace Legion {
         assert(partition_color != INVALID_COLOR);
 #endif
         // Now we can do the call from this node
+        std::set<RtEvent> safe_events;
         forest->create_pending_cross_product(this, handle1, handle2, handles,
                                              kind, partition_color, term_event,
-                                             owner_shard->shard_id,
+                                             safe_events, owner_shard->shard_id,
                                              total_shards);
         // Signal that we're done with our creation
-        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        RtEvent safe_event;
+        if (!safe_events.empty())
+          safe_event = Runtime::merge_events(safe_events);
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/, safe_event);
         // Also have to wait for creation to finish on all shards because
         // any shard can handle requests for any cross-product partition
         creation_barrier.wait();

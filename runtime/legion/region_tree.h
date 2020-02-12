@@ -178,11 +178,12 @@ namespace Legion {
                                         IndexPartition handle1,
                                         IndexPartition handle2,
                   std::map<IndexSpace,IndexPartition> &user_handles,
-                                           PartitionKind kind,
-                                           LegionColor &part_color,
-                                           ApEvent domain_ready,
-                                           ShardID shard = 0,
-                                           size_t total_shards = 1);
+                                        PartitionKind kind,
+                                        LegionColor &part_color,
+                                        ApEvent domain_ready,
+                                        std::set<RtEvent> &safe_events,
+                                        ShardID shard = 0,
+                                        size_t total_shards = 1);
       // For control replication contexts
       RtEvent create_pending_partition_shard(ShardID owner_shard,
                                              ReplicateContext *ctx,
