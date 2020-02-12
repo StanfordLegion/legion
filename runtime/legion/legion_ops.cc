@@ -4134,7 +4134,8 @@ namespace Legion {
         for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
         {
           const RegionRequirement &req = src_indirect_requirements[idx];
-          LegionSpy::log_logical_requirement(unique_op_id, idx, true/*region*/,
+          LegionSpy::log_logical_requirement(unique_op_id, offset + idx,
+                                             true/*region*/,
                                              req.region.index_space.id,
                                              req.region.field_space.id,
                                              req.region.tree_id,
@@ -4152,7 +4153,8 @@ namespace Legion {
         for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
         {
           const RegionRequirement &req = dst_indirect_requirements[idx];
-          LegionSpy::log_logical_requirement(unique_op_id, idx, true/*region*/,
+          LegionSpy::log_logical_requirement(unique_op_id, offset + idx,
+                                             true/*region*/,
                                              req.region.index_space.id,
                                              req.region.field_space.id,
                                              req.region.tree_id,
