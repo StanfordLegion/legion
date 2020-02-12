@@ -169,9 +169,10 @@ namespace Legion {
                                         IndexPartition handle1,
                                         IndexPartition handle2,
                   std::map<IndexSpace,IndexPartition> &user_handles,
-                                           PartitionKind kind,
-                                           LegionColor &part_color,
-                                           ApEvent domain_ready);
+                                        PartitionKind kind,
+                                        LegionColor &part_color,
+                                        ApEvent domain_ready,
+                                        std::set<RtEvent> &safe_events);
       void compute_partition_disjointness(IndexPartition handle,
                                           RtUserEvent ready_event);
       void destroy_index_space(IndexSpace handle, AddressSpaceID source,

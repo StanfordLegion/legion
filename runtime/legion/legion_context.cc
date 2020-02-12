@@ -3784,11 +3784,18 @@ namespace Legion {
         runtime->get_available_pending_partition_op();
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
+      std::set<RtEvent> safe_events;
       forest->create_pending_cross_product(this, handle1, handle2, handles, 
-                                           kind, partition_color, term_event);
+                                kind, partition_color, term_event, safe_events);
       part_op->initialize_cross_product(this, handle1, handle2,partition_color);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      if (!safe_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(safe_events);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
       return partition_color;
     }
 
