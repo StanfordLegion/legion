@@ -149,6 +149,22 @@ function ast_node:get_fields()
 end
 
 function ast_node:__call(fields_to_update)
+  -- Optimization: In many cases optimizations use this to regenerate AST
+  -- nodes without checking if they've actually changed. Rather than stuffing
+  -- the checking code into every place where it's used, just centralize the
+  -- check here. The check has some cost but saves several allocations when it
+  -- triggers, which is often enough to be a win.
+  local changed = false
+  for f, v in pairs(fields_to_update) do
+    if not rawequal(self[f], v) then
+      changed = true
+      break
+    end
+  end
+  if not changed then
+    return self
+  end
+
   local ctor = rawget(self, "node_type")
   local values = {}
   for _, f in ipairs(ctor.expected_fields) do
