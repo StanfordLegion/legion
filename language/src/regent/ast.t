@@ -24,74 +24,6 @@ for k, v in pairs(common_ast) do
   ast[k] = v
 end
 
--- Traversal
-
-function ast.flatmap_node_continuation(fn, node)
-  local function continuation(node, continuing)
-    if ast.is_node(node) then
-      -- First entry: invoke the callback.
-      if continuing == nil then
-        return fn(node, continuation)
-
-      -- Second entry: (if true) continue to children.
-      elseif continuing then
-        local tmp = {}
-        for k, child in pairs(node) do
-          if k ~= "node_type" and k ~= "node_id" then
-            tmp[k] = continuation(child)
-            local is_src_list = terralib.islist(child)
-            local is_dst_list = terralib.islist(tmp[k])
-            assert((is_src_list and is_dst_list) or (not is_src_list and not is_dst_list),
-                   "flatmap only flattens a list of statements")
-          end
-        end
-        return node(tmp)
-      end
-    elseif terralib.islist(node) then
-      local tmp = terralib.newlist()
-      for _, child in ipairs(node) do
-        child = continuation(child)
-        if terralib.islist(child) then
-          tmp:insertall(child)
-        else
-          tmp:insert(child)
-        end
-      end
-      return tmp
-    end
-    return node
-  end
-  return continuation(node)
-end
-
-function ast.flatmap_node_postorder(fn, node)
-  if ast.is_node(node) then
-    local tmp = {}
-    for k, child in pairs(node) do
-       if k ~= "node_type" and k ~= "node_id" then
-        tmp[k] = ast.flatmap_node_postorder(fn, child)
-        local is_src_list = terralib.islist(child)
-        local is_dst_list = terralib.islist(tmp[k])
-        assert((is_src_list and is_dst_list) or (not is_src_list and not is_dst_list),
-               "flatmap only flattens a list of statements")
-      end
-    end
-    return fn(node(tmp))
-  elseif terralib.islist(node) then
-    local tmp = terralib.newlist()
-    for _, child in ipairs(node) do
-      local child = ast.flatmap_node_postorder(fn, child)
-      if terralib.islist(child) then
-        tmp:insertall(child)
-      else
-        tmp:insert(child)
-      end
-    end
-    return tmp
-  end
-  return node
-end
-
 -- Annotation
 
 ast:inner("annotation")
@@ -596,5 +528,89 @@ ast:inner("metadata")
 ast.metadata:leaf("Task", {"reduction", "op"})
 ast.metadata:leaf("Loop", {"parallelizable", "reductions"})
 ast.metadata:leaf("Stat", {"centers", "scalar"})
+
+-- Traversal
+
+local function return_true(node) return true end
+local function return_false(node) return false end
+
+local is_expr_table = {
+  [ast.typed.expr]  = return_true,
+  [ast.typed.stat]  = return_true,
+  [ast.typed.Block] = return_true,
+  [ast.typed.top]   = return_true,
+}
+local is_expr_node = ast.make_single_dispatch(is_expr_table, {}, return_false)()
+
+function ast.traverse_expr_postorder(fn, node)
+  ast.traverse_node_postorder(
+    function(node)
+      if node:is(ast.typed.expr) then
+        fn(node)
+      end
+    end,
+    node, is_expr_node)
+end
+
+function ast.map_expr_postorder(fn, node)
+  return ast.map_node_postorder(
+    function(node)
+      if node:is(ast.typed.expr) then
+        return fn(node)
+      end
+      return node
+    end,
+    node, is_expr_node)
+end
+
+function ast.mapreduce_expr_postorder(map_fn, reduce_fn, node, init)
+  return ast.mapreduce_node_postorder(
+    function(node)
+      if node:is(ast.typed.expr) then
+        return map_fn(node)
+      end
+      return init
+    end,
+    reduce_fn, node, init, is_expr_node)
+end
+
+local is_stat_table = {
+  [ast.typed.stat]  = return_true,
+  [ast.typed.Block] = return_true,
+  [ast.typed.top]   = return_true,
+}
+local is_stat_node = ast.make_single_dispatch(is_stat_table, {}, return_false)()
+
+function ast.traverse_stat_postorder(fn, node)
+  ast.traverse_node_postorder(
+    function(node)
+      if node:is(ast.typed.stat) then
+        fn(node)
+      end
+    end,
+    node, is_stat_node)
+end
+
+function ast.map_stat_postorder(fn, node)
+  return ast.map_node_postorder(
+    function(node)
+      if node:is(ast.typed.stat) then
+        return fn(node)
+      end
+      return node
+    end,
+    node, is_stat_node)
+end
+
+function ast.mapreduce_stat_postorder(map_fn, reduce_fn, node, init)
+  return ast.mapreduce_node_postorder(
+    function(node)
+      if node:is(ast.typed.stat) then
+        return map_fn(node)
+      end
+      return init
+    end,
+    reduce_fn, node, init, is_stat_node)
+end
 
 return ast

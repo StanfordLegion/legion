@@ -191,21 +191,12 @@ local node_is_leaf = {
   [ast.typed.stat.EndTrace]          = unreachable,
   [ast.typed.stat.MapRegions]        = unreachable,
   [ast.typed.stat.UnmapRegions]      = unreachable,
-
-  -- Miscellaneous:
-  [ast.typed.Block]             = always_true,
-  [ast.IndexLaunchArgsProvably] = always_true,
-  [ast.location]                = always_true,
-  [ast.annotation]              = always_true,
-  [ast.condition_kind]          = always_true,
-  [ast.disjointness_kind]       = always_true,
-  [ast.fence_kind]              = always_true,
-  [ast.metadata]                = always_true,
 }
 
 local analyze_leaf_node = ast.make_single_dispatch(
   node_is_leaf,
-  {ast.typed.expr, ast.typed.stat})
+  {ast.typed.expr, ast.typed.stat},
+  always_true)
 
 local function analyze_leaf(cx, node)
   return ast.mapreduce_node_postorder(
@@ -329,21 +320,12 @@ local node_is_inner = {
   [ast.typed.stat.EndTrace]          = unreachable,
   [ast.typed.stat.MapRegions]        = unreachable,
   [ast.typed.stat.UnmapRegions]      = unreachable,
-
-  -- Miscellaneous:
-  [ast.typed.Block]             = always_true,
-  [ast.IndexLaunchArgsProvably] = always_true,
-  [ast.location]                = always_true,
-  [ast.annotation]              = always_true,
-  [ast.condition_kind]          = always_true,
-  [ast.disjointness_kind]       = always_true,
-  [ast.fence_kind]              = always_true,
-  [ast.metadata]                = always_true,
 }
 
 local analyze_inner_node = ast.make_single_dispatch(
   node_is_inner,
-  {ast.typed.expr, ast.typed.stat})
+  {ast.typed.expr, ast.typed.stat},
+  always_true)
 
 local function analyze_inner(cx, node)
   return ast.mapreduce_node_postorder(
@@ -469,21 +451,12 @@ local node_is_idempotent = {
   [ast.typed.stat.EndTrace]          = unreachable,
   [ast.typed.stat.MapRegions]        = unreachable,
   [ast.typed.stat.UnmapRegions]      = unreachable,
-
-  -- Miscellaneous:
-  [ast.typed.Block]             = always_true,
-  [ast.IndexLaunchArgsProvably] = always_true,
-  [ast.location]                = always_true,
-  [ast.annotation]              = always_true,
-  [ast.condition_kind]          = always_true,
-  [ast.disjointness_kind]       = always_true,
-  [ast.fence_kind]              = always_true,
-  [ast.metadata]                = always_true,
 }
 
 local analyze_idempotent_node = ast.make_single_dispatch(
   node_is_idempotent,
-  {ast.typed.expr, ast.typed.stat})
+  {ast.typed.expr, ast.typed.stat},
+  always_true)
 
 local function analyze_idempotent(cx, node)
   return ast.mapreduce_node_postorder(
@@ -619,21 +592,12 @@ local node_is_replicable = {
   [ast.typed.stat.EndTrace]          = unreachable,
   [ast.typed.stat.MapRegions]        = unreachable,
   [ast.typed.stat.UnmapRegions]      = unreachable,
-
-  -- Miscellaneous:
-  [ast.typed.Block]             = always_true,
-  [ast.IndexLaunchArgsProvably] = always_true,
-  [ast.location]                = always_true,
-  [ast.annotation]              = always_true,
-  [ast.condition_kind]          = always_true,
-  [ast.disjointness_kind]       = always_true,
-  [ast.fence_kind]              = always_true,
-  [ast.metadata]                = always_true,
 }
 
 local analyze_replicable_node = ast.make_single_dispatch(
   node_is_replicable,
-  {ast.typed.expr, ast.typed.stat})
+  {ast.typed.expr, ast.typed.stat},
+  always_true)
 
 local function analyze_replicable(cx, node)
   return ast.mapreduce_node_postorder(
