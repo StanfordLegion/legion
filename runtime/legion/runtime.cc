@@ -1847,7 +1847,7 @@ namespace Legion {
         // If we're the owner shard of the barrier then do the arrival
         // for all the shards so that the barrier generation triggers
         // without needing to do any communication
-        const size_t total_shards = repl_ctx->shard_manager->total_shards;
+        const size_t total_shards = repl_ctx->total_shards;
         if ((future_map_barrier_index % total_shards) ==  
             repl_ctx->owner_shard->shard_id)
           Runtime::phase_barrier_arrive(future_map_barrier, total_shards);
