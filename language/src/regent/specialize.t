@@ -870,7 +870,7 @@ end
 
 function specialize.expr_partition_by_field(cx, node, allow_lists)
   return ast.specialized.expr.PartitionByField {
-    completeness = specialize.completeness_kind(cx, node.completeness),
+    completeness = node.completeness and specialize.completeness_kind(cx, node.completeness),
     region = specialize.expr_region_root(cx, node.region),
     colors = specialize.expr(cx, node.colors),
     annotations = node.annotations,
