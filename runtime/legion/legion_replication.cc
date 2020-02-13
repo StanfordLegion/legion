@@ -4560,6 +4560,8 @@ namespace Legion {
             Runtime::phase_barrier_arrive(inline_barrier, 1/*count*/);
           // Set the privilege back to read-write
           requirement.privilege = READ_WRITE;
+          // Reset the usage of the analysis too
+          analysis->usage = RegionUsage(requirement);
           // Wait for everyone to finish their updates
           inline_barrier.wait();
           // Advance the barrier to the next generation

@@ -1650,7 +1650,10 @@ namespace Legion {
       static void handle_remote_updates(Deserializer &derez, Runtime *rt,
                                         AddressSpaceID previous);
     public:
-      const RegionUsage usage;
+      // TODO: make this const again after we update the runtime to 
+      // support collective views so that we don't need to modify 
+      // this field in ReplMapOp::trigger_mapping
+      /*const*/ RegionUsage usage;
       RegionNode *const node;
       const InstanceSet target_instances;
       const std::vector<InstanceView*> target_views;
