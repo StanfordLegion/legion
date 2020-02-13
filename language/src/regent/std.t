@@ -2627,25 +2627,21 @@ std.incomplete = ast.completeness_kind.Incomplete {}
 do
   local next_partition_id = 1
   function std.partition(disjointness, completeness, region_symbol, colors_symbol)
+
+    -- @param disjointness, completeness can be omitted. If this is the case, then
+    -- shift the remaining arguments (except colors symbol) backward and default to aliased or
+    -- incomplete
+    if(not ast.is_node(completeness)) then
+      colors_symbol = region_symbol
+      region_symbol = completeness
+      completeness = std.incomplete
+    end
+
     if colors_symbol == nil then
       colors_symbol = std.newsymbol(std.ispace(std.ptr))
     end
     if terralib.types.istype(colors_symbol) then
       colors_symbol = std.newsymbol(colors_symbol)
-    end
-
-    -- @param disjointness, completeness can be omitted. If this is the case, then
-    -- shift the remaining arguments (except colors symbol) backward and default to aliased or
-    -- incomplete
-    if(not ast.is_node(disjointness)) then
-      region_symbol = completeness
-      completeness = disjointness
-      disjointness = std.aliased
-    end
-
-    if(not ast.is_node(completeness)) then
-      region_symbol = completeness
-      completeness = std.incomplete
     end
 
     assert(disjointness:is(ast.disjointness_kind),

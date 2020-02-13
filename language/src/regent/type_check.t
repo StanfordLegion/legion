@@ -1842,7 +1842,7 @@ function type_check.expr_partition_by_restriction(cx, node)
     colors_symbol = std.newsymbol(colors_type)
   end
 
-  local expr_type = std.partition(disjointness, region_symbol, colors_symbol)
+  local expr_type = std.partition(disjointness, completeness, region_symbol, colors_symbol)
 
   -- Hack: Stuff the region type back into the partition's region
   -- argument, if necessary.
@@ -1852,8 +1852,8 @@ function type_check.expr_partition_by_restriction(cx, node)
   assert(expr_type.parent_region_symbol:gettype() == region_type)
 
   return ast.typed.expr.PartitionByRestriction {
-    disjointness = disjointness,
-    completeness = completeness,
+    disjointness = node.disjointness,
+    completeness = node.completeness,
     region = region,
     transform = transform,
     extent = extent,

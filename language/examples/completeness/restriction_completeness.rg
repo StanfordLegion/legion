@@ -25,8 +25,8 @@ task f()
   var e : rect1d = [rect1d] { lo = [int1d](0), hi = [int1d](0) }
   var colors = ispace(int1d, 3)
   var p = restrict(r, t, e, colors)
-  var p2 = restrict(complete, r, t, e, colors)
-  var p3 = restrict(incomplete, r, t, e, colors)
+  -- var p2 = restrict(complete, r, t, e, colors)
+  -- var p3 = restrict(incomplete, r, t, e, colors)
   var q = dynamic_cast(partition(disjoint, r, colors), p)
 
   for i in colors do
