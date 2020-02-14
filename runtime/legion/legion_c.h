@@ -2419,6 +2419,18 @@ extern "C" {
   legion_future_map_get_future(legion_future_map_t handle,
                                legion_domain_point_t point);
 
+  /**
+   * @return Caller takes ownership of return value
+   *
+   * @see Legion::Runtime::reduce_future_map
+   */
+  legion_future_t
+  legion_reduce_future_map(legion_runtime_t runtime,
+                           legion_context_t ctx,
+                           legion_future_map_t handle,
+                           legion_reduction_op_id_t redop,
+                           bool deterministic);
+
   // -----------------------------------------------------------------------
   // Deferred Buffer Operations
   // -----------------------------------------------------------------------

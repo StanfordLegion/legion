@@ -1373,6 +1373,7 @@ namespace Legion {
     class AttachOp;
     class DetachOp;
     class TimingOp;
+    class AllReduceOp;
     class ExternalMappable;
     class RemoteOp;
     class RemoteMapOp;
@@ -1612,6 +1613,7 @@ namespace Legion {
     friend class Internal::AttachOp;                        \
     friend class Internal::DetachOp;                        \
     friend class Internal::TimingOp;                        \
+    friend class Internal::AllReduceOp;                     \
     friend class Internal::TraceSummaryOp;                  \
     friend class Internal::ExternalMappable;                \
     friend class Internal::ExternalTask;                    \

@@ -64,6 +64,7 @@ namespace Legion {
         ATTACH_OP_KIND,
         DETACH_OP_KIND,
         TIMING_OP_KIND,
+        ALL_REDUCE_OP_KIND,
         TRACE_CAPTURE_OP_KIND,
         TRACE_COMPLETE_OP_KIND,
         TRACE_REPLAY_OP_KIND,
@@ -97,6 +98,7 @@ namespace Legion {
         "Attach",                   \
         "Detach",                   \
         "Timing",                   \
+        "All Reduce Op",            \
         "Trace Capture",            \
         "Trace Complete",           \
         "Trace Replay",             \
@@ -3191,11 +3193,40 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
       virtual void deferred_execute(void);
-      virtual void trigger_complete(void);
     protected:
       TimingMeasurement measurement;
       std::set<Future> preconditions;
       Future result;
+    };
+
+    /**
+     * \class AllReduceOp 
+     * Operation for reducing future maps down to futures
+     */
+    class AllReduceOp : public Operation {
+    public:
+      AllReduceOp(Runtime *rt);
+      AllReduceOp(const AllReduceOp &rhs);
+      virtual ~AllReduceOp(void);
+    public:
+      AllReduceOp& operator=(const AllReduceOp &rhs);
+    public:
+      Future initialize(InnerContext *ctx, const FutureMap &future_map,
+                        ReductionOpID redop, bool deterministic);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+    public:
+      virtual void trigger_dependence_analysis(void);
+      virtual void trigger_mapping(void);
+      virtual void deferred_execute(void);
+    protected:
+      FutureMap future_map;
+      const ReductionOp *redop; 
+      Future result;
+      bool deterministic;
     };
 
     /**

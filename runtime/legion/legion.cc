@@ -5064,6 +5064,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Future Runtime::reduce_future_map(Context ctx, const FutureMap &future_map,
+                                      ReductionOpID redop, bool deterministic)
+    //--------------------------------------------------------------------------
+    {
+      return ctx->reduce_future_map(future_map, redop, deterministic);
+    }
+
+    //--------------------------------------------------------------------------
     Future Runtime::execute_task(Context ctx, 
                         TaskID task_id,
                         const std::vector<IndexSpaceRequirement> &indexes,
