@@ -274,6 +274,7 @@ namespace Legion {
       DEP_PART_BY_PREIMAGE = 12, // create partition by preimage
       DEP_PART_BY_PREIMAGE_RANGE = 13, // create partition by preimage range
       DEP_PART_ASSOCIATION = 14, // create an association
+      DEP_PART_WEIGHTS = 15, // create partition by weights
     };
 
     // Enumeration of Legion runtime tasks

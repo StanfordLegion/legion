@@ -1116,6 +1116,38 @@ extern "C" {
                                       int color /* = AUTO_GENERATE_ID */);
 
   /**
+   * @return Caller takes ownership of return value
+   *
+   * @see Legion::Runtime::create_partition_by_weights
+   */
+  legion_index_partition_t
+  legion_index_partition_create_by_weights(
+      legion_runtime_t runtime,
+      legion_context_t ctx,
+      legion_index_space_t parent,
+      legion_domain_point_t *colors,
+      int *weights,
+      size_t num_colors,
+      legion_index_space_t color_space,
+      size_t granularity /* = 1 */,
+      int color /* = AUTO_GENERATE_ID */);
+
+  /**
+   * @return Caller takes ownership of return value
+   *
+   * @see Legion::Runtime::create_partition_by_weights
+   */
+  legion_index_partition_t
+  legion_index_partition_create_by_weights_future_map(
+      legion_runtime_t runtime,
+      legion_context_t ctx,
+      legion_index_space_t parent,
+      legion_future_map_t future_map,
+      legion_index_space_t color_space,
+      size_t granularity /* = 1 */,
+      int color /* = AUTO_GENERATE_ID */);
+
+  /**
    * @return Caller takes ownership of return value.
    *
    * @see Legion::Runtime::create_partition_by_union()
@@ -1202,7 +1234,7 @@ extern "C" {
    * @see Legion::Runtime::create_partition_by_domain
    */
   legion_index_partition_t
-  legion_index_partition_create_by_future_map(
+  legion_index_partition_create_by_domain_future_map(
       legion_runtime_t runtime,
       legion_context_t ctx,
       legion_index_space_t parent,

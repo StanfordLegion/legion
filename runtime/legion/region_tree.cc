@@ -409,6 +409,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ApEvent RegionTreeForest::create_partition_by_weights(Operation *op,
+                                                       IndexPartition pid,
+                                                       const FutureMap &weights,
+                                                       size_t granularity)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartNode *new_part = get_node(pid);
+      return new_part->create_by_weights(op, weights, granularity);
+    }
+
+    //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_partition_by_union(Operation *op,
                                                         IndexPartition pid,
                                                         IndexPartition handle1,
@@ -8593,6 +8604,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return parent->create_equal_children(op, this, granularity); 
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent IndexPartNode::create_by_weights(Operation *op, 
+                                   const FutureMap &weights, size_t granularity)
+    //--------------------------------------------------------------------------
+    {
+      return parent->create_by_weights(op, this, weights.impl, granularity); 
     }
 
     //--------------------------------------------------------------------------

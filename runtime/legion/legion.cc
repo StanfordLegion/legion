@@ -3538,14 +3538,38 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_equal_partition(Context ctx, 
-                                                      IndexSpace parent,
-                                                      IndexSpace color_space,
-                                                      size_t granularity,
-                                                      Color color)
+                                                   IndexSpace parent,
+                                                   IndexSpace color_space,
+                                                   size_t granularity,
+                                                   Color color)
     //--------------------------------------------------------------------------
     {
       return runtime->create_equal_partition(ctx, parent, color_space,
                                              granularity, color);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition Runtime::create_partition_by_weights(Context ctx,
+                                       IndexSpace parent,
+                                       const std::map<DomainPoint,int> &weights,
+                                       IndexSpace color_space,
+                                       size_t granularity, Color color)
+    //--------------------------------------------------------------------------
+    {
+      return ctx->create_partition_by_weights(parent, weights, color_space, 
+                                              granularity, color);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition Runtime::create_partition_by_weights(Context ctx,
+                                                IndexSpace parent,
+                                                const FutureMap &weights,
+                                                IndexSpace color_space,
+                                                size_t granularity, Color color)
+    //--------------------------------------------------------------------------
+    {
+      return ctx->create_partition_by_weights(parent, weights, color_space, 
+                                              granularity, color);
     }
 
     //--------------------------------------------------------------------------

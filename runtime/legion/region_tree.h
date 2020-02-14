@@ -184,6 +184,10 @@ namespace Legion {
       ApEvent create_equal_partition(Operation *op, 
                                      IndexPartition pid, 
                                      size_t granularity);
+      ApEvent create_partition_by_weights(Operation *op,
+                                          IndexPartition pid,
+                                          const FutureMap &map,
+                                          size_t granularity);
       ApEvent create_partition_by_union(Operation *op,
                                         IndexPartition pid,
                                         IndexPartition handle1,
@@ -1810,6 +1814,10 @@ namespace Legion {
                                        IndexPartNode *partition,
                                        FutureMapImpl *future_map,
                                        bool perform_intersections) = 0;
+      virtual ApEvent create_by_weights(Operation *op,
+                                        IndexPartNode *partition,
+                                        FutureMapImpl *future_map,
+                                        size_t granularity) = 0;
       virtual ApEvent create_by_field(Operation *op,
                                       IndexPartNode *partition,
                 const std::vector<FieldDataDescriptor> &instances,
@@ -1987,6 +1995,15 @@ namespace Legion {
                                       IndexPartNode *partition,
                                       FutureMapImpl *future_map,
                                       bool perform_intersections);
+      virtual ApEvent create_by_weights(Operation *op,
+                                        IndexPartNode *partition,
+                                        FutureMapImpl *future_map,
+                                        size_t granularity);
+      template<int COLOR_DIM, typename COLOR_T>
+      ApEvent create_by_weight_helper(Operation *op,
+                                      IndexPartNode *partition,
+                                      FutureMapImpl *future_map,
+                                      size_t granularity);
       virtual ApEvent create_by_field(Operation *op,
                                       IndexPartNode *partition,
                 const std::vector<FieldDataDescriptor> &instances,
@@ -2148,6 +2165,28 @@ namespace Legion {
         Operation *const op;
         FutureMapImpl *const future_map;
         const bool intersect;
+        ApEvent result;
+      };
+      struct CreateByWeightHelper {
+      public:
+        CreateByWeightHelper(IndexSpaceNodeT<DIM,T> *n,
+                             IndexPartNode *p, Operation *o,
+                             FutureMapImpl *fm, size_t g)
+          : node(n), partition(p), op(o), future_map(fm), granularity(g) { }
+      public:
+        template<typename COLOR_DIM, typename COLOR_T>
+        static inline void demux(CreateByWeightHelper *creator)
+        {
+          creator->result = creator->node->template 
+            create_by_weight_helper<COLOR_DIM::N,COLOR_T>(creator->op,
+                creator->partition, creator->future_map, creator->granularity);
+        }
+      public:
+        IndexSpaceNodeT<DIM,T> *const node;
+        IndexPartNode *const partition;
+        Operation *const op;
+        FutureMapImpl *const future_map;
+        const size_t granularity;
         ApEvent result;
       };
       struct CreateByFieldHelper {
@@ -2508,6 +2547,8 @@ namespace Legion {
       static void handle_pending_child_task(const void *args);
     public:
       ApEvent create_equal_children(Operation *op, size_t granularity);
+      ApEvent create_by_weights(Operation *op, const FutureMap &weights,
+                                size_t granularity);
       ApEvent create_by_union(Operation *Op,
                               IndexPartNode *left, IndexPartNode *right);
       ApEvent create_by_intersection(Operation *op,
