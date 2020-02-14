@@ -3581,22 +3581,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexPartition InnerContext::create_partition_by_weights(IndexSpace parent,
-                        const std::map<DomainPoint,int> &weights, 
-                        IndexSpace color_space, size_t granularity, Color color)
-    //--------------------------------------------------------------------------
-    {
-      ArgumentMap argmap;
-      for (std::map<DomainPoint,int>::const_iterator it = 
-            weights.begin(); it != weights.end(); it++)
-        argmap.set_point(it->first,
-            TaskArgument(&it->second, sizeof(it->second)));
-      FutureMap future_map(argmap.impl->freeze(this));
-      return create_partition_by_weights(parent, future_map, color_space,
-                                         granularity, color);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InnerContext::create_partition_by_weights(IndexSpace parent,
                                                 const FutureMap &weights, 
                                                 IndexSpace color_space,
                                                 size_t granularity, Color color)
@@ -15136,19 +15120,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexPartition LeafContext::create_partition_by_weights(IndexSpace parent,
-                                       const std::map<DomainPoint,int> &weights,
-                                       IndexSpace color_space,
-                                       size_t granularity, Color color)
-    //--------------------------------------------------------------------------
-    {
-      REPORT_LEGION_ERROR(ERROR_ILLEGAL_EQUAL_PARTITION_CREATION,
-        "Illegal create partition by weights performed in leaf "
-                     "task %s (ID %lld)", get_task_name(), get_unique_id())
-      return IndexPartition::NO_PART;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition LeafContext::create_partition_by_weights(IndexSpace parent,
                                                 const FutureMap &weights,
                                                 IndexSpace color_space,
                                                 size_t granularity, Color color)
@@ -16704,17 +16675,6 @@ namespace Legion {
     {
       return enclosing->create_equal_partition(forest, parent, color_space,
                                                granularity, color);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InlineContext::create_partition_by_weights(IndexSpace parent,
-                                       const std::map<DomainPoint,int> &weights,
-                                       IndexSpace color_space,
-                                       size_t granularity, Color color)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_partition_by_weights(parent, weights, 
-                                    color_space, granularity, color);
     }
 
     //--------------------------------------------------------------------------

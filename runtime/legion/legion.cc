@@ -3600,7 +3600,13 @@ namespace Legion {
                                        size_t granularity, Color color)
     //--------------------------------------------------------------------------
     {
-      return ctx->create_partition_by_weights(parent, weights, color_space, 
+      ArgumentMap argmap;
+      for (std::map<DomainPoint,int>::const_iterator it = 
+            weights.begin(); it != weights.end(); it++)
+        argmap.set_point(it->first,
+            TaskArgument(&it->second, sizeof(it->second)));
+      FutureMap future_map(argmap.impl->freeze(ctx));
+      return ctx->create_partition_by_weights(parent, future_map, color_space,
                                               granularity, color);
     }
 
