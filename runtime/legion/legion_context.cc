@@ -12241,6 +12241,27 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Future ReplicateContext::reduce_future_map(const FutureMap &future_map,
+                                        ReductionOpID redop, bool deterministic)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this); 
+      if (future_map.impl == NULL)
+        return Future();
+      // Check to see if this is just a normal future map, if so then 
+      // we can just do the standard thing here
+      if (!future_map.impl->is_replicate_future_map())
+        return InnerContext::reduce_future_map(future_map,redop,deterministic);
+      ReplAllReduceOp *all_reduce_op = 
+        runtime->get_available_repl_all_reduce_op();
+      Future result = 
+        all_reduce_op->initialize(this, future_map, redop, deterministic);
+      all_reduce_op->initialize_replication(this);
+      runtime->add_to_dependence_queue(this, executing_processor,all_reduce_op);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     PhysicalRegion ReplicateContext::map_region(const InlineLauncher &launcher)
     //--------------------------------------------------------------------------
     {

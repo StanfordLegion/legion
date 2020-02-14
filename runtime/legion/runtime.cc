@@ -12156,6 +12156,13 @@ namespace Legion {
         delete (*it);
       }
       available_repl_timing_ops.clear();
+      for (std::deque<ReplAllReduceOp*>::const_iterator it = 
+            available_repl_all_reduce_ops.begin(); it !=
+            available_repl_all_reduce_ops.end(); it++)
+      {
+        delete (*it);
+      }
+      available_repl_all_reduce_ops.clear();
       for (std::deque<ReplFenceOp*>::const_iterator it = 
             available_repl_fence_ops.begin(); it !=
             available_repl_fence_ops.end(); it++)
@@ -21787,6 +21794,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ReplAllReduceOp* Runtime::get_available_repl_all_reduce_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return get_available(all_reduce_op_lock, available_repl_all_reduce_ops);
+    }
+
+    //--------------------------------------------------------------------------
     ReplFenceOp* Runtime::get_available_repl_fence_op(void) 
     //--------------------------------------------------------------------------
     {
@@ -22251,6 +22265,14 @@ namespace Legion {
     {
       AutoLock t_lock(timing_op_lock);
       release_operation<false>(available_repl_timing_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_repl_all_reduce_op(ReplAllReduceOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock a_lock(all_reduce_op_lock);
+      release_operation<false>(available_repl_all_reduce_ops, op);
     }
 
     //--------------------------------------------------------------------------

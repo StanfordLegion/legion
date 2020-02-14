@@ -314,6 +314,7 @@ namespace Legion {
     public:
       inline ApEvent get_ready_event(void) const { return ready_event; }
       inline const Domain& get_domain(void) const { return future_map_domain; }
+      virtual bool is_replicate_future_map(void) const { return false; }
     public:
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_valid(ReferenceMutator *mutator);
@@ -409,6 +410,8 @@ namespace Legion {
       virtual ~ReplFutureMapImpl(void);
     public:
       ReplFutureMapImpl& operator=(const ReplFutureMapImpl &rhs);
+    public:
+      virtual bool is_replicate_future_map(void) const { return true; }
     public:
       // Override this so we can trigger our deletion barrier
       virtual void notify_inactive(ReferenceMutator *mutator);
@@ -3249,6 +3252,7 @@ namespace Legion {
       ReplDependentPartitionOp* get_available_repl_dependent_partition_op(void);
       ReplMustEpochOp*      get_available_repl_epoch_op(void);
       ReplTimingOp*         get_available_repl_timing_op(void);
+      ReplAllReduceOp*      get_available_repl_all_reduce_op(void);
       ReplFenceOp*          get_available_repl_fence_op(void);
       ReplMapOp*            get_available_repl_map_op(void);
       ReplAttachOp*         get_available_repl_attach_op(void);
@@ -3309,6 +3313,7 @@ namespace Legion {
       void free_repl_dependent_partition_op(ReplDependentPartitionOp *op);
       void free_repl_epoch_op(ReplMustEpochOp *op);
       void free_repl_timing_op(ReplTimingOp *op);
+      void free_repl_all_reduce_op(ReplAllReduceOp *op);
       void free_repl_fence_op(ReplFenceOp *op);
       void free_repl_map_op(ReplMapOp *op);
       void free_repl_attach_op(ReplAttachOp *op);
@@ -3716,6 +3721,7 @@ namespace Legion {
                                         available_repl_dependent_partition_ops;
       std::deque<ReplMustEpochOp*>      available_repl_must_epoch_ops;
       std::deque<ReplTimingOp*>         available_repl_timing_ops;
+      std::deque<ReplAllReduceOp*>      available_repl_all_reduce_ops;
       std::deque<ReplFenceOp*>          available_repl_fence_ops;
       std::deque<ReplMapOp*>            available_repl_map_ops;
       std::deque<ReplAttachOp*>         available_repl_attach_ops;

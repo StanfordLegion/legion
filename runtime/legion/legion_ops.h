@@ -3293,6 +3293,9 @@ namespace Legion {
       virtual void deactivate(void);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
+    protected:
+      void activate_all_reduce(void);
+      void deactivate_all_reduce(void);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);

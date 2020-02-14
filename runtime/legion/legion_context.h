@@ -1688,6 +1688,8 @@ namespace Legion {
       virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher);
       virtual Future execute_index_space(const IndexTaskLauncher &launcher,
                                       ReductionOpID redop, bool deterministic);
+      virtual Future reduce_future_map(const FutureMap &future_map,
+                                       ReductionOpID redop, bool deterministic);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual ApEvent remap_region(PhysicalRegion region);
       // Unmapping region is the same as for an inner context

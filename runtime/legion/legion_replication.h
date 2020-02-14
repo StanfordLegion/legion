@@ -223,6 +223,34 @@ namespace Legion {
     };
 
     /**
+     * \class AllReduceOpCollective
+     * This collective has equivalent functonality to 
+     * MPI All Reduce in that it will take a value from each
+     * shard and reduce it down to a final value using a
+     * Realm reduction operator.
+     */
+    class AllReduceOpCollective : public AllGatherCollective<false> {
+    public:
+      AllReduceOpCollective(CollectiveIndexLocation loc, ReplicateContext *ctx,
+                            const ReductionOp *redop);
+      AllReduceOpCollective(ReplicateContext *ctx, CollectiveID id,
+                            const ReductionOp *redop);
+      virtual ~AllReduceOpCollective(void);
+    public:
+      virtual void pack_collective_stage(Serializer &rez, int stage);
+      virtual void unpack_collective_stage(Deserializer &derez, int stage);
+    public:
+      RtEvent async_reduce(const void *value);
+      void sync_result(void *result);
+    public:
+      const ReductionOp *const redop;
+    protected:
+      int current_stage;
+      void *const value;
+      std::map<int,std::vector<void*> > future_values;
+    };
+
+    /**
      * \class AllReduceCollective
      * This shard collective has equivalent functionality to 
      * MPI All Reduce in that it will take a value from each
@@ -653,6 +681,7 @@ namespace Legion {
       // This takes ownership of the buffer
       RtEvent exchange_futures(void *value);
       void reduce_futures(ReplIndexTask *target);
+      void reduce_futures(const ReductionOp *redop, void *result_buffer);
     public:
       const size_t future_size;
     protected:
@@ -1565,6 +1594,31 @@ namespace Legion {
     protected:
       ValueBroadcast<long long> *timing_collective;
     }; 
+
+    /**
+     * \class ReplAllReduceOp
+     * An all-reduce operation that is aware that it is
+     * being executed in a control replication context
+     */
+    class ReplAllReduceOp : public AllReduceOp {
+    public:
+      ReplAllReduceOp(Runtime *rt);
+      ReplAllReduceOp(const ReplAllReduceOp &rhs);
+      virtual ~ReplAllReduceOp(void);
+    public:
+      ReplAllReduceOp& operator=(const ReplAllReduceOp &rhs);
+    public:
+      void initialize_replication(ReplicateContext *ctx);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+    public:
+      virtual void deferred_execute(void);
+    protected:
+      void *result_buffer;
+      FutureExchange *exchange_collective;
+      AllReduceOpCollective *all_reduce_collective;
+    };
 
     /**
      * \class ReplFenceOp

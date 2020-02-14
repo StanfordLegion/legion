@@ -16775,16 +16775,14 @@ namespace Legion {
     void AllReduceOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_operation(); 
+      activate_all_reduce();
     }
 
     //--------------------------------------------------------------------------
     void AllReduceOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
-      deactivate_operation();
-      future_map = FutureMap();
-      result = Future();
+      deactivate_all_reduce(); 
       runtime->free_all_reduce_op(this);
     }
 
@@ -16800,6 +16798,22 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return ALL_REDUCE_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    void AllReduceOp::activate_all_reduce(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_operation(); 
+    }
+
+    //--------------------------------------------------------------------------
+    void AllReduceOp::deactivate_all_reduce(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_operation();
+      future_map = FutureMap();
+      result = Future();
     }
 
     //--------------------------------------------------------------------------

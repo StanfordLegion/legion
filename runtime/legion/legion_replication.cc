@@ -4182,6 +4182,146 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Repl All Reduce Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ReplAllReduceOp::ReplAllReduceOp(Runtime *rt)
+      : AllReduceOp(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplAllReduceOp::ReplAllReduceOp(const ReplAllReduceOp &rhs)
+      : AllReduceOp(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplAllReduceOp::~ReplAllReduceOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplAllReduceOp& ReplAllReduceOp::operator=(const ReplAllReduceOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplAllReduceOp::initialize_replication(ReplicateContext *ctx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(redop != NULL);
+      assert(exchange_collective == NULL);
+      assert(all_reduce_collective == NULL);
+#endif
+      if (deterministic)
+        exchange_collective = 
+          new FutureExchange(ctx, redop->sizeof_rhs, COLLECTIVE_LOC_97);
+      else
+        all_reduce_collective = 
+          new AllReduceOpCollective(COLLECTIVE_LOC_97, ctx, redop);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplAllReduceOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_all_reduce();
+      result_buffer = NULL;
+      exchange_collective = NULL;
+      all_reduce_collective = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplAllReduceOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_all_reduce();
+      if (exchange_collective != NULL)
+        delete exchange_collective;
+      if (all_reduce_collective != NULL)
+        delete all_reduce_collective;
+      runtime->free_repl_all_reduce_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplAllReduceOp::deferred_execute(void)
+    //--------------------------------------------------------------------------
+    {
+      // See if this is our first pass through to perform the reduction
+      if (result_buffer == NULL)
+      { 
+        // First perform the reduction on our shard local futures
+        std::map<DomainPoint,FutureImpl*> futures;
+        future_map.impl->get_shard_local_futures(futures);
+        result_buffer = malloc(redop->sizeof_rhs);
+        redop->init(result_buffer, 1/*count*/);
+        for (std::map<DomainPoint,FutureImpl*>::const_iterator it = 
+              futures.begin(); it != futures.end(); it++)
+        {
+          FutureImpl *impl = it->second;
+          const size_t future_size = impl->get_untyped_size(true/*internal*/);
+          if (future_size != redop->sizeof_rhs)
+            REPORT_LEGION_ERROR(ERROR_FUTURE_MAP_REDOP_TYPE_MISMATCH,
+                "Future in future map reduction in task %s (UID %lld) does not "
+                "have the right input size for the given reduction operator. "
+                "Future has size %zd bytes but reduction operator expects "
+                "RHS inputs of %zd bytes.", parent_ctx->get_task_name(),
+                parent_ctx->get_unique_id(), future_size, redop->sizeof_rhs)
+          const void *data = 
+                        impl->get_untyped_result(true,NULL,true/*internal*/);
+          redop->fold(result_buffer, data, 1/*count*/, true/*exclusive*/);
+        }
+        if (runtime->legion_spy_enabled)
+        {
+          for (std::map<DomainPoint,FutureImpl*>::const_iterator it = 
+                futures.begin(); it != futures.end(); it++)
+          {
+            FutureImpl *impl = it->second;
+            const ApEvent ready_event = impl->get_ready_event();
+            if (ready_event.exists())
+              LegionSpy::log_future_use(unique_op_id, ready_event);
+          }
+        }
+        // Now do the exchange across the shards
+        RtEvent defer;
+        if (deterministic)
+          defer = exchange_collective->exchange_futures(result_buffer);
+        else
+          defer = all_reduce_collective->async_reduce(result_buffer);
+        if (defer.exists() && !defer.has_triggered())
+        {
+          DeferredExecuteArgs args(this);
+          runtime->issue_runtime_meta_task(args, 
+              LG_THROUGHPUT_DEFERRED_PRIORITY, defer);
+          return;
+        }
+      }
+      // If we make it here then we can get the results of the
+      // reductions across the shards
+      if (deterministic)
+        exchange_collective->reduce_futures(redop, result_buffer);
+      else
+        all_reduce_collective->sync_result(result_buffer);
+      // Tell the future about the final result which it will own
+      result.impl->set_result(result_buffer, redop->sizeof_rhs, true/*own*/);
+      // Mark that we are done executing which will complete the future
+      // as soon as this operation is complete
+      complete_execution();
+    }
+
+    /////////////////////////////////////////////////////////////
     // Repl Fence Op 
     /////////////////////////////////////////////////////////////
 
@@ -8573,6 +8713,126 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // All Reduce Op Collective 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    AllReduceOpCollective::AllReduceOpCollective(CollectiveIndexLocation loc,
+                                  ReplicateContext *ctx, const ReductionOp *op)
+      : AllGatherCollective(loc, ctx), redop(op), current_stage(-1),
+        value(malloc(op->sizeof_rhs))
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    AllReduceOpCollective::AllReduceOpCollective(ReplicateContext *ctx,
+                                         CollectiveID id, const ReductionOp* op)
+      : AllGatherCollective(ctx, id), redop(op), current_stage(-1),
+        value(malloc(op->sizeof_rhs))
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    AllReduceOpCollective::~AllReduceOpCollective(void)
+    //--------------------------------------------------------------------------
+    {
+      while (!future_values.empty())
+      {
+        std::map<int,std::vector<void*> >::iterator next = 
+          future_values.begin();
+        for (std::vector<void*>::iterator it = 
+              next->second.begin(); it != next->second.end(); it++)
+          free(*it);
+        future_values.erase(next);
+      }
+      free(value);
+    }
+
+    //--------------------------------------------------------------------------
+    void AllReduceOpCollective::pack_collective_stage(Serializer &rez,int stage)
+    //--------------------------------------------------------------------------
+    {
+      // The first time we pack a stage we merge any values that we had
+      // unpacked earlier as they are needed for sending this stage for
+      // the first time.
+      if (stage != current_stage)
+      {
+        if (!future_values.empty())
+        {
+          std::map<int,std::vector<void*> >::iterator next = 
+            future_values.begin();
+          for (std::vector<void*>::const_iterator it = 
+                next->second.begin(); it != next->second.end(); it++)
+          {
+            redop->fold(value, *it, 1/*count*/, true/*exclusive*/);
+            free(*it);
+          }
+          future_values.erase(next);
+        }
+        current_stage = stage;
+      }
+      rez.serialize(value);
+    }
+
+    //--------------------------------------------------------------------------
+    void AllReduceOpCollective::unpack_collective_stage(
+                                                 Deserializer &derez, int stage)
+    //--------------------------------------------------------------------------
+    {
+      // We never eagerly do reductions as they can arrive out of order
+      // and we can't apply them too early or we'll get duplicate 
+      // applications of reductions
+      void *next = malloc(redop->sizeof_rhs);
+      derez.deserialize(next, redop->sizeof_rhs);
+      future_values[stage].push_back(next);
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent AllReduceOpCollective::async_reduce(const void *input)
+    //--------------------------------------------------------------------------
+    {
+      memcpy(value, input, redop->sizeof_rhs);
+      perform_collective_async();
+      return perform_collective_wait(false/*block*/);
+    }
+    
+    //--------------------------------------------------------------------------
+    void AllReduceOpCollective::sync_result(void *result)
+    //--------------------------------------------------------------------------
+    {
+      perform_collective_wait(true/*block*/); 
+      // Need to avoid races here so we have to always recompute the last stage
+      memcpy(result, value, redop->sizeof_rhs);
+      if (!future_values.empty())
+      {
+#ifdef DEBUG_LEGION
+        // Should be at most one stage left
+        assert(future_values.size() == 1);
+#endif
+        const std::map<int,std::vector<void*> >::const_iterator last = 
+          future_values.begin();
+        if (last->first == -1)
+        {
+          // Special case for the last stage which already includes our
+          // value so just do the overwrite
+#ifdef DEBUG_LEGION
+          assert(last->second.size() == 1);
+#endif
+          memcpy(result, last->second.front(), redop->sizeof_rhs);
+        }
+        else
+        {
+          // Do the reduction here
+          for (std::vector<void*>::const_iterator it =
+                last->second.begin(); it != last->second.end(); it++)
+            redop->fold(result, *it, 1/*count*/, true/*exclusive*/);
+        }
+      }
+    }
+
+    /////////////////////////////////////////////////////////////
     // All Reduce Collective 
     /////////////////////////////////////////////////////////////
 
@@ -9863,6 +10123,23 @@ namespace Legion {
             it != results.end(); it++)
         target->fold_reduction_future(it->second, future_size, 
                                       false/*owner*/, true/*exclusive*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void FutureExchange::reduce_futures(const ReductionOp *redop,
+                                        void *result_buffer)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(future_size == redop->sizeof_rhs);
+#endif
+      redop->init(result_buffer, 1/*count*/);
+      // Now we apply the shard results in order to ensure that we get
+      // the same bitwise order across all the shards
+      // No need for the lock anymore since we know we're done
+      for (std::map<ShardID,void*>::const_iterator it = results.begin();
+            it != results.end(); it++)
+        redop->fold(result_buffer, it->second, 1/*count*/, true/*exclusive*/);
     }
 
     /////////////////////////////////////////////////////////////
