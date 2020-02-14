@@ -3538,14 +3538,44 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_equal_partition(Context ctx, 
-                                                      IndexSpace parent,
-                                                      IndexSpace color_space,
-                                                      size_t granularity,
-                                                      Color color)
+                                                   IndexSpace parent,
+                                                   IndexSpace color_space,
+                                                   size_t granularity,
+                                                   Color color)
     //--------------------------------------------------------------------------
     {
       return runtime->create_equal_partition(ctx, parent, color_space,
                                              granularity, color);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition Runtime::create_partition_by_weights(Context ctx,
+                                       IndexSpace parent,
+                                       const std::map<DomainPoint,int> &weights,
+                                       IndexSpace color_space,
+                                       size_t granularity, Color color)
+    //--------------------------------------------------------------------------
+    {
+      ArgumentMap argmap;
+      for (std::map<DomainPoint,int>::const_iterator it = 
+            weights.begin(); it != weights.end(); it++)
+        argmap.set_point(it->first,
+            TaskArgument(&it->second, sizeof(it->second)));
+      FutureMap future_map(argmap.impl->freeze(ctx));
+      return ctx->create_partition_by_weights(parent, future_map, color_space,
+                                              granularity, color);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition Runtime::create_partition_by_weights(Context ctx,
+                                                IndexSpace parent,
+                                                const FutureMap &weights,
+                                                IndexSpace color_space,
+                                                size_t granularity, Color color)
+    //--------------------------------------------------------------------------
+    {
+      return ctx->create_partition_by_weights(parent, weights, color_space, 
+                                              granularity, color);
     }
 
     //--------------------------------------------------------------------------
@@ -5061,6 +5091,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return runtime->execute_index_space(ctx, launcher, redop, deterministic);
+    }
+
+    //--------------------------------------------------------------------------
+    Future Runtime::reduce_future_map(Context ctx, const FutureMap &future_map,
+                                      ReductionOpID redop, bool deterministic)
+    //--------------------------------------------------------------------------
+    {
+      return ctx->reduce_future_map(future_map, redop, deterministic);
     }
 
     //--------------------------------------------------------------------------

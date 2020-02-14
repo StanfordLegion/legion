@@ -109,6 +109,11 @@ namespace Legion {
                                             IndexSpace color_space,
                                             size_t granularity,
                                             Color color) = 0;
+      virtual IndexPartition create_partition_by_weights(IndexSpace parent,
+                                            const FutureMap &weights,
+                                            IndexSpace color_space,
+                                            size_t granularity, 
+                                            Color color) = 0;
       virtual IndexPartition create_partition_by_union(RegionTreeForest *forest,
                                             IndexSpace parent,
                                             IndexPartition handle1,
@@ -301,6 +306,8 @@ namespace Legion {
                                          const IndexTaskLauncher &launcher) = 0;
       virtual Future execute_index_space(const IndexTaskLauncher &launcher,
                                    ReductionOpID redop, bool deterministic) = 0; 
+      virtual Future reduce_future_map(const FutureMap &future_map,
+                                   ReductionOpID redop, bool deterministic) = 0;
       virtual PhysicalRegion map_region(const InlineLauncher &launcher) = 0;
       virtual ApEvent remap_region(PhysicalRegion region) = 0;
       virtual void unmap_region(PhysicalRegion region) = 0;
@@ -790,6 +797,11 @@ namespace Legion {
                                             IndexSpace color_space,
                                             size_t granularity,
                                             Color color);
+      virtual IndexPartition create_partition_by_weights(IndexSpace parent,
+                                            const FutureMap &weights,
+                                            IndexSpace color_space,
+                                            size_t granularity, 
+                                            Color color);
       virtual IndexPartition create_partition_by_union(RegionTreeForest *forest,
                                             IndexSpace parent,
                                             IndexPartition handle1,
@@ -965,6 +977,8 @@ namespace Legion {
       virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher);
       virtual Future execute_index_space(const IndexTaskLauncher &launcher,
                                       ReductionOpID redop, bool deterministic);
+      virtual Future reduce_future_map(const FutureMap &future_map,
+                                       ReductionOpID redop, bool deterministic);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual ApEvent remap_region(PhysicalRegion region);
       virtual void unmap_region(PhysicalRegion region);
@@ -1427,6 +1441,11 @@ namespace Legion {
                                             IndexSpace color_space,
                                             size_t granularity,
                                             Color color);
+      virtual IndexPartition create_partition_by_weights(IndexSpace parent,
+                                            const FutureMap &weights,
+                                            IndexSpace color_space,
+                                            size_t granularity, 
+                                            Color color);
       virtual IndexPartition create_partition_by_union(RegionTreeForest *forest,
                                             IndexSpace parent,
                                             IndexPartition handle1,
@@ -1602,6 +1621,8 @@ namespace Legion {
       virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher);
       virtual Future execute_index_space(const IndexTaskLauncher &launcher,
                                       ReductionOpID redop, bool deterministic);
+      virtual Future reduce_future_map(const FutureMap &future_map,
+                                       ReductionOpID redop, bool deterministic);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual ApEvent remap_region(PhysicalRegion region);
       virtual void unmap_region(PhysicalRegion region);
@@ -1751,6 +1772,11 @@ namespace Legion {
                                             IndexSpace parent,
                                             IndexSpace color_space,
                                             size_t granularity,
+                                            Color color);
+      virtual IndexPartition create_partition_by_weights(IndexSpace parent,
+                                            const FutureMap &weights,
+                                            IndexSpace color_space,
+                                            size_t granularity, 
                                             Color color);
       virtual IndexPartition create_partition_by_union(RegionTreeForest *forest,
                                             IndexSpace parent,
@@ -1941,6 +1967,8 @@ namespace Legion {
       virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher);
       virtual Future execute_index_space(const IndexTaskLauncher &launcher,
                                       ReductionOpID redop, bool deterministic);
+      virtual Future reduce_future_map(const FutureMap &future_map,
+                                       ReductionOpID redop, bool deterministic);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual ApEvent remap_region(PhysicalRegion region);
       virtual void unmap_region(PhysicalRegion region);

@@ -318,6 +318,8 @@ namespace Legion {
       void add_valid_point(const DomainPoint &dp);
 #endif
     public:
+      void register_dependence(Operation *consumer_op);
+    public:
       void record_future_map_registered(ReferenceMutator *creator);
       static void handle_future_map_future_request(Deserializer &derez,
                               Runtime *runtime, AddressSpaceID source);
@@ -328,6 +330,10 @@ namespace Legion {
       // Either an index space task or a must epoch op
       Operation *const op;
       const GenerationID op_gen;
+      const int op_depth;
+#ifdef LEGION_SPY
+      const UniqueID op_uid;
+#endif
     private:
       mutable LocalLock future_map_lock;
       ApEvent ready_event;
@@ -2828,6 +2834,7 @@ namespace Legion {
       AttachOp*             get_available_attach_op(void);
       DetachOp*             get_available_detach_op(void);
       TimingOp*             get_available_timing_op(void);
+      AllReduceOp*          get_available_all_reduce_op(void);
     public:
       void free_individual_task(IndividualTask *task);
       void free_point_task(PointTask *task);
@@ -2865,6 +2872,7 @@ namespace Legion {
       void free_attach_op(AttachOp *op);
       void free_detach_op(DetachOp *op);
       void free_timing_op(TimingOp *op);
+      void free_all_reduce_op(AllReduceOp *op);
     public:
       RegionTreeContext allocate_region_tree_context(void);
       void free_region_tree_context(RegionTreeContext tree_ctx); 
@@ -3181,6 +3189,7 @@ namespace Legion {
       mutable LocalLock attach_op_lock;
       mutable LocalLock detach_op_lock;
       mutable LocalLock timing_op_lock;
+      mutable LocalLock all_reduce_op_lock;
     protected:
       std::deque<IndividualTask*>       available_individual_tasks;
       std::deque<PointTask*>            available_point_tasks;
@@ -3218,6 +3227,7 @@ namespace Legion {
       std::deque<AttachOp*>             available_attach_ops;
       std::deque<DetachOp*>             available_detach_ops;
       std::deque<TimingOp*>             available_timing_ops;
+      std::deque<AllReduceOp*>          available_all_reduce_ops;
 #ifdef DEBUG_LEGION
       TreeStateLogger *tree_state_logger;
       // For debugging purposes keep track of

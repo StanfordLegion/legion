@@ -3485,6 +3485,41 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition InnerContext::create_partition_by_weights(IndexSpace parent,
+                                                const FutureMap &weights, 
+                                                IndexSpace color_space,
+                                                size_t granularity, Color color)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);  
+      const IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                               parent.get_tree_id(), parent.get_type_tag());
+      const DistributedID did = runtime->get_available_distributed_id();
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating partition %d by weights with parent index "
+                      "space %x in task %s (ID %lld)", pid.id, parent.id,
+                      get_task_name(), get_unique_id());
+#endif
+      LegionColor partition_color = INVALID_COLOR;
+      if (color != AUTO_GENERATE_ID)
+        partition_color = color;
+      PendingPartitionOp *part_op = 
+        runtime->get_available_pending_partition_op();
+      part_op->initialize_weight_partition(this, pid, weights, granularity);
+      const ApEvent term_event = part_op->get_completion_event();
+      // Tell the region tree forest about this partition
+      RegionTreeForest *forest = runtime->forest;
+      const RtEvent safe = forest->create_pending_partition(this, pid, parent,
+        color_space, partition_color, DISJOINT_COMPLETE_KIND, did, term_event);
+      // Now we can add the operation to the queue
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      // Wait for any notifications to occur before returning
+      if (safe.exists())
+        safe.wait();
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition InnerContext::create_partition_by_union(
                                           RegionTreeForest *forest,
                                           IndexSpace parent,
@@ -3784,11 +3819,18 @@ namespace Legion {
         runtime->get_available_pending_partition_op();
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
+      std::set<RtEvent> safe_events;
       forest->create_pending_cross_product(this, handle1, handle2, handles, 
-                                           kind, partition_color, term_event);
+                                kind, partition_color, term_event, safe_events);
       part_op->initialize_cross_product(this, handle1, handle2,partition_color);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      if (!safe_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(safe_events);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
       return partition_color;
     }
 
@@ -5013,6 +5055,21 @@ namespace Legion {
 #endif
       execute_task_launch(task, true/*index*/, current_trace, 
                           launcher.silence_warnings, launcher.enable_inlining);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    Future InnerContext::reduce_future_map(const FutureMap &future_map,
+                                        ReductionOpID redop, bool deterministic)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this); 
+      if (future_map.impl == NULL)
+        return Future();
+      AllReduceOp *all_reduce_op = runtime->get_available_all_reduce_op();
+      Future result = 
+        all_reduce_op->initialize(this, future_map, redop, deterministic);
+      runtime->add_to_dependence_queue(this, executing_processor,all_reduce_op);
       return result;
     }
 
@@ -9316,6 +9373,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition LeafContext::create_partition_by_weights(IndexSpace parent,
+                                                const FutureMap &weights,
+                                                IndexSpace color_space,
+                                                size_t granularity, Color color)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_EQUAL_PARTITION_CREATION,
+        "Illegal create partition by weights performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id())
+      return IndexPartition::NO_PART;
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition LeafContext::create_partition_by_union(
                                           RegionTreeForest *forest,
                                           IndexSpace parent,
@@ -9884,6 +9954,17 @@ namespace Legion {
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,
         "Illegal execute index space call performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id())
+      return Future();
+    }
+
+    //--------------------------------------------------------------------------
+    Future LeafContext::reduce_future_map(const FutureMap &future_map,
+                                        ReductionOpID redop, bool deterministic)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,
+        "Illegal reduce future map call performed in leaf "
                      "task %s (ID %lld)", get_task_name(), get_unique_id())
       return Future();
     }
@@ -10744,6 +10825,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition InlineContext::create_partition_by_weights(IndexSpace parent,
+                                                const FutureMap &weights,
+                                                IndexSpace color_space,
+                                                size_t granularity, Color color)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_partition_by_weights(parent, weights, 
+                                    color_space, granularity, color);
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition InlineContext::create_partition_by_union(
                                       RegionTreeForest *forest,
                                       IndexSpace parent,
@@ -11183,6 +11275,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return enclosing->execute_index_space(launcher, redop, deterministic);
+    }
+
+    //--------------------------------------------------------------------------
+    Future InlineContext::reduce_future_map(const FutureMap &future_map,
+                                        ReductionOpID redop, bool deterministic)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->reduce_future_map(future_map, redop, deterministic);
     }
 
     //--------------------------------------------------------------------------

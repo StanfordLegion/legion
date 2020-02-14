@@ -64,6 +64,7 @@ namespace Legion {
         ATTACH_OP_KIND,
         DETACH_OP_KIND,
         TIMING_OP_KIND,
+        ALL_REDUCE_OP_KIND,
         TRACE_CAPTURE_OP_KIND,
         TRACE_COMPLETE_OP_KIND,
         TRACE_REPLAY_OP_KIND,
@@ -97,6 +98,7 @@ namespace Legion {
         "Attach",                   \
         "Detach",                   \
         "Timing",                   \
+        "All Reduce Op",            \
         "Trace Capture",            \
         "Trace Complete",           \
         "Trace Replay",             \
@@ -2365,6 +2367,7 @@ namespace Legion {
       enum PendingPartitionKind
       {
         EQUAL_PARTITION = 0,
+        WEIGHT_PARTITION,
         UNION_PARTITION,
         INTERSECTION_PARTITION,
         INTERSECTION_WITH_REGION,
@@ -2393,6 +2396,22 @@ namespace Legion {
         virtual void perform_logging(PendingPartitionOp* op);
       protected:
         IndexPartition pid;
+        size_t granularity;
+      };
+      class WeightPartitionThunk : public PendingPartitionThunk {
+      public:
+        WeightPartitionThunk(IndexPartition id, const FutureMap &w, size_t g)
+          : pid(id), weights(w), granularity(g) { }
+        virtual ~WeightPartitionThunk(void) { }
+      public:
+        virtual ApEvent perform(PendingPartitionOp *op,
+                                RegionTreeForest *forest)
+        { return forest->create_partition_by_weights(op, pid, 
+                                        weights, granularity); }
+        virtual void perform_logging(PendingPartitionOp *op);
+      protected:
+        IndexPartition pid;
+        FutureMap weights;
         size_t granularity;
       };
       class UnionPartitionThunk : public PendingPartitionThunk {
@@ -2559,6 +2578,8 @@ namespace Legion {
     public:
       void initialize_equal_partition(InnerContext *ctx,
                                       IndexPartition pid, size_t granularity);
+      void initialize_weight_partition(InnerContext *ctx, IndexPartition pid,
+                                const FutureMap &weights, size_t granularity);
       void initialize_union_partition(InnerContext *ctx,
                                       IndexPartition pid, 
                                       IndexPartition handle1,
@@ -3191,11 +3212,40 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
       virtual void deferred_execute(void);
-      virtual void trigger_complete(void);
     protected:
       TimingMeasurement measurement;
       std::set<Future> preconditions;
       Future result;
+    };
+
+    /**
+     * \class AllReduceOp 
+     * Operation for reducing future maps down to futures
+     */
+    class AllReduceOp : public Operation {
+    public:
+      AllReduceOp(Runtime *rt);
+      AllReduceOp(const AllReduceOp &rhs);
+      virtual ~AllReduceOp(void);
+    public:
+      AllReduceOp& operator=(const AllReduceOp &rhs);
+    public:
+      Future initialize(InnerContext *ctx, const FutureMap &future_map,
+                        ReductionOpID redop, bool deterministic);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+    public:
+      virtual void trigger_dependence_analysis(void);
+      virtual void trigger_mapping(void);
+      virtual void deferred_execute(void);
+    protected:
+      FutureMap future_map;
+      const ReductionOp *redop; 
+      Future result;
+      bool deterministic;
     };
 
     /**

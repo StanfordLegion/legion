@@ -629,6 +629,12 @@ namespace Legion {
         log_spy.print("Timing Operation %llu %llu", context, timing);
       }
 
+      static inline void log_all_reduce_operation(UniqueID context, 
+                                                  UniqueID reduce)
+      {
+        log_spy.print("All Reduce Operation %llu %llu", context, reduce);
+      }
+
       static inline void log_predicate_operation(UniqueID context, 
                                                  UniqueID pred_op)
       {

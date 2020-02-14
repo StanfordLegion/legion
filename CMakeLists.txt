@@ -168,10 +168,12 @@ endif()
 #------------------------------------------------------------------------------#
 option(Legion_USE_Python "Use Python" OFF)
 if(Legion_USE_Python)
+  set(Legion_Python_Version "" CACHE STRING "Minimum Python version")
+
   # Note: Legion now supports several versions, so no need to be so forceful
   # set(Python_ADDITIONAL_VERSIONS 2.7)
-  find_package(PythonInterp REQUIRED) # Needed to invoke setup.py for install
-  find_package(PythonLibs REQUIRED)
+  find_package(PythonInterp ${Legion_Python_Version} REQUIRED) # Needed to invoke setup.py for install
+  find_package(PythonLibs ${Legion_Python_Version} REQUIRED)
 
   # define variable for realm_defines.h
   set(REALM_USE_PYTHON ON)
@@ -482,6 +484,11 @@ if(Legion_REDOP_COMPLEX)
   set(LEGION_REDOP_COMPLEX ON)
 endif()
 mark_as_advanced(Legion_REDOP_COMPLEX)
+if(Legion_REDOP_HALF)
+  # define variable for legion_defines.h
+  set(LEGION_REDOP_HALF ON)
+endif()
+mark_as_advanced(Legion_REDOP_HALF)
 
 #------------------------------------------------------------------------------#
 # Configure definition headers
