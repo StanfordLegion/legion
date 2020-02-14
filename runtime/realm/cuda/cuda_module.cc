@@ -2300,14 +2300,12 @@ namespace Realm {
     // class GPU
 
     GPU::GPU(CudaModule *_module, GPUInfo *_info, GPUWorker *_worker,
+	     CUcontext _context,
 	     int num_streams)
       : module(_module), info(_info), worker(_worker)
-      , proc(0), fbmem(0), current_stream(0)
+      , proc(0), fbmem(0), context(_context), current_stream(0)
     {
-      // create a CUDA context for our device - automatically becomes current
-      CHECK_CU( cuCtxCreate(&context, 
-			    CU_CTX_MAP_HOST | CU_CTX_SCHED_BLOCKING_SYNC,
-			    info->device) );
+      // assume context is already current (happens automatically on creation)
 
       event_pool.init_pool();
 
@@ -2634,6 +2632,9 @@ namespace Realm {
       , cfg_pin_sysmem(true)
       , cfg_fences_use_callbacks(false)
       , cfg_suppress_hijack_warning(false)
+      , cfg_skip_gpu_count(0)
+      , cfg_skip_busy_gpus(false)
+      , cfg_min_avail_mem(0)
       , shared_worker(0), zcmem_cpu_base(0)
       , zcib_cpu_base(0), zcmem(0)
     {}
@@ -2660,9 +2661,6 @@ namespace Realm {
 	CHECK_CU( cuDeviceGetCount(&num_devices) );
 	for(int i = 0; i < num_devices; i++) {
 	  GPUInfo *info = new GPUInfo;
-
-	  // TODO: consider environment variables or other ways to tell if certain
-	  //  GPUs should be ignored
 
 	  info->index = i;
 	  CHECK_CU( cuDeviceGet(&info->device, i) );
@@ -2722,7 +2720,10 @@ namespace Realm {
 	  .add_option_int("-ll:gpuworker", m->cfg_use_shared_worker)
 	  .add_option_int("-ll:pin", m->cfg_pin_sysmem)
 	  .add_option_bool("-cuda:callbacks", m->cfg_fences_use_callbacks)
-	  .add_option_bool("-cuda:nohijack", m->cfg_suppress_hijack_warning);
+	  .add_option_bool("-cuda:nohijack", m->cfg_suppress_hijack_warning)
+	  .add_option_int("-cuda:skipgpus", m->cfg_skip_gpu_count)
+	  .add_option_bool("-cuda:skipbusy", m->cfg_skip_busy_gpus)
+	  .add_option_int_units("-cuda:minavailmem", m->cfg_min_avail_mem, 'm');
 	
 	bool ok = cp.parse_command_line(cmdline);
 	if(!ok) {
@@ -2740,12 +2741,6 @@ namespace Realm {
     {
       Module::initialize(runtime);
 
-      // sanity-check: do we even have enough gpus?
-      if(cfg_num_gpus > gpu_info.size()) {
-	log_gpu.fatal() << cfg_num_gpus << " GPUs requested, but only " << gpu_info.size() << " available!";
-	assert(false);
-      }
-
       // if we are using a shared worker, create that next
       if(cfg_use_shared_worker) {
 	shared_worker = new GPUWorker;
@@ -2755,9 +2750,41 @@ namespace Realm {
 						 1 << 20); // hardcoded worker stack size
       }
 
-      // just use the GPUs in order right now
       gpus.resize(cfg_num_gpus);
-      for(unsigned i = 0; i < cfg_num_gpus; i++) {
+      unsigned gpu_count = 0;
+      // try to get cfg_num_gpus, working through the list in order
+      for(size_t i = cfg_skip_gpu_count;
+          (i < gpu_info.size()) && (gpu_count < cfg_num_gpus);
+          i++) {
+	// try to create a context and possibly check available memory
+	CUcontext context;
+	CUresult res = cuCtxCreate(&context,
+				   CU_CTX_MAP_HOST | CU_CTX_SCHED_BLOCKING_SYNC,
+				   gpu_info[i]->device);
+	// a busy GPU might return INVALID_DEVICE or OUT_OF_MEMORY here
+	if((res == CUDA_ERROR_INVALID_DEVICE) ||
+	   (res == CUDA_ERROR_OUT_OF_MEMORY)) {
+	  if(cfg_skip_busy_gpus) {
+	    log_gpu.info() << "GPU " << gpu_info[i]->device << " appears to be busy (res=" << res << ") - skipping";
+	    continue;
+	  } else {
+	    log_gpu.fatal() << "GPU " << gpu_info[i]->device << " appears to be in use - use CUDA_VISIBLE_DEVICES, -cuda:skipgpus, or -cuda:skipbusy to select other GPUs";
+	    abort();
+	  }
+	}
+	// any other error is a (unknown) problem
+	CHECK_CU(res);
+
+	if(cfg_min_avail_mem > 0) {
+	  size_t total_mem, avail_mem;
+	  CHECK_CU( cuMemGetInfo(&avail_mem, &total_mem) );
+	  if(avail_mem < cfg_min_avail_mem) {
+	    log_gpu.info() << "GPU " << gpu_info[i]->device << " does not have enough available memory (" << avail_mem << " < " << cfg_min_avail_mem << ") - skipping";
+	    CHECK_CU( cuCtxDestroy(context) );
+	    continue;
+	  }
+	}
+	
 	// either create a worker for this GPU or use the shared one
 	GPUWorker *worker;
 	if(cfg_use_shared_worker) {
@@ -2770,12 +2797,18 @@ namespace Realm {
 					    1 << 20); // hardcoded worker stack size
 	}
 
-	GPU *g = new GPU(this, gpu_info[i], worker, cfg_gpu_streams);
+	GPU *g = new GPU(this, gpu_info[i], worker, context, cfg_gpu_streams);
 
 	if(!cfg_use_shared_worker)
 	  dedicated_workers[g] = worker;
 
-	gpus[i] = g;
+	gpus[gpu_count++] = g;
+      }
+
+      // did we actually get the requested number of GPUs?
+      if(gpu_count < cfg_num_gpus) {
+	log_gpu.fatal() << cfg_num_gpus << " GPUs requested, but only " << gpu_count << " available!";
+	assert(false);
       }
     }
 

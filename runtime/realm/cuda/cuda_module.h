@@ -112,6 +112,9 @@ namespace Realm {
       bool cfg_use_background_workers, cfg_use_shared_worker, cfg_pin_sysmem;
       bool cfg_fences_use_callbacks;
       bool cfg_suppress_hijack_warning;
+      unsigned cfg_skip_gpu_count;
+      bool cfg_skip_busy_gpus;
+      size_t cfg_min_avail_mem;
 
       // "global" variables live here too
       GPUWorker *shared_worker;
@@ -455,6 +458,7 @@ namespace Realm {
     class GPU {
     public:
       GPU(CudaModule *_module, GPUInfo *_info, GPUWorker *worker,
+	  CUcontext _context,
 	  int num_streams);
       ~GPU(void);
 
