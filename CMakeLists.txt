@@ -484,6 +484,11 @@ if(Legion_REDOP_COMPLEX)
   set(LEGION_REDOP_COMPLEX ON)
 endif()
 mark_as_advanced(Legion_REDOP_COMPLEX)
+if(Legion_REDOP_HALF)
+  # define variable for legion_defines.h
+  set(LEGION_REDOP_HALF ON)
+endif()
+mark_as_advanced(Legion_REDOP_HALF)
 
 #------------------------------------------------------------------------------#
 # Configure definition headers
