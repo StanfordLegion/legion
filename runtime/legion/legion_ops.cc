@@ -16714,12 +16714,162 @@ namespace Legion {
       complete_execution();
     }
 
+    ///////////////////////////////////////////////////////////// 
+    // All Reduce Op 
+    /////////////////////////////////////////////////////////////
+
     //--------------------------------------------------------------------------
-    void TimingOp::trigger_complete(void)
+    AllReduceOp::AllReduceOp(Runtime *rt)
+      : Operation(rt)
     //--------------------------------------------------------------------------
     {
-      complete_operation();
-    } 
+    }
+
+    //--------------------------------------------------------------------------
+    AllReduceOp::AllReduceOp(const AllReduceOp &rhs)
+      : Operation(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    AllReduceOp::~AllReduceOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    AllReduceOp& AllReduceOp::operator=(const AllReduceOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    Future AllReduceOp::initialize(InnerContext *ctx, const FutureMap &fm, 
+                                   ReductionOpID redop_id,bool is_deterministic)
+    //--------------------------------------------------------------------------
+    {
+      initialize_operation(ctx, true/*track*/);
+      future_map = fm;
+      redop = runtime->get_reduction(redop_id);
+      result = Future(new FutureImpl(runtime, true/*register*/,
+                  runtime->get_available_distributed_id(),
+                  runtime->address_space, get_completion_event(), this));
+      deterministic = is_deterministic;
+      if (runtime->legion_spy_enabled)
+      {
+        LegionSpy::log_all_reduce_operation(ctx->get_unique_id(), unique_op_id);
+        const DomainPoint empty_point;
+        LegionSpy::log_future_creation(unique_op_id,
+            result.impl->get_ready_event(), empty_point);
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void AllReduceOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_operation(); 
+    }
+
+    //--------------------------------------------------------------------------
+    void AllReduceOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_operation();
+      future_map = FutureMap();
+      result = Future();
+      runtime->free_all_reduce_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* AllReduceOp::get_logging_name(void) const
+    //--------------------------------------------------------------------------
+    {
+      return op_names[ALL_REDUCE_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind AllReduceOp::get_operation_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return ALL_REDUCE_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    void AllReduceOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      future_map.impl->register_dependence(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void AllReduceOp::trigger_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+      complete_mapping();
+      const ApEvent ready = future_map.impl->get_ready_event();
+      if (ready.exists())
+      {
+        const RtEvent wait_on = Runtime::protect_event(ready);
+        if (wait_on.exists() && !wait_on.has_triggered())
+        {
+          DeferredExecuteArgs args(this);
+          runtime->issue_runtime_meta_task(args, 
+              LG_THROUGHPUT_DEFERRED_PRIORITY, wait_on);
+          return;
+        }
+      }
+      // If we make it here we can just do this now
+      deferred_execute();
+    }
+
+    //--------------------------------------------------------------------------
+    void AllReduceOp::deferred_execute(void)
+    //--------------------------------------------------------------------------
+    {
+      std::map<DomainPoint,Future> futures;
+      future_map.impl->get_all_futures(futures);
+      void *result_buffer = malloc(redop->sizeof_rhs);
+      redop->init(result_buffer, 1/*count*/);
+      for (std::map<DomainPoint,Future>::const_iterator it = 
+            futures.begin(); it != futures.end(); it++)
+      {
+        FutureImpl *impl = it->second.impl;
+        const size_t future_size = impl->get_untyped_size(true/*internal*/);
+        if (future_size != redop->sizeof_rhs)
+          REPORT_LEGION_ERROR(ERROR_FUTURE_MAP_REDOP_TYPE_MISMATCH,
+              "Future in future map reduction in task %s (UID %lld) does not "
+              "have the right input size for the given reduction operator. "
+              "Future has size %zd bytes but reduction operator expects "
+              "RHS inputs of %zd bytes.", parent_ctx->get_task_name(),
+              parent_ctx->get_unique_id(), future_size, redop->sizeof_rhs)
+        const void *data = impl->get_untyped_result(true,NULL,true/*internal*/);
+        redop->fold(result_buffer, data, 1/*count*/, true/*exclusive*/);
+      }
+      if (runtime->legion_spy_enabled)
+      {
+        for (std::map<DomainPoint,Future>::const_iterator it = 
+              futures.begin(); it != futures.end(); it++)
+        {
+          FutureImpl *impl = it->second.impl;
+          const ApEvent ready_event = impl->get_ready_event();
+          if (ready_event.exists())
+            LegionSpy::log_future_use(unique_op_id, ready_event);
+        }
+      }
+      // Tell the future about the final result which it will own
+      result.impl->set_result(result_buffer, redop->sizeof_rhs, true/*own*/);
+      // Mark that we are done executing which will complete the future
+      // as soon as this operation is complete
+      complete_execution();
+    }
 
     ///////////////////////////////////////////////////////////// 
     // Remote Op 

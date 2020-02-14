@@ -5440,6 +5440,22 @@ namespace Legion {
                                ReductionOpID redop, bool deterministic = false);
 
       /**
+       * Reduce a future map down to a single future value using 
+       * a specified reduction operator. This assumes that all the values
+       * in the future map are instance of the reduction operator's RHS
+       * type and the resulting future will also be an RHS type.
+       * @param ctx enclosing task context
+       * @param future_map the future map to reduct the value
+       * @param redop ID for the reduction op to use for reducing values
+       * @param deterministic request that the reduced future be computed
+       *        in a deterministic way (more expensive than non-deterministic)
+       * @return a future result representing the the reduction of all the
+       *         values in the future map
+       */
+      Future reduce_future_map(Context ctx, const FutureMap &future_map, 
+                               ReductionOpID redop, bool deterministic = false);
+
+      /**
        * @deprecated
        * An older method for launching a single task maintained for backwards
        * compatibility with older Legion programs.  

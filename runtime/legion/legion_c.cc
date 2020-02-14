@@ -2845,6 +2845,21 @@ legion_future_map_get_future(legion_future_map_t fm_,
   return CObjectWrapper::wrap(new Future(fm->get_future(dp)));
 }
 
+legion_future_t
+legion_reduce_future_map(legion_runtime_t runtime_,
+                         legion_context_t ctx_,
+                         legion_future_map_t fm_,
+                         legion_reduction_op_id_t redop,
+                         bool deterministic)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  FutureMap *fm = CObjectWrapper::unwrap(fm_);
+
+  return CObjectWrapper::wrap(new Future(
+        runtime->reduce_future_map(ctx, *fm, redop, deterministic)));
+}
+
 // -----------------------------------------------------------------------
 // Deferred Buffer Operations
 // -----------------------------------------------------------------------

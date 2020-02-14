@@ -5134,6 +5134,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Future InnerContext::reduce_future_map(const FutureMap &future_map,
+                                        ReductionOpID redop, bool deterministic)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this); 
+      if (future_map.impl == NULL)
+        return Future();
+      AllReduceOp *all_reduce_op = runtime->get_available_all_reduce_op();
+      Future result = 
+        all_reduce_op->initialize(this, future_map, redop, deterministic);
+      runtime->add_to_dependence_queue(this, executing_processor,all_reduce_op);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     PhysicalRegion InnerContext::map_region(const InlineLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -15637,6 +15652,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Future LeafContext::reduce_future_map(const FutureMap &future_map,
+                                        ReductionOpID redop, bool deterministic)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,
+        "Illegal reduce future map call performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id())
+      return Future();
+    }
+
+    //--------------------------------------------------------------------------
     PhysicalRegion LeafContext::map_region(const InlineLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -17036,6 +17062,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return enclosing->execute_index_space(launcher, redop, deterministic);
+    }
+
+    //--------------------------------------------------------------------------
+    Future InlineContext::reduce_future_map(const FutureMap &future_map,
+                                        ReductionOpID redop, bool deterministic)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->reduce_future_map(future_map, redop, deterministic);
     }
 
     //--------------------------------------------------------------------------

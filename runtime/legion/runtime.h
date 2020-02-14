@@ -343,6 +343,8 @@ namespace Legion {
       virtual void get_shard_local_futures(
                                 std::map<DomainPoint,FutureImpl*> &futures);
     public:
+      void register_dependence(Operation *consumer_op);
+    public:
       void record_future_map_registered(ReferenceMutator *creator);
       static void handle_future_map_future_request(Deserializer &derez,
                               Runtime *runtime, AddressSpaceID source);
@@ -353,6 +355,10 @@ namespace Legion {
       // Either an index space task or a must epoch op
       Operation *const op;
       const GenerationID op_gen;
+      const int op_depth;
+#ifdef LEGION_SPY
+      const UniqueID op_uid;
+#endif
       const Domain future_map_domain;
     protected:
       mutable LocalLock future_map_lock;
@@ -3229,6 +3235,7 @@ namespace Legion {
       AttachOp*             get_available_attach_op(void);
       DetachOp*             get_available_detach_op(void);
       TimingOp*             get_available_timing_op(void);
+      AllReduceOp*          get_available_all_reduce_op(void);
     public: // Control replication operations
       ReplIndividualTask*   get_available_repl_individual_task(void);
       ReplIndexTask*        get_available_repl_index_task(void);
@@ -3288,6 +3295,7 @@ namespace Legion {
       void free_attach_op(AttachOp *op);
       void free_detach_op(DetachOp *op);
       void free_timing_op(TimingOp *op);
+      void free_all_reduce_op(AllReduceOp *op);
     public: // Control replication operations
       void free_repl_individual_task(ReplIndividualTask *task);
       void free_repl_index_task(ReplIndexTask *task);
@@ -3654,6 +3662,7 @@ namespace Legion {
       mutable LocalLock attach_op_lock;
       mutable LocalLock detach_op_lock;
       mutable LocalLock timing_op_lock;
+      mutable LocalLock all_reduce_op_lock;
     protected:
       std::deque<IndividualTask*>       available_individual_tasks;
       std::deque<PointTask*>            available_point_tasks;
@@ -3691,6 +3700,7 @@ namespace Legion {
       std::deque<AttachOp*>             available_attach_ops;
       std::deque<DetachOp*>             available_detach_ops;
       std::deque<TimingOp*>             available_timing_ops;
+      std::deque<AllReduceOp*>          available_all_reduce_ops;
     protected: // Control replication operations
       std::deque<ReplIndividualTask*>   available_repl_individual_tasks;
       std::deque<ReplIndexTask*>        available_repl_index_tasks;

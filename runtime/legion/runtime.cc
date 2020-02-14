@@ -1367,6 +1367,10 @@ namespace Legion {
       : DistributedCollectable(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC),  owner_space), 
         context(ctx), op(o), op_gen(o->get_generation()), 
+        op_depth(o->get_context()->get_depth()),
+#ifdef LEGION_SPY
+        op_uid(o->get_unique_op_id()),
+#endif
         future_map_domain(domain), ready_event(o->get_completion_event()),
         delete_event(deleted)
     //--------------------------------------------------------------------------
@@ -1388,7 +1392,10 @@ namespace Legion {
       : DistributedCollectable(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC), 
           owner_space, register_now), 
-        context(ctx), op(NULL), op_gen(0), 
+        context(ctx), op(NULL), op_gen(0), op_depth(0),
+#ifdef LEGION_SPY
+        op_uid(0),
+#endif
         future_map_domain(d), ready_event(ready), delete_event(deleted)
     //--------------------------------------------------------------------------
     {
@@ -1403,7 +1410,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMapImpl::FutureMapImpl(const FutureMapImpl &rhs)
-      : DistributedCollectable(rhs), context(NULL), op(NULL), op_gen(0)
+      : DistributedCollectable(rhs), context(NULL), op(NULL), op_gen(0), 
+        op_depth(0)
+#ifdef LEGION_SPY
+        , op_uid(0)
+#endif
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1669,6 +1680,32 @@ namespace Legion {
       for (std::map<DomainPoint,Future>::const_iterator it = 
             futures.begin(); it != futures.end(); it++)
         others[it->first] = it->second.impl;
+    }
+
+    //--------------------------------------------------------------------------
+    void FutureMapImpl::register_dependence(Operation *consumer_op)
+    //--------------------------------------------------------------------------
+    {
+      if (op == NULL)
+        return;
+      // Only record dependences on things from the same context
+      // We know futures can never flow up the task tree so the
+      // only way they have the same depth is if they are from 
+      // the same parent context
+      TaskContext *context = consumer_op->get_context();
+      const int consumer_depth = context->get_depth();
+#ifdef DEBUG_LEGION
+      assert(consumer_depth >= op_depth);
+#endif
+      if (consumer_depth == op_depth)
+      {
+        consumer_op->register_dependence(op, op_gen);
+#ifdef LEGION_SPY
+        LegionSpy::log_mapping_dependence(
+            context->get_unique_id(), op_uid, 0,
+            consumer_op->get_unique_op_id(), 0, TRUE_DEPENDENCE);
+#endif
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -12028,6 +12065,13 @@ namespace Legion {
         delete (*it);
       }
       available_timing_ops.clear();
+      for (std::deque<AllReduceOp*>::const_iterator it = 
+            available_all_reduce_ops.begin(); it !=
+            available_all_reduce_ops.end(); it++)
+      {
+        delete (*it);
+      }
+      available_all_reduce_ops.clear();
       for (std::deque<ReplIndividualTask*>::const_iterator it = 
             available_repl_individual_tasks.begin(); it !=
             available_repl_individual_tasks.end(); it++)
@@ -21647,6 +21691,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    AllReduceOp* Runtime::get_available_all_reduce_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return get_available(all_reduce_op_lock, available_all_reduce_ops);
+    }
+
+    //--------------------------------------------------------------------------
     ReplIndividualTask* Runtime::get_available_repl_individual_task(void)
     //--------------------------------------------------------------------------
     {
@@ -22272,6 +22323,14 @@ namespace Legion {
     {
       AutoLock t_lock(summary_op_lock);
       release_operation<false>(available_repl_summary_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_all_reduce_op(AllReduceOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock a_lock(all_reduce_op_lock);
+      release_operation<false>(available_all_reduce_ops, op);
     }
 
     //--------------------------------------------------------------------------
