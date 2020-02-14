@@ -211,6 +211,12 @@ namespace Legion {
                                      size_t granularity,
                                      ShardID shard = 0,
                                      size_t total_shards = 1);
+      ApEvent create_partition_by_weights(Operation *op,
+                                          IndexPartition pid,
+                                          const FutureMap &map,
+                                          size_t granularity,
+                                          ShardID shard = 0,
+                                          size_t total_shards = 1);
       ApEvent create_partition_by_union(Operation *op,
                                         IndexPartition pid,
                                         IndexPartition handle1,
@@ -1925,6 +1931,12 @@ namespace Legion {
                                        bool perform_intersections,
                                        ShardID shard,
                                        size_t total_shards) = 0;
+      virtual ApEvent create_by_weights(Operation *op,
+                                        IndexPartNode *partition,
+                                        FutureMapImpl *future_map,
+                                        size_t granularity,
+                                        ShardID shard,
+                                        size_t total_shards) = 0;
       virtual ApEvent create_by_field(Operation *op,
                                       IndexPartNode *partition,
                 const std::vector<FieldDataDescriptor> &instances,
@@ -2141,6 +2153,17 @@ namespace Legion {
                                       FutureMapImpl *future_map,
                                       bool perform_intersections,
                                       ShardID shard, size_t total_shards);
+      virtual ApEvent create_by_weights(Operation *op,
+                                        IndexPartNode *partition,
+                                        FutureMapImpl *future_map,
+                                        size_t granularity,
+                                        ShardID shard, size_t total_shards);
+      template<int COLOR_DIM, typename COLOR_T>
+      ApEvent create_by_weight_helper(Operation *op,
+                                      IndexPartNode *partition,
+                                      FutureMapImpl *future_map,
+                                      size_t granularity,
+                                      ShardID shard, size_t total_shards);
       virtual ApEvent create_by_field(Operation *op,
                                       IndexPartNode *partition,
                 const std::vector<FieldDataDescriptor> &instances,
@@ -2299,9 +2322,9 @@ namespace Legion {
       struct CreateByDomainHelper {
       public:
         CreateByDomainHelper(IndexSpaceNodeT<DIM,T> *n,
-                              IndexPartNode *p, Operation *o,
-                              FutureMapImpl *fm, bool inter,
-                              bool s, size_t total)
+                             IndexPartNode *p, Operation *o,
+                             FutureMapImpl *fm, bool inter,
+                             ShardID s, size_t total)
           : node(n), partition(p), op(o), future_map(fm), 
             shard(s), total_shards(total), intersect(inter) { }
       public:
@@ -2321,6 +2344,33 @@ namespace Legion {
         const ShardID shard;
         const size_t total_shards;
         const bool intersect;
+        ApEvent result;
+      };
+      struct CreateByWeightHelper {
+      public:
+        CreateByWeightHelper(IndexSpaceNodeT<DIM,T> *n,
+                             IndexPartNode *p, Operation *o,
+                             FutureMapImpl *fm, size_t g,
+                             ShardID s, size_t total)
+          : node(n), partition(p), op(o), future_map(fm), 
+            granularity(g), shard(s), total_shards(total) { }
+      public:
+        template<typename COLOR_DIM, typename COLOR_T>
+        static inline void demux(CreateByWeightHelper *creator)
+        {
+          creator->result = creator->node->template 
+            create_by_weight_helper<COLOR_DIM::N,COLOR_T>(creator->op,
+                creator->partition, creator->future_map, creator->granularity,
+                creator->shard, creator->total_shards);
+        }
+      public:
+        IndexSpaceNodeT<DIM,T> *const node;
+        IndexPartNode *const partition;
+        Operation *const op;
+        FutureMapImpl *const future_map;
+        const size_t granularity;
+        const ShardID shard;
+        const size_t total_shards;
         ApEvent result;
       };
       struct CreateByFieldHelper {
@@ -2685,6 +2735,8 @@ namespace Legion {
     public:
       ApEvent create_equal_children(Operation *op, size_t granularity,
                                     ShardID shard, size_t total_shards);
+      ApEvent create_by_weights(Operation *op, const FutureMap &weights,
+                  size_t granularity, ShardID shard, size_t total_shards);
       ApEvent create_by_union(Operation *Op,
                               IndexPartNode *left, IndexPartNode *right,
                               ShardID shard, size_t total_shards);

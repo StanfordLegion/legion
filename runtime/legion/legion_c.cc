@@ -1144,6 +1144,54 @@ legion_index_partition_create_equal(legion_runtime_t runtime_,
 }
 
 legion_index_partition_t
+legion_index_partition_create_by_weights(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_space_t parent_,
+  legion_domain_point_t *colors_,
+  int *weights_,
+  size_t num_colors,
+  legion_index_space_t color_space_,
+  size_t granularity /* = 1 */,
+  int color /* = AUTO_GENERATE_ID */)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexSpace parent = CObjectWrapper::unwrap(parent_);
+  IndexSpace color_space = CObjectWrapper::unwrap(color_space_);
+  std::map<DomainPoint,int> weights;
+  for (unsigned idx = 0; idx < num_colors; idx++)
+    weights[CObjectWrapper::unwrap(colors_[idx])] = weights_[idx]; 
+
+  IndexPartition ip =
+    runtime->create_partition_by_weights(ctx, parent, weights, 
+                              color_space, granularity, color);
+  return CObjectWrapper::wrap(ip);
+}
+
+legion_index_partition_t
+legion_index_partition_create_by_weights_future_map(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_space_t parent_,
+  legion_future_map_t future_map_,
+  legion_index_space_t color_space_,
+  size_t granularity /* = 1 */,
+  int color /* = AUTO_GENERATE_ID */)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexSpace parent = CObjectWrapper::unwrap(parent_);
+  FutureMap *future_map = CObjectWrapper::unwrap(future_map_);
+  IndexSpace color_space = CObjectWrapper::unwrap(color_space_);
+
+  IndexPartition ip =
+    runtime->create_partition_by_weights(ctx, parent, *future_map,
+                                  color_space, granularity, color);
+  return CObjectWrapper::wrap(ip);
+}
+
+legion_index_partition_t
 legion_index_partition_create_by_union(
   legion_runtime_t runtime_,
   legion_context_t ctx_,
@@ -1265,7 +1313,7 @@ legion_index_partition_create_by_domain(
 }
 
 legion_index_partition_t
-legion_index_partition_create_by_future_map(
+legion_index_partition_create_by_domain_future_map(
   legion_runtime_t runtime_,
   legion_context_t ctx_,
   legion_index_space_t parent_,

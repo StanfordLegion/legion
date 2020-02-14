@@ -2360,6 +2360,7 @@ namespace Legion {
       enum PendingPartitionKind
       {
         EQUAL_PARTITION = 0,
+        WEIGHT_PARTITION,
         UNION_PARTITION,
         INTERSECTION_PARTITION,
         INTERSECTION_WITH_REGION,
@@ -2396,6 +2397,27 @@ namespace Legion {
         virtual void perform_logging(PendingPartitionOp* op);
       protected:
         IndexPartition pid;
+        size_t granularity;
+      };
+      class WeightPartitionThunk : public PendingPartitionThunk {
+      public:
+        WeightPartitionThunk(IndexPartition id, const FutureMap &w, size_t g)
+          : pid(id), weights(w), granularity(g) { }
+        virtual ~WeightPartitionThunk(void) { }
+      public:
+        virtual ApEvent perform(PendingPartitionOp *op,
+                                RegionTreeForest *forest)
+        { return forest->create_partition_by_weights(op, pid, 
+                                        weights, granularity); }
+        virtual ApEvent perform_shard(PendingPartitionOp *op,
+                                      RegionTreeForest *forest,
+                                      ShardID shard, size_t total_shards)
+        { return forest->create_partition_by_weights(op, pid, weights,
+                                      granularity, shard, total_shards); }
+        virtual void perform_logging(PendingPartitionOp *op);
+      protected:
+        IndexPartition pid;
+        FutureMap weights;
         size_t granularity;
       };
       class UnionPartitionThunk : public PendingPartitionThunk {
@@ -2611,6 +2633,8 @@ namespace Legion {
     public:
       void initialize_equal_partition(InnerContext *ctx,
                                       IndexPartition pid, size_t granularity);
+      void initialize_weight_partition(InnerContext *ctx, IndexPartition pid,
+                                const FutureMap &weights, size_t granularity);
       void initialize_union_partition(InnerContext *ctx,
                                       IndexPartition pid, 
                                       IndexPartition handle1,

@@ -115,6 +115,16 @@ namespace Legion {
                                             IndexSpace color_space,
                                             size_t granularity,
                                             Color color) = 0;
+      virtual IndexPartition create_partition_by_weights(IndexSpace parent,
+                                       const std::map<DomainPoint,int> &weights,
+                                            IndexSpace color_space,
+                                            size_t granularity, 
+                                            Color color) = 0;
+      virtual IndexPartition create_partition_by_weights(IndexSpace parent,
+                                            const FutureMap &weights,
+                                            IndexSpace color_space,
+                                            size_t granularity, 
+                                            Color color) = 0;
       virtual IndexPartition create_partition_by_union(RegionTreeForest *forest,
                                             IndexSpace parent,
                                             IndexPartition handle1,
@@ -847,6 +857,16 @@ namespace Legion {
                                             IndexSpace parent,
                                             IndexSpace color_space,
                                             size_t granularity,
+                                            Color color);
+      virtual IndexPartition create_partition_by_weights(IndexSpace parent,
+                                       const std::map<DomainPoint,int> &weights,
+                                            IndexSpace color_space,
+                                            size_t granularity, 
+                                            Color color);
+      virtual IndexPartition create_partition_by_weights(IndexSpace parent,
+                                            const FutureMap &weights,
+                                            IndexSpace color_space,
+                                            size_t granularity, 
                                             Color color);
       virtual IndexPartition create_partition_by_union(RegionTreeForest *forest,
                                             IndexSpace parent,
@@ -2060,6 +2080,16 @@ namespace Legion {
                                             IndexSpace color_space,
                                             size_t granularity,
                                             Color color);
+      virtual IndexPartition create_partition_by_weights(IndexSpace parent,
+                                       const std::map<DomainPoint,int> &weights,
+                                            IndexSpace color_space,
+                                            size_t granularity, 
+                                            Color color);
+      virtual IndexPartition create_partition_by_weights(IndexSpace parent,
+                                            const FutureMap &weights,
+                                            IndexSpace color_space,
+                                            size_t granularity, 
+                                            Color color);
       virtual IndexPartition create_partition_by_union(RegionTreeForest *forest,
                                             IndexSpace parent,
                                             IndexPartition handle1,
@@ -2418,6 +2448,16 @@ namespace Legion {
                                             IndexSpace parent,
                                             IndexSpace color_space,
                                             size_t granularity,
+                                            Color color);
+      virtual IndexPartition create_partition_by_weights(IndexSpace parent,
+                                       const std::map<DomainPoint,int> &weights,
+                                            IndexSpace color_space,
+                                            size_t granularity, 
+                                            Color color);
+      virtual IndexPartition create_partition_by_weights(IndexSpace parent,
+                                            const FutureMap &weights,
+                                            IndexSpace color_space,
+                                            size_t granularity, 
                                             Color color);
       virtual IndexPartition create_partition_by_union(RegionTreeForest *forest,
                                             IndexSpace parent,

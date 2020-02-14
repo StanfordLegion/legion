@@ -8593,6 +8593,38 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    IndexPartitionT<DIM,T> Runtime::create_partition_by_weights(Context ctx,
+                          IndexSpaceT<DIM,T> parent,
+                          const std::map<Point<COLOR_DIM,COLOR_T>,int> &weights,
+                          IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
+                          size_t granularity, Color color)
+    //--------------------------------------------------------------------------
+    {
+      std::map<DomainPoint,int> untyped_weights;
+      for (std::map<DomainPoint,int>::const_iterator it = 
+            weights.begin(); it != weights.end(); it++)
+        untyped_weights[DomainPoint(it->first)] = it->second;
+      return IndexPartitionT<DIM,T>(create_partition_by_weights(ctx,
+                                IndexSpace(parent), untyped_weights, 
+                                IndexSpace(color_space), granularity, color));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    IndexPartitionT<DIM,T> Runtime::create_partition_by_weights(Context ctx,
+                                     IndexSpaceT<DIM,T> parent,
+                                     const FutureMap &weights,
+                                     IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
+                                     size_t granularity, Color color)
+    //--------------------------------------------------------------------------
+    {
+      return IndexPartitionT<DIM,T>(create_partition_by_weights(ctx,
+                                IndexSpace(parent), weights, 
+                                IndexSpace(color_space), granularity, color));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
     IndexPartitionT<DIM,T> Runtime::create_partition_by_union(Context ctx,
                               IndexSpaceT<DIM,T> parent,
                               IndexPartitionT<DIM,T> handle1,

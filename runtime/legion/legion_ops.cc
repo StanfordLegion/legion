@@ -12325,6 +12325,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PendingPartitionOp::initialize_weight_partition(InnerContext *ctx,
+               IndexPartition pid, const FutureMap &weights, size_t granularity)
+    //--------------------------------------------------------------------------
+    {
+      initialize_operation(ctx, true/*track*/);
+#ifdef DEBUG_LEGION
+      assert(thunk == NULL);
+#endif
+      thunk = new WeightPartitionThunk(pid, weights, granularity);
+      // Also save this locally for analysis
+      future_map = weights;
+      if (runtime->legion_spy_enabled)
+        perform_logging();
+    }
+
+    //--------------------------------------------------------------------------
     void PendingPartitionOp::initialize_union_partition(InnerContext *ctx,
                                                         IndexPartition pid,
                                                         IndexPartition h1,
@@ -12621,6 +12637,15 @@ namespace Legion {
     {
       LegionSpy::log_target_pending_partition(op->unique_op_id, pid.id,
           EQUAL_PARTITION);
+    }
+
+    //--------------------------------------------------------------------------
+    void PendingPartitionOp::WeightPartitionThunk::perform_logging(
+                                                         PendingPartitionOp *op)
+    //--------------------------------------------------------------------------
+    {
+      LegionSpy::log_target_pending_partition(op->unique_op_id, pid.id,
+          WEIGHT_PARTITION);
     }
 
     //--------------------------------------------------------------------------

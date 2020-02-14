@@ -3680,6 +3680,27 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    ApEvent IndexSpaceNodeT<DIM,T>::create_by_weights(Operation *op,
+                                                    IndexPartNode *partition,
+                                                    FutureMapImpl *future_map,
+                                                    size_t granularity,
+                                                    ShardID shard,
+                                                    size_t total_shards)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(partition->parent == this);
+#endif
+      // Demux the color space type to do the actual operations 
+      CreateByWeightHelper creator(this, partition, op, future_map,
+                                   granularity, shard, total_shards);
+      NT_TemplateHelper::demux<CreateByWeightHelper>(
+                   partition->color_space->handle.get_type_tag(), &creator);
+      return creator.result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     ApEvent IndexSpaceNodeT<DIM,T>::create_by_field(Operation *op,
                                                     IndexPartNode *partition,
                               const std::vector<FieldDataDescriptor> &instances,
@@ -3849,6 +3870,90 @@ namespace Legion {
       if (result_events.empty())
         return ApEvent::NO_AP_EVENT;
       return Runtime::merge_events(NULL, result_events);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T> template<int COLOR_DIM, typename COLOR_T>
+    ApEvent IndexSpaceNodeT<DIM,T>::create_by_weight_helper(Operation *op,
+                         IndexPartNode *partition, FutureMapImpl *future_map, 
+                         size_t granularity, ShardID shard, size_t total_shards)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceNodeT<COLOR_DIM,COLOR_T> *color_space = 
+       static_cast<IndexSpaceNodeT<COLOR_DIM,COLOR_T>*>(partition->color_space);
+      // Enumerate the color space
+      Realm::IndexSpace<COLOR_DIM,COLOR_T> realm_color_space;
+      color_space->get_realm_index_space(realm_color_space, true/*tight*/); 
+      const size_t count = realm_color_space.volume();
+      // Unpack the futures and fill in the weights appropriately
+      std::vector<int> weights(count);
+      std::vector<LegionColor> child_colors(count);
+      unsigned color_index = 0;
+      std::map<DomainPoint,FutureImpl*> futures;
+      future_map->get_all_futures(futures);
+      // Make all the entries for the color space
+      for (Realm::IndexSpaceIterator<COLOR_DIM,COLOR_T> 
+            rect_iter(realm_color_space); rect_iter.valid; rect_iter.step())
+      {
+        for (Realm::PointInRectIterator<COLOR_DIM,COLOR_T> 
+              itr(rect_iter.rect); itr.valid; itr.step())
+        {
+          const DomainPoint key(Point<COLOR_DIM,COLOR_T>(itr.p));
+          std::map<DomainPoint,FutureImpl*>::const_iterator finder = 
+            futures.find(key);
+          if (finder == futures.end())
+            REPORT_LEGION_ERROR(ERROR_MISSING_PARTITION_BY_WEIGHT_COLOR,
+                "A partition by weight call is missing an entry for a "
+                "color in the color space. All colors must be present.")
+          FutureImpl *future = finder->second;
+          if (future->get_untyped_size(true/*internal*/) != sizeof(int))
+            REPORT_LEGION_ERROR(ERROR_INVALID_PARTITION_BY_WEIGHT_VALUE,
+                  "An invalid future size was found in a partition by weight "
+                  "call. All futures must contain int values.")
+          weights[color_index] = *(static_cast<int*>(
+                future->get_untyped_result(true, NULL, true/*internal*/)));
+          child_colors[color_index++] = color_space->linearize_color(&itr.p,
+                                          color_space->handle.get_type_tag());
+        }
+      }
+      Realm::ProfilingRequestSet requests;
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_partition_request(requests,
+                                                op, DEP_PART_WEIGHTS);
+      Realm::IndexSpace<DIM,T> local_space;
+      ApEvent ready = get_realm_index_space(local_space, false/*tight*/);
+      if (op->has_execution_fence_event())
+        ready = Runtime::merge_events(NULL, ready, 
+                  op->get_execution_fence_event());
+      std::vector<Realm::IndexSpace<DIM,T> > subspaces;
+      ApEvent result(local_space.create_weighted_subspaces(count,
+            granularity, weights, subspaces, requests, ready));
+#ifdef LEGION_DISABLE_EVENT_PRUNING
+      if (!result.exists() || (result == ready))
+      {
+        ApUserEvent new_result = Runtime::create_ap_user_event();
+        Runtime::trigger_event(new_result);
+        result = new_result;
+      }
+#endif
+#ifdef LEGION_SPY
+      LegionSpy::log_deppart_events(op->get_unique_op_id(),handle,ready,result);
+#endif
+      for (unsigned idx = 0; idx < count; idx++)
+      {
+        if ((idx % total_shards) == shard)
+        {
+          IndexSpaceNodeT<DIM,T> *child = 
+              static_cast<IndexSpaceNodeT<DIM,T>*>(
+                  partition->get_child(child_colors[idx]));
+          if (child->set_realm_index_space(context->runtime->address_space,
+                                           subspaces[idx]))
+              assert(false); // should never hit this
+        }
+        else // We don't need this because another shard handled it
+          subspaces[idx].destroy();
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------

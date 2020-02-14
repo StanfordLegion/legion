@@ -3580,6 +3580,57 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition InnerContext::create_partition_by_weights(IndexSpace parent,
+                        const std::map<DomainPoint,int> &weights, 
+                        IndexSpace color_space, size_t granularity, Color color)
+    //--------------------------------------------------------------------------
+    {
+      ArgumentMap argmap;
+      for (std::map<DomainPoint,int>::const_iterator it = 
+            weights.begin(); it != weights.end(); it++)
+        argmap.set_point(it->first,
+            TaskArgument(&it->second, sizeof(it->second)));
+      FutureMap future_map(argmap.impl->freeze(this));
+      return create_partition_by_weights(parent, future_map, color_space,
+                                         granularity, color);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InnerContext::create_partition_by_weights(IndexSpace parent,
+                                                const FutureMap &weights, 
+                                                IndexSpace color_space,
+                                                size_t granularity, Color color)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);  
+      const IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                               parent.get_tree_id(), parent.get_type_tag());
+      const DistributedID did = runtime->get_available_distributed_id();
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating partition %d by weights with parent index "
+                      "space %x in task %s (ID %lld)", pid.id, parent.id,
+                      get_task_name(), get_unique_id());
+#endif
+      LegionColor partition_color = INVALID_COLOR;
+      if (color != AUTO_GENERATE_ID)
+        partition_color = color;
+      PendingPartitionOp *part_op = 
+        runtime->get_available_pending_partition_op();
+      part_op->initialize_weight_partition(this, pid, weights, granularity);
+      const ApEvent term_event = part_op->get_completion_event();
+      // Tell the region tree forest about this partition
+      RegionTreeForest *forest = runtime->forest;
+      const RtEvent safe = forest->create_pending_partition(this, pid, parent,
+        color_space, partition_color, DISJOINT_COMPLETE_KIND, did, term_event);
+      // Now we can add the operation to the queue
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      // Wait for any notifications to occur before returning
+      if (safe.exists())
+        safe.wait();
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition InnerContext::create_partition_by_union(
                                           RegionTreeForest *forest,
                                           IndexSpace parent,
@@ -15084,6 +15135,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition LeafContext::create_partition_by_weights(IndexSpace parent,
+                                       const std::map<DomainPoint,int> &weights,
+                                       IndexSpace color_space,
+                                       size_t granularity, Color color)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_EQUAL_PARTITION_CREATION,
+        "Illegal create partition by weights performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id())
+      return IndexPartition::NO_PART;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition LeafContext::create_partition_by_weights(IndexSpace parent,
+                                                const FutureMap &weights,
+                                                IndexSpace color_space,
+                                                size_t granularity, Color color)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_EQUAL_PARTITION_CREATION,
+        "Illegal create partition by weights performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id())
+      return IndexPartition::NO_PART;
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition LeafContext::create_partition_by_union(
                                           RegionTreeForest *forest,
                                           IndexSpace parent,
@@ -16627,6 +16704,28 @@ namespace Legion {
     {
       return enclosing->create_equal_partition(forest, parent, color_space,
                                                granularity, color);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InlineContext::create_partition_by_weights(IndexSpace parent,
+                                       const std::map<DomainPoint,int> &weights,
+                                       IndexSpace color_space,
+                                       size_t granularity, Color color)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_partition_by_weights(parent, weights, 
+                                    color_space, granularity, color);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InlineContext::create_partition_by_weights(IndexSpace parent,
+                                                const FutureMap &weights,
+                                                IndexSpace color_space,
+                                                size_t granularity, Color color)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_partition_by_weights(parent, weights, 
+                                    color_space, granularity, color);
     }
 
     //--------------------------------------------------------------------------

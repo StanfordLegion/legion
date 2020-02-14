@@ -338,6 +338,14 @@ namespace Legion {
     public:
       virtual void get_all_futures(std::map<DomainPoint,Future> &futures);
       void set_all_futures(const std::map<DomainPoint,Future> &futures);
+      inline void get_all_futures(std::map<DomainPoint,FutureImpl*> &futures)
+      {
+        std::map<DomainPoint,Future> impls;
+        get_all_futures(impls);
+        for (std::map<DomainPoint,Future>::const_iterator it = 
+              impls.begin(); it != impls.end(); it++)
+          futures[it->first] = it->second.impl;
+      }
     public:
       // Will return NULL if it does not exist
       virtual FutureImpl* find_shard_local_future(const DomainPoint &point);

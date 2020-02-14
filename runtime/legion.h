@@ -3800,6 +3800,48 @@ namespace Legion {
       ///@}
       ///@{
       /**
+       * Create 'color_space' index spaces (one for each point) to partition
+       * the parent 'parent' index space using the 'weights' to proportionally
+       * size the resulting subspaces. By definition the resulting partition
+       * will be disjoint. Users can also specify a minimum 'granularity' for
+       * the size of the index subspaces. Users can specify an optional
+       * 'color' for the name of the created index partition.
+       * @param ctx the enclosing task context
+       * @param parent index space of the partition to be made
+       * @param weights per-color weights for sizing output regions
+       * @param color_space space of the colors to create
+       * @param granularity the minimum size of the index subspaces
+       * @param color optional color parameter for the partition
+       * @return name of the created index partition
+       */
+      IndexPartition create_partition_by_weights(Context ctx, IndexSpace parent,
+                                       const std::map<DomainPoint,int> &weights,
+                                       IndexSpace color_space,
+                                       size_t granularity = 1,
+                                       Color color = AUTO_GENERATE_ID);
+      template<int DIM, typename COORD_T, int COLOR_DIM, typename COLOR_COORD_T>
+      IndexPartitionT<DIM,COORD_T> create_partition_by_weights(Context ctx,
+                    IndexSpaceT<DIM,COORD_T> parent,
+                    const std::map<Point<COLOR_DIM,COLOR_COORD_T>,int> &weights,
+                    IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
+                    size_t granularity = 1, Color color = AUTO_GENERATE_ID);
+      // Alternate versions of the above method that take a future map where
+      // the values in the future map will be interpretted as a integer weights
+      IndexPartition create_partition_by_weights(Context ctx, IndexSpace parent,
+                                                 const FutureMap &weights,
+                                                 IndexSpace color_space,
+                                                 size_t granularity = 1,
+                                                 Color color =AUTO_GENERATE_ID);
+      template<int DIM, typename COORD_T, int COLOR_DIM, typename COLOR_COORD_T>
+      IndexPartitionT<DIM,COORD_T> create_partition_by_weights(Context ctx,
+                               IndexSpaceT<DIM,COORD_T> parent,
+                               const FutureMap &weights,
+                               IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
+                               size_t granularity = 1, 
+                               Color color = AUTO_GENERATE_ID);
+      ///@}
+      ///@{
+      /**
        * This function zips a union operation over all the index subspaces
        * in two different partitions. The zip operation is only applied 
        * to the points contained in the intersection of the two color
