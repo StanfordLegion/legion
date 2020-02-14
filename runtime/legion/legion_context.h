@@ -110,11 +110,6 @@ namespace Legion {
                                             size_t granularity,
                                             Color color) = 0;
       virtual IndexPartition create_partition_by_weights(IndexSpace parent,
-                                       const std::map<DomainPoint,int> &weights,
-                                            IndexSpace color_space,
-                                            size_t granularity, 
-                                            Color color) = 0;
-      virtual IndexPartition create_partition_by_weights(IndexSpace parent,
                                             const FutureMap &weights,
                                             IndexSpace color_space,
                                             size_t granularity, 
@@ -803,11 +798,6 @@ namespace Legion {
                                             size_t granularity,
                                             Color color);
       virtual IndexPartition create_partition_by_weights(IndexSpace parent,
-                                       const std::map<DomainPoint,int> &weights,
-                                            IndexSpace color_space,
-                                            size_t granularity, 
-                                            Color color);
-      virtual IndexPartition create_partition_by_weights(IndexSpace parent,
                                             const FutureMap &weights,
                                             IndexSpace color_space,
                                             size_t granularity, 
@@ -1452,11 +1442,6 @@ namespace Legion {
                                             size_t granularity,
                                             Color color);
       virtual IndexPartition create_partition_by_weights(IndexSpace parent,
-                                       const std::map<DomainPoint,int> &weights,
-                                            IndexSpace color_space,
-                                            size_t granularity, 
-                                            Color color);
-      virtual IndexPartition create_partition_by_weights(IndexSpace parent,
                                             const FutureMap &weights,
                                             IndexSpace color_space,
                                             size_t granularity, 
@@ -1787,11 +1772,6 @@ namespace Legion {
                                             IndexSpace parent,
                                             IndexSpace color_space,
                                             size_t granularity,
-                                            Color color);
-      virtual IndexPartition create_partition_by_weights(IndexSpace parent,
-                                       const std::map<DomainPoint,int> &weights,
-                                            IndexSpace color_space,
-                                            size_t granularity, 
                                             Color color);
       virtual IndexPartition create_partition_by_weights(IndexSpace parent,
                                             const FutureMap &weights,
