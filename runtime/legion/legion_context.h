@@ -1523,6 +1523,11 @@ namespace Legion {
                                             IndexSpace color_space,
                                             size_t granularity,
                                             Color color);
+      virtual IndexPartition create_partition_by_weights(IndexSpace parent,
+                                            const FutureMap &weights,
+                                            IndexSpace color_space,
+                                            size_t granularity, 
+                                            Color color);
       virtual IndexPartition create_partition_by_union(RegionTreeForest *forest,
                                             IndexSpace parent,
                                             IndexPartition handle1,

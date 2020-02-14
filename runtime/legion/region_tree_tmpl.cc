@@ -74,7 +74,7 @@ namespace Legion {
     create_by_weight_helper<INST_N2,T2>(Operation *,    \
                                      IndexPartNode *,   \
                                      FutureMapImpl *,   \
-                                     size_t); \
+                                     size_t, ShardID, size_t); \
   template ApEvent IndexSpaceNodeT<INST_N1,T1>:: \
     create_by_field_helper<INST_N2,T2>(Operation *,	\
 				     IndexPartNode *,	  \

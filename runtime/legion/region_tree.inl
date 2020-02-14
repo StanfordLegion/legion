@@ -3889,7 +3889,7 @@ namespace Legion {
       std::vector<int> weights(count);
       std::vector<LegionColor> child_colors(count);
       unsigned color_index = 0;
-      std::map<DomainPoint,FutureImpl*> futures;
+      std::map<DomainPoint,Future> futures;
       future_map->get_all_futures(futures);
       // Make all the entries for the color space
       for (Realm::IndexSpaceIterator<COLOR_DIM,COLOR_T> 
@@ -3899,13 +3899,13 @@ namespace Legion {
               itr(rect_iter.rect); itr.valid; itr.step())
         {
           const DomainPoint key(Point<COLOR_DIM,COLOR_T>(itr.p));
-          std::map<DomainPoint,FutureImpl*>::const_iterator finder = 
+          std::map<DomainPoint,Future>::const_iterator finder = 
             futures.find(key);
           if (finder == futures.end())
             REPORT_LEGION_ERROR(ERROR_MISSING_PARTITION_BY_WEIGHT_COLOR,
                 "A partition by weight call is missing an entry for a "
                 "color in the color space. All colors must be present.")
-          FutureImpl *future = finder->second;
+          FutureImpl *future = future_map->unpack_future(finder->second);
           if (future->get_untyped_size(true/*internal*/) != sizeof(int))
             REPORT_LEGION_ERROR(ERROR_INVALID_PARTITION_BY_WEIGHT_VALUE,
                   "An invalid future size was found in a partition by weight "

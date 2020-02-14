@@ -9663,6 +9663,111 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition ReplicateContext::create_partition_by_weights(
+                                                IndexSpace parent,
+                                                const FutureMap &weights, 
+                                                IndexSpace color_space,
+                                                size_t granularity, Color color)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
+      LegionColor partition_color = INVALID_COLOR;
+      bool color_generated = false;
+      if (color != AUTO_GENERATE_ID)
+        partition_color = color;
+      else
+        color_generated = true;
+      RegionTreeForest *forest = runtime->forest;
+      ReplPendingPartitionOp *part_op = 
+        runtime->get_available_repl_pending_partition_op();
+      ApEvent term_event = part_op->get_completion_event();
+      if (owner_shard->shard_id == index_partition_allocator_shard)
+      {
+        // We're the owner, so mke it locally and then broadcast it
+        pid.id = runtime->get_unique_index_partition_id();
+        const DistributedID did = runtime->get_available_distributed_id();
+#ifdef DEBUG_LEGION
+        log_index.debug("Creating equal partition %d with parent index space %x"
+                        " in task %s (ID %lld)", pid.id, parent.id,
+                        get_task_name(), get_unique_id());
+#endif
+        // Have to do our registration before broadcasting
+        RtEvent parent_notified = 
+          forest->create_pending_partition_shard(
+                                           index_partition_allocator_shard, 
+                                           this, pid, parent,
+                                           color_space, partition_color, 
+                                           DISJOINT_COMPLETE_KIND, did, NULL,
+                                           pending_partition_barrier,
+                                           shard_manager->get_mapping(),
+                                           creation_barrier); 
+        // We have to wait before broadcasting the value to other shards
+        if (!parent_notified.has_triggered())
+          parent_notified.wait();
+        // Then we can broadcast the name of the partition
+        ValueBroadcast<IPBroadcast> pid_collective(this, COLLECTIVE_LOC_98);
+        pid_collective.broadcast(IPBroadcast(pid, did));
+        if (color_generated)
+        {
+#ifdef DEBUG_LEGION
+          assert(partition_color != INVALID_COLOR); // we should have an ID
+#endif
+          ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_99);
+          color_collective.broadcast(partition_color);
+        }
+        // Wait for the creation to finish
+        creation_barrier.wait();
+      }
+      else
+      {
+        // We need to get the barrier result
+        ValueBroadcast<IPBroadcast> pid_collective(this,
+                          index_partition_allocator_shard, COLLECTIVE_LOC_98);
+        const IPBroadcast value = pid_collective.get_value();
+        pid = value.pid;
+#ifdef DEBUG_LEGION
+        assert(pid.exists());
+#endif
+        // If we need a color then we can get that too
+        if (color_generated)
+        {
+          ValueBroadcast<LegionColor> color_collective(this,
+                            index_partition_allocator_shard, COLLECTIVE_LOC_99);
+          partition_color = color_collective.get_value();
+#ifdef DEBUG_LEGION
+          assert(partition_color != INVALID_COLOR);
+#endif
+        }
+        // Do our registration
+        forest->create_pending_partition_shard(index_partition_allocator_shard, 
+                                         this, pid, parent, 
+                                         color_space, partition_color, 
+                                         DISJOINT_COMPLETE_KIND, value.did,NULL,
+                                         pending_partition_barrier,
+                                         shard_manager->get_mapping(),
+                                         creation_barrier);
+        // Signal that we're done our creation
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        // Also have to wait for creation to finish on all shards because 
+        // any shard can handle requests for sub-regions of a partition
+        creation_barrier.wait();
+      }
+      advance_replicate_barrier(creation_barrier, total_shards-1);
+      part_op->initialize_weight_partition(this, pid, weights, granularity);
+      // Now we can add the operation to the queue
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      // Trigger the pending partition barrier and advance it
+      Runtime::phase_barrier_arrive(pending_partition_barrier, 
+                                    1/*count*/, term_event);
+      advance_replicate_barrier(pending_partition_barrier, total_shards);
+      // Update the allocation shard
+      index_partition_allocator_shard++;
+      if (index_partition_allocator_shard == total_shards)
+        index_partition_allocator_shard = 0;
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition ReplicateContext::create_partition_by_union(
                                           RegionTreeForest *forest,
                                           IndexSpace parent,
