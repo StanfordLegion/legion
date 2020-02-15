@@ -1787,16 +1787,11 @@ namespace Legion {
             stealing_disabled(false),
             resilient_mode(false),
             unsafe_launch(false),
-#ifdef DEBUG_LEGION
             unsafe_mapper(false),
-#else
-            unsafe_mapper(true),
-#endif
-            dynamic_independence_tests(true),
+            safe_mapper(false),
+            disable_independence_tests(false),
             legion_spy_enabled(false),
             enable_test_mapper(false),
-            legion_ldb_enabled(false),
-            replay_file(NULL),
             slow_config_ok(false),
 #ifdef DEBUG_LEGION
             logging_region_tree_state(false),
@@ -1809,7 +1804,6 @@ namespace Legion {
 #endif
             num_profiling_nodes(0),
             serializer_type("binary"),
-            prof_logfile(NULL),
             prof_footprint_threshold(128 << 20),
             prof_target_latency(100) { }
       public:
@@ -1842,11 +1836,12 @@ namespace Legion {
         bool resilient_mode;
         bool unsafe_launch;
         bool unsafe_mapper;
-        bool dynamic_independence_tests;
+        bool safe_mapper;
+        bool disable_independence_tests;
         bool legion_spy_enabled;
         bool enable_test_mapper;
-        bool legion_ldb_enabled;
-        const char* replay_file;
+        std::string replay_file;
+        std::string ldb_file;
         bool slow_config_ok;
 #ifdef DEBUG_LEGION
         bool logging_region_tree_state;
@@ -1857,8 +1852,8 @@ namespace Legion {
         bool check_privileges;
       public:
         unsigned num_profiling_nodes;
-        const char *serializer_type;
-        const char *prof_logfile;
+        std::string serializer_type;
+        std::string prof_logfile;
         size_t prof_footprint_threshold;
         size_t prof_target_latency;
       };
@@ -1986,11 +1981,11 @@ namespace Legion {
       const bool resilient_mode;
       const bool unsafe_launch;
       const bool unsafe_mapper;
-      const bool dynamic_independence_tests;
+      const bool disable_independence_tests;
       const bool legion_spy_enabled;
       const bool enable_test_mapper;
       const bool legion_ldb_enabled;
-      const char*const replay_file;
+      const std::string replay_file;
 #ifdef DEBUG_LEGION
       const bool logging_region_tree_state;
       const bool verbose_logging;
@@ -3777,7 +3772,8 @@ namespace Legion {
       // Static methods for start-up and callback phases
       static int start(int argc, char **argv, bool background);
       static void register_builtin_reduction_operators(void);
-      static RealmRuntime initialize(int *argc, char ***argv);
+      static const LegionConfiguration& initialize(int *argc, char ***argv, 
+                                                   bool filter);
       static LegionConfiguration parse_arguments(int argc, char **argv);
       static void perform_slow_config_checks(const LegionConfiguration &config);
       static void configure_interoperability(bool separate_runtimes);

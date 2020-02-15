@@ -32,6 +32,7 @@
 #include "mappers/test_mapper.h"
 #include "mappers/replay_mapper.h"
 #include "mappers/debug_mapper.h"
+#include "realm/cmdline.h"
 
 #include <unistd.h> // sleep for warnings
 
@@ -11582,16 +11583,20 @@ namespace Legion {
         stealing_disabled(config.stealing_disabled),
         resilient_mode(config.resilient_mode),
         unsafe_launch(config.unsafe_launch),
+#ifdef DEBUG_LEGION
         unsafe_mapper(config.unsafe_mapper),
-        dynamic_independence_tests(config.dynamic_independence_tests),
+#else
+        unsafe_mapper(!config.safe_mapper),
+#endif
+        disable_independence_tests(config.disable_independence_tests),
 #ifdef LEGION_SPY
         legion_spy_enabled(true),
 #else
         legion_spy_enabled(config.legion_spy_enabled),
 #endif
         enable_test_mapper(config.enable_test_mapper),
-        legion_ldb_enabled(config.legion_ldb_enabled),
-        replay_file(config.replay_file),
+        legion_ldb_enabled(!config.ldb_file.empty()),
+        replay_file(legion_ldb_enabled ? config.ldb_file : config.replay_file),
 #ifdef DEBUG_LEGION
         logging_region_tree_state(config.logging_region_tree_state),
         verbose_logging(config.verbose_logging),
@@ -11675,7 +11680,7 @@ namespace Legion {
 				    (*it).kind(), this,
                                     LEGION_DEFAULT_MAPPER_SLOTS, 
                                     stealing_disabled,
-                                    (replay_file != NULL));
+                                    !replay_file.empty());
         proc_managers[*it] = manager;
       }
       // Initialize the message manager array so that we can construct
@@ -11780,7 +11785,7 @@ namespace Legion {
         resilient_mode(rhs.resilient_mode),
         unsafe_launch(rhs.unsafe_launch),
         unsafe_mapper(rhs.unsafe_mapper),
-        dynamic_independence_tests(rhs.dynamic_independence_tests),
+        disable_independence_tests(rhs.disable_independence_tests),
         legion_spy_enabled(rhs.legion_spy_enabled),
         enable_test_mapper(rhs.enable_test_mapper),
         legion_ldb_enabled(rhs.legion_ldb_enabled),
@@ -12423,10 +12428,10 @@ namespace Legion {
                                     lg_task_descriptions,
                                     Operation::LAST_OP_KIND,
                                     Operation::op_names,
-                                    config.serializer_type,
-                                    config.prof_logfile,
+                                    config.serializer_type.c_str(),
+                                    config.prof_logfile.c_str(),
                                     total_address_spaces,
-                                    config.prof_footprint_threshold,
+                                    config.prof_footprint_threshold << 20,
                                     config.prof_target_latency);
       LG_MESSAGE_DESCRIPTIONS(lg_message_descriptions);
       profiler->record_message_kinds(lg_message_descriptions, LAST_SEND_KIND);
@@ -12619,7 +12624,7 @@ namespace Legion {
     void Runtime::initialize_mappers(void)
     //--------------------------------------------------------------------------
     {
-      if (replay_file == NULL) // This is the normal path
+      if (replay_file.empty()) // This is the normal path
       {
         if (enable_test_mapper)
         {
@@ -12668,7 +12673,7 @@ namespace Legion {
                 proc_managers.begin(); it != proc_managers.end(); it++)
           {
             Mapper *mapper = new Mapping::DebugMapper(mapper_runtime, 
-                                            machine, it->first, replay_file);
+                                    machine, it->first, replay_file.c_str());
             MapperManager *wrapper = wrap_mapper(this, mapper, 0, it->first);
             it->second->add_mapper(0, wrapper, false/*check*/, true/*owns*/, 
                                     true/*skip replay*/);
@@ -12680,7 +12685,7 @@ namespace Legion {
                 proc_managers.begin(); it != proc_managers.end(); it++)
           {
             Mapper *mapper = new Mapping::ReplayMapper(mapper_runtime, 
-                                            machine, it->first, replay_file);
+                                    machine, it->first, replay_file.c_str());
             MapperManager *wrapper = wrap_mapper(this, mapper, 0, it->first);
             it->second->add_mapper(0, wrapper, false/*check*/, true/*owns*/,
                                     true/*skip replay*/);
@@ -23711,11 +23716,9 @@ namespace Legion {
       // their values as they might be changed by GASNet or MPI or whatever.
       // Note that the logger isn't initialized until after this call returns 
       // which means any logging that occurs before this has undefined behavior.
-      RealmRuntime realm = runtime_initialized ? 
-        RealmRuntime::get_runtime() : initialize(&argc, &argv);
+      const LegionConfiguration &config = initialize(&argc, &argv, false);
+      RealmRuntime realm = RealmRuntime::get_runtime();
 
-      // Parse the command line arguments
-      const LegionConfiguration config = parse_arguments(argc, argv);
       // Perform any waits that the user requested before starting
       if (config.delay_start > 0)
           sleep(config.delay_start);
@@ -23784,12 +23787,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ RealmRuntime Runtime::initialize(int *argc, char ***argv)
+    /*static*/ const Runtime::LegionConfiguration& Runtime::initialize(
+                                           int *argc, char ***argv, bool filter)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!runtime_initialized);
-#endif
+      static LegionConfiguration config;
+      if (runtime_initialized)
+        return config;
       RealmRuntime realm;
 #ifndef NDEBUG
       bool ok = 
@@ -23797,15 +23801,161 @@ namespace Legion {
         realm.network_init(argc, argv);
       assert(ok);
 
+      const int num_args = *argc;
       // Next we configure the realm runtime after which we can access the
       // machine model and make events and reservations and do reigstrations
+      std::vector<std::string> cmdline(num_args-1);
+      for (int i = 1; i < num_args; i++)
+        cmdline[i-1] = (*argv)[i];
 #ifndef NDEBUG
       ok = 
 #endif
-        realm.configure_from_command_line(*argc, *argv);
+        realm.configure_from_command_line(cmdline, filter);
       assert(ok);
+      Realm::CommandLineParser cp; 
+      cp.add_option_bool("-lg:warn_backtrace",
+                         config.warnings_backtrace, !filter)
+        .add_option_bool("-lg:warn", config.runtime_warnings, !filter)
+        .add_option_bool("-lg:leaks", config.report_leaks, !filter)
+        .add_option_bool("-lg:separate",
+                         config.separate_runtime_instances, !filter)
+        .add_option_bool("-lg:registration",config.record_registration,!filter)
+        .add_option_bool("-lg:nosteal",config.stealing_disabled,!filter)
+        .add_option_bool("-lg:resilient",config.resilient_mode,!filter)
+        .add_option_bool("-lg:unsafe_launch",config.unsafe_launch,!filter)
+        .add_option_bool("-lg:unsafe_mapper",config.unsafe_mapper,!filter)
+        .add_option_bool("-lg:safe_mapper",config.safe_mapper,!filter)
+        .add_option_bool("-lg:inorder",config.program_order_execution,!filter)
+        .add_option_bool("-lg:dump_physical_traces",
+                         config.dump_physical_traces, !filter)
+        .add_option_bool("-lg:no_tracing",config.no_tracing, !filter)
+        .add_option_bool("-lg:no_physical_tracing",
+                         config.no_physical_tracing, !filter)
+        .add_option_bool("-lg:no_trace_optimization",
+                         config.no_trace_optimization, !filter)
+        .add_option_bool("-lg:no_fence_elision",
+                         config.no_fence_elision, !filter)
+        .add_option_bool("-lg:replay_on_cpus",
+                         config.replay_on_cpus, !filter)
+        .add_option_bool("-lg:disjointness",
+                         config.verify_disjointness, !filter)
+        .add_option_int("-lg:window", config.initial_task_window_size, !filter)
+        .add_option_int("-lg:hysteresis", 
+                        config.initial_task_window_hysteresis, !filter)
+        .add_option_int("-lg:sched", 
+                        config.initial_tasks_to_schedule, !filter)
+        .add_option_int("-lg:vector", 
+                        config.initial_meta_task_vector_width, !filter)
+        .add_option_int("-lg:message",config.max_message_size, !filter)
+        .add_option_int("-lg:epoch", config.gc_epoch_size, !filter)
+        .add_option_int("-lg:local", config.max_local_fields, !filter)
+        .add_option_int("-lg:parallel_replay", 
+                        config.max_replay_parallelism, !filter)
+        .add_option_bool("-lg:no_dyn",config.disable_independence_tests,!filter)
+        .add_option_bool("-lg:spy",config.legion_spy_enabled, !filter)
+        .add_option_bool("-lg:test",config.enable_test_mapper, !filter)
+        .add_option_int("-lg:delay", config.delay_start, !filter)
+        .add_option_string("-lg:replay", config.replay_file, !filter)
+        .add_option_string("-lg:ldb", config.ldb_file, !filter)
+#ifdef DEBUG_LEGION
+        .add_option_bool("-lg:tree",config.logging_region_tree_state, !filter)
+        .add_option_bool("-lg:verbose",config.verbose_logging, !filter)
+        .add_option_bool("-lg:logical_only",config.logical_logging_only,!filter)
+        .add_option_bool("-lg:physical_only",
+                         config.physical_logging_only,!filter)
+#endif
+        .add_option_int("-lg:prof", config.num_profiling_nodes, !filter)
+        .add_option_string("-lg:serializer", config.serializer_type, !filter)
+        .add_option_string("-lg:prof_logfile", config.prof_logfile, !filter)
+        .add_option_int("-lg:prof_footprint", 
+                        config.prof_footprint_threshold, !filter)
+        .add_option_int("-lg:prof_latency",config.prof_target_latency, !filter)
+        .add_option_bool("-lg:debug_ok",config.slow_config_ok, !filter)
+        // These are all the deprecated versions of these flag
+        .add_option_bool("-hl:separate",
+                         config.separate_runtime_instances, !filter)
+        .add_option_bool("-hl:registration",config.record_registration, !filter)
+        .add_option_bool("-hl:nosteal",config.stealing_disabled, !filter)
+        .add_option_bool("-hl:resilient",config.resilient_mode, !filter)
+        .add_option_bool("-hl:unsafe_launch",config.unsafe_launch, !filter)
+        .add_option_bool("-hl:unsafe_mapper",config.unsafe_mapper, !filter)
+        .add_option_bool("-hl:safe_mapper",config.safe_mapper, !filter)
+        .add_option_bool("-hl:inorder",config.program_order_execution, !filter)
+        .add_option_bool("-hl:disjointness",config.verify_disjointness, !filter)
+        .add_option_int("-hl:window", config.initial_task_window_size, !filter)
+        .add_option_int("-hl:hysteresis", 
+                        config.initial_task_window_hysteresis, !filter)
+        .add_option_int("-hl:sched", config.initial_tasks_to_schedule, !filter)
+        .add_option_int("-hl:message",config.max_message_size, !filter)
+        .add_option_int("-hl:epoch", config.gc_epoch_size, !filter)
+        .add_option_bool("-hl:no_dyn",config.disable_independence_tests,!filter)
+        .add_option_bool("-hl:spy",config.legion_spy_enabled, !filter)
+        .add_option_bool("-hl:test",config.enable_test_mapper, !filter)
+        .add_option_int("-hl:delay", config.delay_start, !filter)
+        .add_option_string("-hl:replay", config.replay_file, !filter)
+        .add_option_string("-hl:ldb", config.ldb_file, !filter)
+#ifdef DEBUG_LEGION
+        .add_option_bool("-hl:tree",config.logging_region_tree_state,!filter)
+        .add_option_bool("-hl:verbose",config.verbose_logging,!filter)
+        .add_option_bool("-hl:logical_only",config.logical_logging_only,!filter)
+        .add_option_bool("-hl:physical_only",
+                         config.physical_logging_only,!filter)
+#endif
+        .add_option_int("-hl:prof", config.num_profiling_nodes, !filter)
+        .add_option_string("-hl:serializer", config.serializer_type, !filter)
+        .add_option_string("-hl:prof_logfile", config.prof_logfile, !filter)
+        .parse_command_line(cmdline);
+      // If we asked to filter the arguments, now we need to go back in
+      // and update the arguments so that they reflect the pruned data
+      if (filter)
+      {
+        if (!cmdline.empty())
+        {
+          int arg_index = 1;
+          for (unsigned idx = 0; idx < cmdline.size(); idx++)
+          {
+            const char *str = cmdline[idx].c_str();
+            // Find the location of this string in the original
+            // arguments to so that we can get its original pointer 
+            assert(arg_index < num_args);
+            while (strcmp(str, (*argv)[arg_index]) != 0)
+            {
+              arg_index++;
+              assert(arg_index < num_args);
+            }
+            // Now that we've got it's original pointer we can move
+            // it to the new location in the outputs
+            if (arg_index == int(idx+1))
+              arg_index++; // already in the right place 
+            else
+              (*argv)[idx+1] = (*argv)[arg_index++];
+          }
+          *argc = (1 + cmdline.size());
+        }
+        else
+          *argc = 1;
+      }
+#ifdef DEBUG_LEGION
+      if (config.logging_region_tree_state)
+        REPORT_LEGION_WARNING(LEGION_WARNING_REGION_TREE_STATE_LOGGING,
+            "Region tree state logging is disabled.  To enable region "
+            "tree state logging compile in debug mode.")
+      if (config.verify_disjointness)
+        REPORT_LEGION_WARNING(LEGION_WARNING_DISJOINTNESS_VERIFICATION,
+            "Disjointness verification for partition creation is disabled. "
+            "To enable dynamic disjointness testing compile in debug mode.")
+#endif
+      if (config.initial_task_window_hysteresis > 100)
+        REPORT_LEGION_ERROR(ERROR_LEGION_CONFIGURATION,
+            "Illegal task window hysteresis value of %d which is not a value "
+            "between 0 and 100.", config.initial_task_window_hysteresis)
+      if (config.max_local_fields > LEGION_MAX_FIELDS)
+        REPORT_LEGION_ERROR(ERROR_LEGION_CONFIGURATION,
+            "Illegal max local fields value %d which is larger than the "
+            "value of LEGION_MAX_FIELDS (%d).", config.max_local_fields,
+            LEGION_MAX_FIELDS)
       runtime_initialized = true;
-      return realm;
+      return config;
     }
 
     //--------------------------------------------------------------------------
@@ -24011,183 +24161,6 @@ namespace Legion {
       ctx->end_task(NULL, 0, false/*owned*/);
       // Record that this is no longer an implicit external task
       external_implicit_task = false; 
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ Runtime::LegionConfiguration Runtime::parse_arguments(int argc,
-                                                                    char **argv)
-    //--------------------------------------------------------------------------
-    {
-      LegionConfiguration config;
-#define INT_ARG(argname, varname) do {    \
-      if(!strcmp((argv)[i], argname)) {	  \
-        varname = atoi((argv)[++i]);	  \
-        continue;			  \
-      } } while(0)
-
-#define BOOL_ARG(argname, varname) do {   \
-      if(!strcmp((argv)[i], argname)) {	  \
-        varname = true;			  \
-        continue;			  \
-      } } while(0)
-      for (int i = 1; i < argc; i++)
-      {
-        BOOL_ARG("-lg:warn_backtrace",config.warnings_backtrace);
-        BOOL_ARG("-lg:warn",config.runtime_warnings);
-        BOOL_ARG("-lg:leaks",config.report_leaks);
-        BOOL_ARG("-lg:separate",config.separate_runtime_instances);
-        BOOL_ARG("-lg:registration",config.record_registration);
-        BOOL_ARG("-lg:nosteal",config.stealing_disabled);
-        BOOL_ARG("-lg:resilient",config.resilient_mode);
-        BOOL_ARG("-lg:unsafe_launch",config.unsafe_launch);
-        BOOL_ARG("-lg:unsafe_mapper",config.unsafe_mapper);
-        if (!strcmp(argv[i],"-lg:safe_mapper"))
-          config.unsafe_mapper = false;
-        BOOL_ARG("-lg:inorder",config.program_order_execution);
-        BOOL_ARG("-lg:dump_physical_traces",config.dump_physical_traces);
-        BOOL_ARG("-lg:no_tracing",config.no_tracing);
-        BOOL_ARG("-lg:no_physical_tracing",config.no_physical_tracing);
-        BOOL_ARG("-lg:no_trace_optimization",config.no_trace_optimization);
-        BOOL_ARG("-lg:no_fence_elision",config.no_fence_elision);
-        BOOL_ARG("-lg:replay_on_cpus",config.replay_on_cpus);
-        BOOL_ARG("-lg:disjointness",config.verify_disjointness);
-        INT_ARG("-lg:window", config.initial_task_window_size);
-        INT_ARG("-lg:hysteresis", config.initial_task_window_hysteresis);
-        INT_ARG("-lg:sched", config.initial_tasks_to_schedule);
-        INT_ARG("-lg:vector", config.initial_meta_task_vector_width);
-        INT_ARG("-lg:message",config.max_message_size);
-        INT_ARG("-lg:epoch", config.gc_epoch_size);
-        INT_ARG("-lg:local", config.max_local_fields);
-        INT_ARG("-lg:parallel_replay", config.max_replay_parallelism);
-        if (!strcmp(argv[i],"-lg:no_dyn"))
-          config.dynamic_independence_tests = false;
-        BOOL_ARG("-lg:spy",config.legion_spy_enabled);
-        BOOL_ARG("-lg:test",config.enable_test_mapper);
-        INT_ARG("-lg:delay", config.delay_start);
-        if (!strcmp(argv[i],"-lg:replay"))
-        {
-          config.replay_file = argv[++i];
-          continue;
-        }
-        if (!strcmp(argv[i],"-lg:ldb"))
-        {
-          config.replay_file = argv[++i];
-          config.legion_ldb_enabled = true;
-          continue;
-        }
-#ifdef DEBUG_LEGION
-        BOOL_ARG("-lg:tree",config.logging_region_tree_state);
-        BOOL_ARG("-lg:verbose",config.verbose_logging);
-        BOOL_ARG("-lg:logical_only",config.logical_logging_only);
-        BOOL_ARG("-lg:physical_only",config.physical_logging_only);
-#else
-        if (!strcmp(argv[i],"-lg:tree"))
-        {
-          REPORT_LEGION_WARNING(LEGION_WARNING_REGION_TREE_STATE_LOGGING,
-                                "Region tree state logging is "
-                        "disabled.  To enable region tree state logging "
-                                                "compile in debug mode.");
-        }
-        if (!strcmp(argv[i],"-lg:disjointness"))
-        {
-          REPORT_LEGION_WARNING(LEGION_WARNING_DISJOINTNESS_VERIFICATION,
-                                "Disjointness verification for "
-                    "partition creation is disabled.  To enable dynamic "
-                            "disjointness testing compile in debug mode.");
-        }
-#endif
-        INT_ARG("-lg:prof", config.num_profiling_nodes);
-        if (!strcmp(argv[i],"-lg:serializer"))
-        {
-          config.serializer_type = argv[++i];
-          continue;
-        }
-        if (!strcmp(argv[i],"-lg:prof_logfile"))
-        {
-          config.prof_logfile = argv[++i];
-          continue;
-        }
-        if (!strcmp(argv[i],"-lg:prof_footprint"))
-        {
-          config.prof_footprint_threshold = atoi(argv[++i]) << 20;
-          continue;
-        }
-        INT_ARG("-lg:prof_latency",config.prof_target_latency);
-
-        BOOL_ARG("-lg:debug_ok",config.slow_config_ok);
-        
-        // These are all the deprecated versions of these flag
-        BOOL_ARG("-hl:separate",config.separate_runtime_instances);
-        BOOL_ARG("-hl:registration",config.record_registration);
-        BOOL_ARG("-hl:nosteal",config.stealing_disabled);
-        BOOL_ARG("-hl:resilient",config.resilient_mode);
-        BOOL_ARG("-hl:unsafe_launch",config.unsafe_launch);
-        BOOL_ARG("-hl:unsafe_mapper",config.unsafe_mapper);
-        if (!strcmp(argv[i],"-hl:safe_mapper"))
-          config.unsafe_mapper = false;
-        BOOL_ARG("-hl:inorder",config.program_order_execution);
-        BOOL_ARG("-hl:disjointness",config.verify_disjointness);
-        INT_ARG("-hl:window", config.initial_task_window_size);
-        INT_ARG("-hl:hysteresis", config.initial_task_window_hysteresis);
-        INT_ARG("-hl:sched", config.initial_tasks_to_schedule);
-        INT_ARG("-hl:message",config.max_message_size);
-        INT_ARG("-hl:epoch", config.gc_epoch_size);
-        if (!strcmp(argv[i],"-hl:no_dyn"))
-          config.dynamic_independence_tests = false;
-        BOOL_ARG("-hl:spy",config.legion_spy_enabled);
-        BOOL_ARG("-hl:test",config.enable_test_mapper);
-        INT_ARG("-hl:delay", config.delay_start);
-        if (!strcmp(argv[i],"-hl:replay"))
-        {
-          config.replay_file = argv[++i];
-          continue;
-        }
-        if (!strcmp(argv[i],"-hl:ldb"))
-        {
-          config.replay_file = argv[++i];
-          config.legion_ldb_enabled = true;
-          continue;
-        }
-#ifdef DEBUG_LEGION
-        BOOL_ARG("-hl:tree",config.logging_region_tree_state);
-        BOOL_ARG("-hl:verbose",config.verbose_logging);
-        BOOL_ARG("-hl:logical_only",config.logical_logging_only);
-        BOOL_ARG("-hl:physical_only",config.physical_logging_only);
-#else
-        if (!strcmp(argv[i],"-hl:tree"))
-        {
-          REPORT_LEGION_WARNING(LEGION_WARNING_REGION_TREE_STATE_LOGGING,
-                                "Region tree state logging is "
-                        "disabled.  To enable region tree state logging "
-                                                "compile in debug mode.");
-        }
-        if (!strcmp(argv[i],"-hl:disjointness"))
-        {
-          REPORT_LEGION_WARNING(LEGION_WARNING_DISJOINTNESS_VERIFICATION,
-                                "Disjointness verification for "
-                    "partition creation is disabled.  To enable dynamic "
-                            "disjointness testing compile in debug mode.");
-        }
-#endif
-        INT_ARG("-hl:prof", config.num_profiling_nodes);
-        if (!strcmp(argv[i],"-hl:serializer"))
-        {
-          config.serializer_type = argv[++i];
-          continue;
-        }
-        if (!strcmp(argv[i],"-hl:prof_logfile"))
-        {
-          config.prof_logfile = argv[++i];
-          continue;
-        }
-      } 
-#undef INT_ARG
-#undef BOOL_ARG
-#ifdef DEBUG_LEGION
-      assert(config.initial_task_window_hysteresis <= 100);
-      assert(config.max_local_fields <= LEGION_MAX_FIELDS);
-#endif
-      return config;
     }
 
     //--------------------------------------------------------------------------

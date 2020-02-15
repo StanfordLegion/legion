@@ -27,7 +27,8 @@ if 'issues' not in data:
              'issues': data }
 
 subprojects = set([ 'Legion', 'Realm', 'Regent', 'Bishop',
-                    'Build', 'Tests', 'Tools', 'Documentation' ])
+                    'Build', 'Tests', 'CI', 'Tools',
+                    'Documentation' ])
 
 # construct the base url that'd be used to re-query these issues
 query_url = '{}/repos/{}/{}/issues'.format(data['base_url'],

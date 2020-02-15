@@ -6258,10 +6258,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::initialize(int *argc, char ***argv)
+    /*static*/ void Runtime::initialize(int *argc, char ***argv, bool filter)
     //--------------------------------------------------------------------------
     {
-      Internal::Runtime::initialize(argc, argv);
+      Internal::Runtime::initialize(argc, argv, filter);
     }
 
     //--------------------------------------------------------------------------

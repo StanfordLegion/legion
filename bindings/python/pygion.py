@@ -1705,14 +1705,11 @@ class Task (object):
         assert(self.task_id is None)
 
         if not task_id:
-            if not top_level_task:
-                global next_legion_task_id
-                task_id = next_legion_task_id
-                next_legion_task_id += 1
-                # If we ever hit this then we need to allocate more task IDs
-                assert task_id < max_legion_task_id
-            else:
-                task_id = 1 # Predefined value for the top-level task
+            global next_legion_task_id
+            task_id = next_legion_task_id
+            next_legion_task_id += 1
+            # If we ever hit this then we need to allocate more task IDs
+            assert task_id < max_legion_task_id
 
         execution_constraints = c.legion_execution_constraint_set_create()
         c.legion_execution_constraint_set_add_processor_constraint(
@@ -1755,7 +1752,9 @@ class Task (object):
             len(qualname),
             ffi.NULL,
             0)
-
+        # If we're the top-level task then tell the runtime about our ID
+        if top_level_task:
+            c.legion_runtime_set_top_level_task_id(task_id)
         if global_task_registration_barrier is not None:
             c.legion_phase_barrier_arrive(_my.ctx.runtime, _my.ctx.context, global_task_registration_barrier, 1)
             global_task_registration_barrier = c.legion_phase_barrier_advance(_my.ctx.runtime, _my.ctx.context, global_task_registration_barrier)
