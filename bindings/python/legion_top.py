@@ -140,6 +140,8 @@ def python_main(raw_args, user_data, proc):
     if len(args) < 2 or args[1] == '-':
         run_repl()
     elif args[1] == '-c':
+        assert len(args) >= 3
+        sys.argv = list(args)
         run_cmd(args[2], run_name='__main__')
     else:
         assert len(args) >= 2

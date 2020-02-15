@@ -105,7 +105,7 @@ static void print_usage(FILE *out)
 int main(int argc, char **argv)
 {
   // Make sure argc and argv are valid before we look at them
-  Runtime::initialize(&argc, &argv);
+  Runtime::initialize(&argc, &argv, true/*filter legion and realm args*/);
 #ifdef BINDINGS_AUGMENT_PYTHONPATH
   // Add the binary directory to PYTHONPATH. This is needed for
   // in-place builds to find legion.py.
@@ -167,8 +167,8 @@ int main(int argc, char **argv)
     } else if (argv[1][1] == '\0')
       // Interactive console means no control replication
       control_replicate = false;
-  // TODO: this is insufficent, we need to remove all the legion
-  // and realm flags before we can check this
+  // Note this check is safe because we filtered all the 
+  // Legion and Realm flags out earlier
   } else if (argc < 2) {
     // Ineractive console means no control replication
     control_replicate = false;
