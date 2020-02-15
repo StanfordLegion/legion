@@ -7001,7 +7001,7 @@ namespace Legion {
             ready = finder->second;
           else
           {
-            if (implicit_runtime->dynamic_independence_tests)
+            if (!implicit_runtime->disable_independence_tests)
               issue_dynamic_test = true;
             else
             {
@@ -8316,7 +8316,7 @@ namespace Legion {
             ready_event = finder->second;
           else
           {
-            if (implicit_runtime->dynamic_independence_tests)
+            if (!implicit_runtime->disable_independence_tests)
               issue_dynamic_test = true;
             else
             {

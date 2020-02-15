@@ -7323,8 +7323,9 @@ namespace Legion {
        * be passed into the 'start' method or undefined behavior will occur.
        * @param argc pointer to an integer in which to store the argument count 
        * @param argv pointer to array of strings for storing command line args
+       * @param filter remove any runtime command line arguments
        */
-      static void initialize(int *argc, char ***argv);
+      static void initialize(int *argc, char ***argv, bool filter = false);
 
       /**
        * Blocking call to wait for the runtime to shutdown when
