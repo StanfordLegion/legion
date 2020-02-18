@@ -5460,6 +5460,11 @@ extern "C" {
   legion_context_get_shard_id(legion_runtime_t /*runtime*/,
                               legion_context_t /*context*/,
                               bool /*I know what I am doing*/);
+  // Another hidden method for getting the number of shards
+  size_t
+  legion_context_get_num_shards(legion_runtime_t /*runtime*/,
+                                legion_context_t /*context*/,
+                                bool /*I know what I am doing*/);
   // Another hidden method for control replication that most
   // people should not be using but for which there are legitamite
   // user, especially in garbage collected languages

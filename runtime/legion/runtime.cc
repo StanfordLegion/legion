@@ -14976,25 +14976,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ShardID Runtime::get_shard_id(Context ctx)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context get shard ID!");
-      return ctx->get_shard_id();
-    }
-
-    //--------------------------------------------------------------------------
-    Future Runtime::consensus_match(Context ctx, const void *input,void *output,
-                                    size_t num_elements, size_t element_size)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context consensus match!");
-      return ctx->consensus_match(input, output, num_elements, element_size);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::yield(Context ctx)
     //--------------------------------------------------------------------------
     {

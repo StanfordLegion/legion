@@ -7470,6 +7470,17 @@ legion_context_get_shard_id(legion_runtime_t runtime_,
   return runtime->get_shard_id(ctx, I_know_what_I_am_doing);
 }
 
+size_t
+legion_context_get_num_shards(legion_runtime_t runtime_,
+                              legion_context_t ctx_,
+                              bool I_know_what_I_am_doing)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+
+  return runtime->get_num_shards(ctx, I_know_what_I_am_doing);
+}
+
 legion_future_t
 legion_context_consensus_match(legion_runtime_t runtime_,
                                legion_context_t context_,

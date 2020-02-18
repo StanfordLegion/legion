@@ -93,6 +93,7 @@ namespace Legion {
       virtual void print_once(FILE *f, const char *message) const;
       virtual void log_once(Realm::LoggerMessage &message) const;
       virtual ShardID get_shard_id(void) const;
+      virtual size_t get_num_shards(void) const;
       virtual Future consensus_match(const void *input, void *output,
                                      size_t num_elements, size_t element_size);
     public:
@@ -1494,6 +1495,7 @@ namespace Legion {
       virtual void print_once(FILE *f, const char *message) const;
       virtual void log_once(Realm::LoggerMessage &message) const;
       virtual ShardID get_shard_id(void) const;
+      virtual size_t get_num_shards(void) const;
       virtual Future consensus_match(const void *input, void *output,
                                      size_t num_elements, size_t element_size);
     public:
