@@ -1848,8 +1848,8 @@ namespace Legion {
                         parent_ctx->get_unique_id())
         RegionTreeID bad_tree = 0;
         std::vector<FieldID> missing_fields;
-        std::vector<PhysicalManager*> unacquired;
-        int composite_index = runtime->forest->physical_convert_mapping(
+        std::vector<InstanceManager*> unacquired;
+        int virtual_index = runtime->forest->physical_convert_mapping(
             this, regions[*it], finder->second, 
             chosen_instances, bad_tree, missing_fields,
             runtime->unsafe_mapper ? NULL : get_acquired_instances_ref(),
@@ -1890,9 +1890,9 @@ namespace Legion {
         }
         if (!unacquired.empty())
         {
-          std::map<PhysicalManager*,std::pair<unsigned,bool> > 
+          std::map<InstanceManager*,std::pair<unsigned,bool> > 
             *acquired_instances = get_acquired_instances_ref();
-          for (std::vector<PhysicalManager*>::const_iterator uit = 
+          for (std::vector<InstanceManager*>::const_iterator uit = 
                 unacquired.begin(); uit != unacquired.end(); uit++)
           {
             if (acquired_instances->find(*uit) == acquired_instances->end())
@@ -1917,7 +1917,7 @@ namespace Legion {
                           mapper->get_mapper_name(), *it, 
                           get_task_name(), get_unique_id());
         }
-        if (composite_index >= 0)
+        if (virtual_index >= 0)
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from 'premap_task' invocation "
                         "on mapper %s. Mapper requested composite instance "
@@ -2862,7 +2862,7 @@ namespace Legion {
             InstanceSet &req_instances = physical_instances[idx];
             for (unsigned idx2 = 0; idx2 < req_instances.size(); idx2++)
             {
-              Memory mem = req_instances[idx2].get_memory();
+              const Memory mem = req_instances[idx2].get_memory();
               if (visible_memories.find(mem) == visible_memories.end())
               {
                 // Not visible from all target processors
@@ -2901,20 +2901,20 @@ namespace Legion {
         InstanceSet &result = physical_instances[idx];
         RegionTreeID bad_tree = 0;
         std::vector<FieldID> missing_fields;
-        std::vector<PhysicalManager*> unacquired;
+        std::vector<InstanceManager*> unacquired;
         bool free_acquired = false;
-        std::map<PhysicalManager*,std::pair<unsigned,bool> > *acquired = NULL;
+        std::map<InstanceManager*,std::pair<unsigned,bool> > *acquired = NULL;
         // Get the acquired instances only if we are checking
         if (!runtime->unsafe_mapper)
         {
           if (this->must_epoch != NULL)
           {
-            acquired = new std::map<PhysicalManager*,
+            acquired = new std::map<InstanceManager*,
                      std::pair<unsigned,bool> >(*get_acquired_instances_ref());
             free_acquired = true;
             // Merge the must epoch owners acquired instances too 
             // if we need to check for all our instances being acquired
-            std::map<PhysicalManager*,std::pair<unsigned,bool> > 
+            std::map<InstanceManager*,std::pair<unsigned,bool> > 
               *epoch_acquired = this->must_epoch->get_acquired_instances_ref();
             if (epoch_acquired != NULL)
               acquired->insert(epoch_acquired->begin(), epoch_acquired->end());
@@ -2962,9 +2962,9 @@ namespace Legion {
         }
         if (!unacquired.empty())
         {
-          std::map<PhysicalManager*,std::pair<unsigned,bool> > 
+          std::map<InstanceManager*,std::pair<unsigned,bool> > 
             *acquired_instances = get_acquired_instances_ref();
-          for (std::vector<PhysicalManager*>::const_iterator it = 
+          for (std::vector<InstanceManager*>::const_iterator it = 
                 unacquired.begin(); it != unacquired.end(); it++)
           {
             if (acquired_instances->find(*it) == acquired_instances->end())
@@ -3051,7 +3051,7 @@ namespace Legion {
           {
             for (unsigned idx2 = 0; idx2 < result.size(); idx2++)
             {
-              Memory mem = result[idx2].get_memory();
+              const Memory mem = result[idx2].get_memory();
               if (visible_memories.find(mem) == visible_memories.end())
                 // Not visible from all target processors
                 REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
@@ -3068,7 +3068,7 @@ namespace Legion {
           // managers are reduction instances
           if (IS_REDUCE(regions[idx]))
           {
-            std::map<PhysicalManager*,std::pair<unsigned,bool> > 
+            std::map<InstanceManager*,std::pair<unsigned,bool> > 
               *acquired = get_acquired_instances_ref();
             for (unsigned idx2 = 0; idx2 < result.size(); idx2++)
             {
@@ -3081,9 +3081,9 @@ namespace Legion {
                               "reduction privileges.", "map_task", 
                               mapper->get_mapper_name(), idx,
                               get_task_name(), get_unique_id())
-              std::map<PhysicalManager*,std::pair<unsigned,bool> >::
+              std::map<InstanceManager*,std::pair<unsigned,bool> >::
                 const_iterator finder = acquired->find(
-                    result[idx2].get_manager());
+                    result[idx2].get_instance_manager());
 #ifdef DEBUG_LEGION
               assert(finder != acquired->end());
 #endif
@@ -3291,7 +3291,7 @@ namespace Legion {
           if (!overlap)
             continue;
           PhysicalManager *manager = ref.get_manager();
-          if (manager->conflicts(constraints, &conflict_constraint))
+          if (manager->conflicts(constraints, index_point,&conflict_constraint))
             break;
         }
         if (conflict_constraint != NULL)
@@ -3837,7 +3837,7 @@ namespace Legion {
         // Convert the post-mapping  
         InstanceSet result;
         RegionTreeID bad_tree = 0;
-        std::vector<PhysicalManager*> unacquired;
+        std::vector<InstanceManager*> unacquired;
         bool had_composite = 
           runtime->forest->physical_convert_postmapping(this, req,
                               output.chosen_instances[idx], result, bad_tree,
@@ -3855,9 +3855,9 @@ namespace Legion {
                         regions[idx].region.get_tree_id())
         if (!unacquired.empty())
         {
-          std::map<PhysicalManager*,std::pair<unsigned,bool> > 
+          std::map<InstanceManager*,std::pair<unsigned,bool> > 
             *acquired_instances = get_acquired_instances_ref();
-          for (std::vector<PhysicalManager*>::const_iterator uit = 
+          for (std::vector<InstanceManager*>::const_iterator uit = 
                 unacquired.begin(); uit != unacquired.end(); uit++)
           {
             if (acquired_instances->find(*uit) == acquired_instances->end())
@@ -5115,7 +5115,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
+    std::map<InstanceManager*,std::pair<unsigned,bool> >* 
                                 IndividualTask::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
@@ -6245,7 +6245,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
+    std::map<InstanceManager*,std::pair<unsigned,bool> >* 
                                      PointTask::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
@@ -7538,7 +7538,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
+    std::map<InstanceManager*,std::pair<unsigned,bool> >* 
                                      IndexTask::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
@@ -8386,7 +8386,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
+    std::map<InstanceManager*,std::pair<unsigned,bool> >* 
                                      SliceTask::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {

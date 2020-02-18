@@ -369,8 +369,8 @@ namespace Legion {
       LG_DEFER_PERFORM_REMOTE_TASK_ID,
       LG_DEFER_PERFORM_UPDATE_TASK_ID,
       LG_DEFER_PERFORM_OUTPUT_TASK_ID,
-      LG_DEFER_INSTANCE_MANAGER_TASK_ID,
-      LG_DEFER_REDUCTION_MANAGER_TASK_ID,
+      LG_DEFER_INDIVIDUAL_MANAGER_TASK_ID,
+      LG_DEFER_COLLECTIVE_MANAGER_TASK_ID,
       LG_YIELD_TASK_ID,
       LG_MESSAGE_ID, // These two must be the last two
       LG_RETRY_SHUTDOWN_TASK_ID,
@@ -716,7 +716,8 @@ namespace Legion {
       SEND_PHI_VIEW,
       SEND_REDUCTION_VIEW,
       SEND_INSTANCE_MANAGER,
-      SEND_REDUCTION_MANAGER,
+      SEND_COLLECTIVE_MANAGER,
+      SEND_COLLECTIVE_MESSAGE,
       SEND_CREATE_TOP_VIEW_REQUEST,
       SEND_CREATE_TOP_VIEW_RESPONSE,
       SEND_VIEW_REQUEST,
@@ -881,7 +882,8 @@ namespace Legion {
         "Send Phi View",                                              \
         "Send Reduction View",                                        \
         "Send Instance Manager",                                      \
-        "Send Reduction Manager",                                     \
+        "Send Collective Instance Manager",                           \
+        "Send Collective Instance Message",                           \
         "Send Create Top View Request",                               \
         "Send Create Top View Response",                              \
         "Send View Request",                                          \
@@ -1541,10 +1543,9 @@ namespace Legion {
     class InstanceRef;
     class InstanceSet;
     class InnerTaskView;
-    class ReductionManager;
-    class ListReductionManager;
-    class FoldReductionManager;
     class VirtualManager;
+    class IndividualManager;
+    class CollectiveManager;
     class ReductionView;
     class InstanceBuilder;
 
@@ -1640,10 +1641,8 @@ namespace Legion {
     friend class Internal::FillView;                        \
     friend class Internal::LayoutDescription;               \
     friend class Internal::PhysicalManager;                 \
-    friend class Internal::InstanceManager;                 \
-    friend class Internal::ReductionManager;                \
-    friend class Internal::ListReductionManager;            \
-    friend class Internal::FoldReductionManager;            \
+    friend class Internal::IndividualManager;               \
+    friend class Internal::CollectiveManager;               \
     friend class Internal::TreeStateLogger;                 \
     friend class Internal::MapperManager;                   \
     friend class Internal::InstanceRef;                     \

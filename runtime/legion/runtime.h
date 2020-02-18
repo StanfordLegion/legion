@@ -757,15 +757,15 @@ namespace Legion {
       void prepare_for_shutdown(void);
       void finalize(void);
     public:
-      void register_remote_instance(PhysicalManager *manager);
-      void unregister_remote_instance(PhysicalManager *manager);
+      void register_remote_instance(InstanceManager *manager);
+      void unregister_remote_instance(InstanceManager *manager);
     public:
-      void activate_instance(PhysicalManager *manager);
-      void deactivate_instance(PhysicalManager *manager);
-      void validate_instance(PhysicalManager *manager);
-      void invalidate_instance(PhysicalManager *manager);
-      bool attempt_acquire(PhysicalManager *manager);
-      void complete_acquire(PhysicalManager *manager);
+      void activate_instance(InstanceManager *manager);
+      void deactivate_instance(InstanceManager *manager);
+      void validate_instance(InstanceManager *manager);
+      void invalidate_instance(InstanceManager *manager);
+      bool attempt_acquire(InstanceManager *manager);
+      void complete_acquire(InstanceManager *manager);
     public:
       bool create_physical_instance(const LayoutConstraintSet &contraints,
                                     const std::vector<LogicalRegion> &regions,
@@ -806,12 +806,12 @@ namespace Legion {
                                     MappingInstance &result, bool acquire,
                                     bool tight_bounds, bool remote = false);
       void release_tree_instances(RegionTreeID tid);
-      void set_garbage_collection_priority(PhysicalManager *manager,
+      void set_garbage_collection_priority(InstanceManager *manager,
                                     MapperID mapper_id, Processor proc,
                                     GCPriority priority);
-      RtEvent acquire_instances(const std::set<PhysicalManager*> &managers,
+      RtEvent acquire_instances(const std::set<InstanceManager*> &managers,
                                     std::vector<bool> &results);
-      void record_created_instance( PhysicalManager *manager, bool acquire,
+      void record_created_instance( InstanceManager *manager, bool acquire,
                                     MapperID mapper_id, Processor proc,
                                     GCPriority priority, bool remote);
     public:
@@ -838,20 +838,20 @@ namespace Legion {
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool acquire, 
                                     bool tight_region_bounds, bool remote);
-      void release_candidate_references(const std::deque<PhysicalManager*>
+      void release_candidate_references(const std::deque<InstanceManager*>
                                                         &candidates) const;
     protected:
       // We serialize all allocation attempts in a memory in order to 
       // ensure find_and_create calls will remain atomic
       RtEvent acquire_allocation_privilege(void);
       void release_allocation_privilege(void);
-      PhysicalManager* allocate_physical_instance(InstanceBuilder &builder,
+      InstanceManager* allocate_physical_instance(InstanceBuilder &builder,
                                                   size_t *footprint);
     public:
       bool delete_by_size_and_state(const size_t needed_size, 
                                     InstanceState state, bool larger_only); 
-      RtEvent attach_external_instance(PhysicalManager *manager);
-      RtEvent detach_external_instance(PhysicalManager *manager);
+      RtEvent attach_external_instance(InstanceManager *manager);
+      RtEvent detach_external_instance(InstanceManager *manager);
     public:
       // The memory that we are managing
       const Memory memory;
@@ -871,7 +871,7 @@ namespace Legion {
       mutable LocalLock manager_lock;
       // We maintain several sets of instances here
       // This is a generic list that tracks all the allocated instances
-      typedef LegionMap<PhysicalManager*,InstanceInfo,
+      typedef LegionMap<InstanceManager*,InstanceInfo,
                         MEMORY_INSTANCES_ALLOC>::tracked TreeInstances;
       std::map<RegionTreeID,TreeInstances> current_instances;
       // Keep track of outstanding requuests for allocations which 
@@ -2281,7 +2281,10 @@ namespace Legion {
       void send_phi_view(AddressSpaceID target, Serializer &rez);
       void send_reduction_view(AddressSpaceID target, Serializer &rez);
       void send_instance_manager(AddressSpaceID target, Serializer &rez);
-      void send_reduction_manager(AddressSpaceID target, Serializer &rez);
+      void send_collective_instance_manager(AddressSpaceID target, 
+                                            Serializer &rez);
+      void send_collective_instance_message(AddressSpaceID target, 
+                                            Serializer &rez);
       void send_create_top_view_request(AddressSpaceID target, Serializer &rez);
       void send_create_top_view_response(AddressSpaceID target,Serializer &rez);
       void send_view_register_user(AddressSpaceID target, Serializer &rez);
@@ -2510,8 +2513,8 @@ namespace Legion {
                                       AddressSpaceID source);
       void handle_send_instance_manager(Deserializer &derez,
                                         AddressSpaceID source);
-      void handle_send_reduction_manager(Deserializer &derez,
-                                         AddressSpaceID source);
+      void handle_collective_instance_manager(Deserializer &derez);
+      void handle_collective_instance_message(Deserializer &derez);
       void handle_create_top_view_request(Deserializer &derez,
                                           AddressSpaceID source);
       void handle_create_top_view_response(Deserializer &derez);
@@ -2746,7 +2749,7 @@ namespace Legion {
     public:
       LogicalView* find_or_request_logical_view(DistributedID did,
                                                 RtEvent &ready);
-      PhysicalManager* find_or_request_physical_manager(DistributedID did, 
+      InstanceManager* find_or_request_instance_manager(DistributedID did, 
                                                         RtEvent &ready);
       EquivalenceSet* find_or_request_equivalence_set(DistributedID did,
                                                       RtEvent &ready);

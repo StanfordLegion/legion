@@ -31,7 +31,7 @@ namespace Legion {
       RtUserEvent                       resume;
       MappingCallKind                   kind;
       Operation*                        operation;
-      std::map<PhysicalManager*,
+      std::map<InstanceManager*,
         std::pair<unsigned/*count*/,bool/*created*/> >* acquired_instances;
       unsigned long long                start_time;
       unsigned long long                stop_time;
@@ -49,7 +49,7 @@ namespace Legion {
     public:
       struct AcquireStatus {
       public:
-        std::set<PhysicalManager*> instances;
+        std::set<InstanceManager*> instances;
         std::vector<bool> results;
       };
       struct DeferMessageArgs : public LgTaskArgs<DeferMessageArgs> {

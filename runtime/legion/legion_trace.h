@@ -701,41 +701,23 @@ namespace Legion {
       virtual void record_merge_events(ApEvent &lhs, 
                             const std::set<ApEvent>& rhs, Memoizable *memo);
     public:
-      virtual void record_issue_copy(Memoizable *memo,
-                             unsigned src_idx,
-                             unsigned dst_idx,
-                             ApEvent &lhs,
+      virtual void record_issue_copy(Memoizable *memo, ApEvent &lhs,
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
-#ifdef LEGION_SPY
-                             FieldSpace handle,
-                             RegionTreeID src_tree_id,
-                             RegionTreeID dst_tree_id,
-#endif
-                             ApEvent precondition,
-                             ReductionOpID redop,
-                             bool reduction_fold,
-                             const FieldMaskSet<InstanceView> &tracing_srcs,
-                             const FieldMaskSet<InstanceView> &tracing_dsts);
+                             ApEvent precondition, PredEvent pred_guard,
+                             ReductionOpID redop, bool reduction_fold);
       virtual void record_issue_indirect(Memoizable *memo, ApEvent &lhs,
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
                              const std::vector<void*> &indirections,
-                             ApEvent precondition);
-      virtual void record_issue_fill(Memoizable *memo, unsigned idx,
-                             ApEvent &lhs,
+                             ApEvent precondition, PredEvent pred_guard);
+      virtual void record_issue_fill(Memoizable *memo, ApEvent &lhs,
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField> &fields,
                              const void *fill_value, size_t fill_size,
-#ifdef LEGION_SPY
-                             FieldSpace handle,
-                             RegionTreeID tree_id,
-#endif
-                             ApEvent precondition,
-                             const FieldMaskSet<FillView> &tracing_srcs,
-                             const FieldMaskSet<InstanceView> &tracing_dsts);
+                             ApEvent precondition, PredEvent pred_guard);
     private:
       void record_issue_fill_for_reduction(Memoizable *memo,
                                            unsigned idx,
@@ -752,7 +734,18 @@ namespace Legion {
                                   const RegionUsage &usage,
                                   const FieldMask &user_mask,
                                   bool update_validity);
-      virtual void record_fill_view(FillView *view, const FieldMask &user_mask);
+      virtual void record_post_fill_view(FillView *view, const FieldMask &mask);
+      virtual void record_fill_views(ApEvent lhs, Memoizable *memo,
+                           unsigned idx, IndexSpaceExpression *expr, 
+                           const FieldMaskSet<FillView> &tracing_srcs,
+                           const FieldMaskSet<InstanceView> &tracing_dsts,
+                           std::set<RtEvent> &applied_events);
+      virtual void record_copy_views(ApEvent lhs, Memoizable *memo,
+                           unsigned src_idx, unsigned dst_idx,
+                           IndexSpaceExpression *expr,
+                           const FieldMaskSet<InstanceView> &tracing_srcs,
+                           const FieldMaskSet<InstanceView> &tracing_dsts,
+                           std::set<RtEvent> &applied_events);
     private:
       void record_views(unsigned entry,
                         IndexSpaceExpression *expr,
@@ -1046,10 +1039,6 @@ namespace Legion {
                 const TraceLocalID &op_key,
                 const std::vector<CopySrcDstField> &fields,
                 const void *fill_value, size_t fill_size,
-#ifdef LEGION_SPY
-                FieldSpace handle,
-                RegionTreeID tree_id,
-#endif
                 unsigned precondition_idx);
       virtual ~IssueFill(void);
       virtual void execute(void);
@@ -1066,10 +1055,6 @@ namespace Legion {
       std::vector<CopySrcDstField> fields;
       void *fill_value;
       size_t fill_size;
-#ifdef LEGION_SPY
-      FieldSpace handle;
-      RegionTreeID tree_id;
-#endif
       unsigned precondition_idx;
     };
 
@@ -1088,11 +1073,6 @@ namespace Legion {
                 const TraceLocalID &op_key,
                 const std::vector<CopySrcDstField>& src_fields,
                 const std::vector<CopySrcDstField>& dst_fields,
-#ifdef LEGION_SPY
-                FieldSpace handle,
-                RegionTreeID src_tree_id,
-                RegionTreeID dst_tree_id,
-#endif
                 unsigned precondition_idx,
                 ReductionOpID redop, bool reduction_fold);
       virtual ~IssueCopy(void);
@@ -1109,11 +1089,6 @@ namespace Legion {
       IndexSpaceExpression *expr;
       std::vector<CopySrcDstField> src_fields;
       std::vector<CopySrcDstField> dst_fields;
-#ifdef LEGION_SPY
-      FieldSpace handle;
-      RegionTreeID src_tree_id;
-      RegionTreeID dst_tree_id;
-#endif
       unsigned precondition_idx;
       ReductionOpID redop;
       bool reduction_fold;

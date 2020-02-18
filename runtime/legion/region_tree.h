@@ -396,7 +396,7 @@ namespace Legion {
                     const RegionRequirement &req, const bool restricted,
                     const InstanceSet &sources, ApEvent term_event, 
                     InnerContext *context, unsigned index,
-                    std::map<PhysicalManager*,InstanceView*> &top_views,
+                    std::map<InstanceManager*,InstanceView*> &top_views,
                     std::set<RtEvent> &applied_events);
       void invalidate_current_context(RegionTreeContext ctx, bool users_only,
                                       LogicalRegion handle);
@@ -522,7 +522,7 @@ namespace Legion {
                       const LegionVector<IndirectRecord>::aligned &src_records,
                               const InstanceRef &src_idx_target,
                       const LegionVector<IndirectRecord>::aligned &dst_records,
-                              const InstanceRef &dst_idx_target,
+                              const InstanceRef &dst_idx_target, CopyOp *op,
                               const bool both_are_range,
                               const ApEvent precondition, 
                               const PredEvent pred_guard,
@@ -579,18 +579,18 @@ namespace Legion {
                                const std::vector<MappingInstance> &chosen,
                                InstanceSet &result, RegionTreeID &bad_tree,
                                std::vector<FieldID> &missing_fields,
-                               std::map<PhysicalManager*,
+                               std::map<InstanceManager*,
                                     std::pair<unsigned,bool> > *acquired,
-                               std::vector<PhysicalManager*> &unacquired,
+                               std::vector<InstanceManager*> &unacquired,
                                const bool do_acquire_checks,
                                const bool allow_partial_virtual = false);
       bool physical_convert_postmapping(Operation *op,
                                const RegionRequirement &req,
                                const std::vector<MappingInstance> &chosen,
                                InstanceSet &result, RegionTreeID &bad_tree,
-                               std::map<PhysicalManager*,
+                               std::map<InstanceManager*,
                                     std::pair<unsigned,bool> > *acquired,
-                               std::vector<PhysicalManager*> &unacquired,
+                               std::vector<InstanceManager*> &unacquired,
                                const bool do_acquire_checks);
       void log_mapping_decision(const UniqueID unique_id, TaskContext *context,
                                 const unsigned index, 
@@ -599,8 +599,8 @@ namespace Legion {
                                 bool postmapping = false);
     public: // helper method for the above two methods
       void perform_missing_acquires(Operation *op,
-                 std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired,
-                               const std::vector<PhysicalManager*> &unacquired);
+                 std::map<InstanceManager*,std::pair<unsigned,bool> > &acquired,
+                               const std::vector<InstanceManager*> &unacquired);
     public:
       bool are_colocated(const std::vector<InstanceSet*> &instances,
                          FieldSpace handle, const std::set<FieldID> &fields,
@@ -938,28 +938,12 @@ namespace Legion {
       virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
                            const void *fill_value, size_t fill_size,
-#ifdef LEGION_SPY
-                           UniqueID fill_uid,
-                           FieldSpace handle,
-                           RegionTreeID tree_id,
-#endif
-                           ApEvent precondition, PredEvent pred_guard,
-                           // Can be NULL if we're not tracing
-                           const FieldMaskSet<FillView> *tracing_srcs,
-                           const FieldMaskSet<InstanceView> *tracing_dsts) = 0;
+                           ApEvent precondition, PredEvent pred_guard) = 0;
       virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
-#ifdef LEGION_SPY
-                           FieldSpace handle,
-                           RegionTreeID src_tree_id,
-                           RegionTreeID dst_tree_id,
-#endif
                            ApEvent precondition, PredEvent pred_guard,
-                           ReductionOpID redop, bool reduction_fold,
-                           // Can be NULL if we're not tracing
-                           const FieldMaskSet<InstanceView> *tracing_srcs,
-                           const FieldMaskSet<InstanceView> *tracing_dsts) = 0;
+                           ReductionOpID redop, bool reduction_fold) = 0;
       virtual void construct_indirections(
                            const std::vector<unsigned> &field_indexes,
                            const FieldID indirect_field,
@@ -1007,29 +991,15 @@ namespace Legion {
                                const PhysicalTraceInfo &trace_info,
                                const std::vector<CopySrcDstField> &dst_fields,
                                const void *fill_value, size_t fill_size,
-#ifdef LEGION_SPY
-                               UniqueID fill_uid,
-                               FieldSpace handle,
-                               RegionTreeID tree_id,
-#endif
-                               ApEvent precondition, PredEvent pred_guard,
-                               const FieldMaskSet<FillView> *tracing_srcs,
-                               const FieldMaskSet<InstanceView> *tracing_dsts);
+                               ApEvent precondition, PredEvent pred_guard);
       template<int DIM, typename T>
       inline ApEvent issue_copy_internal(RegionTreeForest *forest,
                                const Realm::IndexSpace<DIM,T> &space,
                                const PhysicalTraceInfo &trace_info,
                                const std::vector<CopySrcDstField> &dst_fields,
                                const std::vector<CopySrcDstField> &src_fields,
-#ifdef LEGION_SPY
-                               FieldSpace handle,
-                               RegionTreeID src_tree_id,
-                               RegionTreeID dst_tree_id,
-#endif
                                ApEvent precondition, PredEvent pred_guard,
-                               ReductionOpID redop, bool reduction_fold,
-                               const FieldMaskSet<InstanceView> *tracing_srcs,
-                               const FieldMaskSet<InstanceView> *tracing_dsts);
+                               ReductionOpID redop, bool reduction_fold);
       template<int DIM, typename T>
       inline void construct_indirections_internal(
                                const std::vector<unsigned> &field_indexes,
@@ -1194,28 +1164,12 @@ namespace Legion {
       virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
                            const void *fill_value, size_t fill_size,
-#ifdef LEGION_SPY
-                           UniqueID fill_uid,
-                           FieldSpace handle,
-                           RegionTreeID tree_id,
-#endif
-                           ApEvent precondition, PredEvent pred_guard,
-                           // Can be NULL if we're not tracing
-                           const FieldMaskSet<FillView> *tracing_srcs,
-                           const FieldMaskSet<InstanceView> *tracing_dsts);
+                           ApEvent precondition, PredEvent pred_guard);
       virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
-#ifdef LEGION_SPY
-                           FieldSpace handle,
-                           RegionTreeID src_tree_id,
-                           RegionTreeID dst_tree_id,
-#endif
                            ApEvent precondition, PredEvent pred_guard,
-                           ReductionOpID redop, bool reduction_fold,
-                           // Can be NULL if we're not tracing
-                           const FieldMaskSet<InstanceView> *tracing_srcs,
-                           const FieldMaskSet<InstanceView> *tracing_dsts);
+                           ReductionOpID redop, bool reduction_fold);
       virtual void construct_indirections(
                            const std::vector<unsigned> &field_indexes,
                            const FieldID indirect_field,
@@ -2086,28 +2040,12 @@ namespace Legion {
       virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
                            const void *fill_value, size_t fill_size,
-#ifdef LEGION_SPY
-                           UniqueID fill_uid,
-                           FieldSpace handle,
-                           RegionTreeID tree_id,
-#endif
-                           ApEvent precondition, PredEvent pred_guard,
-                           // Can be NULL if we're not tracing
-                           const FieldMaskSet<FillView> *tracing_srcs,
-                           const FieldMaskSet<InstanceView> *tracing_dsts);
+                           ApEvent precondition, PredEvent pred_guard);
       virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
-#ifdef LEGION_SPY
-                           FieldSpace handle,
-                           RegionTreeID src_tree_id,
-                           RegionTreeID dst_tree_id,
-#endif
                            ApEvent precondition, PredEvent pred_guard,
-                           ReductionOpID redop, bool reduction_fold,
-                           // Can be NULL if we're not tracing
-                           const FieldMaskSet<InstanceView> *tracing_srcs,
-                           const FieldMaskSet<InstanceView> *tracing_dsts);
+                           ReductionOpID redop, bool reduction_fold);
       virtual void construct_indirections(
                            const std::vector<unsigned> &field_indexes,
                            const FieldID indirect_field,

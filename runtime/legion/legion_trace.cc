@@ -2050,7 +2050,8 @@ namespace Legion {
           log_tracing.info() << "  "
                     <<(view->is_reduction_view() ? "Reduction" : "Materialized")
                     << " view: " << view << ", Inst: " << std::hex
-                    << view->get_manager()->get_instance().id << std::dec
+                    << view->get_manager()->get_instance(DomainPoint()).id 
+                    << std::dec
                     << ", Index expr: " << eit->first->set_expr->expr_id
                     << ", Name: " << (name_size > 0 ? (const char*)name : "")
                     << ", Field Mask: " << mask;
@@ -3562,23 +3563,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_issue_copy(Memoizable *memo,
-                                             unsigned src_idx,
-                                             unsigned dst_idx,
-                                             ApEvent &lhs,
+    void PhysicalTemplate::record_issue_copy(Memoizable *memo, ApEvent &lhs,
                                              IndexSpaceExpression *expr,
                                  const std::vector<CopySrcDstField>& src_fields,
                                  const std::vector<CopySrcDstField>& dst_fields,
-#ifdef LEGION_SPY
-                                             FieldSpace handle,
-                                             RegionTreeID src_tree_id,
-                                             RegionTreeID dst_tree_id,
-#endif
                                              ApEvent precondition,
+                                             PredEvent pred_guard,
                                              ReductionOpID redop,
-                                             bool reduction_fold,
-                                 const FieldMaskSet<InstanceView> &tracing_srcs,
-                                 const FieldMaskSet<InstanceView> &tracing_dsts)
+                                             bool reduction_fold)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3589,22 +3581,7 @@ namespace Legion {
         Realm::UserEvent rename(Realm::UserEvent::create_user_event());
         rename.trigger();
         lhs = ApEvent(rename);
-      }
-
-      LegionList<FieldSet<EquivalenceSet*> >::aligned src_eqs, dst_eqs;
-      // Get these before we take the lock
-      {
-        FieldMaskSet<EquivalenceSet> eq_sets;
-        const FieldMask &src_mask = tracing_srcs.get_valid_mask();
-        memo->find_equivalence_sets(trace->runtime, src_idx, src_mask, eq_sets);
-        eq_sets.compute_field_sets(src_mask, src_eqs);
-      }
-      {
-        FieldMaskSet<EquivalenceSet> eq_sets;
-        const FieldMask &dst_mask = tracing_dsts.get_valid_mask();
-        memo->find_equivalence_sets(trace->runtime, dst_idx, dst_mask, eq_sets);
-        eq_sets.compute_field_sets(dst_mask, dst_eqs);
-      }
+      } 
 
       AutoLock tpl_lock(template_lock);
 #ifdef DEBUG_LEGION
@@ -3615,17 +3592,7 @@ namespace Legion {
       insert_instruction(new IssueCopy(
             *this, lhs_, expr, find_trace_local_id(memo),
             src_fields, dst_fields,
-#ifdef LEGION_SPY
-            handle, src_tree_id, dst_tree_id,
-#endif
-            find_event(precondition), redop, reduction_fold));
-
-      record_views(lhs_, expr, RegionUsage(READ_ONLY, EXCLUSIVE, 0), 
-                   tracing_srcs, src_eqs);
-      record_copy_views(lhs_, expr, tracing_srcs);
-      record_views(lhs_, expr, RegionUsage(WRITE_ONLY, EXCLUSIVE, 0), 
-                   tracing_dsts, dst_eqs);
-      record_copy_views(lhs_, expr, tracing_dsts);
+            find_event(precondition), redop, reduction_fold)); 
     }
 
     //--------------------------------------------------------------------------
@@ -3634,7 +3601,7 @@ namespace Legion {
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
                              const std::vector<void*> &indirections,
-                             ApEvent precondition)
+                             ApEvent precondition, PredEvent pred_guard)
     //--------------------------------------------------------------------------
     {
       // TODO: support for tracing of gather/scatter/indirect operations
@@ -3642,20 +3609,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_issue_fill(Memoizable *memo,
-                                             unsigned idx,
-                                             ApEvent &lhs,
+    void PhysicalTemplate::record_issue_fill(Memoizable *memo, ApEvent &lhs,
                                              IndexSpaceExpression *expr,
                                  const std::vector<CopySrcDstField> &fields,
                                              const void *fill_value, 
                                              size_t fill_size,
-#ifdef LEGION_SPY
-                                             FieldSpace handle,
-                                             RegionTreeID tree_id,
-#endif
                                              ApEvent precondition,
-                                 const FieldMaskSet<FillView> &tracing_srcs,
-                                 const FieldMaskSet<InstanceView> &tracing_dsts)
+                                             PredEvent pred_guard)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3666,15 +3626,6 @@ namespace Legion {
         Realm::UserEvent rename(Realm::UserEvent::create_user_event());
         rename.trigger();
         lhs = ApEvent(rename);
-      }
-
-      // Do this before we take the lock
-      LegionList<FieldSet<EquivalenceSet*> >::aligned eqs;
-      {
-        FieldMaskSet<EquivalenceSet> eq_sets;
-        const FieldMask &dst_mask = tracing_dsts.get_valid_mask();
-        memo->find_equivalence_sets(trace->runtime, idx, dst_mask, eq_sets);
-        eq_sets.compute_field_sets(dst_mask, eqs);
       }
 
       AutoLock tpl_lock(template_lock);
@@ -3686,15 +3637,7 @@ namespace Legion {
       insert_instruction(new IssueFill(*this, lhs_, expr,
                                        find_trace_local_id(memo),
                                        fields, fill_value, fill_size, 
-#ifdef LEGION_SPY
-                                       handle, tree_id,
-#endif
-                                       find_event(precondition)));
-
-      record_fill_views(tracing_srcs);
-      record_views(lhs_, expr, RegionUsage(WRITE_ONLY, EXCLUSIVE, 0), 
-                   tracing_dsts, eqs);
-      record_copy_views(lhs_, expr, tracing_dsts);
+                                       find_event(precondition))); 
     }
 
     //--------------------------------------------------------------------------
@@ -3709,16 +3652,15 @@ namespace Legion {
 
       TraceLocalID op_key = find_trace_local_id(memo);
       ReductionView *reduction_view = view->as_reduction_view();
-      ReductionManager *manager = reduction_view->manager;
-      LayoutDescription *const layout = manager->layout;
-      const ReductionOp *reduction_op = manager->op;
-
+      InstanceManager *manager = reduction_view->manager;
+      
       std::vector<CopySrcDstField> fields;
-      std::vector<FieldID> fill_fields;
-      manager->field_space_node->get_field_set(user_mask,
-          trace->logical_trace->ctx, fill_fields);
-      layout->compute_copy_offsets(fill_fields, manager, fields);
+      manager->compute_copy_offsets(user_mask, fields);
 
+      const ReductionOp *reduction_op = manager->reduction_op;
+#ifdef DEBUG_LEGION
+      assert(reduction_op != NULL);
+#endif
       size_t fill_size = reduction_op->sizeof_rhs;
       void *fill_value = malloc(fill_size);
       reduction_op->init(fill_value, 1);
@@ -3732,10 +3674,6 @@ namespace Legion {
       unsigned lhs_ = convert_event(lhs);
       insert_instruction(new IssueFill(*this, lhs_, expr, op_key,
                                        fields, fill_value, fill_size,
-#ifdef LEGION_SPY
-                                       manager->field_space_node->handle,
-                                       manager->tree_id,
-#endif
                                        fence_completion_id));
       reduction_ready_events[op_key].insert(lhs);
 
@@ -3806,7 +3744,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_fill_view(
+    void PhysicalTemplate::record_post_fill_view(
                                      FillView *view, const FieldMask &user_mask)
     //--------------------------------------------------------------------------
     {
@@ -3815,6 +3753,77 @@ namespace Legion {
       assert(is_recording());
 #endif
       post_fill_views.insert(view, user_mask);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_fill_views(ApEvent lhs, Memoizable *memo,
+                                 unsigned idx, IndexSpaceExpression *expr,
+                                 const FieldMaskSet<FillView> &tracing_srcs,
+                                 const FieldMaskSet<InstanceView> &tracing_dsts,
+                                 std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(memo != NULL);
+#endif
+      // Do this before we take the lock
+      LegionList<FieldSet<EquivalenceSet*> >::aligned eqs;
+      {
+        FieldMaskSet<EquivalenceSet> eq_sets;
+        const FieldMask &dst_mask = tracing_dsts.get_valid_mask();
+        memo->find_equivalence_sets(trace->runtime, idx, dst_mask, eq_sets);
+        eq_sets.compute_field_sets(dst_mask, eqs);
+      }
+
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
+      const unsigned lhs_ = find_event(lhs);
+      record_fill_views(tracing_srcs);
+      record_views(lhs_, expr, RegionUsage(WRITE_ONLY, EXCLUSIVE, 0), 
+                   tracing_dsts, eqs);
+      record_copy_views(lhs_, expr, tracing_dsts);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_copy_views(ApEvent lhs, Memoizable *memo,
+                                 unsigned src_idx, unsigned dst_idx,
+                                 IndexSpaceExpression *expr,
+                                 const FieldMaskSet<InstanceView> &tracing_srcs,
+                                 const FieldMaskSet<InstanceView> &tracing_dsts,
+                                 std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(memo != NULL);
+#endif
+      LegionList<FieldSet<EquivalenceSet*> >::aligned src_eqs, dst_eqs;
+      // Get these before we take the lock
+      {
+        FieldMaskSet<EquivalenceSet> eq_sets;
+        const FieldMask &src_mask = tracing_srcs.get_valid_mask();
+        memo->find_equivalence_sets(trace->runtime, src_idx, src_mask, eq_sets);
+        eq_sets.compute_field_sets(src_mask, src_eqs);
+      }
+      {
+        FieldMaskSet<EquivalenceSet> eq_sets;
+        const FieldMask &dst_mask = tracing_dsts.get_valid_mask();
+        memo->find_equivalence_sets(trace->runtime, dst_idx, dst_mask, eq_sets);
+        eq_sets.compute_field_sets(dst_mask, dst_eqs);
+      }
+
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
+      const unsigned lhs_ = find_event(lhs);
+      record_views(lhs_, expr, RegionUsage(READ_ONLY, EXCLUSIVE, 0), 
+                   tracing_srcs, src_eqs);
+      record_copy_views(lhs_, expr, tracing_srcs);
+      record_views(lhs_, expr, RegionUsage(WRITE_ONLY, EXCLUSIVE, 0), 
+                   tracing_dsts, dst_eqs);
+      record_copy_views(lhs_, expr, tracing_dsts);
     }
 
     //--------------------------------------------------------------------------
@@ -4419,14 +4428,8 @@ namespace Legion {
                          const TraceLocalID& key,
                          const std::vector<CopySrcDstField>& s,
                          const std::vector<CopySrcDstField>& d,
-#ifdef LEGION_SPY
-                         FieldSpace h,RegionTreeID src_tid,RegionTreeID dst_tid,
-#endif
                          unsigned pi, ReductionOpID ro, bool rf)
       : Instruction(tpl, key), lhs(l), expr(e), src_fields(s), dst_fields(d), 
-#ifdef LEGION_SPY
-        handle(h), src_tree_id(src_tid), dst_tree_id(dst_tid),
-#endif
         precondition_idx(pi), redop(ro), reduction_fold(rf)
     //--------------------------------------------------------------------------
     {
@@ -4461,11 +4464,8 @@ namespace Legion {
       ApEvent precondition = events[precondition_idx];
       const PhysicalTraceInfo trace_info(memo->get_operation(), -1U, false);
       events[lhs] = expr->issue_copy(trace_info, dst_fields, src_fields,
-#ifdef LEGION_SPY
-                                     handle, src_tree_id, dst_tree_id,
-#endif
                                      precondition, PredEvent::NO_PRED_EVENT,
-                                     redop, reduction_fold, NULL, NULL);
+                                     redop, reduction_fold);
     }
 
     //--------------------------------------------------------------------------
@@ -4511,14 +4511,8 @@ namespace Legion {
                          IndexSpaceExpression *e, const TraceLocalID &key,
                          const std::vector<CopySrcDstField> &f,
                          const void *value, size_t size, 
-#ifdef LEGION_SPY
-                         FieldSpace h, RegionTreeID tid,
-#endif
                          unsigned pi)
       : Instruction(tpl, key), lhs(l), expr(e), fields(f), fill_size(size),
-#ifdef LEGION_SPY
-        handle(h), tree_id(tid),
-#endif
         precondition_idx(pi)
     //--------------------------------------------------------------------------
     {
@@ -4555,12 +4549,7 @@ namespace Legion {
       const PhysicalTraceInfo trace_info(memo->get_operation(), -1U, false);
       events[lhs] = expr->issue_fill(trace_info, fields, 
                                      fill_value, fill_size,
-#ifdef LEGION_SPY
-                                     trace_info.op->get_unique_op_id(),
-                                     handle, tree_id,
-#endif
-                                     precondition, PredEvent::NO_PRED_EVENT,
-                                     NULL, NULL);
+                                     precondition, PredEvent::NO_PRED_EVENT);
     }
 
     //--------------------------------------------------------------------------

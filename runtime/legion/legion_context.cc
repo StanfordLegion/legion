@@ -406,7 +406,7 @@ namespace Legion {
         if (it->second.privilege_fields.empty())
           continue;
         InstanceSet instance_set;
-        std::vector<PhysicalManager*> unacquired;  
+        std::vector<InstanceManager*> unacquired;  
         RegionTreeID bad_tree; std::vector<FieldID> missing_fields;
         runtime->forest->physical_convert_mapping(owner_task, 
             it->second, instances, instance_set, bad_tree, 
@@ -644,7 +644,7 @@ namespace Legion {
                     Mapping::PhysicalInstance::get_virtual_instance());
                   const UniqueID unique_op_id = get_unique_id();
                   InstanceSet instance_set;
-                  std::vector<PhysicalManager*> unacquired;  
+                  std::vector<InstanceManager*> unacquired;  
                   RegionTreeID bad_tree; std::vector<FieldID> missing_fields;
                   runtime->forest->physical_convert_mapping(owner_task, 
                     it->second, instances, instance_set, bad_tree, 
@@ -799,7 +799,7 @@ namespace Legion {
               std::vector<MappingInstance> instances(1, 
                         Mapping::PhysicalInstance::get_virtual_instance());
               InstanceSet instance_set;
-              std::vector<PhysicalManager*> unacquired;  
+              std::vector<InstanceManager*> unacquired;  
               RegionTreeID bad_tree; std::vector<FieldID> missing_fields;
               runtime->forest->physical_convert_mapping(owner_task, 
                       req, instances, instance_set, bad_tree, missing_fields,
@@ -1481,7 +1481,7 @@ namespace Legion {
             std::vector<MappingInstance> instances(1, 
                           Mapping::PhysicalInstance::get_virtual_instance());
             InstanceSet instance_set;
-            std::vector<PhysicalManager*> unacquired;  
+            std::vector<InstanceManager*> unacquired;  
             RegionTreeID bad_tree; std::vector<FieldID> missing_fields;
             runtime->forest->physical_convert_mapping(owner_task, 
                 req, instances, instance_set, bad_tree, 
@@ -1542,7 +1542,7 @@ namespace Legion {
             {
               // Do extra logging for legion spy
               InstanceSet instance_set;
-              std::vector<PhysicalManager*> unacquired;  
+              std::vector<InstanceManager*> unacquired;  
               RegionTreeID bad_tree; std::vector<FieldID> missing_fields;
               runtime->forest->physical_convert_mapping(owner_task, 
                   it->second, instances, instance_set, bad_tree, 
@@ -7291,7 +7291,7 @@ namespace Legion {
       // For all of the physical contexts that were mapped, initialize them
       // with a specified reference to the current instance, otherwise
       // they were a virtual reference and we can ignore it.
-      std::map<PhysicalManager*,InstanceView*> top_views;
+      std::map<InstanceManager*,InstanceView*> top_views;
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
 #ifdef DEBUG_LEGION
@@ -7421,7 +7421,7 @@ namespace Legion {
       // Clean up our instance top views
       if (!instance_top_views.empty())
       {
-        for (std::map<PhysicalManager*,InstanceView*>::const_iterator it = 
+        for (std::map<InstanceManager*,InstanceView*>::const_iterator it = 
               instance_top_views.begin(); it != instance_top_views.end(); it++)
         {
           it->first->unregister_active_context(this);
@@ -7454,8 +7454,8 @@ namespace Legion {
         for (unsigned idx = 0; idx < targets.size(); idx++)
         {
           // See if we can find it
-          PhysicalManager *manager = targets[idx].get_manager();
-          std::map<PhysicalManager*,InstanceView*>::const_iterator finder = 
+          InstanceManager *manager = targets[idx].get_instance_manager();
+          std::map<InstanceManager*,InstanceView*>::const_iterator finder = 
             instance_top_views.find(manager);     
           if (finder != instance_top_views.end())
             target_views[idx] = finder->second;
@@ -7470,7 +7470,7 @@ namespace Legion {
         for (std::vector<unsigned>::const_iterator it = 
               still_needed.begin(); it != still_needed.end(); it++)
         {
-          PhysicalManager *manager = targets[*it].get_manager();
+          InstanceManager *manager = targets[*it].get_instance_manager();
           RtEvent ready;
           target_views[*it] = 
             create_instance_top_view(manager, local_space, &ready);
@@ -7500,7 +7500,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InstanceView* InnerContext::create_instance_top_view(
-                        PhysicalManager *manager, AddressSpaceID request_source,
+                        InstanceManager *manager, AddressSpaceID request_source,
                         RtEvent *ready_event/*=NULL*/)
     //--------------------------------------------------------------------------
     {
@@ -7532,13 +7532,13 @@ namespace Legion {
       RtEvent wait_on;
       {
         AutoLock inst_lock(instance_view_lock);
-        std::map<PhysicalManager*,InstanceView*>::const_iterator finder = 
+        std::map<InstanceManager*,InstanceView*>::const_iterator finder = 
           instance_top_views.find(manager);
         if (finder != instance_top_views.end())
           // We've already got the view, so we are done
           return finder->second;
         // See if someone else is already making it
-        std::map<PhysicalManager*,RtUserEvent>::iterator pending_finder =
+        std::map<InstanceManager*,RtUserEvent>::iterator pending_finder =
           pending_top_views.find(manager);
         if (pending_finder == pending_top_views.end())
           // mark that we are making it
@@ -7557,7 +7557,7 @@ namespace Legion {
         wait_on.wait();
         // Retake the lock and read out the result
         AutoLock inst_lock(instance_view_lock, 1, false/*exclusive*/);
-        std::map<PhysicalManager*,InstanceView*>::const_iterator finder = 
+        std::map<InstanceManager*,InstanceView*>::const_iterator finder = 
             instance_top_views.find(manager);
 #ifdef DEBUG_LEGION
         assert(finder != instance_top_views.end());
@@ -7577,7 +7577,7 @@ namespace Legion {
                 instance_top_views.end());
 #endif
         instance_top_views[manager] = result;
-        std::map<PhysicalManager*,RtUserEvent>::iterator pending_finder =
+        std::map<InstanceManager*,RtUserEvent>::iterator pending_finder =
           pending_top_views.find(manager);
 #ifdef DEBUG_LEGION
         assert(pending_finder != pending_top_views.end());
@@ -7646,13 +7646,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::notify_instance_deletion(PhysicalManager *deleted)
+    void InnerContext::notify_instance_deletion(InstanceManager *deleted)
     //--------------------------------------------------------------------------
     {
       InstanceView *removed = NULL;
       {
         AutoLock inst_lock(instance_view_lock);
-        std::map<PhysicalManager*,InstanceView*>::iterator finder =  
+        std::map<InstanceManager*,InstanceView*>::iterator finder =  
           instance_top_views.find(deleted);
 #ifdef DEBUG_LEGION
         assert(finder != instance_top_views.end());
@@ -7687,10 +7687,10 @@ namespace Legion {
       DistributedCollectable *dc = 
         runtime->find_distributed_collectable(manager_did);
 #ifdef DEBUG_LEGION
-      PhysicalManager *manager = dynamic_cast<PhysicalManager*>(dc);
+      InstanceManager *manager = dynamic_cast<InstanceManager*>(dc);
       assert(manager != NULL);
 #else
-      PhysicalManager *manager = static_cast<PhysicalManager*>(dc);
+      InstanceManager *manager = static_cast<InstanceManager*>(dc);
 #endif
       // Nasty deadlock case: if the request came from a different node
       // we have to defer this because we are in the view virtual channel
@@ -10495,7 +10495,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InstanceView* LeafContext::create_instance_top_view(
-                PhysicalManager *manager, AddressSpaceID source, RtEvent *ready)
+                InstanceManager *manager, AddressSpaceID source, RtEvent *ready)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -11742,7 +11742,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InstanceView* InlineContext::create_instance_top_view(
-                PhysicalManager *manager, AddressSpaceID source, RtEvent *ready)
+                InstanceManager *manager, AddressSpaceID source, RtEvent *ready)
     //--------------------------------------------------------------------------
     {
       assert(false);

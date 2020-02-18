@@ -2132,7 +2132,7 @@ namespace Legion {
         const InstanceRef &ref = references[idx];
         if (ref.is_field_set(fid))
         {
-          PhysicalManager *manager = ref.get_manager();
+          InstanceManager *manager = ref.get_instance_manager();
           if (check_field_size)
           {
             const size_t actual_size = 
@@ -2146,7 +2146,7 @@ namespace Legion {
                             fid, field_size, actual_size, 
                             context->get_task_name(), context->get_unique_id())
           }
-          return manager->get_instance();
+          return manager->get_instance(DomainPoint());
         }
       }
       // should never get here at worst there should have been an
@@ -3689,7 +3689,7 @@ namespace Legion {
                                                std::set<ApEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
-      std::vector<PhysicalManager*> to_check;
+      std::vector<InstanceManager*> to_check;
       {
         AutoLock m_lock(manager_lock,1,false/*exclusive*/);
         for (std::map<RegionTreeID,TreeInstances>::const_iterator cit = 
@@ -3701,7 +3701,7 @@ namespace Legion {
             to_check.push_back(it->first);
           }
       }
-      for (std::vector<PhysicalManager*>::const_iterator it = 
+      for (std::vector<InstanceManager*>::const_iterator it = 
             to_check.begin(); it != to_check.end(); it++)
       {
         (*it)->find_shutdown_preconditions(preconditions);
@@ -3717,10 +3717,10 @@ namespace Legion {
       // Only need to do things if we are the owner memory
       if (!is_owner)
         return;
-      std::map<PhysicalManager*,RtEvent> to_delete;
+      std::map<InstanceManager*,RtEvent> to_delete;
       {
         AutoLock m_lock(manager_lock);
-        std::vector<PhysicalManager*> to_remove;
+        std::vector<InstanceManager*> to_remove;
         for (std::map<RegionTreeID,TreeInstances>::iterator cit = 
               current_instances.begin(); cit != current_instances.end(); cit++)
           for (TreeInstances::iterator it = 
@@ -3748,7 +3748,7 @@ namespace Legion {
           }
         if (!to_remove.empty())
         {
-          for (std::vector<PhysicalManager*>::const_iterator it = 
+          for (std::vector<InstanceManager*>::const_iterator it = 
                 to_remove.begin(); it != to_remove.end(); it++)
           {
             std::map<RegionTreeID,TreeInstances>::iterator finder = 
@@ -3762,7 +3762,7 @@ namespace Legion {
           }
         }
       }
-      for (std::map<PhysicalManager*,RtEvent>::const_iterator it = 
+      for (std::map<InstanceManager*,RtEvent>::const_iterator it = 
             to_delete.begin(); it != to_delete.end(); it++)
       {
         it->first->perform_deletion(it->second);
@@ -3781,7 +3781,7 @@ namespace Legion {
       // No need for the lock, no one should be doing anything at this point
       for (std::map<RegionTreeID,TreeInstances>::const_iterator cit = 
             current_instances.begin(); cit != current_instances.end(); cit++)
-        for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
+        for (std::map<InstanceManager*,InstanceInfo>::const_iterator it = 
               cit->second.begin(); it != cit->second.end(); it++)
         {
           if (it->second.current_state == PENDING_COLLECTED_STATE)
@@ -3792,7 +3792,7 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    void MemoryManager::register_remote_instance(PhysicalManager *manager)
+    void MemoryManager::register_remote_instance(InstanceManager *manager)
     //--------------------------------------------------------------------------
     {
       const size_t inst_size = manager->get_instance_size();
@@ -3808,7 +3808,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MemoryManager::unregister_remote_instance(PhysicalManager *manager)
+    void MemoryManager::unregister_remote_instance(InstanceManager *manager)
     //--------------------------------------------------------------------------
     {
       AutoLock m_lock(manager_lock);
@@ -3824,7 +3824,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MemoryManager::activate_instance(PhysicalManager *manager)
+    void MemoryManager::activate_instance(InstanceManager *manager)
     //--------------------------------------------------------------------------
     {
       AutoLock m_lock(manager_lock);
@@ -3855,7 +3855,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MemoryManager::deactivate_instance(PhysicalManager *manager)
+    void MemoryManager::deactivate_instance(InstanceManager *manager)
     //--------------------------------------------------------------------------
     {
       bool perform_deletion = false;
@@ -3921,7 +3921,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MemoryManager::validate_instance(PhysicalManager *manager)
+    void MemoryManager::validate_instance(InstanceManager *manager)
     //--------------------------------------------------------------------------
     {
       AutoLock m_lock(manager_lock);
@@ -3945,7 +3945,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MemoryManager::invalidate_instance(PhysicalManager *manager)
+    void MemoryManager::invalidate_instance(InstanceManager *manager)
     //--------------------------------------------------------------------------
     {
       AutoLock m_lock(manager_lock);
@@ -3969,7 +3969,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool MemoryManager::attempt_acquire(PhysicalManager *manager)
+    bool MemoryManager::attempt_acquire(InstanceManager *manager)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3997,7 +3997,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MemoryManager::complete_acquire(PhysicalManager *manager)
+    void MemoryManager::complete_acquire(InstanceManager *manager)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4008,7 +4008,7 @@ namespace Legion {
       assert(current_instances.find(manager->tree_id) != 
               current_instances.end());
 #endif
-      std::map<PhysicalManager*,InstanceInfo>::iterator finder = 
+      std::map<InstanceManager*,InstanceInfo>::iterator finder = 
         current_instances[manager->tree_id].find(manager);
 #ifdef DEBUG_LEGION
       assert(finder != current_instances[manager->tree_id].end());
@@ -4072,7 +4072,7 @@ namespace Legion {
         if (wait_on.exists())
           wait_on.wait();
         // Try to make the result
-        PhysicalManager *manager = 
+        InstanceManager *manager = 
           allocate_physical_instance(builder, footprint);
         if (manager != NULL)
         {
@@ -4139,7 +4139,7 @@ namespace Legion {
         if (wait_on.exists())
           wait_on.wait();
         // Try to make the instance
-        PhysicalManager *manager = 
+        InstanceManager *manager = 
           allocate_physical_instance(builder, footprint);
         if (manager != NULL)
         {
@@ -4223,7 +4223,7 @@ namespace Legion {
         if (!success)
         {
           // If we couldn't find it, we have to make it
-          PhysicalManager *manager = 
+          InstanceManager *manager = 
             allocate_physical_instance(builder, footprint);
           if (manager != NULL)
           {
@@ -4311,7 +4311,7 @@ namespace Legion {
         if (!success)
         {
           // If we couldn't find it, we have to make it
-          PhysicalManager *manager = 
+          InstanceManager *manager = 
             allocate_physical_instance(builder, footprint);
           if (manager != NULL)
           {
@@ -4430,10 +4430,10 @@ namespace Legion {
         return;
       // Take the manager lock and see if there are any managers
       // we can release now
-      std::map<PhysicalManager*,std::pair<RtEvent,bool> > to_release;
+      std::map<InstanceManager*,std::pair<RtEvent,bool> > to_release;
       do 
       {
-        std::vector<PhysicalManager*> to_remove;
+        std::vector<InstanceManager*> to_remove;
         AutoLock m_lock(manager_lock);
         std::map<RegionTreeID,TreeInstances>::iterator finder = 
           current_instances.find(tree_id);
@@ -4483,14 +4483,14 @@ namespace Legion {
         }
         if (!to_remove.empty())
         {
-          for (std::vector<PhysicalManager*>::const_iterator it = 
+          for (std::vector<InstanceManager*>::const_iterator it = 
                 to_remove.begin(); it != to_remove.end(); it++)
             finder->second.erase(*it);
           if (finder->second.empty())
             current_instances.erase(finder);
         }
       } while (false);
-      for (std::map<PhysicalManager*,std::pair<RtEvent,bool> >::
+      for (std::map<InstanceManager*,std::pair<RtEvent,bool> >::
             const_iterator it = to_release.begin(); it != to_release.end();it++)
       {
         it->first->perform_deletion(it->second.first);
@@ -4504,7 +4504,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MemoryManager::set_garbage_collection_priority(
-                                PhysicalManager *manager, MapperID mapper_id, 
+                                InstanceManager *manager, MapperID mapper_id, 
                                 Processor processor, GCPriority priority)
     //--------------------------------------------------------------------------
     {
@@ -4637,7 +4637,7 @@ namespace Legion {
           current_instances.find(manager->tree_id);
         if (tree_finder != current_instances.end())
         {
-          std::map<PhysicalManager*,InstanceInfo>::iterator finder = 
+          std::map<InstanceManager*,InstanceInfo>::iterator finder = 
             tree_finder->second.find(manager);
           if (finder != tree_finder->second.end())
           {
@@ -4711,7 +4711,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent MemoryManager::acquire_instances(
-                                     const std::set<PhysicalManager*> &managers,
+                                     const std::set<InstanceManager*> &managers,
                                      std::vector<bool> &results)
     //--------------------------------------------------------------------------
     {
@@ -4727,7 +4727,7 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(memory);
         rez.serialize<size_t>(managers.size());
-        for (std::set<PhysicalManager*>::const_iterator it = 
+        for (std::set<InstanceManager*>::const_iterator it = 
               managers.begin(); it != managers.end(); it++)
         {
           rez.serialize((*it)->did);
@@ -5124,8 +5124,8 @@ namespace Legion {
                (kind <= FIND_ONLY_LAYOUT));
 #endif
         RtEvent manager_ready = RtEvent::NO_RT_EVENT;
-        PhysicalManager *manager = 
-          runtime->find_or_request_physical_manager(did, manager_ready);
+        InstanceManager *manager = 
+          runtime->find_or_request_instance_manager(did, manager_ready);
         WrapperReferenceMutator mutator(preconditions);
         // If the manager isn't ready yet, then we need to wait for it
         if (manager_ready.exists())
@@ -5271,7 +5271,7 @@ namespace Legion {
       derez.deserialize(never_gc_event);
       // Hold our lock to make sure our allocation doesn't change
       // when getting the reference
-      PhysicalManager *manager = NULL;
+      InstanceManager *manager = NULL;
       {
         AutoLock m_lock(manager_lock,1,false/*exclusive*/);
         DistributedCollectable *dc = 
@@ -5279,9 +5279,9 @@ namespace Legion {
         if (dc != NULL)
         {
 #ifdef DEBUG_LEGION
-          manager = dynamic_cast<PhysicalManager*>(dc);
+          manager = dynamic_cast<InstanceManager*>(dc);
 #else
-          manager = static_cast<PhysicalManager*>(dc);
+          manager = static_cast<InstanceManager*>(dc);
 #endif
           manager->add_base_resource_ref(MEMORY_MANAGER_REF);
         }
@@ -5348,16 +5348,16 @@ namespace Legion {
                                                 AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      std::vector<std::pair<unsigned,PhysicalManager*> > successes;
+      std::vector<std::pair<unsigned,InstanceManager*> > successes;
       size_t num_managers;
       derez.deserialize(num_managers);
       for (unsigned idx = 0; idx < num_managers; idx++)
       {
         DistributedID did;
         derez.deserialize(did);
-        PhysicalManager *remote_manager; // remote pointer, never use!
+        InstanceManager *remote_manager; // remote pointer, never use!
         derez.deserialize(remote_manager);
-        PhysicalManager *manager = NULL;
+        InstanceManager *manager = NULL;
         // Prevent changes until we can get a resource reference
         {
           AutoLock m_lock(manager_lock,1,false/*exclusive*/);
@@ -5366,9 +5366,9 @@ namespace Legion {
           if (dc != NULL)
           {
 #ifdef DEBUG_LEGION
-            manager = dynamic_cast<PhysicalManager*>(dc);
+            manager = dynamic_cast<InstanceManager*>(dc);
 #else
-            manager = static_cast<PhysicalManager*>(dc);
+            manager = static_cast<InstanceManager*>(dc);
 #endif
             manager->add_base_resource_ref(MEMORY_MANAGER_REF);
           }
@@ -5385,7 +5385,7 @@ namespace Legion {
         else // just remove our reference since we succeeded
         {
           successes.push_back(
-              std::pair<unsigned,PhysicalManager*>(idx, remote_manager));
+              std::pair<unsigned,InstanceManager*>(idx, remote_manager));
           manager->remove_base_resource_ref(MEMORY_MANAGER_REF);
         }
       }
@@ -5403,7 +5403,7 @@ namespace Legion {
           rez.serialize(memory);
           rez.serialize(target);
           rez.serialize<size_t>(successes.size());
-          for (std::vector<std::pair<unsigned,PhysicalManager*> >::
+          for (std::vector<std::pair<unsigned,InstanceManager*> >::
                 const_iterator it = successes.begin(); 
                 it != successes.end(); it++)
           {
@@ -5433,7 +5433,7 @@ namespace Legion {
         unsigned index;
         derez.deserialize(index);
         (*target)[index] = true;
-        PhysicalManager *manager;
+        InstanceManager *manager;
         derez.deserialize(manager);
         LocalReferenceMutator local_mutator;
         manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
@@ -5460,7 +5460,7 @@ namespace Legion {
     {
       if (regions.empty())
         return false;
-      std::deque<PhysicalManager*> candidates;
+      std::deque<InstanceManager*> candidates;
       const RegionTreeID tree_id = regions[0].get_tree_id(); 
       do 
       {
@@ -5497,12 +5497,12 @@ namespace Legion {
         }
         IndexSpaceExpression *space_expr = (region_exprs.size() == 1) ?
           *(region_exprs.begin()) : forest->union_index_spaces(region_exprs);
-        for (std::deque<PhysicalManager*>::const_iterator it = 
+        for (std::deque<InstanceManager*>::const_iterator it = 
               candidates.begin(); it != candidates.end(); it++)
         {
           if (!(*it)->meets_expression(space_expr, tight_region_bounds))
             continue;
-          if ((*it)->entails(constraints, NULL))
+          if ((*it)->entails(constraints, DomainPoint(), NULL))
           {
             // Check to see if we need to acquire
             // If we fail to acquire then keep going
@@ -5529,7 +5529,7 @@ namespace Legion {
     {
       if (regions.empty())
         return false;
-      std::deque<PhysicalManager*> candidates;
+      std::deque<InstanceManager*> candidates;
       const RegionTreeID tree_id = regions[0].get_tree_id();
       do
       {
@@ -5566,12 +5566,12 @@ namespace Legion {
         }
         IndexSpaceExpression *space_expr = (region_exprs.size() == 1) ?
           *(region_exprs.begin()) : forest->union_index_spaces(region_exprs);
-        for (std::deque<PhysicalManager*>::const_iterator it = 
+        for (std::deque<InstanceManager*>::const_iterator it = 
               candidates.begin(); it != candidates.end(); it++)
         {
           if (!(*it)->meets_expression(space_expr, tight_region_bounds))
             continue;
-          if ((*it)->entails(constraints, NULL))
+          if ((*it)->entails(constraints, DomainPoint(), NULL))
           {
             // Check to see if we need to acquire
             // If we fail to acquire then keep going
@@ -5599,7 +5599,7 @@ namespace Legion {
     {
       if (regions.empty())
         return false;
-      std::deque<PhysicalManager*> candidates;
+      std::deque<InstanceManager*> candidates;
       const RegionTreeID tree_id = regions[0].get_tree_id();
       do
       {
@@ -5637,12 +5637,12 @@ namespace Legion {
         }
         IndexSpaceExpression *space_expr = (region_exprs.size() == 1) ?
           *(region_exprs.begin()) : forest->union_index_spaces(region_exprs);
-        for (std::deque<PhysicalManager*>::const_iterator it = 
+        for (std::deque<InstanceManager*>::const_iterator it = 
               candidates.begin(); it != candidates.end(); it++)
         {
           if (!(*it)->meets_expression(space_expr, tight_region_bounds))
             continue;
-          if ((*it)->entails(constraints, NULL))
+          if ((*it)->entails(constraints, DomainPoint(), NULL))
           {
             // Check to see if we need to acquire
             // If we fail to acquire then keep going
@@ -5670,7 +5670,7 @@ namespace Legion {
     {
       if (regions.empty())
         return false;
-      std::deque<PhysicalManager*> candidates;
+      std::deque<InstanceManager*> candidates;
       const RegionTreeID tree_id = regions[0].get_tree_id();
       do
       {
@@ -5680,7 +5680,7 @@ namespace Legion {
           current_instances.find(tree_id);
         if (finder == current_instances.end())
           break;
-        for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
+        for (std::map<InstanceManager*,InstanceInfo>::const_iterator it = 
               finder->second.begin(); it != finder->second.end(); it++)
         {
           // Only consider ones that are currently valid
@@ -5707,12 +5707,12 @@ namespace Legion {
         }
         IndexSpaceExpression *space_expr = (region_exprs.size() == 1) ?
           *(region_exprs.begin()) : forest->union_index_spaces(region_exprs);
-        for (std::deque<PhysicalManager*>::const_iterator it = 
+        for (std::deque<InstanceManager*>::const_iterator it = 
               candidates.begin(); it != candidates.end(); it++)
         {
           if (!(*it)->meets_expression(space_expr, tight_region_bounds))
             continue;
-          if ((*it)->entails(constraints, NULL))
+          if ((*it)->entails(constraints, DomainPoint(), NULL))
           {
             // Check to see if we need to acquire
             // If we fail to acquire then keep going
@@ -5732,10 +5732,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MemoryManager::release_candidate_references(
-                           const std::deque<PhysicalManager*> &candidates) const
+                           const std::deque<InstanceManager*> &candidates) const
     //--------------------------------------------------------------------------
     {
-      for (std::deque<PhysicalManager*>::const_iterator it = 
+      for (std::deque<InstanceManager*>::const_iterator it = 
             candidates.begin(); it != candidates.end(); it++)
       {
         if ((*it)->remove_base_resource_ref(MEMORY_MANAGER_REF))
@@ -5779,7 +5779,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalManager* MemoryManager::allocate_physical_instance(
+    InstanceManager* MemoryManager::allocate_physical_instance(
                                     InstanceBuilder &builder, size_t *footprint)
     //--------------------------------------------------------------------------
     {
@@ -5788,7 +5788,7 @@ namespace Legion {
 #endif
       // First, just try to make the instance as is, if it works we are done 
       size_t needed_size;
-      PhysicalManager *manager = 
+      InstanceManager *manager = 
         builder.create_physical_instance(runtime->forest, &needed_size);
       if (footprint != NULL)
         *footprint = needed_size;
@@ -5806,7 +5806,7 @@ namespace Legion {
                                        true/*large only*/))
       {
         // See if we can make the instance
-        PhysicalManager *result = 
+        InstanceManager *result = 
           builder.create_physical_instance(runtime->forest);
         if (result != NULL)
           return result;
@@ -5816,7 +5816,7 @@ namespace Legion {
                                        false/*large only*/))
       {
         // See if we can make the instance
-        PhysicalManager *result = 
+        InstanceManager *result = 
           builder.create_physical_instance(runtime->forest);
         if (result != NULL)
           return result;
@@ -5826,7 +5826,7 @@ namespace Legion {
                                        true/*large only*/))
       {
         // See if we can make the instance
-        PhysicalManager *result = 
+        InstanceManager *result = 
           builder.create_physical_instance(runtime->forest);
         if (result != NULL)
           return result;
@@ -5836,7 +5836,7 @@ namespace Legion {
                                        false/*large only*/))
       {
         // See if we can make the instance
-        PhysicalManager *result = 
+        InstanceManager *result = 
           builder.create_physical_instance(runtime->forest);
         if (result != NULL)
           return result;
@@ -5846,7 +5846,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MemoryManager::record_created_instance(PhysicalManager *manager,
+    void MemoryManager::record_created_instance(InstanceManager *manager,
                            bool acquire, MapperID mapper_id, Processor p, 
                            GCPriority priority, bool remote)
     //--------------------------------------------------------------------------
@@ -5888,7 +5888,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent MemoryManager::attach_external_instance(PhysicalManager *manager)
+    RtEvent MemoryManager::attach_external_instance(InstanceManager *manager)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -5936,7 +5936,7 @@ namespace Legion {
     {
       bool pass_complete = true;
       size_t total_deleted = 0;
-      std::map<PhysicalManager*,RtEvent> to_delete;
+      std::map<InstanceManager*,RtEvent> to_delete;
       {
         AutoLock m_lock(manager_lock);
         if (state == COLLECTABLE_STATE)
@@ -5968,7 +5968,7 @@ namespace Legion {
           }
           if (!to_delete.empty())
           {
-            for (std::map<PhysicalManager*,RtEvent>::const_iterator it = 
+            for (std::map<InstanceManager*,RtEvent>::const_iterator it = 
                   to_delete.begin(); it != to_delete.end(); it++)
             {
               std::map<RegionTreeID,TreeInstances>::iterator finder = 
@@ -6023,7 +6023,7 @@ namespace Legion {
       // and remove any references that we are holding
       if (!to_delete.empty())
       {
-        for (std::map<PhysicalManager*,RtEvent>::const_iterator it = 
+        for (std::map<InstanceManager*,RtEvent>::const_iterator it = 
               to_delete.begin(); it != to_delete.end(); it++)
         {
           it->first->perform_deletion(it->second);
@@ -6035,7 +6035,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent MemoryManager::detach_external_instance(PhysicalManager *manager)
+    RtEvent MemoryManager::detach_external_instance(InstanceManager *manager)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -6069,7 +6069,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(tree_finder != current_instances.end());
 #endif
-        std::map<PhysicalManager*,InstanceInfo>::iterator finder = 
+        std::map<InstanceManager*,InstanceInfo>::iterator finder = 
           tree_finder->second.find(manager);
 #ifdef DEBUG_LEGION
         assert(finder != tree_finder->second.end());
@@ -6984,10 +6984,14 @@ namespace Legion {
                                                     remote_address_space);
               break;
             }
-          case SEND_REDUCTION_MANAGER:
+          case SEND_COLLECTIVE_MANAGER:
             {
-              runtime->handle_send_reduction_manager(derez,
-                                                     remote_address_space);
+              runtime->handle_collective_instance_manager(derez);
+              break;
+            }
+          case SEND_COLLECTIVE_MESSAGE:
+            {
+              runtime->handle_collective_instance_message(derez);
               break;
             }
           case SEND_CREATE_TOP_VIEW_REQUEST:
@@ -10951,9 +10955,7 @@ namespace Legion {
       std::vector<CustomSerdezID> serdez;
       std::vector<std::pair<FieldID,size_t> > field_sizes;
       LayoutDescription *layout = new LayoutDescription(all_ones, constraints);
-      PointerConstraint pointer_constraint(Memory::NO_MEMORY, 0);
-      virtual_manager = 
-        new VirtualManager(forest, layout, pointer_constraint, 0/*did*/);
+      virtual_manager = new VirtualManager(this, 0/*did*/, layout);
       virtual_manager->add_base_resource_ref(NEVER_GC_REF);
     }
 
@@ -15458,11 +15460,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_reduction_manager(AddressSpaceID target,Serializer &rez)
+    void Runtime::send_collective_instance_manager(AddressSpaceID target, 
+                                                   Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_message(rez, SEND_REDUCTION_MANAGER,
+      find_messenger(target)->send_message(rez, SEND_COLLECTIVE_MANAGER,
                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_collective_instance_message(AddressSpaceID target,
+                                                   Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      // Put all these messages on the reference virtual channel to keep them
+      // all in order and make sure that we never send any of this messages
+      // once the references on the collective instance are removed
+      find_messenger(target)->send_message(rez, SEND_COLLECTIVE_MESSAGE,
+                                   REFERENCE_VIRTUAL_CHANNEL, true/*flush*/); 
     }
 
     //--------------------------------------------------------------------------
@@ -16876,15 +16891,21 @@ namespace Legion {
                                                AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      InstanceManager::handle_send_manager(this, source, derez);
+      IndividualManager::handle_send_manager(this, source, derez);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_send_reduction_manager(Deserializer &derez,
-                                                AddressSpaceID source)
+    void Runtime::handle_collective_instance_manager(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      ReductionManager::handle_send_manager(this, source, derez);
+      CollectiveManager::handle_send_manager(this, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_collective_instance_message(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      CollectiveManager::handle_collective_message(derez, this);
     }
 
     //--------------------------------------------------------------------------
@@ -16972,7 +16993,7 @@ namespace Legion {
                                          AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      PhysicalManager::handle_manager_request(derez, this, source);
+      InstanceManager::handle_manager_request(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
@@ -17450,8 +17471,8 @@ namespace Legion {
       DistributedID did;
       derez.deserialize(did);
       RtEvent manager_ready;
-      PhysicalManager *manager = 
-        find_or_request_physical_manager(did, manager_ready);
+      InstanceManager *manager = 
+        find_or_request_instance_manager(did, manager_ready);
       RtUserEvent done_event;
       derez.deserialize(done_event);
       MemoryManager *memory_manager = find_memory_manager(target_memory);
@@ -17471,8 +17492,8 @@ namespace Legion {
       DistributedID did;
       derez.deserialize(did);
       RtEvent manager_ready;
-      PhysicalManager *manager = 
-        find_or_request_physical_manager(did, manager_ready);
+      InstanceManager *manager = 
+        find_or_request_instance_manager(did, manager_ready);
       RtUserEvent done_event;
       derez.deserialize(done_event);
       MemoryManager *memory_manager = find_memory_manager(target_memory);
@@ -18468,27 +18489,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalManager* Runtime::find_or_request_physical_manager(
+    InstanceManager* Runtime::find_or_request_instance_manager(
                                               DistributedID did, RtEvent &ready)
     //--------------------------------------------------------------------------
     {
       DistributedCollectable *dc = NULL;
-      if (PhysicalManager::is_instance_did(did))
+      if (PhysicalManager::is_collective_did(did))
         dc = find_or_request_distributed_collectable<
-          InstanceManager, SEND_MANAGER_REQUEST, DEFAULT_VIRTUAL_CHANNEL>(did, 
-                                                                        ready);
-      else if (PhysicalManager::is_reduction_fold_did(did))
-        dc = find_or_request_distributed_collectable<
-          FoldReductionManager, SEND_MANAGER_REQUEST, DEFAULT_VIRTUAL_CHANNEL>(
+          CollectiveManager, SEND_MANAGER_REQUEST, DEFAULT_VIRTUAL_CHANNEL>(
                                                                     did, ready);
-      else if (PhysicalManager::is_reduction_list_did(did))
+      else if (PhysicalManager::is_instance_did(did))
         dc = find_or_request_distributed_collectable<
-          ListReductionManager, SEND_MANAGER_REQUEST, DEFAULT_VIRTUAL_CHANNEL>(
+          IndividualManager, SEND_MANAGER_REQUEST, DEFAULT_VIRTUAL_CHANNEL>(
                                                                     did, ready);
       else
         assert(false);
       // Have to static cast since the memory might not have been initialized
-      return static_cast<PhysicalManager*>(dc);
+      return static_cast<InstanceManager*>(dc);
     }
 
     //--------------------------------------------------------------------------
@@ -22416,8 +22433,8 @@ namespace Legion {
           }
         case LG_DEFERRED_COLLECT_ID:
           {
-            const PhysicalManager::GarbageCollectionArgs *collect_args =
-              (const PhysicalManager::GarbageCollectionArgs*)args;
+            const InstanceManager::GarbageCollectionArgs *collect_args =
+              (const InstanceManager::GarbageCollectionArgs*)args;
             CollectableView::handle_deferred_collect(collect_args->view,
                                                     *collect_args->to_collect);
             delete collect_args->to_collect;
@@ -22909,14 +22926,14 @@ namespace Legion {
             PhysicalAnalysis::handle_deferred_output(args);
             break;
           }
-        case LG_DEFER_INSTANCE_MANAGER_TASK_ID:
+        case LG_DEFER_INDIVIDUAL_MANAGER_TASK_ID:
           {
-            InstanceManager::handle_defer_manager(args, runtime);
+            IndividualManager::handle_defer_manager(args, runtime);
             break;
           }
-        case LG_DEFER_REDUCTION_MANAGER_TASK_ID:
+        case LG_DEFER_COLLECTIVE_MANAGER_TASK_ID:
           {
-            ReductionManager::handle_defer_manager(args, runtime);
+            CollectiveManager::handle_defer_manager(args, runtime);
             break;
           }
         case LG_YIELD_TASK_ID:
