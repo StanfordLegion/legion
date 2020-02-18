@@ -10886,19 +10886,7 @@ namespace Legion {
               new Mapping::DefaultMapper(mapper_runtime, machine, it->first);
             MapperManager *wrapper = wrap_mapper(this, mapper, 0, it->first);
             it->second->add_mapper(0, wrapper, false/*check*/, true/*owns*/);
-          }
-          // Now ask the application what it wants to do
-          const std::vector<RegistrationCallbackFnptr> &registration_callbacks
-            = get_pending_registration_callbacks();
-          if (!registration_callbacks.empty())
-          {
-            log_run.info("Invoking mapper registration callback functions...");
-            for (std::vector<RegistrationCallbackFnptr>::const_iterator it = 
-                  registration_callbacks.begin(); it !=
-                  registration_callbacks.end(); it++)
-              (**it)(machine, external, local_procs);
-            log_run.info("Finished execution of mapper registration callbacks");
-          }
+          } 
         }
       }
       else // This is the replay/debug path
@@ -10968,6 +10956,26 @@ namespace Legion {
       if (mpi_rank_table != NULL)
         mpi_rank_table->perform_rank_exchange();
       initialize_mappers(); 
+      // Finally perform the registration callback methods
+      const std::vector<RegistrationCallbackFnptr> &registration_callbacks
+        = get_pending_registration_callbacks();
+      if (!registration_callbacks.empty())
+      {
+        log_run.info("Invoking registration callback functions...");
+        for (std::vector<RegistrationCallbackFnptr>::const_iterator it = 
+              registration_callbacks.begin(); it !=
+              registration_callbacks.end(); it++)
+          perform_registration_callback(*it);
+        log_run.info("Finished execution of registration callbacks");
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::perform_registration_callback(
+                                             RegistrationCallbackFnptr callback)
+    //--------------------------------------------------------------------------
+    {
+      (*callback)(machine, external, local_procs);
     }
 
     //--------------------------------------------------------------------------
@@ -13314,6 +13322,13 @@ namespace Legion {
     void Runtime::add_mapper(MapperID map_id, Mapper *mapper, Processor proc)
     //--------------------------------------------------------------------------
     {
+      // If we have a custom mapper then silently ignore this
+      if (!replay_file.empty() || enable_test_mapper)
+      {
+        // We take ownership of these things so delete it now
+        delete mapper;
+        return;
+      }
       // First, wrap this mapper in a mapper manager
       MapperManager *manager = wrap_mapper(this, mapper, map_id, proc);
       if (!proc.exists())
@@ -13490,6 +13505,13 @@ namespace Legion {
     void Runtime::replace_default_mapper(Mapper *mapper, Processor proc)
     //--------------------------------------------------------------------------
     {
+      // If we have a custom mapper then silently ignore this
+      if (!replay_file.empty() || enable_test_mapper)
+      {
+        // We take ownership of mapper so delete it now
+        delete mapper;
+        return;
+      }
       // First, wrap this mapper in a mapper manager
       MapperManager *manager = wrap_mapper(this, mapper, 0, proc); 
       if (!proc.exists())
@@ -21504,12 +21526,12 @@ namespace Legion {
       if (config.separate_runtime_instances)
       {
 #ifdef TRACE_ALLOCATION
-        REPORT_LEGION_ERROR(ERROR_TRACING_ALLOCATION_WITH_SEPARATE, 
+        REPORT_LEGION_FATAL(LEGION_FATAL_SEPARATE_RUNTIME_INSTANCES, 
                       "Memory tracing not supported with "
                       "separate runtime instances.")
 #endif
         if (!local_util_procs.empty())
-          REPORT_LEGION_ERROR(ERROR_SEPARATE_UTILITY_PROCS, 
+          REPORT_LEGION_FATAL(LEGION_FATAL_SEPARATE_RUNTIME_INSTANCES, 
                         "Separate runtime instances are not "
                         "supported when running with explicit "
                         "utility processors")
@@ -21843,9 +21865,24 @@ namespace Legion {
                                             RegistrationCallbackFnptr callback)
     //--------------------------------------------------------------------------
     {
-      std::vector<RegistrationCallbackFnptr> &registration_callbacks = 
-        get_pending_registration_callbacks();
-      registration_callbacks.push_back(callback);
+      if (runtime_started)
+      {
+        // Wait for the runtime to be started everywhere
+        if (!runtime_started_event.has_triggered())
+          // If we're here this has to be an external thread
+          runtime_started_event.external_wait();
+        if (the_runtime->separate_runtime_instances)
+          REPORT_LEGION_FATAL(LEGION_FATAL_SEPARATE_RUNTIME_INSTANCES,
+              "Dynamic registration callbacks cannot be registered after "
+              "the runtime has been started with multiple runtime instances.")
+        the_runtime->perform_registration_callback(callback);
+      }
+      else
+      {
+        std::vector<RegistrationCallbackFnptr> &registration_callbacks = 
+          get_pending_registration_callbacks();
+        registration_callbacks.push_back(callback);
+      }
     }
 
     //--------------------------------------------------------------------------
