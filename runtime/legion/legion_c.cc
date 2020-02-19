@@ -5556,6 +5556,12 @@ legion_task_get_depth(legion_task_t task_)
   return CObjectWrapper::unwrap(task_)->get_depth();
 }
 
+legion_mapper_id_t
+legion_task_get_mapper(legion_task_t task_)
+{
+  return CObjectWrapper::unwrap(task_)->map_id;
+}
+
 legion_mapping_tag_id_t
 legion_task_get_tag(legion_task_t task_)
 {

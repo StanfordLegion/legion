@@ -4176,6 +4176,12 @@ extern "C" {
   legion_task_get_depth(legion_task_t task);
 
   /**
+   * @see Legion::Mappable::map_id
+   */
+  legion_mapper_id_t
+  legion_task_get_mapper(legion_task_t task);
+
+  /**
    * @see Legion::Mappable::tag
    */
   legion_mapping_tag_id_t
