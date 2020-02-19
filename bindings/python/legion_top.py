@@ -193,16 +193,19 @@ def legion_python_main(raw_args, user_data, proc):
 
     # Run user's script.
     args = input_args(True)
-    if len(args) < 2 or args[1] == '-':
+    start = 1
+    if len(args) > 1 and args[1] == '--nocr':
+        start += 1
+    if len(args) < (start+1) or args[start] == '-':
         run_repl()
-    elif args[1] == '-c':
+    elif args[start] == '-c':
         assert len(args) >= 3
         sys.argv = list(args)
-        run_cmd(args[2], run_name='__main__')
+        run_cmd(args[start+1], run_name='__main__')
     else:
-        assert len(args) >= 2
+        assert len(args) >= (start+1) 
         sys.argv = list(args)
-        run_path(args[1], run_name='__main__')
+        run_path(args[start], run_name='__main__')
 
     # # Hack: Keep this thread alive because otherwise Python will reuse
     # # it for task execution and Pygion's thread-local state (_my.ctx)

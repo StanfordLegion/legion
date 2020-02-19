@@ -120,7 +120,7 @@ static void python_main_callback(Machine machine, Runtime *runtime,
 
 static void print_usage(FILE *out)
 {
-  fprintf(out,"legion_python [-c cmd | -m mod | file | -] [arg] ...\n");
+  fprintf(out,"legion_python [--nocr] [-c cmd | -m mod | file | -] [arg] ...\n");
 }
 
 int main(int argc, char **argv)
@@ -168,29 +168,34 @@ int main(int argc, char **argv)
 #endif
 
   const char *module_name = NULL;
-  if (argc > 1 && argv[1][0] == '-') {
-    if (strcmp(argv[1],"-m") == 0) {
-      if (argc < 3)
+  int start = 1;
+  if ((argc > start) && (strcmp(argv[start],"--nocr") == 0)) {
+    control_replicate = false;
+    start++;
+  }
+  if ((argc > start) && argv[start][0] == '-') {
+    if (strcmp(argv[start],"-m") == 0) {
+      if (argc < (start+2))
       {
         fprintf(stderr,"Argument expected for the -m option\n");
         print_usage(stderr);
         return 1;
       }
       else
-        module_name = argv[2];
-    } else if (strcmp(argv[1],"-c") == 0) {
-      if (argc < 3)
+        module_name = argv[start+1];
+    } else if (strcmp(argv[start],"-c") == 0) {
+      if (argc < (start+2))
       {
         fprintf(stderr,"Argument expected for the -c option\n");
         print_usage(stderr);
         return 1;
       }
-    } else if (argv[1][1] == '\0')
+    } else if (argv[start][1] == '\0')
       // Interactive console means no control replication
       control_replicate = false;
   // Note this check is safe because we filtered all the 
   // Legion and Realm flags out earlier
-  } else if (argc < 2) {
+  } else if (argc < (start+1)) {
     // Ineractive console means no control replication
     control_replicate = false;
   }
