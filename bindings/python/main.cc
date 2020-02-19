@@ -25,6 +25,7 @@ using namespace Legion::Mapping;
 
 static bool control_replicate = true;
 static const char * const unique_name = "legion_python";
+static const VariantID vid = 1;
 
 // Special mapper just for mapping the top-level Python tasks
 class LegionPyMapper : public Legion::Mapping::NullMapper {
@@ -90,26 +91,29 @@ static void python_main_callback(Machine machine, Runtime *runtime,
   // Get an ID for the top-level task, register it with the runtime
   const TaskID top_task_id = runtime->generate_library_task_ids(unique_name, 2); 
   runtime->set_top_level_task_id(top_task_id);
-  runtime->attach_name(top_task_id, "legion_python_main", false/*mutable*/, true/*local only*/);
   // Register a variant for the top-level task
   {
-    TaskVariantRegistrar registrar(top_task_id, "legion_python_main", false/*global*/);
+    const char *const task_name = "legion_python_main";
+    TaskVariantRegistrar registrar(top_task_id, task_name, false/*global*/);
     registrar.add_constraint(ProcessorConstraint(Processor::PY_PROC));
     CodeDescriptor code_desc(Realm::Type::from_cpp_type<Processor::TaskFuncPtr>());
     code_desc.add_implementation(
-        new Realm::PythonSourceImplementation("legion_top", "legion_python_main"));
-    runtime->register_task_variant(registrar, code_desc); 
+        new Realm::PythonSourceImplementation("legion_top", task_name));
+    registrar.set_replicable(control_replicate);
+    runtime->register_task_variant(registrar, code_desc, NULL, 0, task_name, vid);
+    runtime->attach_name(top_task_id, task_name, false/*mutable*/, true/*local only*/);
   }
   // Register a variant for the global import task
-  runtime->attach_name(top_task_id+1, "legion_python_import_global", 
-                        false/*mutable*/, true/*local only*/);
   {
-    TaskVariantRegistrar registrar(top_task_id+1, "legion_python_import_global", false/*global*/);
+    const char *const task_name = "legion_python_import_global";
+    TaskVariantRegistrar registrar(top_task_id+1, task_name, false/*global*/);
     registrar.add_constraint(ProcessorConstraint(Processor::PY_PROC));
     CodeDescriptor code_desc(Realm::Type::from_cpp_type<Processor::TaskFuncPtr>());
     code_desc.add_implementation(
-        new Realm::PythonSourceImplementation("legion_top", "legion_python_import_global"));
-    runtime->register_task_variant(registrar, code_desc);
+        new Realm::PythonSourceImplementation("legion_top", task_name));
+    registrar.set_leaf(true);
+    runtime->register_task_variant(registrar, code_desc, NULL, 0, task_name, vid);
+    runtime->attach_name(top_task_id+1, task_name, false/*mutable*/, true/*local only*/);
   }
   // Register our mapper for the top-level task
   const MapperID top_mapper_id = runtime->generate_library_mapper_ids(unique_name, 1);
@@ -344,12 +348,7 @@ void LegionPyMapper::map_task(const MapperContext      ctx,
   {
     assert(task.task_id == (top_task_id + 1));
     assert(task.regions.empty());
-    std::vector<VariantID> variants;
-    // Top-level task should be a python task variant for Legate
-    runtime->find_valid_variants(ctx, task.task_id, variants, 
-                                 Processor::PY_PROC);
-    assert(variants.size() == 1);
-    output.chosen_variant = variants.front();
+    output.chosen_variant = vid;
   }
   // Still need to fill in the target procs
   assert(task.target_proc.kind() == Processor::PY_PROC);
@@ -392,12 +391,7 @@ void LegionPyMapper::map_top_level_task(const MapperContext ctx,
 {
   assert(task.get_depth() == 0);
   assert(task.regions.empty());
-  std::vector<VariantID> variants;
-  // Top-level task should be a python task variant for Legate
-  runtime->find_valid_variants(ctx, task.task_id, variants, 
-                               Processor::PY_PROC);
-  assert(variants.size() == 1);
-  output.chosen_variant = variants.front();
+  output.chosen_variant = vid;
 }
 
 void LegionPyMapper::select_tunable_value(const MapperContext         ctx,
