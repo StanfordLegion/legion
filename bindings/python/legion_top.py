@@ -21,13 +21,19 @@ import gc
 import os
 import sys
 import code
+import types
+import struct
 import threading
+import importlib
 
 from legion_cffi import ffi, lib as c
 
+# This has to match the unique name in main.cc
+_unique_name = 'legion_python'
 
 # Storage for variables that apply to the top-level task.
 # IMPORTANT: They are valid ONLY in the top-level task.
+# or in global import tasks.
 top_level = threading.local()
 # Fields:
 #     top_level.runtime
@@ -118,7 +124,57 @@ def run_path(filename, run_name=None):
     # sys.modules[run_name] = old_module
 
 
-def python_main(raw_args, user_data, proc):
+def import_global(module, check_depth=True):
+    try:
+        # We should only be doing something for this if we're the top-level task
+        if c.legion_task_get_depth(top_level.task[0]) > 0 and check_depth:
+            return
+    except AttributeError:
+        raise RuntimeError('"import_global" must be called in a legion_python task')
+    if isinstance(module,str):
+        name = module
+    elif isinstance(module,types.ModuleType):
+        name = module.__name__
+    else:
+        raise TypeError('"module" arg to "import_global" must be a ModuleType or str type')
+    mapper = c.legion_runtime_generate_library_mapper_ids(
+            top_level.runtime[0], _unique_name.encode('utf-8'), 1)
+    future = c.legion_runtime_select_tunable_value(
+            top_level.runtime[0], top_level.context[0], 0, mapper, 0)
+    num_python_procs = struct.unpack_from('i',
+            ffi.buffer(c.legion_future_get_untyped_pointer(future),4))[0]
+    c.legion_future_destroy(future)
+    assert num_python_procs > 0
+    # Launch an index space task across all the python 
+    # processors to import the module in every interpreter
+    task_id = c.legion_runtime_generate_library_task_ids(
+            top_level.runtime[0], _unique_name.encode('utf-8'), 2) + 1
+    rect = ffi.new('legion_rect_1d_t *')
+    rect[0].lo.x[0] = 0
+    rect[0].hi.x[0] = num_python_procs - 1
+    domain = c.legion_domain_from_rect_1d(rect[0])
+    packed = name.encode('utf-8')
+    arglen = len(packed)
+    array = ffi.new('char[]', arglen)
+    ffi.buffer(array, arglen)[:] = packed
+    args = ffi.new('legion_task_argument_t *')
+    args[0].args = array
+    args[0].arglen = arglen
+    argmap = c.legion_argument_map_create()
+    launcher = c.legion_index_launcher_create(task_id, domain, 
+            args[0], argmap, c.legion_predicate_true(), False, mapper, 0)
+    future = c.legion_index_launcher_execute_reduction(top_level.runtime[0], 
+            top_level.context[0], launcher, c.LEGION_REDOP_SUM_INT32)
+    c.legion_index_launcher_destroy(launcher)
+    c.legion_argument_map_destroy(argmap)
+    result = struct.unpack_from('i',
+            ffi.buffer(c.legion_future_get_untyped_pointer(future),4))[0]
+    c.legion_future_destroy(future)
+    if result > 0:
+        raise ImportError('failed to globally import '+name+' on '+str(result)+' nodes')
+
+
+def legion_python_main(raw_args, user_data, proc):
     raw_arg_ptr = ffi.new('char[]', bytes(raw_args))
     raw_arg_size = len(raw_args)
 
@@ -137,16 +193,19 @@ def python_main(raw_args, user_data, proc):
 
     # Run user's script.
     args = input_args(True)
-    if len(args) < 2 or args[1] == '-':
+    start = 1
+    if len(args) > 1 and args[1] == '--nocr':
+        start += 1
+    if len(args) < (start+1) or args[start] == '-':
         run_repl()
-    elif args[1] == '-c':
+    elif args[start] == '-c':
         assert len(args) >= 3
         sys.argv = list(args)
-        run_cmd(args[2], run_name='__main__')
+        run_cmd(args[start+1], run_name='__main__')
     else:
-        assert len(args) >= 2
+        assert len(args) >= (start+1) 
         sys.argv = list(args)
-        run_path(args[1], run_name='__main__')
+        run_path(args[start], run_name='__main__')
 
     # # Hack: Keep this thread alive because otherwise Python will reuse
     # # it for task execution and Pygion's thread-local state (_my.ctx)
@@ -168,4 +227,40 @@ def python_main(raw_args, user_data, proc):
 
     # Execute postamble.
     c.legion_task_postamble(runtime[0], context[0], ffi.NULL, 0)
+
+
+# This is our helper task for ensuring that python modules are imported
+# globally on all python processors across the system
+def legion_python_import_global(raw_args, user_data, proc):
+    raw_arg_ptr = ffi.new('char[]', bytes(raw_args))
+    raw_arg_size = len(raw_args)
+
+    # Execute preamble to obtain Legion API context.
+    task = ffi.new('legion_task_t *')
+    raw_regions = ffi.new('legion_physical_region_t **')
+    num_regions = ffi.new('unsigned *')
+    context = ffi.new('legion_context_t *')
+    runtime = ffi.new('legion_runtime_t *')
+    c.legion_task_preamble(
+        raw_arg_ptr, raw_arg_size, proc,
+        task, raw_regions, num_regions, context, runtime)
+
+    top_level.runtime, top_level.context, top_level.task = runtime, context, task
+
+    # Get the name of the task 
+    module_name = ffi.unpack(ffi.cast('char*', c.legion_task_get_args(task[0])), 
+            c.legion_task_get_arglen(task[0])).decode('utf-8')
+    try:
+        importlib.import_module(module_name)
+        failures = 0
+    except ImportError:
+        failures = 1
+
+    del top_level.runtime
+    del top_level.context
+    del top_level.task
+
+    result = struct.pack('i',failures)
+
+    c.legion_task_postamble(runtime[0], context[0], ffi.from_buffer(result), 4)
 

@@ -24,7 +24,7 @@ using namespace Legion;
 using namespace Legion::Mapping;
 
 static bool control_replicate = true;
-static const char * const unique_name = "python_main";
+static const char * const unique_name = "legion_python";
 
 // Special mapper just for mapping the top-level Python tasks
 class LegionPyMapper : public Legion::Mapping::NullMapper {
@@ -43,6 +43,10 @@ public: // Task mapping calls
   virtual void select_task_options(const MapperContext    ctx,
                                    const Task&            task,
                                          TaskOptions&     output);
+  virtual void slice_task(const MapperContext      ctx,
+                          const Task&              task, 
+                          const SliceTaskInput&    input,
+                                SliceTaskOutput&   output);
   virtual void map_task(const MapperContext      ctx,
                         const Task&              task,
                         const MapTaskInput&      input,
@@ -52,6 +56,10 @@ public: // Task mapping calls
                                   const MapTaskInput&      input,
                                   const MapTaskOutput&     default_output,
                                   MapReplicateTaskOutput&  output);
+  virtual void select_tunable_value(const MapperContext         ctx,
+                                    const Task&                 task,
+                                    const SelectTunableInput&   input,
+                                          SelectTunableOutput&  output);
   virtual void select_steal_targets(const MapperContext         ctx,
                                     const SelectStealingInput&  input,
                                           SelectStealingOutput& output);
@@ -80,16 +88,29 @@ static void python_main_callback(Machine machine, Runtime *runtime,
                                  const std::set<Processor> &local_procs)
 {
   // Get an ID for the top-level task, register it with the runtime
-  const TaskID top_task_id = runtime->generate_library_task_ids(unique_name, 1); 
+  const TaskID top_task_id = runtime->generate_library_task_ids(unique_name, 2); 
   runtime->set_top_level_task_id(top_task_id);
-  runtime->attach_name(top_task_id, unique_name, false/*mutable*/, true/*local only*/);
+  runtime->attach_name(top_task_id, "legion_python_main", false/*mutable*/, true/*local only*/);
   // Register a variant for the top-level task
-  TaskVariantRegistrar registrar(top_task_id, unique_name, false/*global*/);
-  registrar.add_constraint(ProcessorConstraint(Processor::PY_PROC));
-  CodeDescriptor code_desc(Realm::Type::from_cpp_type<Processor::TaskFuncPtr>());
-  code_desc.add_implementation(
-      new Realm::PythonSourceImplementation("legion_top", unique_name));
-  runtime->register_task_variant(registrar, code_desc); 
+  {
+    TaskVariantRegistrar registrar(top_task_id, "legion_python_main", false/*global*/);
+    registrar.add_constraint(ProcessorConstraint(Processor::PY_PROC));
+    CodeDescriptor code_desc(Realm::Type::from_cpp_type<Processor::TaskFuncPtr>());
+    code_desc.add_implementation(
+        new Realm::PythonSourceImplementation("legion_top", "legion_python_main"));
+    runtime->register_task_variant(registrar, code_desc); 
+  }
+  // Register a variant for the global import task
+  runtime->attach_name(top_task_id+1, "legion_python_import_global", 
+                        false/*mutable*/, true/*local only*/);
+  {
+    TaskVariantRegistrar registrar(top_task_id+1, "legion_python_import_global", false/*global*/);
+    registrar.add_constraint(ProcessorConstraint(Processor::PY_PROC));
+    CodeDescriptor code_desc(Realm::Type::from_cpp_type<Processor::TaskFuncPtr>());
+    code_desc.add_implementation(
+        new Realm::PythonSourceImplementation("legion_top", "legion_python_import_global"));
+    runtime->register_task_variant(registrar, code_desc);
+  }
   // Register our mapper for the top-level task
   const MapperID top_mapper_id = runtime->generate_library_mapper_ids(unique_name, 1);
   runtime->set_top_level_task_mapper_id(top_mapper_id);
@@ -99,7 +120,7 @@ static void python_main_callback(Machine machine, Runtime *runtime,
 
 static void print_usage(FILE *out)
 {
-  fprintf(out,"legion_python [-c cmd | -m mod | file | -] [arg] ...\n");
+  fprintf(out,"legion_python [--nocr] [-c cmd | -m mod | file | -] [arg] ...\n");
 }
 
 int main(int argc, char **argv)
@@ -147,29 +168,34 @@ int main(int argc, char **argv)
 #endif
 
   const char *module_name = NULL;
-  if (argc > 1 && argv[1][0] == '-') {
-    if (strcmp(argv[1],"-m") == 0) {
-      if (argc < 3)
+  int start = 1;
+  if ((argc > start) && (strcmp(argv[start],"--nocr") == 0)) {
+    control_replicate = false;
+    start++;
+  }
+  if ((argc > start) && argv[start][0] == '-') {
+    if (strcmp(argv[start],"-m") == 0) {
+      if (argc < (start+2))
       {
         fprintf(stderr,"Argument expected for the -m option\n");
         print_usage(stderr);
         return 1;
       }
       else
-        module_name = argv[2];
-    } else if (strcmp(argv[1],"-c") == 0) {
-      if (argc < 3)
+        module_name = argv[start+1];
+    } else if (strcmp(argv[start],"-c") == 0) {
+      if (argc < (start+2))
       {
         fprintf(stderr,"Argument expected for the -c option\n");
         print_usage(stderr);
         return 1;
       }
-    } else if (argv[1][1] == '\0')
+    } else if (argv[start][1] == '\0')
       // Interactive console means no control replication
       control_replicate = false;
   // Note this check is safe because we filtered all the 
   // Legion and Realm flags out earlier
-  } else if (argc < 2) {
+  } else if (argc < (start+1)) {
     // Ineractive console means no control replication
     control_replicate = false;
   }
@@ -245,12 +271,63 @@ void LegionPyMapper::select_task_options(const MapperContext    ctx,
                                          const Task&            task,
                                                TaskOptions&     output)
 {
-  assert(task.get_depth() == 0);
-  assert(task.task_id == top_task_id);
-  // We only control replicate if we're allowed to and there are multiple nodes
-  output.replicate = control_replicate && (total_nodes > 1);
+  if (task.task_id == top_task_id)
+  {
+    assert(task.get_depth() == 0);
+    // We only control replicate if we're allowed to and there are multiple nodes
+    output.replicate = control_replicate && (total_nodes > 1);
+  }
+  else
+  {
+    assert(task.task_id == (top_task_id + 1));
+    output.replicate = false;
+  }
   assert(!local_pys.empty());
   output.initial_proc = local_pys.front();
+}
+
+void LegionPyMapper::slice_task(const MapperContext      ctx,
+                                const Task&              task, 
+                                const SliceTaskInput&    input,
+                                      SliceTaskOutput&   output)
+{
+  assert(task.task_id == (top_task_id + 1));
+  const Rect<1> bounds = input.domain; 
+  const size_t num_points = bounds.volume();
+  output.slices.reserve(num_points);
+  if (num_points == local_pys.size())
+  {
+    unsigned index = 0;
+    // Already been sharded, just assign to the local python procs
+    for (coord_t p = bounds.lo[0]; p <= bounds.hi[0]; p++)
+    {
+      const Point<1> point(p);
+      const Rect<1> rect(point,point);
+      output.slices.push_back(TaskSlice(Domain(rect),
+            local_pys[index++], false/*recurse*/, false/*stelable*/));
+    }
+  }
+  else
+  {
+    // Not sharded, so we should have points for all the python procs
+    assert(input.domain.get_volume() == (local_pys.size() * total_nodes));
+    Machine::ProcessorQuery py_procs(machine);
+    py_procs.only_kind(Processor::PY_PROC);
+    std::set<AddressSpaceID> spaces;
+    for (Machine::ProcessorQuery::iterator it = 
+          py_procs.begin(); it != py_procs.end(); it++)
+    {
+      const AddressSpaceID space = it->address_space();
+      if (spaces.find(space) != spaces.end())
+        continue;
+      const Point<1> lo(space*local_pys.size());
+      const Point<1> hi((space+1)*local_pys.size()-1);
+      const Rect<1> rect(lo,hi);
+      output.slices.push_back(TaskSlice(Domain(rect),
+            *it, true/*recurse*/, false/*stelable*/));
+      spaces.insert(space);
+    }
+  }
 }
 
 void LegionPyMapper::map_task(const MapperContext      ctx,
@@ -258,9 +335,22 @@ void LegionPyMapper::map_task(const MapperContext      ctx,
                               const MapTaskInput&      input,
                                     MapTaskOutput&     output)
 {
-  assert(task.get_depth() == 0);
-  assert(task.task_id == top_task_id);
-  map_top_level_task(ctx, task, input, output);
+  if (task.task_id == top_task_id)
+  {
+    assert(task.get_depth() == 0);
+    map_top_level_task(ctx, task, input, output);
+  }
+  else
+  {
+    assert(task.task_id == (top_task_id + 1));
+    assert(task.regions.empty());
+    std::vector<VariantID> variants;
+    // Top-level task should be a python task variant for Legate
+    runtime->find_valid_variants(ctx, task.task_id, variants, 
+                                 Processor::PY_PROC);
+    assert(variants.size() == 1);
+    output.chosen_variant = variants.front();
+  }
   // Still need to fill in the target procs
   assert(task.target_proc.kind() == Processor::PY_PROC);
   output.target_procs.push_back(task.target_proc);
@@ -308,6 +398,20 @@ void LegionPyMapper::map_top_level_task(const MapperContext ctx,
                                Processor::PY_PROC);
   assert(variants.size() == 1);
   output.chosen_variant = variants.front();
+}
+
+void LegionPyMapper::select_tunable_value(const MapperContext         ctx,
+                                          const Task&                 task,
+                                          const SelectTunableInput&   input,
+                                                SelectTunableOutput&  output)
+{
+  // We only have one tunable value for now and its the global number of python procs
+  assert(input.tunable_id == 0);
+  const int value = local_pys.size() * total_nodes;
+  int *result = (int*)malloc(sizeof(value));
+  *result = value;
+  output.value = result;
+  output.size = sizeof(value);
 }
 
 void LegionPyMapper::select_steal_targets(const MapperContext         ctx,
