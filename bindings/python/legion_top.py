@@ -265,7 +265,7 @@ def legion_python_import_global(raw_args, user_data, proc):
     module_name = ffi.unpack(ffi.cast('char*', c.legion_task_get_args(task[0])), 
             c.legion_task_get_arglen(task[0])).decode('utf-8')
     try:
-        importlib.import_module(module_name)
+        globals()[module_name] = importlib.import_module(module_name)
         failures = 0
     except ImportError:
         failures = 1
