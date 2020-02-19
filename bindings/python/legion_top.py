@@ -28,6 +28,11 @@ import importlib
 
 from legion_cffi import ffi, lib as c
 
+try:
+    unicode # Python 2
+except NameError:
+    unicode = str # Python 3
+
 # This has to match the unique name in main.cc
 _unique_name = 'legion_python'
 
@@ -133,6 +138,8 @@ def import_global(module, check_depth=True):
         raise RuntimeError('"import_global" must be called in a legion_python task')
     if isinstance(module,str):
         name = module
+    elif isinstance(module,unicode):
+        name = module
     elif isinstance(module,types.ModuleType):
         name = module.__name__
     else:
@@ -172,6 +179,13 @@ def import_global(module, check_depth=True):
     c.legion_future_destroy(future)
     if result > 0:
         raise ImportError('failed to globally import '+name+' on '+str(result)+' nodes')
+
+
+# In general we discourage the use of this function, but some libraries are
+# not safe to use with control replication so this will give them a way
+# to check whether they are running in a safe context or not
+def is_control_replicated():
+    return False
 
 
 def legion_python_main(raw_args, user_data, proc):
