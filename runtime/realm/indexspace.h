@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,13 +29,6 @@
 #include "realm/realm_config.h"
 #include "realm/sparsity.h"
 #include "realm/dynamic_templates.h"
-
-// we need intptr_t - make it if needed
-#if __cplusplus >= 201103L
-#include <stdint.h>
-#else
-typedef ptrdiff_t intptr_t;
-#endif
 
 #include "realm/custom_serdez.h"
 
@@ -171,7 +164,7 @@ namespace Realm {
     bool empty(void) const;
     
     // true if there is no sparsity map (i.e. the bounds fully define the domain)
-    __CUDA_HD__
+    REALM_CUDA_HD
     bool dense(void) const;
 
     // kicks off any operation needed to get detailed sparsity information - asking for

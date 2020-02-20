@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2019 Stanford University
+# Copyright 2020 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,12 +17,12 @@
 
 from __future__ import print_function
 
-import legion
-from legion import task, Fspace, IndexLaunch, Ispace, Region, RW, WD
+import pygion
+from pygion import task, Fspace, IndexLaunch, Ispace, Region, RW, WD
 import numpy
 
 # This task is defined in C++. See init_task in python_interop.cc.
-init = legion.extern_task(task_id=3, privileges=[WD], return_type=legion.int64)
+init = pygion.extern_task(task_id=3, privileges=[WD], return_type=pygion.int64)
 
 @task
 def hello(i, j):
@@ -51,7 +51,7 @@ def main_task():
     # interop with C++, we have to choose an explicit field ID here
     # (in this case, 1). We could leave this out if the code were pure
     # Python.
-    F = Fspace({'x': (legion.float64, 1)})
+    F = Fspace({'x': (pygion.float64, 1)})
 
     # Create a region from I and F and launch two tasks.
     R = Region(I, F)

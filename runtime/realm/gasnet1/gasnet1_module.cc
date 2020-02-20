@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,9 +34,9 @@
 #include <gasnet.h>
 #include <gasnet_coll.h>
 // eliminate GASNet warnings for unused static functions
-static const void *ignore_gasnet_warning1 __attribute__((unused)) = (void *)_gasneti_threadkey_init;
+REALM_ATTR_UNUSED(static const void *ignore_gasnet_warning1) = (void *)_gasneti_threadkey_init;
 #ifdef _INCLUDED_GASNET_TOOLS_H
-static const void *ignore_gasnet_warning2 __attribute__((unused)) = (void *)_gasnett_trace_printf_noop;
+REALM_ATTR_UNUSED(static const void *ignore_gasnet_warning2) = (void *)_gasnett_trace_printf_noop;
 #endif
 
 #define CHECK_GASNET(cmd) do { \
@@ -374,7 +374,7 @@ namespace Realm {
 
   protected:
     NodeID target;
-    Realm::NodeSet *targets;
+    Realm::NodeSet targets;
     bool is_multicast;
     void *dest_payload_addr;
     size_t header_size;
@@ -393,7 +393,6 @@ namespace Realm {
 					 size_t _max_payload_size,
 					 void *_dest_payload_addr)
     : target(_target)
-    , targets(0)
     , is_multicast(false)
     , dest_payload_addr(_dest_payload_addr)
     , header_size(_header_size)
@@ -412,7 +411,7 @@ namespace Realm {
 					 unsigned short _msgid,
 					 size_t _header_size,
 					 size_t _max_payload_size)
-    : targets(new NodeSet(_targets))
+    : targets(_targets)
     , is_multicast(true)
     , dest_payload_addr(0)
     , header_size(_header_size)
@@ -429,46 +428,7 @@ namespace Realm {
   
   GASNet1MessageImpl::~GASNet1MessageImpl()
   {
-    delete targets;
   }
-
-  class ActiveMessageSender {
-  public:
-    ActiveMessageSender(const void *_args, size_t _arglen,
-			const void *_payload, size_t _payload_len)
-      : prev_target(-1)
-      , args(_args)
-      , arglen(_arglen)
-      , payload(_payload)
-      , payload_len(_payload_len)
-    {}
-
-    void apply(NodeID target)
-    {
-      if(prev_target != -1)
-	enqueue_message(prev_target, MSGID_NEW_ACTIVEMSG,
-			args, arglen,
-			payload, payload_len, PAYLOAD_COPY);
-      prev_target = target;
-    }
-
-    void finish(int payload_mode)
-    {
-      if(prev_target != -1)
-	enqueue_message(prev_target, MSGID_NEW_ACTIVEMSG,
-			args, arglen,
-			payload, payload_len, payload_mode);
-      else
-	if(payload_mode == PAYLOAD_FREE)
-	  free(const_cast<void *>(payload));
-    }
-
-    NodeID prev_target;
-    const void *args;
-    size_t arglen;
-    const void *payload;
-    size_t payload_len;
-  };
 
   void GASNet1MessageImpl::commit(size_t act_payload_size)
   {
@@ -477,10 +437,23 @@ namespace Realm {
     args.payload_len = act_payload_size;
 
     if(is_multicast) {
-      ActiveMessageSender ams(&args, header_size+24,
-			      payload_base, act_payload_size);
-      targets->map(ams);
-      ams.finish(PAYLOAD_FREE);
+      assert(dest_payload_addr == 0);
+      size_t count = targets.size();
+      if(count > 0) {
+	for(NodeSet::const_iterator it = targets.begin();
+	    it != targets.end();
+	    ++it) {
+	  enqueue_message(*it, MSGID_NEW_ACTIVEMSG,
+			  &args, header_size+24,
+			  payload_base, act_payload_size,
+			  ((count > 0) ? PAYLOAD_COPY : PAYLOAD_FREE));
+	  count--;
+	}
+      } else {
+	// free the (unused) payload ourselves
+	if(payload_size > 0)
+	  free(payload_base);
+      }
     } else {
       enqueue_message(target, MSGID_NEW_ACTIVEMSG,
 		      &args, header_size+24,

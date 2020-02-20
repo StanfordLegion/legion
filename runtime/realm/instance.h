@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,21 +32,11 @@
 #include <vector>
 
 // we need intptr_t - make it if needed
-#if __cplusplus >= 201103L
+#if REALM_CXX_STANDARD >= 11
 #include <stdint.h>
 #else
 typedef ptrdiff_t intptr_t;
 #endif
-
-namespace LegionRuntime {
-  namespace Accessor {
-    #define REGION_ACCESSOR_ALREADY_PROTOTYPED
-    template <typename AT, typename ET = void, typename PT = ET> struct RegionAccessor;
-    namespace AccessorType {
-      struct Generic;
-    };
-  };
-};
 
 namespace Realm {
 
@@ -68,7 +58,7 @@ namespace Realm {
 
     static const RegionInstance NO_INST;
 
-    __CUDA_HD__
+    REALM_CUDA_HD
     bool exists(void) const;
 
     Memory get_location(void) const;
@@ -209,8 +199,6 @@ namespace Realm {
 
     template <int N>
     IndexSpace<N,int> get_indexspace(void) const;
-
-    LegionRuntime::Accessor::RegionAccessor<LegionRuntime::Accessor::AccessorType::Generic> get_accessor(void) const;
 
     // used for accessor construction
     bool increment_accessor_count(void);

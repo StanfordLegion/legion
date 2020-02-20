@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2019 Stanford University
+# Copyright 2020 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -37,7 +37,7 @@ install(TARGETS legion_python
 )
 
 # Use setup.py script to install the Python bindings library
-install(CODE "execute_process(COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/setup.py install --prefix ${CMAKE_INSTALL_PREFIX} WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})")
+install(CODE "execute_process(COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/setup.py install --cmake-build-dir ${CMAKE_BINARY_DIR}/runtime --prefix ${CMAKE_INSTALL_PREFIX} WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})")
 
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/examples/hello.py
   DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/python/examples

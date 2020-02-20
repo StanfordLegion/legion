@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -493,8 +493,8 @@ namespace Realm {
 
   // calls callback for each element in list
   template <typename T, typename PT, IntrusivePriorityListLink<T> T::*LINK, PT T::*PRI, typename LT>
-  template <typename CALLBACK>
-  inline void IntrusivePriorityList<T, PT, LINK, PRI, LT>::foreach(CALLBACK& cb)
+  template <typename CALLABLE>
+  inline void IntrusivePriorityList<T, PT, LINK, PRI, LT>::foreach(CALLABLE& cb)
   {
     lock.lock();
     T *cur = head;

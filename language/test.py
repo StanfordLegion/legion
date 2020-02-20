@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2019 Stanford University
+# Copyright 2020 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -108,6 +108,21 @@ def run_spy(logfiles, verbose, py_exe_path):
     if retcode != 0:
         raise TestFailure(' '.join(cmd), output.decode('utf-8') if output is not None else None)
 
+def run_gc(logfiles, verbose, py_exe_path):
+    cmd = [py_exe_path, os.path.join(regent.root_dir(), 'tools', 'legion_gc.py'),
+           '--leaks',
+           '--cycles',
+           '--assert'] + logfiles
+    if verbose: print('Running', ' '.join(cmd))
+    proc = subprocess.Popen(
+        cmd,
+        stdout=None if verbose else subprocess.PIPE,
+        stderr=None if verbose else subprocess.STDOUT)
+    output, _ = proc.communicate()
+    retcode = proc.wait()
+    if retcode != 0:
+        raise TestFailure(' '.join(cmd), output.decode('utf-8') if output is not None else None)
+
 def run_prof(out_dir, logfiles, verbose, py_exe_path):
     cmd = [
         py_exe_path,
@@ -198,6 +213,28 @@ def test_spy(filename, debug, verbose, short, py_exe_path, flags, env):
     finally:
         shutil.rmtree(spy_dir)
 
+def test_gc(filename, debug, verbose, short, py_exe_path, flags, env):
+    gc_dir = tempfile.mkdtemp(dir=os.path.dirname(os.path.abspath(filename)))
+    gc_log = os.path.join(gc_dir, 'gc_%.log')
+    gc_flags = ['-level', 'legion_gc=2', '-logfile', gc_log]
+
+    runs_with = find_labeled_flags(filename, 'runs-with', short)
+    try:
+        for params in runs_with:
+            try:
+                cmd = run(filename, debug, verbose, params + flags + gc_flags, env)
+            except TestFailure as e:
+                raise Exception('Command failed:\n%s\n\nOutput:\n%s' % (e.command, e.output))
+
+            try:
+                gc_logs = glob.glob(os.path.join(gc_dir, 'gc_*.log'))
+                assert len(gc_logs) > 0
+                run_gc(gc_logs, verbose, py_exe_path)
+            except TestFailure as e:
+                raise Exception('Command failed:\n%s\n%s\n\nOutput:\n%s' % (cmd, e.command, e.output))
+    finally:
+        shutil.rmtree(gc_dir)
+
 def test_prof(filename, debug, verbose, short, py_exe_path, flags, env):
     prof_dir = tempfile.mkdtemp(dir=os.path.dirname(os.path.abspath(filename)))
     prof_log = os.path.join(prof_dir, 'prof_%.gz')
@@ -264,12 +301,27 @@ class Counter:
         self.passed = 0
         self.failed = 0
 
-def get_test_specs(legion_dir, use_run, use_spy, use_prof, use_hdf5, use_openmp, use_cuda, use_python, max_dim, short, extra_flags):
+def get_test_specs(legion_dir, use_run, use_spy, use_gc, use_prof, use_hdf5, use_openmp, use_cuda, use_python, max_dim, short, extra_flags):
     base_env = {
     }
     run_env = {
         'REALM_BACKTRACE': '1',
     }
+
+    unit_tests = (
+        os.path.join('tests', 'regent', 'unit_test'),
+    )
+    run_pass_tests = (
+        os.path.join('tests', 'regent', 'run_pass'),
+        os.path.join('tests', 'regent', 'perf'),
+        os.path.join('tests', 'regent', 'bugs'),
+        os.path.join('tests', 'regent', 'layout'),
+        os.path.join('tests', 'bishop', 'run_pass'),
+        os.path.join('examples'),
+        os.path.join('..', 'tutorial'),
+        os.path.join('tests', 'runtime', 'bugs'),
+        os.path.join('tests', 'runtime', 'features'),
+    )
 
     base = [
         # FIXME: Move this flag into a per-test parameter so we don't use it everywhere.
@@ -281,52 +333,23 @@ def get_test_specs(legion_dir, use_run, use_spy, use_prof, use_hdf5, use_openmp,
     ]
     pretty = [
         ('pretty', (test_run_pass, (['-fpretty', '1'] + extra_flags, base_env)),
-         (os.path.join('tests', 'regent', 'run_pass'),
-          os.path.join('tests', 'regent', 'perf'),
-          os.path.join('tests', 'regent', 'bugs'),
-          os.path.join('tests', 'regent', 'layout'),
-          os.path.join('tests', 'bishop', 'run_pass'),
-          os.path.join('examples'),
-          os.path.join('..', 'tutorial'),
-         )),
+         unit_tests + run_pass_tests),
     ]
     run = [
         ('run_pass', (test_run_pass, ([] + extra_flags, run_env)),
-         (os.path.join('tests', 'regent', 'unit_test'),
-          os.path.join('tests', 'regent', 'run_pass'),
-          os.path.join('tests', 'regent', 'perf'),
-          os.path.join('tests', 'regent', 'bugs'),
-          os.path.join('tests', 'regent', 'layout'),
-          os.path.join('tests', 'bishop', 'run_pass'),
-          os.path.join('examples'),
-          os.path.join('..', 'tutorial'),
-          os.path.join('tests', 'runtime', 'bugs'),
-          os.path.join('tests', 'runtime', 'features'),
-         )),
+         unit_tests + run_pass_tests),
     ]
     spy = [
         ('spy', (test_spy, ([] + extra_flags, base_env)),
-         (os.path.join('tests', 'regent', 'run_pass'),
-          os.path.join('tests', 'regent', 'perf'),
-          os.path.join('tests', 'regent', 'bugs'),
-          os.path.join('tests', 'regent', 'layout'),
-          os.path.join('tests', 'bishop', 'run_pass'),
-          os.path.join('examples'),
-          os.path.join('..', 'tutorial'),
-          os.path.join('tests', 'runtime', 'bugs'),
-          os.path.join('tests', 'runtime', 'features'),
-         )),
+         run_pass_tests),
+    ]
+    gc = [
+        ('gc', (test_gc, ([] + extra_flags, base_env)),
+         run_pass_tests),
     ]
     prof = [
         ('prof', (test_prof, ([] + extra_flags, base_env)),
-         (os.path.join('tests', 'regent', 'run_pass'),
-          os.path.join('tests', 'regent', 'perf'),
-          os.path.join('tests', 'regent', 'bugs'),
-          os.path.join('tests', 'regent', 'layout'),
-          os.path.join('tests', 'bishop', 'run_pass'),
-          os.path.join('examples'),
-          os.path.join('..', 'tutorial'),
-         )),
+         run_pass_tests),
     ]
     hdf5 = [
         ('run_pass', (test_run_pass, ([] + extra_flags, run_env)),
@@ -363,7 +386,7 @@ def get_test_specs(legion_dir, use_run, use_spy, use_prof, use_hdf5, use_openmp,
         ]
 
     result = []
-    if not use_run and not use_spy and not use_prof and not use_hdf5 and not use_cuda:
+    if not (use_run or use_spy or use_gc or use_prof or use_hdf5 or use_cuda):
         result.extend(base)
         if not short:
             result.extend(pretty)
@@ -372,6 +395,8 @@ def get_test_specs(legion_dir, use_run, use_spy, use_prof, use_hdf5, use_openmp,
         result.extend(run)
     if use_spy:
         result.extend(spy)
+    if use_gc:
+        result.extend(gc)
     if use_prof:
         result.extend(prof)
     if use_hdf5:
@@ -386,7 +411,7 @@ def get_test_specs(legion_dir, use_run, use_spy, use_prof, use_hdf5, use_openmp,
         result.extend(max_dim_tests(dim))
     return result
 
-def run_all_tests(thread_count, debug, max_dim, run, spy, prof, hdf5, openmp, cuda, python, extra_flags, verbose, quiet,
+def run_all_tests(thread_count, debug, max_dim, run, spy, gc, prof, hdf5, openmp, cuda, python, extra_flags, verbose, quiet,
                   only_patterns, skip_patterns, timelimit, short):
     thread_pool = multiprocessing.Pool(thread_count)
     results = []
@@ -396,7 +421,7 @@ def run_all_tests(thread_count, debug, max_dim, run, spy, prof, hdf5, openmp, cu
     py_exe_path = detect_python_interpreter()
 
     # Run tests asynchronously.
-    tests = get_test_specs(legion_dir, run, spy, prof, hdf5, openmp, cuda, python, max_dim, short, extra_flags)
+    tests = get_test_specs(legion_dir, run, spy, gc, prof, hdf5, openmp, cuda, python, max_dim, short, extra_flags)
     for test_name, test_fn, test_dirs in tests:
         test_paths = []
         for test_dir in test_dirs:
@@ -507,8 +532,7 @@ def test_driver(argv):
                         dest='thread_count')
     parser.add_argument('--debug', '-g',
                         action='store_true',
-                        help='enable debug mode',
-                        dest='debug')
+                        help='enable debug mode')
     parser.add_argument('--max-dim',
                         type=int,
                         default=3,
@@ -516,32 +540,28 @@ def test_driver(argv):
                         dest='max_dim')
     parser.add_argument('--run_pass',
                         action='store_true',
-                        help='limit to run_pass tests',
-                        dest='run_pass')
+                        help='limit to run_pass tests')
     parser.add_argument('--spy', '-s',
                         action='store_true',
-                        help='run Legion Spy tests',
-                        dest='spy')
+                        help='run Legion Spy tests')
+    parser.add_argument('--gc',
+                        action='store_true',
+                        help='run Legion GC tests')
     parser.add_argument('--prof',
                         action='store_true',
-                        help='run Legion Prof tests',
-                        dest='prof')
-    parser.add_argument('--hdf', '--hdf5',
+                        help='run Legion Prof tests')
+    parser.add_argument('--hdf5',
                         action='store_true',
-                        help='run HDF5 tests',
-                        dest='hdf5')
+                        help='run HDF5 tests')
     parser.add_argument('--openmp',
                         action='store_true',
-                        help='run OpenMP tests',
-                        dest='openmp')
+                        help='run OpenMP tests')
     parser.add_argument('--cuda',
                         action='store_true',
-                        help='run CUDA tests',
-                        dest='cuda')
+                        help='run CUDA tests')
     parser.add_argument('--python',
                         action='store_true',
-                        help='run Python tests',
-                        dest='python')
+                        help='run Python tests')
     parser.add_argument('--extra',
                         action='append',
                         default=[],
@@ -582,6 +602,7 @@ def test_driver(argv):
         args.max_dim,
         args.run_pass,
         args.spy,
+        args.gc,
         args.prof,
         args.hdf5,
         args.openmp,

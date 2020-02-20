@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,7 +25,7 @@
 #include <iostream>
 
 // we need intptr_t - make it if needed
-#if __cplusplus >= 201103L
+#if REALM_CXX_STANDARD >= 11
 #include <stdint.h>
 #else
 #include <stddef.h>

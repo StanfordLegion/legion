@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,9 @@
 #include "realm/activemsg.h"
 
 // for name demangling
+#ifdef REALM_HAVE_CXXABI_H
 #include <cxxabi.h>
+#endif
 
 namespace Realm {
   
@@ -186,6 +188,7 @@ ActiveMessageHandlerReg<T, T2>::ActiveMessageHandlerReg(void)
   while(*c)
     hash = hash * 73 + *c++;
 
+#ifdef REALM_HAVE_CXXABI_H
   int status = -4;
   // let __cxa_demagle do a malloc - we have no idea how much to request
   //  ahead of time
@@ -194,7 +197,9 @@ ActiveMessageHandlerReg<T, T2>::ActiveMessageHandlerReg(void)
     // success
     name = demangled;
     must_free = true;
-  } else {
+  } else
+#endif
+  {
     name = mangled_name;
     must_free = false;
   }

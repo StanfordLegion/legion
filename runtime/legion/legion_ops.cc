@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -580,8 +580,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::add_copy_profiling_request(
-                                           Realm::ProfilingRequestSet &requests)
+    void Operation::add_copy_profiling_request(unsigned src_index, 
+            unsigned dst_index, Realm::ProfilingRequestSet &requests, bool fill)
     //--------------------------------------------------------------------------
     {
       // Should only be called for inherited types
@@ -589,7 +589,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::handle_profiling_response(
+    void Operation::handle_profiling_response(const ProfilingResponseBase *base,
                                        const Realm::ProfilingResponse &response)
     //--------------------------------------------------------------------------
     {
@@ -883,7 +883,7 @@ namespace Legion {
       parent_ctx->invalidate_trace_cache(trace, this);
 
       // See if we have any fence dependences
-      execution_fence_event = parent_ctx->register_fence_dependence(this);
+      execution_fence_event = parent_ctx->register_implicit_dependences(this);
     }
 
     //--------------------------------------------------------------------------
@@ -3499,16 +3499,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapOp::add_copy_profiling_request(Realm::ProfilingRequestSet &requests)
+    void MapOp::add_copy_profiling_request(unsigned src_index, 
+            unsigned dst_index, Realm::ProfilingRequestSet &requests, bool fill)
     //--------------------------------------------------------------------------
     {
       // Nothing to do if we don't have any profiling requests
       if (profiling_requests.empty())
         return;
-      ProfilingResponseBase base(this);
+      OpProfilingResponse response(this, src_index, dst_index, fill);
       Realm::ProfilingRequest &request = requests.add_request( 
           runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
-          &base, sizeof(base), profiling_priority);
+          &response, sizeof(response), profiling_priority);
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             profiling_requests.begin(); it != profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
@@ -3518,15 +3519,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapOp::handle_profiling_response(
+    void MapOp::handle_profiling_response(const ProfilingResponseBase *base,
                                        const Realm::ProfilingResponse &response)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(mapper != NULL);
 #endif
+      const OpProfilingResponse *op_info = 
+        static_cast<const OpProfilingResponse*>(base);
       Mapping::Mapper::InlineProfilingInfo info;
       info.profiling_responses.attach_realm_profiling_response(response);
+      info.fill_response = op_info->fill;
       mapper->invoke_inline_report_profiling(this, &info);
       handle_profiling_update(-1);
     }
@@ -3790,6 +3794,8 @@ namespace Legion {
                 "is no corresponding range indirection on the destination.",
                 idx, parent_ctx->get_task_name(), parent_ctx->get_unique_id())
         }
+        possible_src_indirect_out_of_range = 
+          launcher.possible_src_indirect_out_of_range;
       }
       if (!launcher.dst_indirect_requirements.empty())
       {
@@ -3830,6 +3836,10 @@ namespace Legion {
                   parent_ctx->get_unique_id())
           }
         }
+        possible_dst_indirect_out_of_range = 
+          launcher.possible_dst_indirect_out_of_range;
+        possible_dst_indirect_aliasing = 
+          launcher.possible_dst_indirect_aliasing;
       }
       grants = launcher.grants;
       // Register ourselves with all the grants
@@ -3956,7 +3966,7 @@ namespace Legion {
           {
             // Indirect copy
             IndexSpace src_indirect_space = 
-              src_requirements[idx].region.get_index_space();
+              src_indirect_requirements[idx].region.get_index_space();
             IndexSpace dst_indirect_space= 
               dst_indirect_requirements[idx].region.get_index_space();
             // Just check compatibility here since it's really hard to
@@ -4117,7 +4127,8 @@ namespace Legion {
         for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
         {
           const RegionRequirement &req = src_indirect_requirements[idx];
-          LegionSpy::log_logical_requirement(unique_op_id, idx, true/*region*/,
+          LegionSpy::log_logical_requirement(unique_op_id, offset + idx,
+                                             true/*region*/,
                                              req.region.index_space.id,
                                              req.region.field_space.id,
                                              req.region.tree_id,
@@ -4135,7 +4146,8 @@ namespace Legion {
         for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
         {
           const RegionRequirement &req = dst_indirect_requirements[idx];
-          LegionSpy::log_logical_requirement(unique_op_id, idx, true/*region*/,
+          LegionSpy::log_logical_requirement(unique_op_id, offset + idx,
+                                             true/*region*/,
                                              req.region.index_space.id,
                                              req.region.field_space.id,
                                              req.region.tree_id,
@@ -4806,7 +4818,8 @@ namespace Legion {
               dst_requirements[index], src_records,
               (*gather_targets)[0], dst_targets, this, 
               src_requirements.size() + index, gather_is_range[index],
-              local_init_precondition, predication_guard, trace_info);
+              local_init_precondition, predication_guard, trace_info,
+              possible_src_indirect_out_of_range);
           Runtime::trigger_event(indirect_done, local_done);
         }
       }
@@ -4819,7 +4832,9 @@ namespace Legion {
               src_requirements[index], dst_indirect_requirements[index],
               dst_requirements[index], src_targets, (*scatter_targets)[0],
               dst_records, this, index, scatter_is_range[index],
-              local_init_precondition, predication_guard, trace_info);
+              local_init_precondition, predication_guard, trace_info,
+              possible_dst_indirect_out_of_range, 
+              possible_dst_indirect_aliasing);
           Runtime::trigger_event(indirect_done, local_done);
         }
         else
@@ -4833,7 +4848,10 @@ namespace Legion {
               dst_requirements[index], dst_indirect_requirements[index],
               src_records, (*gather_targets)[0],
               dst_records, (*scatter_targets)[0], gather_is_range[index],
-              local_init_precondition, predication_guard, trace_info);
+              local_init_precondition, predication_guard, trace_info,
+              possible_src_indirect_out_of_range,
+              possible_dst_indirect_out_of_range,
+              possible_dst_indirect_aliasing);
           Runtime::trigger_event(indirect_done, local_done);
         }
       }
@@ -5769,17 +5787,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CopyOp::add_copy_profiling_request(
-                                           Realm::ProfilingRequestSet &requests)
+    void CopyOp::add_copy_profiling_request(unsigned src_index, 
+            unsigned dst_index, Realm::ProfilingRequestSet &requests, bool fill)
     //--------------------------------------------------------------------------
     {
       // Nothing to do if we don't have any profiling requests
       if (profiling_requests.empty())
         return;
-      ProfilingResponseBase base(this);
+      OpProfilingResponse response(this, src_index, dst_index, fill);
       Realm::ProfilingRequest &request = requests.add_request( 
           runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
-          &base, sizeof(base), profiling_priority);
+          &response, sizeof(response), profiling_priority);
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             profiling_requests.begin(); it != profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
@@ -5789,15 +5807,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CopyOp::handle_profiling_response(
+    void CopyOp::handle_profiling_response(const ProfilingResponseBase *base,
                                        const Realm::ProfilingResponse &response)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(mapper != NULL);
 #endif
+      const OpProfilingResponse *op_info = 
+        static_cast<const OpProfilingResponse*>(base);
       Mapping::Mapper::CopyProfilingInfo info;
       info.profiling_responses.attach_realm_profiling_response(response);
+      info.src_index = op_info->src;
+      info.dst_index = op_info->dst;
+      info.fill_response = op_info->fill;
       mapper->invoke_copy_report_profiling(this, &info);
       handle_profiling_update(-1);
     }
@@ -5989,6 +6012,8 @@ namespace Legion {
         src_exchange_events.resize(gather_size);
         src_merged.resize(gather_size);
         src_exchanged.resize(gather_size);
+        possible_src_indirect_out_of_range =
+          launcher.possible_src_indirect_out_of_range;
       }
       if (!launcher.dst_indirect_requirements.empty())
       {
@@ -6014,6 +6039,10 @@ namespace Legion {
         dst_exchange_events.resize(scatter_size);
         dst_merged.resize(scatter_size);
         dst_exchanged.resize(scatter_size);
+        possible_dst_indirect_out_of_range = 
+          launcher.possible_dst_indirect_out_of_range;
+        possible_dst_indirect_aliasing = 
+          launcher.possible_dst_indirect_aliasing;
       }
       grants = launcher.grants;
       // Register ourselves with all the grants
@@ -8444,17 +8473,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PostCloseOp::add_copy_profiling_request(
-                                           Realm::ProfilingRequestSet &requests)
+    void PostCloseOp::add_copy_profiling_request(unsigned src_index,
+            unsigned dst_index, Realm::ProfilingRequestSet &requests, bool fill)
     //--------------------------------------------------------------------------
     {
       // Nothing to do if we don't have any profiling requests
       if (profiling_requests.empty())
         return;
-      ProfilingResponseBase base(this);
+      OpProfilingResponse response(this, src_index, dst_index, fill);
       Realm::ProfilingRequest &request = requests.add_request( 
           runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
-          &base, sizeof(base), profiling_priority);
+          &response, sizeof(response), profiling_priority);
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             profiling_requests.begin(); it != profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
@@ -8465,14 +8494,18 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PostCloseOp::handle_profiling_response(
+                                       const ProfilingResponseBase *base,
                                        const Realm::ProfilingResponse &response)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(mapper != NULL);
 #endif
+      const OpProfilingResponse *op_info = 
+        static_cast<const OpProfilingResponse*>(base);
       Mapping::Mapper::CloseProfilingInfo info;
       info.profiling_responses.attach_realm_profiling_response(response);
+      info.fill_response = op_info->fill;
       mapper->invoke_close_report_profiling(this, &info);
       handle_profiling_update(-1);
     }
@@ -9353,17 +9386,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AcquireOp::add_copy_profiling_request(
-                                           Realm::ProfilingRequestSet &requests)
+    void AcquireOp::add_copy_profiling_request(unsigned src_index,
+            unsigned dst_index, Realm::ProfilingRequestSet &requests, bool fill)
     //--------------------------------------------------------------------------
     {
       // Nothing to do if we don't have any profiling requests
       if (profiling_requests.empty())
         return;
-      ProfilingResponseBase base(this);
+      OpProfilingResponse response(this, src_index, dst_index, fill);
       Realm::ProfilingRequest &request = requests.add_request( 
           runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
-          &base, sizeof(base), profiling_priority);
+          &response, sizeof(response), profiling_priority);
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             profiling_requests.begin(); it != profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
@@ -9373,15 +9406,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AcquireOp::handle_profiling_response(
+    void AcquireOp::handle_profiling_response(const ProfilingResponseBase *base,
                                        const Realm::ProfilingResponse &response)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(mapper != NULL);
 #endif
+      const OpProfilingResponse *op_info = 
+        static_cast<const OpProfilingResponse*>(base);
       Mapping::Mapper::AcquireProfilingInfo info;
       info.profiling_responses.attach_realm_profiling_response(response);
+      info.fill_response = op_info->fill;
       mapper->invoke_acquire_report_profiling(this, &info);
       handle_profiling_update(-1);
     }
@@ -10164,17 +10200,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReleaseOp::add_copy_profiling_request(
-                                           Realm::ProfilingRequestSet &requests)
+    void ReleaseOp::add_copy_profiling_request(unsigned src_index,
+            unsigned dst_index, Realm::ProfilingRequestSet &requests, bool fill)
     //--------------------------------------------------------------------------
     {
       // Nothing to do if we don't have any profiling requests
       if (profiling_requests.empty())
         return;
-      ProfilingResponseBase base(this);
+      OpProfilingResponse response(this, src_index, dst_index, fill);
       Realm::ProfilingRequest &request = requests.add_request( 
           runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
-          &base, sizeof(base), profiling_priority);
+          &response, sizeof(response), profiling_priority);
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             profiling_requests.begin(); it != profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
@@ -10184,15 +10220,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReleaseOp::handle_profiling_response(
+    void ReleaseOp::handle_profiling_response(const ProfilingResponseBase *base,
                                        const Realm::ProfilingResponse &response)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(mapper != NULL);
 #endif
+      const OpProfilingResponse *op_info = 
+        static_cast<const OpProfilingResponse*>(base);
       Mapping::Mapper::ReleaseProfilingInfo info;
       info.profiling_responses.attach_realm_profiling_response(response);
+      info.fill_response = op_info->fill;
       mapper->invoke_release_report_profiling(this, &info);
       handle_profiling_update(-1);
     }
@@ -12136,6 +12175,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PendingPartitionOp::initialize_weight_partition(InnerContext *ctx,
+               IndexPartition pid, const FutureMap &weights, size_t granularity)
+    //--------------------------------------------------------------------------
+    {
+      initialize_operation(ctx, true/*track*/);
+#ifdef DEBUG_LEGION
+      assert(thunk == NULL);
+#endif
+      thunk = new WeightPartitionThunk(pid, weights, granularity);
+      // Also save this locally for analysis
+      future_map = weights;
+      if (runtime->legion_spy_enabled)
+        perform_logging();
+    }
+
+    //--------------------------------------------------------------------------
     void PendingPartitionOp::initialize_union_partition(InnerContext *ctx,
                                                         IndexPartition pid,
                                                         IndexPartition h1,
@@ -12216,6 +12271,25 @@ namespace Legion {
 #endif
       thunk = new RestrictedPartitionThunk(pid, transform, transform_size,
                                            extent, extent_size);
+      if (runtime->legion_spy_enabled)
+        perform_logging();
+    }
+
+    //--------------------------------------------------------------------------
+    void PendingPartitionOp::initialize_by_domain(InnerContext *ctx,
+                                                  IndexPartition pid,
+                                                  const FutureMap &fm,
+                                                  bool perform_intersections)
+    //--------------------------------------------------------------------------
+    {
+      initialize_operation(ctx, true/*track*/);
+#ifdef DEBUG_LEGION
+      assert(thunk == NULL);
+#endif
+      thunk = new FutureMapThunk(pid, fm, perform_intersections);
+      // Also save this locally for analysis
+      future_map = fm;
+
       if (runtime->legion_spy_enabled)
         perform_logging();
     }
@@ -12321,13 +12395,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PendingPartitionOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      if ((future_map.impl != NULL) && (future_map.impl->op != NULL))
+        register_dependence(future_map.impl->op, future_map.impl->op_gen);
+    }
+
+    //--------------------------------------------------------------------------
     void PendingPartitionOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
       // Give these slightly higher priority since they are likely
       // needed by later operations
-      enqueue_ready_operation(RtEvent::NO_RT_EVENT, 
-                              LG_THROUGHPUT_DEFERRED_PRIORITY);
+      if (future_map.impl != NULL)
+        enqueue_ready_operation(Runtime::protect_event(
+              future_map.impl->get_ready_event()), 
+            LG_THROUGHPUT_DEFERRED_PRIORITY);
+      else
+        enqueue_ready_operation(RtEvent::NO_RT_EVENT, 
+                                LG_THROUGHPUT_DEFERRED_PRIORITY);
     }
 
     //--------------------------------------------------------------------------
@@ -12361,6 +12448,7 @@ namespace Legion {
       if (thunk != NULL)
         delete thunk;
       thunk = NULL;
+      future_map = FutureMap(); // clear any references
       runtime->free_pending_partition_op(this);
     }
 
@@ -12385,6 +12473,15 @@ namespace Legion {
     {
       LegionSpy::log_target_pending_partition(op->unique_op_id, pid.id,
           EQUAL_PARTITION);
+    }
+
+    //--------------------------------------------------------------------------
+    void PendingPartitionOp::WeightPartitionThunk::perform_logging(
+                                                         PendingPartitionOp *op)
+    //--------------------------------------------------------------------------
+    {
+      LegionSpy::log_target_pending_partition(op->unique_op_id, pid.id,
+          WEIGHT_PARTITION);
     }
 
     //--------------------------------------------------------------------------
@@ -12430,6 +12527,15 @@ namespace Legion {
     {
       LegionSpy::log_target_pending_partition(op->unique_op_id, pid.id,
           RESTRICTED_PARTITION);
+    }
+
+    //--------------------------------------------------------------------------
+    void PendingPartitionOp::FutureMapThunk::perform_logging(
+                                                         PendingPartitionOp *op)
+    //--------------------------------------------------------------------------
+    {
+      LegionSpy::log_target_pending_partition(op->unique_op_id, pid.id,
+          BY_DOMAIN_PARTITION);
     }
 
     //--------------------------------------------------------------------------
@@ -12820,6 +12926,9 @@ namespace Legion {
                                                    requirement,
                                                    projection_info,
                                                    privilege_path);
+      // Record this dependent partition op with the context so that it 
+      // can track implicit dependences on it for later operations
+      parent_ctx->update_current_deppart(this);
     }
 
     //--------------------------------------------------------------------------
@@ -13504,17 +13613,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DependentPartitionOp::add_copy_profiling_request(
-                                           Realm::ProfilingRequestSet &requests)
+    void DependentPartitionOp::add_copy_profiling_request(unsigned src_index,
+            unsigned dst_index, Realm::ProfilingRequestSet &requests, bool fill)
     //--------------------------------------------------------------------------
     {
       // Nothing to do if we don't have any profiling requests
       if (profiling_requests.empty())
         return;
-      ProfilingResponseBase base(this);
+      OpProfilingResponse response(this, src_index, dst_index, fill);
       Realm::ProfilingRequest &request = requests.add_request( 
           runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
-          &base, sizeof(base), profiling_priority);
+          &response, sizeof(response), profiling_priority);
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             profiling_requests.begin(); it != profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
@@ -13525,14 +13634,18 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DependentPartitionOp::handle_profiling_response(
+                                       const ProfilingResponseBase *base,
                                        const Realm::ProfilingResponse &response)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(mapper != NULL);
 #endif
+      const OpProfilingResponse *op_info = 
+        static_cast<const OpProfilingResponse*>(base);
       Mapping::Mapper::PartitionProfilingInfo info;
       info.profiling_responses.attach_realm_profiling_response(response);
+      info.fill_response = op_info->fill;
       mapper->invoke_partition_report_profiling(this, &info);
       handle_profiling_update(-1);
     }
@@ -14158,8 +14271,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FillOp::add_copy_profiling_request(
-                                           Realm::ProfilingRequestSet &reqeusts)
+    void FillOp::add_copy_profiling_request(unsigned src_index,
+            unsigned dst_index, Realm::ProfilingRequestSet &reqeusts, bool fill)
     //--------------------------------------------------------------------------
     {
       // Nothing to do for the moment
@@ -15663,19 +15776,13 @@ namespace Legion {
           }
         case EXTERNAL_INSTANCE:
           {
-            // Create the Instance Layout Generic object for realm
-            Realm::InstanceLayoutConstraints realm_constraints;
-            // Get some help from the instance builder to make this
-            InstanceBuilder::convert_layout_constraints(layout_constraint_set,
-                                          field_set, sizes, realm_constraints);
+            Realm::InstanceLayoutGeneric *ilg = 
+              node->create_layout(layout_constraint_set, field_set, sizes);
             const PointerConstraint &pointer = 
                                       layout_constraint_set.pointer_constraint;
 #ifdef DEBUG_LEGION
             assert(pointer.is_valid);
 #endif
-            Realm::InstanceLayoutGeneric *ilg = 
-              node->create_layout(realm_constraints, 
-                  layout_constraint_set.ordering_constraint);
             result = node->create_external_instance(pointer.memory, pointer.ptr,
                                                     ilg, ready_event);
             constraints = layout_constraint_set;
@@ -16166,8 +16273,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DetachOp::add_copy_profiling_request(
-                                           Realm::ProfilingRequestSet &reqeusts)
+    void DetachOp::add_copy_profiling_request(unsigned src_index,
+            unsigned dst_index, Realm::ProfilingRequestSet &reqeusts, bool fill)
     //--------------------------------------------------------------------------
     {
       // Nothing to do
@@ -16372,12 +16479,162 @@ namespace Legion {
       complete_execution();
     }
 
+    ///////////////////////////////////////////////////////////// 
+    // All Reduce Op 
+    /////////////////////////////////////////////////////////////
+
     //--------------------------------------------------------------------------
-    void TimingOp::trigger_complete(void)
+    AllReduceOp::AllReduceOp(Runtime *rt)
+      : Operation(rt)
     //--------------------------------------------------------------------------
     {
-      complete_operation();
-    } 
+    }
+
+    //--------------------------------------------------------------------------
+    AllReduceOp::AllReduceOp(const AllReduceOp &rhs)
+      : Operation(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    AllReduceOp::~AllReduceOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    AllReduceOp& AllReduceOp::operator=(const AllReduceOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    Future AllReduceOp::initialize(InnerContext *ctx, const FutureMap &fm, 
+                                   ReductionOpID redop_id,bool is_deterministic)
+    //--------------------------------------------------------------------------
+    {
+      initialize_operation(ctx, true/*track*/);
+      future_map = fm;
+      redop = runtime->get_reduction(redop_id);
+      result = Future(new FutureImpl(runtime, true/*register*/,
+                  runtime->get_available_distributed_id(),
+                  runtime->address_space, get_completion_event(), this));
+      deterministic = is_deterministic;
+      if (runtime->legion_spy_enabled)
+      {
+        LegionSpy::log_all_reduce_operation(ctx->get_unique_id(), unique_op_id);
+        const DomainPoint empty_point;
+        LegionSpy::log_future_creation(unique_op_id,
+            result.impl->get_ready_event(), empty_point);
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void AllReduceOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_operation(); 
+    }
+
+    //--------------------------------------------------------------------------
+    void AllReduceOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_operation();
+      future_map = FutureMap();
+      result = Future();
+      runtime->free_all_reduce_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* AllReduceOp::get_logging_name(void) const
+    //--------------------------------------------------------------------------
+    {
+      return op_names[ALL_REDUCE_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind AllReduceOp::get_operation_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return ALL_REDUCE_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    void AllReduceOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      future_map.impl->register_dependence(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void AllReduceOp::trigger_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+      complete_mapping();
+      const ApEvent ready = future_map.impl->get_ready_event();
+      if (ready.exists())
+      {
+        const RtEvent wait_on = Runtime::protect_event(ready);
+        if (wait_on.exists() && !wait_on.has_triggered())
+        {
+          DeferredExecuteArgs args(this);
+          runtime->issue_runtime_meta_task(args, 
+              LG_THROUGHPUT_DEFERRED_PRIORITY, wait_on);
+          return;
+        }
+      }
+      // If we make it here we can just do this now
+      deferred_execute();
+    }
+
+    //--------------------------------------------------------------------------
+    void AllReduceOp::deferred_execute(void)
+    //--------------------------------------------------------------------------
+    {
+      std::map<DomainPoint,Future> futures;
+      future_map.impl->get_all_futures(futures);
+      void *result_buffer = malloc(redop->sizeof_rhs);
+      redop->init(result_buffer, 1/*count*/);
+      for (std::map<DomainPoint,Future>::const_iterator it = 
+            futures.begin(); it != futures.end(); it++)
+      {
+        FutureImpl *impl = it->second.impl;
+        const size_t future_size = impl->get_untyped_size(true/*internal*/);
+        if (future_size != redop->sizeof_rhs)
+          REPORT_LEGION_ERROR(ERROR_FUTURE_MAP_REDOP_TYPE_MISMATCH,
+              "Future in future map reduction in task %s (UID %lld) does not "
+              "have the right input size for the given reduction operator. "
+              "Future has size %zd bytes but reduction operator expects "
+              "RHS inputs of %zd bytes.", parent_ctx->get_task_name(),
+              parent_ctx->get_unique_id(), future_size, redop->sizeof_rhs)
+        const void *data = impl->get_untyped_result(true,NULL,true/*internal*/);
+        redop->fold(result_buffer, data, 1/*count*/, true/*exclusive*/);
+      }
+      if (runtime->legion_spy_enabled)
+      {
+        for (std::map<DomainPoint,Future>::const_iterator it = 
+              futures.begin(); it != futures.end(); it++)
+        {
+          FutureImpl *impl = it->second.impl;
+          const ApEvent ready_event = impl->get_ready_event();
+          if (ready_event.exists())
+            LegionSpy::log_future_use(unique_op_id, ready_event);
+        }
+      }
+      // Tell the future about the final result which it will own
+      result.impl->set_result(result_buffer, redop->sizeof_rhs, true/*own*/);
+      // Mark that we are done executing which will complete the future
+      // as soon as this operation is complete
+      complete_execution();
+    }
 
     ///////////////////////////////////////////////////////////// 
     // Remote Op 
@@ -16568,18 +16825,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteOp::add_copy_profiling_request(
-                                           Realm::ProfilingRequestSet &requests)
+    void RemoteOp::add_copy_profiling_request(unsigned src_index,
+            unsigned dst_index, Realm::ProfilingRequestSet &requests, bool fill)
     //--------------------------------------------------------------------------
     {
       // Nothing to do if we don't have any profiling requests
       if (profiling_requests.empty())
         return;
       // Send the result back to the owner node
-      ProfilingResponseBase base(remote_ptr);
+      OpProfilingResponse response(this, src_index, dst_index, fill);
       Realm::ProfilingRequest &request = requests.add_request( 
           profiling_target, LG_LEGION_PROFILING_ID, 
-          &base, sizeof(base), profiling_priority);
+          &response, sizeof(response), profiling_priority);
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             profiling_requests.begin(); it != profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));

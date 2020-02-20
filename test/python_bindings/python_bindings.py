@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2019 Stanford University
+# Copyright 2020 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,8 +17,8 @@
 
 from __future__ import print_function
 
-import legion
-from legion import task, Region, RW, WD
+import pygion
+from pygion import task, Region, RW, WD
 import numpy
 
 @task
@@ -71,10 +71,10 @@ def main_task():
     x = f(1, "asdf", True)
     print("result of f is %s" % x.get())
 
-    R = Region([4, 4], {'x': legion.float64})
+    R = Region([4, 4], {'x': pygion.float64})
     init(R)
     inc(R, 1)
 
-    S = Region([1000], {'x': legion.float64, 'y': legion.float64})
+    S = Region([1000], {'x': pygion.float64, 'y': pygion.float64})
     fill(S, 10)
     saxpy(S, 2)

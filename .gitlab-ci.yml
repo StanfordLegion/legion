@@ -81,6 +81,7 @@ variables:
   USE_PYTHON: "1"
   # FIXME: It would be nice to find a better way to do this,
   # but the alternatives look scary
+  PYTHON_EXE: "python3"
   PYTHON_LIB: "/usr/lib/x86_64-linux-gnu/libpython3.5m.so"
   PYTHON_VERSION_MAJOR: "3"
   TEST_PYTHON_EXE: "python3"
@@ -137,6 +138,7 @@ variables:
 
 # These commands will run before each job.
 before_script:
+  - set -e
   - uname -a
   - |
     if [[ "$(uname)" = "Linux" ]]; then
@@ -295,7 +297,7 @@ before_script:
       fi
     - $TEST_PYTHON_EXE ./test.py --test=external --test=private
   retry:
-    max: 2
+    max: 0
     when:
       - runner_system_failure
       - unknown_failure
@@ -315,7 +317,7 @@ before_script:
     - export PERF_MAX_NODES=1
     - $TEST_PYTHON_EXE ./test.py --test=perf
   retry:
-    max: 2
+    max: 0
     when:
       - runner_system_failure
       - unknown_failure

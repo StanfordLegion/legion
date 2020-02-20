@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -158,6 +158,7 @@ namespace Legion {
   class Partition;
   class MustEpoch;
   class Runtime;
+  class LegionHandshake;
   class MPILegionHandshake;
   // For backwards compatibility
   typedef Runtime HighLevelRuntime;
@@ -273,6 +274,7 @@ namespace Legion {
       DEP_PART_BY_PREIMAGE = 12, // create partition by preimage
       DEP_PART_BY_PREIMAGE_RANGE = 13, // create partition by preimage range
       DEP_PART_ASSOCIATION = 14, // create an association
+      DEP_PART_WEIGHTS = 15, // create partition by weights
     };
 
     // Enumeration of Legion runtime tasks
@@ -376,27 +378,27 @@ namespace Legion {
     }; 
 
     // Runtime task numbering 
-#ifdef LEGION_SEPARATE_META_TASKS
     enum {
       LG_INITIALIZE_TASK_ID   = Realm::Processor::TASK_ID_PROCESSOR_INIT,
       LG_SHUTDOWN_TASK_ID     = Realm::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
-      LG_TASK_ID              = Realm::Processor::TASK_ID_FIRST_AVAILABLE,
-      LG_LEGION_PROFILING_ID  = Realm::Processor::TASK_ID_FIRST_AVAILABLE+LG_LAST_TASK_ID+1,
-      LG_STARTUP_TASK_ID      = Realm::Processor::TASK_ID_FIRST_AVAILABLE+LG_LAST_TASK_ID+2,
-      LG_ENDPOINT_TASK_ID     = Realm::Processor::TASK_ID_FIRST_AVAILABLE+LG_LAST_TASK_ID+3,
-      LG_TASK_ID_AVAILABLE    = Realm::Processor::TASK_ID_FIRST_AVAILABLE+LG_LAST_TASK_ID+4,
-    };
+#ifdef LEGION_GPU_REDUCTIONS
+      LG_REDOP_TASK_ID        = Realm::Processor::TASK_ID_FIRST_AVAILABLE,
+      LG_TASK_ID              = LG_REDOP_TASK_ID + LEGION_REDOP_LAST - LEGION_REDOP_BASE,
 #else
-    enum {
-      LG_INITIALIZE_TASK_ID   = Realm::Processor::TASK_ID_PROCESSOR_INIT,
-      LG_SHUTDOWN_TASK_ID     = Realm::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
       LG_TASK_ID              = Realm::Processor::TASK_ID_FIRST_AVAILABLE,
-      LG_LEGION_PROFILING_ID  = Realm::Processor::TASK_ID_FIRST_AVAILABLE+1,
-      LG_STARTUP_TASK_ID      = Realm::Processor::TASK_ID_FIRST_AVAILABLE+2,
-      LG_ENDPOINT_TASK_ID     = Realm::Processor::TASK_ID_FIRST_AVAILABLE+3,
-      LG_TASK_ID_AVAILABLE    = Realm::Processor::TASK_ID_FIRST_AVAILABLE+4,
-    };
 #endif
+#ifdef LEGION_SEPARATE_META_TASKS
+      LG_LEGION_PROFILING_ID  = LG_TASK_ID+LG_LAST_TASK_ID+1,
+      LG_STARTUP_TASK_ID      = LG_TASK_ID+LG_LAST_TASK_ID+2,
+      LG_ENDPOINT_TASK_ID     = LG_TASK_ID+LG_LAST_TASK_ID+3,
+      LG_TASK_ID_AVAILABLE    = LG_TASK_ID+LG_LAST_TASK_ID+4,
+#else
+      LG_LEGION_PROFILING_ID  = LG_TASK_ID+1,
+      LG_STARTUP_TASK_ID      = LG_TASK_ID+2,
+      LG_ENDPOINT_TASK_ID     = LG_TASK_ID+3,
+      LG_TASK_ID_AVAILABLE    = LG_TASK_ID+4,
+#endif
+    };
 
     // Make this a macro so we can keep it close to 
     // declaration of the task IDs themselves
@@ -1312,7 +1314,7 @@ namespace Legion {
     class PhysicalRegionImpl;
     class GrantImpl;
     class PredicateImpl;
-    class MPILegionHandshakeImpl;
+    class LegionHandshakeImpl;
     class ProcessorManager;
     class MemoryManager;
     class VirtualChannel;
@@ -1324,9 +1326,11 @@ namespace Legion {
     class ProjectionFunction;
     class Runtime;
     // A small interface class for handling profiling responses
+    struct ProfilingResponseBase;
     class ProfilingResponseHandler {
     public:
       virtual void handle_profiling_response(
+                const ProfilingResponseBase *base,
                 const Realm::ProfilingResponse &response) = 0;
     };
     struct ProfilingResponseBase {
@@ -1370,6 +1374,7 @@ namespace Legion {
     class AttachOp;
     class DetachOp;
     class TimingOp;
+    class AllReduceOp;
     class ExternalMappable;
     class RemoteOp;
     class RemoteMapOp;
@@ -1609,6 +1614,7 @@ namespace Legion {
     friend class Internal::AttachOp;                        \
     friend class Internal::DetachOp;                        \
     friend class Internal::TimingOp;                        \
+    friend class Internal::AllReduceOp;                     \
     friend class Internal::TraceSummaryOp;                  \
     friend class Internal::ExternalMappable;                \
     friend class Internal::ExternalTask;                    \
@@ -1641,7 +1647,7 @@ namespace Legion {
     friend class Internal::TreeStateLogger;                 \
     friend class Internal::MapperManager;                   \
     friend class Internal::InstanceRef;                     \
-    friend class Internal::MPILegionHandshakeImpl;          \
+    friend class Internal::LegionHandshakeImpl;             \
     friend class Internal::ArgumentMapImpl;                 \
     friend class Internal::FutureMapImpl;                   \
     friend class Internal::TaskContext;                     \

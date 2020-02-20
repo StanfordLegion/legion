@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1044,7 +1044,7 @@ namespace Realm {
 	//  the count to 2 instead of 1
 	bool registered = SparsityMapImpl<N,T>::lookup(it->sparsity)->add_waiter(this, true /*precise*/);
 	if(registered)
-	  __sync_fetch_and_add(&wait_count, 1);
+	  wait_count.fetch_add(1);
       }
     }
 
@@ -1206,7 +1206,7 @@ namespace Realm {
 	//  the count to 2 instead of 1
 	bool registered = SparsityMapImpl<N,T>::lookup(it->sparsity)->add_waiter(this, true /*precise*/);
 	if(registered)
-	  __sync_fetch_and_add(&wait_count, 1);
+	  wait_count.fetch_add(1);
       }
     }
 
@@ -1436,7 +1436,7 @@ namespace Realm {
       //  the count to 2 instead of 1
       bool registered = SparsityMapImpl<N,T>::lookup(lhs.sparsity)->add_waiter(this, true /*precise*/);
       if(registered)
-	__sync_fetch_and_add(&wait_count, 1);
+	wait_count.fetch_add(1);
     }
 
     if(!rhs.dense()) {
@@ -1444,7 +1444,7 @@ namespace Realm {
       //  the count to 2 instead of 1
       bool registered = SparsityMapImpl<N,T>::lookup(rhs.sparsity)->add_waiter(this, true /*precise*/);
       if(registered)
-	__sync_fetch_and_add(&wait_count, 1);
+	wait_count.fetch_add(1);
     }
 
     finish_dispatch(op, inline_ok);

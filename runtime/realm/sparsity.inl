@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -46,7 +46,8 @@ namespace Realm {
     return id != rhs.id;
   }
 
-  template <int N, typename T> __CUDA_HD__
+  template <int N, typename T>
+  REALM_CUDA_HD
   inline bool SparsityMap<N,T>::exists(void) const
   {
     return id != 0;

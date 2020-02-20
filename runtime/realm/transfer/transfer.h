@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -135,7 +135,9 @@ namespace Realm {
 
     virtual TransferIterator *create_iterator(RegionInstance inst,
 					      RegionInstance peer,
-					      const std::vector<FieldID>& fields) const = 0;
+					      const std::vector<FieldID>& fields,
+					      const std::vector<size_t>& fld_offsets,
+					      const std::vector<size_t>& fld_sizes) const = 0;
 
     virtual void print(std::ostream& os) const = 0;
   };

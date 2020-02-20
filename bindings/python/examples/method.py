@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2019 Stanford University
+# Copyright 2020 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@
 
 from __future__ import print_function
 
-from legion import task
+from pygion import task
 
 class A:
     # Note: @task is like @staticmethod so no 'self' argument

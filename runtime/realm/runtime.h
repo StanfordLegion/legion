@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -93,13 +93,9 @@ namespace Realm {
 	ONE_TASK_PER_PROC, // a task for every processor in the machine
       };
 
+      REALM_ATTR_DEPRECATED("use collective_spawn calls instead",
       void run(Processor::TaskFuncID task_id = 0, RunStyle style = ONE_TASK_ONLY,
-	       const void *args = 0, size_t arglen = 0, bool background = false)
-	__attribute__((deprecated
-#ifndef __ICC // Apparently icc doesn't support strings for deprecated warnings
-              ("use collect_spawn calls instead")
-#endif
-              ));
+	       const void *args = 0, size_t arglen = 0, bool background = false));
 
       // requests a shutdown of the runtime
       void shutdown(Event wait_on = Event::NO_EVENT, int result_code = 0);

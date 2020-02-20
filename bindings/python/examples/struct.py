@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2019 Stanford University
+# Copyright 2020 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,12 +17,12 @@
 
 from __future__ import print_function
 
-import legion
-from legion import task, Future, Region, WD
+import pygion
+from pygion import task, Future, Region, WD
 import numpy
 
 # Define a custom struct type.
-legion.ffi.cdef(r'''
+pygion.ffi.cdef(r'''
 typedef struct mystruct {
   int x;
   double y;
@@ -30,7 +30,7 @@ typedef struct mystruct {
 } mystruct;
 ''')
 mystruct_np = numpy.dtype([('x', numpy.intc), ('y', numpy.double), ('z', numpy.byte)], align=True)
-mystruct = legion.Type(mystruct_np, 'mystruct')
+mystruct = pygion.Type(mystruct_np, 'mystruct')
 
 @task(privileges=[WD])
 def region_with_struct(R):
@@ -39,7 +39,7 @@ def region_with_struct(R):
 
 @task
 def main():
-    myvalue_root = legion.ffi.new('mystruct *')
+    myvalue_root = pygion.ffi.new('mystruct *')
     myvalue = myvalue_root[0]
     myvalue.x = 123
     myvalue.y = 3.14

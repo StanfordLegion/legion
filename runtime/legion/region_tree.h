@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +23,8 @@
 #include "legion/legion_analysis.h"
 #include "legion/garbage_collection.h"
 #include "legion/field_tree.h"
+
+#include <algorithm>
 
 namespace Legion {
   namespace Internal {
@@ -167,9 +169,10 @@ namespace Legion {
                                         IndexPartition handle1,
                                         IndexPartition handle2,
                   std::map<IndexSpace,IndexPartition> &user_handles,
-                                           PartitionKind kind,
-                                           LegionColor &part_color,
-                                           ApEvent domain_ready);
+                                        PartitionKind kind,
+                                        LegionColor &part_color,
+                                        ApEvent domain_ready,
+                                        std::set<RtEvent> &safe_events);
       void compute_partition_disjointness(IndexPartition handle,
                                           RtUserEvent ready_event);
       void destroy_index_space(IndexSpace handle, AddressSpaceID source,
@@ -181,6 +184,10 @@ namespace Legion {
       ApEvent create_equal_partition(Operation *op, 
                                      IndexPartition pid, 
                                      size_t granularity);
+      ApEvent create_partition_by_weights(Operation *op,
+                                          IndexPartition pid,
+                                          const FutureMap &map,
+                                          size_t granularity);
       ApEvent create_partition_by_union(Operation *op,
                                         IndexPartition pid,
                                         IndexPartition handle1,
@@ -200,6 +207,9 @@ namespace Legion {
       ApEvent create_partition_by_restriction(IndexPartition pid,
                                               const void *transform,
                                               const void *extent);
+      ApEvent create_partition_by_domain(Operation *op, IndexPartition pid,
+                                         const FutureMap &future_map,
+                                         bool perform_intersections);
       ApEvent create_cross_product_partitions(Operation *op,
                                               IndexPartition base,
                                               IndexPartition source,
@@ -490,7 +500,8 @@ namespace Legion {
                             const bool gather_is_range,
                             const ApEvent precondition, 
                             const PredEvent pred_guard,
-                            const PhysicalTraceInfo &trace_info);
+                            const PhysicalTraceInfo &trace_info,
+                            const bool possible_src_out_of_range);
       ApEvent scatter_across(const RegionRequirement &src_req,
                              const RegionRequirement &idx_req,
                              const RegionRequirement &dst_req,
@@ -501,7 +512,9 @@ namespace Legion {
                              const bool scatter_is_range,
                              const ApEvent precondition, 
                              const PredEvent pred_guard,
-                             const PhysicalTraceInfo &trace_info);
+                             const PhysicalTraceInfo &trace_info,
+                             const bool possible_dst_out_of_range,
+                             const bool possible_dst_aliasing);
       ApEvent indirect_across(const RegionRequirement &src_req,
                               const RegionRequirement &src_idx_req,
                               const RegionRequirement &dst_req,
@@ -513,7 +526,10 @@ namespace Legion {
                               const bool both_are_range,
                               const ApEvent precondition, 
                               const PredEvent pred_guard,
-                              const PhysicalTraceInfo &trace_info);
+                              const PhysicalTraceInfo &trace_info,
+                              const bool possible_src_out_of_range,
+                              const bool possible_dst_out_of_range,
+                              const bool possible_dst_aliasing);
       // This takes ownership of the value buffer
       ApEvent fill_fields(FillOp *op,
                           const RegionRequirement &req,
@@ -855,9 +871,11 @@ namespace Legion {
       struct UnstructuredIndirectionHelper {
       public:
         UnstructuredIndirectionHelper(FieldID fid, bool range, 
-            PhysicalInstance inst, const std::set<IndirectRecord*> &recs)
+            PhysicalInstance inst, const std::set<IndirectRecord*> &recs,
+            bool out_of_range, bool aliasing)
           : indirect_field(fid), indirect_inst(inst), 
-            records(recs), result(NULL), is_range(range) { }
+            records(recs), result(NULL), is_range(range),
+            possible_out_of_range(out_of_range), possible_aliasing(aliasing) { }
       public:
         template<typename N2, typename T2>
         static inline void demux(UnstructuredIndirectionHelper *helper)
@@ -868,6 +886,8 @@ namespace Legion {
           indirect->field_id = helper->indirect_field;
           indirect->inst = helper->indirect_inst;
           indirect->is_ranges = helper->is_range;
+          indirect->oor_possible = helper->possible_out_of_range;
+          indirect->aliasing_possible = helper->possible_aliasing;
           indirect->subfield_offset = 0;
           indirect->spaces.resize(helper->records.size());
           indirect->insts.resize(helper->records.size());
@@ -891,6 +911,8 @@ namespace Legion {
         const std::set<IndirectRecord*> &records;
         typename Realm::CopyIndirection<N1,T1>::Base *result;
         const bool is_range;
+        const bool possible_out_of_range;
+        const bool possible_aliasing;
       };
     public:
       IndexSpaceExpression(LocalLock &lock);
@@ -946,16 +968,19 @@ namespace Legion {
                            const LegionVector<
                                   IndirectRecord>::aligned &records,
                            std::vector<void*> &indirections,
-                           std::vector<unsigned> &indirect_indexes) = 0;
+                           std::vector<unsigned> &indirect_indexes,
+                           const bool possible_out_of_range,
+                           const bool possible_aliasing) = 0;
       virtual void destroy_indirections(std::vector<void*> &indirections) = 0;
       virtual ApEvent issue_indirect(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
                            const std::vector<void*> &indirects,
                            ApEvent precondition, PredEvent pred_guard) = 0;
-      virtual Realm::InstanceLayoutGeneric*
-                   create_layout(const Realm::InstanceLayoutConstraints &ilc,
-                                 const OrderingConstraint &constraint) = 0;
+      virtual Realm::InstanceLayoutGeneric* create_layout(
+                           const LayoutConstraintSet &constraints,
+                           const std::vector<FieldID> &field_ids,
+                           const std::vector<size_t> &field_sizes) = 0;
     public:
       static void handle_tighten_index_space(const void *args);
       static AddressSpaceID get_owner_space(IndexSpaceExprID id, Runtime *rt);
@@ -1014,7 +1039,9 @@ namespace Legion {
                                const LegionVector<
                                       IndirectRecord>::aligned &records,
                                std::vector<void*> &indirections,
-                               std::vector<unsigned> &indirect_indexes);
+                               std::vector<unsigned> &indirect_indexes,
+                               const bool possible_out_of_range,
+                               const bool possible_aliasing);
       template<int DIM, typename T>
       inline void destroy_indirections_internal(
                                std::vector<void*> &indirections);
@@ -1029,8 +1056,9 @@ namespace Legion {
       template<int DIM, typename T>
       inline Realm::InstanceLayoutGeneric* create_layout_internal(
                                const Realm::IndexSpace<DIM,T> &space,
-                               const Realm::InstanceLayoutConstraints &ilc,
-                               const OrderingConstraint &constraint) const;
+                               const LayoutConstraintSet &constraints,
+                               const std::vector<FieldID> &field_ids,
+                               const std::vector<size_t> &field_sizes) const;
     public:
       static IndexSpaceExpression* unpack_expression(Deserializer &derez,
                          RegionTreeForest *forest, AddressSpaceID source);
@@ -1196,16 +1224,19 @@ namespace Legion {
                            const LegionVector<
                                   IndirectRecord>::aligned &records,
                            std::vector<void*> &indirections,
-                           std::vector<unsigned> &indirect_indexes);
+                           std::vector<unsigned> &indirect_indexes,
+                           const bool possible_out_of_range,
+                           const bool possible_aliasing);
       virtual void destroy_indirections(std::vector<void*> &indirections);
       virtual ApEvent issue_indirect(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
                            const std::vector<void*> &indirects,
                            ApEvent precondition, PredEvent pred_guard);
-      virtual Realm::InstanceLayoutGeneric*
-                   create_layout(const Realm::InstanceLayoutConstraints &ilc,
-                                 const OrderingConstraint &constraint);
+      virtual Realm::InstanceLayoutGeneric* create_layout(
+                           const LayoutConstraintSet &constraints,
+                           const std::vector<FieldID> &field_ids,
+                           const std::vector<size_t> &field_sizes);
     public:
       ApEvent get_realm_index_space(Realm::IndexSpace<DIM,T> &space,
                                     bool need_tight_result);
@@ -1779,6 +1810,14 @@ namespace Legion {
                                             const void *transform,
                                             const void *extent,
                                             int partition_dim) = 0;
+      virtual ApEvent create_by_domain(Operation *op,
+                                       IndexPartNode *partition,
+                                       FutureMapImpl *future_map,
+                                       bool perform_intersections) = 0;
+      virtual ApEvent create_by_weights(Operation *op,
+                                        IndexPartNode *partition,
+                                        FutureMapImpl *future_map,
+                                        size_t granularity) = 0;
       virtual ApEvent create_by_field(Operation *op,
                                       IndexPartNode *partition,
                 const std::vector<FieldDataDescriptor> &instances,
@@ -1947,6 +1986,24 @@ namespace Legion {
       ApEvent create_by_restriction_helper(IndexPartNode *partition,
                                    const Realm::Matrix<N,DIM,T> &transform,
                                    const Realm::Rect<N,T> &extent);
+      virtual ApEvent create_by_domain(Operation *op,
+                                       IndexPartNode *partition,
+                                       FutureMapImpl *future_map,
+                                       bool perform_intersections);
+      template<int COLOR_DIM, typename COLOR_T>
+      ApEvent create_by_domain_helper(Operation *op,
+                                      IndexPartNode *partition,
+                                      FutureMapImpl *future_map,
+                                      bool perform_intersections);
+      virtual ApEvent create_by_weights(Operation *op,
+                                        IndexPartNode *partition,
+                                        FutureMapImpl *future_map,
+                                        size_t granularity);
+      template<int COLOR_DIM, typename COLOR_T>
+      ApEvent create_by_weight_helper(Operation *op,
+                                      IndexPartNode *partition,
+                                      FutureMapImpl *future_map,
+                                      size_t granularity);
       virtual ApEvent create_by_field(Operation *op,
                                       IndexPartNode *partition,
                 const std::vector<FieldDataDescriptor> &instances,
@@ -2059,16 +2116,19 @@ namespace Legion {
                            const LegionVector<
                                   IndirectRecord>::aligned &records,
                            std::vector<void*> &indirections,
-                           std::vector<unsigned> &indirect_indexes);
+                           std::vector<unsigned> &indirect_indexes,
+                           const bool possible_out_of_range,
+                           const bool possible_aliasing);
       virtual void destroy_indirections(std::vector<void*> &indirections);
       virtual ApEvent issue_indirect(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
                            const std::vector<void*> &indirects,
                            ApEvent precondition, PredEvent pred_guard);
-      virtual Realm::InstanceLayoutGeneric*
-                   create_layout(const Realm::InstanceLayoutConstraints &ilc,
-                                 const OrderingConstraint &constraint);
+      virtual Realm::InstanceLayoutGeneric* create_layout(
+                           const LayoutConstraintSet &constraints,
+                           const std::vector<FieldID> &field_ids,
+                           const std::vector<size_t> &field_sizes);
     public:
       virtual void get_launch_space_domain(Domain &launch_domain);
       virtual void validate_slicing(const std::vector<IndexSpace> &slice_spaces,
@@ -2085,6 +2145,50 @@ namespace Legion {
       Realm::Point<DIM,long long> offset;
       bool linearization_ready;
     public:
+      struct CreateByDomainHelper {
+      public:
+        CreateByDomainHelper(IndexSpaceNodeT<DIM,T> *n,
+                              IndexPartNode *p, Operation *o,
+                              FutureMapImpl *fm, bool inter)
+          : node(n), partition(p), op(o), future_map(fm), intersect(inter) { }
+      public:
+        template<typename COLOR_DIM, typename COLOR_T>
+        static inline void demux(CreateByDomainHelper *creator)
+        {
+          creator->result = creator->node->template 
+            create_by_domain_helper<COLOR_DIM::N,COLOR_T>(creator->op,
+                creator->partition, creator->future_map, creator->intersect);
+        }
+      public:
+        IndexSpaceNodeT<DIM,T> *const node;
+        IndexPartNode *const partition;
+        Operation *const op;
+        FutureMapImpl *const future_map;
+        const bool intersect;
+        ApEvent result;
+      };
+      struct CreateByWeightHelper {
+      public:
+        CreateByWeightHelper(IndexSpaceNodeT<DIM,T> *n,
+                             IndexPartNode *p, Operation *o,
+                             FutureMapImpl *fm, size_t g)
+          : node(n), partition(p), op(o), future_map(fm), granularity(g) { }
+      public:
+        template<typename COLOR_DIM, typename COLOR_T>
+        static inline void demux(CreateByWeightHelper *creator)
+        {
+          creator->result = creator->node->template 
+            create_by_weight_helper<COLOR_DIM::N,COLOR_T>(creator->op,
+                creator->partition, creator->future_map, creator->granularity);
+        }
+      public:
+        IndexSpaceNodeT<DIM,T> *const node;
+        IndexPartNode *const partition;
+        Operation *const op;
+        FutureMapImpl *const future_map;
+        const size_t granularity;
+        ApEvent result;
+      };
       struct CreateByFieldHelper {
       public:
         CreateByFieldHelper(IndexSpaceNodeT<DIM,T> *n,
@@ -2443,6 +2547,8 @@ namespace Legion {
       static void handle_pending_child_task(const void *args);
     public:
       ApEvent create_equal_children(Operation *op, size_t granularity);
+      ApEvent create_by_weights(Operation *op, const FutureMap &weights,
+                                size_t granularity);
       ApEvent create_by_union(Operation *Op,
                               IndexPartNode *left, IndexPartNode *right);
       ApEvent create_by_intersection(Operation *op,
@@ -2452,6 +2558,7 @@ namespace Legion {
       ApEvent create_by_difference(Operation *op,
                               IndexPartNode *left, IndexPartNode *right);
       ApEvent create_by_restriction(const void *transform, const void *extent);
+      ApEvent create_by_domain(FutureMapImpl *future_map);
     public:
       bool compute_complete(void);
       bool intersects_with(IndexSpaceNode *other, bool compute = true);

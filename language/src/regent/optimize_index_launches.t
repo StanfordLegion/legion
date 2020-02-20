@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University
+-- Copyright 2020 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -493,179 +493,208 @@ local function analyze_noninterference_self(
   return true
 end
 
-local function analyze_is_side_effect_free_node(cx)
-  return function(node)
-    -- Expressions:
-    if node:is(ast.typed.expr.IndexAccess) then
-      return not std.is_ref(node.expr_type)
-    elseif node:is(ast.typed.expr.Call) then
-      return not std.is_task(node.fn.value)
-    elseif node:is(ast.typed.expr.RawContext) or
-      node:is(ast.typed.expr.RawPhysical) or
-      node:is(ast.typed.expr.RawRuntime) or
-      node:is(ast.typed.expr.Ispace) or
-      node:is(ast.typed.expr.Region) or
-      node:is(ast.typed.expr.Partition) or
-      node:is(ast.typed.expr.PartitionEqual) or
-      node:is(ast.typed.expr.PartitionByField) or
-      node:is(ast.typed.expr.Image) or
-      node:is(ast.typed.expr.Preimage) or
-      node:is(ast.typed.expr.CrossProduct) or
-      node:is(ast.typed.expr.ListSlicePartition) or
-      node:is(ast.typed.expr.ListDuplicatePartition) or
-      node:is(ast.typed.expr.ListSliceCrossProduct) or
-      node:is(ast.typed.expr.ListCrossProduct) or
-      node:is(ast.typed.expr.ListCrossProductComplete) or
-      node:is(ast.typed.expr.ListPhaseBarriers) or
-      node:is(ast.typed.expr.PhaseBarrier) or
-      node:is(ast.typed.expr.DynamicCollective) or
-      node:is(ast.typed.expr.Adjust) or
-      node:is(ast.typed.expr.Arrive) or
-      node:is(ast.typed.expr.Await) or
-      node:is(ast.typed.expr.Copy) or
-      node:is(ast.typed.expr.Fill) or
-      node:is(ast.typed.expr.Acquire) or
-      node:is(ast.typed.expr.Release) or
-      node:is(ast.typed.expr.AllocateScratchFields) or
-      node:is(ast.typed.expr.Condition) or
-      node:is(ast.typed.expr.Deref)
-    then
-      return false
-
-    elseif node:is(ast.typed.expr.ID) or
-      node:is(ast.typed.expr.Constant) or
-      node:is(ast.typed.expr.Function) or
-      node:is(ast.typed.expr.FieldAccess) or
-      node:is(ast.typed.expr.MethodCall) or
-      node:is(ast.typed.expr.Cast) or
-      node:is(ast.typed.expr.Ctor) or
-      node:is(ast.typed.expr.CtorListField) or
-      node:is(ast.typed.expr.CtorRecField) or
-      node:is(ast.typed.expr.RawFields) or
-      node:is(ast.typed.expr.RawValue) or
-      node:is(ast.typed.expr.Isnull) or
-      node:is(ast.typed.expr.Null) or
-      node:is(ast.typed.expr.DynamicCast) or
-      node:is(ast.typed.expr.StaticCast) or
-      node:is(ast.typed.expr.UnsafeCast) or
-      node:is(ast.typed.expr.ListInvert) or
-      node:is(ast.typed.expr.ListRange) or
-      node:is(ast.typed.expr.DynamicCollectiveGetResult) or
-      node:is(ast.typed.expr.Advance) or
-      node:is(ast.typed.expr.WithScratchFields) or
-      node:is(ast.typed.expr.RegionRoot) or
-      node:is(ast.typed.expr.Unary) or
-      node:is(ast.typed.expr.Binary) or
-      node:is(ast.typed.expr.Projection)
-    then
-      return true
-
-    -- Statements:
-    elseif node:is(ast.typed.stat.Var) then
-      return true
-
-    -- Miscellaneous:
-    elseif node:is(ast.location) or
-      node:is(ast.annotation) or
-      node:is(ast.condition_kind)
-    then
-      return true
-
-    else
-      assert(false, "unexpected node type " .. tostring(node.node_type))
-    end
-  end
+local function always_true(cx, node)
+  return true
 end
 
+local function always_false(cx, node)
+  return false
+end
+
+local function unreachable(cx, node)
+  assert(false, "unreachable")
+end
+
+local node_is_side_effect_free = {
+  -- Expressions:
+  [ast.typed.expr.IndexAccess] = function(cx, node)
+    return not std.is_ref(node.expr_type)
+  end,
+
+  [ast.typed.expr.Call] = function(cx, node)
+    return not std.is_task(node.fn.value)
+  end,
+
+  [ast.typed.expr.RawContext]                 = always_false,
+  [ast.typed.expr.RawPhysical]                = always_false,
+  [ast.typed.expr.RawRuntime]                 = always_false,
+  [ast.typed.expr.Ispace]                     = always_false,
+  [ast.typed.expr.Region]                     = always_false,
+  [ast.typed.expr.Partition]                  = always_false,
+  [ast.typed.expr.PartitionEqual]             = always_false,
+  [ast.typed.expr.PartitionByField]           = always_false,
+  [ast.typed.expr.PartitionByRestriction]     = always_false,
+  [ast.typed.expr.Image]                      = always_false,
+  [ast.typed.expr.ImageByTask]                = always_false,
+  [ast.typed.expr.Preimage]                   = always_false,
+  [ast.typed.expr.CrossProduct]               = always_false,
+  [ast.typed.expr.CrossProductArray]          = always_false,
+  [ast.typed.expr.ListSlicePartition]         = always_false,
+  [ast.typed.expr.ListDuplicatePartition]     = always_false,
+  [ast.typed.expr.ListSliceCrossProduct]      = always_false,
+  [ast.typed.expr.ListCrossProduct]           = always_false,
+  [ast.typed.expr.ListCrossProductComplete]   = always_false,
+  [ast.typed.expr.ListPhaseBarriers]          = always_false,
+  [ast.typed.expr.PhaseBarrier]               = always_false,
+  [ast.typed.expr.DynamicCollective]          = always_false,
+  [ast.typed.expr.Adjust]                     = always_false,
+  [ast.typed.expr.Arrive]                     = always_false,
+  [ast.typed.expr.Await]                      = always_false,
+  [ast.typed.expr.Copy]                       = always_false,
+  [ast.typed.expr.Fill]                       = always_false,
+  [ast.typed.expr.Acquire]                    = always_false,
+  [ast.typed.expr.Release]                    = always_false,
+  [ast.typed.expr.AttachHDF5]                 = always_false,
+  [ast.typed.expr.DetachHDF5]                 = always_false,
+  [ast.typed.expr.AllocateScratchFields]      = always_false,
+  [ast.typed.expr.Condition]                  = always_false,
+  [ast.typed.expr.Deref]                      = always_false,
+  [ast.typed.expr.ImportIspace]               = always_false,
+  [ast.typed.expr.ImportRegion]               = always_false,
+  [ast.typed.expr.ImportPartition]            = always_false,
+
+  [ast.typed.expr.ID]                         = always_true,
+  [ast.typed.expr.Constant]                   = always_true,
+  [ast.typed.expr.Global]                     = always_true,
+  [ast.typed.expr.Function]                   = always_true,
+  [ast.typed.expr.FieldAccess]                = always_true,
+  [ast.typed.expr.MethodCall]                 = always_true,
+  [ast.typed.expr.Cast]                       = always_true,
+  [ast.typed.expr.Ctor]                       = always_true,
+  [ast.typed.expr.CtorListField]              = always_true,
+  [ast.typed.expr.CtorRecField]               = always_true,
+  [ast.typed.expr.RawFields]                  = always_true,
+  [ast.typed.expr.RawTask]                    = always_true,
+  [ast.typed.expr.RawValue]                   = always_true,
+  [ast.typed.expr.Isnull]                     = always_true,
+  [ast.typed.expr.Null]                       = always_true,
+  [ast.typed.expr.DynamicCast]                = always_true,
+  [ast.typed.expr.StaticCast]                 = always_true,
+  [ast.typed.expr.UnsafeCast]                 = always_true,
+  [ast.typed.expr.ListInvert]                 = always_true,
+  [ast.typed.expr.ListRange]                  = always_true,
+  [ast.typed.expr.ListIspace]                 = always_true,
+  [ast.typed.expr.ListFromElement]            = always_true,
+  [ast.typed.expr.DynamicCollectiveGetResult] = always_true,
+  [ast.typed.expr.Advance]                    = always_true,
+  [ast.typed.expr.WithScratchFields]          = always_true,
+  [ast.typed.expr.RegionRoot]                 = always_true,
+  [ast.typed.expr.Unary]                      = always_true,
+  [ast.typed.expr.Binary]                     = always_true,
+  [ast.typed.expr.AddressOf]                  = always_true,
+  [ast.typed.expr.ParallelizerConstraint]     = always_true,
+  [ast.typed.expr.Projection]                 = always_true,
+
+  [ast.typed.expr.Future]                     = unreachable,
+  [ast.typed.expr.FutureGetResult]            = unreachable,
+  [ast.typed.expr.Internal]                   = unreachable,
+
+  -- Statements:
+  [ast.typed.stat.Var]                        = always_true,
+}
+
+local analyze_is_side_effect_free_node = ast.make_single_dispatch(
+  node_is_side_effect_free,
+  {ast.typed.expr})
+
 local function analyze_is_side_effect_free(cx, node)
-  return ast.mapreduce_node_postorder(
+  return ast.mapreduce_expr_postorder(
     analyze_is_side_effect_free_node(cx),
     data.all,
     node, true)
 end
 
-local function analyze_is_loop_invariant_node(cx)
-  return function(node)
-    -- Expressions:
-    if node:is(ast.typed.expr.ID) then
-      return not cx:is_loop_variable(node.value)
-    elseif node:is(ast.typed.expr.IndexAccess) then
-      return not std.is_ref(node.expr_type)
-    elseif node:is(ast.typed.expr.Call) or
-      node:is(ast.typed.expr.Ispace) or
-      node:is(ast.typed.expr.Region) or
-      node:is(ast.typed.expr.Partition) or
-      node:is(ast.typed.expr.PartitionEqual) or
-      node:is(ast.typed.expr.PartitionByField) or
-      node:is(ast.typed.expr.Image) or
-      node:is(ast.typed.expr.Preimage) or
-      node:is(ast.typed.expr.CrossProduct) or
-      node:is(ast.typed.expr.ListSlicePartition) or
-      node:is(ast.typed.expr.ListDuplicatePartition) or
-      node:is(ast.typed.expr.ListSliceCrossProduct) or
-      node:is(ast.typed.expr.ListCrossProduct) or
-      node:is(ast.typed.expr.ListCrossProductComplete) or
-      node:is(ast.typed.expr.ListPhaseBarriers) or
-      node:is(ast.typed.expr.PhaseBarrier) or
-      node:is(ast.typed.expr.DynamicCollective) or
-      node:is(ast.typed.expr.DynamicCollectiveGetResult) or
-      node:is(ast.typed.expr.Adjust) or
-      node:is(ast.typed.expr.Arrive) or
-      node:is(ast.typed.expr.Await) or
-      node:is(ast.typed.expr.Copy) or
-      node:is(ast.typed.expr.Fill) or
-      node:is(ast.typed.expr.Acquire) or
-      node:is(ast.typed.expr.Release) or
-      node:is(ast.typed.expr.AllocateScratchFields) or
-      node:is(ast.typed.expr.Condition) or
-      node:is(ast.typed.expr.Deref) or
-      node:is(ast.typed.expr.Projection)
-    then
-      return false
+local node_is_loop_invariant = {
+  -- Expressions:
+  [ast.typed.expr.ID] = function(cx, node)
+    return not cx:is_loop_variable(node.value)
+  end,
 
-    elseif node:is(ast.typed.expr.Constant) or
-      node:is(ast.typed.expr.Function) or
-      node:is(ast.typed.expr.FieldAccess) or
-      node:is(ast.typed.expr.MethodCall) or
-      node:is(ast.typed.expr.Cast) or
-      node:is(ast.typed.expr.Ctor) or
-      node:is(ast.typed.expr.CtorListField) or
-      node:is(ast.typed.expr.CtorRecField) or
-      node:is(ast.typed.expr.RawContext) or
-      node:is(ast.typed.expr.RawFields) or
-      node:is(ast.typed.expr.RawPhysical) or
-      node:is(ast.typed.expr.RawRuntime) or
-      node:is(ast.typed.expr.RawValue) or
-      node:is(ast.typed.expr.Isnull) or
-      node:is(ast.typed.expr.Null) or
-      node:is(ast.typed.expr.DynamicCast) or
-      node:is(ast.typed.expr.StaticCast) or
-      node:is(ast.typed.expr.UnsafeCast) or
-      node:is(ast.typed.expr.ListInvert) or
-      node:is(ast.typed.expr.ListRange) or
-      node:is(ast.typed.expr.Advance) or
-      node:is(ast.typed.expr.WithScratchFields) or
-      node:is(ast.typed.expr.RegionRoot) or
-      node:is(ast.typed.expr.Unary) or
-      node:is(ast.typed.expr.Binary)
-    then
-      return true
+  [ast.typed.expr.IndexAccess] = function(cx, node)
+    return not std.is_ref(node.expr_type)
+  end,
 
-    -- Miscellaneous:
-    elseif node:is(ast.location) or
-      node:is(ast.annotation) or
-      node:is(ast.condition_kind)
-    then
-      return true
+  [ast.typed.expr.Call]                       = always_false,
+  [ast.typed.expr.Ispace]                     = always_false,
+  [ast.typed.expr.Region]                     = always_false,
+  [ast.typed.expr.Partition]                  = always_false,
+  [ast.typed.expr.PartitionEqual]             = always_false,
+  [ast.typed.expr.PartitionByField]           = always_false,
+  [ast.typed.expr.PartitionByRestriction]     = always_false,
+  [ast.typed.expr.Image]                      = always_false,
+  [ast.typed.expr.ImageByTask]                = always_false,
+  [ast.typed.expr.Preimage]                   = always_false,
+  [ast.typed.expr.CrossProduct]               = always_false,
+  [ast.typed.expr.CrossProductArray]          = always_false,
+  [ast.typed.expr.ListSlicePartition]         = always_false,
+  [ast.typed.expr.ListDuplicatePartition]     = always_false,
+  [ast.typed.expr.ListSliceCrossProduct]      = always_false,
+  [ast.typed.expr.ListCrossProduct]           = always_false,
+  [ast.typed.expr.ListCrossProductComplete]   = always_false,
+  [ast.typed.expr.ListPhaseBarriers]          = always_false,
+  [ast.typed.expr.PhaseBarrier]               = always_false,
+  [ast.typed.expr.DynamicCollective]          = always_false,
+  [ast.typed.expr.DynamicCollectiveGetResult] = always_false,
+  [ast.typed.expr.Adjust]                     = always_false,
+  [ast.typed.expr.Arrive]                     = always_false,
+  [ast.typed.expr.Await]                      = always_false,
+  [ast.typed.expr.Copy]                       = always_false,
+  [ast.typed.expr.Fill]                       = always_false,
+  [ast.typed.expr.Acquire]                    = always_false,
+  [ast.typed.expr.Release]                    = always_false,
+  [ast.typed.expr.AttachHDF5]                 = always_false,
+  [ast.typed.expr.DetachHDF5]                 = always_false,
+  [ast.typed.expr.AllocateScratchFields]      = always_false,
+  [ast.typed.expr.Condition]                  = always_false,
+  [ast.typed.expr.Deref]                      = always_false,
+  [ast.typed.expr.ImportIspace]               = always_false,
+  [ast.typed.expr.ImportRegion]               = always_false,
+  [ast.typed.expr.ImportPartition]            = always_false,
+  [ast.typed.expr.Projection]                 = always_false,
 
-    else
-      assert(false, "unexpected node type " .. tostring(node.node_type))
-    end
-  end
-end
+  [ast.typed.expr.Constant]                   = always_true,
+  [ast.typed.expr.Global]                     = always_true,
+  [ast.typed.expr.Function]                   = always_true,
+  [ast.typed.expr.FieldAccess]                = always_true,
+  [ast.typed.expr.MethodCall]                 = always_true,
+  [ast.typed.expr.Cast]                       = always_true,
+  [ast.typed.expr.Ctor]                       = always_true,
+  [ast.typed.expr.CtorListField]              = always_true,
+  [ast.typed.expr.CtorRecField]               = always_true,
+  [ast.typed.expr.RawContext]                 = always_true,
+  [ast.typed.expr.RawFields]                  = always_true,
+  [ast.typed.expr.RawPhysical]                = always_true,
+  [ast.typed.expr.RawRuntime]                 = always_true,
+  [ast.typed.expr.RawTask]                    = always_true,
+  [ast.typed.expr.RawValue]                   = always_true,
+  [ast.typed.expr.Isnull]                     = always_true,
+  [ast.typed.expr.Null]                       = always_true,
+  [ast.typed.expr.DynamicCast]                = always_true,
+  [ast.typed.expr.StaticCast]                 = always_true,
+  [ast.typed.expr.UnsafeCast]                 = always_true,
+  [ast.typed.expr.ListInvert]                 = always_true,
+  [ast.typed.expr.ListRange]                  = always_true,
+  [ast.typed.expr.ListIspace]                 = always_true,
+  [ast.typed.expr.ListFromElement]            = always_true,
+  [ast.typed.expr.Advance]                    = always_true,
+  [ast.typed.expr.WithScratchFields]          = always_true,
+  [ast.typed.expr.RegionRoot]                 = always_true,
+  [ast.typed.expr.Unary]                      = always_true,
+  [ast.typed.expr.Binary]                     = always_true,
+  [ast.typed.expr.AddressOf]                  = always_true,
+  [ast.typed.expr.ParallelizerConstraint]     = always_true,
+
+  [ast.typed.expr.Future]                     = unreachable,
+  [ast.typed.expr.FutureGetResult]            = unreachable,
+  [ast.typed.expr.Internal]                   = unreachable,
+}
+
+local analyze_is_loop_invariant_node = ast.make_single_dispatch(
+  node_is_loop_invariant,
+  {ast.typed.expr})
 
 local function analyze_is_loop_invariant(cx, node)
-  return ast.mapreduce_node_postorder(
+  return ast.mapreduce_expr_postorder(
     analyze_is_loop_invariant_node(cx),
     data.all,
     node, true)
@@ -685,98 +714,106 @@ local function collect_free_variables_node(cx)
 end
 
 local function collect_free_variables(cx, node)
-  return ast.mapreduce_node_postorder(
+  return ast.mapreduce_expr_postorder(
     collect_free_variables_node(cx),
     data.all,
     node, true)
 end
 
-local function analyze_is_simple_index_expression_node(cx)
-  return function(node)
-    -- Expressions:
-    if node:is(ast.typed.expr.ID) then
-      return true
+local node_is_simple_index_expression = {
+  -- Expressions:
+  [ast.typed.expr.ID] = function(cx, node)
+    return true
+  end,
 
-    elseif node:is(ast.typed.expr.FieldAccess) then
-      -- Field access gets desugared in the type checker, just sanity
-      -- check here that we're not doing a region access.
-      local value_type = std.as_read(node.value.expr_type)
-      assert(not std.is_bounded_type(value_type) or std.get_field(value_type.index_type.base_type, node.field_name))
+  [ast.typed.expr.FieldAccess] = function(cx, node)
+    -- Field access gets desugared in the type checker, just sanity
+    -- check here that we're not doing a region access.
+    local value_type = std.as_read(node.value.expr_type)
+    assert(not std.is_bounded_type(value_type) or std.get_field(value_type.index_type.base_type, node.field_name))
+  end,
 
-    elseif node:is(ast.typed.expr.IndexAccess) or
-      node:is(ast.typed.expr.MethodCall) or
-      node:is(ast.typed.expr.Call) or
-      node:is(ast.typed.expr.RawContext) or
-      node:is(ast.typed.expr.RawFields) or
-      node:is(ast.typed.expr.RawPhysical) or
-      node:is(ast.typed.expr.RawRuntime) or
-      node:is(ast.typed.expr.RawValue) or
-      node:is(ast.typed.expr.Isnull) or
-      node:is(ast.typed.expr.Null) or
-      node:is(ast.typed.expr.DynamicCast) or
-      node:is(ast.typed.expr.StaticCast) or
-      node:is(ast.typed.expr.UnsafeCast) or
-      node:is(ast.typed.expr.Ispace) or
-      node:is(ast.typed.expr.Region) or
-      node:is(ast.typed.expr.Partition) or
-      node:is(ast.typed.expr.PartitionEqual) or
-      node:is(ast.typed.expr.PartitionByField) or
-      node:is(ast.typed.expr.Image) or
-      node:is(ast.typed.expr.Preimage) or
-      node:is(ast.typed.expr.CrossProduct) or
-      node:is(ast.typed.expr.ListSlicePartition) or
-      node:is(ast.typed.expr.ListDuplicatePartition) or
-      node:is(ast.typed.expr.ListSliceCrossProduct) or
-      node:is(ast.typed.expr.ListCrossProduct) or
-      node:is(ast.typed.expr.ListCrossProductComplete) or
-      node:is(ast.typed.expr.ListPhaseBarriers) or
-      node:is(ast.typed.expr.ListInvert) or
-      node:is(ast.typed.expr.ListRange) or
-      node:is(ast.typed.expr.PhaseBarrier) or
-      node:is(ast.typed.expr.DynamicCollective) or
-      node:is(ast.typed.expr.DynamicCollectiveGetResult) or
-      node:is(ast.typed.expr.Advance) or
-      node:is(ast.typed.expr.Adjust) or
-      node:is(ast.typed.expr.Arrive) or
-      node:is(ast.typed.expr.Await) or
-      node:is(ast.typed.expr.Copy) or
-      node:is(ast.typed.expr.Fill) or
-      node:is(ast.typed.expr.Acquire) or
-      node:is(ast.typed.expr.Release) or
-      node:is(ast.typed.expr.AllocateScratchFields) or
-      node:is(ast.typed.expr.WithScratchFields) or
-      node:is(ast.typed.expr.RegionRoot) or
-      node:is(ast.typed.expr.Condition) or
-      node:is(ast.typed.expr.Deref)
-    then
-      return false
+  [ast.typed.expr.IndexAccess]                = always_false,
+  [ast.typed.expr.MethodCall]                 = always_false,
+  [ast.typed.expr.Call]                       = always_false,
+  [ast.typed.expr.RawContext]                 = always_false,
+  [ast.typed.expr.RawFields]                  = always_false,
+  [ast.typed.expr.RawPhysical]                = always_false,
+  [ast.typed.expr.RawRuntime]                 = always_false,
+  [ast.typed.expr.RawTask]                    = always_false,
+  [ast.typed.expr.RawValue]                   = always_false,
+  [ast.typed.expr.Isnull]                     = always_false,
+  [ast.typed.expr.Null]                       = always_false,
+  [ast.typed.expr.DynamicCast]                = always_false,
+  [ast.typed.expr.StaticCast]                 = always_false,
+  [ast.typed.expr.UnsafeCast]                 = always_false,
+  [ast.typed.expr.Ispace]                     = always_false,
+  [ast.typed.expr.Region]                     = always_false,
+  [ast.typed.expr.Partition]                  = always_false,
+  [ast.typed.expr.PartitionEqual]             = always_false,
+  [ast.typed.expr.PartitionByField]           = always_false,
+  [ast.typed.expr.PartitionByRestriction]     = always_false,
+  [ast.typed.expr.Image]                      = always_false,
+  [ast.typed.expr.ImageByTask]                = always_false,
+  [ast.typed.expr.Preimage]                   = always_false,
+  [ast.typed.expr.CrossProduct]               = always_false,
+  [ast.typed.expr.CrossProductArray]          = always_false,
+  [ast.typed.expr.ListSlicePartition]         = always_false,
+  [ast.typed.expr.ListDuplicatePartition]     = always_false,
+  [ast.typed.expr.ListSliceCrossProduct]      = always_false,
+  [ast.typed.expr.ListCrossProduct]           = always_false,
+  [ast.typed.expr.ListCrossProductComplete]   = always_false,
+  [ast.typed.expr.ListPhaseBarriers]          = always_false,
+  [ast.typed.expr.ListInvert]                 = always_false,
+  [ast.typed.expr.ListRange]                  = always_false,
+  [ast.typed.expr.ListIspace]                 = always_false,
+  [ast.typed.expr.ListFromElement]            = always_false,
+  [ast.typed.expr.PhaseBarrier]               = always_false,
+  [ast.typed.expr.DynamicCollective]          = always_false,
+  [ast.typed.expr.DynamicCollectiveGetResult] = always_false,
+  [ast.typed.expr.Advance]                    = always_false,
+  [ast.typed.expr.Adjust]                     = always_false,
+  [ast.typed.expr.Arrive]                     = always_false,
+  [ast.typed.expr.Await]                      = always_false,
+  [ast.typed.expr.Copy]                       = always_false,
+  [ast.typed.expr.Fill]                       = always_false,
+  [ast.typed.expr.Acquire]                    = always_false,
+  [ast.typed.expr.Release]                    = always_false,
+  [ast.typed.expr.AttachHDF5]                 = always_false,
+  [ast.typed.expr.DetachHDF5]                 = always_false,
+  [ast.typed.expr.AllocateScratchFields]      = always_false,
+  [ast.typed.expr.WithScratchFields]          = always_false,
+  [ast.typed.expr.RegionRoot]                 = always_false,
+  [ast.typed.expr.Condition]                  = always_false,
+  [ast.typed.expr.Deref]                      = always_false,
+  [ast.typed.expr.AddressOf]                  = always_false,
+  [ast.typed.expr.ParallelizerConstraint]     = always_false,
+  [ast.typed.expr.ImportIspace]               = always_false,
+  [ast.typed.expr.ImportRegion]               = always_false,
+  [ast.typed.expr.ImportPartition]            = always_false,
+  [ast.typed.expr.Projection]                 = always_false,
 
-    elseif node:is(ast.typed.expr.Constant) or
-      node:is(ast.typed.expr.Function) or
-      node:is(ast.typed.expr.Cast) or
-      node:is(ast.typed.expr.Ctor) or
-      node:is(ast.typed.expr.CtorListField) or
-      node:is(ast.typed.expr.CtorRecField) or
-      node:is(ast.typed.expr.Unary) or
-      node:is(ast.typed.expr.Binary)
-    then
-      return true
+  [ast.typed.expr.Constant]                   = always_true,
+  [ast.typed.expr.Global]                     = always_true,
+  [ast.typed.expr.Function]                   = always_true,
+  [ast.typed.expr.Cast]                       = always_true,
+  [ast.typed.expr.Ctor]                       = always_true,
+  [ast.typed.expr.CtorListField]              = always_true,
+  [ast.typed.expr.CtorRecField]               = always_true,
+  [ast.typed.expr.Unary]                      = always_true,
+  [ast.typed.expr.Binary]                     = always_true,
 
-    -- Miscellaneous:
-    elseif node:is(ast.location) or
-      node:is(ast.annotation) or
-      node:is(ast.condition_kind)
-    then
-      return true
+  [ast.typed.expr.Future]                     = unreachable,
+  [ast.typed.expr.FutureGetResult]            = unreachable,
+  [ast.typed.expr.Internal]                   = unreachable,
+}
 
-    else
-      assert(false, "unexpected node type " .. tostring(node.node_type))
-    end
-  end
-end
+local analyze_is_simple_index_expression_node = ast.make_single_dispatch(
+  node_is_simple_index_expression,
+  {ast.typed.expr})
 
 local function analyze_is_simple_index_expression(cx, node)
-  return ast.mapreduce_node_postorder(
+  return ast.mapreduce_expr_postorder(
     analyze_is_simple_index_expression_node(cx),
     data.all,
     node, true)
@@ -1212,49 +1249,17 @@ function optimize_index_launch.stat_for_list(cx, node)
   }
 end
 
-function optimize_index_launches.stat_block(cx, node)
-  return node {
-    block = optimize_index_launches.block(cx, node.block),
-  }
-end
-
-function optimize_index_launches.stat_if(cx, node)
-  local then_block = optimize_index_launches.block(cx, node.then_block)
-  local elseif_blocks = node.elseif_blocks:map(function(elseif_block)
-    return optimize_index_launches.stat(cx, elseif_block)
-  end)
-  local else_block = optimize_index_launches.block(cx, node.else_block)
-  return node {
-    then_block = then_block,
-    elseif_blocks = elseif_blocks,
-    else_block = else_block,
-  }
-end
-
-function optimize_index_launches.stat_elseif(cx, node)
-  local block = optimize_index_launches.block(cx, node.block)
-  return node { block = block }
-end
-
 local function do_nothing(cx, node) return node end
 
 local optimize_index_launches_stat_table = {
   [ast.typed.stat.ForNum]    = optimize_index_launch.stat_for_num,
   [ast.typed.stat.ForList]   = optimize_index_launch.stat_for_list,
-
-  [ast.typed.stat.While]     = optimize_index_launches.stat_block,
-  [ast.typed.stat.Repeat]    = optimize_index_launches.stat_block,
-  [ast.typed.stat.Block]     = optimize_index_launches.stat_block,
-  [ast.typed.stat.MustEpoch] = optimize_index_launches.stat_block,
-  [ast.typed.stat.While]     = optimize_index_launches.stat_block,
-  [ast.typed.stat.If]        = optimize_index_launches.stat_if,
-  [ast.typed.stat.Elseif]    = optimize_index_launches.stat_elseif,
-  [ast.typed.stat]           = do_nothing,
 }
 
 local optimize_index_launches_stat = ast.make_single_dispatch(
   optimize_index_launches_stat_table,
-  {})
+  {},
+  do_nothing)
 
 function optimize_index_launches.stat(cx, node)
   return optimize_index_launches_stat(cx)(node)
@@ -1272,9 +1277,7 @@ function optimize_index_launches.top_task(cx, node)
   if not node.body then return node end
 
   local cx = cx:new_task_scope(node.prototype:get_constraints())
-  local body = optimize_index_launches.block(cx, node.body)
-
-  return node { body = body }
+  return ast.map_stat_postorder(optimize_index_launches_stat(cx), node)
 end
 
 function optimize_index_launches.top(cx, node)

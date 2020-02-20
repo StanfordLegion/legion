@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1813,6 +1813,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfiler::handle_profiling_response(
+                                       const ProfilingResponseBase *base,
                                        const Realm::ProfilingResponse &response)
     //--------------------------------------------------------------------------
     {

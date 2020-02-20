@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -65,6 +65,16 @@ namespace Legion {
 #ifdef INST_N2
   // NTNT templates (helper methods on IndexSpaceNodeT)
 #define DOIT_TT(T1,T2) \
+  template ApEvent IndexSpaceNodeT<INST_N1,T1>:: \
+    create_by_domain_helper<INST_N2,T2>(Operation *,    \
+                                     IndexPartNode *,     \
+                                     FutureMapImpl *,     \
+                                     bool); \
+  template ApEvent IndexSpaceNodeT<INST_N1,T1>:: \
+    create_by_weight_helper<INST_N2,T2>(Operation *,    \
+                                     IndexPartNode *,   \
+                                     FutureMapImpl *,   \
+                                     size_t); \
   template ApEvent IndexSpaceNodeT<INST_N1,T1>:: \
     create_by_field_helper<INST_N2,T2>(Operation *,	\
 				     IndexPartNode *,	  \

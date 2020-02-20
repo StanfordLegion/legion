@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -970,8 +970,9 @@
     inline char* to_string(const uint64_t *bits, int count)
     //--------------------------------------------------------------------------
     {
+      int maxlen = ((((count + 63) >> 6) << 4) + 1);  // includes trailing \0
       char *result = 
-        (char*)malloc(((((count + 63) >> 6) << 4) + 1) * sizeof(char));
+        (char*)malloc(maxlen * sizeof(char));
 #if defined(LEGION_DEBUG) || defined(REALM_DEBUG)
       assert(result != 0);
 #endif
@@ -980,14 +981,14 @@
       if((count & 63) != 0 && bits[count >> 6]) {
         // each nibble (4 bits) takes one character
         int nibbles = ((count & 63) + 3) >> 2;
-        sprintf(p, "%*.*" MASK_FMT, nibbles, nibbles, bits[count >> 6]);
+        snprintf(p, maxlen-(p-result), "%*.*" MASK_FMT, nibbles, nibbles, bits[count >> 6]);
         p += nibbles;
       }
       // rest are whole words
       int idx = (count >> 6);
       while(idx > 0) {
         if (bits[--idx] || idx == 0) {
-          sprintf(p, "%16.16" MASK_FMT, bits[idx]);
+          snprintf(p, maxlen-(p-result), "%16.16" MASK_FMT, bits[idx]);
           p += 16;
         }
       }

@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University
+-- Copyright 2020 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -381,14 +381,12 @@ local node_alpha_conversion = {
   [ast.specialized.stat.Expr] = pass_through,
   [ast.specialized.stat.RawDelete] = pass_through,
   [ast.specialized.stat.Fence] = pass_through,
-  [ast.specialized.Block] = pass_through,
-  [ast.location] = pass_through,
-  [ast.annotation] = pass_through,
 }
 
 local alpha_convert_node = ast.make_single_dispatch(
   node_alpha_conversion,
-  {ast.specialized.expr, ast.specialized.stat})
+  {ast.specialized.expr, ast.specialized.stat},
+  pass_through)
 
 local function alpha_convert_body(cx, node)
   return ast.map_node_continuation(alpha_convert_node(cx), node)

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2019 Stanford University
+# Copyright 2020 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -22,31 +22,27 @@ import numpy as np
 import os
 import subprocess
 
-import legion
-from legion import task, print_once, Fspace, Future, IndexLaunch, Ipartition, Ispace, N, Partition, R, Reduce, Region, RW
+import pygion
+from pygion import task, print_once, Fspace, Future, IndexLaunch, Ipartition, Ispace, N, Partition, R, Reduce, Region, RW
 
 root_dir = os.path.dirname(__file__)
-try:
-    prefix_dir = legion.prefix_dir
-except AttributeError:
-    prefix_dir, legion_h_path = legion.find_legion_header()
 pennant_header = subprocess.check_output(
     [
-        "gcc", "-I", prefix_dir, "-DLEGION_USE_PYTHON_CFFI", "-E", "-P",
+        "gcc", "-DLEGION_USE_PYTHON_CFFI", "-E", "-P",
         os.path.join(root_dir, "pennant_config.h")
     ]).decode("utf-8")
-ffi = legion.ffi
+ffi = pygion.ffi
 ffi.cdef(pennant_header)
 
-mesh_colorings = legion.Type(
+mesh_colorings = pygion.Type(
     np.dtype([('bytes', np.void, ffi.sizeof('mesh_colorings'))]),
     'mesh_colorings')
 
-mesh_partitions = legion.Type(
+mesh_partitions = pygion.Type(
     np.dtype([('bytes', np.void, ffi.sizeof('mesh_partitions'))]),
     'mesh_partitions')
 
-config = legion.Type(
+config = pygion.Type(
     np.dtype([('bytes', np.void, ffi.sizeof('config'))]),
     'config')
 
@@ -54,30 +50,30 @@ def create_partition(is_disjoint, region, c_partition, color_space):
     ipart = Ipartition(c_partition.index_partition, region.ispace, color_space)
     return Partition(region, ipart)
 
-read_config = legion.extern_task(
+read_config = pygion.extern_task(
     task_id=10000,
     argument_types=[],
     privileges=[],
     return_type=config,
     calling_convention='regent')
 
-read_partitions = legion.extern_task(
+read_partitions = pygion.extern_task(
     task_id=10001,
     argument_types=[Region, Region, Region, config],
     privileges=[N, N, N],
     return_type=mesh_partitions,
     calling_convention='regent')
 
-initialize_spans = legion.extern_task(
+initialize_spans = pygion.extern_task(
     task_id=10002,
-    argument_types=[config, legion.int64, Region, Region, Region, Region],
+    argument_types=[config, pygion.int64, Region, Region, Region, Region],
     privileges=[None, None, RW, RW, RW, RW],
-    return_type=legion.void,
+    return_type=pygion.void,
     calling_convention='regent')
 
-initialize_topology = legion.extern_task(
+initialize_topology = pygion.extern_task(
     task_id=10003,
-    argument_types=[config, legion.int64, Region, Region, Region, Region, Region],
+    argument_types=[config, pygion.int64, Region, Region, Region, Region, Region],
     privileges=[
         None,
         None,
@@ -86,48 +82,48 @@ initialize_topology = legion.extern_task(
         RW('px_x', 'px_y', 'has_bcx', 'has_bcy'),
         N,
         RW('mapsz', 'mapsp1', 'mapsp1_r', 'mapsp2', 'mapsp2_r', 'mapss3', 'mapss4')],
-    return_type=legion.void,
+    return_type=pygion.void,
     calling_convention='regent')
 
-init_pointers = legion.extern_task(
+init_pointers = pygion.extern_task(
     task_id=10012,
     argument_types=[Region, Region, Region, Region, Region],
     privileges=[N, N, N, RW('mapsp1', 'mapsp1_r', 'mapsp2', 'mapsp2_r'), R],
-    return_type=legion.void,
+    return_type=pygion.void,
     calling_convention='regent')
 
-init_mesh_zones = legion.extern_task(
+init_mesh_zones = pygion.extern_task(
     task_id=10013,
     argument_types=[Region, Region],
     privileges=[RW('zx_x', 'zx_y', 'zarea', 'zvol'), R],
-    return_type=legion.void,
+    return_type=pygion.void,
     calling_convention='regent')
 
-calc_centers_full = legion.extern_task(
+calc_centers_full = pygion.extern_task(
     task_id=10014,
-    argument_types=[Region, Region, Region, Region, Region, legion.bool_],
+    argument_types=[Region, Region, Region, Region, Region, pygion.bool_],
     privileges=[
         R('znump') + RW('zx_x', 'zx_y'),
         R('px_x', 'px_y'),
         R('px_x', 'px_y'),
         R('mapsz', 'mapsp1', 'mapsp1_r', 'mapsp2', 'mapsp2_r') + RW('ex_x', 'ex_y'),
         R],
-    return_type=legion.void,
+    return_type=pygion.void,
     calling_convention='regent')
 
-calc_volumes_full = legion.extern_task(
+calc_volumes_full = pygion.extern_task(
     task_id=10015,
-    argument_types=[Region, Region, Region, Region, Region, legion.bool_],
+    argument_types=[Region, Region, Region, Region, Region, pygion.bool_],
     privileges=[
         R('zx_x', 'zx_y', 'znump') + RW('zarea', 'zvol'),
         R('px_x', 'px_y'),
         R('px_x', 'px_y'),
         R('mapsz', 'mapsp1', 'mapsp1_r', 'mapsp2', 'mapsp2_r') + RW('sarea'),
         R],
-    return_type=legion.void,
+    return_type=pygion.void,
     calling_convention='regent')
 
-init_side_fracs = legion.extern_task(
+init_side_fracs = pygion.extern_task(
     task_id=10016,
     argument_types=[Region, Region, Region, Region, Region],
     privileges=[
@@ -136,39 +132,39 @@ init_side_fracs = legion.extern_task(
         N,
         R('mapsz', 'sarea') + RW('smf'),
         R],
-    return_type=legion.void,
+    return_type=pygion.void,
     calling_convention='regent')
 
-init_hydro = legion.extern_task(
+init_hydro = pygion.extern_task(
     task_id=10017,
-    argument_types=[Region, Region, legion.float64, legion.float64, legion.float64, legion.float64, legion.float64, legion.float64, legion.float64, legion.float64],
+    argument_types=[Region, Region, pygion.float64, pygion.float64, pygion.float64, pygion.float64, pygion.float64, pygion.float64, pygion.float64, pygion.float64],
     privileges=[
         R('zx_x', 'zx_y', 'zvol') + RW('zr', 'ze', 'zwrate', 'zm', 'zetot'),
         R],
-    return_type=legion.void,
+    return_type=pygion.void,
     calling_convention='regent')
 
-init_radial_velocity = legion.extern_task(
+init_radial_velocity = pygion.extern_task(
     task_id=10018,
-    argument_types=[Region, Region, legion.float64],
+    argument_types=[Region, Region, pygion.float64],
     privileges=[
         R('px_x', 'px_y') + RW('pu_x', 'pu_y'),
         R],
-    return_type=legion.void,
+    return_type=pygion.void,
     calling_convention='regent')
 
-adv_pos_half = legion.extern_task(
+adv_pos_half = pygion.extern_task(
     task_id=10019,
-    argument_types=[Region, Region, legion.float64, legion.bool_, legion.bool_],
+    argument_types=[Region, Region, pygion.float64, pygion.bool_, pygion.bool_],
     privileges=[
         R('px_x', 'px_y', 'pu_x', 'pu_y') + RW('px0_x', 'px0_y', 'pxp_x', 'pxp_y', 'pu0_x', 'pu0_y', 'pmaswt', 'pf_x', 'pf_y'),
         R],
-    return_type=legion.void,
+    return_type=pygion.void,
     calling_convention='regent')
 
-calc_everything = legion.extern_task(
+calc_everything = pygion.extern_task(
     task_id=10020,
-    argument_types=[Region, Region, Region, Region, Region, Region, legion.float64, legion.float64, legion.float64, legion.float64, legion.float64, legion.float64, legion.bool_],
+    argument_types=[Region, Region, Region, Region, Region, Region, pygion.float64, pygion.float64, pygion.float64, pygion.float64, pygion.float64, pygion.float64, pygion.bool_],
     privileges=[
         R('zm', 'zvol', 'zr', 'znump', 'zwrate', 'ze') + RW('zp', 'zxp_x', 'zuc_y', 'zvol0', 'zvolp', 'z0tmp', 'zxp_y', 'zrp', 'zuc_x', 'zdu', 'zss', 'zareap', 'zdl'),
         R('pu_y', 'pxp_y', 'pxp_x', 'pu_x') + RW('pf_x', 'pmaswt', 'pf_y'),
@@ -176,21 +172,21 @@ calc_everything = legion.extern_task(
         R('smf', 'mapsp2', 'mapss4', 'mapsp1_r', 'mapss3', 'mapsp2_r', 'mapsz', 'mapsp1') + RW('sfq_x', 'sfq_y', 'cdiv', 'carea', 'cevol', 'cqe2_x', 'sft_x', 'cqe2_y', 'sareap', 'cqe1_y', 'exp_x', 'sfp_x', 'cdu', 'elen', 'sft_y', 'sfp_y', 'exp_y', 'cqe1_x', 'ccos'),
         R,
         R],
-    return_type=legion.void,
+    return_type=pygion.void,
     calling_convention='regent')
 
-adv_pos_full = legion.extern_task(
+adv_pos_full = pygion.extern_task(
     task_id=10021,
-    argument_types=[Region, Region, legion.float64, legion.bool_],
+    argument_types=[Region, Region, pygion.float64, pygion.bool_],
     privileges=[
         R('px0_x', 'px0_y', 'pmaswt', 'has_bcx', 'has_bcy') + RW('px_x', 'px_y', 'pu_x', 'pu_y', 'pu0_x', 'pu0_y', 'pf_x', 'pf_y'),
         R],
-    return_type=legion.void,
+    return_type=pygion.void,
     calling_convention='regent')
 
-calc_everything_full = legion.extern_task(
+calc_everything_full = pygion.extern_task(
     task_id=10022,
-    argument_types=[Region, Region, Region, Region, Region, Region, legion.float64, legion.bool_],
+    argument_types=[Region, Region, Region, Region, Region, Region, pygion.float64, pygion.bool_],
     privileges=[
         R('zm', 'zvol0', 'znump', 'zp') + RW('ze', 'zx_x', 'zwrate', 'zetot', 'zx_y', 'zw', 'zarea', 'zvol', 'zr'),
         R('px_y', 'pxp_y', 'pxp_x', 'pu0_y', 'pu0_x', 'pu_y', 'pu_x', 'px_x'),
@@ -198,30 +194,30 @@ calc_everything_full = legion.extern_task(
         R('mapsp2', 'sfq_x', 'mapsp1_r', 'sfp_y', 'sfq_y', 'mapsp1', 'mapsz', 'mapsp2_r', 'sfp_x') + RW('ex_y', 'ex_x', 'sarea'),
         R,
         R],
-    return_type=legion.void,
+    return_type=pygion.void,
     calling_convention='regent')
 
-calc_dt_hydro = legion.extern_task(
+calc_dt_hydro = pygion.extern_task(
     task_id=10023,
-    argument_types=[Region, Region, legion.float64, legion.float64, legion.float64, legion.float64, legion.bool_, legion.bool_],
+    argument_types=[Region, Region, pygion.float64, pygion.float64, pygion.float64, pygion.float64, pygion.bool_, pygion.bool_],
     privileges=[
         R('zdl', 'zvol0', 'zvol', 'zss', 'zdu'),
         R],
-    return_type=legion.float64,
+    return_type=pygion.float64,
     calling_convention='regent')
 
-calc_global_dt = legion.extern_task(
+calc_global_dt = pygion.extern_task(
     task_id=10024,
-    argument_types=[legion.float64, legion.float64, legion.float64, legion.float64, legion.float64, legion.float64, legion.float64, legion.int64],
+    argument_types=[pygion.float64, pygion.float64, pygion.float64, pygion.float64, pygion.float64, pygion.float64, pygion.float64, pygion.int64],
     privileges=[],
-    return_type=legion.float64,
+    return_type=pygion.float64,
     calling_convention='regent')
 
-validate_output_sequential = legion.extern_task(
+validate_output_sequential = pygion.extern_task(
     task_id=10028,
     argument_types=[Region, Region, Region, config],
     privileges=[R, R, R],
-    return_type=legion.void,
+    return_type=pygion.void,
     calling_convention='regent')
 
 @task(task_id=2) # , inner=True
@@ -231,93 +227,93 @@ def main():
     conf = read_config().get()
 
     zone = Fspace(OrderedDict([
-        ('zxp_x', legion.float64),
-        ('zxp_y', legion.float64),
-        ('zx_x', legion.float64),
-        ('zx_y', legion.float64),
-        ('zareap', legion.float64),
-        ('zarea', legion.float64),
-        ('zvol0', legion.float64),
-        ('zvolp', legion.float64),
-        ('zvol', legion.float64),
-        ('zdl', legion.float64),
-        ('zm', legion.float64),
-        ('zrp', legion.float64),
-        ('zr', legion.float64),
-        ('ze', legion.float64),
-        ('zetot', legion.float64),
-        ('zw', legion.float64),
-        ('zwrate', legion.float64),
-        ('zp', legion.float64),
-        ('zss', legion.float64),
-        ('zdu', legion.float64),
-        ('zuc_x', legion.float64),
-        ('zuc_y', legion.float64),
-        ('z0tmp', legion.float64),
-        ('znump', legion.uint8),
+        ('zxp_x', pygion.float64),
+        ('zxp_y', pygion.float64),
+        ('zx_x', pygion.float64),
+        ('zx_y', pygion.float64),
+        ('zareap', pygion.float64),
+        ('zarea', pygion.float64),
+        ('zvol0', pygion.float64),
+        ('zvolp', pygion.float64),
+        ('zvol', pygion.float64),
+        ('zdl', pygion.float64),
+        ('zm', pygion.float64),
+        ('zrp', pygion.float64),
+        ('zr', pygion.float64),
+        ('ze', pygion.float64),
+        ('zetot', pygion.float64),
+        ('zw', pygion.float64),
+        ('zwrate', pygion.float64),
+        ('zp', pygion.float64),
+        ('zss', pygion.float64),
+        ('zdu', pygion.float64),
+        ('zuc_x', pygion.float64),
+        ('zuc_y', pygion.float64),
+        ('z0tmp', pygion.float64),
+        ('znump', pygion.uint8),
     ]))
 
     point = Fspace(OrderedDict([
-        ('px0_x', legion.float64),
-        ('px0_y', legion.float64),
-        ('pxp_x', legion.float64),
-        ('pxp_y', legion.float64),
-        ('px_x', legion.float64),
-        ('px_y', legion.float64),
-        ('pu0_x', legion.float64),
-        ('pu0_y', legion.float64),
-        ('pu_x', legion.float64),
-        ('pu_y', legion.float64),
-        ('pap_x', legion.float64),
-        ('pap_y', legion.float64),
-        ('pf_x', legion.float64),
-        ('pf_y', legion.float64),
-        ('pmaswt', legion.float64),
-        ('has_bcx', legion.bool_),
-        ('has_bcy', legion.bool_),
+        ('px0_x', pygion.float64),
+        ('px0_y', pygion.float64),
+        ('pxp_x', pygion.float64),
+        ('pxp_y', pygion.float64),
+        ('px_x', pygion.float64),
+        ('px_y', pygion.float64),
+        ('pu0_x', pygion.float64),
+        ('pu0_y', pygion.float64),
+        ('pu_x', pygion.float64),
+        ('pu_y', pygion.float64),
+        ('pap_x', pygion.float64),
+        ('pap_y', pygion.float64),
+        ('pf_x', pygion.float64),
+        ('pf_y', pygion.float64),
+        ('pmaswt', pygion.float64),
+        ('has_bcx', pygion.bool_),
+        ('has_bcy', pygion.bool_),
     ]))
 
     side = Fspace(OrderedDict([
-        ('mapsz', legion.int1d),
-        ('mapsp1', legion.int1d),
-        ('mapsp1_r', legion.uint8),
-        ('mapsp2', legion.int1d),
-        ('mapsp2_r', legion.uint8),
-        ('mapss3', legion.int1d),
-        ('mapss4', legion.int1d),
-        ('sareap', legion.float64),
-        ('sarea', legion.float64),
-        ('svolp', legion.float64),
-        ('svol', legion.float64),
-        ('ssurfp_x', legion.float64),
-        ('ssurfp_y', legion.float64),
-        ('smf', legion.float64),
-        ('sfp_x', legion.float64),
-        ('sfp_y', legion.float64),
-        ('sft_x', legion.float64),
-        ('sft_y', legion.float64),
-        ('sfq_x', legion.float64),
-        ('sfq_y', legion.float64),
-        ('exp_x', legion.float64),
-        ('exp_y', legion.float64),
-        ('ex_x', legion.float64),
-        ('ex_y', legion.float64),
-        ('elen', legion.float64),
-        ('carea', legion.float64),
-        ('cevol', legion.float64),
-        ('cdu', legion.float64),
-        ('cdiv', legion.float64),
-        ('ccos', legion.float64),
-        ('cqe1_x', legion.float64),
-        ('cqe1_y', legion.float64),
-        ('cqe2_x', legion.float64),
-        ('cqe2_y', legion.float64),
+        ('mapsz', pygion.int1d),
+        ('mapsp1', pygion.int1d),
+        ('mapsp1_r', pygion.uint8),
+        ('mapsp2', pygion.int1d),
+        ('mapsp2_r', pygion.uint8),
+        ('mapss3', pygion.int1d),
+        ('mapss4', pygion.int1d),
+        ('sareap', pygion.float64),
+        ('sarea', pygion.float64),
+        ('svolp', pygion.float64),
+        ('svol', pygion.float64),
+        ('ssurfp_x', pygion.float64),
+        ('ssurfp_y', pygion.float64),
+        ('smf', pygion.float64),
+        ('sfp_x', pygion.float64),
+        ('sfp_y', pygion.float64),
+        ('sft_x', pygion.float64),
+        ('sft_y', pygion.float64),
+        ('sfq_x', pygion.float64),
+        ('sfq_y', pygion.float64),
+        ('exp_x', pygion.float64),
+        ('exp_y', pygion.float64),
+        ('ex_x', pygion.float64),
+        ('ex_y', pygion.float64),
+        ('elen', pygion.float64),
+        ('carea', pygion.float64),
+        ('cevol', pygion.float64),
+        ('cdu', pygion.float64),
+        ('cdiv', pygion.float64),
+        ('ccos', pygion.float64),
+        ('cqe1_x', pygion.float64),
+        ('cqe1_y', pygion.float64),
+        ('cqe2_x', pygion.float64),
+        ('cqe2_y', pygion.float64),
     ]))
 
     span = Fspace(OrderedDict([
-        ('start', legion.int64),
-        ('stop', legion.int64),
-        ('internal', legion.bool_), 
+        ('start', pygion.int64),
+        ('stop', pygion.int64),
+        ('internal', pygion.bool_), 
    ]))
 
     zones = Region([conf.nz], zone)
@@ -368,17 +364,17 @@ def main():
 
     for region in [zone_spans, private_spans, shared_spans, side_spans]:
         for field in ['start', 'stop']:
-            legion.fill(region, field, 0)
+            pygion.fill(region, field, 0)
 
     if old_seq_init:
         # FIXME: These fields are actually never used, fill them here
         # just to avoid validation errors later.
-        legion.fill(points, 'pap_x', 0)
-        legion.fill(points, 'pap_y', 0)
-        legion.fill(sides, 'svolp', 0)
-        legion.fill(sides, 'svol', 0)
-        legion.fill(sides, 'ssurfp_x', 0)
-        legion.fill(sides, 'ssurfp_y', 0)
+        pygion.fill(points, 'pap_x', 0)
+        pygion.fill(points, 'pap_y', 0)
+        pygion.fill(sides, 'svolp', 0)
+        pygion.fill(sides, 'svol', 0)
+        pygion.fill(sides, 'ssurfp_x', 0)
+        pygion.fill(sides, 'ssurfp_y', 0)
 
     if conf.par_init:
         for i in IndexLaunch(pieces):
@@ -459,12 +455,12 @@ def main():
     cycle = 0
     cstop = conf.cstop + 2*conf.prune
     time = 0.0
-    dt = Future(conf.dtmax, legion.float64)
+    dt = Future(conf.dtmax, pygion.float64)
     dthydro = conf.dtmax
     while cycle < cstop and time < conf.tstop:
         if cycle == conf.prune:
-            legion.execution_fence(block=True)
-            start_time = legion.c.legion_get_current_time_in_nanos()
+            pygion.execution_fence(block=True)
+            start_time = pygion.c.legion_get_current_time_in_nanos()
 
         dt = calc_global_dt(dt, conf.dtfac, conf.dtinit, conf.dtmax, dthydro, time, conf.tstop, cycle)
 
@@ -527,8 +523,8 @@ def main():
         time += dt.get()
 
         if cycle == conf.cstop - conf.prune:
-            legion.execution_fence(block=True)
-            stop_time = legion.c.legion_get_current_time_in_nanos()
+            pygion.execution_fence(block=True)
+            stop_time = pygion.c.legion_get_current_time_in_nanos()
 
     if old_seq_init:
         validate_output_sequential(zones, points, sides, conf)

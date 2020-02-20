@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,60 +34,9 @@ namespace Realm {
   // turn nested event triggers into a list walk instead - keeps from blowing
   //  out the stack
   namespace ThreadLocal {
-    __thread EventWaiter::EventWaiterList *nested_wake_list = 0;
+    REALM_THREAD_LOCAL EventWaiter::EventWaiterList *nested_wake_list = 0;
   };
 
-#if 0
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class DeferredEventTrigger
-  //
-
-  class DeferredEventTrigger : public EventWaiter {
- public:
-    DeferredEventTrigger(Event _after_event);
-
-    virtual ~DeferredEventTrigger(void);
-    
-    virtual bool event_triggered(Event e, bool poisoned);
-
-    virtual void print(std::ostream& os) const;
-
-    virtual Event get_finish_event(void) const;
-
-  protected:
-    Event after_event;
-  };
-  
-  DeferredEventTrigger::DeferredEventTrigger(Event _after_event)
-    : after_event(_after_event)
-  {}
-
-  DeferredEventTrigger::~DeferredEventTrigger(void) { }
-
-  bool DeferredEventTrigger::event_triggered(Event e, bool poisoned)
-  {
-    if(poisoned) {
-      log_poison.info() << "poisoned deferred event: event=" << after_event;
-      GenEventImpl::trigger(after_event, true /*poisoned*/);
-      return true;
-    }
-    
-    log_event.info() << "deferred trigger occuring: " << after_event;
-    GenEventImpl::trigger(after_event, false /*!poisoned*/);
-    return true;
-  }
-
-  void DeferredEventTrigger::print(std::ostream& os) const
-  {
-    os << "deferred trigger: after=" << after_event;
-  }
-
-  Event DeferredEventTrigger::get_finish_event(void) const
-  {
-    return after_event;
-  }
-#endif
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -546,7 +495,7 @@ namespace Realm {
 
   Barrier Barrier::alter_arrival_count(int delta) const
   {
-    timestamp_t timestamp = __sync_fetch_and_add(&BarrierImpl::barrier_adjustment_timestamp, 1);
+    timestamp_t timestamp = BarrierImpl::barrier_adjustment_timestamp.fetch_add(1);
 #ifdef EVENT_GRAPH_TRACE
     Event enclosing = find_enclosing_termination_event();
     log_event_graph.info("Barrier Alter: (" IDFMT ",%d) (" IDFMT
@@ -736,89 +685,6 @@ namespace Realm {
   // class EventMerger
   //
 
-#if 0
-    class EventMerger {
-    public:
-      EventMerger(GenEventImpl *_event_impl);
-      ~EventMerger(void);
-
-      bool is_active(void) const;
-
-      void prepare_merger(Event _finish_event, bool _ignore_faults, unsigned _max_preconditions);
-
-      void add_precondition(Event wait_for);
-
-      void arm_merger(void);
-
-    protected:
-      void precondition_triggered(bool poisoned);
-
-      friend class MergeEventPrecondition;
-
-      class MergeEventPrecondition : public EventWaiter {
-      public:
-	EventMerger *merger;
-
-	virtual void event_triggered(bool poisoned)
-	{
-	  merger->precondition_triggered(poisoned);
-	}
-
-	virtual void print(std::ostream& os) const
-	{
-	  os << "event merger: " << merger->finish_event 
-	     << " left=" << merger->count_needed;
-	}
-
-	virtual Event get_finish_event(void) const
-	{
-	  return merger->event_impl->make_event(merger->finish_gen);
-	}
-      };
-
-#if 0
-      virtual bool event_triggered(Event triggered, bool poisoned)
-      {
-	// if the input is poisoned, we propagate that poison eagerly
-	if(poisoned) {
-	  bool first_fault = (__sync_fetch_and_add(&faults_observed, 1) == 0);
-	  if(first_fault && !ignore_faults) {
-	    log_poison.info() << "event merger poisoned: after=" << finish_event;
-	    GenEventImpl::trigger(finish_event, true /*poisoned*/);
-	  }
-	}
-
-	int count_left = __sync_fetch_and_add(&count_needed, -1);
-
-        // Put the logging first to avoid segfaults
-	log_event.debug() << "received trigger merged event=" << finish_event << " left=" << count_left << " poisoned=" << poisoned;
-
-	// count is the value before the decrement, so it was 1, it's now 0
-	bool last_trigger = (count_left == 1);
-
-	// trigger on the last input event, unless we did an early poison propagation
-	if(last_trigger && (ignore_faults || (faults_observed == 0))) {
-	  GenEventImpl::trigger(finish_event, false /*!poisoned*/);
-	}
-
-        // caller can delete us if this was the last trigger
-        return last_trigger;
-      }
-#endif
-
-      GenEventImpl *event_impl;
-      Event::gen_t finish_gen;
-      bool ignore_faults;
-      atomic<int> count_needed;
-      int faults_observed;
-
-      static const size_t MAX_INLINE_PRECONDITIONS = 6;
-      MergeEventPrecondition inline_preconditions[MAX_INLINE_PRECONDITIONS];
-      MergeEventPrecondition *preconditions;
-      unsigned num_preconditions, max_preconditions;
-    };
-#endif
-
     EventMerger::EventMerger(GenEventImpl *_event_impl)
       : event_impl(_event_impl)
       , count_needed(0)
@@ -848,7 +714,7 @@ namespace Realm {
       assert(event_impl->make_event(finish_gen) == _finish_event);
       ignore_faults = _ignore_faults;
       count_needed.store(1);  // this matches the subsequent call to arm()
-      faults_observed = 0;
+      faults_observed.store(0);
       num_preconditions = 0;
       // resize the precondition array if needed
       if(_max_preconditions > max_preconditions) {
@@ -869,7 +735,7 @@ namespace Realm {
       if(wait_for.has_triggered_faultaware(poisoned)) {
 	if(poisoned) {
 	  // always count faults, but don't necessarily propagate
-	  bool first_fault = (__sync_fetch_and_add(&faults_observed, 1) == 0);
+	  bool first_fault = (faults_observed.fetch_add(1) == 0);
 	  if(first_fault && !ignore_faults) {
             log_poison.info() << "event merger early poison: after=" << event_impl->make_event(finish_gen);
 	    event_impl->trigger(finish_gen, Network::my_node_id, true /*poisoned*/);
@@ -898,7 +764,7 @@ namespace Realm {
     {
       // if the input is poisoned, we propagate that poison eagerly
       if(poisoned) {
-	bool first_fault = (__sync_fetch_and_add(&faults_observed, 1) == 0);
+	bool first_fault = (faults_observed.fetch_add(1) == 0);
 	if(first_fault && !ignore_faults) {
 	  log_poison.info() << "event merger poisoned: after=" << event_impl->make_event(finish_gen);
 	  event_impl->trigger(finish_gen, Network::my_node_id, true /*poisoned*/);
@@ -915,7 +781,7 @@ namespace Realm {
       bool last_trigger = (count_left == 1);
 
       // trigger on the last input event, unless we did an early poison propagation
-      if(last_trigger && (ignore_faults || (faults_observed == 0))) {
+      if(last_trigger && (ignore_faults || (faults_observed.load() == 0))) {
 	event_impl->trigger(finish_gen, Network::my_node_id, false /*!poisoned*/);
       }
 
@@ -1413,7 +1279,7 @@ namespace Realm {
     {
       // common case: no poisoned generations
       int npg_cached = num_poisoned_generations.load_acquire();
-      if(__builtin_expect((npg_cached == 0), 1))
+      if(REALM_LIKELY(npg_cached == 0))
 	return false;
       
       for(int i = 0; i < npg_cached; i++)
@@ -1427,29 +1293,6 @@ namespace Realm {
     // Events
 
 
-  template <typename T>
-  struct MediumBroadcastHelper : public T::RequestArgs {
-    inline void apply(NodeID target)
-    {
-      T::Message::request(target, *this, payload, payload_size, payload_mode);
-    }
-
-    void broadcast(const NodeSet& targets,
-		   const void *_payload, size_t _payload_size,
-		   int _payload_mode)
-    {
-      payload = _payload;
-      payload_size = _payload_size;
-      payload_mode = _payload_mode;
-      assert((payload_mode != PAYLOAD_FREE) && "cannot use PAYLOAD_FREE with broadcast!");
-      targets.map(*this);
-    }
-
-    const void *payload;
-    size_t payload_size;
-    int payload_mode;
-  };
-  
     // only called for generational events
     /*static*/ void EventSubscribeMessage::handle_message(NodeID sender, const EventSubscribeMessage &args,
 							  const void *data, size_t datalen)
@@ -1682,7 +1525,7 @@ namespace Realm {
     }
 
 
-  /*static*/ Barrier::timestamp_t BarrierImpl::barrier_adjustment_timestamp;
+  /*static*/ atomic<Barrier::timestamp_t> BarrierImpl::barrier_adjustment_timestamp(0);
 
 
 

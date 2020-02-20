@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -250,7 +250,7 @@ namespace Realm {
       // would like this constructor to be protected and have QT be a friend, but that requires
       //  C++11 (or a compiler like g++ that supports it even without -std=c++11)
       //  The CUDA compiler also seems to be a little dense here as well
-#if __cplusplus >= 201103L && !defined(__CUDACC__)
+#if (REALM_CXX_STANDARD >= 11) && !defined(__CUDACC__)
     protected:
       friend QT;
 #else

@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -2070,6 +2070,20 @@ namespace Legion {
           if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
             has_conflict = true;
         }
+        for (unsigned idx = 0; !has_conflict &&
+              (idx < copy->src_indirect_requirements.size()); idx++)
+        {
+          const RegionRequirement &req = copy->src_indirect_requirements[idx];
+          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
+            has_conflict = true;
+        }
+        for (unsigned idx = 0; !has_conflict &&
+              (idx < copy->dst_indirect_requirements.size()); idx++)
+        {
+          const RegionRequirement &req = copy->dst_indirect_requirements[idx];
+          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
+            has_conflict = true;
+        }
         if (has_conflict)
           conflicting.push_back(physical_regions[our_idx]);
       }
@@ -2098,6 +2112,20 @@ namespace Legion {
               (idx < copy->dst_requirements.size()); idx++)
         {
           const RegionRequirement &req = copy->dst_requirements[idx];
+          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
+            has_conflict = true;
+        }
+        for (unsigned idx = 0; !has_conflict &&
+              (idx < copy->src_indirect_requirements.size()); idx++)
+        {
+          const RegionRequirement &req = copy->src_indirect_requirements[idx];
+          if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
+            has_conflict = true;
+        }
+        for (unsigned idx = 0; !has_conflict &&
+              (idx < copy->dst_indirect_requirements.size()); idx++)
+        {
+          const RegionRequirement &req = copy->dst_indirect_requirements[idx];
           if (check_region_dependence(our_tid,our_space,our_req,our_usage,req))
             has_conflict = true;
         }
@@ -2907,7 +2935,7 @@ namespace Legion {
         outstanding_subtasks(0), pending_subtasks(0), pending_frames(0), 
         currently_active_context(false), current_mapping_fence(NULL), 
         mapping_fence_gen(0), current_mapping_fence_index(0), 
-        current_execution_fence_index(0) 
+        current_execution_fence_index(0), last_deppart(NULL),last_deppart_gen(0)
     //--------------------------------------------------------------------------
     {
       // Set some of the default values for a context
@@ -3457,6 +3485,41 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition InnerContext::create_partition_by_weights(IndexSpace parent,
+                                                const FutureMap &weights, 
+                                                IndexSpace color_space,
+                                                size_t granularity, Color color)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);  
+      const IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                               parent.get_tree_id(), parent.get_type_tag());
+      const DistributedID did = runtime->get_available_distributed_id();
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating partition %d by weights with parent index "
+                      "space %x in task %s (ID %lld)", pid.id, parent.id,
+                      get_task_name(), get_unique_id());
+#endif
+      LegionColor partition_color = INVALID_COLOR;
+      if (color != AUTO_GENERATE_ID)
+        partition_color = color;
+      PendingPartitionOp *part_op = 
+        runtime->get_available_pending_partition_op();
+      part_op->initialize_weight_partition(this, pid, weights, granularity);
+      const ApEvent term_event = part_op->get_completion_event();
+      // Tell the region tree forest about this partition
+      RegionTreeForest *forest = runtime->forest;
+      const RtEvent safe = forest->create_pending_partition(this, pid, parent,
+        color_space, partition_color, DISJOINT_COMPLETE_KIND, did, term_event);
+      // Now we can add the operation to the queue
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      // Wait for any notifications to occur before returning
+      if (safe.exists())
+        safe.wait();
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition InnerContext::create_partition_by_union(
                                           RegionTreeForest *forest,
                                           IndexSpace parent,
@@ -3756,11 +3819,18 @@ namespace Legion {
         runtime->get_available_pending_partition_op();
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
+      std::set<RtEvent> safe_events;
       forest->create_pending_cross_product(this, handle1, handle2, handles, 
-                                           kind, partition_color, term_event);
+                                kind, partition_color, term_event, safe_events);
       part_op->initialize_cross_product(this, handle1, handle2,partition_color);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      if (!safe_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(safe_events);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
       return partition_color;
     }
 
@@ -3845,6 +3915,43 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition InnerContext::create_partition_by_domain(
+                                                RegionTreeForest *forest,
+                                                IndexSpace parent,
+                                                const FutureMap &domains,
+                                                IndexSpace color_space,
+                                                bool perform_intersections,
+                                                PartitionKind part_kind,
+                                                Color color)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id(), parent.get_type_tag());
+      DistributedID did = runtime->get_available_distributed_id();
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating partition by domain in task %s (ID %lld)", 
+                      get_task_name(), get_unique_id());
+#endif
+      LegionColor part_color = INVALID_COLOR;
+      if (color != AUTO_GENERATE_ID)
+        part_color = color; 
+      PendingPartitionOp *part_op = 
+        runtime->get_available_pending_partition_op();
+      part_op->initialize_by_domain(this, pid, domains, perform_intersections);
+      ApEvent term_event = part_op->get_completion_event();
+      // Tell the region tree forest about this partition
+      RtEvent safe = forest->create_pending_partition(this, pid, parent, 
+                      color_space, part_color, part_kind, did, term_event);
+      // Now we can add the operation to the queue
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      // Wait for any notifications to occur before returning
+      if (safe.exists())
+        safe.wait();
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition InnerContext::create_partition_by_field(
                                               RegionTreeForest *forest,
                                               LogicalRegion handle,
@@ -3852,7 +3959,8 @@ namespace Legion {
                                               FieldID fid,
                                               IndexSpace color_space,
                                               Color color,
-                                              MapperID id, MappingTagID tag)
+                                              MapperID id, MappingTagID tag,
+                                              PartitionKind part_kind)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -3873,7 +3981,7 @@ namespace Legion {
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition 
       RtEvent safe = forest->create_pending_partition(this, pid, parent, 
-                      color_space, part_color, DISJOINT_KIND, did, term_event);
+                      color_space, part_color, part_kind, did, term_event);
       // Do this after creating the pending partition so the node exists
       // in case we need to look at it during initialization
       part_op->initialize_by_field(this, pid, handle, parent_priv, fid, id,tag);
@@ -4947,6 +5055,21 @@ namespace Legion {
 #endif
       execute_task_launch(task, true/*index*/, current_trace, 
                           launcher.silence_warnings, launcher.enable_inlining);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    Future InnerContext::reduce_future_map(const FutureMap &future_map,
+                                        ReductionOpID redop, bool deterministic)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this); 
+      if (future_map.impl == NULL)
+        return Future();
+      AllReduceOp *all_reduce_op = runtime->get_available_all_reduce_op();
+      Future result = 
+        all_reduce_op->initialize(this, future_map, redop, deterministic);
+      runtime->add_to_dependence_queue(this, executing_processor,all_reduce_op);
       return result;
     }
 
@@ -6229,9 +6352,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent InnerContext::register_fence_dependence(Operation *op)
+    ApEvent InnerContext::register_implicit_dependences(Operation *op)
     //--------------------------------------------------------------------------
     {
+      // If there are any outstanding unmapped dependent partition operations
+      // outstanding then we might have an implicit dependence on its execution
+      // so we always record a dependence on it
+      if (last_deppart != NULL)
+      {
+#ifdef LEGION_SPY
+        // Can't prune when doing legion spy
+        op->register_dependence(last_deppart, last_deppart_gen);
+#else
+        if (op->register_dependence(last_deppart, last_deppart_gen))
+          last_deppart = NULL;
+#endif
+      }
       if (current_mapping_fence != NULL)
       {
 #ifdef LEGION_SPY
@@ -6313,7 +6449,7 @@ namespace Legion {
         const Operation::OpKind op_kind = op->get_operation_kind();
         // It's alright if you hit this assertion for a new operation kind
         // Just add the new operation kind here and then update the check
-        // in register_fence_dependence that looks for all these kinds too
+        // in register_implicit_dependences that looks for all these kinds too
         // so that we do not run into trouble when running with Legion Spy.
         assert((op_kind == Operation::FENCE_OP_KIND) || 
                (op_kind == Operation::FRAME_OP_KIND) || 
@@ -6539,6 +6675,16 @@ namespace Legion {
         current_execution_fence_event = op->get_completion_event();
         current_execution_fence_index = op->get_ctx_index();
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::update_current_deppart(DependentPartitionOp *op)
+    //--------------------------------------------------------------------------
+    {
+      // Just overwrite since we know we already recorded a dependence
+      // between this operation and the previous last deppart op
+      last_deppart = op;
+      last_deppart_gen = op->get_generation();
     }
 
     //--------------------------------------------------------------------------
@@ -9227,6 +9373,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition LeafContext::create_partition_by_weights(IndexSpace parent,
+                                                const FutureMap &weights,
+                                                IndexSpace color_space,
+                                                size_t granularity, Color color)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_EQUAL_PARTITION_CREATION,
+        "Illegal create partition by weights performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id())
+      return IndexPartition::NO_PART;
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition LeafContext::create_partition_by_union(
                                           RegionTreeForest *forest,
                                           IndexSpace parent,
@@ -9337,6 +9496,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition LeafContext::create_partition_by_domain(
+                                                RegionTreeForest *forest,
+                                                IndexSpace parent,
+                                                const FutureMap &domains,
+                                                IndexSpace color_space,
+                                                bool perform_intersections,
+                                                PartitionKind part_kind,
+                                                Color color)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_PARTITION_BY_DOMAIN,
+          "Illegal create partition by domain performed in leaf "
+          "task %s (UID %lld)", get_task_name(), get_unique_id())
+      return IndexPartition::NO_PART;
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition LeafContext::create_partition_by_field(
                                                 RegionTreeForest *forest,
                                                 LogicalRegion handle,
@@ -9344,7 +9520,8 @@ namespace Legion {
                                                 FieldID fid,
                                                 IndexSpace color_space,
                                                 Color color,
-                                                MapperID id, MappingTagID tag)
+                                                MapperID id, MappingTagID tag,
+                                                PartitionKind part_kind)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_PARTITION_FIELD,
@@ -9782,6 +9959,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Future LeafContext::reduce_future_map(const FutureMap &future_map,
+                                        ReductionOpID redop, bool deterministic)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,
+        "Illegal reduce future map call performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id())
+      return Future();
+    }
+
+    //--------------------------------------------------------------------------
     PhysicalRegion LeafContext::map_region(const InlineLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -10066,7 +10254,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent LeafContext::register_fence_dependence(Operation *op)
+    ApEvent LeafContext::register_implicit_dependences(Operation *op)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -10091,6 +10279,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LeafContext::update_current_deppart(DependentPartitionOp *op) 
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     RtEvent LeafContext::get_current_mapping_fence_event(void)
     //--------------------------------------------------------------------------
     {
@@ -10105,7 +10300,6 @@ namespace Legion {
       assert(false);
       return ApEvent::NO_AP_EVENT;
     }
-
 
     //--------------------------------------------------------------------------
     void LeafContext::begin_trace(TraceID tid, bool logical_only)
@@ -10631,6 +10825,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition InlineContext::create_partition_by_weights(IndexSpace parent,
+                                                const FutureMap &weights,
+                                                IndexSpace color_space,
+                                                size_t granularity, Color color)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_partition_by_weights(parent, weights, 
+                                    color_space, granularity, color);
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition InlineContext::create_partition_by_union(
                                       RegionTreeForest *forest,
                                       IndexSpace parent,
@@ -10732,6 +10937,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition InlineContext::create_partition_by_domain(
+                                                RegionTreeForest *forest,
+                                                IndexSpace parent,
+                                                const FutureMap &domains,
+                                                IndexSpace color_space,
+                                                bool perform_intersections,
+                                                PartitionKind part_kind,
+                                                Color color)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_partition_by_domain(forest, parent, domains,
+                      color_space, perform_intersections, part_kind, color);
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition InlineContext::create_partition_by_field(
                                                       RegionTreeForest *forest,
                                                       LogicalRegion handle,
@@ -10740,11 +10960,12 @@ namespace Legion {
                                                       IndexSpace color_space,
                                                       Color color,
                                                       MapperID id, 
-                                                      MappingTagID tag)
+                                                      MappingTagID tag,
+                                                      PartitionKind part_kind)
     //--------------------------------------------------------------------------
     {
       return enclosing->create_partition_by_field(forest, handle, parent_priv,
-                                            fid, color_space, color, id, tag);
+                                  fid, color_space, color, id, tag, part_kind);
     }
 
     //--------------------------------------------------------------------------
@@ -11057,6 +11278,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Future InlineContext::reduce_future_map(const FutureMap &future_map,
+                                        ReductionOpID redop, bool deterministic)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->reduce_future_map(future_map, redop, deterministic);
+    }
+
+    //--------------------------------------------------------------------------
     PhysicalRegion InlineContext::map_region(const InlineLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -11287,10 +11516,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent InlineContext::register_fence_dependence(Operation *op)
+    ApEvent InlineContext::register_implicit_dependences(Operation *op)
     //--------------------------------------------------------------------------
     {
-      return enclosing->register_fence_dependence(op);
+      return enclosing->register_implicit_dependences(op);
     }
 
     //--------------------------------------------------------------------------
@@ -11307,6 +11536,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       enclosing->update_current_fence(op, mapping, execution);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::update_current_deppart(DependentPartitionOp *op) 
+    //--------------------------------------------------------------------------
+    {
+      enclosing->update_current_deppart(op);
     }
 
     //--------------------------------------------------------------------------

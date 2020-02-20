@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -448,7 +448,7 @@ namespace Realm {
 
     close(output_fd);
 
-    log_realmprof.info() << "realm profiler shut down: samples=" << next_sample_index;
+    log_realmprof.info() << "realm profiler shut down: samples=" << next_sample_index.load();
   }
 
   bool SamplingProfilerImpl::parse_profile_pattern(const std::string& s)
@@ -502,7 +502,7 @@ namespace Realm {
 
     while(dga) {
       if(cfg_enabled && pattern_match(dga->gauge->name)) {
-	int sampler_id = __sync_fetch_and_add(&next_sampler_id, 1);
+	int sampler_id = next_sampler_id.fetch_add(1);
 	SampleFile::PacketNewGauge *info = new SampleFile::PacketNewGauge;
 	GaugeSampler *sampler = dga->create_sampler(sampler_id, this, info);
 #ifndef NDEBUG
@@ -623,7 +623,7 @@ namespace Realm {
       long long t_start = Clock::current_time_in_nanoseconds();
       last_sample_time = t_start;
       (*sampling_start) = t_start;
-      int current_sample_index = __sync_fetch_and_add(&next_sample_index, 1);
+      int current_sample_index = next_sample_index.fetch_add(1);
       GaugeSampler *sampler = head;
       while(sampler) {
 	// take the sampler's mutex while performing the sample to avoid races with
@@ -740,7 +740,7 @@ namespace Realm {
       return 0;
     
     // it matches a pattern, so create the sampler and add it to the list
-    int sampler_id = __sync_fetch_and_add(&next_sampler_id, 1);
+    int sampler_id = next_sampler_id.fetch_add(1);
     SampleFile::PacketNewGauge *info = new SampleFile::PacketNewGauge;
     GaugeSampler *sampler = new GaugeSamplerImpl<T>(sampler_id, this, gauge, info);
 #ifndef NDEBUG

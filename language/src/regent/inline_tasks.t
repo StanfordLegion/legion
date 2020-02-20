@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University
+-- Copyright 2020 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -96,19 +96,12 @@ local substitute_expr_table = {
   [ast.specialized.expr.Cast]        = substitute_expr_cast,
   [ast.specialized.expr.Null]        = substitute_expr_null,
   [ast.specialized.expr.Region]      = substitute_expr_region,
-  [ast.specialized.expr]             = pass_through,
-  [ast.specialized.region]           = pass_through,
-  [ast.specialized.projection]       = pass_through,
-  [ast.condition_kind]               = pass_through,
-  [ast.disjointness_kind]            = pass_through,
-  [ast.fence_kind]                   = pass_through,
-  [ast.location]                     = pass_through,
-  [ast.annotation]                   = pass_through,
 }
 
 local substitute_expr = ast.make_single_dispatch(
   substitute_expr_table,
-  {})
+  {},
+  pass_through)
 
 function substitute.expr(cx, node)
   return ast.map_node_postorder(substitute_expr(cx), node)
@@ -258,12 +251,12 @@ local substitute_stat_table = {
   -- TODO: Symbols in the constraints should be handled here
   [ast.specialized.stat.ParallelizeWith] = substitute_stat_block,
   [ast.specialized.stat.ParallelPrefix]  = substitute_stat_parallel_prefix,
-  [ast.specialized.stat]                 = pass_through,
 }
 
 local substitute_stat = ast.make_single_dispatch(
   substitute_stat_table,
-  {})
+  {},
+  pass_through)
 
 function substitute.stat(cx, node)
   return substitute_stat(cx)(node)
@@ -284,19 +277,12 @@ end
 
 local find_lvalues_expr_table = {
   [ast.specialized.expr.AddressOf] = find_lvalues_expr_address_of,
-  [ast.specialized.expr]           = pass_through,
-  [ast.specialized.region]         = pass_through,
-  [ast.specialized.projection]     = pass_through,
-  [ast.condition_kind]             = pass_through,
-  [ast.disjointness_kind]          = pass_through,
-  [ast.fence_kind]                 = pass_through,
-  [ast.location]                   = pass_through,
-  [ast.annotation]                 = pass_through,
 }
 
 local find_lvalues_expr = ast.make_single_dispatch(
   find_lvalues_expr_table,
-  {})
+  {},
+  pass_through)
 
 function find_lvalues.expr(cx, node)
   return ast.map_node_postorder(find_lvalues_expr(cx), node)
@@ -342,12 +328,12 @@ local find_lvalues_stat_table = {
   [ast.specialized.stat.Var]             = find_lvalues_stat_var,
   [ast.specialized.stat.Assignment]      = find_lvalues_stat_assignment_or_reduce,
   [ast.specialized.stat.Reduce]          = find_lvalues_stat_assignment_or_reduce,
-  [ast.specialized.stat]                 = pass_through,
 }
 
 local find_lvalues_stat = ast.make_single_dispatch(
   find_lvalues_stat_table,
-  {})
+  {},
+  pass_through)
 
 function find_lvalues.stat(cx, node)
   find_lvalues_stat(cx)(node)
@@ -559,12 +545,12 @@ local inline_tasks_stat_table = {
 
   [ast.specialized.stat.Return]          = pass_through_stat,
   [ast.specialized.stat.VarUnpack]       = pass_through_stat,
-  [ast.specialized.stat]                 = pass_through_stat,
 }
 
 local inline_tasks_stat = ast.make_single_dispatch(
   inline_tasks_stat_table,
-  {})
+  {},
+  pass_through_stat)
 
 function inline_tasks.stat(stats, node)
   inline_tasks_stat(stats)(node)

@@ -1,5 +1,5 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
- * Copyright 2019 Los Alamos National Laboratory
+/* Copyright 2020 Stanford University, NVIDIA Corporation
+ * Copyright 2020 Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -674,7 +674,7 @@ namespace Realm {
 					 off_t ib_offset)
     {
       ibinfo->offset = ib_offset;
-      size_t remaining = __sync_sub_and_fetch(&ib_responses_needed, 1);
+      size_t remaining = ib_responses_needed.fetch_sub(1) - 1;
       log_ib_alloc.debug() << "received: req=" << ((void *)this) << " info=" << ((void *)ibinfo) << " offset=" << ib_offset << " remain=" << remaining;
       if(remaining == 0) {
 	// all IB responses have been retrieved, so advance the copy request
@@ -1052,7 +1052,7 @@ namespace Realm {
 	} else {
 	  // increase the count by one to prevent a trigger before we finish
 	  //  this loop
-	  ib_responses_needed = ib_edges.size() + 1;
+	  ib_responses_needed.store(ib_edges.size() + 1);
 
 	  // sort requests by target memory to reduce risk of resource deadlock
 	  PendingIBRequests pending;
@@ -1091,14 +1091,14 @@ namespace Realm {
 	  state = STATE_WAIT_IB;
 
 	  // fall through if this ends up being the last decrement
-	  if(__sync_sub_and_fetch(&ib_responses_needed, 1) > 0)
+	  if(ib_responses_needed.fetch_sub(1) > 1)
 	    return false;
 	}
       }
 
       if(state == STATE_WAIT_IB) {
 	// we should never get here unless the count is already 0
-	assert(ib_responses_needed == 0);
+	assert(ib_responses_needed.load() == 0);
 	state = STATE_READY;
       }
 
@@ -1149,7 +1149,7 @@ namespace Realm {
     }
 
 
-    static unsigned rdma_sequence_no = 1;
+    static atomic<unsigned> rdma_sequence_no(1);
 
     static AsyncFileIOContext *aio_context = 0;
 
@@ -2008,14 +2008,16 @@ namespace Realm {
       //  know about each other so they can potentially conspire about
       //  iteration order
       std::vector<FieldID> src_fields, dst_fields;
+      std::vector<size_t> src_field_offsets, dst_field_offsets, field_sizes;
       CustomSerdezID serdez_id = 0;
       for(OASVec::const_iterator it2 = oas_by_inst->begin()->second.begin();
 	  it2 != oas_by_inst->begin()->second.end();
 	  ++it2) {
 	src_fields.push_back(it2->src_field_id);
 	dst_fields.push_back(it2->dst_field_id);
-	assert(it2->src_subfield_offset == 0);
-	assert(it2->dst_subfield_offset == 0);
+	src_field_offsets.push_back(it2->src_subfield_offset);
+	dst_field_offsets.push_back(it2->dst_subfield_offset);
+	field_sizes.push_back(it2->size);
 	if(it2->serdez_id != 0) {
 	  assert((serdez_id == 0) || (serdez_id == it2->serdez_id));
 	  serdez_id = it2->serdez_id;
@@ -2023,7 +2025,9 @@ namespace Realm {
       }
       TransferIterator *src_iter;
       if(gather_info == 0) {
-	src_iter = domain->create_iterator(src_inst, dst_inst, src_fields);
+	src_iter = domain->create_iterator(src_inst, dst_inst,
+					   src_fields, src_field_offsets,
+					   field_sizes);
       } else {
 	// "source" is the addresses, not the indirectly-accessed data
 	assert(!src_inst.exists());
@@ -2032,7 +2036,9 @@ namespace Realm {
       }
       TransferIterator *dst_iter;
       if(scatter_info == 0) {
-	dst_iter = domain->create_iterator(dst_inst,src_inst, dst_fields);
+	dst_iter = domain->create_iterator(dst_inst,src_inst,
+					   dst_fields, dst_field_offsets,
+					   field_sizes);
       } else {
 	// "dest" is the addresses (which we read!), not the indirectly-named data
 	assert(!dst_inst.exists());
@@ -2112,7 +2118,9 @@ namespace Realm {
 	    ii.inst = xdt.inputs[j].indirect_inst;
 	    ii.iter = gather_info->create_indirect_iterator(ii.mem,
 							    xdt.inputs[j].indirect_inst,
-							    src_fields);
+							    src_fields,
+							    src_field_offsets,
+							    field_sizes);
 	    ii.serdez_id = serdez_id;
 	    ii.ib_offset = 0;
 	    ii.ib_size = 0;
@@ -2168,7 +2176,9 @@ namespace Realm {
 	    oi.inst = xdt.outputs[j].indirect_inst;
 	    oi.iter = scatter_info->create_indirect_iterator(oi.mem,
 							     xdt.outputs[j].indirect_inst,
-							     dst_fields);
+							     dst_fields,
+							     dst_field_offsets,
+							     field_sizes);
 	    oi.serdez_id = serdez_id;
 	    oi.ib_offset = 0;
 	    oi.ib_size = 0;
@@ -2472,20 +2482,26 @@ namespace Realm {
       bool dst_is_remote = ((dst_mem->kind == MemoryImpl::MKIND_REMOTE) ||
 			    (dst_mem->kind == MemoryImpl::MKIND_RDMA));
       unsigned rdma_sequence_id = (dst_is_remote ?
-				     __sync_fetch_and_add(&rdma_sequence_no, 1) :
+				     rdma_sequence_no.fetch_add(1) :
 				     0);
       unsigned rdma_count = 0;
 
       std::vector<FieldID> src_field(1, srcs[0].field_id);
       std::vector<FieldID> dst_field(1, dst.field_id);
-      assert(srcs[0].subfield_offset == 0);
-      assert(dst.subfield_offset == 0);
+      std::vector<size_t> src_field_offset(1, srcs[0].subfield_offset);
+      std::vector<size_t> dst_field_offset(1, dst.subfield_offset);
+      std::vector<size_t> src_field_size(1, srcs[0].size);
+      std::vector<size_t> dst_field_size(1, dst.size);
       TransferIterator *src_iter = domain->create_iterator(srcs[0].inst,
 							   dst.inst,
-							   src_field);
+							   src_field,
+							   src_field_offset,
+							   src_field_size);
       TransferIterator *dst_iter = domain->create_iterator(dst.inst,
 							   srcs[0].inst,
-							   dst_field);
+							   dst_field,
+							   dst_field_offset,
+							   dst_field_size);
 
       const ReductionOpUntyped *redop = get_runtime()->reduce_op_table.get(redop_id, 0);
       if(redop == 0) {
@@ -2865,10 +2881,13 @@ namespace Realm {
       MemoryImpl *mem_impl = get_runtime()->get_memory_impl(dst.inst.get_location());
 
       std::vector<FieldID> dst_field(1, dst.field_id);
-      assert(dst.subfield_offset == 0);
+      std::vector<size_t> dst_field_offset(1, dst.subfield_offset);
+      std::vector<size_t> dst_field_size(1, dst.size);
       TransferIterator *iter = domain->create_iterator(dst.inst,
 						       RegionInstance::NO_INST,
-						       dst_field);
+						       dst_field,
+						       dst_field_offset,
+						       dst_field_size);
 #ifdef USE_CUDA
       // fills to GPU FB memory are offloaded to the GPU itself
       if (mem_impl->lowlevel_kind == Memory::GPU_FB_MEM) {

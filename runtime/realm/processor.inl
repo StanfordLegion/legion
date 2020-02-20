@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,7 +31,7 @@ namespace Realm {
   // use compiler-provided TLS for quickly finding our thread - stick this in another
   //  namespace to make it obvious
   namespace ThreadLocal {
-    extern __thread Processor current_processor;
+    extern REALM_THREAD_LOCAL Processor current_processor;
   };
 
   /*static*/ inline Processor Processor::get_executing_processor(void)

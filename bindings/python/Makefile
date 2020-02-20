@@ -1,4 +1,4 @@
-# Copyright 2019 Stanford University
+# Copyright 2020 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -53,7 +53,7 @@ CC_FLAGS += -DLEGION_REDOP_COMPLEX
 
 NO_BUILD_ALL=1
 .PHONY: all
-all: $(OUTFILE) cached_legion.h
+all: $(OUTFILE) legion_cffi.py
 
 ###########################################################################
 #
@@ -63,8 +63,9 @@ all: $(OUTFILE) cached_legion.h
 
 include $(LG_RT_DIR)/runtime.mk
 
-cached_legion.h: $(LG_RT_DIR)/legion.h $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
-	gcc -DLEGION_USE_PYTHON_CFFI $(CC_FLAGS) $(INC_FLAGS) -E -P $< > $@
+legion_cffi.py: legion_cffi.py.in legion_cffi_build.py
+	$(PYTHON_EXE) legion_cffi_build.py --defines-dir $(DEFINE_HEADERS_DIR)
 
 clean::
-	$(RM) -f $(OUTFILE) $(SLIB_LEGION) $(SLIB_REALM) $(GEN_OBJS) $(GEN_GPU_OBJS) $(REALM_OBJS) $(LEGION_OBJS) $(GPU_RUNTIME_OBJS) $(MAPPER_OBJS) $(ASM_OBJS) legion_defines.h realm_defines.h cached_legion.h
+	$(RM) -f $(OUTFILE) $(SLIB_LEGION) $(SLIB_REALM) $(GEN_OBJS) $(GEN_GPU_OBJS) $(REALM_OBJS) $(LEGION_OBJS) $(GPU_RUNTIME_OBJS) $(MAPPER_OBJS) $(ASM_OBJS) legion_defines.h realm_defines.h legion_cffi.py *.pyc
+	$(RM) -rf build dist *.egg-info

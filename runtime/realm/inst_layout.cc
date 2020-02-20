@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -39,7 +39,8 @@ namespace Realm {
 	    ++it, ++i) {
 	  field_groups[i].resize(1);
 	  field_groups[i][0].field_id = it->first;
-	  field_groups[i][0].offset = -1;
+	  field_groups[i][0].fixed_offset = false;
+	  field_groups[i][0].offset = 0;
 	  field_groups[i][0].size = it->second;
 	  field_groups[i][0].alignment = it->second; // natural alignment 
 	}
@@ -56,7 +57,8 @@ namespace Realm {
 	    it != field_sizes.end();
 	    ++it, ++i) {
 	  field_groups[0][i].field_id = it->first;
-	  field_groups[0][i].offset = -1;
+	  field_groups[0][i].fixed_offset = false;
+	  field_groups[0][i].offset = 0;
 	  field_groups[0][i].size = it->second;
 	  field_groups[0][i].alignment = it->second; // natural alignment 
 	}
@@ -83,8 +85,9 @@ namespace Realm {
 	size_t offset = 0;
 	for(size_t i = 0; i < field_sizes.size(); i++) {
 	  field_groups[i].resize(1);
-	  field_groups[i][0].field_id = offset;
-	  field_groups[i][0].offset = -1;
+	  field_groups[i][0].field_id = FieldID(offset);
+	  field_groups[i][0].fixed_offset = false;
+	  field_groups[i][0].offset = 0;
 	  field_groups[i][0].size = field_sizes[i];
 	  field_groups[i][0].alignment = field_sizes[i]; // natural alignment 
 	  offset += field_sizes[i];
@@ -99,8 +102,9 @@ namespace Realm {
 	field_groups[0].resize(field_sizes.size());
 	size_t offset = 0;
 	for(size_t i = 0; i < field_sizes.size(); i++) {
-	  field_groups[0][i].field_id = offset;
-	  field_groups[0][i].offset = -1;
+	  field_groups[0][i].field_id = FieldID(offset);
+	  field_groups[0][i].fixed_offset = false;
+	  field_groups[0][i].offset = 0;
 	  field_groups[0][i].size = field_sizes[i];
 	  field_groups[0][i].alignment = field_sizes[i]; // natural alignment 
 	  offset += field_sizes[i];

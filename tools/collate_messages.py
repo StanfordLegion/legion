@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2019 Stanford University, NVIDIA Corporation
+# Copyright 2020 Stanford University, NVIDIA Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -404,8 +404,5 @@ if remediesListFile == None:
 messageEnumNames = loadMessageNames(remediesListFile)
 connection = sqlite3.connect(":memory:")
 parseSourceFiles(connection, enums)
-
-if args.prefix != None:
-    args.prefix = args.prefix.replace("//", "/")
 
 writeHtmlOutput(connection, args.prefix, args.strip, args.glossaryFile, args.glossaryURL, args.outputDir, args.remediesDir, messageEnumNames)

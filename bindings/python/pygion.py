@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2019 Stanford University
+# Copyright 2020 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,12 +17,12 @@
 
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-import cffi
 try:
     import cPickle as pickle
 except ImportError:
     import pickle
 import collections
+from io import StringIO
 import itertools
 import math
 import numpy
@@ -59,64 +59,10 @@ try:
 except:
     zip_longest = itertools.zip_longest # Python 3
 
-from io import StringIO
-
 _pickle_version = pickle.HIGHEST_PROTOCOL # Use latest Pickle protocol
 
-def find_legion_header():
-    def try_prefix(prefix_dir):
-        legion_h_path = os.path.join(prefix_dir, 'legion.h')
-        if os.path.exists(legion_h_path):
-            return prefix_dir, legion_h_path
-
-    # For in-source builds, find the header relative to the bindings
-    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
-    runtime_dir = os.path.join(root_dir, 'runtime')
-    result = try_prefix(runtime_dir)
-    if result:
-        return result
-
-    # If this was installed to a non-standard prefix, we might be able
-    # to guess from the directory structures
-    if os.path.basename(root_dir) == 'lib':
-        include_dir = os.path.join(os.path.dirname(root_dir), 'include')
-        result = try_prefix(include_dir)
-        if result:
-            return result
-
-    # Otherwise we have to hope that Legion is installed in a standard location
-    result = try_prefix('/usr/include')
-    if result:
-        return result
-
-    result = try_prefix('/usr/local/include')
-    if result:
-        return result
-
-    raise Exception('Unable to locate legion.h header file')
-
-try:
-    with open(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'cached_legion.h'), 'r') as f:
-        header = f.read()
-except IOError as e:
-    print('Unable to find cached_legion.h, falling back to reading legion.h')
-    prefix_dir, legion_h_path = find_legion_header()
-
-    # If we're running from a local Python build, we need to include
-    # the path where legion.py is located in order to find
-    # legion_defines.h.
-    legion_py_dir = os.path.dirname(os.path.realpath(__file__))
-
-    # If we're running inside of Regent, try to parse the include path
-    # since we'll need it to locate legion_defines.h.
-    include_path = os.environ.get('INCLUDE_PATH', '').split(';')
-    include_path = [x for y in include_path for x in ['-I', y]]
-
-    header = subprocess.check_output(['gcc', '-I', prefix_dir, '-I', legion_py_dir] + include_path + ['-DLEGION_USE_PYTHON_CFFI', '-E', '-P', legion_h_path]).decode('utf-8')
-
-ffi = cffi.FFI()
-ffi.cdef(header)
-c = ffi.dlopen(None)
+import legion_top
+from legion_cffi import ffi, lib as c
 
 _max_dim = None
 for dim in range(1, 9):
@@ -132,7 +78,7 @@ AUTO_GENERATE_ID = -1
 
 # Note: don't use __file__ here, it may return either .py or .pyc and cause
 # non-deterministic failures.
-library_name = "legion.py"
+library_name = "pygion.py"
 max_legion_python_tasks = 1000000
 next_legion_task_id = c.legion_runtime_generate_library_task_ids(
                         c.legion_runtime_get_runtime(),
@@ -151,34 +97,7 @@ def inside_legion_executable():
     else:
         return True
 
-def input_args(filter_runtime_options=False):
-    raw_args = c.legion_runtime_get_input_args()
-
-    args = []
-    for i in range(raw_args.argc):
-        args.append(ffi.string(raw_args.argv[i]).decode('utf-8'))
-
-    if filter_runtime_options:
-        i = 1 # Skip program name
-
-        prefixes = ['-lg:', '-hl:', '-realm:', '-ll:', '-cuda:', '-numa:',
-                    '-dm:', '-bishop:']
-        while i < len(args):
-            match = False
-            for prefix in prefixes:
-                if args[i].startswith(prefix):
-                    match = True
-                    break
-            if args[i] == '-level':
-                match = True
-            if args[i] == '-logfile':
-                match = True
-            if match:
-                args.pop(i)
-                args.pop(i) # Assume that every option has an argument
-                continue
-            i += 1
-    return args
+input_args = legion_top.input_args
 
 def execute_as_script():
     args = input_args(True)
@@ -1336,7 +1255,7 @@ class Ipartition(object):
             region.raw_value(),
             region.parent.raw_value() if region.parent is not None else region.raw_value(),
             region.fspace.field_ids[field],
-            color_space.raw_value(), color)
+            color_space.raw_value(), color, 0, 0, disjoint.value)
         return Ipartition(handle, region.ispace, color_space)
 
     @staticmethod
@@ -1356,7 +1275,7 @@ class Ipartition(object):
             ispace.raw_value(), projection.raw_value(),
             parent.parent.raw_value() if parent.parent is not None else parent.raw_value(),
             parent.fspace.field_ids[field],
-            color_space.raw_value(), part_kind.value, color)
+            color_space.raw_value(), part_kind.value, color, 0, 0)
         return Ipartition(handle, parent.ispace, color_space)
 
     @staticmethod
@@ -1375,7 +1294,7 @@ class Ipartition(object):
             projection.raw_value(), region.raw_value(),
             region.parent.raw_value() if region.parent is not None else region.raw_value(),
             region.fspace.field_ids[field],
-            color_space.raw_value(), part_kind.value, color)
+            color_space.raw_value(), part_kind.value, color, 0, 0)
         return Ipartition(handle, region.ispace, color_space)
 
     @staticmethod
@@ -1786,14 +1705,11 @@ class Task (object):
         assert(self.task_id is None)
 
         if not task_id:
-            if not top_level_task:
-                global next_legion_task_id
-                task_id = next_legion_task_id
-                next_legion_task_id += 1
-                # If we ever hit this then we need to allocate more task IDs
-                assert task_id < max_legion_task_id
-            else:
-                task_id = 1 # Predefined value for the top-level task
+            global next_legion_task_id
+            task_id = next_legion_task_id
+            next_legion_task_id += 1
+            # If we ever hit this then we need to allocate more task IDs
+            assert task_id < max_legion_task_id
 
         execution_constraints = c.legion_execution_constraint_set_create()
         c.legion_execution_constraint_set_add_processor_constraint(
@@ -1836,7 +1752,9 @@ class Task (object):
             len(qualname),
             ffi.NULL,
             0)
-
+        # If we're the top-level task then tell the runtime about our ID
+        if top_level_task:
+            c.legion_runtime_set_top_level_task_id(task_id)
         if global_task_registration_barrier is not None:
             c.legion_phase_barrier_arrive(_my.ctx.runtime, _my.ctx.context, global_task_registration_barrier, 1)
             global_task_registration_barrier = c.legion_phase_barrier_advance(_my.ctx.runtime, _my.ctx.context, global_task_registration_barrier)
@@ -2441,45 +2359,23 @@ class Trace(object):
         c.legion_runtime_end_trace(_my.ctx.runtime, _my.ctx.context, self.trace_id)
 
 if is_script:
-    # We can't use runpy for this since runpy is aggressive about
-    # cleaning up after itself and removes the module before execution
-    # has completed.
-    def run_path(filename, run_name=None):
-        import imp
-        module = imp.new_module(run_name)
-        setattr(module, '__name__', run_name)
-        setattr(module, '__file__', filename)
-        setattr(module, '__loader__', None)
-        setattr(module, '__package__', run_name.rpartition('.')[0])
+    _my.ctx = Context(
+        legion_top.top_level.context,
+        legion_top.top_level.runtime,
+        legion_top.top_level.task,
+        [])
 
-        # Hide the current module if it exists.
-        old_module = sys.modules[run_name] if run_name in sys.modules else None
-        sys.modules[run_name] = module
+    def _cleanup():
+        del _my.ctx
 
-        sys.path.append(os.path.dirname(filename))
+    legion_top.top_level.cleanup_items.append(_cleanup)
 
-        with open(filename) as f:
-            code = compile(f.read(), filename, 'exec')
-            exec(code, module.__dict__)
+    # FIXME: Really this should be the number of control replicated shards at this level
+    c.legion_runtime_enable_scheduler_lock()
+    num_procs = Tunable.select(Tunable.GLOBAL_PYS).get()
+    c.legion_runtime_disable_scheduler_lock()
 
-        # FIXME: Can't restore the old module because tasks may be
-        # continuing to execute asynchronously. We could fix this with
-        # an execution fence but it doesn't seem worth it given that
-        # we'll be cleaning up the process right after this.
-
-        # sys.modules[run_name] = old_module
-
-    @task(top_level=True, replicable=True)
-    def legion_main():
-        # FIXME: Really this should be the number of control replicated shards at this level
-        global global_task_registration_barrier
-        num_procs = Tunable.select(Tunable.GLOBAL_PYS).get()
-        global_task_registration_barrier = c.legion_phase_barrier_create(_my.ctx.runtime, _my.ctx.context, num_procs)
-
-        args = input_args(True)
-        assert len(args) >= 2
-        sys.argv = list(args)
-        run_path(args[1], run_name='__main__')
+    global_task_registration_barrier = c.legion_phase_barrier_create(_my.ctx.runtime, _my.ctx.context, num_procs)
 elif is_legion_python:
     print('WARNING: Executing Python modules via legion_python has been deprecated.')
     print('It is now recommended to run the script directly by passing the path')

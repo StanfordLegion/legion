@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,21 +26,25 @@
 #endif
 
 #include <pthread.h>
-#ifdef __FreeBSD__
-#include <pthread_np.h>
-typedef cpuset_t cpu_set_t;
+#ifdef REALM_ON_LINUX
+  #define HAVE_CPUSET
+#endif
+#ifdef REALM_ON_FREEBSD
+  #include <pthread_np.h>
+  typedef cpuset_t cpu_set_t;
+  #define HAVE_CPUSET
 #endif
 #include <errno.h>
 // for PTHREAD_STACK_MIN
 #include <limits.h>
-#ifdef __MACH__
+#ifdef REALM_ON_MACOS
 // for sched_yield
 #include <sched.h>
 #endif
 
 #ifdef REALM_USE_USER_THREADS
 #include <ucontext.h>
-#ifdef __MACH__
+#ifdef REALM_ON_MACOS
 // MacOS has (loudly) deprecated set/get/make/swapcontext,
 //  despite there being no POSIX replacement for them...
 // this check is on the use, not the declaration, so we wrap them here
@@ -68,7 +72,7 @@ inline void makecontext_wrap(ucontext_t *u, void (*fn)(), int args, ...) { makec
 #include <string>
 #include <map>
 
-#ifdef __linux__
+#ifdef REALM_ON_LINUX
 // needed for scanning Linux's /sys
 #include <dirent.h>
 #include <stdio.h>
@@ -110,7 +114,7 @@ namespace Realm {
 #endif
 
   namespace ThreadLocal {
-    /*extern*/ __thread Thread *current_thread = 0;
+    /*extern*/ REALM_THREAD_LOCAL Thread *current_thread = 0;
   };
 
   ////////////////////////////////////////////////////////////////////////
@@ -134,7 +138,7 @@ namespace Realm {
   struct CoreReservation::Allocation {
     bool exclusive_ownership;
     std::set<int> proc_ids;
-#ifndef __MACH__
+#ifdef HAVE_CPUSET
     bool restrict_cpus;  // if true, thread is confined to set below
     cpu_set_t allowed_cpus;
 #endif
@@ -412,7 +416,7 @@ namespace Realm {
       CoreReservation::Allocation *alloc = new CoreReservation::Allocation;
 
       alloc->exclusive_ownership = true;  // unless we set it false below
-#ifndef __MACH__
+#ifdef HAVE_CPUSET
       alloc->restrict_cpus = false; // unless we set it to true below
       CPU_ZERO(&alloc->allowed_cpus);
 #endif
@@ -425,7 +429,7 @@ namespace Realm {
 	alloc->proc_ids.insert(p->id);
 	if(user_count[p] > 1)
 	  alloc->exclusive_ownership = false;
-#ifndef __MACH__
+#ifdef HAVE_CPUSET
 	if(!(p->kernel_proc_ids.empty())) {
 	  alloc->restrict_cpus = true;
 	  for(std::set<int>::const_iterator it3 = p->kernel_proc_ids.begin();
@@ -477,7 +481,7 @@ namespace Realm {
 	CoreReservation::Allocation *alloc = new CoreReservation::Allocation;
 
 	alloc->exclusive_ownership = true;  // unless we set it false below
-#ifndef __MACH__
+#ifdef HAVE_CPUSET
 	alloc->restrict_cpus = false; // unless we set it to true below
 	CPU_ZERO(&alloc->allowed_cpus);
 #endif
@@ -539,7 +543,7 @@ namespace Realm {
   //
   // class Thread
 
-  static bool handler_registered = false;
+  static atomic<bool> handler_registered(false);
   // Valgrind uses SIGUSR2 on Darwin
   static int handler_signal = SIGUSR1;
 
@@ -561,7 +565,9 @@ namespace Realm {
 
   static void register_handler(void)
   {
-    if(!__sync_bool_compare_and_swap(&handler_registered, false, true)) return;
+    bool expval = false;
+    if(!handler_registered.compare_exchange(expval, true))
+      return;
 
     struct sigaction act;
     bzero(&act, sizeof(act));
@@ -578,17 +584,17 @@ namespace Realm {
       AutoLock<> a(signal_mutex);
       signal_queue.push_back(sig);
     }
-    int prev = __sync_fetch_and_add(&signal_count, 1);
+    int prev = signal_count.fetch_add(1);
     if((prev == 0) && asynchronous)
       alert_thread();
   }
 
   Thread::Signal Thread::pop_signal(void)
   {
-    if(signal_count) {
+    if(signal_count.load() > 0) {
       Signal sig;
-      __sync_fetch_and_sub(&signal_count, 1);
       AutoLock<> a(signal_mutex);
+      signal_count.fetch_sub(1);
       sig = signal_queue.front();
       signal_queue.pop_front();
       return sig;
@@ -601,10 +607,10 @@ namespace Realm {
     // should only be called from the thread itself
     assert(this == Thread::self());
 
-    while(signal_count > 0) {
+    while(signal_count.load() > 0) {
       Signal sig;
       {
-	__sync_fetch_and_sub(&signal_count, 1);
+	signal_count.fetch_sub(1);
 	AutoLock<> a(signal_mutex);
 	// should never be empty, as there's no race conditions on emptying the queue
 	assert(!signal_queue.empty());
@@ -723,7 +729,7 @@ namespace Realm {
     if(thread->altstack_base != 0) {
       // so MacOS doesn't seem to want to let you disable a stack, returning
       //  EINVAL even if the stack is not active - free the memory anyway
-#ifndef __MACH__
+#ifndef REALM_ON_MACOS
       stack_t disabled = { .ss_sp = 0,
 			   .ss_flags = SS_DISABLE };
       stack_t oldstack;
@@ -759,7 +765,7 @@ namespace Realm {
     // allocation better exist...
     assert(rsrv.allocation);
 
-#ifndef __MACH__
+#ifdef HAVE_CPUSET
     if(rsrv.allocation->restrict_cpus)
       CHECK_PTHREAD( pthread_attr_setaffinity_np(&attr, 
 						 sizeof(rsrv.allocation->allowed_cpus),
@@ -889,13 +895,13 @@ namespace Realm {
 
 #ifdef REALM_USE_USER_THREADS
   namespace {
-    int uswitch_test_check_flag = 1;
+    atomic<int> uswitch_test_check_flag(1);
     ucontext_t uswitch_test_ctx1, uswitch_test_ctx2;
 
     void uswitch_test_entry(int arg)
     {
-      log_thread.debug() << "uswitch test: adding: " << uswitch_test_check_flag << " " << arg;
-      __sync_fetch_and_add(&uswitch_test_check_flag, arg);
+      log_thread.debug() << "uswitch test: adding: " << uswitch_test_check_flag.load() << " " << arg;
+      uswitch_test_check_flag.fetch_add(arg);
       errno = 0;
       int ret = swapcontext(&uswitch_test_ctx2, &uswitch_test_ctx1);
       if(ret != 0) {
@@ -938,7 +944,7 @@ namespace Realm {
       return false;
     }
 
-    int val = __sync_fetch_and_add(&uswitch_test_check_flag, 0);
+    int val = uswitch_test_check_flag.load();
     if(val != 67) {
       log_thread.info() << "uswitch test: val mismatch: " << val << " != 67";
       free(stack_base);
@@ -966,7 +972,7 @@ namespace Realm {
     static void user_switch(UserThread *switch_to);
 
   protected:
-    static void uthread_entry(void) __attribute__((noreturn));
+    REALM_ATTR_NORETURN(static void uthread_entry(void));
 
     virtual void alert_thread(void);
 
@@ -975,11 +981,9 @@ namespace Realm {
     void *target;
     void (*entry_wrapper)(void *);
     int magic;
-#ifndef __MACH__
     ucontext_t ctx;
-#else
+#ifdef REALM_ON_MACOS
     // valgrind says Darwin's getcontext is writing past the end of ctx?
-    ucontext_t ctx;
     int padding[512];
 #endif
     void *stack_base;
@@ -1007,11 +1011,11 @@ namespace Realm {
   }
 
   namespace ThreadLocal {
-    __thread ucontext_t *host_context = 0;
+    REALM_THREAD_LOCAL ucontext_t *host_context = 0;
     // current_user_thread is redundant with current_thread, but kept for debugging
     //  purposes for now
-    __thread UserThread *current_user_thread = 0;
-    __thread Thread *current_host_thread = 0;
+    REALM_THREAD_LOCAL UserThread *current_user_thread = 0;
+    REALM_THREAD_LOCAL Thread *current_host_thread = 0;
   };
 
   /*static*/ void UserThread::uthread_entry(void)
@@ -1210,7 +1214,7 @@ namespace Realm {
 
   /*static*/ void Thread::yield(void)
   {
-#ifdef __MACH__
+#ifdef REALM_ON_MACOS
     sched_yield();
 #else
     pthread_yield();
@@ -1349,7 +1353,7 @@ namespace Realm {
     }
   }
 
-#ifdef __linux__
+#ifdef REALM_ON_LINUX
   static CoreMap *extract_core_map_from_linux_sys(bool hyperthread_sharing)
   {
     cpu_set_t cset;
@@ -1464,7 +1468,7 @@ namespace Realm {
 #endif
 
 #ifdef REALM_USE_HWLOC
-#ifdef __linux__
+#ifdef REALM_ON_LINUX
   // find bulldozer cpus that share fpu
   static bool get_bd_sibling_id(int cpu_id, int core_id,
 				std::set<int>& sibling_ids) {
@@ -1548,7 +1552,7 @@ namespace Realm {
           // add to HT sets to deal with in a bit
           ht_sets[std::make_pair(node_id, core_id)].insert(p);
 
-#ifdef __linux__
+#ifdef REALM_ON_LINUX
           // add bulldozer sets
 	  std::set<int> sibling_ids;
 	  if(get_bd_sibling_id(cpu_id, core_id, sibling_ids) &&
@@ -1624,7 +1628,7 @@ namespace Realm {
 #endif
 
     // 3) extracted from Linux's /sys
-#ifdef __linux__
+#ifdef REALM_ON_LINUX
     {
       CoreMap *cm = extract_core_map_from_linux_sys(hyperthread_sharing);
       if(cm) return cm;

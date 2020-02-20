@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -48,11 +48,11 @@ namespace Realm {
     /*static*/ const Processor Processor::NO_PROC = { 0 }; 
 
   namespace ThreadLocal {
-    __thread Processor current_processor;
+    REALM_THREAD_LOCAL Processor current_processor;
     
     // if nonzero, prevents application thread from yielding execution
     //  resources on an Event wait
-    __thread int scheduler_lock = 0;
+    REALM_THREAD_LOCAL int scheduler_lock = 0;
   };
 
     Processor::Kind Processor::kind(void) const

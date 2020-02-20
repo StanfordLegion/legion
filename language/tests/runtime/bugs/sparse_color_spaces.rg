@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University, NVIDIA Corporation
+-- Copyright 2020 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -40,7 +40,9 @@ do
                                                           fid,
                                                           __raw(clusters.ispace),
                                                           c.DISJOINT_KIND,
-                                                          -1)
+                                                          c.AUTO_GENERATE_ID,
+                                                          0,
+                                                          0)
 
   var raw_part = c.legion_logical_partition_create(__runtime(), __context(), __raw(mat), ip)
 

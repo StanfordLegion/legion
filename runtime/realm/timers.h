@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -128,7 +128,7 @@ namespace Realm {
         }
       // We only call this at the end of the run so leaking a little memory isn't too bad
       char *result = new char[16];
-      sprintf(result,"%d",level);
+      snprintf(result,16,"%d",level);
       return result;
     }
   };

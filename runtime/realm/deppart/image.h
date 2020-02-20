@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -50,7 +50,7 @@ namespace Realm {
 
     friend class PartitioningMicroOp;
     template <typename S>
-    bool serialize_params(S& s) const WARN_UNUSED;
+    REALM_ATTR_WARN_UNUSED(bool serialize_params(S& s) const);
 
     // construct from received packet
     template <typename S>

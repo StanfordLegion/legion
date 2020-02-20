@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -100,19 +100,6 @@ namespace Realm {
 			     Event before_copy,
 			     Event after_copy = Event::NO_EVENT);
     */
-
-    // helper methods used in other places
-    static inline off_t calc_mem_loc(off_t alloc_offset, off_t field_start, int field_size, size_t elmt_size,
-				     size_t block_size, off_t index)
-    {
-      return (alloc_offset +                                      // start address
-	      ((index / block_size) * block_size * elmt_size) +   // full blocks
-	      (field_start * block_size) +                        // skip other fields
-	      ((index % block_size) * field_size));               // some some of our fields within our block
-    }
-
-    void find_field_start(const std::vector<size_t>& field_sizes, off_t byte_offset,
-			  size_t size, off_t& field_start, int& field_size);
     
     class DmaRequestQueue;
     // for now we use a single queue for all (local) dmas
@@ -330,7 +317,7 @@ namespace Realm {
 
       //PriorityIBQueue priority_ib_queue;
       //PendingIBRequests pending_ib_requests;
-      size_t ib_responses_needed;
+      atomic<size_t> ib_responses_needed;
       // operations on ib_by_inst are protected by ib_mutex
       //IBByInst ib_by_inst;
       //Mutex ib_mutex;
@@ -391,7 +378,9 @@ namespace Realm {
 
       virtual TransferIterator *create_indirect_iterator(Memory addrs_mem,
 							 RegionInstance inst,
-							 const std::vector<FieldID>& fields) const = 0;
+							 const std::vector<FieldID>& fields,
+							 const std::vector<size_t>& fld_offsets,
+							 const std::vector<size_t>& fld_sizes) const = 0;
 
       virtual void print(std::ostream& os) const = 0;
     };

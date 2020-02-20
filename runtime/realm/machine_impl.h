@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@
 #include "realm/machine.h"
 #include "realm/network.h"
 #include "realm/mutex.h"
+#include "realm/atomics.h"
 
 #include <vector>
 #include <set>
@@ -230,7 +231,7 @@ namespace Realm {
       Processor cache_next(Processor after);
 
     protected:
-      int references;
+      atomic<int> references;
       MachineImpl *machine;
       bool is_restricted_node;
       int restricted_node_id;
@@ -345,7 +346,7 @@ namespace Realm {
       Memory mutated_cached_query(Memory p);
 
     protected:
-      int references;
+      atomic<int> references;
       MachineImpl *machine;
       bool is_restricted_node;
       int restricted_node_id;

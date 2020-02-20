@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2019 Stanford University
+# Copyright 2020 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,8 +17,8 @@
 
 from __future__ import print_function
 
-import legion
-from legion import task, RW
+import pygion
+from pygion import task, RW
 import numpy
 
 @task(privileges=[RW])
@@ -28,8 +28,8 @@ def hello(R):
 # Define the main task. This task is called first.
 @task
 def main():
-    R = legion.Region([0, 0], {'x': legion.float64})
-    legion.fill(R, 'x', 3.14)
+    R = pygion.Region([0, 0], {'x': pygion.float64})
+    pygion.fill(R, 'x', 3.14)
 
     hello(R)
 

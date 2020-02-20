@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -82,7 +82,7 @@ namespace Realm {
   // use compiler-provided TLS for quickly finding our thread - stick this in another
   //  namespace to make it obvious
   namespace ThreadLocal {
-    extern __thread Thread *current_thread;
+    extern REALM_THREAD_LOCAL Thread *current_thread;
   };
   
   inline /*static*/ Thread *Thread::self(void)
@@ -201,7 +201,7 @@ namespace Realm {
 #endif
 
     // we're interacting with the scheduler, so check for signals first
-    if(thread->signal_count > 0)
+    if(thread->signal_count.load() > 0)
       thread->process_signals();
 
     // first, indicate our intent to sleep
@@ -224,7 +224,7 @@ namespace Realm {
 
     // check signals again on the way out (async ones should have woken us already,
     //  but synchronous ones do not)
-    if(thread->signal_count > 0)
+    if(thread->signal_count.load() > 0)
       thread->process_signals();
 
     // finally, resume any performance counters

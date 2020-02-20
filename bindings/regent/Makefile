@@ -1,4 +1,4 @@
-# Copyright 2019 Stanford University
+# Copyright 2020 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -49,6 +49,7 @@ INC_FLAGS ?=
 LD_FLAGS ?=
 
 CC_FLAGS += -fPIC
+NVCC_FLAGS += -Xcompiler -fPIC
 ifeq ($(shell uname), Darwin)
 	LD_FLAGS += -dynamiclib -single_module -undefined dynamic_lookup -fPIC
 else

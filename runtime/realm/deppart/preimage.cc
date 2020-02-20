@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -223,7 +223,7 @@ namespace Realm {
 	//  the count to 2 instead of 1
 	bool registered = SparsityMapImpl<N2,T2>::lookup(targets[i].sparsity)->add_waiter(this, true /*precise*/);
 	if(registered)
-	  __sync_fetch_and_add(&wait_count, 1);
+	  wait_count.fetch_add(1);
       }
     }
 
@@ -233,7 +233,7 @@ namespace Realm {
       //  the count to 2 instead of 1
       bool registered = SparsityMapImpl<N,T>::lookup(parent_space.sparsity)->add_waiter(this, true /*precise*/);
       if(registered)
-	__sync_fetch_and_add(&wait_count, 1);
+	wait_count.fetch_add(1);
     }
     
     finish_dispatch(op, inline_ok);
@@ -345,7 +345,7 @@ namespace Realm {
       // build the overlap tester based on the targets, since they're at least known
       ComputeOverlapMicroOp<N2,T2> *uop = new ComputeOverlapMicroOp<N2,T2>(this);
 
-      remaining_sparse_images = ptr_data.size() + range_data.size();
+      remaining_sparse_images.store(ptr_data.size() + range_data.size());
       contrib_counts.resize(preimages.size(), 0);
 
       // create a dummy async microop that lives until we've received all the sparse images
@@ -446,7 +446,7 @@ namespace Realm {
 	    it2 != overlaps.end();
 	    it2++) {
 	  int j = *it2;
-	  __sync_fetch_and_add(&contrib_counts[j], 1);
+	  contrib_counts[j].fetch_add(1);
 	  uop->add_sparsity_output(targets[j], preimages[j]);
 	}
 	uop->dispatch(this, false /* do not run in this thread */);
@@ -463,18 +463,18 @@ namespace Realm {
 	    it2 != overlaps.end();
 	    it2++) {
 	  int j = *it2;
-	  __sync_fetch_and_add(&contrib_counts[j], 1);
+	  contrib_counts[j].fetch_add(1);
 	  uop->add_sparsity_output(targets[j], preimages[j]);
 	}
 	uop->dispatch(this, false /* do not run in this thread */);
       }
 
       // if these were the last sparse images, we can now set the contributor counts
-      int v = __sync_sub_and_fetch(&remaining_sparse_images, 1);
+      int v = remaining_sparse_images.fetch_sub(1) - 1;
       if(v == 0) {
 	for(size_t j = 0; j < preimages.size(); j++) {
-	  log_part.info() << contrib_counts[j] << " total contributors to preimage " << j;
-	  SparsityMapImpl<N,T>::lookup(preimages[j])->set_contributor_count(contrib_counts[j]);
+	  log_part.info() << contrib_counts[j].load() << " total contributors to preimage " << j;
+	  SparsityMapImpl<N,T>::lookup(preimages[j])->set_contributor_count(contrib_counts[j].load());
 	}
 	dummy_overlap_uop->mark_finished(true /*successful*/);
       }
@@ -514,7 +514,7 @@ namespace Realm {
 	      it2 != overlaps.end();
 	      it2++) {
 	    int j = *it2;
-	    __sync_fetch_and_add(&contrib_counts[j], 1);
+	    contrib_counts[j].fetch_add(1);
 	    uop->add_sparsity_output(targets[j], preimages[j]);
 	  }
 	  uop->dispatch(this, true /* ok to run in this thread */);
@@ -531,7 +531,7 @@ namespace Realm {
 	      it2 != overlaps.end();
 	      it2++) {
 	    int j = *it2;
-	    __sync_fetch_and_add(&contrib_counts[j], 1);
+	    contrib_counts[j].fetch_add(1);
 	    uop->add_sparsity_output(targets[j], preimages[j]);
 	  }
 	  uop->dispatch(this, true /* ok to run in this thread */);
@@ -539,11 +539,11 @@ namespace Realm {
       }
 
       // if these were the last sparse images, we can now set the contributor counts
-      int v = __sync_sub_and_fetch(&remaining_sparse_images, pending.size());
+      int v = remaining_sparse_images.fetch_sub(pending.size()) - pending.size();
       if(v == 0) {
 	for(size_t j = 0; j < preimages.size(); j++) {
-	  log_part.info() << contrib_counts[j] << " total contributors to preimage " << j;
-	  SparsityMapImpl<N,T>::lookup(preimages[j])->set_contributor_count(contrib_counts[j]);
+	  log_part.info() << contrib_counts[j].load() << " total contributors to preimage " << j;
+	  SparsityMapImpl<N,T>::lookup(preimages[j])->set_contributor_count(contrib_counts[j].load());
 	}
 	dummy_overlap_uop->mark_finished(true /*successful*/);
       }

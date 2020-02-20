@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@
 #ifndef REALM_SERIALIZE_H
 #define REALM_SERIALIZE_H
 
+#include "realm/realm_config.h"
 #include "realm/bytearray.h"
 
 #include <stddef.h>

@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -7275,15 +7275,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void TaskLauncher::add_wait_handshake(MPILegionHandshake handshake)
+    inline void TaskLauncher::add_wait_handshake(LegionHandshake handshake)
     //--------------------------------------------------------------------------
     {
       wait_barriers.push_back(handshake.get_legion_wait_phase_barrier());
     }
 
     //--------------------------------------------------------------------------
-    inline void TaskLauncher::add_arrival_handshake(
-                                                   MPILegionHandshake handshake)
+    inline void TaskLauncher::add_arrival_handshake(LegionHandshake handshake)
     //--------------------------------------------------------------------------
     {
       arrive_barriers.push_back(handshake.get_legion_arrive_phase_barrier());
@@ -7369,8 +7368,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void IndexTaskLauncher::add_wait_handshake(
-                                                   MPILegionHandshake handshake)
+    inline void IndexTaskLauncher::add_wait_handshake(LegionHandshake handshake)
     //--------------------------------------------------------------------------
     {
       wait_barriers.push_back(handshake.get_legion_wait_phase_barrier());
@@ -7378,7 +7376,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     inline void IndexTaskLauncher::add_arrival_handshake(
-                                                   MPILegionHandshake handshake)
+                                                      LegionHandshake handshake)
     //--------------------------------------------------------------------------
     {
       arrive_barriers.push_back(handshake.get_legion_arrive_phase_barrier());
@@ -7437,15 +7435,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void InlineLauncher::add_wait_handshake(MPILegionHandshake handshake)
+    inline void InlineLauncher::add_wait_handshake(LegionHandshake handshake)
     //--------------------------------------------------------------------------
     {
       wait_barriers.push_back(handshake.get_legion_wait_phase_barrier());
     }
 
     //--------------------------------------------------------------------------
-    inline void InlineLauncher::add_arrival_handshake(
-                                                   MPILegionHandshake handshake)
+    inline void InlineLauncher::add_arrival_handshake(LegionHandshake handshake)
     //--------------------------------------------------------------------------
     {
       arrive_barriers.push_back(handshake.get_legion_arrive_phase_barrier());
@@ -7549,15 +7546,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void CopyLauncher::add_wait_handshake(MPILegionHandshake handshake)
+    inline void CopyLauncher::add_wait_handshake(LegionHandshake handshake)
     //--------------------------------------------------------------------------
     {
       wait_barriers.push_back(handshake.get_legion_wait_phase_barrier());
     }
 
     //--------------------------------------------------------------------------
-    inline void CopyLauncher::add_arrival_handshake(
-                                                   MPILegionHandshake handshake)
+    inline void CopyLauncher::add_arrival_handshake(LegionHandshake handshake)
     //--------------------------------------------------------------------------
     {
       arrive_barriers.push_back(handshake.get_legion_arrive_phase_barrier());
@@ -7663,8 +7659,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void IndexCopyLauncher::add_wait_handshake(
-                                                   MPILegionHandshake handshake)
+    inline void IndexCopyLauncher::add_wait_handshake(LegionHandshake handshake)
     //--------------------------------------------------------------------------
     {
       wait_barriers.push_back(handshake.get_legion_wait_phase_barrier());
@@ -7672,7 +7667,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     inline void IndexCopyLauncher::add_arrival_handshake(
-                                                   MPILegionHandshake handshake)
+                                                      LegionHandshake handshake)
     //--------------------------------------------------------------------------
     {
       arrive_barriers.push_back(handshake.get_legion_arrive_phase_barrier());
@@ -7709,8 +7704,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void AcquireLauncher::add_wait_handshake(
-                                                   MPILegionHandshake handshake)
+    inline void AcquireLauncher::add_wait_handshake(LegionHandshake handshake)
     //--------------------------------------------------------------------------
     {
       wait_barriers.push_back(handshake.get_legion_wait_phase_barrier());
@@ -7718,7 +7712,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     inline void AcquireLauncher::add_arrival_handshake(
-                                                   MPILegionHandshake handshake)
+                                                      LegionHandshake handshake)
     //--------------------------------------------------------------------------
     {
       arrive_barriers.push_back(handshake.get_legion_arrive_phase_barrier());
@@ -7755,8 +7749,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void ReleaseLauncher::add_wait_handshake(
-                                                   MPILegionHandshake handshake)
+    inline void ReleaseLauncher::add_wait_handshake(LegionHandshake handshake)
     //--------------------------------------------------------------------------
     {
       wait_barriers.push_back(handshake.get_legion_wait_phase_barrier());
@@ -7764,7 +7757,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     inline void ReleaseLauncher::add_arrival_handshake(
-                                                   MPILegionHandshake handshake)
+                                                      LegionHandshake handshake)
     //--------------------------------------------------------------------------
     {
       arrive_barriers.push_back(handshake.get_legion_arrive_phase_barrier());
@@ -7815,15 +7808,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void FillLauncher::add_wait_handshake(MPILegionHandshake handshake)
+    inline void FillLauncher::add_wait_handshake(LegionHandshake handshake)
     //--------------------------------------------------------------------------
     {
       wait_barriers.push_back(handshake.get_legion_wait_phase_barrier());
     }
 
     //--------------------------------------------------------------------------
-    inline void FillLauncher::add_arrival_handshake(
-                                                   MPILegionHandshake handshake)
+    inline void FillLauncher::add_arrival_handshake(LegionHandshake handshake)
     //--------------------------------------------------------------------------
     {
       arrive_barriers.push_back(handshake.get_legion_arrive_phase_barrier());
@@ -7874,8 +7866,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void IndexFillLauncher::add_wait_handshake(
-                                                   MPILegionHandshake handshake)
+    inline void IndexFillLauncher::add_wait_handshake(LegionHandshake handshake)
     //--------------------------------------------------------------------------
     {
       wait_barriers.push_back(handshake.get_legion_wait_phase_barrier());
@@ -7883,7 +7874,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     inline void IndexFillLauncher::add_arrival_handshake(
-                                                   MPILegionHandshake handshake)
+                                                      LegionHandshake handshake)
     //--------------------------------------------------------------------------
     {
       arrive_barriers.push_back(handshake.get_legion_arrive_phase_barrier());
@@ -7924,26 +7915,26 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(handle.exists());
       assert(resource == EXTERNAL_INSTANCE);
 #endif
       constraints.add_constraint(PointerConstraint(mem, uintptr_t(base)));
       constraints.add_constraint(MemoryConstraint(mem.kind()));
       constraints.add_constraint(
           FieldConstraint(fields, true/*contiugous*/, true/*inorder*/));
-      std::vector<DimensionKind> dim_order(4);
+      const int dims = handle.get_index_space().get_dim();
+      std::vector<DimensionKind> dim_order(dims+1);
       // Field dimension first for AOS
       dim_order[0] = DIM_F;
       if (column_major)
       {
-        dim_order[1] = DIM_X;
-        dim_order[2] = DIM_Y;
-        dim_order[3] = DIM_Z;
+        for (int idx = 0; idx < dims; idx++)
+          dim_order[idx+1] = (DimensionKind)(DIM_X + idx); 
       }
       else
       {
-        dim_order[1] = DIM_Z;
-        dim_order[2] = DIM_Y;
-        dim_order[3] = DIM_X;
+        for (int idx = 0; idx < dims; idx++)
+          dim_order[idx+1] = (DimensionKind)(DIM_X + (dims-1) - idx);
       }
       constraints.add_constraint(
           OrderingConstraint(dim_order, false/*contiguous*/));
@@ -7962,27 +7953,27 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(handle.exists());
       assert(resource == EXTERNAL_INSTANCE);
 #endif
       constraints.add_constraint(PointerConstraint(mem, uintptr_t(base)));
       constraints.add_constraint(MemoryConstraint(mem.kind()));
       constraints.add_constraint(
-          FieldConstraint(fields, true/*contiugous*/, true/*inorder*/));
-      std::vector<DimensionKind> dim_order(4);
+          FieldConstraint(fields, true/*contiguous*/, true/*inorder*/));
+      const int dims = handle.get_index_space().get_dim();
+      std::vector<DimensionKind> dim_order(dims+1);
       if (column_major)
       {
-        dim_order[0] = DIM_X;
-        dim_order[1] = DIM_Y;
-        dim_order[2] = DIM_Z;
+        for (int idx = 0; idx < dims; idx++)
+          dim_order[idx] = (DimensionKind)(DIM_X + idx); 
       }
       else
       {
-        dim_order[0] = DIM_Z;
-        dim_order[1] = DIM_Y;
-        dim_order[2] = DIM_X;
+        for (int idx = 0; idx < dims; idx++)
+          dim_order[idx] = (DimensionKind)(DIM_X + (dims-1) - idx);
       }
       // Field dimension last for SOA 
-      dim_order[3] = DIM_F;
+      dim_order[dims] = DIM_F;
       constraints.add_constraint(
           OrderingConstraint(dim_order, false/*contiguous*/));
       if (alignments != NULL)
@@ -8600,6 +8591,38 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    IndexPartitionT<DIM,T> Runtime::create_partition_by_weights(Context ctx,
+                          IndexSpaceT<DIM,T> parent,
+                          const std::map<Point<COLOR_DIM,COLOR_T>,int> &weights,
+                          IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
+                          size_t granularity, Color color)
+    //--------------------------------------------------------------------------
+    {
+      std::map<DomainPoint,int> untyped_weights;
+      for (std::map<DomainPoint,int>::const_iterator it = 
+            weights.begin(); it != weights.end(); it++)
+        untyped_weights[DomainPoint(it->first)] = it->second;
+      return IndexPartitionT<DIM,T>(create_partition_by_weights(ctx,
+                                IndexSpace(parent), untyped_weights, 
+                                IndexSpace(color_space), granularity, color));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    IndexPartitionT<DIM,T> Runtime::create_partition_by_weights(Context ctx,
+                                     IndexSpaceT<DIM,T> parent,
+                                     const FutureMap &weights,
+                                     IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
+                                     size_t granularity, Color color)
+    //--------------------------------------------------------------------------
+    {
+      return IndexPartitionT<DIM,T>(create_partition_by_weights(ctx,
+                                IndexSpace(parent), weights, 
+                                IndexSpace(color_space), granularity, color));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
     IndexPartitionT<DIM,T> Runtime::create_partition_by_union(Context ctx,
                               IndexSpaceT<DIM,T> parent,
                               IndexPartitionT<DIM,T> handle1,
@@ -8800,17 +8823,53 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    IndexPartitionT<DIM,T> Runtime::create_partition_by_domain(
+                                    Context ctx, IndexSpaceT<DIM,T> parent,
+                                    const std::map<Point<COLOR_DIM,COLOR_T>,
+                                                   DomainT<DIM,T> > &domains,
+                                    IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
+                                    bool perform_intersections,
+                                    PartitionKind part_kind, Color color)
+    //--------------------------------------------------------------------------
+    {
+      std::map<DomainPoint,Domain> converted_domains;
+      for (typename std::map<Point<COLOR_DIM,COLOR_T>,DomainT<DIM,T> >::
+            const_iterator it = domains.begin(); it != domains.end(); it++)
+        converted_domains[DomainPoint(it->first)] = Domain(it->second);
+      return IndexPartitionT<DIM,T>(create_partition_by_domain(ctx,
+              IndexSpace(parent), converted_domains, IndexSpace(color_space),
+              perform_intersections, part_kind, color));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    IndexPartitionT<DIM,T> Runtime::create_partition_by_domain(
+                                    Context ctx, IndexSpaceT<DIM,T> parent,
+                                    const FutureMap &domain_future_map,
+                                    IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
+                                    bool perform_intersections,
+                                    PartitionKind part_kind, Color color)
+    //--------------------------------------------------------------------------
+    {
+      return IndexPartitionT<DIM,T>(create_partition_by_domain(ctx,
+              IndexSpace(parent), domain_future_map, IndexSpace(color_space),
+              perform_intersections, part_kind, color));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
     IndexPartitionT<DIM,T> Runtime::create_partition_by_field(Context ctx,
                                     LogicalRegionT<DIM,T> handle,
                                     LogicalRegionT<DIM,T> parent,
                                     FieldID fid,
                                     IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
-                                    Color color, MapperID id, MappingTagID tag)
+                                    Color color, MapperID id, MappingTagID tag,
+                                    PartitionKind part_kind)
     //--------------------------------------------------------------------------
     {
       return IndexPartitionT<DIM,T>(create_partition_by_field(ctx,
             LogicalRegion(handle), LogicalRegion(parent), fid, 
-            IndexSpace(color_space), color, id, tag));
+            IndexSpace(color_space), color, id, tag, part_kind));
     }
 
     //--------------------------------------------------------------------------

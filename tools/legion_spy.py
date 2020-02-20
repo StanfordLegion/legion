@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2019 Stanford University, NVIDIA Corporation
+# Copyright 2020 Stanford University, NVIDIA Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -86,8 +86,9 @@ PENDING_PART_OP_KIND = 18
 DYNAMIC_COLLECTIVE_OP_KIND = 19
 TRACE_OP_KIND = 20
 TIMING_OP_KIND = 21
-PREDICATE_OP_KIND = 22
-MUST_EPOCH_OP_KIND = 23
+ALL_REDUCE_OP_KIND = 22
+PREDICATE_OP_KIND = 23
+MUST_EPOCH_OP_KIND = 24
 
 OPEN_NONE = 0
 OPEN_READ_ONLY = 1
@@ -118,6 +119,7 @@ OpNames = [
 "Dynamic Collective Op",
 "Trace Op",
 "Timing Op",
+"Reduce Op",
 "Predicate Op",
 "Must Epoch Op",
 ]
@@ -6447,6 +6449,7 @@ class Operation(object):
             DYNAMIC_COLLECTIVE_OP_KIND : "navy",
             TRACE_OP_KIND : "springgreen",
             TIMING_OP_KIND : "turquoise",
+            ALL_REDUCE_OP_KIND : "cyan",
             PREDICATE_OP_KIND : "olivedrab1",
             MUST_EPOCH_OP_KIND : "tomato",
             }[self.kind]
@@ -9027,6 +9030,8 @@ dynamic_collective_pat   = re.compile(
     prefix+"Dynamic Collective (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 timing_op_pat            = re.compile(
     prefix+"Timing Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+all_reduce_op_pat        = re.compile(
+    prefix+"All Reduce Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 predicate_op_pat         = re.compile(
     prefix+"Predicate Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 must_epoch_op_pat        = re.compile(
@@ -9675,6 +9680,14 @@ def parse_legion_spy_line(line, state):
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(TIMING_OP_KIND)
         op.set_name("Timing Op "+m.group('uid'))
+        context = state.get_task(int(m.group('ctx')))
+        op.set_context(context)
+        return True
+    m = all_reduce_op_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid')))
+        op.set_op_kind(ALL_REDUCE_OP_KIND)
+        op.set_name("Reduce Op "+m.group('uid'))
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
         return True

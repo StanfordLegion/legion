@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -212,17 +212,29 @@ namespace Realm {
 	  for(PointInRectIterator<N2,T2> pir(it2.rect); pir.valid; pir.step()) {
 	    Rect<N,T> rng = a_data.read(pir.p);
 
-	    if(parent_space.contains_any(rng)) {
-              // optional filter
-              if(!diff_rhss.empty())
-                if(diff_rhss[i].contains_all(rng)) {
-                  //std::cout << "point " << ptr << " filtered!\n";
-                  continue;
-                }
-	      //std::cout << "image " << i << "(" << sources[i] << ") -> " << pir.p << " -> " << ptr << std::endl;
-	      if(!bmpp) bmpp = &bitmasks[i];
-	      if(!*bmpp) *bmpp = new BM;
-	      (*bmpp)->add_rect(rng);
+	    // precisely test rng against each subrect of the parent space
+	    //  by performing restricted iteration
+	    for(IndexSpaceIterator<N,T> it3(parent_space, rng);
+		it3.valid;
+		it3.step()) {
+	      // if any of the points in the range overlap the diff_rhs, we'll
+	      //  need to test each point individually
+	      bool check_diff = (!diff_rhss.empty() &&
+				 diff_rhss[i].contains_any(it3.rect));
+
+	      if(check_diff) {
+		for(PointInRectIterator<N,T> pir2(it3.rect); pir2.valid; pir2.step())
+		  if(!diff_rhss[i].contains(pir2.p)) {
+		    if(!bmpp) bmpp = &bitmasks[i];
+		    if(!*bmpp) *bmpp = new BM;
+		    (*bmpp)->add_point(pir2.p);
+		  }
+	      } else {
+		// add whole rectangle
+		if(!bmpp) bmpp = &bitmasks[i];
+		if(!*bmpp) *bmpp = new BM;
+		(*bmpp)->add_rect(it3.rect);
+	      }
 	    }
 	  }
 	}
@@ -244,7 +256,9 @@ namespace Realm {
       for(PointInRectIterator<N2,T2> pir(it.rect); pir.valid; pir.step()) {
 	Point<N,T> ptr = a_data.read(pir.p);
 
-	bitmask.add_point(ptr);
+	// make sure to check for containment in the parent space
+	if(parent_space.contains(ptr))
+	  bitmask.add_point(ptr);
       }
     }
   }
@@ -263,7 +277,12 @@ namespace Realm {
       for(PointInRectIterator<N2,T2> pir(it.rect); pir.valid; pir.step()) {
 	Rect<N,T> rng = a_data.read(pir.p);
 
-	bitmask.add_rect(rng);
+	// don't test against the diff_rhss filter, but we do need to stay
+	//  inside the parent space
+	for(IndexSpaceIterator<N,T> it2(parent_space, rng);
+	    it2.valid;
+	    it2.step())
+	  bitmask.add_rect(rng);
       }
     }
   }
@@ -346,7 +365,7 @@ namespace Realm {
 	//  the count to 2 instead of 1
 	bool registered = SparsityMapImpl<N2,T2>::lookup(sources[i].sparsity)->add_waiter(this, true /*precise*/);
 	if(registered)
-	  __sync_fetch_and_add(&wait_count, 1);
+	  wait_count.fetch_add(1);
       }
     }
 
@@ -357,7 +376,7 @@ namespace Realm {
 	//  the count to 2 instead of 1
 	bool registered = SparsityMapImpl<N,T>::lookup(diff_rhss[i].sparsity)->add_waiter(this, true /*precise*/);
 	if(registered)
-	  __sync_fetch_and_add(&wait_count, 1);
+	  wait_count.fetch_add(1);
       }
     }
 
@@ -367,7 +386,7 @@ namespace Realm {
       //  the count to 2 instead of 1
       bool registered = SparsityMapImpl<N,T>::lookup(parent_space.sparsity)->add_waiter(this, true /*precise*/);
       if(registered)
-	__sync_fetch_and_add(&wait_count, 1);
+	wait_count.fetch_add(1);
     }
     
     finish_dispatch(op, inline_ok);

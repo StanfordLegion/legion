@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University, NVIDIA Corporation
+-- Copyright 2020 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -21,346 +21,6 @@ local report = require("common/report")
 local std = require("regent/std")
 
 local normalize = {}
-
--- Multi-field accesses are allowed only in unary, binary, dereference,
--- and casting expressions.
-
-local function join_num_accessed_fields(a, b)
-  if a == 1 then
-    return b
-  elseif b == 1 then
-    return a
-  elseif a ~= b then
-    return false
-  else
-    return a
-  end
-end
-
-local function get_num_accessed_fields(node)
-  if not ast.is_node(node) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.ID) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.Constant) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.Global) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.FieldAccess) then
-    if std.config["allow-multi-field-expansion"] then
-      if terralib.islist(node.field_name) then
-        return get_num_accessed_fields(node.value) * #node.field_name
-      else
-        return get_num_accessed_fields(node.value)
-      end
-    else
-      -- We only need to know if there is any multi-field access
-      -- as we are going to use this only to reject it.
-      local fields = node.field_name
-      while fields do
-        if #fields > 1 then
-          return #fields
-        end
-        fields = fields[1].fields
-      end
-      return 1
-    end
-
-  elseif node:is(ast.specialized.expr.IndexAccess) then
-    if get_num_accessed_fields(node.value) > 1 then return false end
-    if get_num_accessed_fields(node.index) > 1 then return false end
-    return 1
-
-  elseif node:is(ast.specialized.expr.MethodCall) then
-    if get_num_accessed_fields(node.value) > 1 then return false end
-    for _, arg in pairs(node.args) do
-      if get_num_accessed_fields(arg) > 1 then return false end
-    end
-    return 1
-
-  elseif node:is(ast.specialized.expr.Call) then
-    if get_num_accessed_fields(node.fn) > 1 then return false end
-    for _, arg in pairs(node.args) do
-      if get_num_accessed_fields(arg) > 1 then return false end
-    end
-    return 1
-
-  elseif node:is(ast.specialized.expr.Ctor) then
-    node.fields:map(function(field)
-      if field:is(ast.specialized.expr.CtorListField) then
-        if get_num_accessed_fields(field.value) > 1 then return false end
-      elseif field:is(ast.specialized.expr.CtorListField) then
-        if get_num_accessed_fields(field.num_expr) > 1 then return false end
-        if get_num_accessed_fields(field.value) > 1 then return false end
-      end
-    end)
-    return 1
-
-  elseif node:is(ast.specialized.expr.RawContext) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.RawFields) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.RawPhysical) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.RawRuntime) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.RawTask) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.RawValue) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.Isnull) then
-    if get_num_accessed_fields(node.pointer) > 1 then return false end
-    return 1
-
-  elseif node:is(ast.specialized.expr.New) then
-    if get_num_accessed_fields(node.extent) > 1 then return false end
-    return 1
-
-  elseif node:is(ast.specialized.expr.Null) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.DynamicCast) then
-    return get_num_accessed_fields(node.value)
-
-  elseif node:is(ast.specialized.expr.StaticCast) then
-    return get_num_accessed_fields(node.value)
-
-  elseif node:is(ast.specialized.expr.UnsafeCast) then
-    return get_num_accessed_fields(node.value)
-
-  elseif node:is(ast.specialized.expr.Ispace) then
-    if get_num_accessed_fields(node.extent) > 1 then return false end
-    if get_num_accessed_fields(node.start) > 1 then return false end
-    return 1
-
-  elseif node:is(ast.specialized.expr.Region) then
-    if get_num_accessed_fields(node.ispace) > 1 then return false end
-    return 1
-
-  elseif node:is(ast.specialized.expr.Partition) then
-    if get_num_accessed_fields(node.coloring) > 1 then return false end
-    return 1
-
-  elseif node:is(ast.specialized.expr.PartitionEqual) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.PartitionByField) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.Image) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.Preimage) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.CrossProduct) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.CrossProductArray) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.ListSlicePartition) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.ListDuplicatePartition) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.ListCrossProduct) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.ListCrossProductComplete) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.ListPhaseBarriers) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.ListInvert) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.ListRange) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.PhaseBarrier) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.DynamicCollective) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.Advance) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.Arrive) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.Await) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.DynamicCollectiveGetResult) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.Copy) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.Fill) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.Acquire) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.Release) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.Unary) then
-    return get_num_accessed_fields(node.rhs)
-
-  elseif node:is(ast.specialized.expr.Binary) then
-    return join_num_accessed_fields(get_num_accessed_fields(node.lhs),
-                                    get_num_accessed_fields(node.rhs))
-
-  elseif node:is(ast.specialized.expr.Deref) then
-    return get_num_accessed_fields(node.value)
-
-  elseif node:is(ast.specialized.expr.AddressOf) then
-    return get_num_accessed_fields(node.value)
-
-  elseif node:is(ast.specialized.expr.Cast) then
-    return get_num_accessed_fields(node.args[1])
-
-  else
-    return 1
-
-  end
-end
-
-local function has_all_valid_field_accesses(node)
-  local valid = true
-  local print_warning = true
-  local message = "multi-field expansion is deprecated. please change it to single field expressions"
-  data.zip(node.lhs, node.rhs):map(function(pair)
-    if valid then
-      local lh, rh = unpack(pair)
-      local num_accessed_fields_lh = get_num_accessed_fields(lh)
-      local num_accessed_fields_rh = get_num_accessed_fields(rh)
-      local num_accessed_fields =
-        join_num_accessed_fields(num_accessed_fields_lh,
-                                 num_accessed_fields_rh)
-      if not std.config["allow-multi-field-expansion"] then
-        if not num_accessed_fields or num_accessed_fields > 1 then
-          report.error(node, message)
-        end
-      else
-        if print_warning then
-          report.warn(node, message)
-          print_warning = false
-        end
-        if not num_accessed_fields then
-          valid = false
-        -- Special case when there is only one assignee for multiple
-        -- values on the RHS
-        elseif num_accessed_fields_lh == 1 and
-               num_accessed_fields_rh > 1 then
-          valid = false
-        end
-      end
-    end
-  end)
-
-  return valid
-end
-
-local function get_nth_field_access(node, idx)
-  if node:is(ast.specialized.expr.FieldAccess) then
-    local num_accessed_fields_value = get_num_accessed_fields(node.value)
-    local num_accessed_fields = #node.field_name
-
-    local idx1 = math.floor((idx - 1) / num_accessed_fields) + 1
-    local idx2 = (idx - 1) % num_accessed_fields + 1
-
-    return node {
-      value = get_nth_field_access(node.value, idx1),
-      field_name = node.field_name[idx2],
-    }
-
-  elseif node:is(ast.specialized.expr.Unary) then
-    return node { rhs = get_nth_field_access(node.rhs, idx) }
-
-  elseif node:is(ast.specialized.expr.Binary) then
-    return node {
-      lhs = get_nth_field_access(node.lhs, idx),
-      rhs = get_nth_field_access(node.rhs, idx),
-    }
-
-  elseif node:is(ast.specialized.expr.Deref) then
-    return node {
-      value = get_nth_field_access(node.value, idx),
-    }
-
-  elseif node:is(ast.specialized.expr.AddressOf) then
-    return node {
-      value = get_nth_field_access(node.value, idx),
-    }
-
-  elseif node:is(ast.specialized.expr.DynamicCast) or
-         node:is(ast.specialized.expr.StaticCast) or
-         node:is(ast.specialized.expr.UnsafeCast) then
-    return node {
-      value = get_nth_field_access(node.value, idx),
-    }
-
-  elseif node:is(ast.specialized.expr.Cast) then
-    return node {
-      args = node.args:map(function(arg)
-        return get_nth_field_access(arg, idx)
-      end)
-    }
-  else
-    return node
-  end
-end
-
-local function flatten_multifield_accesses(node)
-  if not has_all_valid_field_accesses(node) then
-    report.error(node, "invalid use of multi-field access")
-  end
-
-  if not std.config["allow-multi-field-expansion"] then
-    return node
-  end
-
-  local flattened_lhs = terralib.newlist()
-  local flattened_rhs = terralib.newlist()
-
-  data.zip(node.lhs, node.rhs):map(function(pair)
-    local lh, rh = unpack(pair)
-    local num_accessed_fields =
-      join_num_accessed_fields(get_num_accessed_fields(lh),
-                               get_num_accessed_fields(rh))
-    assert(num_accessed_fields ~= false, "unreachable")
-    for idx = 1, num_accessed_fields do
-      flattened_lhs:insert(get_nth_field_access(lh, idx))
-      flattened_rhs:insert(get_nth_field_access(rh, idx))
-    end
-  end)
-
-  if #node.lhs == flattened_lhs and #node.rhs == flattened_rhs then
-    return node
-  else
-    return node {
-      lhs = flattened_lhs,
-      rhs = flattened_rhs,
-    }
-  end
-end
 
 -- Normalization for Expressions
 
@@ -455,13 +115,11 @@ end)
 local function expr_field_access(stats, expr)
   local value = normalize.expr(stats, expr.value, true)
   local field_name = expr.field_name
-  if not std.config["allow-multi-field-expansion"] then
-    if type(field_name[1]) == "string" then
-      if #field_name > 1 then
-        report.error(expr, "multi-field access is not allowed")
-      end
-      field_name = field_name[1]
+  if type(field_name[1]) == "string" then
+    if #field_name > 1 then
+      report.error(expr, "multi-field access is not allowed")
     end
+    field_name = field_name[1]
   end
   return expr {
     value = value,
@@ -881,12 +539,79 @@ local function stat_for_list(stats, stat)
 end
 
 local function stat_repeat(stats, stat)
-  local block = normalize.block(stat.block)
-  local block_stats = block.stats
-  local until_cond = normalize.expr(block_stats, stat.until_cond, true)
-  stats:insert(stat {
-    until_cond = until_cond,
-    block = block { stats = block_stats },
+  -- Unfortunately, we need to keep the original reapeat loop
+  -- in the program to make it type checked correctly.
+  local dead_code = nil
+  do
+    -- Make a local context to normalize the repeat loop
+    -- that will later be eliminated.
+    local stats = terralib.newlist()
+    local until_cond = normalize.expr(stats, stat.until_cond)
+    local block = normalize.block(stat.block)
+    stats:insert(stat {
+      until_cond = until_cond,
+      block = block,
+    })
+    dead_code = ast.specialized.Block {
+      stats = stats,
+      span = stat.span,
+    }
+  end
+  stats:insert(ast.specialized.stat.If {
+    cond = ast.specialized.expr.Constant {
+      value = false,
+      expr_type = bool,
+      span = stat.span,
+      annotations = ast.default_annotations(),
+    },
+    then_block = dead_code,
+    elseif_blocks = terralib.newlist(),
+    else_block = ast.specialized.Block {
+      stats = terralib.newlist(),
+      span = stat.span,
+    },
+    span = stat.span,
+    annotations = ast.default_annotations(),
+  })
+
+  local cond_var = std.newsymbol(bool)
+  stats:insert(ast.specialized.stat.Var {
+    symbols = cond_var,
+    values = ast.specialized.expr.Constant {
+      value = true,
+      expr_type = bool,
+      span = stat.until_cond.span,
+      annotations = ast.default_annotations(),
+    },
+    span = stat.span,
+    annotations = ast.default_annotations(),
+  })
+
+  local cond = ast.specialized.expr.ID {
+    value = cond_var,
+    span = stat.until_cond.span,
+    annotations = ast.default_annotations(),
+  }
+
+  local block_stats = terralib.newlist()
+  block_stats:insertall(stat.block.stats)
+  block_stats:insert(ast.specialized.stat.Assignment {
+    lhs = terralib.newlist({cond}),
+    rhs = terralib.newlist({ ast.specialized.expr.Unary {
+      op = "not",
+      rhs = stat.until_cond,
+      span = stat.until_cond.span,
+      annotations = ast.default_annotations(),
+    }}),
+    span = stat.until_cond.span,
+    annotations = ast.default_annotations(),
+  })
+
+  normalize.stat(stats, ast.specialized.stat.While {
+    cond = cond,
+    block = stat.block { stats = block_stats },
+    span = stat.span,
+    annotations = stat.annotations,
   })
 end
 
@@ -954,8 +679,6 @@ local function stat_return(stats, stat)
 end
 
 local function stat_assignment_or_reduce(stats, stat)
-  stat = flatten_multifield_accesses(stat)
-
   if #stat.lhs == 1 then
     assert(#stat.rhs == 1)
     local lhs = normalize.expr(stats, stat.lhs[1], false)

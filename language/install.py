@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2019 Stanford University
+# Copyright 2020 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -193,9 +193,9 @@ def symlink(from_path, to_path):
     if not os.path.lexists(to_path):
         os.symlink(from_path, to_path)
 
-def install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
+def install_bindings(regent_dir, legion_dir, bindings_dir, python_bindings_dir, runtime_dir,
                      cmake, cmake_exe, build_dir,
-                     debug, cuda, openmp, llvm, hdf, spy,
+                     debug, cuda, openmp, python, llvm, hdf, spy,
                      gasnet, gasnet_dir, conduit, clean_first,
                      extra_flags, thread_count, verbose):
     # Don't blow away an existing directory
@@ -228,6 +228,7 @@ def install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
             ['-DCMAKE_BUILD_TYPE=%s' % ('Debug' if debug else 'Release'),
              '-DLegion_USE_CUDA=%s' % ('ON' if cuda else 'OFF'),
              '-DLegion_USE_OpenMP=%s' % ('ON' if openmp else 'OFF'),
+             '-DLegion_USE_Python=%s' % ('ON' if python else 'OFF'),
              '-DLegion_USE_LLVM=%s' % ('ON' if llvm else 'OFF'),
              '-DLegion_USE_GASNet=%s' % ('ON' if gasnet else 'OFF'),
              '-DLegion_USE_HDF5=%s' % ('ON' if hdf else 'OFF'),
@@ -265,9 +266,11 @@ def install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
     else:
         flags = (
             ['LG_RT_DIR=%s' % runtime_dir,
+             'DEFINE_HEADERS_DIR=%s' % bindings_dir, # otherwise Python build recompiles everything
              'DEBUG=%s' % (1 if debug else 0),
              'USE_CUDA=%s' % (1 if cuda else 0),
              'USE_OPENMP=%s' % (1 if openmp else 0),
+             'USE_PYTHON=%s' % (1 if python else 0),
              'USE_LLVM=%s' % (1 if llvm else 0),
              'USE_GASNET=%s' % (1 if gasnet else 0),
              'USE_HDF=%s' % (1 if hdf else 0),
@@ -282,9 +285,17 @@ def install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
             subprocess.check_call(
                 [make_exe] + flags + ['clean'],
                 cwd=bindings_dir)
+            if python:
+                subprocess.check_call(
+                    [make_exe] + flags + ['clean'],
+                    cwd=python_bindings_dir)
         subprocess.check_call(
             [make_exe] + flags + ['-j', str(thread_count)],
             cwd=bindings_dir)
+        if python:
+            subprocess.check_call(
+                [make_exe] + flags + ['-j', str(thread_count)],
+                cwd=python_bindings_dir)
 
         # This last bit is necessary because Mac OS X shared libraries
         # have paths hard-coded into them, and in this case those paths
@@ -314,7 +325,7 @@ def get_cmake_config(cmake, regent_dir, default=None):
     dump_json_config(config_filename, cmake)
     return cmake
 
-def install(gasnet=False, cuda=False, openmp=False, hdf=False, llvm=False,
+def install(gasnet=False, cuda=False, openmp=False, python=False, llvm=False, hdf=False,
             spy=False, conduit=None, cmake=None, rdir=None,
             cmake_exe=None, cmake_build_dir=None,
             terra_url=None, terra_branch=None, terra_use_cmake=None, external_terra_dir=None,
@@ -334,7 +345,6 @@ def install(gasnet=False, cuda=False, openmp=False, hdf=False, llvm=False,
     if clean_first and cmake_build_dir is not None:
         raise Exception('Cannot clean a pre-existing build directory')
 
-    thread_count = thread_count
     if thread_count is None:
         thread_count = multiprocessing.cpu_count()
 
@@ -351,9 +361,10 @@ def install(gasnet=False, cuda=False, openmp=False, hdf=False, llvm=False,
                   external_terra_dir, thread_count, llvm)
 
     bindings_dir = os.path.join(legion_dir, 'bindings', 'regent')
-    install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
+    python_bindings_dir = os.path.join(legion_dir, 'bindings', 'python')
+    install_bindings(regent_dir, legion_dir, bindings_dir, python_bindings_dir, runtime_dir,
                      cmake, cmake_exe, cmake_build_dir,
-                     debug, cuda, openmp, llvm, hdf, spy,
+                     debug, cuda, openmp, python, llvm, hdf, spy,
                      gasnet, gasnet_dir, conduit, clean_first,
                      extra_flags, thread_count, verbose)
 
@@ -397,6 +408,10 @@ def driver():
         '--openmp', dest='openmp', action='store_true', required=False,
         default=os.environ.get('USE_OPENMP') == '1',
         help='Build Legion with OpenMP support.')
+    parser.add_argument(
+        '--python', dest='python', action='store_true', required=False,
+        default=os.environ.get('USE_PYTHON') == '1',
+        help='Build Legion with Python support.')
     parser.add_argument(
         '--llvm', dest='llvm', action='store_true', required=False,
         default=os.environ.get('USE_LLVM') == '1',

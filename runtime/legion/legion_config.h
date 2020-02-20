@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,13 @@
 // for UINT_MAX, INT_MAX, INT_MIN
 #include <limits.h>
 #endif // LEGION_USE_PYTHON_CFFI
+
+// Define a prefix for annotating functions for CUDA compilation
+#ifdef __CUDACC__
+#define __CUDA_HD__ __host__ __device__
+#else
+#define __CUDA_HD__
+#endif
 
 /**
  * \file legion_config.h
@@ -864,7 +871,7 @@ typedef enum legion_error_t {
   ERROR_IDEMPOTENT_MISMATCH = 75,
   ERROR_INVALID_MAPPER_ID = 76,
   ERROR_INVALID_TREE_ENTRY = 77,
-  ERROR_SEPARATE_UTILITY_PROCS = 78,
+  // = 78
   ERROR_MAXIMUM_NODES_EXCEEDED = 79,
   ERROR_MAXIMUM_PROCS_EXCEEDED = 80,
   ERROR_INVALID_TASK_ID = 81,
@@ -905,7 +912,7 @@ typedef enum legion_error_t {
   ERROR_MISSING_DEFAULT_PREDICATE_RESULT = 116,
   ERROR_PREDICATE_RESULT_SIZE_MISMATCH = 117,
   ERROR_MPI_INTEROPERABILITY_NOT_CONFIGURED = 118,
-  ERROR_TRACING_ALLOCATION_WITH_SEPARATE = 119,
+  // = 119,
   ERROR_EMPTY_INDEX_PARTITION = 120,
   ERROR_INCONSISTENT_SEMANTIC_TAG = 121,
   ERROR_INVALID_SEMANTIC_TAG = 122,
@@ -1141,6 +1148,12 @@ typedef enum legion_error_t {
   ERROR_DUPLICATE_FUTURE_SET = 560,
   ERROR_ATTACH_HDF5 = 561,
   ERROR_ATTACH_HDF5_CONSTRAINT = 562,
+  ERROR_ILLEGAL_PARTITION_BY_DOMAIN = 563,
+  ERROR_INVALID_PARTITION_BY_DOMAIN_VALUE = 564,
+  ERROR_FUTURE_MAP_REDOP_TYPE_MISMATCH = 565,
+  ERROR_MISSING_PARTITION_BY_WEIGHT_COLOR = 566,
+  ERROR_INVALID_PARTITION_BY_WEIGHT_VALUE = 567,
+  ERROR_LEGION_CONFIGURATION = 568,
   
 
   LEGION_WARNING_FUTURE_NONLEAF = 1000,
@@ -1208,6 +1221,7 @@ typedef enum legion_error_t {
   LEGION_FATAL_RESTRICTED_SIMULTANEOUS = 2008,
   LEGION_FATAL_INCONSISTENT_PHI_VIEW = 2009, 
   LEGION_FATAL_EXCEEDED_LIBRARY_ID_OFFSET = 2010,
+  LEGION_FATAL_SEPARATE_RUNTIME_INSTANCES = 2011,
   
 }  legion_error_t;
 
@@ -1500,6 +1514,7 @@ typedef enum legion_builtin_redop_t {
   LEGION_REDOP_MIN_FLOAT32    = LEGION_REDOP_VALUE(MIN,FLOAT32),
   LEGION_REDOP_MIN_FLOAT64    = LEGION_REDOP_VALUE(MIN,FLOAT64),
   // No definitions of min for complex types
+  LEGION_REDOP_LAST,
 } legion_builtin_redop_t;
 
 #undef LEGION_REDOP_KIND_SUM_VALUE

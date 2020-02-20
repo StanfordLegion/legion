@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -123,8 +123,8 @@ namespace Realm {
     T *pop_front(PT min_priority);
 
     // calls callback for each element in list
-    template <typename CALLBACK>
-    void foreach(CALLBACK& cb);
+    template <typename CALLABLE>
+    void foreach(CALLABLE& cb);
 
     // we don't maintain the size, so this is slow - use only for debugging
     size_t size(void) const;

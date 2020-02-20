@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -58,8 +58,6 @@ namespace Legion {
     public:
       void compute_copy_offsets(const FieldMask &copy_mask, 
                                 PhysicalManager *manager,
-                                std::vector<CopySrcDstField> &fields);
-      void compute_copy_offsets(FieldID copy_field, PhysicalManager *manager,
                                 std::vector<CopySrcDstField> &fields);
       void compute_copy_offsets(const std::vector<FieldID> &copy_fields,
                                 PhysicalManager *manager,
@@ -166,6 +164,25 @@ namespace Legion {
       virtual void notify_inactive(ReferenceMutator *mutator);
       virtual void notify_valid(ReferenceMutator *mutator);
       virtual void notify_invalid(ReferenceMutator *mutator);
+    public:
+      virtual ApEvent fill_from(FillView *fill_view, ApEvent precondition,
+                                PredEvent predicate_guard,
+                                IndexSpaceExpression *expression,
+                                const FieldMask &fill_mask,
+                                const PhysicalTraceInfo &trace_info,
+                                CopyAcrossHelper *across_helper = NULL,
+                                FieldMaskSet<FillView> *tracing_srcs=NULL,
+                                FieldMaskSet<InstanceView> *tracing_dsts=NULL);
+      virtual ApEvent copy_from(PhysicalManager *manager, ApEvent precondition,
+                                PredEvent predicate_guard, ReductionOpID redop,
+                                IndexSpaceExpression *expression,
+                                const FieldMask &copy_mask,
+                                const PhysicalTraceInfo &trace_info,
+                                CopyAcrossHelper *across_helper = NULL,
+                                FieldMaskSet<InstanceView> *tracing_srcs=NULL,
+                                FieldMaskSet<InstanceView> *tracing_dsts=NULL);
+      virtual void compute_copy_offsets(const FieldMask &copy_mask,
+                                        std::vector<CopySrcDstField> &fields);
     public:
       virtual void send_manager(AddressSpaceID target) = 0; 
       static void handle_manager_request(Deserializer &derez, 
@@ -347,14 +364,25 @@ namespace Legion {
       virtual ApEvent get_use_event(void) const { return use_event; }
       virtual ApEvent get_unique_event(void) const { return unique_event; }
     public:
+      virtual ApEvent fill_from(FillView *fill_view, ApEvent precondition,
+                                PredEvent predicate_guard,
+                                IndexSpaceExpression *expression,
+                                const FieldMask &fill_mask,
+                                const PhysicalTraceInfo &trace_info,
+                                CopyAcrossHelper *across_helper = NULL,
+                                FieldMaskSet<FillView> *tracing_srcs=NULL,
+                                FieldMaskSet<InstanceView> *tracing_dsts=NULL);
+      virtual ApEvent copy_from(PhysicalManager *manager, ApEvent precondition,
+                                PredEvent predicate_guard, ReductionOpID redop,
+                                IndexSpaceExpression *expression,
+                                const FieldMask &copy_mask,
+                                const PhysicalTraceInfo &trace_info,
+                                CopyAcrossHelper *across_helper = NULL,
+                                FieldMaskSet<InstanceView> *tracing_srcs=NULL,
+                                FieldMaskSet<InstanceView> *tracing_dsts=NULL);
+    public:
       virtual InstanceView* create_instance_top_view(InnerContext *context,
-                                            AddressSpaceID logical_owner);
-      void compute_copy_offsets(const FieldMask &copy_mask,
-                                std::vector<CopySrcDstField> &fields);
-      void compute_copy_offsets(FieldID fid, 
-                                std::vector<CopySrcDstField> &fields);
-      void compute_copy_offsets(const std::vector<FieldID> &copy_fields,
-                                std::vector<CopySrcDstField> &fields);
+                                            AddressSpaceID logical_owner); 
       void initialize_across_helper(CopyAcrossHelper *across_helper,
                                     const FieldMask &mask,
                                     const std::vector<unsigned> &src_indexes,
@@ -436,8 +464,6 @@ namespace Legion {
           get_field_accessor(FieldID fid) const = 0;
     public:
       virtual bool is_foldable(void) const = 0;
-      virtual void find_field_offsets(const FieldMask &reduce_mask,
-          std::vector<CopySrcDstField> &fields) = 0;
       virtual Domain get_pointer_space(void) const = 0;
     public:
       virtual ApEvent get_use_event(void) const { return use_event; }
@@ -500,9 +526,18 @@ namespace Legion {
           get_field_accessor(FieldID fid) const;
     public:
       virtual bool is_foldable(void) const;
-      virtual void find_field_offsets(const FieldMask &reduce_mask,
+      virtual void compute_copy_offsets(const FieldMask &reduce_mask,
           std::vector<CopySrcDstField> &fields);
       virtual Domain get_pointer_space(void) const;
+    public:
+      virtual ApEvent copy_from(PhysicalManager *manager, ApEvent precondition,
+                                PredEvent predicate_guard, ReductionOpID redop,
+                                IndexSpaceExpression *expression,
+                                const FieldMask &copy_mask,
+                                const PhysicalTraceInfo &trace_info,
+                                CopyAcrossHelper *across_helper = NULL,
+                                FieldMaskSet<InstanceView> *tracing_srcs=NULL,
+                                FieldMaskSet<InstanceView> *tracing_dsts=NULL);
     protected:
       const Domain ptr_space;
     };
@@ -539,9 +574,16 @@ namespace Legion {
           get_field_accessor(FieldID fid) const;
     public:
       virtual bool is_foldable(void) const;
-      virtual void find_field_offsets(const FieldMask &reduce_mask,
-          std::vector<CopySrcDstField> &fields);
       virtual Domain get_pointer_space(void) const;
+    public:
+      virtual ApEvent copy_from(PhysicalManager *manager, ApEvent precondition,
+                                PredEvent predicate_guard, ReductionOpID redop,
+                                IndexSpaceExpression *expression,
+                                const FieldMask &copy_mask,
+                                const PhysicalTraceInfo &trace_info,
+                                CopyAcrossHelper *across_helper = NULL,
+                                FieldMaskSet<InstanceView> *tracing_srcs=NULL,
+                                FieldMaskSet<InstanceView> *tracing_dsts=NULL);
     public:
       const ApEvent use_event;
     };
@@ -588,25 +630,19 @@ namespace Legion {
         : regions(regs), constraints(cons), runtime(rt), memory_manager(memory),
           creator_id(cid), instance(PhysicalInstance::NO_INST), 
           field_space_node(NULL), instance_domain(NULL), tree_id(0),
-          redop_id(0), reduction_op(NULL), valid(false) { }
+          redop_id(0), reduction_op(NULL), realm_layout(NULL), valid(false) { }
       virtual ~InstanceBuilder(void);
     public:
       void initialize(RegionTreeForest *forest);
       PhysicalManager* create_physical_instance(RegionTreeForest *forest,
                                                 size_t *footprint = NULL);
     public:
-      virtual void handle_profiling_response(
-                    const Realm::ProfilingResponse &response);
+      virtual void handle_profiling_response(const ProfilingResponseBase *base,
+                                      const Realm::ProfilingResponse &response);
     protected:
       void compute_space_and_domain(RegionTreeForest *forest);
     protected:
       void compute_layout_parameters(void);
-    public:
-      static void convert_layout_constraints(
-                    const LayoutConstraintSet &constraints,
-                    const std::vector<FieldID> &field_set,
-                    const std::vector<size_t> &field_sizes,
-                          Realm::InstanceLayoutConstraints &realm_constraints);
     protected:
       const std::vector<LogicalRegion> &regions;
       LayoutConstraintSet constraints;
@@ -628,7 +664,7 @@ namespace Legion {
       FieldMask instance_mask;
       ReductionOpID redop_id;
       const ReductionOp *reduction_op;
-      Realm::InstanceLayoutConstraints realm_constraints;
+      Realm::InstanceLayoutGeneric *realm_layout;
     public:
       bool valid;
     };

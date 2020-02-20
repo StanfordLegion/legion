@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -64,6 +64,7 @@ namespace Legion {
         ATTACH_OP_KIND,
         DETACH_OP_KIND,
         TIMING_OP_KIND,
+        ALL_REDUCE_OP_KIND,
         TRACE_CAPTURE_OP_KIND,
         TRACE_COMPLETE_OP_KIND,
         TRACE_REPLAY_OP_KIND,
@@ -97,6 +98,7 @@ namespace Legion {
         "Attach",                   \
         "Detach",                   \
         "Timing",                   \
+        "All Reduce Op",            \
         "Trace Capture",            \
         "Trace Complete",           \
         "Trace Replay",             \
@@ -229,6 +231,16 @@ namespace Legion {
         bool issue_commit_trigger(Operation *op, Runtime *runtime);
       private:
         std::set<RtEvent> commit_dependences;
+      };
+      struct OpProfilingResponse : public ProfilingResponseBase {
+      public:
+        OpProfilingResponse(ProfilingResponseHandler *h, 
+                            unsigned s, unsigned d, bool f, bool t = false)
+          : ProfilingResponseBase(h), src(s), dst(d), fill(f), task(t) { }
+      public:
+        unsigned src, dst;
+        bool fill;
+        bool task;
       };
     public:
       Operation(Runtime *rt);
@@ -384,11 +396,11 @@ namespace Legion {
       static ApEvent merge_sync_preconditions(const TraceInfo &info,
                                 const std::vector<Grant> &grants,
                                 const std::vector<PhaseBarrier> &wait_barriers);
-      virtual void add_copy_profiling_request(
-                                        Realm::ProfilingRequestSet &reqeusts);
+      virtual void add_copy_profiling_request(unsigned src_index, 
+          unsigned dst_index, Realm::ProfilingRequestSet &reqeusts, bool fill);
       // Report a profiling result for this operation
-      virtual void handle_profiling_response(
-                                  const Realm::ProfilingResponse &result);
+      virtual void handle_profiling_response(const ProfilingResponseBase *base,
+                                        const Realm::ProfilingResponse &result);
       virtual void handle_profiling_update(int count);
       // Compute the initial precondition for this operation
       virtual ApEvent compute_init_precondition(const TraceInfo &info);
@@ -1002,10 +1014,10 @@ namespace Legion {
       void check_privilege(void);
       void compute_parent_index(void);
       bool invoke_mapper(InstanceSet &mapped_instances);
-      virtual void add_copy_profiling_request(
-                            Realm::ProfilingRequestSet &reqeusts);
-      virtual void handle_profiling_response(
-                      const Realm::ProfilingResponse &response);
+      virtual void add_copy_profiling_request(unsigned src_index, 
+          unsigned dst_index, Realm::ProfilingRequestSet &reqeusts, bool fill);
+      virtual void handle_profiling_response(const ProfilingResponseBase *base,
+                                      const Realm::ProfilingResponse &response);
       virtual void handle_profiling_update(int count);
       virtual void pack_remote_operation(Serializer &rez,
                                          AddressSpaceID target) const;
@@ -1183,10 +1195,10 @@ namespace Legion {
       int perform_conversion(unsigned idx, const RegionRequirement &req,
                              std::vector<MappingInstance> &output,
                              InstanceSet &targets, bool is_reduce = false);
-      virtual void add_copy_profiling_request(
-                                      Realm::ProfilingRequestSet &reqeusts);
-      virtual void handle_profiling_response(
-                                const Realm::ProfilingResponse &response);
+      virtual void add_copy_profiling_request(unsigned src_index,
+          unsigned dst_index, Realm::ProfilingRequestSet &reqeusts, bool fill);
+      virtual void handle_profiling_response(const ProfilingResponseBase *base,
+                                      const Realm::ProfilingResponse &response);
       virtual void handle_profiling_update(int count);
       virtual void pack_remote_operation(Serializer &rez,
                                          AddressSpaceID target) const;
@@ -1219,6 +1231,10 @@ namespace Legion {
       int                                 profiling_priority;
       mutable int             outstanding_profiling_requests;
       mutable RtUserEvent                 profiling_reported;
+    protected:
+      bool                            possible_src_indirect_out_of_range;
+      bool                            possible_dst_indirect_out_of_range;
+      bool                            possible_dst_indirect_aliasing;
     };
 
     /**
@@ -1651,10 +1667,10 @@ namespace Legion {
                    get_acquired_instances_ref(void);
       virtual void record_reference_mutation_effect(RtEvent event);
     protected:
-      virtual void add_copy_profiling_request(
-                                          Realm::ProfilingRequestSet &reqeusts);
-      virtual void handle_profiling_response(
-                                    const Realm::ProfilingResponse &response);
+      virtual void add_copy_profiling_request(unsigned src_index,
+          unsigned dst_index, Realm::ProfilingRequestSet &reqeusts, bool fill);
+      virtual void handle_profiling_response(const ProfilingResponseBase *base,
+                                      const Realm::ProfilingResponse &response);
       virtual void handle_profiling_update(int count);
       virtual void pack_remote_operation(Serializer &rez,
                                          AddressSpaceID target) const;
@@ -1781,10 +1797,10 @@ namespace Legion {
       void check_acquire_privilege(void);
       void compute_parent_index(void);
       void invoke_mapper(void);
-      virtual void add_copy_profiling_request(
-                                          Realm::ProfilingRequestSet &reqeusts);
-      virtual void handle_profiling_response(
-                                    const Realm::ProfilingResponse &response);
+      virtual void add_copy_profiling_request(unsigned src_index,
+          unsigned dst_index, Realm::ProfilingRequestSet &reqeusts, bool fill);
+      virtual void handle_profiling_response(const ProfilingResponseBase *base,
+                                      const Realm::ProfilingResponse &response);
       virtual void handle_profiling_update(int count);
       virtual void pack_remote_operation(Serializer &rez,
                                          AddressSpaceID target) const;
@@ -1884,10 +1900,10 @@ namespace Legion {
       void check_release_privilege(void);
       void compute_parent_index(void);
       void invoke_mapper(void);
-      virtual void add_copy_profiling_request(
-                                          Realm::ProfilingRequestSet &reqeusts);
-      virtual void handle_profiling_response(
-                                    const Realm::ProfilingResponse &response);
+      virtual void add_copy_profiling_request(unsigned src_index,
+          unsigned dst_index, Realm::ProfilingRequestSet &reqeusts, bool fill);
+      virtual void handle_profiling_response(const ProfilingResponseBase *base,
+                                      const Realm::ProfilingResponse &response);
       virtual void handle_profiling_update(int count);
       virtual void pack_remote_operation(Serializer &rez,
                                          AddressSpaceID target) const;
@@ -2351,11 +2367,13 @@ namespace Legion {
       enum PendingPartitionKind
       {
         EQUAL_PARTITION = 0,
+        WEIGHT_PARTITION,
         UNION_PARTITION,
         INTERSECTION_PARTITION,
         INTERSECTION_WITH_REGION,
         DIFFERENCE_PARTITION,
         RESTRICTED_PARTITION,
+        BY_DOMAIN_PARTITION,
       };
       // Track pending partition operations as thunks
       class PendingPartitionThunk {
@@ -2378,6 +2396,22 @@ namespace Legion {
         virtual void perform_logging(PendingPartitionOp* op);
       protected:
         IndexPartition pid;
+        size_t granularity;
+      };
+      class WeightPartitionThunk : public PendingPartitionThunk {
+      public:
+        WeightPartitionThunk(IndexPartition id, const FutureMap &w, size_t g)
+          : pid(id), weights(w), granularity(g) { }
+        virtual ~WeightPartitionThunk(void) { }
+      public:
+        virtual ApEvent perform(PendingPartitionOp *op,
+                                RegionTreeForest *forest)
+        { return forest->create_partition_by_weights(op, pid, 
+                                        weights, granularity); }
+        virtual void perform_logging(PendingPartitionOp *op);
+      protected:
+        IndexPartition pid;
+        FutureMap weights;
         size_t granularity;
       };
       class UnionPartitionThunk : public PendingPartitionThunk {
@@ -2465,6 +2499,22 @@ namespace Legion {
         void *const transform;
         void *const extent;
       };
+      class FutureMapThunk : public PendingPartitionThunk {
+      public:
+        FutureMapThunk(IndexPartition id, const FutureMap &fm, bool inter)
+          : pid(id), future_map(fm), perform_intersections(inter) { }
+        virtual ~FutureMapThunk(void) { }
+      public:
+        virtual ApEvent perform(PendingPartitionOp *op,
+                                RegionTreeForest *forest)
+        { return forest->create_partition_by_domain(op, pid, future_map,
+                                              perform_intersections); }
+        virtual void perform_logging(PendingPartitionOp *op);
+      protected:
+        IndexPartition pid;
+        FutureMap future_map;
+        bool perform_intersections;
+      };
       class CrossProductThunk : public PendingPartitionThunk {
       public:
         CrossProductThunk(IndexPartition b, IndexPartition s, LegionColor c)
@@ -2528,6 +2578,8 @@ namespace Legion {
     public:
       void initialize_equal_partition(InnerContext *ctx,
                                       IndexPartition pid, size_t granularity);
+      void initialize_weight_partition(InnerContext *ctx, IndexPartition pid,
+                                const FutureMap &weights, size_t granularity);
       void initialize_union_partition(InnerContext *ctx,
                                       IndexPartition pid, 
                                       IndexPartition handle1,
@@ -2550,6 +2602,9 @@ namespace Legion {
                                            size_t transform_size,
                                            const void *extent,
                                            size_t extent_size);
+      void initialize_by_domain(InnerContext *ctx, IndexPartition pid,
+                                const FutureMap &future_map,
+                                bool perform_intersections);
       void initialize_cross_product(InnerContext *ctx, IndexPartition base, 
                                     IndexPartition source, LegionColor color);
       void initialize_index_space_union(InnerContext *ctx, IndexSpace target, 
@@ -2568,6 +2623,7 @@ namespace Legion {
                                         const std::vector<IndexSpace> &handles);
       void perform_logging();
     public:
+      virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
       virtual bool is_partition_op(void) const { return true; } 
@@ -2578,6 +2634,7 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
     protected:
       PendingPartitionThunk *thunk;
+      FutureMap future_map;
     };
 
     /**
@@ -2766,11 +2823,11 @@ namespace Legion {
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                    get_acquired_instances_ref(void);
       virtual void record_reference_mutation_effect(RtEvent event);
-      virtual void add_copy_profiling_request(
-                                        Realm::ProfilingRequestSet &reqeusts);
+      virtual void add_copy_profiling_request(unsigned src_index,
+          unsigned dst_index, Realm::ProfilingRequestSet &reqeusts, bool fill);
       // Report a profiling result for this operation
-      virtual void handle_profiling_response(
-                                  const Realm::ProfilingResponse &result);
+      virtual void handle_profiling_response(const ProfilingResponseBase *base,
+                                        const Realm::ProfilingResponse &result);
       virtual void handle_profiling_update(int count);
       virtual void pack_remote_operation(Serializer &rez,
                                          AddressSpaceID target) const;
@@ -2895,8 +2952,8 @@ namespace Legion {
       virtual int get_depth(void) const;
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                                        get_acquired_instances_ref(void);
-      virtual void add_copy_profiling_request(
-                                        Realm::ProfilingRequestSet &reqeusts);
+      virtual void add_copy_profiling_request(unsigned src_index,
+          unsigned dst_index, Realm::ProfilingRequestSet &reqeusts, bool fill);
     public:
       virtual bool has_prepipeline_stage(void) const
         { return need_prepipeline_stage; }
@@ -3116,8 +3173,8 @@ namespace Legion {
                                   const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
-      virtual void add_copy_profiling_request(
-                                        Realm::ProfilingRequestSet &reqeusts);
+      virtual void add_copy_profiling_request(unsigned src_index,
+          unsigned dst_index, Realm::ProfilingRequestSet &reqeusts, bool fill);
       virtual void pack_remote_operation(Serializer &rez,
                                          AddressSpaceID target) const;
     protected:
@@ -3155,11 +3212,40 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
       virtual void deferred_execute(void);
-      virtual void trigger_complete(void);
     protected:
       TimingMeasurement measurement;
       std::set<Future> preconditions;
       Future result;
+    };
+
+    /**
+     * \class AllReduceOp 
+     * Operation for reducing future maps down to futures
+     */
+    class AllReduceOp : public Operation {
+    public:
+      AllReduceOp(Runtime *rt);
+      AllReduceOp(const AllReduceOp &rhs);
+      virtual ~AllReduceOp(void);
+    public:
+      AllReduceOp& operator=(const AllReduceOp &rhs);
+    public:
+      Future initialize(InnerContext *ctx, const FutureMap &future_map,
+                        ReductionOpID redop, bool deterministic);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+    public:
+      virtual void trigger_dependence_analysis(void);
+      virtual void trigger_mapping(void);
+      virtual void deferred_execute(void);
+    protected:
+      FutureMap future_map;
+      const ReductionOp *redop; 
+      Future result;
+      bool deterministic;
     };
 
     /**
@@ -3209,8 +3295,8 @@ namespace Legion {
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking) = 0;
 
-      virtual void add_copy_profiling_request(
-                            Realm::ProfilingRequestSet &reqeusts);
+      virtual void add_copy_profiling_request(unsigned src_index,
+          unsigned dst_index, Realm::ProfilingRequestSet &reqeusts, bool fill);
       virtual void report_uninitialized_usage(const unsigned index,
                                               LogicalRegion handle,
                                               const RegionUsage usage,

@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@
 
 #include "realm/profiling.h"
 #include "realm/event_impl.h"
+#include "realm/atomics.h"
 
 #include "realm/network.h"
 
@@ -104,11 +105,13 @@ namespace Realm {
 
     GenEventImpl *finish_event;
     EventImpl::gen_t finish_gen;
-    int refcount;
+    atomic<int> refcount;
   public:
     Event get_finish_event(void) const;
   protected:
     typedef ProfilingMeasurements::OperationStatus Status;
+    atomic<Status::Result> state;
+
     ProfilingMeasurements::OperationStatus status;
     bool wants_timeline;
     ProfilingMeasurements::OperationTimeline timeline;
@@ -119,8 +122,8 @@ namespace Realm {
     ProfilingMeasurementCollection measurements;
 
     std::set<AsyncWorkItem *> all_work_items;
-    int pending_work_items;  // uses atomics so we don't have to take lock to check
-    int failed_work_items;
+    atomic<int> pending_work_items;  // uses atomics so we don't have to take lock to check
+    atomic<int> failed_work_items;
     
     friend std::ostream& operator<<(std::ostream& os, const Operation *op);
   };

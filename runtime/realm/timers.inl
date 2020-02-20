@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,11 +20,13 @@
 
 #include "realm/logging.h"
 
-#ifdef __MACH__
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_FREEBSD)
+#include <time.h>
+#endif
+
+#ifdef REALM_ON_MACOS
 #include <mach/clock.h>
 #include <mach/mach.h>
-#else
-#include <time.h>
 #endif
 
 namespace Realm {
@@ -35,53 +37,29 @@ namespace Realm {
 
   inline /*static*/ double Clock::current_time(bool absolute /*= false*/)
   {
-#ifdef __MACH__
-    mach_timespec_t ts;
-    clock_serv_t cclock;
-    host_get_clock_service(mach_host_self(), CALENDAR_CLOCK, &cclock);
-    clock_get_time(cclock, &ts);
-    mach_port_deallocate(mach_task_self(), cclock);
-#else
-    struct timespec ts;
-    clock_gettime(absolute ? CLOCK_REALTIME : CLOCK_MONOTONIC, &ts);
-#endif
-    double t = ts.tv_sec + (1e-9 * ts.tv_nsec);
-    if(!absolute)
-      t -= 1e-9 * zero_time;
-    return t;
+    return (current_time_in_nanoseconds(absolute) * 1e-9);
   }
   
   inline /*static*/ long long Clock::current_time_in_microseconds(bool absolute /*= false*/)
   {
-#ifdef __MACH__
-    mach_timespec_t ts;
-    clock_serv_t cclock;
-    host_get_clock_service(mach_host_self(), CALENDAR_CLOCK, &cclock);
-    clock_get_time(cclock, &ts);
-    mach_port_deallocate(mach_task_self(), cclock);
-#else
-    struct timespec ts;
-    clock_gettime(absolute ? CLOCK_REALTIME : CLOCK_MONOTONIC, &ts);
-#endif
-    long long t = (1000000LL * ts.tv_sec) + (ts.tv_nsec / 1000);
-    if(!absolute)
-      t -= zero_time / 1000;
-    return t;
+    return (current_time_in_nanoseconds(absolute) / 1000);
   }
   
   inline /*static*/ long long Clock::current_time_in_nanoseconds(bool absolute /*= false*/)
   {
-#ifdef __MACH__
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_FREEBSD)
+    struct timespec ts;
+    clock_gettime(absolute ? CLOCK_REALTIME : CLOCK_MONOTONIC, &ts);
+    long long t = (1000000000LL * ts.tv_sec) + ts.tv_nsec;
+#endif
+#ifdef REALM_ON_MACOS
     mach_timespec_t ts;
     clock_serv_t cclock;
     host_get_clock_service(mach_host_self(), CALENDAR_CLOCK, &cclock);
     clock_get_time(cclock, &ts);
     mach_port_deallocate(mach_task_self(), cclock);
-#else
-    struct timespec ts;
-    clock_gettime(absolute ? CLOCK_REALTIME : CLOCK_MONOTONIC, &ts);
-#endif
     long long t = (1000000000LL * ts.tv_sec) + ts.tv_nsec;
+#endif
     if(!absolute)
       t -= zero_time;
     return t;

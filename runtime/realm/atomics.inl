@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,6 +34,26 @@ namespace Realm {
   inline atomic<T>::atomic(T _value)
     : value(_value)
   {}
+
+  template <typename T>
+  inline atomic<T>::atomic(const atomic<T>& copy_from)
+#ifdef REALM_USE_STD_ATOMIC
+    : value(copy_from.value.load())
+#else
+    : value(copy_from.value)
+#endif
+  {}
+
+  template <typename T>
+  inline atomic<T>& atomic<T>::operator=(const atomic<T>& copy_from)
+  {
+#ifdef REALM_USE_STD_ATOMIC
+    value.store(copy_from.value.load());
+#else
+    value = copy_from.value;
+#endif
+    return *this;
+  }
 
   template <typename T>
   inline T atomic<T>::load(void) const

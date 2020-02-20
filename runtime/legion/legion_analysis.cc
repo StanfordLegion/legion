@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -847,6 +847,8 @@ namespace Legion {
                                                            NULL/*op*/, runtime);
             tpl->record_get_term_event(memo);
             Runtime::trigger_event(applied);
+            if (memo->get_origin_space() != runtime->address_space)
+              delete memo;
             break;
           }
         case REMOTE_TRACE_CREATE_USER_EVENT:
@@ -859,6 +861,8 @@ namespace Legion {
                                                            NULL/*op*/, runtime);
             tpl->record_create_ap_user_event(lhs, memo);
             Runtime::trigger_event(applied);
+            if (memo->get_origin_space() != runtime->address_space)
+              delete memo;
             break;
           }
         case REMOTE_TRACE_TRIGGER_EVENT:
@@ -926,6 +930,8 @@ namespace Legion {
             }
             else // didn't change so just trigger
               Runtime::trigger_event(done);
+            if (memo->get_origin_space() != runtime->address_space)
+              delete memo;
             break;
           }
         case REMOTE_TRACE_ISSUE_COPY:
@@ -1028,6 +1034,8 @@ namespace Legion {
             }
             else // lhs was unchanged
               Runtime::trigger_event(done);
+            if (memo->get_origin_space() != runtime->address_space)
+              delete memo;
             break;
           }
         case REMOTE_TRACE_ISSUE_FILL:
@@ -1124,6 +1132,8 @@ namespace Legion {
             }
             else // lhs was unchanged
               Runtime::trigger_event(done);
+            if (memo->get_origin_space() != runtime->address_space)
+              delete memo;
             break;
           }
         case REMOTE_TRACE_RECORD_OP_VIEW:
@@ -1150,6 +1160,8 @@ namespace Legion {
             tpl->record_op_view(memo, index, view, usage, 
                                 user_mask, update_validity);
             Runtime::trigger_event(applied);
+            if (memo->get_origin_space() != runtime->address_space)
+              delete memo;
             break;
           }
         case REMOTE_TRACE_SET_OP_SYNC:
@@ -1178,6 +1190,8 @@ namespace Legion {
             }
             else // lhs didn't change
               Runtime::trigger_event(done);
+            if (memo->get_origin_space() != runtime->address_space)
+              delete memo;
             break;
           }
         case REMOTE_TRACE_RECORD_MAPPER_OUTPUT:
@@ -1210,6 +1224,8 @@ namespace Legion {
             }
             tpl->record_mapper_output(memo, output, physical_instances);
             Runtime::trigger_event(applied);
+            if (memo->get_origin_space() != runtime->address_space)
+              delete memo;
             break;
           }
         case REMOTE_TRACE_GET_REDUCTION_EVENTS:
@@ -1240,6 +1256,8 @@ namespace Legion {
             }
             else
               Runtime::trigger_event(done);
+            if (memo->get_origin_space() != runtime->address_space)
+              delete memo;
             break;
           }
         case REMOTE_TRACE_SET_EFFECTS:
@@ -1252,6 +1270,8 @@ namespace Legion {
             derez.deserialize(postcondition);
             tpl->record_set_effects(memo, postcondition);
             Runtime::trigger_event(applied);
+            if (memo->get_origin_space() != runtime->address_space)
+              delete memo;
             break;
           }
         case REMOTE_TRACE_COMPLETE_REPLAY:
@@ -1264,6 +1284,8 @@ namespace Legion {
             derez.deserialize(ready_event);
             tpl->record_complete_replay(memo, ready_event);
             Runtime::trigger_event(applied);
+            if (memo->get_origin_space() != runtime->address_space)
+              delete memo;
             break;
           }
         default:
@@ -1437,6 +1459,7 @@ namespace Legion {
       {
         Memoizable *memo = 
           RemoteMemoizable::unpack_remote_memoizable(derez, op, runtime); 
+        // PhysicalTraceRecord takes possible ownership of memoizable
         PhysicalTraceRecorder *rec = 
           RemoteTraceRecorder::unpack_remote_recorder(derez, runtime, memo);
         return new TraceInfo(op, memo, rec, true/*recording*/);
@@ -1554,6 +1577,7 @@ namespace Legion {
         derez.deserialize(dst_index);
         bool update_validity;
         derez.deserialize(update_validity);
+        // PhysicalTraceRecord takes possible ownership of memoizable
         PhysicalTraceRecorder *recorder = 
           RemoteTraceRecorder::unpack_remote_recorder(derez, runtime, memo);
         return PhysicalTraceInfo(op, memo, index, dst_index,
@@ -1582,6 +1606,7 @@ namespace Legion {
         derez.deserialize(dst_index);
         bool update_validity;
         derez.deserialize(update_validity);
+        // PhysicalTraceRecord takes possible ownership of memoizable
         RemoteTraceRecorder *recorder = 
           RemoteTraceRecorder::unpack_remote_recorder(derez, runtime, memo);
         return PhysicalTraceInfo(op, memo, index, dst_index,
@@ -4291,8 +4316,8 @@ namespace Legion {
             for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it =
                   src_preconds.begin(); it != src_preconds.end(); it++)
             {
-              //if (it->second * dst_mask)
-              //  continue;
+              if (it->second * dst_mask)
+                continue;
               preconditions.insert(it->first);
             }
             if (!preconditions.empty())
@@ -4326,13 +4351,8 @@ namespace Legion {
       assert(!fills.empty());
       assert(!!fill_mask); 
 #endif
-      std::vector<CopySrcDstField> dst_fields;
-      target->copy_to(fill_mask, dst_fields, fills[0]->across_helper);
       const UniqueID op_id = op->get_unique_op_id();
-#ifdef LEGION_SPY
       PhysicalManager *manager = target->get_manager();
-      FieldSpaceNode *field_space_node = manager->field_space_node;
-#endif
       if (fills.size() == 1)
       {
         FillUpdate *update = fills[0];
@@ -4365,18 +4385,12 @@ namespace Legion {
           else
             tracing_dsts->insert(target, fill_mask);
         }
-        const ApEvent result = fill_expr->issue_fill(trace_info, dst_fields,
-                                                     fill_view->value->value,
-                                                   fill_view->value->value_size,
-#ifdef LEGION_SPY
-                                                     fill_view->fill_op_uid,
-                                                     field_space_node->handle,
-                                                     manager->tree_id,
-#endif
-                                                     precondition,
-                                                     predicate_guard,
-                                                     tracing_src_fills,
-                                                     tracing_dsts);
+        const ApEvent result = manager->fill_from(fill_view, precondition,
+                                                  predicate_guard, fill_expr,
+                                                  fill_mask, trace_info, 
+                                                  fills[0]->across_helper,
+                                                  tracing_src_fills, 
+                                                  tracing_dsts);
         // Record the fill result in the destination 
         if (result.exists())
         {
@@ -4455,18 +4469,12 @@ namespace Legion {
             tracing_src_fills->insert(it->first, fill_mask);
           }
           // See if we have any work to do for tracing
-          const ApEvent result = fill_expr->issue_fill(trace_info, dst_fields,
-                                                       it->first->value->value,
-                                                  it->first->value->value_size,
-#ifdef LEGION_SPY
-                                                       it->first->fill_op_uid,
-                                                       field_space_node->handle,
-                                                       manager->tree_id,
-#endif
-                                                       precondition,
-                                                       predicate_guard,
-                                                       tracing_src_fills,
-                                                       tracing_dsts);
+          const ApEvent result = manager->fill_from(it->first, precondition,
+                                                    predicate_guard, fill_expr,
+                                                    fill_mask, trace_info,
+                                                    fills[0]->across_helper,
+                                                    tracing_src_fills,
+                                                    tracing_dsts);
           if (result.exists())
           {
             target->add_copy_user(false/*reading*/,
@@ -4497,18 +4505,13 @@ namespace Legion {
       assert(!!copy_mask);
 #endif
       const UniqueID op_id = op->get_unique_op_id();
-#ifdef LEGION_SPY
-      PhysicalManager *manager = target->get_manager();
-      FieldSpaceNode *field_space_node = manager->field_space_node;
-#endif
+      PhysicalManager *target_manager = target->get_manager();
       for (std::map<InstanceView*,std::vector<CopyUpdate*> >::const_iterator
             cit = copies.begin(); cit != copies.end(); cit++)
       {
 #ifdef DEBUG_LEGION
         assert(!cit->second.empty());
 #endif
-        std::vector<CopySrcDstField> dst_fields, src_fields;
-        target->copy_to(copy_mask, dst_fields, cit->second[0]->across_helper);
         if (cit->second.size() == 1)
         {
           // Easy case of a single update copy
@@ -4518,7 +4521,6 @@ namespace Legion {
           assert(!(copy_mask - update->src_mask));
 #endif
           InstanceView *source = update->source;
-          source->copy_from(copy_mask, src_fields);
           IndexSpaceExpression *copy_expr = update->expr;
           // See if we have any work to do for tracing
           if (trace_info.recording)
@@ -4542,15 +4544,11 @@ namespace Legion {
             else
               tracing_dsts->insert(target, copy_mask);
           }
-          const ApEvent result = copy_expr->issue_copy(trace_info, 
-                                    dst_fields, src_fields, 
-#ifdef LEGION_SPY
-                                    field_space_node->handle,
-                                    source->get_manager()->tree_id,
-                                    manager->tree_id,
-#endif
-                                    precondition, predicate_guard,
-                                    update->redop, false/*fold*/,
+          const ApEvent result = target_manager->copy_from(
+                                    source->get_manager(), precondition,
+                                    predicate_guard, update->redop,
+                                    copy_expr, copy_mask, trace_info,
+                                    cit->second[0]->across_helper,
                                     tracing_srcs, tracing_dsts);
           if (result.exists())
           {
@@ -4620,8 +4618,6 @@ namespace Legion {
           {
             IndexSpaceExpression *copy_expr = (it->second.size() == 1) ? 
               *(it->second.begin()) : forest->union_index_spaces(it->second);
-            src_fields.clear();
-            it->first->copy_from(copy_mask, src_fields);
             // If we're tracing then get the source information
             if (trace_info.recording)
             {
@@ -4631,15 +4627,11 @@ namespace Legion {
                 tracing_srcs->clear();
               tracing_srcs->insert(it->first, copy_mask);
             }
-            const ApEvent result = copy_expr->issue_copy(trace_info, 
-                                    dst_fields, src_fields, 
-#ifdef LEGION_SPY
-                                    field_space_node->handle,
-                                    it->first->get_manager()->tree_id,
-                                    manager->tree_id,
-#endif
-                                    precondition, predicate_guard,
-                                    redop, false/*fold*/,
+            const ApEvent result = target_manager->copy_from(
+                                    it->first->get_manager(), precondition,
+                                    predicate_guard, redop, copy_expr,
+                                    copy_mask, trace_info, 
+                                    cit->second[0]->across_helper,
                                     tracing_srcs, tracing_dsts);
             if (result.exists())
             {
@@ -8211,39 +8203,6 @@ namespace Legion {
                                                     RtUserEvent deferral_event)
     //--------------------------------------------------------------------------
     {
-      // Handle a special case to avoid over-decomposing with larger index
-      // spaces unnecessarily. If it does need to be refined later then 
-      // we'll do that as part of an acquire operation. This is only
-      // a performance optimization for getting better BVH shapes and
-      // does not impact the correctness of the code
-      if (handle.exists() && (index_space_node != NULL) &&
-          (index_space_node->handle == handle))
-      {
-#ifdef DEBUG_LEGION
-        assert(!deferral_event.exists());
-#endif
-        // Just record this as one of the results
-        if (source != runtime->address_space)
-        {
-          // Not local so we need to send a message
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(did);
-            rez.serialize(ray_mask);
-            rez.serialize(target);
-            rez.serialize(trace_done);
-          }
-          runtime->send_equivalence_set_ray_trace_response(source, rez);
-          return;
-        }
-        else // Local so we can update this directly
-        {
-          target->record_equivalence_set(this, ray_mask);
-          Runtime::trigger_event(trace_done);
-          return;
-        }
-      }
       RegionTreeForest *forest = runtime->forest;
 #ifdef DEBUG_LEGION
       assert(expr != NULL);
@@ -8317,6 +8276,37 @@ namespace Legion {
                                  trace_done, deferral_event, ray_mask);
           runtime->issue_runtime_meta_task(args,
                             LG_THROUGHPUT_DEFERRED_PRIORITY, transition_event);
+          return;
+        }
+        // Handle the special case where we are exactly representing the
+        // index space and we have not been refined yet. This a performance
+        // optimization only and is not required for correctness
+        if (handle.exists() && (index_space_node != NULL) &&
+            (index_space_node->handle == handle) && 
+            (subsets.empty() || (ray_mask * subsets.get_valid_mask())))
+        {
+          // Just record this as one of the results
+          if (source != runtime->address_space)
+          {
+            // Not local so we need to send a message
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(did);
+              rez.serialize(ray_mask);
+              rez.serialize(target);
+              rez.serialize(trace_done);
+            }
+            runtime->send_equivalence_set_ray_trace_response(source, rez);
+          }
+          else // Local so we can update this directly
+          {
+            target->record_equivalence_set(this, ray_mask);
+            Runtime::trigger_event(trace_done);
+          } 
+          // We're done with our traversal so trigger the deferral event
+          if (deferral_event.exists())
+            Runtime::trigger_event(deferral_event);
           return;
         }
         // First check to see which fields are in a disjoint refinement

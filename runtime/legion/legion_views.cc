@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -2330,15 +2330,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return !(space_mask - manager->layout->allocated_fields);
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::copy_field(FieldID fid,
-                                      std::vector<CopySrcDstField> &copy_fields)
-    //--------------------------------------------------------------------------
-    {
-      std::vector<FieldID> local_fields(1,fid);
-      manager->compute_copy_offsets(local_fields, copy_fields); 
     }
 
     //--------------------------------------------------------------------------
@@ -4826,7 +4817,7 @@ namespace Legion {
     {
       // Get the destination fields for this copy
       if (across_helper == NULL)
-        manager->find_field_offsets(copy_mask, dst_fields);
+        manager->compute_copy_offsets(copy_mask, dst_fields);
       else
         across_helper->compute_across_offsets(copy_mask, dst_fields);
     }
@@ -4839,7 +4830,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(FieldMask::pop_count(copy_mask) == 1); // only one field
 #endif
-      manager->find_field_offsets(copy_mask, src_fields);
+      manager->compute_copy_offsets(copy_mask, src_fields);
     }
 
     //--------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -208,6 +208,10 @@ namespace Legion {
       virtual void send_view(AddressSpaceID target) = 0; 
     public:
       // Getting field information for performing copies
+      // We used to use these calls for all copy calls, but
+      // now they are primarily used by region-to-region copy
+      // calls as we use the extra layer of indirection below
+      // to issue calls for collective cases
       virtual void copy_to(const FieldMask &copy_mask, 
                    std::vector<CopySrcDstField> &dst_fields,
                            CopyAcrossHelper *across_helper = NULL) = 0;
@@ -541,8 +545,6 @@ namespace Legion {
       const FieldMask& get_physical_mask(void) const;
     public:
       virtual bool has_space(const FieldMask &space_mask) const;
-    public:
-      void copy_field(FieldID fid, std::vector<CopySrcDstField> &infos);
     public:
       virtual void copy_to(const FieldMask &copy_mask, 
                    std::vector<CopySrcDstField> &dst_fields,

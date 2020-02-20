@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2019 Stanford University
+# Copyright 2020 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,8 +17,8 @@
 
 from __future__ import print_function
 
-import legion
-from legion import task, Fspace, Ispace, Region, RW
+import pygion
+from pygion import task, Fspace, Ispace, Region, RW
 import numpy
 
 # Define a Python task. This task takes one argument: a region. The
@@ -49,17 +49,17 @@ def main():
     I = Ispace([4, 4])
 
     # Create a field space with a single field x of type float64.
-    F = Fspace({'x': legion.float64})
+    F = Fspace({'x': pygion.float64})
 
     # Create a region from I and F.
     R = Region(I, F)
 
     # This could have also been done with the following shortand, and
     # Legion will automatically create an index space and field space.
-    R2 = Region([4, 4], {'x': legion.float64})
+    R2 = Region([4, 4], {'x': pygion.float64})
 
     # Fill the field x of region R with an initial value.
-    legion.fill(R, 'x', 101)
+    pygion.fill(R, 'x', 101)
 
     # Launch two tasks. The second task will depend on the first,
     # since they both write R.

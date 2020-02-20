@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -419,7 +419,7 @@ namespace Realm {
     template <typename S>
     /*static*/ bool SerializationHelper<T,true>::serialize_scalar(S& s, const T& data)
     {
-      return (s.enforce_alignment(__alignof__(T)) &&
+      return (s.enforce_alignment(REALM_ALIGNOF(T)) &&
 	      s.append_serializable(data));
     }
 
@@ -427,7 +427,7 @@ namespace Realm {
     template <typename S>
     /*static*/ bool SerializationHelper<T,true>::deserialize_scalar(S& s, T& data)
     {
-      return (s.enforce_alignment(__alignof__(T)) &&
+      return (s.enforce_alignment(REALM_ALIGNOF(T)) &&
 	      s.extract_serializable(data));
     }
 
@@ -437,7 +437,7 @@ namespace Realm {
     {
       size_t c = v.size();
       return ((s << c) &&
-	      s.enforce_alignment(__alignof__(T)) &&
+	      s.enforce_alignment(REALM_ALIGNOF(T)) &&
 	      s.append_bytes(&v[0], sizeof(T) * c));
     }
 
@@ -450,7 +450,7 @@ namespace Realm {
       // TODO: sanity-check size?
       v.resize(c);
       return (
-	      s.enforce_alignment(__alignof__(T)) &&
+	      s.enforce_alignment(REALM_ALIGNOF(T)) &&
 	      s.extract_bytes(&v[0], sizeof(T) * c));
     }
 

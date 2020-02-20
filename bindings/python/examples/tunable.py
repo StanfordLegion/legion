@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2019 Stanford University
+# Copyright 2020 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,12 +17,12 @@
 
 from __future__ import print_function
 
-import legion
-from legion import task
+import pygion
+from pygion import task
 
 @task
 def main():
-    nprocs = legion.Tunable.select(legion.Tunable.GLOBAL_PYS).get()
+    nprocs = pygion.Tunable.select(pygion.Tunable.GLOBAL_PYS).get()
     print("Number of Python processors: %s" % nprocs)
 
 if __name__ == '__main__':

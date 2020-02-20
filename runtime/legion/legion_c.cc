@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University
+/* Copyright 2020 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1144,6 +1144,54 @@ legion_index_partition_create_equal(legion_runtime_t runtime_,
 }
 
 legion_index_partition_t
+legion_index_partition_create_by_weights(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_space_t parent_,
+  legion_domain_point_t *colors_,
+  int *weights_,
+  size_t num_colors,
+  legion_index_space_t color_space_,
+  size_t granularity /* = 1 */,
+  int color /* = AUTO_GENERATE_ID */)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexSpace parent = CObjectWrapper::unwrap(parent_);
+  IndexSpace color_space = CObjectWrapper::unwrap(color_space_);
+  std::map<DomainPoint,int> weights;
+  for (unsigned idx = 0; idx < num_colors; idx++)
+    weights[CObjectWrapper::unwrap(colors_[idx])] = weights_[idx]; 
+
+  IndexPartition ip =
+    runtime->create_partition_by_weights(ctx, parent, weights, 
+                              color_space, granularity, color);
+  return CObjectWrapper::wrap(ip);
+}
+
+legion_index_partition_t
+legion_index_partition_create_by_weights_future_map(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_space_t parent_,
+  legion_future_map_t future_map_,
+  legion_index_space_t color_space_,
+  size_t granularity /* = 1 */,
+  int color /* = AUTO_GENERATE_ID */)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexSpace parent = CObjectWrapper::unwrap(parent_);
+  FutureMap *future_map = CObjectWrapper::unwrap(future_map_);
+  IndexSpace color_space = CObjectWrapper::unwrap(color_space_);
+
+  IndexPartition ip =
+    runtime->create_partition_by_weights(ctx, parent, *future_map,
+                                  color_space, granularity, color);
+  return CObjectWrapper::wrap(ip);
+}
+
+legion_index_partition_t
 legion_index_partition_create_by_union(
   legion_runtime_t runtime_,
   legion_context_t ctx_,
@@ -1237,13 +1285,67 @@ legion_index_partition_create_by_difference(
 }
 
 legion_index_partition_t
+legion_index_partition_create_by_domain(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_space_t parent_,
+  legion_domain_point_t *colors_,
+  legion_domain_t *domains_,
+  size_t num_color_domains,
+  legion_index_space_t color_space_,
+  bool perform_intersections /* = true */,
+  legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
+  int color /* = AUTO_GENERATE_ID */)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexSpace parent = CObjectWrapper::unwrap(parent_);
+  IndexSpace color_space = CObjectWrapper::unwrap(color_space_);
+  std::map<DomainPoint,Domain> domains;
+  for (unsigned idx = 0; idx < num_color_domains; idx++)
+    domains[CObjectWrapper::unwrap(colors_[idx])] = 
+      CObjectWrapper::unwrap(domains_[idx]);
+
+  IndexPartition ip =
+    runtime->create_partition_by_domain(ctx, parent, domains, 
+        color_space, perform_intersections, part_kind, color);
+  return CObjectWrapper::wrap(ip);
+}
+
+legion_index_partition_t
+legion_index_partition_create_by_domain_future_map(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_space_t parent_,
+  legion_future_map_t future_map_,
+  legion_index_space_t color_space_,
+  bool perform_intersections,
+  legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
+  int color /* = AUTO_GENERATE_ID */)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexSpace parent = CObjectWrapper::unwrap(parent_);
+  FutureMap *future_map = CObjectWrapper::unwrap(future_map_);
+  IndexSpace color_space = CObjectWrapper::unwrap(color_space_);
+
+  IndexPartition ip =
+    runtime->create_partition_by_domain(ctx, parent, *future_map,
+        color_space, perform_intersections, part_kind, color);
+  return CObjectWrapper::wrap(ip);
+}
+
+legion_index_partition_t
 legion_index_partition_create_by_field(legion_runtime_t runtime_,
                                        legion_context_t ctx_,
                                        legion_logical_region_t handle_,
                                        legion_logical_region_t parent_,
                                        legion_field_id_t fid,
                                        legion_index_space_t color_space_,
-                                       int color /* = AUTO_GENERATE_ID */)
+                                       int color /* = AUTO_GENERATE_ID */,
+                                       legion_mapper_id_t id /* = 0 */,
+                                       legion_mapping_tag_id_t tag /* = 0 */,
+                                       legion_partition_kind_t part_kind /* = DISJOINT_KIND */)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
@@ -1253,7 +1355,7 @@ legion_index_partition_create_by_field(legion_runtime_t runtime_,
 
   IndexPartition ip =
     runtime->create_partition_by_field(ctx, handle, parent, fid, color_space,
-                                       color);
+                                       color, id, tag, part_kind);
 
   return CObjectWrapper::wrap(ip);
 }
@@ -1268,7 +1370,9 @@ legion_index_partition_create_by_image(
   legion_field_id_t fid,
   legion_index_space_t color_space_,
   legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-  int color /* = AUTO_GENERATE_ID */)
+  int color /* = AUTO_GENERATE_ID */,
+  legion_mapper_id_t id /* = 0 */,
+  legion_mapping_tag_id_t tag /* = 0 */)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
@@ -1279,7 +1383,7 @@ legion_index_partition_create_by_image(
 
   IndexPartition ip =
     runtime->create_partition_by_image(
-      ctx, handle, projection, parent, fid, color_space, part_kind, color);
+      ctx, handle, projection, parent, fid, color_space, part_kind, color, id, tag);
 
   return CObjectWrapper::wrap(ip);
 }
@@ -1294,7 +1398,9 @@ legion_index_partition_create_by_preimage(
   legion_field_id_t fid,
   legion_index_space_t color_space_,
   legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-  int color /* = AUTO_GENERATE_ID */)
+  int color /* = AUTO_GENERATE_ID */,
+  legion_mapper_id_t id /* = 0 */,
+  legion_mapping_tag_id_t tag /* = 0 */)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
@@ -1305,7 +1411,7 @@ legion_index_partition_create_by_preimage(
 
   IndexPartition ip =
     runtime->create_partition_by_preimage(
-      ctx, projection, handle, parent, fid, color_space, part_kind, color);
+      ctx, projection, handle, parent, fid, color_space, part_kind, color, id, tag);
 
   return CObjectWrapper::wrap(ip);
 }
@@ -1320,7 +1426,9 @@ legion_index_partition_create_by_image_range(
   legion_field_id_t fid,
   legion_index_space_t color_space_,
   legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-  int color /* = AUTO_GENERATE_ID */)
+  int color /* = AUTO_GENERATE_ID */,
+  legion_mapper_id_t id /* = 0 */,
+  legion_mapping_tag_id_t tag /* = 0 */)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
@@ -1331,7 +1439,7 @@ legion_index_partition_create_by_image_range(
 
   IndexPartition ip =
     runtime->create_partition_by_image_range(
-      ctx, handle, projection, parent, fid, color_space, part_kind, color);
+      ctx, handle, projection, parent, fid, color_space, part_kind, color, id, tag);
 
   return CObjectWrapper::wrap(ip);
 }
@@ -1346,7 +1454,9 @@ legion_index_partition_create_by_preimage_range(
   legion_field_id_t fid,
   legion_index_space_t color_space_,
   legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-  int color /* = AUTO_GENERATE_ID */)
+  int color /* = AUTO_GENERATE_ID */,
+  legion_mapper_id_t id /* = 0 */,
+  legion_mapping_tag_id_t tag /* = 0 */)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
@@ -1357,7 +1467,7 @@ legion_index_partition_create_by_preimage_range(
 
   IndexPartition ip =
     runtime->create_partition_by_preimage_range(
-      ctx, projection, handle, parent, fid, color_space, part_kind, color);
+      ctx, projection, handle, parent, fid, color_space, part_kind, color, id, tag);
 
   return CObjectWrapper::wrap(ip);
 }
@@ -2454,6 +2564,19 @@ legion_argument_map_destroy(legion_argument_map_t map_)
 // Predicate Operations
 //------------------------------------------------------------------------
 
+legion_predicate_t
+legion_predicate_create(legion_runtime_t runtime_,
+                        legion_context_t ctx_,
+                        legion_future_t f_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  Future *f = CObjectWrapper::unwrap(f_);
+
+  Predicate result = runtime->create_predicate(ctx, f);
+  return CObjectWrapper::wrap(new Predicate(result));
+}
+
 void
 legion_predicate_destroy(legion_predicate_t handle_)
 {
@@ -2770,6 +2893,21 @@ legion_future_map_get_future(legion_future_map_t fm_,
   return CObjectWrapper::wrap(new Future(fm->get_future(dp)));
 }
 
+legion_future_t
+legion_reduce_future_map(legion_runtime_t runtime_,
+                         legion_context_t ctx_,
+                         legion_future_map_t fm_,
+                         legion_reduction_op_id_t redop,
+                         bool deterministic)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  FutureMap *fm = CObjectWrapper::unwrap(fm_);
+
+  return CObjectWrapper::wrap(new Future(
+        runtime->reduce_future_map(ctx, *fm, redop, deterministic)));
+}
+
 // -----------------------------------------------------------------------
 // Deferred Buffer Operations
 // -----------------------------------------------------------------------
@@ -3055,6 +3193,24 @@ legion_task_launcher_set_sharding_space(legion_task_launcher_t launcher_,
   IndexSpace is = CObjectWrapper::unwrap(is_);
 
   launcher->sharding_space = is;
+}
+
+void
+legion_task_launcher_set_mapper(legion_task_launcher_t launcher_,
+                                legion_mapper_id_t mapper_id)
+{
+  TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->map_id = mapper_id;
+}
+
+void
+legion_task_launcher_set_mapping_tag(legion_task_launcher_t launcher_,
+                                     legion_mapping_tag_id_t tag)
+{
+  TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->tag = tag;
 }
 
 legion_index_launcher_t
@@ -3402,6 +3558,24 @@ legion_index_launcher_set_sharding_space(legion_index_launcher_t launcher_,
   IndexSpace is = CObjectWrapper::unwrap(is_);
 
   launcher->sharding_space = is;
+}
+
+void
+legion_index_launcher_set_mapper(legion_index_launcher_t launcher_,
+                                 legion_mapper_id_t mapper_id)
+{
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->map_id = mapper_id;
+}
+
+void
+legion_index_launcher_set_mapping_tag(legion_index_launcher_t launcher_,
+                                      legion_mapping_tag_id_t tag)
+{
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->tag = tag;
 }
 
 // -----------------------------------------------------------------------
@@ -4628,12 +4802,12 @@ void
 legion_runtime_begin_trace(legion_runtime_t runtime_,
                            legion_context_t ctx_,
                            legion_trace_id_t tid,
-                           bool memoize)
+                           bool logical_only)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
 
-  runtime->begin_trace(ctx, tid, memoize);
+  runtime->begin_trace(ctx, tid, logical_only);
 }
 
 void
@@ -4781,6 +4955,15 @@ legion_physical_region_destroy(legion_physical_region_t handle_)
   PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
 
   delete handle;
+}
+
+legion_physical_region_t
+legion_physical_region_copy(legion_physical_region_t handle_)
+{
+  PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
+
+  PhysicalRegion *result = new PhysicalRegion(*handle);
+  return CObjectWrapper::wrap(result);
 }
 
 bool
@@ -5371,6 +5554,12 @@ int
 legion_task_get_depth(legion_task_t task_)
 {
   return CObjectWrapper::unwrap(task_)->get_depth();
+}
+
+legion_mapper_id_t
+legion_task_get_mapper(legion_task_t task_)
+{
+  return CObjectWrapper::unwrap(task_)->map_id;
 }
 
 legion_mapping_tag_id_t

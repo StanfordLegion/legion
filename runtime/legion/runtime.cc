@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,6 +31,7 @@
 #include "mappers/test_mapper.h"
 #include "mappers/replay_mapper.h"
 #include "mappers/debug_mapper.h"
+#include "realm/cmdline.h"
 
 #include <unistd.h> // sleep for warnings
 
@@ -621,7 +622,14 @@ namespace Legion {
       }
       if (subscription_event.exists())
       {
-        Runtime::trigger_event(subscription_event);
+        // Be very careful here, it might look like you can trigger the
+        // subscription event immediately on the owner node but you can't
+        // because we still rely on futures to propagate privileges when
+        // return region tree types
+        if (future_complete != subscription_event)
+          Runtime::trigger_event(subscription_event, future_complete);
+        else
+          Runtime::trigger_event(subscription_event);
         subscription_event = ApUserEvent::NO_AP_USER_EVENT;
         if (remove_base_resource_ref(RUNTIME_REF))
           assert(false); // should always hold a reference from caller
@@ -1070,7 +1078,11 @@ namespace Legion {
                                  DistributedID did, AddressSpaceID owner_space)
       : DistributedCollectable(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC),  owner_space), 
-        context(ctx), op(o), op_gen(o->get_generation()),
+        context(ctx), op(o), op_gen(o->get_generation()), 
+        op_depth(o->get_context()->get_depth()),
+#ifdef LEGION_SPY
+        op_uid(o->get_unique_op_id()),
+#endif
         ready_event(o->get_completion_event())
     //--------------------------------------------------------------------------
     {
@@ -1087,7 +1099,11 @@ namespace Legion {
       : DistributedCollectable(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC), 
           owner_space, register_now), 
-        context(ctx), op(NULL), op_gen(0), ready_event(ready)
+        context(ctx), op(NULL), op_gen(0), op_depth(0),
+#ifdef LEGION_SPY
+        op_uid(0),
+#endif
+        ready_event(ready)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_GC
@@ -1098,7 +1114,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMapImpl::FutureMapImpl(const FutureMapImpl &rhs)
-      : DistributedCollectable(rhs), context(NULL), op(NULL), op_gen(0)
+      : DistributedCollectable(rhs), context(NULL), op(NULL), op_gen(0), 
+        op_depth(0)
+#ifdef LEGION_SPY
+        , op_uid(0)
+#endif
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1234,6 +1254,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    FutureImpl* FutureMapImpl::find_future(const DomainPoint &point)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock fm_lock(future_map_lock,1,false/*exclusive*/);
+      std::map<DomainPoint,Future>::const_iterator finder = futures.find(point);
+      if (finder != futures.end())
+        return finder->second.impl;
+      else
+        return NULL;
+    }
+
+    //--------------------------------------------------------------------------
     void FutureMapImpl::set_future(const DomainPoint &point, FutureImpl *impl,
                                    ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
@@ -1366,6 +1398,32 @@ namespace Legion {
 #endif
 
     //--------------------------------------------------------------------------
+    void FutureMapImpl::register_dependence(Operation *consumer_op)
+    //--------------------------------------------------------------------------
+    {
+      if (op == NULL)
+        return;
+      // Only record dependences on things from the same context
+      // We know futures can never flow up the task tree so the
+      // only way they have the same depth is if they are from 
+      // the same parent context
+      TaskContext *context = consumer_op->get_context();
+      const int consumer_depth = context->get_depth();
+#ifdef DEBUG_LEGION
+      assert(consumer_depth >= op_depth);
+#endif
+      if (consumer_depth == op_depth)
+      {
+        consumer_op->register_dependence(op, op_gen);
+#ifdef LEGION_SPY
+        LegionSpy::log_mapping_dependence(
+            context->get_unique_id(), op_uid, 0,
+            consumer_op->get_unique_op_id(), 0, TRUE_DEPENDENCE);
+#endif
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void FutureMapImpl::record_future_map_registered(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
@@ -1455,13 +1513,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalRegionImpl::PhysicalRegionImpl(const RegionRequirement &r, 
-                                   ApEvent ready, bool m, TaskContext *ctx, 
+                                   ApEvent mapped, bool m, TaskContext *ctx, 
                                    MapperID mid, MappingTagID t, 
                                    bool leaf, bool virt, Runtime *rt)
       : Collectable(), runtime(rt), context(ctx), map_id(mid), tag(t),
         leaf_region(leaf), virtual_mapped(virt), 
         replaying((ctx != NULL) ? ctx->owner_task->is_replaying() : false),
-        ready_event(ready), req(r), mapped(m), valid(false), 
+        mapped_event(mapped), req(r), mapped(m), valid(false), 
         trigger_on_unmap(false), made_accessor(false)
     //--------------------------------------------------------------------------
     {
@@ -1471,7 +1529,7 @@ namespace Legion {
     PhysicalRegionImpl::PhysicalRegionImpl(const PhysicalRegionImpl &rhs)
       : Collectable(), runtime(NULL), context(NULL), map_id(0), tag(0),
         leaf_region(false), virtual_mapped(false), replaying(false),
-        ready_event(ApEvent::NO_AP_EVENT), mapped(false), valid(false), 
+        mapped_event(ApEvent::NO_AP_EVENT), mapped(false), valid(false), 
         trigger_on_unmap(false), made_accessor(false)
     //--------------------------------------------------------------------------
     {
@@ -1532,10 +1590,7 @@ namespace Legion {
               context->get_task_name(), context->get_unique_id(),
               (warning_string == NULL) ? "" : warning_string)
       }
-      // If we've already gone through this process we're good
-      if (valid)
-        return;
-      if (!ready_event.has_triggered())
+      if (!mapped_event.has_triggered())
       {
         if (warn && !silence_warnings && (source != NULL))
           REPORT_LEGION_WARNING(LEGION_WARNING_MISSING_REGION_WAIT, 
@@ -1547,14 +1602,19 @@ namespace Legion {
               (warning_string == NULL) ? "" : warning_string)
         if (context != NULL)
           context->begin_task_wait(false/*from runtime*/);
-        ready_event.wait();
+        mapped_event.wait();
         if (context != NULL)
           context->end_task_wait();
       }
+      // If we've already gone through this process we're good
+      if (valid)
+        return;
       // Now wait for the reference to be ready
       std::set<ApEvent> wait_on;
       references.update_wait_on_events(wait_on);
-      ApEvent ref_ready = Runtime::merge_events(NULL, wait_on);
+      ApEvent ref_ready;
+      if (!wait_on.empty())
+        ref_ready = Runtime::merge_events(NULL, wait_on);
       bool poisoned;
       if (!ref_ready.has_triggered_faultaware(poisoned))
       {
@@ -1576,10 +1636,12 @@ namespace Legion {
     {
       if (valid)
         return true;
-      if (ready_event.has_triggered())
+      if (mapped_event.has_triggered())
       {
         std::set<ApEvent> wait_on;
         references.update_wait_on_events(wait_on);
+        if (wait_on.empty())
+          return true;
         ApEvent ref_ready = Runtime::merge_events(NULL, wait_on);
         return ref_ready.has_triggered();
       }
@@ -1768,9 +1830,14 @@ namespace Legion {
         // Can only do the trigger when we have actually ready
         std::set<ApEvent> wait_on;
         references.update_wait_on_events(wait_on);
-        wait_on.insert(ready_event);
-        Runtime::trigger_event(termination_event,
-                               Runtime::merge_events(NULL, wait_on));
+        if (!wait_on.empty())
+        {
+          wait_on.insert(mapped_event);
+          Runtime::trigger_event(termination_event,
+                                 Runtime::merge_events(NULL, wait_on));
+        }
+        else
+          Runtime::trigger_event(termination_event, mapped_event);
       }
       valid = false;
       mapped = false;
@@ -1794,13 +1861,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalRegionImpl::remap_region(ApEvent new_ready)
+    void PhysicalRegionImpl::remap_region(ApEvent new_mapped)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!mapped);
 #endif
-      ready_event = new_ready;
+      mapped_event = new_mapped;
       mapped = true;
     }
 
@@ -1838,10 +1905,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent PhysicalRegionImpl::get_ready_event(void) const
+    ApEvent PhysicalRegionImpl::get_mapped_event(void) const
     //--------------------------------------------------------------------------
     {
-      return ready_event;
+      return mapped_event;
     }
 
     //--------------------------------------------------------------------------
@@ -2309,22 +2376,21 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // MPI Legion Handshake Impl 
+    // Legion Handshake Impl 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    MPILegionHandshakeImpl::MPILegionHandshakeImpl(bool init_mpi, int mpi_parts,
+    LegionHandshakeImpl::LegionHandshakeImpl(bool init_ext, int ext_parts,
                                                    int legion_parts)
-      : init_in_MPI(init_mpi), mpi_participants(mpi_parts), 
+      : init_in_ext(init_ext), ext_participants(ext_parts), 
         legion_participants(legion_parts)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    MPILegionHandshakeImpl::MPILegionHandshakeImpl(
-                                              const MPILegionHandshakeImpl &rhs)
-      : init_in_MPI(false), mpi_participants(-1), legion_participants(-1)
+    LegionHandshakeImpl::LegionHandshakeImpl(const LegionHandshakeImpl &rhs)
+      : init_in_ext(false), ext_participants(-1), legion_participants(-1)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -2332,16 +2398,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    MPILegionHandshakeImpl::~MPILegionHandshakeImpl(void)
+    LegionHandshakeImpl::~LegionHandshakeImpl(void)
     //--------------------------------------------------------------------------
     {
-      mpi_wait_barrier.get_barrier().destroy_barrier();
+      ext_wait_barrier.get_barrier().destroy_barrier();
       legion_wait_barrier.get_barrier().destroy_barrier();
     }
 
     //--------------------------------------------------------------------------
-    MPILegionHandshakeImpl& MPILegionHandshakeImpl::operator=(
-                                              const MPILegionHandshakeImpl &rhs)
+    LegionHandshakeImpl& LegionHandshakeImpl::operator=(
+                                                 const LegionHandshakeImpl &rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -2350,50 +2416,50 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MPILegionHandshakeImpl::initialize(void)
+    void LegionHandshakeImpl::initialize(void)
     //--------------------------------------------------------------------------
     {
-      mpi_wait_barrier = PhaseBarrier(ApBarrier(
+      ext_wait_barrier = PhaseBarrier(ApBarrier(
             Realm::Barrier::create_barrier(legion_participants)));
       legion_wait_barrier = PhaseBarrier(ApBarrier(
-            Realm::Barrier::create_barrier(mpi_participants)));
-      mpi_arrive_barrier = legion_wait_barrier;
-      legion_arrive_barrier = mpi_wait_barrier;
+            Realm::Barrier::create_barrier(ext_participants)));
+      ext_arrive_barrier = legion_wait_barrier;
+      legion_arrive_barrier = ext_wait_barrier;
       // Advance the two wait barriers
-      Runtime::advance_barrier(mpi_wait_barrier);
+      Runtime::advance_barrier(ext_wait_barrier);
       Runtime::advance_barrier(legion_wait_barrier);
       // Whoever is waiting first, we have to advance their arrive barriers
-      if (init_in_MPI)
+      if (init_in_ext)
       {
         Runtime::phase_barrier_arrive(legion_arrive_barrier, legion_participants);
-        Runtime::advance_barrier(mpi_wait_barrier);
+        Runtime::advance_barrier(ext_wait_barrier);
       }
       else
       {
-        Runtime::phase_barrier_arrive(mpi_arrive_barrier, mpi_participants);
+        Runtime::phase_barrier_arrive(ext_arrive_barrier, ext_participants);
         Runtime::advance_barrier(legion_wait_barrier);
       }
     }
 
     //--------------------------------------------------------------------------
-    void MPILegionHandshakeImpl::mpi_handoff_to_legion(void)
+    void LegionHandshakeImpl::ext_handoff_to_legion(void)
     //--------------------------------------------------------------------------
     {
       // Just have to do our arrival
-      Runtime::phase_barrier_arrive(mpi_arrive_barrier, 1);
+      Runtime::phase_barrier_arrive(ext_arrive_barrier, 1);
     }
 
     //--------------------------------------------------------------------------
-    void MPILegionHandshakeImpl::mpi_wait_on_legion(void)
+    void LegionHandshakeImpl::ext_wait_on_legion(void)
     //--------------------------------------------------------------------------
     {
       // When we get this call, we know we have done 
       // all the arrivals so we can advance it
-      Runtime::advance_barrier(mpi_arrive_barrier);
-      // Wait for mpi to be ready to run
+      Runtime::advance_barrier(ext_arrive_barrier);
+      // Wait for ext  to be ready to run
       // Note we use the external wait to be sure 
       // we don't get drafted by the Realm runtime
-      ApBarrier previous = Runtime::get_previous_phase(mpi_wait_barrier);
+      ApBarrier previous = Runtime::get_previous_phase(ext_wait_barrier);
       if (!previous.has_triggered())
       {
         // We can't call external wait directly on the barrier
@@ -2404,11 +2470,11 @@ namespace Legion {
         wait_on.external_wait();
       }
       // Now we can advance our wait barrier
-      Runtime::advance_barrier(mpi_wait_barrier);
+      Runtime::advance_barrier(ext_wait_barrier);
     }
 
     //--------------------------------------------------------------------------
-    void MPILegionHandshakeImpl::legion_handoff_to_mpi(void)
+    void LegionHandshakeImpl::legion_handoff_to_ext(void)
     //--------------------------------------------------------------------------
     {
       // Just have to do our arrival
@@ -2416,7 +2482,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MPILegionHandshakeImpl::legion_wait_on_mpi(void)
+    void LegionHandshakeImpl::legion_wait_on_ext(void)
     //--------------------------------------------------------------------------
     {
       Runtime::advance_barrier(legion_arrive_barrier);
@@ -2429,21 +2495,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhaseBarrier MPILegionHandshakeImpl::get_legion_wait_phase_barrier(void)
+    PhaseBarrier LegionHandshakeImpl::get_legion_wait_phase_barrier(void)
     //--------------------------------------------------------------------------
     {
       return legion_wait_barrier;
     }
 
     //--------------------------------------------------------------------------
-    PhaseBarrier MPILegionHandshakeImpl::get_legion_arrive_phase_barrier(void)
+    PhaseBarrier LegionHandshakeImpl::get_legion_arrive_phase_barrier(void)
     //--------------------------------------------------------------------------
     {
       return legion_arrive_barrier;
     }
 
     //--------------------------------------------------------------------------
-    void MPILegionHandshakeImpl::advance_legion_handshake(void)
+    void LegionHandshakeImpl::advance_legion_handshake(void)
     //--------------------------------------------------------------------------
     {
       Runtime::advance_barrier(legion_wait_barrier);
@@ -2451,7 +2517,7 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // MPI Legion Handshake Impl 
+    // MPI Rank Table
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
@@ -2865,12 +2931,6 @@ namespace Legion {
       if (check && (mid == 0))
         REPORT_LEGION_ERROR(ERROR_RESERVED_MAPPING_ID, 
                             "Invalid mapping ID. ID 0 is reserved.");
-#ifndef DISABLE_PARTITION_SHIM
-      if (check && (mid == PARTITION_SHIM_MAPPER_ID))
-        REPORT_LEGION_ERROR(ERROR_RESERVED_MAPPING_ID,
-                            "Invalid mapper ID. %d is reserved for the "
-                            "partition shim mapper", PARTITION_SHIM_MAPPER_ID)
-#endif
       AutoLock m_lock(mapper_lock);
       std::map<MapperID,std::pair<MapperManager*,bool> >::iterator finder = 
         mappers.find(mid);
@@ -9933,16 +9993,20 @@ namespace Legion {
         stealing_disabled(config.stealing_disabled),
         resilient_mode(config.resilient_mode),
         unsafe_launch(config.unsafe_launch),
+#ifdef DEBUG_LEGION
         unsafe_mapper(config.unsafe_mapper),
-        dynamic_independence_tests(config.dynamic_independence_tests),
+#else
+        unsafe_mapper(!config.safe_mapper),
+#endif
+        disable_independence_tests(config.disable_independence_tests),
 #ifdef LEGION_SPY
         legion_spy_enabled(true),
 #else
         legion_spy_enabled(config.legion_spy_enabled),
 #endif
         enable_test_mapper(config.enable_test_mapper),
-        legion_ldb_enabled(config.legion_ldb_enabled),
-        replay_file(config.replay_file),
+        legion_ldb_enabled(!config.ldb_file.empty()),
+        replay_file(legion_ldb_enabled ? config.ldb_file : config.replay_file),
 #ifdef DEBUG_LEGION
         logging_region_tree_state(config.logging_region_tree_state),
         verbose_logging(config.verbose_logging),
@@ -10028,7 +10092,7 @@ namespace Legion {
 				    (*it).kind(), this,
                                     LEGION_DEFAULT_MAPPER_SLOTS, 
                                     stealing_disabled,
-                                    (replay_file != NULL));
+                                    !replay_file.empty());
         proc_managers[*it] = manager;
       }
       // Initialize the message manager array so that we can construct
@@ -10131,7 +10195,7 @@ namespace Legion {
         resilient_mode(rhs.resilient_mode),
         unsafe_launch(rhs.unsafe_launch),
         unsafe_mapper(rhs.unsafe_mapper),
-        dynamic_independence_tests(rhs.dynamic_independence_tests),
+        disable_independence_tests(rhs.disable_independence_tests),
         legion_spy_enabled(rhs.legion_spy_enabled),
         enable_test_mapper(rhs.enable_test_mapper),
         legion_ldb_enabled(rhs.legion_ldb_enabled),
@@ -10414,6 +10478,13 @@ namespace Legion {
         delete (*it);
       }
       available_timing_ops.clear();
+      for (std::deque<AllReduceOp*>::const_iterator it = 
+            available_all_reduce_ops.begin(); it !=
+            available_all_reduce_ops.end(); it++)
+      {
+        delete (*it);
+      }
+      available_all_reduce_ops.clear();
       for (std::map<TaskID,TaskImpl*>::const_iterator it = 
             task_table.begin(); it != task_table.end(); it++)
       {
@@ -10595,10 +10666,10 @@ namespace Legion {
                                     lg_task_descriptions,
                                     Operation::LAST_OP_KIND,
                                     Operation::op_names,
-                                    config.serializer_type,
-                                    config.prof_logfile,
+                                    config.serializer_type.c_str(),
+                                    config.prof_logfile.c_str(),
                                     total_address_spaces,
-                                    config.prof_footprint_threshold,
+                                    config.prof_footprint_threshold << 20,
                                     config.prof_target_latency);
       LG_MESSAGE_DESCRIPTIONS(lg_message_descriptions);
       profiler->record_message_kinds(lg_message_descriptions, LAST_SEND_KIND);
@@ -10791,7 +10862,7 @@ namespace Legion {
     void Runtime::initialize_mappers(void)
     //--------------------------------------------------------------------------
     {
-      if (replay_file == NULL) // This is the normal path
+      if (replay_file.empty()) // This is the normal path
       {
         if (enable_test_mapper)
         {
@@ -10815,32 +10886,7 @@ namespace Legion {
               new Mapping::DefaultMapper(mapper_runtime, machine, it->first);
             MapperManager *wrapper = wrap_mapper(this, mapper, 0, it->first);
             it->second->add_mapper(0, wrapper, false/*check*/, true/*owns*/);
-          }
-#ifndef DISABLE_PARTITION_SHIM
-          // Make default mappers for the partition shim 
-          for (std::map<Processor,ProcessorManager*>::const_iterator it = 
-                proc_managers.begin(); it != proc_managers.end(); it++)
-          {
-            Mapper *mapper = 
-              new Mapping::DefaultMapper(mapper_runtime, machine, it->first);
-            MapperManager *wrapper = wrap_mapper(this, mapper, 
-                                        PARTITION_SHIM_MAPPER_ID, it->first);
-            it->second->add_mapper(PARTITION_SHIM_MAPPER_ID, wrapper, 
-                                   false/*check*/, true/*owns*/);
-          }
-#endif
-          // Now ask the application what it wants to do
-          const std::vector<RegistrationCallbackFnptr> &registration_callbacks
-            = get_pending_registration_callbacks();
-          if (!registration_callbacks.empty())
-          {
-            log_run.info("Invoking mapper registration callback functions...");
-            for (std::vector<RegistrationCallbackFnptr>::const_iterator it = 
-                  registration_callbacks.begin(); it !=
-                  registration_callbacks.end(); it++)
-              (**it)(machine, external, local_procs);
-            log_run.info("Finished execution of mapper registration callbacks");
-          }
+          } 
         }
       }
       else // This is the replay/debug path
@@ -10853,7 +10899,7 @@ namespace Legion {
                 proc_managers.begin(); it != proc_managers.end(); it++)
           {
             Mapper *mapper = new Mapping::DebugMapper(mapper_runtime, 
-                                            machine, it->first, replay_file);
+                                    machine, it->first, replay_file.c_str());
             MapperManager *wrapper = wrap_mapper(this, mapper, 0, it->first);
             it->second->add_mapper(0, wrapper, false/*check*/, true/*owns*/, 
                                     true/*skip replay*/);
@@ -10865,7 +10911,7 @@ namespace Legion {
                 proc_managers.begin(); it != proc_managers.end(); it++)
           {
             Mapper *mapper = new Mapping::ReplayMapper(mapper_runtime, 
-                                            machine, it->first, replay_file);
+                                    machine, it->first, replay_file.c_str());
             MapperManager *wrapper = wrap_mapper(this, mapper, 0, it->first);
             it->second->add_mapper(0, wrapper, false/*check*/, true/*owns*/,
                                     true/*skip replay*/);
@@ -10910,6 +10956,26 @@ namespace Legion {
       if (mpi_rank_table != NULL)
         mpi_rank_table->perform_rank_exchange();
       initialize_mappers(); 
+      // Finally perform the registration callback methods
+      const std::vector<RegistrationCallbackFnptr> &registration_callbacks
+        = get_pending_registration_callbacks();
+      if (!registration_callbacks.empty())
+      {
+        log_run.info("Invoking registration callback functions...");
+        for (std::vector<RegistrationCallbackFnptr>::const_iterator it = 
+              registration_callbacks.begin(); it !=
+              registration_callbacks.end(); it++)
+          perform_registration_callback(*it);
+        log_run.info("Finished execution of registration callbacks");
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::perform_registration_callback(
+                                             RegistrationCallbackFnptr callback)
+    //--------------------------------------------------------------------------
+    {
+      (*callback)(machine, external, local_procs);
     }
 
     //--------------------------------------------------------------------------
@@ -11301,6 +11367,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition Runtime::create_partition_by_domain(Context ctx,
+                                                     IndexSpace parent,
+                                                     const FutureMap &domains,
+                                                     IndexSpace color_space,
+                                                     bool perform_intersections,
+                                                     PartitionKind part_kind,
+                                                     Color color)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx == DUMMY_CONTEXT)
+        REPORT_DUMMY_CONTEXT(
+            "Illegal dummy context create partition by domain!");
+      IndexPartition result = ctx->create_partition_by_domain(forest, parent,
+              domains, color_space, perform_intersections, part_kind, color);
+      if (verify_disjointness && ((part_kind == DISJOINT_KIND) ||
+           (part_kind == DISJOINT_COMPLETE_KIND) ||
+           (part_kind == DISJOINT_INCOMPLETE_KIND)) && 
+          !forest->is_disjoint(result))
+        REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
+                            "Disjointness test failure for create partition "
+                            "by domains in task %s (UID %lld)",
+                            ctx->get_task_name(), ctx->get_unique_id())
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition Runtime::create_partition_by_field(Context ctx,
                                                       LogicalRegion handle,
                                                       LogicalRegion parent_priv,
@@ -11308,13 +11400,14 @@ namespace Legion {
                                                       IndexSpace color_space,
                                                       Color color,
                                                       MapperID id, 
-                                                      MappingTagID tag)
+                                                      MappingTagID tag,
+                                                      PartitionKind part_kind)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT("Illegal dummy context partition by field!");
       return ctx->create_partition_by_field(forest, handle, parent_priv, fid,
-                                            color_space, color, id, tag);
+                                      color_space, color, id, tag, part_kind);
     }
 
     //--------------------------------------------------------------------------
@@ -13229,6 +13322,13 @@ namespace Legion {
     void Runtime::add_mapper(MapperID map_id, Mapper *mapper, Processor proc)
     //--------------------------------------------------------------------------
     {
+      // If we have a custom mapper then silently ignore this
+      if (!replay_file.empty() || enable_test_mapper)
+      {
+        // We take ownership of these things so delete it now
+        delete mapper;
+        return;
+      }
       // First, wrap this mapper in a mapper manager
       MapperManager *manager = wrap_mapper(this, mapper, map_id, proc);
       if (!proc.exists())
@@ -13405,6 +13505,13 @@ namespace Legion {
     void Runtime::replace_default_mapper(Mapper *mapper, Processor proc)
     //--------------------------------------------------------------------------
     {
+      // If we have a custom mapper then silently ignore this
+      if (!replay_file.empty() || enable_test_mapper)
+      {
+        // We take ownership of mapper so delete it now
+        delete mapper;
+        return;
+      }
       // First, wrap this mapper in a mapper manager
       MapperManager *manager = wrap_mapper(this, mapper, 0, proc); 
       if (!proc.exists())
@@ -19186,6 +19293,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    AllReduceOp* Runtime::get_available_all_reduce_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return get_available(all_reduce_op_lock, available_all_reduce_ops);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::free_individual_task(IndividualTask *task)
     //--------------------------------------------------------------------------
     {
@@ -19491,6 +19605,14 @@ namespace Legion {
     {
       AutoLock t_lock(timing_op_lock);
       release_operation<false>(available_timing_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_all_reduce_op(AllReduceOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock a_lock(all_reduce_op_lock);
+      release_operation<false>(available_all_reduce_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -20027,15 +20149,9 @@ namespace Legion {
                                        Operation *op /*= NULL*/)
     //--------------------------------------------------------------------------
     {
-      if ((op == NULL) && (implicit_context != NULL))
-        return Future(new FutureImpl(this, true/*register*/,
+      return Future(new FutureImpl(this, true/*register*/,
                                    get_available_distributed_id(),
-                                   address_space, complete_event,
-                                   implicit_context->owner_task));
-      else
-        return Future(new FutureImpl(this, true/*register*/,
-                                     get_available_distributed_id(),
-                                     address_space, complete_event, op));
+                                   address_space, complete_event, op));
     }
 
     //--------------------------------------------------------------------------
@@ -20791,17 +20907,6 @@ namespace Legion {
       LEGION_STATIC_ASSERT(LEGION_DEFAULT_MIN_TASKS_TO_SCHEDULE > 0);
       LEGION_STATIC_ASSERT(LEGION_DEFAULT_MAX_MESSAGE_SIZE > 0); 
 
-#ifndef DISABLE_PARTITION_SHIM
-      // Preregister any partition shim task variants we need 
-#define COLOR_POINTS(DIM) \
-      PartitionShim::ColorPoints<DIM>::register_task();
-      LEGION_FOREACH_N(COLOR_POINTS)
-#undef COLOR_POINTS
-#define COLOR_RECTS(D1,D2) \
-      PartitionShim::ColorRects<D1,D2>::register_task();
-      LEGION_FOREACH_NN(COLOR_RECTS)
-#undef COLOR_RECTS
-#endif
       // Register builtin reduction operators
       register_builtin_reduction_operators();
 
@@ -20809,11 +20914,9 @@ namespace Legion {
       // their values as they might be changed by GASNet or MPI or whatever.
       // Note that the logger isn't initialized until after this call returns 
       // which means any logging that occurs before this has undefined behavior.
-      RealmRuntime realm = runtime_initialized ? 
-        RealmRuntime::get_runtime() : initialize(&argc, &argv);
+      const LegionConfiguration &config = initialize(&argc, &argv, false);
+      RealmRuntime realm = RealmRuntime::get_runtime();
 
-      // Parse the command line arguments
-      const LegionConfiguration config = parse_arguments(argc, argv);
       // Perform any waits that the user requested before starting
       if (config.delay_start > 0)
           sleep(config.delay_start);
@@ -20824,10 +20927,10 @@ namespace Legion {
       if (config.legion_spy_enabled)
         LegionSpy::log_legion_spy_config();
       // Configure MPI Interoperability
-      const std::vector<MPILegionHandshake> &pending_handshakes =
+      const std::vector<LegionHandshake> &pending_handshakes =
         get_pending_handshake_table();
       if ((mpi_rank >= 0) || (!pending_handshakes.empty()))
-        configure_mpi_interoperability(config.separate_runtime_instances);
+        configure_interoperability(config.separate_runtime_instances);
       // Construct our runtime objects 
       Processor::Kind startup_kind = Processor::NO_KIND;
       const RtEvent tasks_registered = configure_runtime(argc, argv,
@@ -20882,12 +20985,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ RealmRuntime Runtime::initialize(int *argc, char ***argv)
+    /*static*/ const Runtime::LegionConfiguration& Runtime::initialize(
+                                           int *argc, char ***argv, bool filter)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!runtime_initialized);
-#endif
+      static LegionConfiguration config;
+      if (runtime_initialized)
+        return config;
       RealmRuntime realm;
 #ifndef NDEBUG
       bool ok = 
@@ -20895,15 +20999,161 @@ namespace Legion {
         realm.network_init(argc, argv);
       assert(ok);
 
+      const int num_args = *argc;
       // Next we configure the realm runtime after which we can access the
       // machine model and make events and reservations and do reigstrations
+      std::vector<std::string> cmdline(num_args-1);
+      for (int i = 1; i < num_args; i++)
+        cmdline[i-1] = (*argv)[i];
 #ifndef NDEBUG
       ok = 
 #endif
-        realm.configure_from_command_line(*argc, *argv);
+        realm.configure_from_command_line(cmdline, filter);
       assert(ok);
+      Realm::CommandLineParser cp; 
+      cp.add_option_bool("-lg:warn_backtrace",
+                         config.warnings_backtrace, !filter)
+        .add_option_bool("-lg:warn", config.runtime_warnings, !filter)
+        .add_option_bool("-lg:leaks", config.report_leaks, !filter)
+        .add_option_bool("-lg:separate",
+                         config.separate_runtime_instances, !filter)
+        .add_option_bool("-lg:registration",config.record_registration,!filter)
+        .add_option_bool("-lg:nosteal",config.stealing_disabled,!filter)
+        .add_option_bool("-lg:resilient",config.resilient_mode,!filter)
+        .add_option_bool("-lg:unsafe_launch",config.unsafe_launch,!filter)
+        .add_option_bool("-lg:unsafe_mapper",config.unsafe_mapper,!filter)
+        .add_option_bool("-lg:safe_mapper",config.safe_mapper,!filter)
+        .add_option_bool("-lg:inorder",config.program_order_execution,!filter)
+        .add_option_bool("-lg:dump_physical_traces",
+                         config.dump_physical_traces, !filter)
+        .add_option_bool("-lg:no_tracing",config.no_tracing, !filter)
+        .add_option_bool("-lg:no_physical_tracing",
+                         config.no_physical_tracing, !filter)
+        .add_option_bool("-lg:no_trace_optimization",
+                         config.no_trace_optimization, !filter)
+        .add_option_bool("-lg:no_fence_elision",
+                         config.no_fence_elision, !filter)
+        .add_option_bool("-lg:replay_on_cpus",
+                         config.replay_on_cpus, !filter)
+        .add_option_bool("-lg:disjointness",
+                         config.verify_disjointness, !filter)
+        .add_option_int("-lg:window", config.initial_task_window_size, !filter)
+        .add_option_int("-lg:hysteresis", 
+                        config.initial_task_window_hysteresis, !filter)
+        .add_option_int("-lg:sched", 
+                        config.initial_tasks_to_schedule, !filter)
+        .add_option_int("-lg:vector", 
+                        config.initial_meta_task_vector_width, !filter)
+        .add_option_int("-lg:message",config.max_message_size, !filter)
+        .add_option_int("-lg:epoch", config.gc_epoch_size, !filter)
+        .add_option_int("-lg:local", config.max_local_fields, !filter)
+        .add_option_int("-lg:parallel_replay", 
+                        config.max_replay_parallelism, !filter)
+        .add_option_bool("-lg:no_dyn",config.disable_independence_tests,!filter)
+        .add_option_bool("-lg:spy",config.legion_spy_enabled, !filter)
+        .add_option_bool("-lg:test",config.enable_test_mapper, !filter)
+        .add_option_int("-lg:delay", config.delay_start, !filter)
+        .add_option_string("-lg:replay", config.replay_file, !filter)
+        .add_option_string("-lg:ldb", config.ldb_file, !filter)
+#ifdef DEBUG_LEGION
+        .add_option_bool("-lg:tree",config.logging_region_tree_state, !filter)
+        .add_option_bool("-lg:verbose",config.verbose_logging, !filter)
+        .add_option_bool("-lg:logical_only",config.logical_logging_only,!filter)
+        .add_option_bool("-lg:physical_only",
+                         config.physical_logging_only,!filter)
+#endif
+        .add_option_int("-lg:prof", config.num_profiling_nodes, !filter)
+        .add_option_string("-lg:serializer", config.serializer_type, !filter)
+        .add_option_string("-lg:prof_logfile", config.prof_logfile, !filter)
+        .add_option_int("-lg:prof_footprint", 
+                        config.prof_footprint_threshold, !filter)
+        .add_option_int("-lg:prof_latency",config.prof_target_latency, !filter)
+        .add_option_bool("-lg:debug_ok",config.slow_config_ok, !filter)
+        // These are all the deprecated versions of these flag
+        .add_option_bool("-hl:separate",
+                         config.separate_runtime_instances, !filter)
+        .add_option_bool("-hl:registration",config.record_registration, !filter)
+        .add_option_bool("-hl:nosteal",config.stealing_disabled, !filter)
+        .add_option_bool("-hl:resilient",config.resilient_mode, !filter)
+        .add_option_bool("-hl:unsafe_launch",config.unsafe_launch, !filter)
+        .add_option_bool("-hl:unsafe_mapper",config.unsafe_mapper, !filter)
+        .add_option_bool("-hl:safe_mapper",config.safe_mapper, !filter)
+        .add_option_bool("-hl:inorder",config.program_order_execution, !filter)
+        .add_option_bool("-hl:disjointness",config.verify_disjointness, !filter)
+        .add_option_int("-hl:window", config.initial_task_window_size, !filter)
+        .add_option_int("-hl:hysteresis", 
+                        config.initial_task_window_hysteresis, !filter)
+        .add_option_int("-hl:sched", config.initial_tasks_to_schedule, !filter)
+        .add_option_int("-hl:message",config.max_message_size, !filter)
+        .add_option_int("-hl:epoch", config.gc_epoch_size, !filter)
+        .add_option_bool("-hl:no_dyn",config.disable_independence_tests,!filter)
+        .add_option_bool("-hl:spy",config.legion_spy_enabled, !filter)
+        .add_option_bool("-hl:test",config.enable_test_mapper, !filter)
+        .add_option_int("-hl:delay", config.delay_start, !filter)
+        .add_option_string("-hl:replay", config.replay_file, !filter)
+        .add_option_string("-hl:ldb", config.ldb_file, !filter)
+#ifdef DEBUG_LEGION
+        .add_option_bool("-hl:tree",config.logging_region_tree_state,!filter)
+        .add_option_bool("-hl:verbose",config.verbose_logging,!filter)
+        .add_option_bool("-hl:logical_only",config.logical_logging_only,!filter)
+        .add_option_bool("-hl:physical_only",
+                         config.physical_logging_only,!filter)
+#endif
+        .add_option_int("-hl:prof", config.num_profiling_nodes, !filter)
+        .add_option_string("-hl:serializer", config.serializer_type, !filter)
+        .add_option_string("-hl:prof_logfile", config.prof_logfile, !filter)
+        .parse_command_line(cmdline);
+      // If we asked to filter the arguments, now we need to go back in
+      // and update the arguments so that they reflect the pruned data
+      if (filter)
+      {
+        if (!cmdline.empty())
+        {
+          int arg_index = 1;
+          for (unsigned idx = 0; idx < cmdline.size(); idx++)
+          {
+            const char *str = cmdline[idx].c_str();
+            // Find the location of this string in the original
+            // arguments to so that we can get its original pointer 
+            assert(arg_index < num_args);
+            while (strcmp(str, (*argv)[arg_index]) != 0)
+            {
+              arg_index++;
+              assert(arg_index < num_args);
+            }
+            // Now that we've got it's original pointer we can move
+            // it to the new location in the outputs
+            if (arg_index == int(idx+1))
+              arg_index++; // already in the right place 
+            else
+              (*argv)[idx+1] = (*argv)[arg_index++];
+          }
+          *argc = (1 + cmdline.size());
+        }
+        else
+          *argc = 1;
+      }
+#ifdef DEBUG_LEGION
+      if (config.logging_region_tree_state)
+        REPORT_LEGION_WARNING(LEGION_WARNING_REGION_TREE_STATE_LOGGING,
+            "Region tree state logging is disabled.  To enable region "
+            "tree state logging compile in debug mode.")
+      if (config.verify_disjointness)
+        REPORT_LEGION_WARNING(LEGION_WARNING_DISJOINTNESS_VERIFICATION,
+            "Disjointness verification for partition creation is disabled. "
+            "To enable dynamic disjointness testing compile in debug mode.")
+#endif
+      if (config.initial_task_window_hysteresis > 100)
+        REPORT_LEGION_ERROR(ERROR_LEGION_CONFIGURATION,
+            "Illegal task window hysteresis value of %d which is not a value "
+            "between 0 and 100.", config.initial_task_window_hysteresis)
+      if (config.max_local_fields > LEGION_MAX_FIELDS)
+        REPORT_LEGION_ERROR(ERROR_LEGION_CONFIGURATION,
+            "Illegal max local fields value %d which is larger than the "
+            "value of LEGION_MAX_FIELDS (%d).", config.max_local_fields,
+            LEGION_MAX_FIELDS)
       runtime_initialized = true;
-      return realm;
+      return config;
     }
 
     //--------------------------------------------------------------------------
@@ -21068,183 +21318,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ Runtime::LegionConfiguration Runtime::parse_arguments(int argc,
-                                                                    char **argv)
-    //--------------------------------------------------------------------------
-    {
-      LegionConfiguration config;
-#define INT_ARG(argname, varname) do {    \
-      if(!strcmp((argv)[i], argname)) {	  \
-        varname = atoi((argv)[++i]);	  \
-        continue;			  \
-      } } while(0)
-
-#define BOOL_ARG(argname, varname) do {   \
-      if(!strcmp((argv)[i], argname)) {	  \
-        varname = true;			  \
-        continue;			  \
-      } } while(0)
-      for (int i = 1; i < argc; i++)
-      {
-        BOOL_ARG("-lg:warn_backtrace",config.warnings_backtrace);
-        BOOL_ARG("-lg:warn",config.runtime_warnings);
-        BOOL_ARG("-lg:leaks",config.report_leaks);
-        BOOL_ARG("-lg:separate",config.separate_runtime_instances);
-        BOOL_ARG("-lg:registration",config.record_registration);
-        BOOL_ARG("-lg:nosteal",config.stealing_disabled);
-        BOOL_ARG("-lg:resilient",config.resilient_mode);
-        BOOL_ARG("-lg:unsafe_launch",config.unsafe_launch);
-        BOOL_ARG("-lg:unsafe_mapper",config.unsafe_mapper);
-        if (!strcmp(argv[i],"-lg:safe_mapper"))
-          config.unsafe_mapper = false;
-        BOOL_ARG("-lg:inorder",config.program_order_execution);
-        BOOL_ARG("-lg:dump_physical_traces",config.dump_physical_traces);
-        BOOL_ARG("-lg:no_tracing",config.no_tracing);
-        BOOL_ARG("-lg:no_physical_tracing",config.no_physical_tracing);
-        BOOL_ARG("-lg:no_trace_optimization",config.no_trace_optimization);
-        BOOL_ARG("-lg:no_fence_elision",config.no_fence_elision);
-        BOOL_ARG("-lg:replay_on_cpus",config.replay_on_cpus);
-        BOOL_ARG("-lg:disjointness",config.verify_disjointness);
-        INT_ARG("-lg:window", config.initial_task_window_size);
-        INT_ARG("-lg:hysteresis", config.initial_task_window_hysteresis);
-        INT_ARG("-lg:sched", config.initial_tasks_to_schedule);
-        INT_ARG("-lg:vector", config.initial_meta_task_vector_width);
-        INT_ARG("-lg:message",config.max_message_size);
-        INT_ARG("-lg:epoch", config.gc_epoch_size);
-        INT_ARG("-lg:local", config.max_local_fields);
-        INT_ARG("-lg:parallel_replay", config.max_replay_parallelism);
-        if (!strcmp(argv[i],"-lg:no_dyn"))
-          config.dynamic_independence_tests = false;
-        BOOL_ARG("-lg:spy",config.legion_spy_enabled);
-        BOOL_ARG("-lg:test",config.enable_test_mapper);
-        INT_ARG("-lg:delay", config.delay_start);
-        if (!strcmp(argv[i],"-lg:replay"))
-        {
-          config.replay_file = argv[++i];
-          continue;
-        }
-        if (!strcmp(argv[i],"-lg:ldb"))
-        {
-          config.replay_file = argv[++i];
-          config.legion_ldb_enabled = true;
-          continue;
-        }
-#ifdef DEBUG_LEGION
-        BOOL_ARG("-lg:tree",config.logging_region_tree_state);
-        BOOL_ARG("-lg:verbose",config.verbose_logging);
-        BOOL_ARG("-lg:logical_only",config.logical_logging_only);
-        BOOL_ARG("-lg:physical_only",config.physical_logging_only);
-#else
-        if (!strcmp(argv[i],"-lg:tree"))
-        {
-          REPORT_LEGION_WARNING(LEGION_WARNING_REGION_TREE_STATE_LOGGING,
-                                "Region tree state logging is "
-                        "disabled.  To enable region tree state logging "
-                                                "compile in debug mode.");
-        }
-        if (!strcmp(argv[i],"-lg:disjointness"))
-        {
-          REPORT_LEGION_WARNING(LEGION_WARNING_DISJOINTNESS_VERIFICATION,
-                                "Disjointness verification for "
-                    "partition creation is disabled.  To enable dynamic "
-                            "disjointness testing compile in debug mode.");
-        }
-#endif
-        INT_ARG("-lg:prof", config.num_profiling_nodes);
-        if (!strcmp(argv[i],"-lg:serializer"))
-        {
-          config.serializer_type = argv[++i];
-          continue;
-        }
-        if (!strcmp(argv[i],"-lg:prof_logfile"))
-        {
-          config.prof_logfile = argv[++i];
-          continue;
-        }
-        if (!strcmp(argv[i],"-lg:prof_footprint"))
-        {
-          config.prof_footprint_threshold = atoi(argv[++i]) << 20;
-          continue;
-        }
-        INT_ARG("-lg:prof_latency",config.prof_target_latency);
-
-        BOOL_ARG("-lg:debug_ok",config.slow_config_ok);
-        
-        // These are all the deprecated versions of these flag
-        BOOL_ARG("-hl:separate",config.separate_runtime_instances);
-        BOOL_ARG("-hl:registration",config.record_registration);
-        BOOL_ARG("-hl:nosteal",config.stealing_disabled);
-        BOOL_ARG("-hl:resilient",config.resilient_mode);
-        BOOL_ARG("-hl:unsafe_launch",config.unsafe_launch);
-        BOOL_ARG("-hl:unsafe_mapper",config.unsafe_mapper);
-        if (!strcmp(argv[i],"-hl:safe_mapper"))
-          config.unsafe_mapper = false;
-        BOOL_ARG("-hl:inorder",config.program_order_execution);
-        BOOL_ARG("-hl:disjointness",config.verify_disjointness);
-        INT_ARG("-hl:window", config.initial_task_window_size);
-        INT_ARG("-hl:hysteresis", config.initial_task_window_hysteresis);
-        INT_ARG("-hl:sched", config.initial_tasks_to_schedule);
-        INT_ARG("-hl:message",config.max_message_size);
-        INT_ARG("-hl:epoch", config.gc_epoch_size);
-        if (!strcmp(argv[i],"-hl:no_dyn"))
-          config.dynamic_independence_tests = false;
-        BOOL_ARG("-hl:spy",config.legion_spy_enabled);
-        BOOL_ARG("-hl:test",config.enable_test_mapper);
-        INT_ARG("-hl:delay", config.delay_start);
-        if (!strcmp(argv[i],"-hl:replay"))
-        {
-          config.replay_file = argv[++i];
-          continue;
-        }
-        if (!strcmp(argv[i],"-hl:ldb"))
-        {
-          config.replay_file = argv[++i];
-          config.legion_ldb_enabled = true;
-          continue;
-        }
-#ifdef DEBUG_LEGION
-        BOOL_ARG("-hl:tree",config.logging_region_tree_state);
-        BOOL_ARG("-hl:verbose",config.verbose_logging);
-        BOOL_ARG("-hl:logical_only",config.logical_logging_only);
-        BOOL_ARG("-hl:physical_only",config.physical_logging_only);
-#else
-        if (!strcmp(argv[i],"-hl:tree"))
-        {
-          REPORT_LEGION_WARNING(LEGION_WARNING_REGION_TREE_STATE_LOGGING,
-                                "Region tree state logging is "
-                        "disabled.  To enable region tree state logging "
-                                                "compile in debug mode.");
-        }
-        if (!strcmp(argv[i],"-hl:disjointness"))
-        {
-          REPORT_LEGION_WARNING(LEGION_WARNING_DISJOINTNESS_VERIFICATION,
-                                "Disjointness verification for "
-                    "partition creation is disabled.  To enable dynamic "
-                            "disjointness testing compile in debug mode.");
-        }
-#endif
-        INT_ARG("-hl:prof", config.num_profiling_nodes);
-        if (!strcmp(argv[i],"-hl:serializer"))
-        {
-          config.serializer_type = argv[++i];
-          continue;
-        }
-        if (!strcmp(argv[i],"-hl:prof_logfile"))
-        {
-          config.prof_logfile = argv[++i];
-          continue;
-        }
-      } 
-#undef INT_ARG
-#undef BOOL_ARG
-#ifdef DEBUG_LEGION
-      assert(config.initial_task_window_hysteresis <= 100);
-      assert(config.max_local_fields <= LEGION_MAX_FIELDS);
-#endif
-      return config;
-    }
-
-    //--------------------------------------------------------------------------
     /*static*/ void Runtime::perform_slow_config_checks(
                                               const LegionConfiguration &config)
     //--------------------------------------------------------------------------
@@ -21376,28 +21449,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::configure_mpi_interoperability(
+    /*static*/ void Runtime::configure_interoperability(
                                                 bool separate_runtime_instances)
     //--------------------------------------------------------------------------
     {
-      if (separate_runtime_instances)
+      if (separate_runtime_instances && (mpi_rank > 0))
         REPORT_LEGION_ERROR(ERROR_MPI_INTEROP_MISCONFIGURATION,
             "Legion-MPI Interoperability is not supported when running "
             "with separate runtime instances for each processor")
-      if (mpi_rank < 0)
-        REPORT_LEGION_ERROR(ERROR_MPI_INTEROP_MISCONFIGURATION,
-            "Legion detected the presence of Legion-MPI handshake objects "
-            "without a set MPI rank. An MPI rank must be set to use any "
-            "Legion-MPI handhshake objects")
-      const std::vector<MPILegionHandshake> &pending_handshakes = 
+      const std::vector<LegionHandshake> &pending_handshakes = 
         get_pending_handshake_table();
       if (!pending_handshakes.empty())
       {
-        for (std::vector<MPILegionHandshake>::const_iterator it = 
+        for (std::vector<LegionHandshake>::const_iterator it = 
               pending_handshakes.begin(); it != pending_handshakes.end(); it++)
           it->impl->initialize();
       }
     }
+
+#ifdef LEGION_GPU_REDUCTIONS
+    extern void register_builtin_gpu_reduction_tasks(
+        const std::set<Processor> &gpus, std::set<RtEvent> &registered_events);
+#endif
 
     //--------------------------------------------------------------------------
     /*static*/ RtEvent Runtime::configure_runtime(int argc, char **argv,
@@ -21453,12 +21526,12 @@ namespace Legion {
       if (config.separate_runtime_instances)
       {
 #ifdef TRACE_ALLOCATION
-        REPORT_LEGION_ERROR(ERROR_TRACING_ALLOCATION_WITH_SEPARATE, 
+        REPORT_LEGION_FATAL(LEGION_FATAL_SEPARATE_RUNTIME_INSTANCES, 
                       "Memory tracing not supported with "
                       "separate runtime instances.")
 #endif
         if (!local_util_procs.empty())
-          REPORT_LEGION_ERROR(ERROR_SEPARATE_UTILITY_PROCS, 
+          REPORT_LEGION_FATAL(LEGION_FATAL_SEPARATE_RUNTIME_INSTANCES, 
                         "Separate runtime instances are not "
                         "supported when running with explicit "
                         "utility processors")
@@ -21589,6 +21662,14 @@ namespace Legion {
               it->first.register_task(LG_LEGION_PROFILING_ID, rt_profiling_task,
                 no_requests, &it->second, sizeof(it->second))));
       }
+#ifdef LEGION_GPU_REDUCTIONS
+      std::set<Processor> gpu_procs;
+      for (std::set<Processor>::const_iterator it = 
+            local_procs.begin(); it != local_procs.end(); it++)
+        if (it->kind() == Processor::TOC_PROC)
+          gpu_procs.insert(*it);
+      register_builtin_gpu_reduction_tasks(gpu_procs, registered_events); 
+#endif
 
       // Lastly do any other registrations we might have
       const ReductionOpTable& red_table = get_reduction_table(true/*safe*/);
@@ -21674,7 +21755,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::register_handshake(MPILegionHandshake &handshake)
+    /*static*/ void Runtime::register_handshake(LegionHandshake &handshake)
     //--------------------------------------------------------------------------
     {
       // See if the runtime is started or not
@@ -21685,7 +21766,7 @@ namespace Legion {
       }
       else
       {
-        std::vector<MPILegionHandshake> &pending_handshakes = 
+        std::vector<LegionHandshake> &pending_handshakes = 
           get_pending_handshake_table();
         pending_handshakes.push_back(handshake);
       }
@@ -21784,9 +21865,24 @@ namespace Legion {
                                             RegistrationCallbackFnptr callback)
     //--------------------------------------------------------------------------
     {
-      std::vector<RegistrationCallbackFnptr> &registration_callbacks = 
-        get_pending_registration_callbacks();
-      registration_callbacks.push_back(callback);
+      if (runtime_started)
+      {
+        // Wait for the runtime to be started everywhere
+        if (!runtime_started_event.has_triggered())
+          // If we're here this has to be an external thread
+          runtime_started_event.external_wait();
+        if (the_runtime->separate_runtime_instances)
+          REPORT_LEGION_FATAL(LEGION_FATAL_SEPARATE_RUNTIME_INSTANCES,
+              "Dynamic registration callbacks cannot be registered after "
+              "the runtime has been started with multiple runtime instances.")
+        the_runtime->perform_registration_callback(callback);
+      }
+      else
+      {
+        std::vector<RegistrationCallbackFnptr> &registration_callbacks = 
+          get_pending_registration_callbacks();
+        registration_callbacks.push_back(callback);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -21951,11 +22047,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ std::vector<MPILegionHandshake>& 
+    /*static*/ std::vector<LegionHandshake>& 
                                       Runtime::get_pending_handshake_table(void)
     //--------------------------------------------------------------------------
     {
-      static std::vector<MPILegionHandshake> pending_handshakes_table;
+      static std::vector<LegionHandshake> pending_handshakes_table;
       return pending_handshakes_table;
     }
 
@@ -22680,7 +22776,8 @@ namespace Legion {
           {
             const TaskOp::DeferDistributeArgs *dargs = 
               (const TaskOp::DeferDistributeArgs*)args;
-            dargs->proxy_this->distribute_task();
+            if (dargs->proxy_this->distribute_task())
+              dargs->proxy_this->launch_task();
             break;
           }
         case LG_DEFER_PERFORM_MAPPING_TASK_ID:
@@ -22903,10 +23000,10 @@ namespace Legion {
       {
         // If we got a NULL let's assume they meant the profiler
         // this mainly happens with messages that cross nodes
-        runtime->profiler->handle_profiling_response(response);
+        runtime->profiler->handle_profiling_response(base, response);
       }
       else
-        base->handler->handle_profiling_response(response);
+        base->handler->handle_profiling_response(base, response);
     }
 
     //--------------------------------------------------------------------------

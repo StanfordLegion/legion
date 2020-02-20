@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2019 Stanford University
+# Copyright 2020 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -37,6 +37,7 @@ list(APPEND REALM_TESTS
   compqueue
   event_subscribe
   deferred_allocs
+  test_nodeset
   )
 
 # TODO: build memspeed properly with cuda enabled...

@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,10 +41,6 @@
 
 #include "realm/module.h"
 #include "realm/network.h"
-
-#if __cplusplus >= 201103L
-#define typeof decltype
-#endif
 
 namespace Realm {
 
@@ -134,7 +130,7 @@ namespace Realm {
 
       // sparsity maps can be created by other nodes, so keep a
       //  map per-creator_node
-      std::vector<DynamicTable<SparsityMapTableAllocator> *> sparsity_maps;
+      std::vector<atomic<DynamicTable<SparsityMapTableAllocator> *> > sparsity_maps;
     };
 
     class RemoteIDAllocator {

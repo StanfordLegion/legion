@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2019 Stanford University
+# Copyright 2020 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,8 +17,8 @@
 
 from __future__ import print_function
 
-import legion
-from legion import index_launch, task, Domain, ID, IndexLaunch, R, Region, Partition
+import pygion
+from pygion import index_launch, task, Domain, ID, IndexLaunch, R, Region, Partition
 
 @task
 def hi(i):
@@ -45,9 +45,9 @@ def main():
     for i, point in enumerate(Domain([3, 3])):
         assert futures[i].get() == point
 
-    R = Region([4, 4], {'x': legion.float64})
+    R = Region([4, 4], {'x': pygion.float64})
     P = Partition.equal(R, [2, 2])
-    legion.fill(R, 'x', 0)
+    pygion.fill(R, 'x', 0)
 
     for i in IndexLaunch([2, 2]):
         hello(R, i)

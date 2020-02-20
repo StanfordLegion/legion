@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -60,7 +60,8 @@ namespace Legion {
       // Now that we know we're going to do this fill add any profiling requests
       Realm::ProfilingRequestSet requests;
       if (trace_info.op != NULL)
-        trace_info.op->add_copy_profiling_request(requests);
+        trace_info.op->add_copy_profiling_request(trace_info.index,
+            trace_info.dst_index, requests, true/*fill*/);
       if (forest->runtime->profiler != NULL)
         forest->runtime->profiler->add_fill_request(requests, trace_info.op);
 #ifdef LEGION_SPY
@@ -176,7 +177,8 @@ namespace Legion {
       // Now that we know we're going to do this copy add any profling requests
       Realm::ProfilingRequestSet requests;
       if (trace_info.op != NULL)
-        trace_info.op->add_copy_profiling_request(requests);
+        trace_info.op->add_copy_profiling_request(trace_info.index,
+            trace_info.dst_index, requests, false/*fill*/);
       if (forest->runtime->profiler != NULL)
         forest->runtime->profiler->add_copy_request(requests, trace_info.op);
 #ifdef LEGION_SPY
@@ -250,12 +252,14 @@ namespace Legion {
                                      const std::vector<unsigned> &field_indexes,
                                      const FieldID indirect_field,
                                      const TypeTag indirect_type,
-                                     const bool is_range,
+                                     const bool is_range, 
                                      const PhysicalInstance indirect_instance,
                                      const LegionVector<
                                             IndirectRecord>::aligned &records,
                                      std::vector<void*> &indirects,
-                                     std::vector<unsigned> &indirect_indexes)
+                                     std::vector<unsigned> &indirect_indexes,
+                                     const bool possible_out_of_range,
+                                     const bool possible_aliasing)
     //--------------------------------------------------------------------------
     {
       typedef std::vector<typename Realm::CopyIndirection<DIM,T>::Base*>
@@ -283,7 +287,8 @@ namespace Legion {
             field_sets.begin(); it != field_sets.end(); it++, index++)
       {
         UnstructuredIndirectionHelper<DIM,T> helper(indirect_field, is_range,
-                                              indirect_instance, it->elements);
+                                    indirect_instance, it->elements, 
+                                    possible_out_of_range, possible_aliasing);
         NT_TemplateHelper::demux<UnstructuredIndirectionHelper<DIM,T> >(
             indirect_type, &helper);
         indirections[offset+index] = helper.result;
@@ -344,7 +349,8 @@ namespace Legion {
       // Now that we know we're going to do this copy add any profling requests
       Realm::ProfilingRequestSet requests;
       if (trace_info.op != NULL)
-        trace_info.op->add_copy_profiling_request(requests);
+        trace_info.op->add_copy_profiling_request(trace_info.index,
+            trace_info.dst_index, requests, false/*fill*/);
       if (forest->runtime->profiler != NULL)
         forest->runtime->profiler->add_copy_request(requests, trace_info.op);
 #ifdef LEGION_SPY
@@ -415,34 +421,252 @@ namespace Legion {
       return result;
     }
 
+    template <typename T, typename T2>
+    inline T round_up(T val, T2 step)
+    {
+      T rem = val % step;
+      if(rem == 0)
+        return val;
+      else
+        return val + (step - rem);
+    }
+
+    template <typename T>
+    inline T max(T a, T b)
+    {
+      return((a > b) ? a : b);
+    }
+
+    template <typename T>
+    inline T gcd(T a, T b)
+    {
+      while(a != b) {
+        if(a > b)
+          a -= b;
+        else
+          b -= a;
+      }
+      return a;
+    }
+
+    template <typename T>
+    inline T lcm(T a, T b)
+    {
+      // TODO: more efficient way?
+      return(a * b / gcd(a, b));
+    }
+
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     Realm::InstanceLayoutGeneric* IndexSpaceExpression::create_layout_internal(
-                                    const Realm::IndexSpace<DIM,T> &space,
-                                    const Realm::InstanceLayoutConstraints &ilc,
-                                    const OrderingConstraint &constraint) const
+                                   const Realm::IndexSpace<DIM,T> &space,
+                                   const LayoutConstraintSet &constraints,
+                                   const std::vector<FieldID> &field_ids,
+                                   const std::vector<size_t> &field_sizes) const
     //--------------------------------------------------------------------------
     {
-      int dim_order[DIM];
-      // Construct the dimension ordering
-      unsigned next_dim = 0;
-      for (std::vector<DimensionKind>::const_iterator it = 
-            constraint.ordering.begin(); it != constraint.ordering.end(); it++)
+#ifdef DEBUG_LEGION
+      assert(field_ids.size() == field_sizes.size());
+      assert(int(constraints.ordering_constraint.ordering.size()) == (DIM+1));
+#endif
+      Realm::InstanceLayout<DIM,T> *layout = new Realm::InstanceLayout<DIM,T>();
+      layout->bytes_used = 0;
+      // Start with 32-byte alignment for AVX instructions
+      layout->alignment_reqd = 32;
+      layout->space = space;
+      const Rect<DIM,T> &bounds = space.bounds;
+
+      // We already know that this index space is tight so we don't need to
+      // do any extra work on the bounds
+      // If the bounds are empty we can use the same piece list for all fields
+      if (bounds.empty())
       {
-        // Skip the field dimension we already handled it
-        if ((*it) == DIM_F)
-          continue;
-        if ((*it) > DIM_F)
-          assert(false); // TODO: handle split dimensions
-        if ((*it) >= DIM) // Skip dimensions bigger than ours
-          continue;
-        dim_order[next_dim++] = *it;
+        layout->piece_lists.resize(1);
+        for (unsigned idx = 0; idx < field_ids.size(); idx++)
+        {
+          const FieldID fid = field_ids[idx];
+          Realm::InstanceLayoutGeneric::FieldLayout &fl = layout->fields[fid];
+          fl.list_idx = 0;
+          fl.rel_offset = 0;
+          fl.size_in_bytes = field_sizes[idx];
+        }
+        return layout;
+      }
+      
+      // Get any alignment and offset constraints for individual fields
+      std::map<FieldID,size_t> alignments;
+      for (std::vector<AlignmentConstraint>::const_iterator it = 
+            constraints.alignment_constraints.begin(); it !=
+            constraints.alignment_constraints.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        assert(it->eqk == EQ_EK);
+#endif
+        alignments[it->fid] = it->alignment;
+      }
+      std::map<FieldID,off_t> offsets;
+      for (std::vector<OffsetConstraint>::const_iterator it = 
+            constraints.offset_constraints.begin(); it !=
+            constraints.offset_constraints.end(); it++)
+        offsets[it->fid] = it->offset;
+      // Zip the fields with their sizes and sort them if we're allowed to
+      std::set<size_t> unique_sizes;
+      std::vector<std::pair<size_t,FieldID> > zip_fields;
+      for (unsigned idx = 0; idx < field_ids.size(); idx++)
+      {
+        zip_fields.push_back(
+            std::pair<size_t,FieldID>(field_sizes[idx], field_ids[idx]));
+        unique_sizes.insert(field_sizes[idx]);
+      }
+      if (!constraints.field_constraint.inorder)
+      {
+        // Sort them so the smallest fields are first
+        std::stable_sort(zip_fields.begin(), zip_fields.end());
+        // Reverse them so the biggest fields are first
+        std::reverse(zip_fields.begin(), zip_fields.end());
+        // Then reverse the field IDs back for the same size fields
+        std::vector<std::pair<size_t,FieldID> >::iterator it1 = 
+          zip_fields.begin(); 
+        while (it1 != zip_fields.end())
+        {
+          std::vector<std::pair<size_t,FieldID> >::iterator it2 = it1;
+          while ((it2 != zip_fields.end()) && (it1->first == it2->first))
+            it2++;
+          std::reverse(it1, it2);
+          it1 = it2;
+        }
+      }
+      // Find out how many elements exists between fields
+      int field_index = -1;
+      size_t elements_between_fields = 1;
+      const OrderingConstraint &order = constraints.ordering_constraint;
+      for (unsigned idx = 0; order.ordering.size(); idx++)
+      {
+        const DimensionKind dim = order.ordering[idx];
+        if (dim == DIM_F)
+        {
+          field_index = idx;
+          break;
+        }
+        else
+        {
+#ifdef DEBUG_LEGION
+          assert(int(dim) < DIM);
+#endif
+          elements_between_fields *= (bounds.hi[dim] - bounds.lo[dim] + 1);
+        }
       }
 #ifdef DEBUG_LEGION
-      assert(next_dim == DIM); // should have filled them all in
+      assert(field_index >= 0);
 #endif
-      return Realm::InstanceLayoutGeneric::choose_instance_layout(space,
-                                                            ilc, dim_order);
+      // This code borrows from choose_instance_layout but
+      // there are subtle differences to handle Legion's layout constraints
+      // What we want to compute is the size of the field dimension
+      // in a way that guarantees that all fields maintain their alignments
+      size_t fsize = 0;
+      size_t falign = 1;
+      // We can't make the piece lists yet because we don't know the 
+      // extent of the field dimension needed to ensure alignment 
+      std::map<FieldID, size_t> field_offsets;
+      for (std::vector<std::pair<size_t,FieldID> >::const_iterator it = 
+            zip_fields.begin(); it != zip_fields.end(); it++)
+      {
+        // if not specified, field goes at the end of all known fields
+        // (or a bit past if alignment is a concern)
+        size_t offset = fsize;
+        std::map<FieldID,off_t>::const_iterator offset_finder = 
+          offsets.find(it->second);
+        if (offset_finder != offsets.end())
+          offset += offset_finder->second;
+        std::map<FieldID,size_t>::const_iterator alignment_finder = 
+          alignments.find(it->second);
+        const size_t field_alignment = (alignment_finder != alignments.end()) ?
+          alignment_finder->second : 1;
+        if (field_alignment > 1)
+        {
+          offset = round_up(offset, field_alignment);
+          if ((falign % field_alignment) != 0)
+            falign = lcm(falign, field_alignment);
+        }
+        // increase size and alignment if needed
+        fsize = max(fsize, offset + it->first * elements_between_fields);
+        field_offsets[it->second] = offset;
+      }
+      if (falign > 1)
+      {
+        // group size needs to be rounded up to match group alignment
+	fsize = round_up(fsize, falign);
+	// overall instance alignment layout must be compatible with group
+	layout->alignment_reqd = lcm(layout->alignment_reqd, falign);
+      }
+      // we've handled the offsets and alignment for every field across
+      // all dimensions so we can just use the size of the field to 
+      // determine the piece list
+      std::map<size_t,unsigned> pl_indexes;
+      layout->piece_lists.reserve(unique_sizes.size());
+      for (std::vector<std::pair<size_t,FieldID> >::const_iterator it = 
+            zip_fields.begin(); it != zip_fields.end(); it++)
+      {
+        unsigned li;
+        std::map<size_t,unsigned>::const_iterator finder =
+          pl_indexes.find(it->first);
+        if (finder == pl_indexes.end())
+        {
+          li = layout->piece_lists.size();
+#ifdef DEBUG_LEGION
+          assert(li < unique_sizes.size());
+#endif
+          layout->piece_lists.resize(li + 1);
+          pl_indexes[it->first] = li;
+
+          // create the piece
+          Realm::AffineLayoutPiece<DIM,T> *piece = 
+            new Realm::AffineLayoutPiece<DIM,T>;
+          piece->bounds = bounds; 
+          piece->offset = 0;
+          size_t stride = it->first;
+          for (std::vector<DimensionKind>::const_iterator dit = 
+                order.ordering.begin(); dit != order.ordering.end(); dit++)
+          {
+            if ((*dit) != DIM_F)
+            {
+#ifdef DEBUG_LEGION
+              assert(int(*dit) < DIM);
+#endif
+              piece->strides[*dit] = stride;
+              piece->offset -= bounds.lo[*dit] * stride;
+              stride *= (bounds.hi[*dit] - bounds.lo[*dit] + 1);
+            }
+            else
+              // Reset the stride to the fsize for the next dimension
+              // since it already incorporates everything prior to it
+              stride = fsize;
+          }
+          layout->piece_lists[li].pieces.push_back(piece);
+        }
+        else
+          li = finder->second;
+#ifdef DEBUG_LEGION
+        assert(layout->fields.count(it->second) == 0);
+#endif
+        Realm::InstanceLayoutGeneric::FieldLayout &fl = 
+          layout->fields[it->second];
+        fl.list_idx = li;
+        fl.rel_offset = field_offsets[it->second];
+        fl.size_in_bytes = it->first;
+      }
+      // Lastly compute the size of the layout, which is the size of the 
+      // field dimension times the extents of all the remaning dimensions
+      layout->bytes_used = fsize;
+      for (unsigned idx = field_index+1; idx < order.ordering.size(); idx++)
+      {
+        const DimensionKind dim = order.ordering[idx];
+#ifdef DEBUG_LEGION
+        assert(int(dim) < DIM);
+#endif
+        layout->bytes_used *= (bounds.hi[dim] - bounds.lo[dim] + 1);
+      }
+      return layout;
     }
 
     /////////////////////////////////////////////////////////////
@@ -752,17 +976,20 @@ namespace Legion {
                                      const std::vector<unsigned> &field_indexes,
                                      const FieldID indirect_field,
                                      const TypeTag indirect_type,
-                                     const bool is_range,
+                                     const bool is_range, 
                                      const PhysicalInstance indirect_instance,
                                      const LegionVector<
                                             IndirectRecord>::aligned &records,
                                      std::vector<void*> &indirections,
-                                     std::vector<unsigned> &indirect_indexes)
+                                     std::vector<unsigned> &indirect_indexes,
+                                     const bool possible_out_of_range,
+                                     const bool possible_aliasing)
     //--------------------------------------------------------------------------
     {
       construct_indirections_internal<DIM,T>(field_indexes, indirect_field,
                                  indirect_type, is_range, indirect_instance, 
-                                 records, indirections, indirect_indexes);
+                                 records, indirections, indirect_indexes,
+                                 possible_out_of_range, possible_aliasing);
     }
 
     //--------------------------------------------------------------------------
@@ -804,15 +1031,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     Realm::InstanceLayoutGeneric* IndexSpaceOperationT<DIM,T>::create_layout(
-                                    const Realm::InstanceLayoutConstraints &ilc,
-                                    const OrderingConstraint &constraint)
+                                    const LayoutConstraintSet &constraints,
+                                    const std::vector<FieldID> &field_ids,
+                                    const std::vector<size_t> &field_sizes)
     //--------------------------------------------------------------------------
     {
-      Realm::IndexSpace<DIM,T> local_space;
-      ApEvent space_ready = get_realm_index_space(local_space, true/*tight*/);
+      Realm::IndexSpace<DIM,T> local_is;
+      ApEvent space_ready = get_realm_index_space(local_is, true/*tight*/);
       if (space_ready.exists())
         space_ready.wait();
-      return create_layout_internal(local_space, ilc, constraint);
+      return create_layout_internal(local_is,constraints,field_ids,field_sizes);
     }
 
     //--------------------------------------------------------------------------
@@ -2967,6 +3195,43 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    ApEvent IndexSpaceNodeT<DIM,T>::create_by_domain(Operation *op,
+                                                    IndexPartNode *partition,
+                                                    FutureMapImpl *future_map,
+                                                    bool perform_intersections)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(partition->parent == this);
+#endif
+      // Demux the color space type to do the actual operations 
+      CreateByDomainHelper creator(this, partition, op, 
+                                    future_map, perform_intersections);
+      NT_TemplateHelper::demux<CreateByDomainHelper>(
+                   partition->color_space->handle.get_type_tag(), &creator);
+      return creator.result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    ApEvent IndexSpaceNodeT<DIM,T>::create_by_weights(Operation *op,
+                                                    IndexPartNode *partition,
+                                                    FutureMapImpl *future_map,
+                                                    size_t granularity)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(partition->parent == this);
+#endif
+      // Demux the color space type to do the actual operations 
+      CreateByWeightHelper creator(this, partition, op, future_map,granularity);
+      NT_TemplateHelper::demux<CreateByWeightHelper>(
+                   partition->color_space->handle.get_type_tag(), &creator);
+      return creator.result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     ApEvent IndexSpaceNodeT<DIM,T>::create_by_field(Operation *op,
                                                     IndexPartNode *partition,
                               const std::vector<FieldDataDescriptor> &instances,
@@ -2986,6 +3251,159 @@ namespace Legion {
 #endif // defined(DEFINE_NT_TEMPLATES)
 
 #ifdef DEFINE_NTNT_TEMPLATES
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T> template<int COLOR_DIM, typename COLOR_T>
+    ApEvent IndexSpaceNodeT<DIM,T>::create_by_domain_helper(Operation *op,
+                          IndexPartNode *partition, FutureMapImpl *future_map,
+                          bool perform_intersections)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceNodeT<COLOR_DIM,COLOR_T> *color_space = 
+       static_cast<IndexSpaceNodeT<COLOR_DIM,COLOR_T>*>(partition->color_space);
+      // Enumerate the color space
+      Realm::IndexSpace<COLOR_DIM,COLOR_T> realm_color_space;
+      color_space->get_realm_index_space(realm_color_space, true/*tight*/);
+
+      std::set<ApEvent> result_events;
+      Realm::IndexSpace<DIM,T> parent_space;
+      ApEvent parent_ready;
+      if (perform_intersections)
+      {
+        parent_ready = get_realm_index_space(parent_space, false/*tight*/);
+        if (op->has_execution_fence_event())
+        {
+          if (parent_ready.exists())
+            parent_ready = Runtime::merge_events(NULL, parent_ready,
+                                    op->get_execution_fence_event());
+          else
+            parent_ready = op->get_execution_fence_event();
+        }
+      }
+      // Make all the entries for the color space
+      for (Realm::IndexSpaceIterator<COLOR_DIM,COLOR_T> 
+            rect_iter(realm_color_space); rect_iter.valid; rect_iter.step())
+      {
+        for (Realm::PointInRectIterator<COLOR_DIM,COLOR_T> 
+              itr(rect_iter.rect); itr.valid; itr.step())
+        {
+          LegionColor child_color = color_space->linearize_color(&itr.p,
+                                        color_space->handle.get_type_tag());
+          IndexSpaceNodeT<DIM,T> *child = static_cast<IndexSpaceNodeT<DIM,T>*>(
+                                            partition->get_child(child_color));
+          Realm::IndexSpace<DIM,T> child_space;
+          const DomainPoint key(Point<COLOR_DIM,COLOR_T>(itr.p));
+          FutureImpl *future = future_map->find_future(key);
+          if (future != NULL)
+          {
+            if (future->get_untyped_size(true/*internal*/) != 
+                  sizeof(Domain))
+              REPORT_LEGION_ERROR(ERROR_INVALID_PARTITION_BY_DOMAIN_VALUE,
+                  "An invalid future size was found in a partition by domain "
+                  "call. All futures must contain Domain objects.")
+            const Domain *domain = static_cast<Domain*>(
+                future->get_untyped_result(true, NULL, true/*internal*/));
+            const DomainT<DIM,T> domaint = *domain;
+            child_space = domaint;
+            if (perform_intersections)
+            {
+              Realm::ProfilingRequestSet requests;
+              if (context->runtime->profiler != NULL)
+                context->runtime->profiler->add_partition_request(requests,
+                                                op, DEP_PART_INTERSECTIONS);
+              Realm::IndexSpace<DIM,T> result;
+              ApEvent ready(Realm::IndexSpace<DIM,T>::compute_intersection(
+                    parent_space, child_space, result, requests, parent_ready));
+              child_space = result;
+              if (ready.exists())
+                result_events.insert(ready);
+            }
+          }
+          else
+            child_space = Realm::IndexSpace<DIM,T>::make_empty();
+          if (child->set_realm_index_space(context->runtime->address_space,
+                                           child_space))
+            assert(false); // should never hit this
+        }
+      }
+      if (result_events.empty())
+        return ApEvent::NO_AP_EVENT;
+      return Runtime::merge_events(NULL, result_events);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T> template<int COLOR_DIM, typename COLOR_T>
+    ApEvent IndexSpaceNodeT<DIM,T>::create_by_weight_helper(Operation *op,
+        IndexPartNode *partition, FutureMapImpl *future_map, size_t granularity)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceNodeT<COLOR_DIM,COLOR_T> *color_space = 
+       static_cast<IndexSpaceNodeT<COLOR_DIM,COLOR_T>*>(partition->color_space);
+      // Enumerate the color space
+      Realm::IndexSpace<COLOR_DIM,COLOR_T> realm_color_space;
+      color_space->get_realm_index_space(realm_color_space, true/*tight*/); 
+      const size_t count = realm_color_space.volume();
+      // Unpack the futures and fill in the weights appropriately
+      std::vector<int> weights(count);
+      std::vector<LegionColor> child_colors(count);
+      unsigned color_index = 0;
+      // Make all the entries for the color space
+      for (Realm::IndexSpaceIterator<COLOR_DIM,COLOR_T> 
+            rect_iter(realm_color_space); rect_iter.valid; rect_iter.step())
+      {
+        for (Realm::PointInRectIterator<COLOR_DIM,COLOR_T> 
+              itr(rect_iter.rect); itr.valid; itr.step())
+        {
+          const DomainPoint key(Point<COLOR_DIM,COLOR_T>(itr.p));
+          FutureImpl *future = future_map->find_future(key);
+          if (future == NULL)
+            REPORT_LEGION_ERROR(ERROR_MISSING_PARTITION_BY_WEIGHT_COLOR,
+                "A partition by weight call is missing an entry for a "
+                "color in the color space. All colors must be present.")
+          if (future->get_untyped_size(true/*internal*/) != sizeof(int))
+            REPORT_LEGION_ERROR(ERROR_INVALID_PARTITION_BY_WEIGHT_VALUE,
+                  "An invalid future size was found in a partition by weight "
+                  "call. All futures must contain int values.")
+          weights[color_index] = *(static_cast<int*>(
+                future->get_untyped_result(true, NULL, true/*internal*/)));
+          child_colors[color_index++] = color_space->linearize_color(&itr.p,
+                                          color_space->handle.get_type_tag());
+        }
+      }
+      Realm::ProfilingRequestSet requests;
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_partition_request(requests,
+                                                op, DEP_PART_WEIGHTS);
+      Realm::IndexSpace<DIM,T> local_space;
+      ApEvent ready = get_realm_index_space(local_space, false/*tight*/);
+      if (op->has_execution_fence_event())
+        ready = Runtime::merge_events(NULL, ready, 
+                  op->get_execution_fence_event());
+      std::vector<Realm::IndexSpace<DIM,T> > subspaces;
+      ApEvent result(local_space.create_weighted_subspaces(count,
+            granularity, weights, subspaces, requests, ready));
+#ifdef LEGION_DISABLE_EVENT_PRUNING
+      if (!result.exists() || (result == ready))
+      {
+        ApUserEvent new_result = Runtime::create_ap_user_event();
+        Runtime::trigger_event(new_result);
+        result = new_result;
+      }
+#endif
+#ifdef LEGION_SPY
+      LegionSpy::log_deppart_events(op->get_unique_op_id(),handle,ready,result);
+#endif
+      for (unsigned idx = 0; idx < count; idx++)
+      {
+        IndexSpaceNodeT<DIM,T> *child = 
+            static_cast<IndexSpaceNodeT<DIM,T>*>(
+                partition->get_child(child_colors[idx]));
+        if (child->set_realm_index_space(context->runtime->address_space,
+                                         subspaces[idx]))
+            assert(false); // should never hit this
+      }
+      return result;
+    }
+
     //--------------------------------------------------------------------------
     template<int DIM, typename T> template<int COLOR_DIM, typename COLOR_T>
     ApEvent IndexSpaceNodeT<DIM,T>::create_by_field_helper(Operation *op,
@@ -3986,12 +4404,15 @@ namespace Legion {
                                      const LegionVector<
                                             IndirectRecord>::aligned &records,
                                      std::vector<void*> &indirections,
-                                     std::vector<unsigned> &indirect_indexes)
+                                     std::vector<unsigned> &indirect_indexes,
+                                     const bool possible_out_of_range,
+                                     const bool possible_aliasing)
     //--------------------------------------------------------------------------
     {
       construct_indirections_internal<DIM,T>(field_indexes, indirect_field,
                                  indirect_type, is_range, indirect_instance,
-                                 records, indirections, indirect_indexes);
+                                 records, indirections, indirect_indexes,
+                                 possible_out_of_range, possible_aliasing);
     }
 
     //--------------------------------------------------------------------------
@@ -4033,15 +4454,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     Realm::InstanceLayoutGeneric* IndexSpaceNodeT<DIM,T>::create_layout(
-                                    const Realm::InstanceLayoutConstraints &ilc,
-                                    const OrderingConstraint &constraint)
+                                    const LayoutConstraintSet &constraints,
+                                    const std::vector<FieldID> &field_ids,
+                                    const std::vector<size_t> &field_sizes)
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> local_is;
       ApEvent space_ready = get_realm_index_space(local_is, true/*tight*/);
       if (space_ready.exists())
         space_ready.wait();
-      return create_layout_internal(local_is, ilc, constraint); 
+      return create_layout_internal(local_is,constraints,field_ids,field_sizes);
     }
     
     //--------------------------------------------------------------------------

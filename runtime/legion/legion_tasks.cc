@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -2326,6 +2326,7 @@ namespace Legion {
       selected_variant = 0;
       task_priority = 0;
       perform_postmap = false;
+      first_mapping = true;
       execution_context = NULL;
       remote_trace_info = NULL;
       leaf_cached = false;
@@ -2557,7 +2558,7 @@ namespace Legion {
           else
           {
             // Remote but still need to map
-            RtEvent done_mapping = perform_mapping();
+            const RtEvent done_mapping = perform_mapping();
             if (done_mapping.exists() && !done_mapping.has_triggered())
               defer_launch_task(done_mapping);
             else
@@ -2572,11 +2573,7 @@ namespace Legion {
         early_map_task();
         // See if we have a must epoch in which case
         // we can simply record ourselves and we are done
-        if (must_epoch != NULL)
-        {
-          must_epoch->register_single_task(this, must_epoch_index);
-        }
-        else
+        if (must_epoch == NULL)
         {
 #ifdef DEBUG_LEGION
           assert(target_proc.exists());
@@ -2585,40 +2582,33 @@ namespace Legion {
           // remotely in which case we need to do the
           // mapping now, otherwise we can defer it
           // until the task ends up on the target processor
-          if (is_origin_mapped() && target_proc.exists() &&
-              !runtime->is_local(target_proc))
+          if (is_origin_mapped() && first_mapping)
           {
-            RtEvent done_mapping = perform_mapping();
-            if (done_mapping.exists() && !done_mapping.has_triggered())
-              defer_distribute_task(done_mapping);
-            else
+            first_mapping = false;
+            const RtEvent done_mapping = perform_mapping();
+            if (!done_mapping.exists() || done_mapping.has_triggered())
             {
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-              bool still_local = 
-#endif
-#endif
-              distribute_task();
-#ifdef DEBUG_LEGION
-              assert(!still_local);
-#endif
+              if (distribute_task())
+                launch_task();
             }
+            else
+              defer_distribute_task(done_mapping);
           }
           else
           {
             if (distribute_task())
             {
               // Still local so try mapping and launching
-              RtEvent done_mapping = perform_mapping();
-              if (done_mapping.exists() && !done_mapping.has_triggered())
-                defer_launch_task(done_mapping);
-              else
-              {
+              const RtEvent done_mapping = perform_mapping();
+              if (!done_mapping.exists() || done_mapping.has_triggered())
                 launch_task();
-              }
+              else
+                defer_launch_task(done_mapping);
             }
           }
         }
+        else
+          must_epoch->register_single_task(this, must_epoch_index);
       }
     } 
 
@@ -2765,6 +2755,7 @@ namespace Legion {
           validate_target_processors(output.target_procs);
         // Save the target processors from the output
         target_processors = output.target_procs;
+        target_proc = target_processors.front();
       }
       else
       {
@@ -3097,7 +3088,7 @@ namespace Legion {
               assert(finder != acquired->end());
 #endif
               // Permit this if we are doing replay mapping
-              if (!finder->second.second && (runtime->replay_file == NULL))
+              if (!finder->second.second && (runtime->replay_file.empty()))
                 REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                               "Invalid mapper output from invocation of '%s' "
                               "on mapper %s. Mapper made an illegal decision "
@@ -3496,8 +3487,7 @@ namespace Legion {
         profiling_priority = output.profiling_priority;
       }
       // Now we can convert the mapper output into our physical instances
-      finalize_map_task_output(input, output, must_epoch_owner, 
-                               valid_instances);
+      finalize_map_task_output(input, output, must_epoch_owner,valid_instances);
 
       if (is_recording())
       {
@@ -3991,13 +3981,13 @@ namespace Legion {
             physical_instances[idx].update_wait_on_events(ready_events);
         }
         wait_on_events.insert(Runtime::merge_events(NULL, ready_events));
+        for (unsigned idx = 0; idx < futures.size(); idx++)
+        {
+          FutureImpl *impl = futures[idx].impl; 
+          wait_on_events.insert(impl->subscribe());
+        }
       }
       // Now add get all the other preconditions for the launch
-      for (unsigned idx = 0; idx < futures.size(); idx++)
-      {
-        FutureImpl *impl = futures[idx].impl; 
-        wait_on_events.insert(impl->subscribe());
-      }
       for (unsigned idx = 0; idx < grants.size(); idx++)
       {
         GrantImpl *impl = grants[idx].impl;
@@ -4155,10 +4145,10 @@ namespace Legion {
         }
         if (!realm_measurements.empty())
         {
-          ProfilingResponseBase base(this);
+          OpProfilingResponse response(this, 0, 0, false/*fill*/, true/*task*/);
           Realm::ProfilingRequest &request = profiling_requests.add_request(
               runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
-              &base, sizeof(base));
+              &response, sizeof(response));
           request.add_measurements(realm_measurements);
           int previous = 
             __sync_fetch_and_add(&outstanding_profiling_requests, 1);
@@ -4237,17 +4227,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::add_copy_profiling_request(
-                                           Realm::ProfilingRequestSet &requests)
+    void SingleTask::add_copy_profiling_request(unsigned src_index,
+            unsigned dst_index, Realm::ProfilingRequestSet &requests, bool fill)
     //--------------------------------------------------------------------------
     {
       // Nothing to do if we don't have any copy profiling requests
       if (copy_profiling_requests.empty())
         return;
-      ProfilingResponseBase base(this);
+#ifdef DEBUG_LEGION
+      assert(src_index == dst_index);
+#endif
+      OpProfilingResponse response(this, src_index, dst_index, fill);
       Realm::ProfilingRequest &request = requests.add_request(
         runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
-        &base, sizeof(base));
+        &response, sizeof(response));
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             copy_profiling_requests.begin(); it != 
             copy_profiling_requests.end(); it++)
@@ -4259,6 +4252,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void SingleTask::handle_profiling_response(
+                                       const ProfilingResponseBase *base,
                                        const Realm::ProfilingResponse &response)
     //--------------------------------------------------------------------------
     {
@@ -4266,10 +4260,11 @@ namespace Legion {
         mapper = runtime->find_mapper(current_proc, map_id); 
       Mapping::Mapper::TaskProfilingInfo info;
       info.profiling_responses.attach_realm_profiling_response(response);
-      if (response.has_measurement<
-           Mapping::ProfilingMeasurements::OperationProcessorUsage>())
+      const OpProfilingResponse *task_prof= 
+        static_cast<const OpProfilingResponse*>(base);
+      info.task_response = task_prof->task;
+      if (info.task_response)
       {
-        info.task_response = true;
         // If we had an overhead tracker 
         // see if this is the callback for the task
         if (execution_context->overhead_tracker != NULL)
@@ -4281,8 +4276,8 @@ namespace Legion {
           execution_context->overhead_tracker = NULL;
         }
       }
-      else
-        info.task_response = false;
+      info.region_requirement_index = task_prof->src;
+      info.fill_response = task_prof->fill;
       mapper->invoke_task_report_profiling(this, &info);
       handle_profiling_update(-1);
     } 
@@ -4333,6 +4328,7 @@ namespace Legion {
       serdez_redop_fns = NULL;
       reduction_state_size = 0;
       reduction_state = NULL;
+      first_mapping = true;
       children_complete_invoked = false;
       children_commit_invoked = false;
       predicate_false_result = NULL;
@@ -4623,32 +4619,20 @@ namespace Legion {
         {
           if (is_sliced())
           {
-            if (must_epoch != NULL)
-              register_must_epoch();
-            else
+            if (must_epoch == NULL)
             {
-              // See if we're going to send it
-              // remotely.  If so we need to do
-              // the mapping now.  Otherwise we
-              // can defer the mapping until we get
-              // on the target processor.
-              if (target_proc.exists() && !runtime->is_local(target_proc))
+              // See if we've done our first mapping yet or not
+              if (first_mapping)
               {
-                RtEvent done_mapping = perform_mapping();
-                if (done_mapping.exists() && !done_mapping.has_triggered())
-                  defer_distribute_task(done_mapping);
-                else
+                first_mapping = false;
+                const RtEvent done_mapping = perform_mapping();
+                if (!done_mapping.exists() || done_mapping.has_triggered())
                 {
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-                  bool still_local = 
-#endif
-#endif
-                  distribute_task();
-#ifdef DEBUG_LEGION
-                  assert(!still_local);
-#endif
+                  if (distribute_task())
+                    launch_task();
                 }
+                else
+                  defer_distribute_task(done_mapping);
               }
               else
               {
@@ -4656,12 +4640,12 @@ namespace Legion {
                 // of our local processors.  If it is
                 // still this processor then map and run it
                 if (distribute_task())
-                {
-                  // Still local so we can map and launch it
-                  map_and_launch();
-                }
+                  // Still local so we can launch it
+                  launch_task();
               }
             }
+            else
+              register_must_epoch();
           }
           else
             slice_index_space();
@@ -7383,8 +7367,7 @@ namespace Legion {
 #endif
         const RtEvent done = 
           Runtime::protect_merge_events(effects_postconditions);
-        if (done.exists() && !done.has_triggered())
-          done.wait();
+        complete_preconditions.insert(done);
       }
       if (!complete_preconditions.empty())
         complete_operation(Runtime::merge_events(complete_preconditions));
@@ -7629,7 +7612,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::add_copy_profiling_request(Realm::ProfilingRequestSet &reqs)
+    void IndexTask::add_copy_profiling_request(unsigned src_index,
+                unsigned dst_index, Realm::ProfilingRequestSet &reqs, bool fill)
     //--------------------------------------------------------------------------
     {
       // Nothing to do, there are no copy profiling requests for premap_task
@@ -8762,6 +8746,8 @@ namespace Legion {
             point_futures[idx] = FutureMap(impl, false/*need reference*/);
           }
         }
+        // Set the first mapping to false since we know things are mapped
+        first_mapping = false;
       }
       // Return true to add this to the ready queue
       return true;

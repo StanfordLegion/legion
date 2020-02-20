@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,395 +22,6 @@
 #include "legion/legion_allocation.h"
 
 namespace Legion {
-#ifndef DISABLE_PARTITION_SHIM
-  namespace PartitionShim {
-
-    template<int COLOR_DIM>
-    /*static*/ TaskID ColorPoints<COLOR_DIM>::TASK_ID;
-    template<int COLOR_DIM, int RANGE_DIM>
-    /*static*/ TaskID ColorRects<COLOR_DIM,RANGE_DIM>::TASK_ID;
-    
-    //--------------------------------------------------------------------------
-    template<int CDIM>
-    ColorPoints<CDIM>::ColorPoints(const Coloring &coloring, 
-        LogicalRegion region, FieldID color_field, FieldID pointer_field)
-      : TaskLauncher(TASK_ID, TaskArgument(), Predicate::TRUE_PRED,
-                     PARTITION_SHIM_MAPPER_ID)
-    //--------------------------------------------------------------------------
-    {
-      add_region_requirement(
-          RegionRequirement(region, WRITE_DISCARD, EXCLUSIVE, region));
-      add_field(0/*index*/, color_field);
-      add_field(0/*index*/, pointer_field);
-      // Serialize the coloring into the argument buffer 
-      assert(CDIM == 1);
-      rez.serialize<size_t>(coloring.size());
-      for (Coloring::const_iterator cit = coloring.begin(); 
-            cit != coloring.end(); cit++)
-      {
-        const Point<CDIM,coord_t> color = DomainPoint(cit->first); 
-        rez.serialize(color);
-        rez.serialize<size_t>(cit->second.points.size());
-        for (std::set<ptr_t>::const_iterator it = cit->second.points.begin();
-              it != cit->second.points.end(); it++)
-        {
-          const Point<1,coord_t> point = it->value;
-          rez.serialize(point);
-        }
-        // No need to do ranges since we know that they are all empty
-      }
-      argument = TaskArgument(rez.get_buffer(), rez.get_used_bytes()); 
-    }
-
-    //--------------------------------------------------------------------------
-    template<int CDIM>
-    ColorPoints<CDIM>::ColorPoints(const PointColoring &coloring, 
-        LogicalRegion region, FieldID color_field, FieldID pointer_field)
-      : TaskLauncher(TASK_ID, TaskArgument(), Predicate::TRUE_PRED,
-                     PARTITION_SHIM_MAPPER_ID)
-    //--------------------------------------------------------------------------
-    {
-      add_region_requirement(
-          RegionRequirement(region, WRITE_DISCARD, EXCLUSIVE, region));
-      add_field(0/*index*/, color_field);
-      add_field(0/*index*/, pointer_field);
-      // Serialize the coloring into the argument buffer 
-      rez.serialize<size_t>(coloring.size());
-      for (PointColoring::const_iterator cit = coloring.begin();
-            cit != coloring.end(); cit++)
-      {
-        const Point<CDIM,coord_t> color = cit->first; 
-        rez.serialize(color);
-        rez.serialize<size_t>(cit->second.points.size());
-        for (std::set<ptr_t>::const_iterator it = cit->second.points.begin();
-              it != cit->second.points.end(); it++)
-        {
-          const Point<1,coord_t> point = it->value;
-          rez.serialize(point);
-        }
-        // No need to do any ranges since we know they are all empty
-      }
-      argument = TaskArgument(rez.get_buffer(), rez.get_used_bytes());
-    }
- 
-    //--------------------------------------------------------------------------
-    template<int CDIM>
-    /*static*/ void ColorPoints<CDIM>::register_task(void)
-    //--------------------------------------------------------------------------
-    {
-      TASK_ID = Legion::Runtime::generate_static_task_id();
-      char variant_name[128];
-      snprintf(variant_name,128,"Color Points <%d>", CDIM);
-      TaskVariantRegistrar registrar(TASK_ID, variant_name);
-      registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
-      registrar.set_leaf();
-      Legion::Runtime::preregister_task_variant<
-        ColorPoints<CDIM>::cpu_variant>(registrar, variant_name);
-    }
-
-    //--------------------------------------------------------------------------
-    template<int CDIM>
-    /*static*/ void ColorPoints<CDIM>::cpu_variant(const Task *task, 
-      const std::vector<PhysicalRegion> &regions, Context ctx, Runtime *runtime)
-    //--------------------------------------------------------------------------
-    {
-      const FieldAccessor<WRITE_DISCARD,Point<CDIM,coord_t>,1,coord_t>
-        fa_color(regions[0], task->regions[0].instance_fields[0]);
-      const FieldAccessor<WRITE_DISCARD,Point<1,coord_t>,1,coord_t>
-        fa_point(regions[0], task->regions[0].instance_fields[1]);
-      Deserializer derez(task->args, task->arglen);
-      size_t num_colors;
-      derez.deserialize(num_colors);
-      coord_t next_entry = 0;
-      for (unsigned cidx = 0; cidx < num_colors; cidx++)
-      {
-        Point<CDIM,coord_t> color;
-        derez.deserialize(color);
-        size_t num_points;
-        derez.deserialize(num_points);
-        for (unsigned idx = 0; idx < num_points; idx++, next_entry++)
-        {
-          Point<1,coord_t> point;
-          derez.deserialize(point);
-          fa_color.write(next_entry, color);
-          fa_point.write(next_entry, point);
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    template<int CDIM, int RDIM>
-    ColorRects<CDIM,RDIM>::ColorRects(const DomainColoring &coloring, 
-        LogicalRegion region, FieldID color_field, FieldID range_field)
-      : TaskLauncher(TASK_ID, TaskArgument(), Predicate::TRUE_PRED,
-                     PARTITION_SHIM_MAPPER_ID)
-    //--------------------------------------------------------------------------
-    {
-      add_region_requirement(
-          RegionRequirement(region, WRITE_DISCARD, EXCLUSIVE, region));
-      add_field(0/*index*/, color_field);
-      add_field(0/*index*/, range_field);
-      // Serialize the coloring into the argument buffer 
-      assert(CDIM == 1);
-      rez.serialize<size_t>(coloring.size());
-      for (DomainColoring::const_iterator cit = coloring.begin();
-            cit != coloring.end(); cit++)
-      {
-        const Point<CDIM,coord_t> color = DomainPoint(cit->first);
-        rez.serialize(color);
-        rez.serialize<size_t>(1); // number of rects
-        const Rect<RDIM,coord_t> rect = cit->second;
-        rez.serialize(rect);
-      }
-      argument = TaskArgument(rez.get_buffer(), rez.get_used_bytes());
-    }
-
-    //--------------------------------------------------------------------------
-    template<int CDIM, int RDIM>
-    ColorRects<CDIM,RDIM>::ColorRects(const MultiDomainColoring &coloring, 
-        LogicalRegion region, FieldID color_field, FieldID range_field)
-      : TaskLauncher(TASK_ID, TaskArgument(), Predicate::TRUE_PRED,
-                     PARTITION_SHIM_MAPPER_ID)
-    //--------------------------------------------------------------------------
-    {
-      add_region_requirement(
-          RegionRequirement(region, WRITE_DISCARD, EXCLUSIVE, region));
-      add_field(0/*index*/, color_field);
-      add_field(0/*index*/, range_field);
-      // Serialize the coloring into the argument buffer 
-      assert(CDIM == 1);
-      rez.serialize<size_t>(coloring.size());
-      for (MultiDomainColoring::const_iterator cit = coloring.begin();
-            cit != coloring.end(); cit++)
-      {
-        const Point<CDIM,coord_t> color = DomainPoint(cit->first);
-        rez.serialize(color);
-        rez.serialize<size_t>(cit->second.size());
-        for (std::set<Domain>::const_iterator it = cit->second.begin();
-              it != cit->second.end(); it++)
-        {
-          const Rect<RDIM,coord_t> rect = *it;
-          rez.serialize(rect);
-        }
-      }
-      argument = TaskArgument(rez.get_buffer(), rez.get_used_bytes());
-    }
-
-    //--------------------------------------------------------------------------
-    template<int CDIM, int RDIM>
-    ColorRects<CDIM,RDIM>::ColorRects(const DomainPointColoring &coloring, 
-        LogicalRegion region, FieldID color_field, FieldID range_field)
-      : TaskLauncher(TASK_ID, TaskArgument(), Predicate::TRUE_PRED,
-                     PARTITION_SHIM_MAPPER_ID)
-    //--------------------------------------------------------------------------
-    {
-      add_region_requirement(
-          RegionRequirement(region, WRITE_DISCARD, EXCLUSIVE, region));
-      add_field(0/*index*/, color_field);
-      add_field(0/*index*/, range_field);
-      // Serialize the coloring into the argument buffer 
-      rez.serialize<size_t>(coloring.size());
-      for (DomainPointColoring::const_iterator cit = coloring.begin();
-            cit != coloring.end(); cit++)
-      {
-        const Point<CDIM,coord_t> color = cit->first;
-        rez.serialize(color);
-        rez.serialize<size_t>(1); // number of rects
-        const Rect<RDIM,coord_t> rect = cit->second;
-        rez.serialize(rect);
-      }
-      argument = TaskArgument(rez.get_buffer(), rez.get_used_bytes());
-    }
-
-    //--------------------------------------------------------------------------
-    template<int CDIM, int RDIM>
-    ColorRects<CDIM,RDIM>::ColorRects(const MultiDomainPointColoring &coloring,
-        LogicalRegion region, FieldID color_field, FieldID range_field)
-      : TaskLauncher(TASK_ID, TaskArgument(), Predicate::TRUE_PRED,
-                     PARTITION_SHIM_MAPPER_ID)
-    //--------------------------------------------------------------------------
-    {
-      add_region_requirement(
-          RegionRequirement(region, WRITE_DISCARD, EXCLUSIVE, region));
-      add_field(0/*index*/, color_field);
-      add_field(0/*index*/, range_field);
-      // Serialize the coloring into the argument buffer 
-      rez.serialize<size_t>(coloring.size());
-      for (MultiDomainPointColoring::const_iterator cit = coloring.begin();
-            cit != coloring.end(); cit++)
-      {
-        const Point<CDIM,coord_t> color = cit->first;
-        rez.serialize(color);
-        rez.serialize<size_t>(cit->second.size());
-        for (std::set<Domain>::const_iterator it = cit->second.begin();
-              it != cit->second.end(); it++)
-        {
-          const Rect<RDIM,coord_t> rect = *it;
-          rez.serialize(rect);
-        }
-      }
-      argument = TaskArgument(rez.get_buffer(), rez.get_used_bytes());
-    }
-
-    //--------------------------------------------------------------------------
-    template<int CDIM, int RDIM>
-    ColorRects<CDIM,RDIM>::ColorRects(const Coloring &coloring, 
-                 LogicalRegion region, FieldID color_field, FieldID range_field)
-      : TaskLauncher(TASK_ID, TaskArgument(), Predicate::TRUE_PRED,
-                     PARTITION_SHIM_MAPPER_ID)
-    //--------------------------------------------------------------------------
-    {
-      add_region_requirement(
-          RegionRequirement(region, WRITE_DISCARD, EXCLUSIVE, region));
-      add_field(0/*index*/, color_field);
-      add_field(0/*index*/, range_field);
-      rez.serialize<size_t>(coloring.size());
-      for (Coloring::const_iterator cit = coloring.begin(); 
-            cit != coloring.end(); cit++)
-      {
-        const Point<CDIM,coord_t> color = DomainPoint(cit->first); 
-        rez.serialize(color);
-        // Count how many rectangles there will be
-        size_t total_rects = cit->second.points.size();
-        for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator it = 
-              cit->second.ranges.begin(); it != cit->second.ranges.end(); it++)
-        {
-          // Skip empty ranges
-          if (it->first.value > it->second.value)
-            continue;
-          total_rects++;
-        }
-        rez.serialize(total_rects);
-        for (std::set<ptr_t>::const_iterator it = 
-              cit->second.points.begin(); it != cit->second.points.end(); it++)
-        {
-          const Point<1,coord_t> point(*it);
-          const Rect<1,coord_t> rect(point, point);
-          rez.serialize(rect);
-        }
-        for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator it = 
-              cit->second.ranges.begin(); it != cit->second.ranges.end(); it++)
-        {
-          // Skip empty ranges
-          if (it->first.value > it->second.value)
-            continue;
-          const Point<1,coord_t> lo(it->first.value);
-          const Point<1,coord_t> hi(it->second.value);
-          const Rect<1,coord_t> rect(lo, hi);
-          rez.serialize(rect);
-        }
-      }
-      argument = TaskArgument(rez.get_buffer(), rez.get_used_bytes());
-    }
-
-    //--------------------------------------------------------------------------
-    template<int CDIM, int RDIM>
-    ColorRects<CDIM,RDIM>::ColorRects(const PointColoring &coloring, 
-                 LogicalRegion region, FieldID color_field, FieldID range_field)
-      : TaskLauncher(TASK_ID, TaskArgument(), Predicate::TRUE_PRED,
-                     PARTITION_SHIM_MAPPER_ID)
-    //--------------------------------------------------------------------------
-    {
-      add_region_requirement(
-          RegionRequirement(region, WRITE_DISCARD, EXCLUSIVE, region));
-      add_field(0/*index*/, color_field);
-      add_field(0/*index*/, range_field);
-      rez.serialize<size_t>(coloring.size());
-      for (PointColoring::const_iterator cit = coloring.begin();
-            cit != coloring.end(); cit++)
-      {
-        const Point<CDIM,coord_t> color = cit->first; 
-        rez.serialize(color);
-        // Count how many rectangles there will be
-        size_t total_rects = cit->second.points.size();
-        for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator it = 
-              cit->second.ranges.begin(); it != cit->second.ranges.end(); it++)
-        {
-          // Skip empty ranges
-          if (it->first.value > it->second.value)
-            continue;
-          total_rects++;
-        }
-        rez.serialize(total_rects);
-        for (std::set<ptr_t>::const_iterator it = 
-              cit->second.points.begin(); it != cit->second.points.end(); it++)
-        {
-          const Point<1,coord_t> point(*it);
-          const Rect<1,coord_t> rect(point, point);
-          rez.serialize(rect);
-        }
-        for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator it = 
-              cit->second.ranges.begin(); it != cit->second.ranges.end(); it++)
-        {
-          // Skip empty ranges
-          if (it->first.value > it->second.value)
-            continue;
-          const Point<1,coord_t> lo(it->first.value);
-          const Point<1,coord_t> hi(it->second.value);
-          const Rect<1,coord_t> rect(lo, hi);
-          rez.serialize(rect);
-        }
-      }
-      argument = TaskArgument(rez.get_buffer(), rez.get_used_bytes());
-    }
-
-    //--------------------------------------------------------------------------
-    template<int CDIM, int RDIM>
-    /*static*/ void ColorRects<CDIM,RDIM>::register_task(void)
-    //--------------------------------------------------------------------------
-    {
-      TASK_ID = Legion::Runtime::generate_static_task_id();
-      char variant_name[128];
-      snprintf(variant_name,128,"Color Rects <%d,%d>", CDIM, RDIM);
-      TaskVariantRegistrar registrar(TASK_ID, variant_name);
-      registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
-      registrar.set_leaf();
-      Legion::Runtime::preregister_task_variant<
-        ColorRects<CDIM,RDIM>::cpu_variant>(registrar, variant_name);
-    }
-
-    //--------------------------------------------------------------------------
-    template<int CDIM, int RDIM>
-    /*static*/ void ColorRects<CDIM,RDIM>::cpu_variant(const Task *task,
-      const std::vector<PhysicalRegion> &regions, Context ctx, Runtime *runtime)
-    //--------------------------------------------------------------------------
-    {
-      const FieldAccessor<WRITE_DISCARD,Point<CDIM,coord_t>,1,coord_t>
-        fa_color(regions[0], task->regions[0].instance_fields[0]);
-      const FieldAccessor<WRITE_DISCARD,Rect<RDIM,coord_t>,1,coord_t>
-        fa_range(regions[0], task->regions[0].instance_fields[1]);
-      Deserializer derez(task->args, task->arglen);
-      size_t num_colors;
-      derez.deserialize(num_colors);
-      coord_t next_entry = 0;
-      for (unsigned cidx = 0; cidx < num_colors; cidx++)
-      {
-        Point<CDIM,coord_t> color;
-        derez.deserialize(color);
-        size_t num_ranges;
-        derez.deserialize(num_ranges);
-        for (unsigned idx = 0; idx < num_ranges; idx++, next_entry++)
-        {
-          Rect<RDIM,coord_t> range;
-          derez.deserialize(range);
-          fa_color.write(next_entry, color);
-          fa_range.write(next_entry, range);
-        }
-      }
-    }
-
-    // Do the explicit instantiation
-#define DIMFUNC(DIM) \
-    template class ColorPoints<DIM>;
-    LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
-#define DIMFUNC(D1,D2) \
-    template class ColorRects<D1,D2>;
-    LEGION_FOREACH_NN(DIMFUNC)
-#undef DIMFUNC
-  };
-#endif // DISABLE_PARTITION_SHIM
-
     namespace Internal {
       LEGION_EXTERN_LOGGER_DECLARATIONS
     };
@@ -1885,7 +1496,9 @@ namespace Legion {
     CopyLauncher::CopyLauncher(Predicate pred /*= Predicate::TRUE_PRED*/,
                                MapperID mid /*=0*/, MappingTagID t /*=0*/)
       : predicate(pred), map_id(mid), tag(t), static_dependences(NULL), 
-        silence_warnings(false)
+        possible_src_indirect_out_of_range(true),
+        possible_dst_indirect_out_of_range(true),
+        possible_dst_indirect_aliasing(true), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1898,7 +1511,9 @@ namespace Legion {
     IndexCopyLauncher::IndexCopyLauncher(void) 
       : launch_domain(Domain::NO_DOMAIN), launch_space(IndexSpace::NO_SPACE),
         predicate(Predicate::TRUE_PRED), map_id(0), tag(0),
-        static_dependences(NULL), silence_warnings(false)
+        static_dependences(NULL), possible_src_indirect_out_of_range(true),
+        possible_dst_indirect_out_of_range(true),
+        possible_dst_indirect_aliasing(true), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1908,7 +1523,10 @@ namespace Legion {
                                     Predicate pred /*= Predicate::TRUE_PRED*/,
                                     MapperID mid /*=0*/, MappingTagID t /*=0*/) 
       : launch_domain(dom), launch_space(IndexSpace::NO_SPACE), predicate(pred),
-        map_id(mid),tag(t), static_dependences(NULL), silence_warnings(false)
+        map_id(mid),tag(t), static_dependences(NULL),
+        possible_src_indirect_out_of_range(true),
+        possible_dst_indirect_out_of_range(true),
+        possible_dst_indirect_aliasing(true), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1918,7 +1536,10 @@ namespace Legion {
                                     Predicate pred /*= Predicate::TRUE_PRED*/,
                                     MapperID mid /*=0*/, MappingTagID t /*=0*/) 
       : launch_domain(Domain::NO_DOMAIN), launch_space(space), predicate(pred),
-        map_id(mid), tag(t), static_dependences(NULL), silence_warnings(false)
+        map_id(mid), tag(t), static_dependences(NULL), 
+        possible_src_indirect_out_of_range(true),
+        possible_dst_indirect_out_of_range(true),
+        possible_dst_indirect_aliasing(true), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -2215,18 +1836,18 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // MPILegionHandshake 
+    // LegionHandshake 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    MPILegionHandshake::MPILegionHandshake(void)
+    LegionHandshake::LegionHandshake(void)
       : impl(NULL)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    MPILegionHandshake::MPILegionHandshake(const MPILegionHandshake &rhs)
+    LegionHandshake::LegionHandshake(const LegionHandshake &rhs)
       : impl(rhs.impl)
     //--------------------------------------------------------------------------
     {
@@ -2235,7 +1856,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    MPILegionHandshake::~MPILegionHandshake(void)
+    LegionHandshake::~LegionHandshake(void)
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
@@ -2247,12 +1868,128 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    MPILegionHandshake::MPILegionHandshake(Internal::MPILegionHandshakeImpl *i)
+    LegionHandshake::LegionHandshake(Internal::LegionHandshakeImpl *i)
       : impl(i)
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
         impl->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    LegionHandshake& LegionHandshake::operator=(const LegionHandshake &rhs)
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+      {
+        if (impl->remove_reference())
+          delete impl;
+      }
+      impl = rhs.impl;
+      if (impl != NULL)
+        impl->add_reference();
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionHandshake::ext_handoff_to_legion(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+#endif
+      impl->ext_handoff_to_legion();
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionHandshake::ext_wait_on_legion(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+#endif
+      impl->ext_wait_on_legion();
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionHandshake::legion_handoff_to_ext(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+#endif
+      impl->legion_handoff_to_ext();
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionHandshake::legion_wait_on_ext(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+#endif
+      impl->legion_wait_on_ext();
+    }
+
+    //--------------------------------------------------------------------------
+    PhaseBarrier LegionHandshake::get_legion_wait_phase_barrier(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+#endif
+      return impl->get_legion_wait_phase_barrier();
+    }
+
+    //--------------------------------------------------------------------------
+    PhaseBarrier LegionHandshake::get_legion_arrive_phase_barrier(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+#endif
+      return impl->get_legion_arrive_phase_barrier();
+    }
+    
+    //--------------------------------------------------------------------------
+    void LegionHandshake::advance_legion_handshake(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+#endif
+      impl->advance_legion_handshake();
+    }
+
+    /////////////////////////////////////////////////////////////
+    // MPILegionHandshake 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    MPILegionHandshake::MPILegionHandshake(void)
+      : LegionHandshake()
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    MPILegionHandshake::MPILegionHandshake(const MPILegionHandshake &rhs)
+      : LegionHandshake(rhs)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    MPILegionHandshake::~MPILegionHandshake(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    MPILegionHandshake::MPILegionHandshake(Internal::LegionHandshakeImpl *i)
+      : LegionHandshake(i)
+    //--------------------------------------------------------------------------
+    {
     }
 
     //--------------------------------------------------------------------------
@@ -2269,76 +2006,6 @@ namespace Legion {
       if (impl != NULL)
         impl->add_reference();
       return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void MPILegionHandshake::mpi_handoff_to_legion(void) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(impl != NULL);
-#endif
-      impl->mpi_handoff_to_legion();
-    }
-
-    //--------------------------------------------------------------------------
-    void MPILegionHandshake::mpi_wait_on_legion(void) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(impl != NULL);
-#endif
-      impl->mpi_wait_on_legion();
-    }
-
-    //--------------------------------------------------------------------------
-    void MPILegionHandshake::legion_handoff_to_mpi(void) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(impl != NULL);
-#endif
-      impl->legion_handoff_to_mpi();
-    }
-
-    //--------------------------------------------------------------------------
-    void MPILegionHandshake::legion_wait_on_mpi(void) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(impl != NULL);
-#endif
-      impl->legion_wait_on_mpi();
-    }
-
-    //--------------------------------------------------------------------------
-    PhaseBarrier MPILegionHandshake::get_legion_wait_phase_barrier(void) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(impl != NULL);
-#endif
-      return impl->get_legion_wait_phase_barrier();
-    }
-
-    //--------------------------------------------------------------------------
-    PhaseBarrier MPILegionHandshake::get_legion_arrive_phase_barrier(void) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(impl != NULL);
-#endif
-      return impl->get_legion_arrive_phase_barrier();
-    }
-    
-    //--------------------------------------------------------------------------
-    void MPILegionHandshake::advance_legion_handshake(void) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(impl != NULL);
-#endif
-      impl->advance_legion_handshake();
     }
 
     /////////////////////////////////////////////////////////////
@@ -3585,116 +3252,54 @@ namespace Legion {
                                           Color color, bool allocable)
     //--------------------------------------------------------------------------
     {
-#ifndef DISABLE_PARTITION_SHIM
       if (allocable)
         Internal::log_run.warning("WARNING: allocable index partitions are "
                                   "no longer supported");
-      // Count how many entries there are in the coloring
-      coord_t num_entries = 0;
-      bool do_ranges = false;
-      for (PointColoring::const_iterator cit = coloring.begin(); 
-            cit != coloring.end(); cit++)
+      std::map<DomainPoint,Domain> domains;
+      for (PointColoring::const_iterator cit = 
+            coloring.begin(); cit != coloring.end(); cit++)
       {
-#ifdef DEBUG_LEGION
-        assert(cit->first.get_dim() == color_space.get_dim());
-#endif
-        num_entries += cit->second.points.size();
-        for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator it = 
-              cit->second.ranges.begin(); it != cit->second.ranges.end(); it++)
+        if (cit->second.ranges.empty())
         {
-          // Skip empty ranges
-          if (it->first.value > it->second.value)
-            continue;
-          num_entries++;
-          do_ranges = true;
+          std::vector<Realm::Point<1,coord_t> > 
+            points(cit->second.points.size());
+          unsigned index = 0;
+          for (std::set<ptr_t>::const_iterator it = 
+                cit->second.points.begin(); it != 
+                cit->second.points.end(); it++)
+            points[index++] = Realm::Point<1,coord_t>(*it);
+          const Realm::IndexSpace<1,coord_t> space(points);
+          domains[cit->first] = DomainT<1,coord_t>(space);
         }
-      }
-      // Now make a temporary logical region with two fields to handle
-      // the colors and points
-      Rect<1,coord_t> bounds(Point<1,coord_t>(0),
-                                     Point<1,coord_t>(num_entries-1));
-      IndexSpaceT<1,coord_t> temp_is = create_index_space(ctx, bounds);
-      FieldSpace temp_fs = create_field_space(ctx);
-      const FieldID color_fid = 1;
-      const FieldID pointer_fid = 2;
-      {
-        FieldAllocator allocator = create_field_allocator(ctx,temp_fs);
-        switch (color_space.get_dim())
-        {
-#define DIMFUNC(DIM) \
-          case DIM: \
-            { \
-              allocator.allocate_field( \
-                  sizeof(Point<DIM,coord_t>), color_fid); \
-              break; \
-            }
-          LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
-          default:
-            assert(false);
-        }
-        if (do_ranges)
-          allocator.allocate_field(sizeof(Rect<1,coord_t>), 
-                                   pointer_fid);
         else
-          allocator.allocate_field(sizeof(Point<1,coord_t>), 
-                                   pointer_fid);
-      }
-      LogicalRegionT<1,coord_t> temp_lr = create_logical_region(ctx,
-                                            temp_is, temp_fs, true);
-      // Fill in the logical region with the data
-      // Do this with a task launch to maintain deferred execution
-      switch (color_space.get_dim())
-      {
-#define DIMFUNC(DIM) \
-    case DIM: \
-      { \
-        if (do_ranges) \
-        { \
-          PartitionShim::ColorRects<DIM,1> launcher(coloring, temp_lr, \
-                                            color_fid, pointer_fid); \
-          runtime->execute_task(ctx, launcher); \
-        } \
-        else \
-        { \
-          PartitionShim::ColorPoints<DIM> launcher(coloring, temp_lr, \
-                                            color_fid, pointer_fid); \
-          runtime->execute_task(ctx, launcher); \
-        } \
-        break; \
-      }
-        LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
-        default:
-          assert(false);
+        {
+          std::vector<Realm::Rect<1,coord_t> >
+            ranges(cit->second.points.size() + cit->second.ranges.size());
+          unsigned index = 0;
+          for (std::set<ptr_t>::const_iterator it = 
+                cit->second.points.begin(); it != 
+                cit->second.points.end(); it++)
+          {
+            Realm::Point<1,coord_t> point(*it);
+            ranges[index++] = Realm::Rect<1,coord_t>(point, point);
+          }
+          for (std::set<std::pair<ptr_t,ptr_t> >::iterator it = 
+                cit->second.ranges.begin(); it !=
+                cit->second.ranges.end(); it++)
+          {
+            Realm::Point<1,coord_t> lo(it->first);
+            Realm::Point<1,coord_t> hi(it->second);
+            ranges[index++] = Realm::Rect<1,coord_t>(lo, hi);
+          }
+          const Realm::IndexSpace<1,coord_t> space(ranges);
+          domains[cit->first] = DomainT<1,coord_t>(space);
+        }
       }
       // Make an index space for the color space
       IndexSpace index_color_space = create_index_space(ctx, color_space);
-      // Partition the logical region by the color field
-      IndexPartition temp_ip = create_partition_by_field(ctx, temp_lr, 
-                                    temp_lr, color_fid, index_color_space,
-                                    AUTO_GENERATE_ID, PARTITION_SHIM_MAPPER_ID);
-      // Then project the partition image through the pointer field
-      LogicalPartition temp_lp = get_logical_partition(temp_lr, temp_ip);
-      IndexPartition result;
-      if (do_ranges)
-        result = create_partition_by_image_range(ctx, parent, temp_lp,
-                    temp_lr, pointer_fid, index_color_space, part_kind, color,
-                    PARTITION_SHIM_MAPPER_ID);
-      else
-        result = create_partition_by_image(ctx, parent, temp_lp, 
-                    temp_lr, pointer_fid, index_color_space, part_kind, color,
-                    PARTITION_SHIM_MAPPER_ID);
-      // Clean everything up
-      destroy_logical_region(ctx, temp_lr);
-      destroy_field_space(ctx, temp_fs);
-      destroy_index_space(ctx, temp_is);
+      IndexPartition result = create_partition_by_domain(ctx, parent, domains,
+          index_color_space, true/*perform intersections*/, part_kind, color);
       return result;
-#else // DISABLE_PARTITION_SHIM
-      log_run.error("THE PARTITION SHIM HAS BEEN DISABLED!");
-      assert(false);
-      return IndexPartition::NO_PART;
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3705,27 +3310,50 @@ namespace Legion {
                                           Color part_color)
     //--------------------------------------------------------------------------
     {
-#ifndef DISABLE_PARTITION_SHIM
-      // Count how many entries there are in the coloring
-      coord_t num_entries = 0;
-      bool do_ranges = false;
+      std::map<DomainPoint,Domain> domains;
       Color lower_bound = UINT_MAX, upper_bound = 0;
-      for (Coloring::const_iterator cit = coloring.begin(); 
-            cit != coloring.end(); cit++)
+      for (Coloring::const_iterator cit = 
+            coloring.begin(); cit != coloring.end(); cit++)
       {
         if (cit->first < lower_bound)
           lower_bound = cit->first;
         if (cit->first > upper_bound)
           upper_bound = cit->first;
-        num_entries += cit->second.points.size();
-        for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator it = 
-              cit->second.ranges.begin(); it != cit->second.ranges.end(); it++)
+        const DomainPoint color = Point<1,coord_t>(cit->first);
+        if (cit->second.ranges.empty())
         {
-          // Skip empty ranges
-          if (it->first.value > it->second.value)
-            continue;
-          num_entries++;
-          do_ranges = true;
+          std::vector<Realm::Point<1,coord_t> > 
+            points(cit->second.points.size());
+          unsigned index = 0;
+          for (std::set<ptr_t>::const_iterator it = 
+                cit->second.points.begin(); it != 
+                cit->second.points.end(); it++)
+            points[index++] = Realm::Point<1,coord_t>(*it);
+          const Realm::IndexSpace<1,coord_t> space(points);
+          domains[color] = DomainT<1,coord_t>(space);
+        }
+        else
+        {
+          std::vector<Realm::Rect<1,coord_t> >
+            ranges(cit->second.points.size() + cit->second.ranges.size());
+          unsigned index = 0;
+          for (std::set<ptr_t>::const_iterator it = 
+                cit->second.points.begin(); it != 
+                cit->second.points.end(); it++)
+          {
+            Realm::Point<1,coord_t> point(*it);
+            ranges[index++] = Realm::Rect<1,coord_t>(point, point);
+          }
+          for (std::set<std::pair<ptr_t,ptr_t> >::iterator it = 
+                cit->second.ranges.begin(); it !=
+                cit->second.ranges.end(); it++)
+          {
+            Realm::Point<1,coord_t> lo(it->first);
+            Realm::Point<1,coord_t> hi(it->second);
+            ranges[index++] = Realm::Rect<1,coord_t>(lo, hi);
+          }
+          const Realm::IndexSpace<1,coord_t> space(ranges);
+          domains[color] = DomainT<1,coord_t>(space);
         }
       }
 #ifdef DEBUG_LEGION
@@ -3735,72 +3363,13 @@ namespace Legion {
       Rect<1,coord_t> 
         color_space((Point<1,coord_t>(lower_bound)),
                     (Point<1,coord_t>(upper_bound)));
-      // Now make a temporary logical region with two fields to handle
-      // the colors and points
-      Rect<1,coord_t> bounds(Point<1,coord_t>(0),
-                                     Point<1,coord_t>(num_entries-1));
-      IndexSpaceT<1,coord_t> temp_is = create_index_space(ctx, bounds);
-      FieldSpace temp_fs = create_field_space(ctx);
-      const FieldID color_fid = 1;
-      const FieldID pointer_fid = 2;
-      {
-        FieldAllocator allocator = create_field_allocator(ctx,temp_fs);
-        allocator.allocate_field(sizeof(Point<1,coord_t>), color_fid);
-        if (do_ranges)
-          allocator.allocate_field(sizeof(Rect<1,coord_t>),
-                                   pointer_fid);
-        else
-          allocator.allocate_field(sizeof(Point<1,coord_t>), 
-                                   pointer_fid);
-      }
-      LogicalRegionT<1,coord_t> temp_lr = create_logical_region(ctx,
-                                            temp_is, temp_fs, true);
-      // Fill in the logical region with the data
-      // Do this with a task launch to maintain deferred execution
-      if (do_ranges)
-      {
-        PartitionShim::ColorRects<1,1> launcher(coloring, temp_lr, 
-                                              color_fid, pointer_fid);
-        runtime->execute_task(ctx, launcher);
-      }
-      else
-      {
-        PartitionShim::ColorPoints<1> launcher(coloring, temp_lr, 
-                                               color_fid, pointer_fid);
-        runtime->execute_task(ctx, launcher);
-      }
-      
       // Make an index space for the color space
       IndexSpaceT<1,coord_t> index_color_space = 
                                   create_index_space(ctx, color_space);
-      // Partition the logical region by the color field
-      IndexPartitionT<1,coord_t> temp_ip = create_partition_by_field(ctx,
-                            temp_lr, temp_lr, color_fid, index_color_space,
-                            AUTO_GENERATE_ID, PARTITION_SHIM_MAPPER_ID);
-      // Then project the partition image through the pointer field
-      LogicalPartitionT<1,coord_t> temp_lp = 
-                                     get_logical_partition(temp_lr, temp_ip);
-      IndexPartitionT<1,coord_t> result;
-      if (do_ranges)
-        result = create_partition_by_image_range(ctx, 
-            IndexSpaceT<1,coord_t>(parent), temp_lp, temp_lr, pointer_fid,
-            index_color_space, (disjoint ? DISJOINT_KIND : ALIASED_KIND),
-            part_color, PARTITION_SHIM_MAPPER_ID);
-      else
-        result = create_partition_by_image(ctx,
-            IndexSpaceT<1,coord_t>(parent), temp_lp, temp_lr, pointer_fid, 
-            index_color_space, (disjoint ? DISJOINT_KIND : ALIASED_KIND), 
-            part_color, PARTITION_SHIM_MAPPER_ID);
-      // Clean everything up
-      destroy_logical_region(ctx, temp_lr);
-      destroy_field_space(ctx, temp_fs);
-      destroy_index_space(ctx, temp_is);
+      IndexPartition result = create_partition_by_domain(ctx, parent, domains,
+          index_color_space, true/*perform intersections*/,
+          (disjoint ? DISJOINT_KIND : ALIASED_KIND), part_color);
       return result;
-#else // DISABLE_PARTITION_SHIM
-      log_run.error("THE PARTITION SHIM HAS BEEN DISABLED!");
-      assert(false);
-      return IndexPartition::NO_PART;
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3811,88 +3380,11 @@ namespace Legion {
                                           PartitionKind part_kind, Color color)
     //--------------------------------------------------------------------------
     {
-#ifndef DISABLE_PARTITION_SHIM
-      // Count how many entries there are in the coloring
-      const coord_t num_entries = coloring.size();
-      // Now make a temporary logical region with two fields to handle
-      // the colors and points
-      Rect<1,coord_t> bounds(Point<1,coord_t>(0),
-                                     Point<1,coord_t>(num_entries-1));
-      IndexSpaceT<1,coord_t> temp_is = create_index_space(ctx, bounds);
-      FieldSpace temp_fs = create_field_space(ctx);
-      const FieldID color_fid = 1;
-      const FieldID range_fid = 2;
-      const int color_dim = color_space.get_dim();
-      const int range_dim = coloring.begin()->second.get_dim();
-      {
-        FieldAllocator allocator = create_field_allocator(ctx,temp_fs);
-        switch (color_dim)
-        {
-#define DIMFUNC(DIM) \
-          case DIM: \
-            { \
-              allocator.allocate_field( \
-                  sizeof(Point<DIM,coord_t>), color_fid); \
-              break; \
-            }
-          LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
-          default:
-            assert(false);
-        }
-        switch (range_dim)
-        {
-#define DIMFUNC(DIM) \
-          case DIM: \
-            { \
-              allocator.allocate_field( \
-                  sizeof(Rect<DIM,coord_t>), range_fid); \
-              break; \
-            }
-          LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
-          default:
-            assert(false);
-        }
-      }
-      LogicalRegionT<1,coord_t> temp_lr = create_logical_region(ctx,
-                                            temp_is, temp_fs, true);
-      // Fill in the logical region with the data
-      // Do this with a task launch to maintain deferred execution
-      switch ((color_dim-1) * LEGION_MAX_DIM + (range_dim-1))
-      {
-#define DIMFUNC(D1,D2) \
-        case ((D1-1)*LEGION_MAX_DIM+(D2-1)): \
-          { \
-            PartitionShim::ColorRects<D1,D2> launcher(coloring, \
-                temp_lr, color_fid, range_fid); \
-            runtime->execute_task(ctx, launcher); \
-            break; \
-          }
-        LEGION_FOREACH_NN(DIMFUNC)
-#undef DIMFUNC
-      }
       // Make an index space for the color space
       IndexSpace index_color_space = create_index_space(ctx, color_space);
-      // Partition the logical region by the color field
-      IndexPartition temp_ip = create_partition_by_field(ctx, temp_lr, 
-                                temp_lr, color_fid, index_color_space,
-                                AUTO_GENERATE_ID, PARTITION_SHIM_MAPPER_ID);
-      // Then project the partition image through the range field
-      LogicalPartition temp_lp = get_logical_partition(temp_lr, temp_ip);
-      IndexPartition result = create_partition_by_image_range(ctx, parent, 
-                           temp_lp, temp_lr, range_fid, index_color_space, 
-                           part_kind, color, PARTITION_SHIM_MAPPER_ID);
-      // Clean everything up
-      destroy_logical_region(ctx, temp_lr);
-      destroy_field_space(ctx, temp_fs);
-      destroy_index_space(ctx, temp_is);
+      IndexPartition result = create_partition_by_domain(ctx, parent, coloring,
+          index_color_space, true/*perform intersections*/, part_kind, color);
       return result;
-#else // DISABLE_PARTITION_SHIM
-      log_run.error("THE PARTITION SHIM HAS BEEN DISABLED!");
-      assert(false);
-      return IndexPartition::NO_PART;
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3903,78 +3395,19 @@ namespace Legion {
                                           bool disjoint, Color part_color)
     //--------------------------------------------------------------------------
     {
-#ifndef DISABLE_PARTITION_SHIM
-      // Count how many entries there are in the coloring
-      const coord_t num_entries = coloring.size();
-      // Now make a temporary logical region with two fields to handle
-      // the colors and points
-      Rect<1,coord_t> bounds(Point<1,coord_t>(0),
-                                     Point<1,coord_t>(num_entries-1));
-      IndexSpaceT<1,coord_t> temp_is = create_index_space(ctx, bounds);
-      FieldSpace temp_fs = create_field_space(ctx);
-      const FieldID color_fid = 1;
-      const FieldID range_fid = 2;
-      const int range_dim = coloring.begin()->second.get_dim();
+      std::map<DomainPoint,Domain> domains;
+      for (DomainColoring::const_iterator it = 
+            coloring.begin(); it != coloring.end(); it++)
       {
-        FieldAllocator allocator = create_field_allocator(ctx,temp_fs);
-        allocator.allocate_field(sizeof(Point<1,coord_t>), color_fid);
-        switch (range_dim)
-        {
-#define DIMFUNC(DIM) \
-          case DIM: \
-            { \
-              allocator.allocate_field( \
-                  sizeof(Rect<DIM,coord_t>), range_fid); \
-              break; \
-            }
-          LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
-          default:
-            assert(false);
-        }
+        Point<1,coord_t> color(it->first);
+        domains[color] = it->second;
       }
-      LogicalRegionT<1,coord_t> temp_lr = create_logical_region(ctx,
-                                            temp_is, temp_fs, true);
-      // Fill in the logical region with the data
-      // Do this with a task launch to maintain deferred execution
-      switch (range_dim)
-      {
-#define DIMFUNC(DIM) \
-        case DIM: \
-          { \
-            PartitionShim::ColorRects<1,DIM> launcher(coloring, \
-                temp_lr, color_fid, range_fid); \
-            runtime->execute_task(ctx, launcher); \
-            break; \
-          } 
-        LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
-        default:
-          assert(false);
-      }
-
-      IndexSpaceT<1,coord_t> index_color_space = 
-                            create_index_space<1,coord_t>(ctx, color_space);
-      // Partition the logical region by the color field
-      IndexPartition temp_ip = create_partition_by_field(ctx, temp_lr,
-                                    temp_lr, color_fid, index_color_space,
-                                    AUTO_GENERATE_ID, PARTITION_SHIM_MAPPER_ID);
-      // Then project the partition image through the pointer field
-      LogicalPartition temp_lp = get_logical_partition(temp_lr, temp_ip);
-      IndexPartition result = create_partition_by_image_range(ctx,
-          parent, temp_lp, temp_lr, range_fid, index_color_space, 
-          (disjoint ? DISJOINT_KIND : ALIASED_KIND), part_color,
-          PARTITION_SHIM_MAPPER_ID);
-      // Clean everything up
-      destroy_logical_region(ctx, temp_lr);
-      destroy_field_space(ctx, temp_fs);
-      destroy_index_space(ctx, temp_is);
+      // Make an index space for the color space
+      IndexSpace index_color_space = create_index_space(ctx, color_space);
+      IndexPartition result = create_partition_by_domain(ctx, parent, domains,
+          index_color_space, true/*perform intersections*/,
+          (disjoint ? DISJOINT_KIND : ALIASED_KIND), part_color);
       return result;
-#else // DISABLE_PARTITION_SHIM
-      log_run.error("THE PARTITION SHIM HAS BEEN DISABLED!");
-      assert(false);
-      return IndexPartition::NO_PART;
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3985,91 +3418,46 @@ namespace Legion {
                                        PartitionKind part_kind, Color color)
     //--------------------------------------------------------------------------
     {
-#ifndef DISABLE_PARTITION_SHIM
-      // Count how many entries there are in the coloring
-      coord_t num_entries = 0;
-      for (MultiDomainPointColoring::const_iterator it = coloring.begin();
-            it != coloring.end(); it++)
-        num_entries += it->second.size(); 
-      // Now make a temporary logical region with two fields to handle
-      // the colors and points
-      Rect<1,coord_t> bounds(Point<1,coord_t>(0),
-                                     Point<1,coord_t>(num_entries-1));
-      IndexSpaceT<1,coord_t> temp_is = create_index_space(ctx, bounds);
-      FieldSpace temp_fs = create_field_space(ctx);
-      const FieldID color_fid = 1;
-      const FieldID range_fid = 2;
-      const int color_dim = color_space.get_dim();
-      const int range_dim = coloring.begin()->second.begin()->get_dim();
+      const int dim = parent.get_dim();
+      std::map<DomainPoint,Domain> domains;
+      Realm::ProfilingRequestSet no_reqs;
+      switch (dim)
       {
-        FieldAllocator allocator = create_field_allocator(ctx,temp_fs);
-        switch (color_dim)
-        {
 #define DIMFUNC(DIM) \
-          case DIM: \
-            { \
-              allocator.allocate_field( \
-                  sizeof(Point<DIM,coord_t>), color_fid); \
-              break; \
-            }
-          LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
-          default:
-            assert(false);
-        }
-        switch (range_dim)
-        {
-#define DIMFUNC(DIM) \
-          case DIM: \
-            { \
-              allocator.allocate_field( \
-                  sizeof(Rect<DIM,coord_t>), range_fid); \
-              break; \
-            }
-          LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
-          default:
-            assert(false);
-        }
-      }
-      LogicalRegionT<1,coord_t> temp_lr = create_logical_region(ctx,
-                                            temp_is, temp_fs, true);
-      // Fill in the logical region with the data
-      // Do this with a task launch to maintain deferred execution
-      switch ((color_dim-1) * LEGION_MAX_DIM + (range_dim-1))
-      {
-#define DIMFUNC(D1,D2) \
-        case ((D1-1)*LEGION_MAX_DIM+(D2-1)): \
-          { \
-            PartitionShim::ColorRects<D1,D2> launcher(coloring, \
-                temp_lr, color_fid, range_fid); \
-            runtime->execute_task(ctx, launcher); \
-            break; \
+        case DIM:                                                       \
+          {                                                             \
+            for (MultiDomainPointColoring::const_iterator cit =         \
+                  coloring.begin(); cit != coloring.end(); cit++)       \
+            {                                                           \
+              std::vector<Realm::IndexSpace<DIM,coord_t> >              \
+                  subspaces(cit->second.size());                        \
+              unsigned index = 0;                                       \
+              for (std::set<Domain>::const_iterator it =                \
+                    cit->second.begin(); it != cit->second.end(); it++) \
+              {                                                         \
+                const DomainT<DIM,coord_t> domaint = *it;               \
+                subspaces[index++] = domaint;                           \
+              }                                                         \
+              Realm::IndexSpace<DIM,coord_t> summary;                   \
+              Internal::LgEvent wait_on(                                \
+                  Realm::IndexSpace<DIM,coord_t>::compute_union(        \
+                    subspaces, summary, no_reqs));                      \
+              domains[cit->first] = DomainT<DIM,coord_t>(summary);      \
+              if (wait_on.exists())                                     \
+                wait_on.wait();                                         \
+            }                                                           \
+            break;                                                      \
           }
-        LEGION_FOREACH_NN(DIMFUNC)
+        LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
+        default:
+          assert(false);
       }
       // Make an index space for the color space
       IndexSpace index_color_space = create_index_space(ctx, color_space);
-      // Partition the logical region by the color field
-      IndexPartition temp_ip = create_partition_by_field(ctx, temp_lr, 
-                                    temp_lr, color_fid, index_color_space,
-                                    AUTO_GENERATE_ID, PARTITION_SHIM_MAPPER_ID);
-      // Then project the partition image through the range field
-      LogicalPartition temp_lp = get_logical_partition(temp_lr, temp_ip);
-      IndexPartition result = create_partition_by_image_range(ctx, parent, 
-            temp_lp, temp_lr, range_fid, index_color_space, part_kind, color,
-            PARTITION_SHIM_MAPPER_ID);
-      // Clean everything up
-      destroy_logical_region(ctx, temp_lr);
-      destroy_field_space(ctx, temp_fs);
-      destroy_index_space(ctx, temp_is);
+      IndexPartition result = create_partition_by_domain(ctx, parent, domains,
+        index_color_space, true/*perform intersections*/, part_kind, color);
       return result;
-#else // DISABLE_PARTITION_SHIM
-      log_run.error("THE PARTITION SHIM HAS BEEN DISABLED!");
-      assert(false);
-      return IndexPartition::NO_PART;
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -4080,80 +3468,48 @@ namespace Legion {
                                           bool disjoint, Color part_color)
     //--------------------------------------------------------------------------
     {
-#ifndef DISABLE_PARTITION_SHIM
-      // Count how many entries there are in the coloring
-      coord_t num_entries = 0;
-      for (MultiDomainColoring::const_iterator it = coloring.begin();
-            it != coloring.end(); it++)
-        num_entries += it->second.size();
-      // Now make a temporary logical region with two fields to handle
-      // the colors and points
-      Rect<1,coord_t> bounds(Point<1,coord_t>(0),
-                                     Point<1,coord_t>(num_entries-1));
-      IndexSpaceT<1,coord_t> temp_is = create_index_space(ctx, bounds);
-      FieldSpace temp_fs = create_field_space(ctx);
-      const FieldID color_fid = 1;
-      const FieldID range_fid = 2;
-      const int range_dim = coloring.begin()->second.begin()->get_dim();
-      {
-        FieldAllocator allocator = create_field_allocator(ctx,temp_fs);
-        allocator.allocate_field(sizeof(Point<1,coord_t>), color_fid);
-        switch (range_dim)
-        {
-#define DIMFUNC(DIM) \
-          case DIM: \
-            { \
-              allocator.allocate_field( \
-                  sizeof(Rect<DIM,coord_t>), range_fid); \
-              break; \
-            }
-          LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
-          default:
-            assert(false);
-        }
-      }
-      LogicalRegionT<1,coord_t> temp_lr = create_logical_region(ctx,
-                                            temp_is, temp_fs, true);
-      // Fill in the logical region with the data
-      // Do this with a task launch to maintain deferred execution
-      switch (range_dim)
+      const int dim = parent.get_dim();
+      std::map<DomainPoint,Domain> domains;
+      Realm::ProfilingRequestSet no_reqs;
+      switch (dim)
       {
 #define DIMFUNC(DIM) \
-        case DIM: \
-          { \
-            PartitionShim::ColorRects<1,DIM> launcher(coloring, \
-                temp_lr, color_fid, range_fid); \
-            runtime->execute_task(ctx, launcher); \
-            break; \
+        case DIM:                                                       \
+          {                                                             \
+            for (MultiDomainColoring::const_iterator cit =              \
+                  coloring.begin(); cit != coloring.end(); cit++)       \
+            {                                                           \
+              std::vector<Realm::IndexSpace<DIM,coord_t> >              \
+                  subspaces(cit->second.size());                        \
+              unsigned index = 0;                                       \
+              for (std::set<Domain>::const_iterator it =                \
+                    cit->second.begin(); it != cit->second.end(); it++) \
+              {                                                         \
+                const DomainT<DIM,coord_t> domaint = *it;               \
+                subspaces[index++] = domaint;                           \
+              }                                                         \
+              Realm::IndexSpace<DIM,coord_t> summary;                   \
+              Internal::LgEvent wait_on(                                \
+                  Realm::IndexSpace<DIM,coord_t>::compute_union(        \
+                    subspaces, summary, no_reqs));                      \
+              const Point<1,coord_t> color(cit->first);                 \
+              domains[color] = DomainT<DIM,coord_t>(summary);           \
+              if (wait_on.exists())                                     \
+                wait_on.wait();                                         \
+            }                                                           \
+            break;                                                      \
           }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
         default:
           assert(false);
       }
-      IndexSpaceT<1,coord_t> index_color_space = 
-                            create_index_space<1,coord_t>(ctx, color_space);
-      // Partition the logical region by the color field
-      IndexPartition temp_ip = create_partition_by_field(ctx, temp_lr,
-                                    temp_lr, color_fid, index_color_space,
-                                    AUTO_GENERATE_ID, PARTITION_SHIM_MAPPER_ID);
-      // Then project the partition image through the pointer field
-      LogicalPartition temp_lp = get_logical_partition(temp_lr, temp_ip);
-      IndexPartition result = create_partition_by_image_range(ctx,
-          parent, temp_lp, temp_lr, range_fid, index_color_space, 
-          (disjoint ? DISJOINT_KIND : ALIASED_KIND), part_color,
-          PARTITION_SHIM_MAPPER_ID);
-      // Clean everything up
-      destroy_logical_region(ctx, temp_lr);
-      destroy_field_space(ctx, temp_fs);
-      destroy_index_space(ctx, temp_is);
+      // Make an index space for the color space
+      IndexSpace index_color_space = create_index_space(ctx, color_space);
+      IndexPartition result = create_partition_by_domain(ctx, parent, domains,
+        index_color_space, true/*perform intersections*/, 
+        (disjoint ? DISJOINT_KIND : ALIASED_KIND), part_color);
       return result;
-#else // DISABLE_PARTITION_SHIM
-      log_run.error("THE PARTITION SHIM HAS BEEN DISABLED!");
-      assert(false);
-      return IndexPartition::NO_PART; 
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -4182,14 +3538,44 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_equal_partition(Context ctx, 
-                                                      IndexSpace parent,
-                                                      IndexSpace color_space,
-                                                      size_t granularity,
-                                                      Color color)
+                                                   IndexSpace parent,
+                                                   IndexSpace color_space,
+                                                   size_t granularity,
+                                                   Color color)
     //--------------------------------------------------------------------------
     {
       return runtime->create_equal_partition(ctx, parent, color_space,
                                              granularity, color);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition Runtime::create_partition_by_weights(Context ctx,
+                                       IndexSpace parent,
+                                       const std::map<DomainPoint,int> &weights,
+                                       IndexSpace color_space,
+                                       size_t granularity, Color color)
+    //--------------------------------------------------------------------------
+    {
+      ArgumentMap argmap;
+      for (std::map<DomainPoint,int>::const_iterator it = 
+            weights.begin(); it != weights.end(); it++)
+        argmap.set_point(it->first,
+            TaskArgument(&it->second, sizeof(it->second)));
+      FutureMap future_map(argmap.impl->freeze(ctx));
+      return ctx->create_partition_by_weights(parent, future_map, color_space,
+                                              granularity, color);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition Runtime::create_partition_by_weights(Context ctx,
+                                                IndexSpace parent,
+                                                const FutureMap &weights,
+                                                IndexSpace color_space,
+                                                size_t granularity, Color color)
+    //--------------------------------------------------------------------------
+    {
+      return ctx->create_partition_by_weights(parent, weights, color_space, 
+                                              granularity, color);
     }
 
     //--------------------------------------------------------------------------
@@ -4383,14 +3769,42 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition Runtime::create_partition_by_domain(Context ctx,
+                 IndexSpace parent, const std::map<DomainPoint,Domain> &domains,
+                 IndexSpace color_space, bool perform_intersections,
+                 PartitionKind part_kind, Color color)
+    //--------------------------------------------------------------------------
+    {
+      ArgumentMap argmap;
+      for (std::map<DomainPoint,Domain>::const_iterator it = 
+            domains.begin(); it != domains.end(); it++)
+        argmap.set_point(it->first,
+            TaskArgument(&it->second, sizeof(it->second)));
+      FutureMap future_map(argmap.impl->freeze(ctx));
+      return runtime->create_partition_by_domain(ctx, parent, future_map,
+                    color_space, perform_intersections, part_kind, color);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition Runtime::create_partition_by_domain(Context ctx,
+                             IndexSpace parent, const FutureMap &domains,
+                             IndexSpace color_space, bool perform_intersections,
+                             PartitionKind part_kind, Color color)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->create_partition_by_domain(ctx, parent, domains,
+                 color_space, perform_intersections, part_kind, color);
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition Runtime::create_partition_by_field(Context ctx,
                    LogicalRegion handle, LogicalRegion parent, FieldID fid, 
                    IndexSpace color_space, Color color, 
-                   MapperID id, MappingTagID tag)
+                   MapperID id, MappingTagID tag, PartitionKind part_kind)
     //--------------------------------------------------------------------------
     {
       return runtime->create_partition_by_field(ctx, handle, parent, fid,
-                                                color_space, color, id, tag);
+                                  color_space, color, id, tag, part_kind);
     }
 
     //--------------------------------------------------------------------------
@@ -5680,6 +5094,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Future Runtime::reduce_future_map(Context ctx, const FutureMap &future_map,
+                                      ReductionOpID redop, bool deterministic)
+    //--------------------------------------------------------------------------
+    {
+      return ctx->reduce_future_map(future_map, redop, deterministic);
+    }
+
+    //--------------------------------------------------------------------------
     Future Runtime::execute_task(Context ctx, 
                         TaskID task_id,
                         const std::vector<IndexSpaceRequirement> &indexes,
@@ -6800,10 +6222,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::initialize(int *argc, char ***argv)
+    /*static*/ void Runtime::initialize(int *argc, char ***argv, bool filter)
     //--------------------------------------------------------------------------
     {
-      Internal::Runtime::initialize(argc, argv);
+      Internal::Runtime::initialize(argc, argv, filter);
     }
 
     //--------------------------------------------------------------------------
@@ -6870,6 +6292,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ LegionHandshake Runtime::create_external_handshake(
+                bool init_in_ext, int ext_participants, int legion_participants)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(ext_participants > 0);
+      assert(legion_participants > 0);
+#endif
+      LegionHandshake result(
+          new Internal::LegionHandshakeImpl(init_in_ext,
+                                       ext_participants, legion_participants));
+      Internal::Runtime::register_handshake(result);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ MPILegionHandshake Runtime::create_handshake(bool init_in_MPI,
                                                         int mpi_participants,
                                                         int legion_participants)
@@ -6880,7 +6318,7 @@ namespace Legion {
       assert(legion_participants > 0);
 #endif
       MPILegionHandshake result(
-          new Internal::MPILegionHandshakeImpl(init_in_MPI,
+          new Internal::LegionHandshakeImpl(init_in_MPI,
                                        mpi_participants, legion_participants));
       Internal::Runtime::register_handshake(result);
       return result;

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2019 Stanford University
+# Copyright 2020 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -24,8 +24,8 @@ import numpy as np
 import os
 import subprocess
 
-import legion
-from legion import disjoint_complete, index_launch, print_once, task, Domain, Fspace, Future, Ispace, IndexLaunch, ID, Partition, N, R, Reduce, Region, RW, Trace, WD
+import pygion
+from pygion import disjoint_complete, index_launch, print_once, task, Domain, Fspace, Future, Ispace, IndexLaunch, ID, Partition, N, R, Reduce, Region, RW, Trace, WD
 
 root_dir = os.path.dirname(__file__)
 circuit_header = subprocess.check_output(
@@ -33,10 +33,10 @@ circuit_header = subprocess.check_output(
         "gcc", "-D", "__attribute__(x)=", "-E", "-P",
         os.path.join(root_dir, "circuit_config.h")
     ]).decode("utf-8")
-ffi = legion.ffi
+ffi = pygion.ffi
 ffi.cdef(circuit_header)
 
-Config = legion.Type(
+Config = pygion.Type(
     np.dtype([('bytes', np.void, ffi.sizeof('Config'))]),
     'Config')
 
@@ -69,27 +69,27 @@ def parse_args(argv):
 
 _constant_time_launches = True
 if _constant_time_launches:
-    extern_task = legion.extern_task_wrapper
+    extern_task = pygion.extern_task_wrapper
 else:
-    extern_task = legion.extern_task
+    extern_task = pygion.extern_task
 
 init_piece = extern_task(
     task_id=10002,
-    argument_types=[legion.int32, Config, Region, Region, Region, Region, Region],
+    argument_types=[pygion.int32, Config, Region, Region, Region, Region, Region],
     privileges=[None, None, WD, WD, WD, N, WD],
-    return_type=legion.void,
+    return_type=pygion.void,
     calling_convention='regent')
 
 init_pointers = extern_task(
     task_id=10003,
     argument_types=[Region, Region, Region, Region],
     privileges=[N, N, N, RW('in_ptr', 'in_ptr_r', 'out_ptr', 'out_ptr_r')],
-    return_type=legion.void,
+    return_type=pygion.void,
     calling_convention='regent')
 
 calculate_new_currents = extern_task(
     task_id=10004,
-    argument_types=[legion.bool_, legion.uint32, Region, Region, Region, Region],
+    argument_types=[pygion.bool_, pygion.uint32, Region, Region, Region, Region],
     privileges=[
         None,
         None,
@@ -97,7 +97,7 @@ calculate_new_currents = extern_task(
         R('node_voltage'),
         R('node_voltage'),
         R('in_ptr', 'in_ptr_r', 'out_ptr', 'out_ptr_r', 'inductance', 'resistance', 'wire_cap') + RW(*['current_%d' % i for i in range(10)]) + RW(*['voltage_%d' % i for i in range(9)])],
-    return_type=legion.void,
+    return_type=pygion.void,
     calling_convention='regent')
 
 distribute_charge = extern_task(
@@ -108,24 +108,24 @@ distribute_charge = extern_task(
         Reduce('+', 'charge'),
         Reduce('+', 'charge'),
         R('in_ptr', 'in_ptr_r', 'out_ptr', 'out_ptr_r', 'current_0', 'current_9')],
-    return_type=legion.void,
+    return_type=pygion.void,
     calling_convention='regent')
 
 update_voltages = extern_task(
     task_id=10006,
-    argument_types=[legion.bool_, Region, Region],
+    argument_types=[pygion.bool_, Region, Region],
     privileges=[
         None,
         R('node_cap', 'leakage') + RW('node_voltage', 'charge'),
         R('node_cap', 'leakage') + RW('node_voltage', 'charge')],
-    return_type=legion.void,
+    return_type=pygion.void,
     calling_convention='regent')
 
 @task(task_id=2, replicable=True) # , inner=True
 def main():
     print_once('Running circuit_sparse.py')
 
-    conf = parse_args(legion.input_args(True))
+    conf = parse_args(pygion.input_args(True))
 
     assert conf.num_pieces % conf.pieces_per_superpiece == 0, "pieces should be evenly distributed to superpieces"
     conf.shared_nodes_per_piece = int(math.ceil(conf.nodes_per_piece * conf.pct_shared_nodes / 100.0))
@@ -139,23 +139,23 @@ def main():
     num_circuit_wires = num_pieces * conf.wires_per_piece
 
     node = Fspace(OrderedDict([
-        ('node_cap', legion.float32),
-        ('leakage', legion.float32),
-        ('charge', legion.float32),
-        ('node_voltage', legion.float32),
+        ('node_cap', pygion.float32),
+        ('leakage', pygion.float32),
+        ('charge', pygion.float32),
+        ('node_voltage', pygion.float32),
     ]))
     wire = Fspace(OrderedDict([
-        ('in_ptr', legion.int64),
-        ('in_ptr_r', legion.uint8),
-        ('out_ptr', legion.int64),
-        ('out_ptr_r', legion.uint8),
-        ('inductance', legion.float32),
-        ('resistance', legion.float32),
-        ('wire_cap', legion.float32),
+        ('in_ptr', pygion.int64),
+        ('in_ptr_r', pygion.uint8),
+        ('out_ptr', pygion.int64),
+        ('out_ptr_r', pygion.uint8),
+        ('inductance', pygion.float32),
+        ('resistance', pygion.float32),
+        ('wire_cap', pygion.float32),
     ] + [
-        ('current_%d' % i, legion.float32) for i in range(WIRE_SEGMENTS)
+        ('current_%d' % i, pygion.float32) for i in range(WIRE_SEGMENTS)
     ] + [
-        ('voltage_%d' % i, legion.float32) for i in range(WIRE_SEGMENTS - 1)
+        ('voltage_%d' % i, pygion.float32) for i in range(WIRE_SEGMENTS - 1)
     ]))
 
     all_nodes = Region([num_circuit_nodes], node)
@@ -174,7 +174,7 @@ def main():
     pps = conf.pieces_per_superpiece
     num_shared_nodes = num_pieces * snpp
 
-    privacy_coloring = Region([2], {'rect': legion.rect1d})
+    privacy_coloring = Region([2], {'rect': pygion.rect1d})
     np.copyto(
         privacy_coloring.rect,
         np.array([(num_shared_nodes, num_circuit_nodes - 1),
@@ -196,7 +196,7 @@ def main():
 
     wires_part = Partition.equal(all_wires, launch_domain)
 
-    ghost_ranges = Region([num_superpieces], OrderedDict([('rect', legion.rect1d)]))
+    ghost_ranges = Region([num_superpieces], OrderedDict([('rect', pygion.rect1d)]))
     ghost_ranges_part = Partition.equal(ghost_ranges, launch_domain)
 
     if _constant_time_launches:
@@ -221,8 +221,8 @@ def main():
     trace = Trace()
     for j in range(num_loops):
         if j == prune:
-            legion.execution_fence(block=True)
-            start_time = legion.c.legion_get_current_time_in_nanos()
+            pygion.execution_fence(block=True)
+            start_time = pygion.c.legion_get_current_time_in_nanos()
         with trace:
             if _constant_time_launches:
                 index_launch(
@@ -241,8 +241,8 @@ def main():
                     update_voltages(
                         False, private_part[i], shared_part[i])
         if j == num_loops - prune - 1:
-            legion.execution_fence(block=True)
-            stop_time = legion.c.legion_get_current_time_in_nanos()
+            pygion.execution_fence(block=True)
+            stop_time = pygion.c.legion_get_current_time_in_nanos()
 
     sim_time = (stop_time - start_time)/1e9
     print_once('ELAPSED TIME = %7.3f s' % sim_time)

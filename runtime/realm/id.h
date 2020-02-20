@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,16 +22,6 @@
 #include "realm/utils.h"
 
 #include <iostream>
-
-// we use bit-field structures below, and the order of them isn't guaranteed to
-//  match the system endianness (which itself has no standard way to be
-//  detected, so define our own REALM_REVERSE_ID_FIELDS which can be further
-//  tweaked as needed
-#if defined(__BYTE_ORDER__) && defined(__ORDER_BIG_ENDIAN__)
-  #if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-    #define REALM_REVERSE_ID_FIELDS
-  #endif
-#endif
 
 namespace Realm {
 

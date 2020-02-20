@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@
 #include "realm/utils.h"
 
 #ifdef REALM_USE_USER_THREADS
-#ifdef __MACH__
+#ifdef REALM_ON_MACOS
 #define _XOPEN_SOURCE
 #endif
 #endif
@@ -221,7 +221,7 @@ namespace Realm {
     ThreadScheduler *scheduler;
     Operation *current_op;
     int exception_handler_count;
-    int signal_count;
+    atomic<int> signal_count;
     Mutex signal_mutex;
     std::deque<Signal> signal_queue;
 

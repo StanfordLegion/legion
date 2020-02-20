@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2019 Kitware, Inc.
+# Copyright 2020 Kitware, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -56,7 +56,7 @@ list(APPEND REALM_SRC
   realm/mem_impl.h          realm/mem_impl.cc
   realm/metadata.h          realm/metadata.cc
   realm/module.h            realm/module.cc
-  realm/nodeset.h
+  realm/nodeset.h           realm/nodeset.inl      realm/nodeset.cc
   realm/numa/numa_module.h  realm/numa/numa_module.cc
   realm/numa/numasysif.h    realm/numa/numasysif.cc
   realm/operation.h         realm/operation.cc

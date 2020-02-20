@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,11 +31,11 @@ namespace Realm {
     : finish_event(_finish_event)
     , finish_gen(_finish_gen)
     , refcount(1)
+    , state(ProfilingMeasurements::OperationStatus::WAITING)
     , requests(_requests)
     , pending_work_items(1 /* i.e. the main work item */)
     , failed_work_items(0 /* hopefully it stays that way*/)
   {
-    status.result = ProfilingMeasurements::OperationStatus::WAITING;
     status.error_code = 0;
     measurements.import_requests(requests); 
     wants_timeline = (measurements.wants_measurement<ProfilingMeasurements::OperationTimeline>() ||
@@ -47,12 +47,12 @@ namespace Realm {
 
   inline void Operation::add_reference(void)
   {
-    __sync_fetch_and_add(&refcount, 1);
+    refcount.fetch_add(1);
   }
 
   inline void Operation::remove_reference(void)
   {
-    int left = __sync_add_and_fetch(&refcount, -1);
+    int left = refcount.fetch_sub(1) - 1;
     if(left == 0)
       delete this;
   }
@@ -63,7 +63,7 @@ namespace Realm {
   inline void Operation::add_async_work_item(AsyncWorkItem *item)
   {
     // NO lock taken
-    __sync_fetch_and_add(&pending_work_items, 1);
+    pending_work_items.fetch_add(1);
     all_work_items.insert(item);
   }
 
@@ -71,12 +71,12 @@ namespace Realm {
   inline void Operation::work_item_finished(AsyncWorkItem *item, bool successful)
   {
     // update this count first
-    if(!successful)
-      __sync_fetch_and_add(&failed_work_items, 1);
+    if (!successful)
+      failed_work_items.fetch_add(1);
 
     // no per-work-item data to record, so just decrement the count, and if it goes
     //  to zero, we're complete
-    int remaining = __sync_sub_and_fetch(&pending_work_items, 1);
+    int remaining = pending_work_items.fetch_sub(1) - 1;
 
     if(remaining == 0) {
       mark_completed();
@@ -85,7 +85,7 @@ namespace Realm {
 
   inline bool Operation::cancellation_requested(void) const
   {
-    return status.result == Status::INTERRUPT_REQUESTED;
+    return state.load() == Status::INTERRUPT_REQUESTED;
   }
 
   inline Event Operation::get_finish_event(void) const

@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1352,7 +1352,7 @@ namespace Realm {
     }
 
     namespace ThreadLocal {
-      static __thread GPUProcessor *current_gpu_proc = 0;
+      static REALM_THREAD_LOCAL GPUProcessor *current_gpu_proc = 0;
     };
 
     // this flag will be set on the first call into any of the hijack code in
@@ -2541,7 +2541,7 @@ namespace Realm {
                                            jit_options, option_vals); 
       if (result != CUDA_SUCCESS)
       {
-#ifdef __MACH__
+#ifdef REALM_ON_MACOS
         if (result == CUDA_ERROR_OPERATING_SYSTEM) {
           log_gpu.error("ERROR: Device side asserts are not supported by the "
                               "CUDA driver for MAC OSX, see NVBugs 1628896.");

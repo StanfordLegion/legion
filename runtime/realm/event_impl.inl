@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,7 +41,7 @@ namespace Realm {
 
   inline /*static*/ bool EventImpl::add_waiter(Event needed, EventWaiter *waiter)
   {
-    return get_event_impl(needed)->add_waiter(ID(needed).event_generation(), waiter);
+    return get_event_impl(needed)->add_waiter(gen_t(ID(needed).event_generation()), waiter);
   }
 
 
@@ -59,7 +59,7 @@ namespace Realm {
   inline /*static*/ void GenEventImpl::trigger(Event e, bool poisoned)
   {
     GenEventImpl *impl = get_genevent_impl(e);
-    impl->trigger(ID(e).event_generation(), Network::my_node_id, poisoned);
+    impl->trigger(gen_t(ID(e).event_generation()), Network::my_node_id, poisoned);
   }
 
 

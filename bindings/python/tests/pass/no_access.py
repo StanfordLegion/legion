@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2019 Stanford University
+# Copyright 2020 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,8 +17,8 @@
 
 from __future__ import print_function
 
-import legion
-from legion import task, ID, R, N
+import pygion
+from pygion import task, ID, R, N
 
 @task(privileges=[N])
 def hello(R, i):
@@ -31,19 +31,19 @@ def hello2(R, i):
 
 @task
 def main():
-    R = legion.Region([4], {'x': legion.float64})
-    P = legion.Partition.equal(R, [4])
-    legion.fill(R, 'x', 0)
+    R = pygion.Region([4], {'x': pygion.float64})
+    P = pygion.Partition.equal(R, [4])
+    pygion.fill(R, 'x', 0)
 
     hello2(P[0], 0)
 
-    for i in legion.IndexLaunch([4]):
+    for i in pygion.IndexLaunch([4]):
         hello2(P[i], i)
 
-    legion.index_launch([4], hello2, P[ID], ID)
+    pygion.index_launch([4], hello2, P[ID], ID)
 
     # FIXME: This is needed in nopaint to avoid a race with region deletion
-    legion.execution_fence()
+    pygion.execution_fence()
 
 if __name__ == '__main__':
     main()

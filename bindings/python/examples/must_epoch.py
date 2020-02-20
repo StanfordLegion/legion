@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2019 Stanford University
+# Copyright 2020 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,8 +17,8 @@
 
 from __future__ import print_function
 
-import legion
-from legion import task, ID
+import pygion
+from pygion import task, ID
 
 global_var = 123 # Kids: Don't do this at home
 
@@ -34,29 +34,29 @@ def hi(i):
 def main():
     global global_var
 
-    global_procs = legion.Tunable.select(legion.Tunable.GLOBAL_PYS).get()
+    global_procs = pygion.Tunable.select(pygion.Tunable.GLOBAL_PYS).get()
 
-    with legion.MustEpochLaunch(): # implicit launch domain
+    with pygion.MustEpochLaunch(): # implicit launch domain
         for i in range(global_procs):
             hi(i, point=i)
-    legion.execution_fence(block=True)
+    pygion.execution_fence(block=True)
 
     assert global_var == 4123
 
     global_var = 456
 
-    with legion.MustEpochLaunch([global_procs]):
+    with pygion.MustEpochLaunch([global_procs]):
         for i in range(global_procs):
             hi(i, point=i)
-    legion.execution_fence(block=True)
+    pygion.execution_fence(block=True)
 
     assert global_var == 4456
 
     global_var = 789
 
-    with legion.MustEpochLaunch([global_procs]):
-        legion.index_launch([global_procs], hi, ID)
-    legion.execution_fence(block=True)
+    with pygion.MustEpochLaunch([global_procs]):
+        pygion.index_launch([global_procs], hi, ID)
+    pygion.execution_fence(block=True)
 
     assert global_var == 4789
 

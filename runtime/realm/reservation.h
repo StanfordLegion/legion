@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@
 
 #include "realm/realm_c.h"
 
+#include "realm/atomics.h"
 #include "realm/event.h"
 
 namespace Realm {
@@ -137,21 +138,22 @@ namespace Realm {
     bool trywrlock_slow(void);
     bool tryrdlock_slow(void);
 
+    friend struct FastRsrvState;
+
     // we will make use of atomics for the fast path, so make sure we take
     //  a full cache line for our data to avoid false sharing
     static const size_t CACHE_LINE_SIZE = 64;
-    union {
-      State state;
-      // this is slightly fragile, but we want to have enough room to store
-      //  the implementation-specific stuff without another layer of
-      //  indirection
-      char opaque[CACHE_LINE_SIZE * 4];
-    } __attribute__((aligned(16)));
+    REALM_ALIGNED_TYPE_CONST(State_aligned, atomic<State>, 16);
+    State_aligned state;
+    // this is slightly fragile, but we want to have enough room to store
+    //  the implementation-specific stuff without another layer of
+    //  indirection
+    char opaque[CACHE_LINE_SIZE * 4 - sizeof(atomic<State>)];
   };
 	
 }; // namespace Realm
 
-#include "reservation.inl"
+#include "realm/reservation.inl"
 
 #endif // ifndef REALM_RESERVATION_H
 

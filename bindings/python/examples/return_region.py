@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2019 Stanford University
+# Copyright 2020 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,15 +17,15 @@
 
 from __future__ import print_function
 
-import legion
-from legion import task, Region, RW
+import pygion
+from pygion import task, Region, RW
 
 @task
 def make_region():
     # If you return a region from a task, the privileges to the region
     # will be automatically given to the calling task.
-    R = Region([4, 4], {'x': legion.float64})
-    legion.fill(R, 'x', 0)
+    R = Region([4, 4], {'x': pygion.float64})
+    pygion.fill(R, 'x', 0)
     print('returning from make_region with', R)
     return R
 
@@ -33,8 +33,8 @@ def make_region():
 def make_region_dict():
     # It should also work if the region in question is returned as
     # part of a larger data structure.
-    R = Region([4, 4], {'x': legion.float64})
-    legion.fill(R, 'x', 0)
+    R = Region([4, 4], {'x': pygion.float64})
+    pygion.fill(R, 'x', 0)
     result = {'asdf': R}
     print('returning from make_region_dict with', result)
     return result

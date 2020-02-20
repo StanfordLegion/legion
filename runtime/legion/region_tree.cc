@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -236,12 +236,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::create_pending_cross_product(TaskContext *ctx,
-                                                        IndexPartition handle1,
-                                                        IndexPartition handle2,
+                                                 IndexPartition handle1,
+                                                 IndexPartition handle2,
                              std::map<IndexSpace,IndexPartition> &user_handles,
-                                                        PartitionKind kind,
-                                                        LegionColor &part_color,
-                                                        ApEvent domain_ready)
+                                                 PartitionKind kind,
+                                                 LegionColor &part_color,
+                                                 ApEvent domain_ready,
+                                                 std::set<RtEvent> &safe_events)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *base = get_node(handle1);
@@ -325,14 +326,17 @@ namespace Legion {
                              handle1.get_tree_id(), handle1.get_type_tag()); 
           DistributedID did = 
             runtime->get_available_distributed_id();
-          create_pending_partition(ctx, pid, child_node->handle, 
-                                   source->color_space->handle, 
-                                   part_color, kind, did, domain_ready); 
+          const RtEvent safe =
+            create_pending_partition(ctx, pid, child_node->handle, 
+                                     source->color_space->handle, 
+                                     part_color, kind, did, domain_ready); 
           // If the user requested the handle for this point return it
           std::map<IndexSpace,IndexPartition>::iterator finder = 
             user_handles.find(child_node->handle);
           if (finder != user_handles.end())
             finder->second = pid;
+          if (safe.exists())
+            safe_events.insert(safe);
         }
       }
       else
@@ -347,14 +351,17 @@ namespace Legion {
                              handle1.get_tree_id(), handle1.get_type_tag()); 
           DistributedID did = 
             runtime->get_available_distributed_id();
-          create_pending_partition(ctx, pid, child_node->handle, 
-                                   source->color_space->handle, 
-                                   part_color, kind, did, domain_ready); 
+          const RtEvent safe = 
+            create_pending_partition(ctx, pid, child_node->handle, 
+                                     source->color_space->handle, 
+                                     part_color, kind, did, domain_ready); 
           // If the user requested the handle for this point return it
           std::map<IndexSpace,IndexPartition>::iterator finder = 
             user_handles.find(child_node->handle);
           if (finder != user_handles.end())
             finder->second = pid;
+          if (safe.exists())
+            safe_events.insert(safe);
         }
         delete itr;
       }
@@ -399,6 +406,17 @@ namespace Legion {
     {
       IndexPartNode *new_part = get_node(pid);
       return new_part->create_equal_children(op, granularity);
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent RegionTreeForest::create_partition_by_weights(Operation *op,
+                                                       IndexPartition pid,
+                                                       const FutureMap &weights,
+                                                       size_t granularity)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartNode *new_part = get_node(pid);
+      return new_part->create_by_weights(op, weights, granularity);
     }
 
     //--------------------------------------------------------------------------
@@ -461,6 +479,18 @@ namespace Legion {
     {
       IndexPartNode *new_part = get_node(pid);
       return new_part->create_by_restriction(transform, extent); 
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent RegionTreeForest::create_partition_by_domain(Operation *op,
+                                                    IndexPartition pid,
+                                                    const FutureMap &future_map,
+                                                    bool perform_intersections) 
+    //--------------------------------------------------------------------------
+    {
+      IndexPartNode *new_part = get_node(pid);
+      return new_part->parent->create_by_domain(op, new_part, future_map.impl, 
+                                              perform_intersections);
     }
 
     //--------------------------------------------------------------------------
@@ -2237,7 +2267,8 @@ namespace Legion {
                                             const bool gather_is_range,
                                             const ApEvent precondition, 
                                             const PredEvent pred_guard,
-                                            const PhysicalTraceInfo &trace_info)
+                                            const PhysicalTraceInfo &trace_info,
+                                           const bool possible_src_out_of_range)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2275,7 +2306,8 @@ namespace Legion {
       copy_expr->construct_indirections(src_indexes, idx_field, 
                src_req.region.get_index_space().get_type_tag(), 
                gather_is_range, idx_target.get_manager()->get_instance(),
-               src_records, indirections, indirection_indexes);
+               src_records, indirections, indirection_indexes,
+               possible_src_out_of_range, false/*possible aliasing*/);
 #ifdef DEBUG_LEGION
       assert(indirection_indexes.size() == src_req.instance_fields.size());
 #endif
@@ -2361,7 +2393,9 @@ namespace Legion {
                                              const bool scatter_is_range,
                                              const ApEvent precondition, 
                                              const PredEvent pred_guard,
-                                            const PhysicalTraceInfo &trace_info)
+                                            const PhysicalTraceInfo &trace_info,
+                                           const bool possible_dst_out_of_range,
+                                             const bool possible_dst_aliasing)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2395,7 +2429,8 @@ namespace Legion {
       copy_expr->construct_indirections(dst_indexes, idx_field, 
                dst_req.region.get_index_space().get_type_tag(), 
                scatter_is_range, idx_target.get_manager()->get_instance(),
-               dst_records, indirections, indirection_indexes);
+               dst_records, indirections, indirection_indexes,
+               possible_dst_out_of_range, possible_dst_aliasing);
 #ifdef DEBUG_LEGION
       assert(indirection_indexes.size() == dst_req.instance_fields.size());
 #endif
@@ -2423,7 +2458,7 @@ namespace Legion {
           // We found it
           FieldMask copy_mask;
           copy_mask.set_bit(src_indexes[fidx]);
-          source_views[idx]->copy_to(copy_mask, src_fields);
+          source_views[idx]->copy_from(copy_mask, src_fields);
           copy_preconditions.insert(ref.get_ready_event());
 #ifdef DEBUG_LEGION
           found = true;
@@ -2482,7 +2517,10 @@ namespace Legion {
                               const bool both_are_range,
                               const ApEvent precondition, 
                               const PredEvent pred_guard,
-                              const PhysicalTraceInfo &trace_info)
+                              const PhysicalTraceInfo &trace_info,
+                              const bool possible_src_out_of_range,
+                              const bool possible_dst_out_of_range,
+                              const bool possible_dst_aliasing)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2521,7 +2559,8 @@ namespace Legion {
       copy_expr->construct_indirections(src_indexes, src_idx_field,
                src_req.region.get_index_space().get_type_tag(),
                both_are_range, src_idx_target.get_manager()->get_instance(),
-               src_records, indirections, src_indirection_indexes);
+               src_records, indirections, src_indirection_indexes,
+               possible_src_out_of_range, false/*possible aliasing*/);
 #ifdef DEBUG_LEGION
       assert(src_indirection_indexes.size() == src_req.instance_fields.size());
 #endif
@@ -2529,7 +2568,8 @@ namespace Legion {
       copy_expr->construct_indirections(dst_indexes, dst_idx_field,
                dst_req.region.get_index_space().get_type_tag(),
                both_are_range, dst_idx_target.get_manager()->get_instance(),
-               dst_records, indirections, dst_indirection_indexes);
+               dst_records, indirections, dst_indirection_indexes,
+               possible_dst_out_of_range, possible_dst_aliasing);
 #ifdef DEBUG_LEGION
       assert(dst_indirection_indexes.size() == dst_req.instance_fields.size());
 #endif
@@ -3340,7 +3380,31 @@ namespace Legion {
         {
           result->add_base_valid_ref(APPLICATION_REF, &mutator);
           // Also add references to our color space
-          color_space->add_nested_valid_ref(did, &mutator);
+          // See if the color space is from the same tree
+          // If it's one of our ancestors we can skip the valid
+          // reference to avoid a cycle on valid references, 
+          // otherwise we need to add the valid ref to keep it live
+          if (color_space->handle.get_tree_id() == p.get_tree_id())
+          {
+            bool is_ancestor = false;
+            IndexSpaceNode *ancestor = parent;
+            while (true)
+            {
+              if (ancestor == color_space)
+              {
+                is_ancestor = true;
+                break;
+              }
+              else if (ancestor->parent == NULL)
+                break;
+              else
+                ancestor = ancestor->parent->parent;
+            }
+            if (!is_ancestor)
+              color_space->add_nested_valid_ref(did, &mutator);
+          }
+          else
+            color_space->add_nested_valid_ref(did, &mutator);
           color_space->add_nested_resource_ref(did);
         }
         else
@@ -3400,7 +3464,31 @@ namespace Legion {
         {
           result->add_base_valid_ref(APPLICATION_REF, &mutator);
           // Also add references to our color space
-          color_space->add_nested_valid_ref(did, &mutator);
+          // See if the color space is from the same tree
+          // If it's one of our ancestors we can skip the valid
+          // reference to avoid a cycle on valid references, 
+          // otherwise we need to add the valid ref to keep it live
+          if (color_space->handle.get_tree_id() == p.get_tree_id())
+          {
+            bool is_ancestor = false;
+            IndexSpaceNode *ancestor = parent;
+            while (true)
+            {
+              if (ancestor == color_space)
+              {
+                is_ancestor = true;
+                break;
+              }
+              else if (ancestor->parent == NULL)
+                break;
+              else
+                ancestor = ancestor->parent->parent;
+            }
+            if (!is_ancestor)
+              color_space->add_nested_valid_ref(did, &mutator);
+          }
+          else
+            color_space->add_nested_valid_ref(did, &mutator);
           color_space->add_nested_resource_ref(did);
         }
         else
@@ -6913,7 +7001,7 @@ namespace Legion {
             ready = finder->second;
           else
           {
-            if (implicit_runtime->dynamic_independence_tests)
+            if (!implicit_runtime->disable_independence_tests)
               issue_dynamic_test = true;
             else
             {
@@ -7679,7 +7767,29 @@ namespace Legion {
       {
         // Remove the valid reference that we hold on the color space
         // No need to check for deletion since we have a resource ref too
-        color_space->remove_nested_valid_ref(did, mutator);
+        // Check to see if it is an ancestor in which case we do not need
+        // to remove valid reference because we did not add it initially
+        if (color_space->handle.get_tree_id() == handle.get_tree_id())
+        {
+          bool is_ancestor = false;
+          IndexSpaceNode *ancestor = parent;
+          while (true)
+          {
+            if (ancestor == color_space)
+            {
+              is_ancestor = true;
+              break;
+            }
+            else if (ancestor->parent == NULL)
+              break;
+            else
+              ancestor = ancestor->parent->parent;
+          }
+          if (!is_ancestor)
+            color_space->remove_nested_valid_ref(did, mutator);
+        }
+        else
+          color_space->remove_nested_valid_ref(did, mutator);
         // Remove gc references from our remote nodes
         if (has_remote_instances())
         {
@@ -8206,7 +8316,7 @@ namespace Legion {
             ready_event = finder->second;
           else
           {
-            if (implicit_runtime->dynamic_independence_tests)
+            if (!implicit_runtime->disable_independence_tests)
               issue_dynamic_test = true;
             else
             {
@@ -8494,6 +8604,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return parent->create_equal_children(op, this, granularity); 
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent IndexPartNode::create_by_weights(Operation *op, 
+                                   const FutureMap &weights, size_t granularity)
+    //--------------------------------------------------------------------------
+    {
+      return parent->create_by_weights(op, this, weights.impl, granularity); 
     }
 
     //--------------------------------------------------------------------------

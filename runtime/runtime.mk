@@ -1,5 +1,5 @@
-# Copyright 2019 Stanford University, NVIDIA Corporation
-# Copyright 2019 Los Alamos National Laboratory 
+# Copyright 2020 Stanford University, NVIDIA Corporation
+# Copyright 2020 Los Alamos National Laboratory 
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -343,6 +343,9 @@ LEGION_LD_FLAGS	+= -L$(CUDA)/lib -lcuda
 else
 LEGION_LD_FLAGS	+= -L$(CUDA)/lib64 -L$(CUDA)/lib64/stubs -lcuda -Xlinker -rpath=$(CUDA)/lib64
 endif
+# Add support for Legion GPU reductions
+CC_FLAGS	+= -DLEGION_GPU_REDUCTIONS
+NVCC_FLAGS	+= -DLEGION_GPU_REDUCTIONS
 # CUDA arch variables
 
 # translate legacy arch names into numbers
@@ -618,8 +621,9 @@ REALM_SRC 	+= $(LG_RT_DIR)/realm/hdf5/hdf5_module.cc \
 		   $(LG_RT_DIR)/realm/hdf5/hdf5_access.cc
 endif
 REALM_SRC 	+= $(LG_RT_DIR)/realm/activemsg.cc \
+                   $(LG_RT_DIR)/realm/nodeset.cc \
                    $(LG_RT_DIR)/realm/network.cc
-GPU_RUNTIME_SRC +=
+GPU_RUNTIME_SRC += $(LG_RT_DIR)/legion/legion_redop.cu
 
 REALM_SRC 	+= $(LG_RT_DIR)/realm/logging.cc \
 	           $(LG_RT_DIR)/realm/cmdline.cc \
@@ -730,7 +734,7 @@ $(OUTFILE) : $(GEN_OBJS) $(GEN_GPU_OBJS) $(SLIB_LEGION) $(SLIB_REALM) $(GEN_FORT
 	@echo "---> Linking objects into one binary: $(OUTFILE)"
 	$(CXX) -o $(OUTFILE) $(GEN_OBJS) $(GEN_GPU_OBJS) $(GEN_FORTRAN_OBJS) $(LD_FLAGS) $(LEGION_LIBS) $(LEGION_LD_FLAGS) $(GASNET_FLAGS)
 
-$(SLIB_LEGION) : $(LEGION_OBJS) $(LEGION_FORTRAN_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS)
+$(SLIB_LEGION) : $(LEGION_OBJS) $(LEGION_FORTRAN_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(GPU_RUNTIME_OBJS)
 	rm -f $@
 	$(AR) rc $@ $^
 

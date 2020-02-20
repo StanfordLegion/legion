@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -109,7 +109,7 @@ namespace Realm {
 
     void finish_dispatch(PartitioningOperation *op, bool inline_ok);
 
-    int wait_count;  // how many sparsity maps are we still waiting for?
+    atomic<int> wait_count;  // how many sparsity maps are we still waiting for?
     NodeID requestor;
     AsyncMicroOp *async_microop;
 
@@ -241,7 +241,7 @@ namespace Realm {
 
 };
 
-#include "partitions.inl"
+#include "realm/deppart/partitions.inl"
 
 #endif // REALM_PARTITIONS_H
 

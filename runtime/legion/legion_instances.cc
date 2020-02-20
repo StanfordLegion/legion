@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +23,21 @@
 #include "legion/legion_profiling.h"
 #include "legion/legion_instances.h"
 #include "legion/legion_views.h"
+
+namespace LegionRuntime {
+  namespace Accessor {
+    namespace DebugHooks {
+      // these are calls that can be implemented by a higher level (e.g. Legion) to
+      //  perform privilege/bounds checks on accessor reference and produce more useful
+      //  information for debug
+
+      /*extern*/ void (*check_bounds_ptr)(void *region, ptr_t ptr) = 0;
+      /*extern*/ void (*check_bounds_dpoint)(void *region, const Legion::DomainPoint &dp) = 0;
+
+      /*extern*/ const char *(*find_privilege_task_name)(void *region) = 0;
+    };
+  };
+};
 
 namespace Legion {
   namespace Internal {
@@ -321,25 +336,6 @@ namespace Legion {
 #endif
       }
     } 
-
-    //--------------------------------------------------------------------------
-    void LayoutDescription::compute_copy_offsets(FieldID fid, 
-                 PhysicalManager *manager, std::vector<CopySrcDstField> &fields)
-    //--------------------------------------------------------------------------
-    {
-      std::map<FieldID,unsigned>::const_iterator finder = 
-        field_indexes.find(fid);
-#ifdef DEBUG_LEGION
-      assert(finder != field_indexes.end());
-#endif
-      fields.push_back(field_infos[finder->second]);
-      // Since instances are annonymous in layout descriptions we
-      // have to fill them in when we add the field info
-      fields.back().inst = manager->instance;
-#ifdef LEGION_SPY
-      fields.back().inst_event = manager->get_unique_event();
-#endif
-    }
 
     //--------------------------------------------------------------------------
     void LayoutDescription::compute_copy_offsets(
@@ -743,6 +739,53 @@ namespace Legion {
         memory_manager->invalidate_instance(this);
       if (!is_owner())
         send_remote_valid_decrement(owner_space, RtEvent::NO_RT_EVENT, mutator);
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent PhysicalManager::fill_from(FillView *fill_view,ApEvent precondition,
+                                       PredEvent predicate_guard,
+                                       IndexSpaceExpression *expression,
+                                       const FieldMask &fill_mask,
+                                       const PhysicalTraceInfo &trace_info,
+                                       CopyAcrossHelper *across_helper,
+                                       FieldMaskSet<FillView> *tracing_srcs,
+                                       FieldMaskSet<InstanceView> *tracing_dsts)
+    //--------------------------------------------------------------------------
+    {
+      // Implement in derived classes
+      assert(false);
+      return ApEvent::NO_AP_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent PhysicalManager::copy_from(PhysicalManager *manager,
+                                       ApEvent precondition,
+                                       PredEvent predicate_guard, 
+                                       ReductionOpID reduction_op,
+                                       IndexSpaceExpression *expression,
+                                       const FieldMask &copy_mask,
+                                       const PhysicalTraceInfo &trace_info,
+                                       CopyAcrossHelper *across_helper,
+                                       FieldMaskSet<InstanceView> *tracing_srcs,
+                                       FieldMaskSet<InstanceView> *tracing_dsts)
+    //--------------------------------------------------------------------------
+    {
+      // Implement in derived classes
+      assert(false);
+      return ApEvent::NO_AP_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalManager::compute_copy_offsets(const FieldMask &copy_mask,
+                                           std::vector<CopySrcDstField> &fields)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(layout != NULL);
+      assert(instance.exists());
+#endif
+      // Pass in our physical instance so the layout knows how to specialize
+      layout->compute_copy_offsets(copy_mask, this, fields);
     }
 
     //--------------------------------------------------------------------------
@@ -1179,7 +1222,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(instance.exists());
 #endif
-      return instance.get_accessor();
+      return LegionRuntime::Accessor::RegionAccessor<
+	LegionRuntime::Accessor::AccessorType::Generic>(instance);
     }
 
     //--------------------------------------------------------------------------
@@ -1194,9 +1238,65 @@ namespace Legion {
 #endif
       const CopySrcDstField &info = layout->find_field_info(fid);
       LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic> temp = 
-                                                    instance.get_accessor();
+        LegionRuntime::Accessor::AccessorType::Generic> temp(instance);
       return temp.get_untyped_field_accessor(info.field_id, info.size);
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent InstanceManager::fill_from(FillView *fill_view,ApEvent precondition,
+                                       PredEvent predicate_guard,
+                                       IndexSpaceExpression *fill_expression,
+                                       const FieldMask &fill_mask,
+                                       const PhysicalTraceInfo &trace_info,
+                                       CopyAcrossHelper *across_helper,
+                                       FieldMaskSet<FillView> *tracing_srcs,
+                                       FieldMaskSet<InstanceView> *tracing_dsts)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<CopySrcDstField> dst_fields;
+      if (across_helper == NULL)
+        compute_copy_offsets(fill_mask, dst_fields); 
+      else
+        across_helper->compute_across_offsets(fill_mask, dst_fields);
+      return fill_expression->issue_fill(trace_info, dst_fields, 
+                                         fill_view->value->value,
+                                         fill_view->value->value_size,
+#ifdef LEGION_SPY
+                                         fill_view->fill_op_uid,
+                                         field_space_node->handle,
+                                         tree_id,
+#endif
+                                         precondition, predicate_guard,
+                                         tracing_srcs, tracing_dsts);
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent InstanceManager::copy_from(PhysicalManager *source_manager,
+                                       ApEvent precondition,
+                                       PredEvent predicate_guard, 
+                                       ReductionOpID reduction_op,
+                                       IndexSpaceExpression *copy_expression,
+                                       const FieldMask &copy_mask,
+                                       const PhysicalTraceInfo &trace_info,
+                                       CopyAcrossHelper *across_helper,
+                                       FieldMaskSet<InstanceView> *tracing_srcs,
+                                       FieldMaskSet<InstanceView> *tracing_dsts)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<CopySrcDstField> dst_fields, src_fields;
+      if (across_helper == NULL)
+        compute_copy_offsets(copy_mask, dst_fields); 
+      else
+        across_helper->compute_across_offsets(copy_mask, dst_fields);
+      source_manager->compute_copy_offsets(copy_mask, src_fields);
+      return copy_expression->issue_copy(trace_info, dst_fields, src_fields,
+#ifdef LEGION_SPY
+                                         field_space_node->handle,
+                                         source_manager->tree_id, tree_id,
+#endif
+                                         precondition, predicate_guard,
+                                         reduction_op, false/*fold*/, 
+                                         tracing_srcs, tracing_dsts);
     }
 
     //--------------------------------------------------------------------------
@@ -1216,44 +1316,7 @@ namespace Legion {
                                  context_uid, true/*register now*/);
       register_active_context(own_ctx);
       return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void InstanceManager::compute_copy_offsets(const FieldMask &copy_mask,
-                                           std::vector<CopySrcDstField> &fields)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(layout != NULL);
-#endif
-      // Pass in our physical instance so the layout knows how to specialize
-      layout->compute_copy_offsets(copy_mask, this, fields);
-    }
-
-    //--------------------------------------------------------------------------
-    void InstanceManager::compute_copy_offsets(FieldID fid,
-                                           std::vector<CopySrcDstField> &fields)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(layout != NULL);
-#endif
-      // Pass in our physical instance so the layout knows how to specialize
-      layout->compute_copy_offsets(fid, this, fields);
-    }
-
-    //--------------------------------------------------------------------------
-    void InstanceManager::compute_copy_offsets(
-                                  const std::vector<FieldID> &copy_fields,
-                                  std::vector<CopySrcDstField> &fields)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(layout != NULL);
-#endif
-      // Pass in our physical instance so the layout knows how to specialize
-      layout->compute_copy_offsets(copy_fields, this, fields);
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void InstanceManager::initialize_across_helper(CopyAcrossHelper *helper,
@@ -1810,7 +1873,8 @@ namespace Legion {
     {
       // TODO: Implement this 
       assert(false);
-      return instance.get_accessor();
+      return LegionRuntime::Accessor::RegionAccessor<
+	LegionRuntime::Accessor::AccessorType::Generic>(instance);
     }
 
     //--------------------------------------------------------------------------
@@ -1821,7 +1885,8 @@ namespace Legion {
     {
       // should never be called
       assert(false);
-      return instance.get_accessor();
+      return LegionRuntime::Accessor::RegionAccessor<
+	LegionRuntime::Accessor::AccessorType::Generic>(instance);
     }
 
     //--------------------------------------------------------------------------
@@ -1832,7 +1897,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ListReductionManager::find_field_offsets(const FieldMask &reduce_mask,
+    void ListReductionManager::compute_copy_offsets(const FieldMask &copy_mask,
                                            std::vector<CopySrcDstField> &fields)
     //--------------------------------------------------------------------------
     {
@@ -1848,6 +1913,24 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return ptr_space;
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent ListReductionManager::copy_from(PhysicalManager *source_manager,
+                                       ApEvent precondition,
+                                       PredEvent predicate_guard, 
+                                       ReductionOpID reduction_op,
+                                       IndexSpaceExpression *copy_expression,
+                                       const FieldMask &copy_mask,
+                                       const PhysicalTraceInfo &trace_info,
+                                       CopyAcrossHelper *across_helper,
+                                       FieldMaskSet<InstanceView> *tracing_srcs,
+                                       FieldMaskSet<InstanceView> *tracing_dsts)
+    //--------------------------------------------------------------------------
+    {
+      // TODO: implement this for list reductions
+      assert(false);
+      return ApEvent::NO_AP_EVENT;
     }
 
     /////////////////////////////////////////////////////////////
@@ -1923,7 +2006,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(instance.exists());
 #endif
-      return instance.get_accessor();
+      return LegionRuntime::Accessor::RegionAccessor<
+	LegionRuntime::Accessor::AccessorType::Generic>(instance);
     }
 
     //--------------------------------------------------------------------------
@@ -1938,8 +2022,7 @@ namespace Legion {
 #endif
       const CopySrcDstField &info = layout->find_field_info(fid);
       LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic> temp = 
-                                                    instance.get_accessor();
+        LegionRuntime::Accessor::AccessorType::Generic> temp(instance);
       return temp.get_untyped_field_accessor(info.field_id, info.size);
     }
 
@@ -1951,22 +2034,42 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FoldReductionManager::find_field_offsets(const FieldMask &reduce_mask,
-                                           std::vector<CopySrcDstField> &fields)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(instance.exists());
-      assert(layout != NULL);
-#endif
-      layout->compute_copy_offsets(reduce_mask, this, fields);
-    }
-
-    //--------------------------------------------------------------------------
     Domain FoldReductionManager::get_pointer_space(void) const
     //--------------------------------------------------------------------------
     {
       return Domain::NO_DOMAIN;
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent FoldReductionManager::copy_from(PhysicalManager *source_manager,
+                                       ApEvent precondition,
+                                       PredEvent predicate_guard, 
+                                       ReductionOpID reduction_op,
+                                       IndexSpaceExpression *copy_expression,
+                                       const FieldMask &copy_mask,
+                                       const PhysicalTraceInfo &trace_info,
+                                       CopyAcrossHelper *across_helper,
+                                       FieldMaskSet<InstanceView> *tracing_srcs,
+                                       FieldMaskSet<InstanceView> *tracing_dsts)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(redop == reduction_op);
+#endif
+      std::vector<CopySrcDstField> dst_fields, src_fields;
+      if (across_helper == NULL)
+        compute_copy_offsets(copy_mask, dst_fields); 
+      else
+        across_helper->compute_across_offsets(copy_mask, dst_fields);
+      source_manager->compute_copy_offsets(copy_mask, src_fields);
+      return copy_expression->issue_copy(trace_info, dst_fields, src_fields,
+#ifdef LEGION_SPY
+                                         field_space_node->handle,
+                                         source_manager->tree_id, tree_id,
+#endif
+                                         precondition, predicate_guard,
+                                         reduction_op, true/*fold*/, 
+                                         tracing_srcs, tracing_dsts);
     }
 
     /////////////////////////////////////////////////////////////
@@ -2019,7 +2122,9 @@ namespace Legion {
     {
       // should never be called
       assert(false);
-      return PhysicalInstance::NO_INST.get_accessor();
+      return LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic>
+	(PhysicalInstance::NO_INST);
     }
 
     //--------------------------------------------------------------------------
@@ -2030,7 +2135,9 @@ namespace Legion {
     {
       // should never be called
       assert(false);
-      return PhysicalInstance::NO_INST.get_accessor();
+      return LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic>
+	(PhysicalInstance::NO_INST);
     }
 
     //--------------------------------------------------------------------------
@@ -2073,6 +2180,8 @@ namespace Legion {
     InstanceBuilder::~InstanceBuilder(void)
     //--------------------------------------------------------------------------
     {
+      if (realm_layout != NULL)
+        delete realm_layout;
     }
 
     //--------------------------------------------------------------------------
@@ -2093,17 +2202,25 @@ namespace Legion {
           *footprint = 0;
         return NULL;
       }
-      // Construct the realm layout each time since (realm will take ownership 
-      // after every instance call, so we need a new one each time)
-      Realm::InstanceLayoutGeneric *realm_layout = 
-        instance_domain->create_layout(realm_constraints, 
-                                       constraints.ordering_constraint);
+      if (realm_layout == NULL)
+      {
+        const std::vector<FieldID> &field_set = 
+          constraints.field_constraint.get_field_set();
+        realm_layout =
+          instance_domain->create_layout(constraints, field_set, field_sizes);
 #ifdef DEBUG_LEGION
-      assert(realm_layout != NULL);
+        assert(realm_layout != NULL);
+#endif
+      }
+      // Clone the realm layout each time since (realm will take ownership 
+      // after every instance call, so we need a new one each time)
+      Realm::InstanceLayoutGeneric *inst_layout = realm_layout->clone();
+#ifdef DEBUG_LEGION
+      assert(inst_layout != NULL);
 #endif
       // Have to grab this now since realm is going to take ownership of
       // the instance layout generic object once we do the creation call
-      const size_t instance_footprint = realm_layout->bytes_used;
+      const size_t instance_footprint = inst_layout->bytes_used;
       // Save the footprint size if we need to
       if (footprint != NULL)
         *footprint = instance_footprint;
@@ -2125,7 +2242,7 @@ namespace Legion {
       {
         runtime->profiler->add_inst_request(requests, creator_id);
         ready = ApEvent(PhysicalInstance::create_instance(instance,
-                  memory_manager->memory, realm_layout, requests));
+                  memory_manager->memory, inst_layout, requests));
         if (instance.exists())
         {
           unsigned long long creation_time = 
@@ -2136,7 +2253,7 @@ namespace Legion {
       }
       else
         ready = ApEvent(PhysicalInstance::create_instance(instance,
-                  memory_manager->memory, realm_layout, requests));
+                  memory_manager->memory, inst_layout, requests));
       // Wait for the profiling response
       if (!profiling_ready.has_triggered())
         profiling_ready.wait(); 
@@ -2289,6 +2406,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InstanceBuilder::handle_profiling_response(
+                                       const ProfilingResponseBase *base,
                                        const Realm::ProfilingResponse &response)
     //--------------------------------------------------------------------------
     {
@@ -2388,15 +2506,7 @@ namespace Legion {
                   "Illegal ordering constraint used during instance "
                   "creation contained multiple instances of DIM_F")
             else
-            {
-              // Check for AOS or SOA for now
-              if ((idx > 0) && (idx != (ord.ordering.size()-1)))
-                REPORT_LEGION_FATAL(ERROR_UNSUPPORTED_LAYOUT_CONSTRAINT,
-                    "Ordering constraints must currently place DIM_F "
-                    "in the first or last position as only AOS and SOA "
-                    "layout constraints are currently supported")
               field_idx = idx;
-            }
           }
           else if (ord.ordering[idx] > DIM_F)
             REPORT_LEGION_FATAL(ERROR_UNSUPPORTED_LAYOUT_CONSTRAINT,
@@ -2548,110 +2658,8 @@ namespace Legion {
         default:
           assert(false); // unknown kind
       }
-      // Compute the field groups for realm 
-      convert_layout_constraints(constraints, field_set, 
-                                 field_sizes, realm_constraints); 
     }
 
-    //--------------------------------------------------------------------------
-    /*static*/ void InstanceBuilder::convert_layout_constraints(
-                    const LayoutConstraintSet &constraints,
-                    const std::vector<FieldID> &field_set,
-                    const std::vector<size_t> &field_sizes,
-                            Realm::InstanceLayoutConstraints &realm_constraints)
-    //--------------------------------------------------------------------------
-    {
-      const OrderingConstraint &ord = constraints.ordering_constraint;
-
-      std::map<FieldID, size_t> field_alignments;
-      if (ord.ordering.front() == DIM_F)
-      {
-        // AOS - all field in same group
-        // Use a GCD of field sizes by default to make fields tighly packed
-#ifdef DEBUG_LEGION
-        assert(field_set.size() > 0);
-        assert(field_sizes.size() > 0);
-#endif
-        // Start with an initial upper bound on alignment of 32
-        size_t gcd = 32;
-        for (unsigned idx = 0; idx < field_set.size(); idx++)
-        {
-          size_t next = field_sizes[idx];
-          while (next != 0)
-          {
-            size_t mod = gcd % next;
-            gcd = next;
-            next = mod;
-          }
-        }
-#ifdef DEBUG_LEGION
-        assert(gcd != 0);
-#endif
-        for (unsigned idx = 0; idx < field_set.size(); idx++)
-          field_alignments[field_set[idx]] = gcd;
-      }
-      else if (ord.ordering.back() == DIM_F)
-      {
-        // SOA - each field is its own group
-        // Use a GCD(sizeof(T),32)
-        for (unsigned idx = 0; idx < field_set.size(); idx++)
-          field_alignments[field_set[idx]] = 
-            (field_sizes[idx] | 32) & ~((field_sizes[idx] | 32) - 1);
-      }
-      else // Have to be AOS or SOA for now
-        assert(false);
-
-      const std::vector<AlignmentConstraint> &alignments =
-        constraints.alignment_constraints;
-      for (std::vector<AlignmentConstraint>::const_iterator it =
-           alignments.begin(); it != alignments.end(); ++it)
-      {
-        // TODO: We support only equality constraints for now
-        assert(it->eqk != EQ_EK);
-        field_alignments[it->fid] = it->alignment;
-      }
-
-      if (ord.ordering.front() == DIM_F)
-      {
-        // AOS - all field in same group
-        realm_constraints.field_groups.resize(1);
-        realm_constraints.field_groups[0].resize(field_set.size());
-        for (unsigned idx = 0; idx < field_set.size(); idx++)
-        {
-#ifdef DEBUG_LEGION
-          assert(field_alignments.find(field_set[idx]) !=
-                 field_alignments.end());
-#endif
-          realm_constraints.field_groups[0][idx].field_id = field_set[idx];
-          realm_constraints.field_groups[0][idx].offset = -1;
-          realm_constraints.field_groups[0][idx].size = field_sizes[idx];
-          realm_constraints.field_groups[0][idx].alignment =
-            field_alignments[field_set[idx]];
-        }
-      }
-      else if (ord.ordering.back() == DIM_F)
-      {
-        // SOA - each field is its own group
-        realm_constraints.field_groups.resize(field_set.size());
-        for (unsigned idx = 0; idx < field_set.size(); idx++)
-        {
-#ifdef DEBUG_LEGION
-          assert(field_alignments.find(field_set[idx]) !=
-                 field_alignments.end());
-#endif
-          realm_constraints.field_groups[idx].resize(1);
-          realm_constraints.field_groups[idx][0].field_id = field_set[idx];
-          realm_constraints.field_groups[idx][0].offset = -1;
-          realm_constraints.field_groups[idx][0].size = field_sizes[idx];
-          realm_constraints.field_groups[idx][0].alignment =
-            field_alignments[field_set[idx]];
-        }
-      }
-      else // Have to be AOS or SOA for now
-        assert(false);
-      // TODO: Next go through and check for any offset constraints for fields
-    }
-    
   }; // namespace Internal
 }; // namespace Legion
 

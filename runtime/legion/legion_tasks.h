@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -500,10 +500,10 @@ namespace Legion {
                               std::set<RtEvent> &ready_events);
     public:
       virtual void pack_profiling_requests(Serializer &rez) const;
-      virtual void add_copy_profiling_request(
-                                      Realm::ProfilingRequestSet &requests);
-      virtual void handle_profiling_response(
-                                const Realm::ProfilingResponse &respone);
+      virtual void add_copy_profiling_request(unsigned src_index,
+          unsigned dst_index, Realm::ProfilingRequestSet &requests, bool fill);
+      virtual void handle_profiling_response(const ProfilingResponseBase *base,
+                                      const Realm::ProfilingResponse &respone);
       virtual void handle_profiling_update(int count);
     public:
       virtual void activate(void) = 0;
@@ -564,6 +564,8 @@ namespace Legion {
       TaskPriority                          task_priority;
       bool                                  perform_postmap;
     protected:
+      // origin-mapped cases need to know if they've been mapped or not yet
+      bool                                  first_mapping;
       std::set<RtEvent>                     intra_space_mapping_dependences;
       // Events that must be triggered before we are done mapping
       std::set<RtEvent>                     map_applied_conditions; 
@@ -671,6 +673,9 @@ namespace Legion {
       void *reduction_state; 
       // Temporary storage for future results
       std::map<DomainPoint,std::pair<void*,size_t> > temporary_futures;
+      // used for detecting cases where we've already mapped a mutli task
+      // on the same node but moved it to a different processor
+      bool first_mapping;
     protected:
       bool children_complete_invoked;
       bool children_commit_invoked;
@@ -951,8 +956,8 @@ namespace Legion {
     public:
       virtual void handle_future(const DomainPoint &point, const void *result,
                                  size_t result_size, bool owner);
-      virtual void add_copy_profiling_request(
-                                      Realm::ProfilingRequestSet &requests);
+      virtual void add_copy_profiling_request(unsigned src_index,
+          unsigned dst_index, Realm::ProfilingRequestSet &requests, bool fill);
     public:
       virtual void register_must_epoch(void);
     public:

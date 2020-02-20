@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -610,7 +610,7 @@ namespace Legion {
     public:
       PhysicalTemplate(PhysicalTrace *trace, ApEvent fence_event);
       PhysicalTemplate(const PhysicalTemplate &rhs);
-    private:
+    protected:
       virtual ~PhysicalTemplate(void);
     public:
       void initialize(Runtime *runtime, ApEvent fence_completion,
@@ -818,7 +818,7 @@ namespace Legion {
       const unsigned replay_parallelism;
     private:
       std::map<TraceLocalID,Memoizable*> operations;
-      std::map<TraceLocalID,unsigned>    memo_entries;
+      std::map<TraceLocalID,std::pair<unsigned,bool/*task*/> > memo_entries;
     private:
       CachedMappings cached_mappings;
       bool has_virtual_mapping;

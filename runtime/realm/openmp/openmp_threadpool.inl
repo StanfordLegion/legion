@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@
 namespace Realm {
 
   namespace ThreadLocal {
-    extern __thread ThreadPool::WorkerInfo *threadpool_workerinfo;
+    extern REALM_THREAD_LOCAL ThreadPool::WorkerInfo *threadpool_workerinfo;
   };
 
   ////////////////////////////////////////////////////////////////////////

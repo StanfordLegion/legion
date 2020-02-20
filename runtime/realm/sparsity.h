@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -62,7 +62,7 @@ namespace Realm {
     bool operator!=(const SparsityMap<N,T> &rhs) const;
 
     //static const SparsityMap<N,T> NO_SPACE;
-    __CUDA_HD__
+    REALM_CUDA_HD
     bool exists(void) const;
 
     // looks up the public subset of the implementation object

@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -130,15 +130,6 @@ namespace Realm {
       bool is_locked(unsigned check_mode, bool excl_ok);
 
       void release_reservation(void);
-
-      struct PackFunctor {
-      public:
-        PackFunctor(int *p) : pos(p) { }
-      public:
-        inline void apply(int target) { *pos++ = target; }
-      public:
-        int *pos;
-      };
     };
 
   // active messages

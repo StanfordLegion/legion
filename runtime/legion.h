@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -197,7 +197,7 @@ namespace Legion {
      * to create non-empty field spaces.  Fields within a field space
      * are allocated using field space allocators
      *
-     * @see FieldSpaceAllocator
+     * @see FieldAllocator
      */
     class FieldSpace {
     public:
@@ -1442,8 +1442,8 @@ namespace Legion {
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
       inline void add_arrival_barrier(PhaseBarrier bar);
-      inline void add_wait_handshake(MPILegionHandshake handshake);
-      inline void add_arrival_handshake(MPILegionHandshake handshake);
+      inline void add_wait_handshake(LegionHandshake handshake);
+      inline void add_arrival_handshake(LegionHandshake handshake);
     public:
       inline void set_predicate_false_future(Future f);
       inline void set_predicate_false_result(TaskArgument arg);
@@ -1536,8 +1536,8 @@ namespace Legion {
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
       inline void add_arrival_barrier(PhaseBarrier bar);
-      inline void add_wait_handshake(MPILegionHandshake handshake);
-      inline void add_arrival_handshake(MPILegionHandshake handshake);
+      inline void add_wait_handshake(LegionHandshake handshake);
+      inline void add_arrival_handshake(LegionHandshake handshake);
     public:
       inline void set_predicate_false_future(Future f);
       inline void set_predicate_false_result(TaskArgument arg);
@@ -1618,8 +1618,8 @@ namespace Legion {
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
       inline void add_arrival_barrier(PhaseBarrier bar);
-      inline void add_wait_handshake(MPILegionHandshake handshake);
-      inline void add_arrival_handshake(MPILegionHandshake handshake);
+      inline void add_wait_handshake(LegionHandshake handshake);
+      inline void add_arrival_handshake(LegionHandshake handshake);
     public:
       RegionRequirement               requirement;
       std::vector<Grant>              grants;
@@ -1686,8 +1686,8 @@ namespace Legion {
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
       inline void add_arrival_barrier(PhaseBarrier bar);
-      inline void add_wait_handshake(MPILegionHandshake handshake);
-      inline void add_arrival_handshake(MPILegionHandshake handshake); 
+      inline void add_wait_handshake(LegionHandshake handshake);
+      inline void add_arrival_handshake(LegionHandshake handshake); 
     public:
       std::vector<RegionRequirement>  src_requirements;
       std::vector<RegionRequirement>  dst_requirements;
@@ -1710,6 +1710,14 @@ namespace Legion {
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
       const std::vector<StaticDependence> *static_dependences;
+    public:
+      // Whether the source and destination indirections can lead
+      // to out-of-range access into the instances to skip
+      bool                            possible_src_indirect_out_of_range;
+      bool                            possible_dst_indirect_out_of_range;
+      // Whether the destination indirection can lead to aliasing 
+      // in the destination instances requiring synchronization
+      bool                            possible_dst_indirect_aliasing;
     public:
       bool                            silence_warnings;
     };
@@ -1754,8 +1762,8 @@ namespace Legion {
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
       inline void add_arrival_barrier(PhaseBarrier bar);
-      inline void add_wait_handshake(MPILegionHandshake handshake);
-      inline void add_arrival_handshake(MPILegionHandshake handshake);
+      inline void add_wait_handshake(LegionHandshake handshake);
+      inline void add_arrival_handshake(LegionHandshake handshake);
     public:
       std::vector<RegionRequirement>  src_requirements;
       std::vector<RegionRequirement>  dst_requirements;
@@ -1778,6 +1786,14 @@ namespace Legion {
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
       const std::vector<StaticDependence> *static_dependences;
+    public:
+      // Whether the source and destination indirections can lead
+      // to out-of-range access into the instances to skip
+      bool                            possible_src_indirect_out_of_range;
+      bool                            possible_dst_indirect_out_of_range;
+      // Whether the destination indirection can lead to aliasing 
+      // in the destination instances requiring synchronization
+      bool                            possible_dst_indirect_aliasing;
     public:
       bool                            silence_warnings;
     };
@@ -1804,8 +1820,8 @@ namespace Legion {
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
       inline void add_arrival_barrier(PhaseBarrier bar);
-      inline void add_wait_handshake(MPILegionHandshake handshake);
-      inline void add_arrival_handshake(MPILegionHandshake handshake);
+      inline void add_wait_handshake(LegionHandshake handshake);
+      inline void add_arrival_handshake(LegionHandshake handshake);
     public:
       LogicalRegion                   handle;
       LogicalRegion                   parent;
@@ -1892,8 +1908,8 @@ namespace Legion {
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
       inline void add_arrival_barrier(PhaseBarrier bar);
-      inline void add_wait_handshake(MPILegionHandshake handshake);
-      inline void add_arrival_handshake(MPILegionHandshake handshake);
+      inline void add_wait_handshake(LegionHandshake handshake);
+      inline void add_arrival_handshake(LegionHandshake handshake);
     public:
       Domain                          launch_domain;
       IndexSpace                      launch_space;
@@ -2537,8 +2553,8 @@ namespace Legion {
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier pb);
       inline void add_arrival_barrier(PhaseBarrier pb);
-      inline void add_wait_handshake(MPILegionHandshake handshake);
-      inline void add_arrival_handshake(MPILegionHandshake handshake);
+      inline void add_wait_handshake(LegionHandshake handshake);
+      inline void add_arrival_handshake(LegionHandshake handshake);
     public:
       LogicalRegion                   logical_region;
       LogicalRegion                   parent_region;
@@ -2579,8 +2595,8 @@ namespace Legion {
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier pb);
       inline void add_arrival_barrier(PhaseBarrier pb);
-      inline void add_wait_handshake(MPILegionHandshake handshake);
-      inline void add_arrival_handshake(MPILegionHandshake handshake);
+      inline void add_wait_handshake(LegionHandshake handshake);
+      inline void add_arrival_handshake(LegionHandshake handshake);
     public:
       LogicalRegion                   logical_region;
       LogicalRegion                   parent_region;
@@ -2643,48 +2659,59 @@ namespace Legion {
     };
 
     //==========================================================================
-    //                     MPI Interoperability Classes
+    //                     Interoperability Classes
     //==========================================================================
 
-    class MPILegionHandshake : public Unserializable<MPILegionHandshake> {
+    /**
+     * \class LegionHandshake
+     * This class provides a light-weight synchronization primitive for
+     * external applications to use when performing synchronization with
+     * Legion tasks. It allows for control to be passed from the external
+     * application into Legion and then for control to be handed back to
+     * the external application from Legion. The user can configure which
+     * direction occurs first when constructing the handshake object.
+     * @see Runtime::create_external_handshake
+     */
+    class LegionHandshake : public Unserializable<LegionHandshake> {
     public:
-      MPILegionHandshake(void);
-      MPILegionHandshake(const MPILegionHandshake &rhs);
-      ~MPILegionHandshake(void);
-    private:
-      Internal::MPILegionHandshakeImpl *impl;
+      LegionHandshake(void);
+      LegionHandshake(const LegionHandshake &rhs);
+      ~LegionHandshake(void);
+    protected:
+      Internal::LegionHandshakeImpl *impl;
     protected:
       // Only the runtime should be able to make these
       FRIEND_ALL_RUNTIME_CLASSES
-      explicit MPILegionHandshake(Internal::MPILegionHandshakeImpl *impl);
+      explicit LegionHandshake(Internal::LegionHandshakeImpl *impl);
     public:
-      bool operator==(const MPILegionHandshake &h) const
+      bool operator==(const LegionHandshake &h) const
         { return impl == h.impl; }
-      bool operator<(const MPILegionHandshake &h) const
+      bool operator<(const LegionHandshake &h) const
         { return impl < h.impl; }
-      MPILegionHandshake& operator=(const MPILegionHandshake &rhs);
+      LegionHandshake& operator=(const LegionHandshake &rhs);
     public:
       /**
        * Non-blocking call to signal to Legion that this participant
        * is ready to pass control to Legion.
        */
-      void mpi_handoff_to_legion(void) const;
+      void ext_handoff_to_legion(void) const;
       /**
        * A blocking call that will cause this participant to wait
-       * for all Legion participants to hand over control to MPI.
+       * for all Legion participants to hand over control to the
+       * external application.
        */
-      void mpi_wait_on_legion(void) const;
+      void ext_wait_on_legion(void) const;
     public:
       /**
-       * A non-blocking call to signal to MPI that this participant
-       * is ready to pass control to MPI.
+       * A non-blocking call to signal to the external application 
+       * that this participant is ready to pass control to to it.
        */
-      void legion_handoff_to_mpi(void) const;
+      void legion_handoff_to_ext(void) const;
       /**
        * A blocking call that will cause this participant to wait
-       * for all MPI participants to hand over control to Legion.
+       * for all external participants to hand over control to Legion.
        */
-      void legion_wait_on_mpi(void) const;
+      void legion_wait_on_ext(void) const;
     public:
       /*
        * For asynchronous Legion execution, you can use these
@@ -2703,6 +2730,50 @@ namespace Legion {
        * Advance the handshake associated with the Legion side
        */
       void advance_legion_handshake(void) const;
+    };
+
+    /**
+     * \class MPILegionHandshake
+     * This class is only here for legacy reasons. In general we encourage
+     * users to use the generic LegionHandshake
+     */
+    class MPILegionHandshake : public LegionHandshake {
+    public:
+      MPILegionHandshake(void);
+      MPILegionHandshake(const MPILegionHandshake &rhs);
+      ~MPILegionHandshake(void);
+    protected:
+      // Only the runtime should be able to make these
+      FRIEND_ALL_RUNTIME_CLASSES
+      explicit MPILegionHandshake(Internal::LegionHandshakeImpl *impl);
+    public:
+      bool operator==(const MPILegionHandshake &h) const
+        { return impl == h.impl; }
+      bool operator<(const MPILegionHandshake &h) const
+        { return impl < h.impl; }
+      MPILegionHandshake& operator=(const MPILegionHandshake &rhs);
+    public:
+      /**
+       * Non-blocking call to signal to Legion that this participant
+       * is ready to pass control to Legion.
+       */
+      inline void mpi_handoff_to_legion(void) const { ext_handoff_to_legion(); }
+      /**
+       * A blocking call that will cause this participant to wait
+       * for all Legion participants to hand over control to MPI.
+       */
+      inline void mpi_wait_on_legion(void) const { ext_wait_on_legion(); }
+    public:
+      /**
+       * A non-blocking call to signal to MPI that this participant
+       * is ready to pass control to MPI.
+       */
+      inline void legion_handoff_to_mpi(void) const { legion_handoff_to_ext(); }
+      /**
+       * A blocking call that will cause this participant to wait
+       * for all MPI participants to hand over control to Legion.
+       */
+      inline void legion_wait_on_mpi(void) const { legion_wait_on_ext(); }
     };
 
     //==========================================================================
@@ -3727,6 +3798,48 @@ namespace Legion {
       ///@}
       ///@{
       /**
+       * Create 'color_space' index spaces (one for each point) to partition
+       * the parent 'parent' index space using the 'weights' to proportionally
+       * size the resulting subspaces. By definition the resulting partition
+       * will be disjoint. Users can also specify a minimum 'granularity' for
+       * the size of the index subspaces. Users can specify an optional
+       * 'color' for the name of the created index partition.
+       * @param ctx the enclosing task context
+       * @param parent index space of the partition to be made
+       * @param weights per-color weights for sizing output regions
+       * @param color_space space of the colors to create
+       * @param granularity the minimum size of the index subspaces
+       * @param color optional color parameter for the partition
+       * @return name of the created index partition
+       */
+      IndexPartition create_partition_by_weights(Context ctx, IndexSpace parent,
+                                       const std::map<DomainPoint,int> &weights,
+                                       IndexSpace color_space,
+                                       size_t granularity = 1,
+                                       Color color = AUTO_GENERATE_ID);
+      template<int DIM, typename COORD_T, int COLOR_DIM, typename COLOR_COORD_T>
+      IndexPartitionT<DIM,COORD_T> create_partition_by_weights(Context ctx,
+                    IndexSpaceT<DIM,COORD_T> parent,
+                    const std::map<Point<COLOR_DIM,COLOR_COORD_T>,int> &weights,
+                    IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
+                    size_t granularity = 1, Color color = AUTO_GENERATE_ID);
+      // Alternate versions of the above method that take a future map where
+      // the values in the future map will be interpretted as a integer weights
+      IndexPartition create_partition_by_weights(Context ctx, IndexSpace parent,
+                                                 const FutureMap &weights,
+                                                 IndexSpace color_space,
+                                                 size_t granularity = 1,
+                                                 Color color =AUTO_GENERATE_ID);
+      template<int DIM, typename COORD_T, int COLOR_DIM, typename COLOR_COORD_T>
+      IndexPartitionT<DIM,COORD_T> create_partition_by_weights(Context ctx,
+                               IndexSpaceT<DIM,COORD_T> parent,
+                               const FutureMap &weights,
+                               IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
+                               size_t granularity = 1, 
+                               Color color = AUTO_GENERATE_ID);
+      ///@}
+      ///@{
+      /**
        * This function zips a union operation over all the index subspaces
        * in two different partitions. The zip operation is only applied 
        * to the points contained in the intersection of the two color
@@ -3980,6 +4093,7 @@ namespace Legion {
                               MapperID id = 0,
                               MappingTagID tag = 0);
       ///@}
+      ///@{
       /**
        * Create partition by restriction will make a new partition of a
        * logical region by computing new restriction bounds for each 
@@ -4019,7 +4133,8 @@ namespace Legion {
                                 Rect<DIM,COORD_T> extent,
                                 PartitionKind part_kind = COMPUTE_KIND,
                                 Color color = AUTO_GENERATE_ID);
-
+      ///@}
+      ///@{
       /**
        * Create partition by blockify is a special (but common) case of 
        * create partition by restriction, that is guaranteed to create a 
@@ -4065,6 +4180,76 @@ namespace Legion {
                                     Point<DIM,COORD_T> blocking_factor,
                                     Point<DIM,COORD_T> origin,
                                     Color color = AUTO_GENERATE_ID);
+      ///@}
+      ///@{
+      /**
+       * Create partition by domain allows users to specify an explicit
+       * Domain object to use for one or more subregions directly.
+       * This is similar to the old (deprecated) coloring APIs.
+       * However, instead of specifying colors for each element, we 
+       * encourage users to create domains that express as few dense
+       * rectangles in them as necessary for expressing the index space.
+       * The runtime will not attempt to coalesce the rectangles in 
+       * each domain further.
+       * @param ctx the enclosing task context
+       * @param parent the parent index space to be partitioned
+       * @param domains map of points in the color space points to domains
+       * @param color_space the color space for the partition
+       * @param perform_intersections intersect domains with parent space
+       * @param part_kind specify the partition kind or ask to compute it 
+       * @param color the color of the result of the partition
+       * @return a new index partition of the parent index space
+       */
+      IndexPartition create_partition_by_domain(Context ctx,
+                                    IndexSpace parent,
+                                    const std::map<DomainPoint,Domain> &domains,
+                                    IndexSpace color_space,
+                                    bool perform_intersections = true,
+                                    PartitionKind part_kind = COMPUTE_KIND,
+                                    Color color = AUTO_GENERATE_ID);
+      template<int DIM, typename COORD_T, int COLOR_DIM, typename COLOR_COORD_T>
+      IndexPartitionT<DIM,COORD_T> create_partition_by_domain(Context ctx,
+                                    IndexSpaceT<DIM,COORD_T> parent,
+                                    const std::map<
+                                           Point<COLOR_DIM,COLOR_COORD_T>,
+                                             DomainT<DIM,COORD_T> > &domains,
+                                    IndexSpaceT<COLOR_DIM,
+                                                COLOR_COORD_T> color_space,
+                                    bool perform_intersections = true,
+                                    PartitionKind part_kind = COMPUTE_KIND,
+                                    Color color = AUTO_GENERATE_ID);
+      /**
+       * This is an alternate version of create_partition_by_domain that
+       * instead takes a future map for the list of domains to be used.
+       * The runtime will automatically interpret the results in the 
+       * individual futures as domains for creating the partition. This
+       * allows users to create this partition without blocking.
+       * @param ctx the enclosing task context
+       * @param parent the parent index space to be partitioned
+       * @param domains future map of points to domains
+       * @param color_space the color space for the partition
+       * @param perform_intersections intersect domains with parent space
+       * @param part_kind specify the partition kind or ask to compute it 
+       * @param color the color of the result of the partition
+       * @return a new index partition of the parent index space
+       */
+      IndexPartition create_partition_by_domain(Context ctx,
+                                      IndexSpace parent,
+                                      const FutureMap &domain_future_map,
+                                      IndexSpace color_space,
+                                      bool perform_intersections = true,
+                                      PartitionKind part_kind = COMPUTE_KIND,
+                                      Color color = AUTO_GENERATE_ID);
+      template<int DIM, typename COORD_T, int COLOR_DIM, typename COLOR_COORD_T>
+      IndexPartitionT<DIM,COORD_T> create_partition_by_domain(Context ctx,
+                                      IndexSpaceT<DIM,COORD_T> parent,
+                                      const FutureMap &domain_future_map,
+                                      IndexSpaceT<COLOR_DIM,
+                                                  COLOR_COORD_T> color_space,
+                                      bool perform_intersections = true,
+                                      PartitionKind part_kind = COMPUTE_KIND,
+                                      Color color = AUTO_GENERATE_ID);
+      ///@}
       ///@{
       /**
        * Create partition by field uses an existing field in a logical
@@ -4088,6 +4273,7 @@ namespace Legion {
        * @param color optional new color for the index partition
        * @param id the ID of the mapper to use for mapping the fields
        * @param tag the context tag to pass to the mapper
+       * @param part_kind the kind of the partition
        * @return a new index partition of the index space of the logical region
        */
       IndexPartition create_partition_by_field(Context ctx,
@@ -4097,7 +4283,9 @@ namespace Legion {
                                                IndexSpace color_space,
                                                Color color = AUTO_GENERATE_ID,
                                                MapperID id = 0,
-                                               MappingTagID tag = 0);
+                                               MappingTagID tag = 0,
+                                               PartitionKind part_kind = 
+                                                                 DISJOINT_KIND);
       template<int DIM, typename COORD_T, 
                int COLOR_DIM, typename COLOR_COORD_T>
       IndexPartitionT<DIM,COORD_T> create_partition_by_field(Context ctx,
@@ -4106,7 +4294,8 @@ namespace Legion {
                           FieldID fid, // type: Point<COLOR_DIM,COLOR_COORD_T>
                           IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
                           Color color = AUTO_GENERATE_ID,
-                          MapperID id = 0, MappingTagID tag = 0);
+                          MapperID id = 0, MappingTagID tag = 0,
+                          PartitionKind part_kind = DISJOINT_KIND);
       ///@}
       ///@{
       /**
@@ -5288,6 +5477,22 @@ namespace Legion {
        *    all the return values from the index space of tasks
        */
       Future execute_index_space(Context ctx, const IndexTaskLauncher &launcher,
+                               ReductionOpID redop, bool deterministic = false);
+
+      /**
+       * Reduce a future map down to a single future value using 
+       * a specified reduction operator. This assumes that all the values
+       * in the future map are instance of the reduction operator's RHS
+       * type and the resulting future will also be an RHS type.
+       * @param ctx enclosing task context
+       * @param future_map the future map to reduct the value
+       * @param redop ID for the reduction op to use for reducing values
+       * @param deterministic request that the reduced future be computed
+       *        in a deterministic way (more expensive than non-deterministic)
+       * @return a future result representing the the reduction of all the
+       *         values in the future map
+       */
+      Future reduce_future_map(Context ctx, const FutureMap &future_map, 
                                ReductionOpID redop, bool deterministic = false);
 
       /**
@@ -7118,8 +7323,9 @@ namespace Legion {
        * be passed into the 'start' method or undefined behavior will occur.
        * @param argc pointer to an integer in which to store the argument count 
        * @param argv pointer to array of strings for storing command line args
+       * @param filter remove any runtime command line arguments
        */
-      static void initialize(int *argc, char ***argv);
+      static void initialize(int *argc, char ***argv, bool filter = false);
 
       /**
        * Blocking call to wait for the runtime to shutdown when
@@ -7205,6 +7411,23 @@ namespace Legion {
        * @param rank the integer naming this MPI rank
        */
       static void configure_MPI_interoperability(int rank);
+
+      /**
+       * Create a handshake object for exchanging control between an
+       * external application and Legion. We make this a static method so that 
+       * it can be created before the Legion runtime is initialized.
+       * @param init_in_ext who owns initial control of the handshake,
+       *                    by default it is the external application
+       * @param ext_participants number of calls that need to be made to the 
+       *                    handshake to pass control from the external 
+       *                    application to Legion
+       * @param legion_participants number of calls that need to be made to
+       *                    the handshake to pass control from Legion to the
+       *                    external application
+       */
+      static LegionHandshake create_external_handshake(bool init_in_ext = true,
+                                                   int ext_participants = 1,
+                                                   int legion_participants = 1);
 
       /**
        * Create a handshake object for exchanging control between MPI

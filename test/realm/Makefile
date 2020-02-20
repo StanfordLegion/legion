@@ -1,4 +1,4 @@
-# Copyright 2019 Stanford University
+# Copyright 2020 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -59,6 +59,7 @@ TESTS += scatter
 TESTS += compqueue
 TESTS += event_subscribe
 TESTS += deferred_allocs
+TESTS += test_nodeset
 
 # can set arguments to be passed to a test when running
 TESTARGS_ctxswitch := -ll:io 1 -t 20 -i 10000

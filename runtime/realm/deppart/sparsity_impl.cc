@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -126,24 +126,26 @@ namespace Realm {
     assert(new_tag != 0);
 
     // try set the tag for this entry - if it's 0, we may be the first to get here
-    DynamicTemplates::TagType old_tag = __sync_val_compare_and_swap(&type_tag, 0, new_tag);
-    assert((old_tag == 0) || (old_tag == new_tag));  // better not mismatch...
+    DynamicTemplates::TagType old_tag = 0;
+    if(!type_tag.compare_exchange(old_tag, new_tag)) {
+      // if it was already set, it better not mismatch
+      assert(old_tag == new_tag);
+    }
 
     // now see if the pointer is valid - the validity of the old_tag is no guarantee
-    void *impl = map_impl;
+    void *impl = map_impl.load_acquire();
     if(impl)
       return static_cast<SparsityMapImpl<N,T> *>(impl);
 
     // create one and try to swap it in
     SparsityMapImpl<N,T> *new_impl = new SparsityMapImpl<N,T>(me);
-    impl = __sync_val_compare_and_swap(&map_impl, 0, (void *)new_impl);
-    if(impl != 0) {
+    if(map_impl.compare_exchange(impl, new_impl)) {
+      // ours is the winner - return it
+      return new_impl;
+    } else {
       // we lost the race - free the one we made and return the winner
       delete new_impl;
       return static_cast<SparsityMapImpl<N,T> *>(impl);
-    } else {
-      // ours is the winner - return it
-      return new_impl;
     }
   }
 
@@ -309,7 +311,7 @@ namespace Realm {
       // increment the count atomically - if it brings the total up to 0 (which covers count == 0),
       //  immediately finalize - the contributions happened before we got here
       // just increment the count atomically
-      int v = __sync_add_and_fetch(&remaining_contributor_count, count);
+      int v = remaining_contributor_count.fetch_add(count) + count;
       if(v == 0)
 	finalize();
     } else {
@@ -338,7 +340,7 @@ namespace Realm {
     }
 
     // count is allowed to go negative if we get contributions before we know the total expected
-    int left = __sync_sub_and_fetch(&remaining_contributor_count, 1);
+    int left = remaining_contributor_count.fetch_sub(1) - 1;
     if(left == 0)
       finalize();
   }
@@ -535,7 +537,7 @@ namespace Realm {
       if(NodeID(ID(me).sparsity_creator_node()) == Network::my_node_id) {
 	// we're the owner, so remaining_contributor_count tracks our expected contributions
 	// count is allowed to go negative if we get contributions before we know the total expected
-	int left = __sync_sub_and_fetch(&remaining_contributor_count, 1);
+	int left = remaining_contributor_count.fetch_sub(1) - 1;
 	if(left == 0)
 	  finalize();
       } else {
@@ -896,7 +898,7 @@ namespace Realm {
   //   long time
   inline int FragmentAssembler::get_sequence_id(void)
   {
-    return __sync_fetch_and_add(&next_sequence_id, 1);
+    return next_sequence_id.fetch_add(1);
   }
 
   // adds a fragment to the list, returning true if this is the last one from

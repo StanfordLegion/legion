@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -40,7 +40,7 @@ namespace Realm {
     namespace ThreadLocal {
       // if nonzero, prevents application thread from yielding execution
       //  resources on an Event wait
-      extern __thread int scheduler_lock;
+      extern REALM_THREAD_LOCAL int scheduler_lock;
     };
 
     class ProcessorImpl {

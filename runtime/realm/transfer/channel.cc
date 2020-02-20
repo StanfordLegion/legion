@@ -1,5 +1,5 @@
-/* Copyright 2019 Stanford University
- * Copyright 2019 Los Alamos National Laboratory
+/* Copyright 2020 Stanford University
+ * Copyright 2020 Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -77,7 +77,7 @@ namespace Realm {
     size_t SequenceAssembler::span_exists(size_t start, size_t count)
     {
       // lock-free case 1: start < contig_amount
-      size_t contig_sample = __sync_fetch_and_add(&contig_amount, 0);
+      size_t contig_sample = contig_amount.load_acquire();
       if(start < contig_sample) {
 	size_t max_avail = contig_sample - start;
 	if(count < max_avail)
@@ -87,7 +87,7 @@ namespace Realm {
       }
 
       // lock-free case 2: contig_amount <= start < first_noncontig
-      size_t noncontig_sample = __sync_fetch_and_add(&first_noncontig, 0);
+      size_t noncontig_sample = first_noncontig.load();
       if(start < noncontig_sample)
 	return 0;
 
@@ -97,8 +97,8 @@ namespace Realm {
 
 	// first, recheck the contig_amount, in case both it and the noncontig
 	//  counters were bumped in between looking at the two of them
-	if(start < contig_amount) {
-	  size_t max_avail = contig_amount - start;
+	if(start < contig_amount.load()) {
+	  size_t max_avail = contig_amount.load() - start;
 	  if(count < max_avail)
 	    return count;
 	  else
@@ -106,7 +106,7 @@ namespace Realm {
 	}
 
 	// recheck noncontig as well
-	if(start < first_noncontig)
+	if(start < first_noncontig.load())
 	  return 0;
 
 	// otherwise find the first span after us and then back up one to find
@@ -140,28 +140,29 @@ namespace Realm {
     {
       // first try to bump the contiguous amount without a lock
       size_t span_end = pos + count;
-      if(__sync_bool_compare_and_swap(&contig_amount, pos, span_end)) {
+      size_t expval = pos;
+      if(contig_amount.compare_exchange(expval, span_end)) {
 	// success: check to see if there are any spans we might need to 
 	//  tack on
-	if(span_end == __sync_fetch_and_add(&first_noncontig, 0)) {
+	if(span_end == first_noncontig.load()) {
 	  AutoLock<> al(*mutex);
 	  while(!spans.empty()) {
 	    std::map<size_t, size_t>::iterator it = spans.begin();
 	    if(it->first == span_end) {
-	      bool ok = __sync_bool_compare_and_swap(&contig_amount,
-						     span_end,
-						     span_end + it->second);
+	      expval = span_end;
+	      bool ok = contig_amount.compare_exchange(expval,
+						       span_end + it->second);
 	      assert(ok);
 	      span_end += it->second;
 	      spans.erase(it);
 	    } else {
 	      // this is the new first noncontig
-	      first_noncontig = it->first;
+	      first_noncontig.store(it->first);
 	      break;
 	    }
 	  }
 	  if(spans.empty())
-	    first_noncontig = (size_t)-1;
+	    first_noncontig.store(size_t(-1));
 	}
 
 	// return total change to contig_amount
@@ -175,28 +176,29 @@ namespace Realm {
 	  // the checks above were done without the lock, so it is possible
 	  //  that by the time we've got the lock here, contig_amount has
 	  //  caught up to us
-	  if(__sync_bool_compare_and_swap(&contig_amount, pos, span_end)) {
+	  expval = pos;
+	  if(contig_amount.compare_exchange(expval, span_end)) {
 	    // see if any other spans are now contiguous as well
 	    while(!spans.empty()) {
 	      std::map<size_t, size_t>::iterator it = spans.begin();
 	      if(it->first == span_end) {
-		bool ok = __sync_bool_compare_and_swap(&contig_amount,
-						       span_end,
-						       span_end + it->second);
+		expval = span_end;
+		bool ok = contig_amount.compare_exchange(expval,
+							 span_end + it->second);
 		assert(ok);
 		span_end += it->second;
 		spans.erase(it);
 	      } else {
 		// this is the new first noncontig
-		first_noncontig = it->first;
+		first_noncontig.store(it->first);
 		break;
 	      }
 	    }
 	    if(spans.empty())
-	      first_noncontig = (size_t)-1;
+	      first_noncontig.store(size_t(-1));
 	  } else {
-	    if(pos < first_noncontig)
-	      first_noncontig = pos;
+	    if(pos < first_noncontig.load())
+	      first_noncontig.store(pos);
 
 	    spans[pos] = count;
 	  }
@@ -239,7 +241,7 @@ namespace Realm {
 	  p.indirect_port_idx = ii.indirect_port_idx;
 	  p.local_bytes_total = 0;
 	  p.local_bytes_cons = 0;
-	  p.remote_bytes_total = size_t(-1);
+	  p.remote_bytes_total = uint64_t(-1);
 	  p.ib_offset = ii.ib_offset;
 	  p.ib_size = ii.ib_size;
 	  switch(ii.port_type) {
@@ -570,9 +572,9 @@ namespace Realm {
 	  // to avoid all sorts of weird race conditions, sample all three here
 	  //  and only use them in the code below (exception: atomic increments
 	  //  of rbc or wbc, for which we adjust the snapshot by the same)
-	  size_t pbt_snapshot = __sync_fetch_and_add(&in_port->remote_bytes_total, 0);
-	  size_t rbc_snapshot = __sync_fetch_and_add(&in_port->local_bytes_cons, 0);
-	  size_t wbc_snapshot = __sync_fetch_and_add(&out_port->local_bytes_cons, 0);
+	  size_t pbt_snapshot = in_port->remote_bytes_total.load_acquire();
+	  size_t rbc_snapshot = in_port->local_bytes_cons.load_acquire();
+	  size_t wbc_snapshot = out_port->local_bytes_cons.load_acquire();
 
 	  // normally we detect the end of a transfer after initiating a
 	  //  request, but empty iterators and filtered streams can cause us
@@ -690,7 +692,7 @@ namespace Realm {
 
 	    write_seq = 0; // filled in later
 	    write_bytes = dst_bytes_avail;
-	    __sync_fetch_and_add(&(out_port->local_bytes_cons), dst_bytes_avail);
+	    out_port->local_bytes_cons.fetch_add(dst_bytes_avail);
 	    wbc_snapshot += dst_bytes_avail;
 	  } else
 	  if(!in_port->serdez_op && out_port->serdez_op) {
@@ -797,7 +799,7 @@ namespace Realm {
 
 	    read_seq = 0; // filled in later
 	    read_bytes = src_bytes_avail;
-	    __sync_fetch_and_add(&(in_port->local_bytes_cons), src_bytes_avail);
+	    in_port->local_bytes_cons.fetch_add(src_bytes_avail);
 	    rbc_snapshot += src_bytes_avail;
 
 	    write_seq = out_port->local_bytes_total;
@@ -1104,7 +1106,7 @@ namespace Realm {
 	  //  we still have -1
 	  if((in_port->peer_guid != XFERDES_NO_GUID) &&
 	     (pbt_snapshot == (size_t)-1))
-	    pbt_snapshot = __sync_fetch_and_add(&(in_port->remote_bytes_total), 0);
+	    pbt_snapshot = in_port->remote_bytes_total.load_acquire();
 
 	  // if we have control ports, they tell us when we're done
 	  if((input_control.control_port_idx >= 0) ||
@@ -1367,9 +1369,11 @@ namespace Realm {
       if(!iteration_completed) return false;
       for(std::vector<XferPort>::iterator it = output_ports.begin();
 	  it != output_ports.end();
-	  ++it)
-	if(it->seq_local.span_exists(0, it->local_bytes_cons) != it->local_bytes_cons)
+	  ++it) {
+	size_t lbc_snapshot = it->local_bytes_cons.load();
+	if(it->seq_local.span_exists(0, lbc_snapshot) != lbc_snapshot)
 	  return false;
+      }
       return true;
     }
 
@@ -1492,10 +1496,12 @@ namespace Realm {
 
 	// do this before we add the span
 	if(pre_bytes_total != (size_t)-1) {
-	  if(in_port->remote_bytes_total == (size_t)-1)
-	    in_port->remote_bytes_total = pre_bytes_total;
-	  else
-	    assert(in_port->remote_bytes_total == pre_bytes_total);
+	  // try to swap -1 for the given total
+	  uint64_t val = -1;
+	  if(!in_port->remote_bytes_total.compare_exchange(val, pre_bytes_total)) {
+	    // failure should only happen if we already had the same value
+	    assert(val == pre_bytes_total);
+	  }
 	}
 
 	size_t inc_amt = in_port->seq_remote.add_span(offset, size);
@@ -2004,7 +2010,7 @@ namespace Realm {
 	  // if we're not the first in the chain, and we know the total bytes
 	  //  written by the predecessor, don't exceed that
 	  if(in_port->peer_guid != XFERDES_NO_GUID) {
-	    size_t pre_max = in_port->remote_bytes_total - in_port->local_bytes_total;
+	    size_t pre_max = in_port->remote_bytes_total.load() - in_port->local_bytes_total;
 	    if(pre_max == 0) {
 	      // due to unsynchronized updates to pre_bytes_total, this path
 	      //  can happen for an empty transfer reading from an intermediate
@@ -2429,8 +2435,8 @@ namespace Realm {
       MemcpyChannel::MemcpyChannel(long max_nr)
 	: Channel(XFER_MEM_CPY)
 	, pending_cond(pending_lock)
+	, capacity(max_nr)
       {
-        capacity = max_nr;
         is_stopped = false;
         sleep_threads = false;
         //cbs = (MemcpyRequest**) calloc(max_nr, sizeof(MemcpyRequest*));
@@ -2918,7 +2924,7 @@ namespace Realm {
 	    req->write_seq_count = out_port->local_bytes_total - req->write_seq_pos;
 	    if(rewind_dst > 0) {
 	      //log_request.print() << "rewind dst: " << rewind_dst;
-	      __sync_fetch_and_sub(&(out_port->local_bytes_cons), rewind_dst);
+	      out_port->local_bytes_cons.fetch_sub(rewind_dst);
 	    }
 	  } else
 	    assert(rewind_dst == 0);
@@ -2927,7 +2933,7 @@ namespace Realm {
 	    req->read_seq_count = in_port->local_bytes_total - req->read_seq_pos;
 	    if(rewind_src > 0) {
 	      //log_request.print() << "rewind src: " << rewind_src;
-	      __sync_fetch_and_sub(&(in_port->local_bytes_cons), rewind_src);
+	      in_port->local_bytes_cons.fetch_sub(rewind_src);
 	    }
 	  } else
 	      assert(rewind_src == 0);
@@ -2985,14 +2991,13 @@ namespace Realm {
 
       long MemcpyChannel::available()
       {
-        return capacity;
+        return capacity.load();
       }
 
       GASNetChannel::GASNetChannel(long max_nr, XferDesKind _kind)
 	: Channel(_kind)
+	, capacity(max_nr)
       {
-        capacity = max_nr;
-
 	unsigned bw = 0; // TODO
 	unsigned latency = 0;
 	// any combination of SYSTEM/REGDMA/Z_COPY/SOCKET_MEM
@@ -3048,14 +3053,13 @@ namespace Realm {
 
       long GASNetChannel::available()
       {
-        return capacity;
+        return capacity.load();
       }
 
       RemoteWriteChannel::RemoteWriteChannel(long max_nr)
 	: Channel(XFER_REMOTE_WRITE)
+	, capacity(max_nr)
       {
-        capacity = max_nr;
-
 	unsigned bw = 0; // TODO
 	unsigned latency = 0;
 	// any combination of SYSTEM/REGDMA/Z_COPY/SOCKET_MEM
@@ -3069,7 +3073,7 @@ namespace Realm {
 
       long RemoteWriteChannel::submit(Request** requests, long nr)
       {
-        assert(nr <= capacity);
+        assert(nr <= capacity.load());
         for (long i = 0; i < nr; i ++) {
           RemoteWriteRequest* req = (RemoteWriteRequest*) requests[i];
 	  XferDes::XferPort *in_port = &req->xd->input_ports[req->src_port_idx];
@@ -3108,7 +3112,7 @@ namespace Realm {
 	    req->xd->notify_request_write_done(req);
 	    notify_completion();
 	  }
-          __sync_fetch_and_sub(&capacity, 1);
+	  capacity.fetch_sub(1);
         /*RemoteWriteRequest* req = (RemoteWriteRequest*) requests[i];
           req->complete_event = GenEventImpl::create_genevent()->current_event();
           Realm::RemoteWriteMessage::RequestArgs args;
@@ -3132,15 +3136,20 @@ namespace Realm {
 
       long RemoteWriteChannel::available()
       {
-        return capacity;
+        return capacity.load();
       }
-   
+
+      void RemoteWriteChannel::notify_completion()
+      {
+	capacity.fetch_add(1);
+      }
+
 #ifdef USE_CUDA
       GPUChannel::GPUChannel(Cuda::GPU* _src_gpu, long max_nr, XferDesKind _kind)
 	: Channel(_kind)
+	, capacity(max_nr)
       {
         src_gpu = _src_gpu;
-        capacity = max_nr;
 
 	Memory fbm = src_gpu->fbmem->me;
 
@@ -3298,16 +3307,15 @@ namespace Realm {
 
       long GPUChannel::available()
       {
-        return capacity - pending_copies.size();
+        return capacity.load() - pending_copies.size();
       }
 #endif
 
 #ifdef USE_HDF
       HDFChannel::HDFChannel(long max_nr, XferDesKind _kind)
 	: Channel(_kind)
+	, capacity(max_nr)
       {
-        capacity = max_nr;
-
 	unsigned bw = 0; // TODO
 	unsigned latency = 0;
 	// any combination of SYSTEM/REGDMA/Z_COPY_MEM
@@ -3352,7 +3360,7 @@ namespace Realm {
 
       long HDFChannel::available()
       {
-        return capacity;
+        return capacity.load();
       }
 #endif
 
@@ -3596,35 +3604,29 @@ namespace Realm {
 	  xd->deferred_enqueue.defer(xferDes_queue, xd, wait_on);
 	  return;
 	}
-	
-#ifdef REALM_USE_SUBPROCESSES
-	guid_lock.lock();
-#else
-        pthread_rwlock_wrlock(&guid_lock);
-#endif
-        std::map<XferDesID, XferDesWithUpdates>::iterator git = guid_to_xd.find(xd->guid);
-        if (git != guid_to_xd.end()) {
-          // xerDes_queue has received updates of this xferdes
-          // need to integrate these updates into xferdes
-          assert(git->second.xd == NULL);
-	  git->second.xd = xd;
-	  for(std::map<int, size_t>::const_iterator it = git->second.pre_bytes_total.begin();
-	      it != git->second.pre_bytes_total.end();
-	      ++it)
-	    xd->input_ports[it->first].remote_bytes_total = it->second;
-	  for(std::map<int, SequenceAssembler>::iterator it = git->second.seq_pre_write.begin();
-	      it != git->second.seq_pre_write.end();
-	      ++it)
-	    xd->input_ports[it->first].seq_remote.swap(it->second);
-        } else {
-	  XferDesWithUpdates& xdup = guid_to_xd[xd->guid];
-	  xdup.xd = xd;
-        }
-#ifdef REALM_USE_SUBPROCESSES
-	guid_lock.unlock();
-#else
-        pthread_rwlock_unlock(&guid_lock);
-#endif
+
+	{
+	  RWLock::AutoWriterLock al(guid_lock);
+	  std::map<XferDesID, XferDesWithUpdates>::iterator git = guid_to_xd.find(xd->guid);
+	  if (git != guid_to_xd.end()) {
+	    // xerDes_queue has received updates of this xferdes
+	    // need to integrate these updates into xferdes
+	    assert(git->second.xd == NULL);
+	    git->second.xd = xd;
+	    for(std::map<int, size_t>::const_iterator it = git->second.pre_bytes_total.begin();
+		it != git->second.pre_bytes_total.end();
+		++it)
+	      xd->input_ports[it->first].remote_bytes_total = it->second;
+	    for(std::map<int, SequenceAssembler>::iterator it = git->second.seq_pre_write.begin();
+		it != git->second.seq_pre_write.end();
+		++it)
+	      xd->input_ports[it->first].seq_remote.swap(it->second);
+	  } else {
+	    XferDesWithUpdates& xdup = guid_to_xd[xd->guid];
+	    xdup.xd = xd;
+	  }
+	}
+
         std::map<Channel*, DMAThread*>::iterator it;
         it = channel_to_dma_thread.find(xd->channel);
         assert(it != channel_to_dma_thread.end());

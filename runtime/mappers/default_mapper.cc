@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1308,7 +1308,8 @@ namespace Legion {
         case DIM: \
           { \
             DomainT<DIM,coord_t> point_space = input.domain; \
-            Point<DIM,coord_t> num_blocks(procs.size()); \
+            Point<DIM,coord_t> num_blocks = \
+              default_select_num_blocks<DIM>(procs.size(), point_space.bounds); \
             default_decompose_points<DIM>(point_space, procs, \
                   num_blocks, false/*recurse*/, \
                   stealing_enabled, output.slices); \

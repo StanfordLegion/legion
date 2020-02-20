@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -49,8 +49,8 @@
 #include <gasnet_tools.h>
 
 // eliminate GASNet warnings for unused static functions
-static const void *ignore_gasnet_warning1 __attribute__((unused)) = (void *)_gasneti_threadkey_init;
-static const void *ignore_gasnet_warning2 __attribute__((unused)) = (void *)_gasnett_trace_printf_noop;
+REALM_ATTR_UNUSED(static const void *ignore_gasnet_warning1) = (void *)_gasneti_threadkey_init;
+REALM_ATTR_UNUSED(static const void *ignore_gasnet_warning2) = (void *)_gasnett_trace_printf_noop;
 
 #define NO_DEBUG_AMREQUESTS
 
@@ -259,11 +259,12 @@ protected:
   std::map<char *, size_t> in_use;
   std::map<void *, ssize_t> alloc_counts;
 
-  size_t current_spill_bytes, peak_spill_bytes, current_spill_threshold;
+  atomic<size_t> current_spill_bytes, peak_spill_bytes;
+  atomic<size_t> current_spill_threshold;
 #define TRACK_PER_MESSAGE_SPILLING
 #ifdef TRACK_PER_MESSAGE_SPILLING
-  size_t current_permsg_spill_bytes[256], peak_permsg_spill_bytes[256];
-  size_t total_permsg_spill_bytes[256];
+  atomic<size_t> current_permsg_spill_bytes[256], peak_permsg_spill_bytes[256];
+  atomic<size_t> total_permsg_spill_bytes[256];
 #endif
   int current_suspended_spillers, total_suspended_spillers;
   double total_suspended_time;
@@ -280,7 +281,7 @@ size_t SrcDataPool::print_spill_step = 1 << 30;       // default = 1 GB
 
 // certain threads are exempt from the max spillage due to deadlock concerns
 namespace ThreadLocal {
-  __thread bool always_allow_spilling = false;
+  REALM_THREAD_LOCAL bool always_allow_spilling = false;
 };
 
 // wrapper so we don't have to expose SrcDataPool implementation
@@ -296,12 +297,16 @@ SrcDataPool::SrcDataPool(void *base, size_t size)
   free_list[(char *)base] = size;
   total_size = size;
 
-  current_spill_bytes = peak_spill_bytes = 0;
+  current_spill_bytes.store(0);
+  peak_spill_bytes.store(0);
 #ifdef TRACK_PER_MESSAGE_SPILLING
-  for(int i = 0; i < 256; i++)
-    current_permsg_spill_bytes[i] = peak_permsg_spill_bytes[i] = total_permsg_spill_bytes[i] = 0;
+  for(int i = 0; i < 256; i++) {
+    current_permsg_spill_bytes[i].store(0);
+    peak_permsg_spill_bytes[i].store(0);
+    total_permsg_spill_bytes[i].store(0);
+  }
 #endif
-  current_spill_threshold = print_spill_threshold;
+  current_spill_threshold.store(print_spill_threshold);
 
   current_suspended_spillers = total_suspended_spillers = 0;
   total_suspended_time = 0;
@@ -511,26 +516,34 @@ void SrcDataPool::release_srcptr(void *srcptr)
 bool SrcDataPool::alloc_spill_memory(size_t size_needed, int msgtype, Lock& held_lock,
 				     bool first_try)
 {
-  size_t new_spill_bytes = current_spill_bytes + size_needed;
 
   // case 1: it fits, so add to total and see if we need to print stuff
-  if((max_spill_bytes == 0) || ::ThreadLocal::always_allow_spilling ||
-     (new_spill_bytes <= max_spill_bytes)) {
-    current_spill_bytes = new_spill_bytes;
-    if(new_spill_bytes > peak_spill_bytes) {
-      peak_spill_bytes = new_spill_bytes;
-      if(peak_spill_bytes >= current_spill_threshold) {
-	current_spill_threshold += print_spill_step;
-	print_spill_data();
+  while(true) {
+    size_t old_spill_bytes = current_spill_bytes.load();
+    size_t new_spill_bytes = old_spill_bytes + size_needed;
+
+    if((max_spill_bytes != 0) && !::ThreadLocal::always_allow_spilling &&
+       (new_spill_bytes > max_spill_bytes))
+      break;
+
+    if(current_spill_bytes.compare_exchange(old_spill_bytes,
+					    new_spill_bytes)) {
+      if(new_spill_bytes > max_spill_bytes)
+	peak_spill_bytes.fetch_max(new_spill_bytes);
+
+      size_t old_threshold = current_spill_threshold.load();
+      if(new_spill_bytes > old_threshold) {
+	if(current_spill_threshold.compare_exchange(old_threshold,
+						    new_spill_bytes + print_spill_step))
+	  print_spill_data();
       }
-    }
+
 #ifdef TRACK_PER_MESSAGE_SPILLING
-    size_t new_permsg_spill_bytes = current_permsg_spill_bytes[msgtype] + size_needed;
-    current_permsg_spill_bytes[msgtype] = new_permsg_spill_bytes;
-    if(new_permsg_spill_bytes > peak_permsg_spill_bytes[msgtype])
-      peak_permsg_spill_bytes[msgtype] = new_permsg_spill_bytes;
+      size_t new_permsg_spill_bytes = current_permsg_spill_bytes[msgtype].fetch_add(size_needed) + size_needed;
+      peak_permsg_spill_bytes[msgtype].fetch_max(new_permsg_spill_bytes);
 #endif
-    return true;
+      return true;
+    }
   }
   
   // case 2: we've hit the max allowable spill amount, so stall until room is available
@@ -539,7 +552,7 @@ bool SrcDataPool::alloc_spill_memory(size_t size_needed, int msgtype, Lock& held
   assert(size_needed <= max_spill_bytes);
 
   log_spill.debug() << "max spill amount reached - suspension required ("
-		    << current_spill_bytes << " + " << size_needed << " > " << max_spill_bytes;
+		    << current_spill_bytes.load() << " + " << size_needed << " > " << max_spill_bytes;
 
   // if this is the first try for this message, increase the total waiter count and complain
   current_suspended_spillers++;
@@ -553,10 +566,10 @@ bool SrcDataPool::alloc_spill_memory(size_t size_needed, int msgtype, Lock& held
 
   // sleep until the message would fit, although we won't try to allocate on this pass
   //  (this allows the caller to try the srcdatapool again first)
-  while((current_spill_bytes + size_needed) > max_spill_bytes) {
+  while((current_spill_bytes.load() + size_needed) > max_spill_bytes) {
     condvar.wait();
     log_spill.debug() << "awake - rechecking: "
-		      << current_spill_bytes << " + " << size_needed << " > " << max_spill_bytes << "?";
+		      << current_spill_bytes.load() << " + " << size_needed << " > " << max_spill_bytes << "?";
   }
 
   current_suspended_spillers--;
@@ -572,10 +585,10 @@ bool SrcDataPool::alloc_spill_memory(size_t size_needed, int msgtype, Lock& held
 
 void SrcDataPool::release_spill_memory(size_t size_released, int msgtype, Lock& held_lock)
 {
-  current_spill_bytes -= size_released;
+  current_spill_bytes.fetch_sub(size_released);
 
 #ifdef TRACK_PER_MESSAGE_SPILLING
-  current_permsg_spill_bytes[msgtype] -= size_released;
+  current_permsg_spill_bytes[msgtype].fetch_sub(size_released);
 #endif
 
   // if there are any threads blocked on spilling data, wake them
@@ -589,16 +602,16 @@ void SrcDataPool::print_spill_data(Realm::Logger::LoggingLevel level)
 {
   Realm::LoggerMessage msg = log_spill.newmsg(level);
 
-  msg << "current spill usage = "
-      << current_spill_bytes << " bytes, peak = " << peak_spill_bytes;
+  msg << "current spill usage = " << current_spill_bytes.load()
+      << " bytes, peak = " << peak_spill_bytes.load();
 #ifdef TRACK_PER_MESSAGE_SPILLING
   for(int i = 0; i < 256; i++)
-    if(total_permsg_spill_bytes[i] > 0)
+    if(total_permsg_spill_bytes[i].load() > 0)
       msg << "\n"
 	  << "  MSG " << i << ": "
-	  << "cur=" << current_permsg_spill_bytes[i]
-	  << " peak=" << peak_permsg_spill_bytes[i]
-	  << " total=" << total_permsg_spill_bytes[i];
+	  << "cur=" << current_permsg_spill_bytes[i].load()
+	  << " peak=" << peak_permsg_spill_bytes[i].load()
+	  << " total=" << total_permsg_spill_bytes[i].load();
 #endif
   if(total_suspended_spillers > 0)
     msg << "\n"
@@ -611,7 +624,7 @@ void SrcDataPool::print_spill_data(Realm::Logger::LoggingLevel level)
 size_t current_total_spill_bytes, peak_total_spill_bytes;
 size_t current_spill_threshold;
 size_t current_spill_step;
-size_t current_spill_bytes[256], peak_spill_bytes[256], total_spill_bytes[256];
+atomic<size_t> current_spill_bytes[256], peak_spill_bytes[256], total_spill_bytes[256];
 
 void init_spill_tracking(void)
 {
@@ -629,9 +642,9 @@ void init_spill_tracking(void)
 
   current_total_spill_bytes = 0;
   for(int i = 0; i < 256; i++) {
-    current_spill_bytes[i] = 0;
-    peak_spill_bytes[i] = 0;
-    total_spill_bytes[i] = 0;
+    current_spill_bytes[i].store(0);
+    peak_spill_bytes[i].store(0);
+    total_spill_bytes[i].store(0);
   }
 }
 #endif
@@ -644,38 +657,33 @@ void print_spill_data(void)
     if(total_spill_bytes[i] > 0) {
       printf("spill node %d:  MSG %d: cur=%zd peak=%zd total=%zd\n",
 	     gasnet_mynode(), i,
-	     current_spill_bytes[i],
-	     peak_spill_bytes[i],
-	     total_spill_bytes[i]);
+	     current_spill_bytes[i].load(),
+	     peak_spill_bytes[i].load(),
+	     total_spill_bytes[i].load());
     }
 }
 
 void record_spill_alloc(int msgid, size_t bytes)
 {
-  size_t newcur = __sync_add_and_fetch(&current_spill_bytes[msgid], bytes);
-  while(true) {
-    size_t oldpeak = peak_spill_bytes[msgid];
-    if(oldpeak >= newcur) break;
-    if(__sync_bool_compare_and_swap(&peak_spill_bytes[msgid], oldpeak, newcur))
-      break;
-  }
-  __sync_fetch_and_add(&total_spill_bytes[msgid], bytes);
-  size_t newtotal = __sync_add_and_fetch(&current_total_spill_bytes, bytes);
-  while(true) {
-    size_t oldpeak = peak_total_spill_bytes;
-    if(oldpeak >= newtotal) break;
-    if(__sync_bool_compare_and_swap(&peak_total_spill_bytes, oldpeak, newtotal)) break;
-  }
-  if(newtotal > current_spill_threshold) {
-    current_spill_threshold += current_spill_step;
-    print_spill_data();
+  size_t newcur = current_spill_bytes[msgid].fetch_add(bytes) + bytes;
+  peak_spill_bytes[msgid].fetch_max(newcur);
+  total_spill_bytes[msgid].fetch_add(bytes);
+
+  size_t newtotal = current_total_spill_bytes.fetch_add(bytes) + bytes;
+  peak_total_spill_bytes.fetch_max(newtotal);
+
+  size_t old_thresh = current_spill_threshold.load();
+  if(newtotal > old_thresh) {
+    if(current_spill_threshold.compare_exchange(old_thresh,
+						old_thresh + current_spill_step))
+      print_spill_data();
   }
 }
 
 void record_spill_free(int msgid, size_t bytes)
 {
-  __sync_fetch_and_sub(&current_total_spill_bytes, bytes);
-  __sync_fetch_and_sub(&current_spill_bytes[msgid], bytes);
+  current_total_spill_bytes.fetch_sub(bytes);
+  current_spill_bytes[msgid].fetch_sub(bytes);
 }
 #endif
 
@@ -779,9 +787,9 @@ public:
 class DetailedMessageTiming {
 public:
   DetailedMessageTiming(void)
+    : message_count(0)
   {
     path = getenv("LEGION_MESSAGE_TIMING_PATH");
-    message_count = 0;
     if(path) {
       char *e = getenv("LEGION_MESSAGE_TIMING_MAX");
       if(e)
@@ -804,7 +812,7 @@ public:
   int get_next_index(void)
   {
     if(message_max_count)
-      return __sync_fetch_and_add(&message_count, 1);
+      return message_count.fetch_add(1);
     else
       return -1;
   }
@@ -859,7 +867,8 @@ public:
 
 protected:
   const char *path;
-  int message_count, message_max_count;
+  atomic<int> message_count;
+  int message_max_count;
   MessageTimingData *message_timing;
 };
 
@@ -1056,9 +1065,9 @@ public:
   void record_message(bool sent_reply) 
   {
 #ifdef TRACE_MESSAGES
-    __sync_fetch_and_add(&received_messages, 1);
+    recevied_messages.fetch_add(1);
     if (sent_reply)
-      __sync_fetch_and_add(&sent_messages, 1);
+      sent_messages.fetch_add(1);
 #endif
   }
 
@@ -1262,7 +1271,7 @@ public:
 	  detailed_message_timing.record(timing_idx, peer, MSGID_FLIP_REQ, flip_buffer, 8, qdepth, start_time, CurrentTime());
 #endif
 #ifdef TRACE_MESSAGES
-          __sync_fetch_and_add(&sent_messages, 1);
+	  sent_messages.fetch_add(1);
 #endif
 
 	  continue;
@@ -1448,7 +1457,7 @@ public:
 	   lmb_r_bases[buffer]+lmb_size, count);
 #endif
 #ifdef TRACE_MESSAGES
-    __sync_fetch_and_add(&received_messages, 1);
+    received_messages.fetch_add(1);
 #endif
     bool message_added_to_empty_queue = false;
     mutex.lock();
@@ -1481,7 +1490,7 @@ public:
 	   lmb_w_bases[buffer]+lmb_size);
 #endif
 #ifdef TRACE_MESSAGES
-    __sync_fetch_and_add(&received_messages, 1);
+    received_messages.fetch_add(1);
 #endif
 
     lmb_w_avail[buffer] = true;
@@ -1545,7 +1554,7 @@ protected:
     fflush(stdout);
 #endif
 #ifdef TRACE_MESSAGES
-    __sync_fetch_and_add(&sent_messages, 1);
+    sent_messages.fetch_add(1);
 #endif
 #ifdef ACTIVE_MESSAGE_TRACE
     log_amsg_trace.info("Active Message Request: %d %d %d %ld",
@@ -1844,7 +1853,7 @@ protected:
       fflush(stdout);
 #endif
 #ifdef TRACE_MESSAGES
-      __sync_fetch_and_add(&sent_messages, 1);
+      sent_messages.fetch_add(1);
 #endif
 #ifdef ACTIVE_MESSAGE_TRACE
       log_amsg_trace.info("Active Message Request: %d %d %d %ld",
@@ -2020,8 +2029,8 @@ public:
   Realm::atomic<bool> in_channel_closed;
   Realm::atomic<size_t> messages_handled, messages_expected;
 #ifdef TRACE_MESSAGES
-  int sent_messages;
-  int received_messages;
+  atomic<int> sent_messages;
+  atomic<int> received_messages;
 #endif
 #ifdef DETAILED_MESSAGE_TIMING
   int message_log_state;
@@ -2186,7 +2195,7 @@ public:
       log_amsg.fatal() << "could not open message trace file '" << filename << "': " << strerror(errno);
       abort();
     }
-    last_msgtrace_report = (int)(Realm::Clock::current_time()); // just keep the integer seconds
+    last_msgtrace_report.store(int(Realm::Clock::current_time())); // just keep the integer seconds
 #endif
 
     // for worker threads
@@ -2313,7 +2322,7 @@ public:
 
       ActiveMessageEndpoint *e = endpoints[i];
       fprintf(f, "AMS: %d<->%d: S=%d R=%d\n", 
-              mynode, i, e->sent_messages, e->received_messages);
+              mynode, i, e->sent_messages.load(), e->received_messages.load());
     }
     fflush(f);
 #else
@@ -2403,7 +2412,7 @@ private:
   std::vector<Realm::Thread *> polling_threads;
 #ifdef TRACE_MESSAGES
   FILE *msgtrace_file;
-  int last_msgtrace_report;
+  atomic<int> last_msgtrace_report;
 #endif
 };
 
@@ -2788,10 +2797,10 @@ void EndpointManager::polling_worker_loop(void)
 #ifdef TRACE_MESSAGES
     // see if it's time to write out another update
     int now = (int)(Realm::Clock::current_time());
-    int old = last_msgtrace_report;
+    int old = last_msgtrace_report.load();
     if(now > (old + 29)) {
       // looks like it's time - use an atomic test to see if we should do it
-      if(__sync_bool_compare_and_swap(&last_msgtrace_report, old, now))
+      if(last_msgtrace_report.compare_exchange(old, new))
 	report_activemsg_status(msgtrace_file);
     }
 #endif

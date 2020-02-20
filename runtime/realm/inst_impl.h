@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -77,7 +77,7 @@ namespace Realm {
       bool get_strided_parameters(void *&base, size_t &stride,
 				  off_t field_offset);
 
-      Event request_metadata(void) { return metadata.request_data(ID(me).instance_creator_node(), me.id); }
+      Event request_metadata(void) { return metadata.request_data(int(ID(me).instance_creator_node()), me.id); }
 
       // ensures metadata is available on the specified node
       Event prefetch_metadata(NodeID target);
@@ -138,10 +138,6 @@ namespace Realm {
       // used for serialized application access to contents of instance
       ReservationImpl lock;
     };
-
-    // helper function to figure out which field we're in
-    void find_field_start(const std::vector<size_t>& field_sizes, off_t byte_offset,
-			  size_t size, off_t& field_start, int& field_size);
 
     // active messages
 

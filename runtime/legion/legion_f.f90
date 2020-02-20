@@ -3590,7 +3590,12 @@ contains
       end do
       argc = argc + 1
     else
-      argv(0) = c_null_ptr
+      !argv(0) = c_null_ptr
+      call getarg(0, arg)
+      print *, "arg ", arg
+      tmp_argv(0)%item = trim(arg) // c_null_char
+      argv(0) = c_loc(tmp_argv(0)%item)
+      argc = 1
     end if
     ret_val = legion_runtime_start_f(argc, argv, tmp_background)
   end subroutine legion_runtime_start

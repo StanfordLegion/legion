@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,7 +23,14 @@ namespace Legion {
     __CUDA_HD__
     inline Point(void) : Realm::Point<1,T>() { }
     __CUDA_HD__
-    inline Point(const T val) : Realm::Point<1,T>(val) { }
+    inline Point(T val) : Realm::Point<1,T>(val) { }
+    template <typename T2>
+    __CUDA_HD__
+    inline Point(T2 val, ONLY_IF_INTEGRAL(T2)) : Realm::Point<1,T>(val) { }
+    template <typename T2>
+    __CUDA_HD__
+    inline explicit Point(T2 vals[1], ONLY_IF_INTEGRAL(T2))
+      : Realm::Point<1,T>(vals) { }
     // copies allow type coercion (assuming the underlying type does)
     template<typename T2> __CUDA_HD__
     inline Point(const Point<1,T2> &rhs) : Realm::Point<1,T>(rhs) { }
@@ -58,11 +65,16 @@ namespace Legion {
     __CUDA_HD__
     inline Point(void) : Realm::Point<2,T>() { }
     __CUDA_HD__
-    inline explicit Point(const T v) : Realm::Point<2,T>(v,v) { }
+    inline explicit Point(T v) : Realm::Point<2,T>(v,v) { }
+    template <typename T2>
     __CUDA_HD__
-    inline Point(const T v1, const T v2) : Realm::Point<2,T>(v1,v2) { }
+    inline explicit Point(T2 v, ONLY_IF_INTEGRAL(T2))
+      : Realm::Point<2,T>(v,v) { }
     __CUDA_HD__
-    inline explicit Point(const T vals[2]) : Realm::Point<2,T>(vals) { }
+    inline Point(T v1, T v2) : Realm::Point<2,T>(v1,v2) { }
+    template <typename T2> __CUDA_HD__
+    inline explicit Point(T2 vals[2], ONLY_IF_INTEGRAL(T2))
+      : Realm::Point<2,T>(vals) { }
     // copies allow type coercion (assuming the underlying type does)
     template<typename T2> __CUDA_HD__
     inline Point(const Point<2,T2> &rhs) : Realm::Point<2,T>(rhs) { }
@@ -89,14 +101,20 @@ namespace Legion {
   struct Point<3,T> : public Realm::Point<3,T> {
   public:
     __CUDA_HD__
-    inline Point(void) : Realm::Point<3,T>() { }
+    inline Point(void) : Realm::Point<3,T>() { } 
     __CUDA_HD__
-    inline explicit Point(const T v) : Realm::Point<3,T>(v,v,v) { }
+    inline explicit Point(T v) : Realm::Point<3,T>(v,v,v) { }
+    template <typename T2>
     __CUDA_HD__
-    inline Point(const T v1, const T v2, const T v3) 
+    inline explicit Point(T2 v, ONLY_IF_INTEGRAL(T2))
+      : Realm::Point<3,T>(v,v,v) { }
+    __CUDA_HD__
+    inline Point(T v1, T v2, T v3) 
       : Realm::Point<3,T>(v1,v2,v3) { }
+    template <typename T2>
     __CUDA_HD__
-    inline explicit Point(const T vals[3]) : Realm::Point<3,T>(vals) { }
+    inline explicit Point(T2 vals[3], ONLY_IF_INTEGRAL(T2))
+      : Realm::Point<3,T>(vals) { }
     // copies allow type coercion (assuming the underlying type does)
     template<typename T2> __CUDA_HD__
     inline Point(const Point<3,T2> &rhs) : Realm::Point<3,T>(rhs) { }
@@ -123,14 +141,20 @@ namespace Legion {
   struct Point<4,T> : public Realm::Point<4,T> {
   public:
     __CUDA_HD__
-    inline Point(void) : Realm::Point<4,T>() { }
+    inline Point(void) : Realm::Point<4,T>() { } 
     __CUDA_HD__
-    inline explicit Point(const T v) : Realm::Point<4,T>(v,v,v,v) { }
+    inline explicit Point(T v) : Realm::Point<4,T>(v,v,v,v) { }
+    template <typename T2>
     __CUDA_HD__
-    inline Point(const T v1, const T v2, const T v3, const T v4) 
+    inline explicit Point(T2 v, ONLY_IF_INTEGRAL(T2))
+      : Realm::Point<4,T>(v,v,v,v) { }
+    __CUDA_HD__
+    inline Point(T v1, T v2, T v3, T v4) 
       : Realm::Point<4,T>(v1,v2,v3,v4) { }
+    template <typename T2>
     __CUDA_HD__
-    inline explicit Point(const T vals[4]) : Realm::Point<4,T>(vals) { }
+    inline explicit Point(T2 vals[4], ONLY_IF_INTEGRAL(T2))
+      : Realm::Point<4,T>(vals) { }
     // copies allow type coercion (assuming the underlying type does)
     template<typename T2> __CUDA_HD__
     inline Point(const Point<4,T2> &rhs) : Realm::Point<4,T>(rhs) { }
@@ -164,7 +188,7 @@ namespace Legion {
 
   //----------------------------------------------------------------------------
   template<int DIM, typename T> __CUDA_HD__
-  inline Point<DIM,T>::Point(const T val)
+  inline Point<DIM,T>::Point(T val)
     : Realm::Point<DIM,T>()
   //----------------------------------------------------------------------------
   {
@@ -173,8 +197,20 @@ namespace Legion {
   }
   
   //----------------------------------------------------------------------------
-  template<int DIM, typename T> __CUDA_HD__
-  inline Point<DIM,T>::Point(const T vals[DIM])
+  template<int DIM, typename T>
+  template<typename T2> __CUDA_HD__
+  inline Point<DIM,T>::Point(T2 val, ONLY_IF_INTEGRAL_DEFN(T2))
+    : Realm::Point<DIM,T>()
+  //----------------------------------------------------------------------------
+  {
+    for (int i = 0; i < DIM; i++)
+      (*this)[i] = val;
+  }
+  
+  //----------------------------------------------------------------------------
+  template<int DIM, typename T>
+  template<typename T2> __CUDA_HD__
+  inline Point<DIM,T>::Point(T2 vals[DIM], ONLY_IF_INTEGRAL_DEFN(T2))
     : Realm::Point<DIM,T>(vals)
   //----------------------------------------------------------------------------
   {

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2019 Stanford University
+# Copyright 2020 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -206,18 +206,23 @@ def run_test_regent(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     cmd([sys.executable, os.path.join(root_dir, 'language/travis.py')], env=env)
 
 def run_cxx(tests, flags, launcher, root_dir, bin_dir, env, thread_count, timelimit):
+    prev_built_dir = None
     for test_file, test_flags in tests:
         test_dir = os.path.dirname(os.path.join(root_dir, test_file))
         if bin_dir:
             test_path = os.path.join(bin_dir, os.path.basename(test_file))
         else:
             test_path = os.path.join(root_dir, test_file)
-            cmd([make_exe, '-C', test_dir, '-j', str(thread_count)], env=env)
+            # build if this is in a new directory
+            if test_dir != prev_built_dir:
+                # and clean up the previous directory to keep disk usage down
+                if prev_built_dir:
+                    cmd(['find', prev_built_dir , '-type', 'f', '(', '-name', '*.a', '-o', '-name', os.path.basename(test_file), ')', '-exec', 'rm', '-v', '{}', ';'])
+                cmd([make_exe, '-C', test_dir, '-j', str(thread_count)], env=env)
+                prev_built_dir = test_dir
         cmd(launcher + [test_path] + flags + test_flags, env=env, cwd=test_dir, timelimit=timelimit)
-        # after a successful run, clean up libraries/executables to keep disk
-        #  usage down
-        if not bin_dir:
-            cmd(['find', test_dir , '-type', 'f', '(', '-name', '*.a', '-o', '-name', os.path.basename(test_file), ')', '-exec', 'rm', '-v', '{}', ';'])
+    if prev_built_dir:
+        cmd(['find', prev_built_dir , '-type', 'f', '(', '-name', '*.a', '-o', '-name', os.path.basename(test_file), ')', '-exec', 'rm', '-v', '{}', ';'])
 
 def run_regent(tests, flags, launcher, root_dir, env, thread_count, timelimit):
     for test_file, test_flags in tests:

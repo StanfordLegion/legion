@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -557,7 +557,7 @@ namespace Realm {
   template <int N, typename T>
   void PartitioningMicroOp::sparsity_map_ready(SparsityMapImpl<N,T> *sparsity, bool precise)
   {
-    int left = __sync_sub_and_fetch(&wait_count, 1);
+    int left = wait_count.fetch_sub(1) - 1;
     if(left == 0)
       op_queue->enqueue_partitioning_microop(this);
   }
@@ -569,7 +569,7 @@ namespace Realm {
       inline_ok = false;
     // if there were no registrations by caller (or if they're really fast), the count will be 2
     //  and we can execute this microop inline (if we're allowed to)
-    int left1 = __sync_sub_and_fetch(&wait_count, 1);
+    int left1 = wait_count.fetch_sub(1) - 1;
     if((left1 == 1) && inline_ok) {
       mark_started();
       execute();
@@ -589,7 +589,7 @@ namespace Realm {
 
     // now do the last decrement - if it returns 0, we can still do the operation inline
     //  (otherwise it'll get queued when somebody else does the last decrement)
-    int left2 = __sync_sub_and_fetch(&wait_count, 1);
+    int left2 = wait_count.fetch_sub(1) - 1;
     if(left2 == 0) {
       if(inline_ok) {
 	mark_started();
@@ -656,7 +656,7 @@ namespace Realm {
 	bool registered = SparsityMapImpl<N,T>::lookup(input_spaces[i].sparsity)->add_waiter(this, 
 											     true /*precise*/);
 	if(registered)
-	  __sync_fetch_and_add(&wait_count, 1);
+	  wait_count.fetch_add(1);
       }
     }
 
@@ -664,7 +664,7 @@ namespace Realm {
     for(size_t i = 0; i < extra_deps.size(); i++) {
       bool registered = extra_deps[i]->add_waiter(this, true /*precise*/);
 	if(registered)
-	  __sync_fetch_and_add(&wait_count, 1);
+	  wait_count.fetch_add(1);
     }
 
     finish_dispatch(op, inline_ok);

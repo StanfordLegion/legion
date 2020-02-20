@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2019 Stanford University
+# Copyright 2020 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,10 +21,10 @@ import argparse
 from collections import OrderedDict
 import numpy as np
 
-import legion
-from legion import disjoint, disjoint_incomplete, disjoint_complete, index_launch, print_once, task, Fspace, ID, IndexLaunch, Ispace, N, Partition, R, Region, RW, Trace
+import pygion
+from pygion import disjoint, disjoint_incomplete, disjoint_complete, index_launch, print_once, task, Fspace, ID, IndexLaunch, Ispace, N, Partition, R, Region, RW, Trace
 
-DTYPE = legion.float64
+DTYPE = pygion.float64
 RADIUS = 2
 
 def parse_args(argv):
@@ -39,7 +39,7 @@ def parse_args(argv):
     return parser.parse_args(argv[1:])
 
 def make_colors_part(tiles):
-    colors = Region(tiles, {'rect': legion.rect2d})
+    colors = Region(tiles, {'rect': pygion.rect2d})
     colors_part = Partition.restrict(colors, tiles, np.eye(2), [1, 1], disjoint_complete)
     return colors, colors_part
 
@@ -100,36 +100,36 @@ def make_ghost_y_partition(points, tiles, n, nt, direction):
 
 _constant_time_launches = True
 if _constant_time_launches:
-    extern_task = legion.extern_task_wrapper
+    extern_task = pygion.extern_task_wrapper
 else:
-    extern_task = legion.extern_task
+    extern_task = pygion.extern_task
 
 stencil = extern_task(
     task_id=10001,
-    argument_types=[Region, Region, Region, Region, Region, Region, legion.bool_],
+    argument_types=[Region, Region, Region, Region, Region, Region, pygion.bool_],
     privileges=[RW, N, R('input'), R('input'), R('input'), R('input')],
-    return_type=legion.void,
+    return_type=pygion.void,
     calling_convention='regent')
 
 increment = extern_task(
     task_id=10002,
-    argument_types=[Region, Region, Region, Region, Region, Region, legion.bool_],
+    argument_types=[Region, Region, Region, Region, Region, Region, pygion.bool_],
     privileges=[RW('input'), N, RW('input'), RW('input'), RW('input'), RW('input')],
-    return_type=legion.void,
+    return_type=pygion.void,
     calling_convention='regent')
 
 check = extern_task(
     task_id=10003,
-    argument_types=[Region, Region, legion.int64, legion.int64],
+    argument_types=[Region, Region, pygion.int64, pygion.int64],
     privileges=[R, N],
-    return_type=legion.void,
+    return_type=pygion.void,
     calling_convention='regent')
 
 @task(task_id=2, replicable=True) # , inner=True
 def main():
     print_once('Running stencil.py')
 
-    conf = parse_args(legion.input_args(True))
+    conf = parse_args(pygion.input_args(True))
 
     nbloated = np.array([conf.nx, conf.ny])
     nt = np.array([conf.ntx, conf.nty])
@@ -169,7 +169,7 @@ def main():
 
     for r in [points, xm, xp, ym, yp]:
         for f in ['input', 'output']:
-            legion.fill(r, f, init)
+            pygion.fill(r, f, init)
 
     tsteps = conf.tsteps + 2 * conf.tprune
     tprune = conf.tprune
@@ -177,8 +177,8 @@ def main():
     trace = Trace()
     for t in range(tsteps):
         if t == tprune:
-            legion.execution_fence(block=True)
-            start_time = legion.c.legion_get_current_time_in_nanos()
+            pygion.execution_fence(block=True)
+            start_time = pygion.c.legion_get_current_time_in_nanos()
         with trace:
             if _constant_time_launches:
                 index_launch(tiles, stencil, private[ID], interior[ID], pxm_in[ID], pxp_in[ID], pym_in[ID], pyp_in[ID], False)
@@ -189,8 +189,8 @@ def main():
                 for i in IndexLaunch(tiles):
                     increment(private[i], exterior[i], pxm_out[i], pxp_out[i], pym_out[i], pyp_out[i], False)
         if t == tsteps - tprune - 1:
-            legion.execution_fence(block=True)
-            stop_time = legion.c.legion_get_current_time_in_nanos()
+            pygion.execution_fence(block=True)
+            stop_time = pygion.c.legion_get_current_time_in_nanos()
 
     if _constant_time_launches:
         index_launch(tiles, check, private[ID], interior[ID], tsteps, init)

@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -627,6 +627,12 @@ namespace Legion {
       static inline void log_timing_operation(UniqueID context, UniqueID timing)
       {
         log_spy.print("Timing Operation %llu %llu", context, timing);
+      }
+
+      static inline void log_all_reduce_operation(UniqueID context, 
+                                                  UniqueID reduce)
+      {
+        log_spy.print("All Reduce Operation %llu %llu", context, reduce);
       }
 
       static inline void log_predicate_operation(UniqueID context, 

@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University, NVIDIA Corporation
+-- Copyright 2020 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -4069,7 +4069,7 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
             -- registrations. In the future it would be better to have
             -- explicit variant objects for the different processor
             -- kinds.
-            [(i <= 1 and variant:get_variant_id()) or -1 --[[ AUTO_GENERATE_ID ]] ],
+            [(i <= 1 and variant:get_variant_id()) or c.AUTO_GENERATE_ID ],
             [task:get_name():concat(".")],
             [variant:get_name()],
             [execution_constraints], [layout_constraints], options,

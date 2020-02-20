@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University, NVIDIA Corporation
+-- Copyright 2020 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -260,26 +260,18 @@ local node_usage = {
   end,
 
   [ast.typed.expr] = uses_nothing,
-  [ast.typed.stat] = uses_nothing,
-
-  [ast.typed.Block]             = uses_nothing,
-  [ast.IndexLaunchArgsProvably] = uses_nothing,
-  [ast.location]                = uses_nothing,
-  [ast.annotation]              = uses_nothing,
-  [ast.condition_kind]          = uses_nothing,
-  [ast.disjointness_kind]       = uses_nothing,
-  [ast.fence_kind]              = uses_nothing,
 }
 
 -- FIXME: Should fill out at least the expr cases, otherwise can't
 -- tell if the pass has been updated for all AST nodes or not.
 local analyze_usage_node = ast.make_single_dispatch(
   node_usage,
-  {}) -- ast.typed.expr
+  {}, -- ast.typed.expr
+  uses_nothing)
 
 local function analyze_usage(cx, node)
   assert(node)
-  return ast.mapreduce_node_postorder(
+  return ast.mapreduce_expr_postorder(
     analyze_usage_node(cx),
     usage_meet,
     node, nil)

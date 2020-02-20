@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -517,8 +517,8 @@ namespace Legion {
                                  UniqueID uid, DepPartOpKind part_op);
     public:
       // Process low-level runtime profiling results
-      virtual void handle_profiling_response(
-                            const Realm::ProfilingResponse &response);
+      virtual void handle_profiling_response(const ProfilingResponseBase *base,
+                                      const Realm::ProfilingResponse &response);
     public:
       // Dump all the results
       void finalize(void);

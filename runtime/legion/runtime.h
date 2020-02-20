@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -52,58 +52,6 @@ code, __FILE__, __LINE__, message);                       \
 }
 
 namespace Legion {
-#ifndef DISABLE_PARTITION_SHIM
-#define PARTITION_SHIM_MAPPER_ID                      (1729)
-  // An internal namespace with some classes for providing help
-  // with backwards compatibility for partitioning operations
-  namespace PartitionShim {
-
-    template<int COLOR_DIM>
-    class ColorPoints : public TaskLauncher {
-    public:
-      ColorPoints(const Coloring &coloring, LogicalRegion region,
-                  FieldID color_field, FieldID pointer_field);
-      ColorPoints(const PointColoring &coloring, LogicalRegion region,
-                  FieldID color_field, FieldID pointer_field);
-    protected:
-      Serializer rez;
-    public:
-      static TaskID TASK_ID;
-      static void register_task(void);
-      static void cpu_variant(const Task *task,
-          const std::vector<PhysicalRegion> &regions, 
-          Context ctx, Runtime *runtime);
-    };
-
-    template<int COLOR_DIM, int RANGE_DIM>
-    class ColorRects : public TaskLauncher {
-    public:
-      ColorRects(const DomainColoring &coloring, LogicalRegion region,
-                 FieldID color_field, FieldID range_field);
-      ColorRects(const MultiDomainColoring &coloring, LogicalRegion region, 
-                 FieldID color_field, FieldID range_field);
-    public:
-      ColorRects(const DomainPointColoring &coloring,
-          LogicalRegion region, FieldID color_field, FieldID range_field);
-      ColorRects(const MultiDomainPointColoring &coloring,
-          LogicalRegion region, FieldID color_field, FieldID range_field);
-    public:
-      ColorRects(const Coloring &coloring, LogicalRegion region,
-                 FieldID color_field, FieldID range_field);
-      ColorRects(const PointColoring &coloring, LogicalRegion region,
-                 FieldID color_field, FieldID range_field);
-    protected:
-      Serializer rez;
-    public:
-      static TaskID TASK_ID;
-      static void register_task(void);
-      static void cpu_variant(const Task *task,
-          const std::vector<PhysicalRegion> &regions, 
-          Context ctx, Runtime *runtime);
-    };
-  };
-#endif
-
   namespace Internal { 
 
     // Special helper for when we need a dummy context
@@ -351,6 +299,8 @@ namespace Legion {
       virtual void notify_inactive(ReferenceMutator *mutator);
     public:
       Future get_future(const DomainPoint &point, RtEvent *wait_on = NULL);
+      // Will return NULL if it does not exist
+      FutureImpl* find_future(const DomainPoint &point);
       void set_all_futures(const std::map<DomainPoint,Future> &others);
       void set_future(const DomainPoint &point, FutureImpl *impl,
                       ReferenceMutator *mutator);
@@ -368,6 +318,8 @@ namespace Legion {
       void add_valid_point(const DomainPoint &dp);
 #endif
     public:
+      void register_dependence(Operation *consumer_op);
+    public:
       void record_future_map_registered(ReferenceMutator *creator);
       static void handle_future_map_future_request(Deserializer &derez,
                               Runtime *runtime, AddressSpaceID source);
@@ -378,6 +330,10 @@ namespace Legion {
       // Either an index space task or a must epoch op
       Operation *const op;
       const GenerationID op_gen;
+      const int op_depth;
+#ifdef LEGION_SPY
+      const UniqueID op_uid;
+#endif
     private:
       mutable LocalLock future_map_lock;
       ApEvent ready_event;
@@ -407,7 +363,7 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = PHYSICAL_REGION_ALLOC;
     public:
-      PhysicalRegionImpl(const RegionRequirement &req, ApEvent ready_event,
+      PhysicalRegionImpl(const RegionRequirement &req, ApEvent mapped_event,
                          bool mapped, TaskContext *ctx, MapperID mid,
                          MappingTagID tag, bool leaf, bool virt, Runtime *rt);
       PhysicalRegionImpl(const PhysicalRegionImpl &rhs);
@@ -431,12 +387,12 @@ namespace Legion {
           get_field_accessor(FieldID field, bool silence_warnings = true);
     public:
       void unmap_region(void);
-      void remap_region(ApEvent new_ready_event);
+      void remap_region(ApEvent new_mapped_event);
       const RegionRequirement& get_requirement(void) const;
       void set_reference(const InstanceRef &references);
       void reset_references(const InstanceSet &instances,ApUserEvent term_event,
                             ApEvent wait_for = ApEvent::NO_AP_EVENT);
-      ApEvent get_ready_event(void) const;
+      ApEvent get_mapped_event(void) const;
       bool has_references(void) const;
       void get_references(InstanceSet &instances) const;
       void get_memories(std::set<Memory>& memories) const;
@@ -474,7 +430,7 @@ namespace Legion {
       const bool replaying;
     private:
       // Event for when the instance ref is ready
-      ApEvent ready_event;
+      ApEvent mapped_event;
       // Instance ref
       InstanceSet references;
       RegionRequirement req;
@@ -542,36 +498,36 @@ namespace Legion {
       mutable LocalLock grant_lock;
     };
 
-    class MPILegionHandshakeImpl : public Collectable,
-                       public LegionHeapify<MPILegionHandshakeImpl> {
+    class LegionHandshakeImpl : public Collectable,
+                       public LegionHeapify<LegionHandshakeImpl> {
     public:
       static const AllocationType alloc_type = MPI_HANDSHAKE_ALLOC;
     public:
-      MPILegionHandshakeImpl(bool init_in_MPI, int mpi_participants, 
-                             int legion_participants);
-      MPILegionHandshakeImpl(const MPILegionHandshakeImpl &rhs);
-      ~MPILegionHandshakeImpl(void);
+      LegionHandshakeImpl(bool init_in_ext, int ext_participants, 
+                          int legion_participants);
+      LegionHandshakeImpl(const LegionHandshakeImpl &rhs);
+      ~LegionHandshakeImpl(void);
     public:
-      MPILegionHandshakeImpl& operator=(const MPILegionHandshakeImpl &rhs);
+      LegionHandshakeImpl& operator=(const LegionHandshakeImpl &rhs);
     public:
       void initialize(void);
     public:
-      void mpi_handoff_to_legion(void);
-      void mpi_wait_on_legion(void);
+      void ext_handoff_to_legion(void);
+      void ext_wait_on_legion(void);
     public:
-      void legion_handoff_to_mpi(void);
-      void legion_wait_on_mpi(void);
+      void legion_handoff_to_ext(void);
+      void legion_wait_on_ext(void);
     public:
       PhaseBarrier get_legion_wait_phase_barrier(void);
       PhaseBarrier get_legion_arrive_phase_barrier(void);
       void advance_legion_handshake(void);
     private:
-      const bool init_in_MPI;
-      const int mpi_participants;
+      const bool init_in_ext;
+      const int ext_participants;
       const int legion_participants;
     private:
-      PhaseBarrier mpi_wait_barrier;
-      PhaseBarrier mpi_arrive_barrier;
+      PhaseBarrier ext_wait_barrier;
+      PhaseBarrier ext_arrive_barrier;
       PhaseBarrier legion_wait_barrier; // copy of mpi_arrive_barrier
       PhaseBarrier legion_arrive_barrier; // copy of mpi_wait_barrier
     };
@@ -1515,16 +1471,11 @@ namespace Legion {
             stealing_disabled(false),
             resilient_mode(false),
             unsafe_launch(false),
-#ifdef DEBUG_LEGION
             unsafe_mapper(false),
-#else
-            unsafe_mapper(true),
-#endif
-            dynamic_independence_tests(true),
+            safe_mapper(false),
+            disable_independence_tests(false),
             legion_spy_enabled(false),
             enable_test_mapper(false),
-            legion_ldb_enabled(false),
-            replay_file(NULL),
             slow_config_ok(false),
 #ifdef DEBUG_LEGION
             logging_region_tree_state(false),
@@ -1537,7 +1488,6 @@ namespace Legion {
 #endif
             num_profiling_nodes(0),
             serializer_type("binary"),
-            prof_logfile(NULL),
             prof_footprint_threshold(128 << 20),
             prof_target_latency(100) { }
       public:
@@ -1573,11 +1523,12 @@ namespace Legion {
         bool resilient_mode;
         bool unsafe_launch;
         bool unsafe_mapper;
-        bool dynamic_independence_tests;
+        bool safe_mapper;
+        bool disable_independence_tests;
         bool legion_spy_enabled;
         bool enable_test_mapper;
-        bool legion_ldb_enabled;
-        const char* replay_file;
+        std::string replay_file;
+        std::string ldb_file;
         bool slow_config_ok;
 #ifdef DEBUG_LEGION
         bool logging_region_tree_state;
@@ -1588,8 +1539,8 @@ namespace Legion {
         bool check_privileges;
       public:
         unsigned num_profiling_nodes;
-        const char *serializer_type;
-        const char *prof_logfile;
+        std::string serializer_type;
+        std::string prof_logfile;
         size_t prof_footprint_threshold;
         size_t prof_target_latency;
       public:
@@ -1716,11 +1667,11 @@ namespace Legion {
       const bool resilient_mode;
       const bool unsafe_launch;
       const bool unsafe_mapper;
-      const bool dynamic_independence_tests;
+      const bool disable_independence_tests;
       const bool legion_spy_enabled;
       const bool enable_test_mapper;
       const bool legion_ldb_enabled;
-      const char*const replay_file;
+      const std::string replay_file;
 #ifdef DEBUG_LEGION
       const bool logging_region_tree_state;
       const bool verbose_logging;
@@ -1746,6 +1697,7 @@ namespace Legion {
       void initialize_mappers(void);
       void initialize_virtual_manager(void);
       void initialize_runtime(void);
+      void perform_registration_callback(RegistrationCallbackFnptr callback);
       void startup_runtime(void);
       void finalize_runtime(void);
       ApEvent launch_mapper_task(Mapper *mapper, Processor proc, 
@@ -1812,13 +1764,20 @@ namespace Legion {
                                                  size_t extent_size,
                                                  PartitionKind part_kind,
                                                  Color color);
+      IndexPartition create_partition_by_domain(Context ctx, IndexSpace parent,
+                                                const FutureMap &domains,
+                                                IndexSpace color_space,
+                                                bool perform_intersections,
+                                                PartitionKind part_kind,
+                                                Color color);
       IndexPartition create_partition_by_field(Context ctx, 
                                                LogicalRegion handle,
                                                LogicalRegion parent,
                                                FieldID fid,
                                                IndexSpace color_space,
                                                Color color,
-                                               MapperID id, MappingTagID tag);
+                                               MapperID id, MappingTagID tag,
+                                               PartitionKind part_kind);
       IndexPartition create_partition_by_image(Context ctx,
                                                IndexSpace handle,
                                                LogicalPartition projection,
@@ -2871,6 +2830,7 @@ namespace Legion {
       AttachOp*             get_available_attach_op(void);
       DetachOp*             get_available_detach_op(void);
       TimingOp*             get_available_timing_op(void);
+      AllReduceOp*          get_available_all_reduce_op(void);
     public:
       void free_individual_task(IndividualTask *task);
       void free_point_task(PointTask *task);
@@ -2908,6 +2868,7 @@ namespace Legion {
       void free_attach_op(AttachOp *op);
       void free_detach_op(DetachOp *op);
       void free_timing_op(TimingOp *op);
+      void free_all_reduce_op(AllReduceOp *op);
     public:
       RegionTreeContext allocate_region_tree_context(void);
       void free_region_tree_context(RegionTreeContext tree_ctx); 
@@ -3224,6 +3185,7 @@ namespace Legion {
       mutable LocalLock attach_op_lock;
       mutable LocalLock detach_op_lock;
       mutable LocalLock timing_op_lock;
+      mutable LocalLock all_reduce_op_lock;
     protected:
       std::deque<IndividualTask*>       available_individual_tasks;
       std::deque<PointTask*>            available_point_tasks;
@@ -3261,6 +3223,7 @@ namespace Legion {
       std::deque<AttachOp*>             available_attach_ops;
       std::deque<DetachOp*>             available_detach_ops;
       std::deque<TimingOp*>             available_timing_ops;
+      std::deque<AllReduceOp*>          available_all_reduce_ops;
 #ifdef DEBUG_LEGION
       TreeStateLogger *tree_state_logger;
       // For debugging purposes keep track of
@@ -3304,10 +3267,11 @@ namespace Legion {
       // Static methods for start-up and callback phases
       static int start(int argc, char **argv, bool background);
       static void register_builtin_reduction_operators(void);
-      static RealmRuntime initialize(int *argc, char ***argv);
+      static const LegionConfiguration& initialize(int *argc, char ***argv, 
+                                                   bool filter);
       static LegionConfiguration parse_arguments(int argc, char **argv);
       static void perform_slow_config_checks(const LegionConfiguration &config);
-      static void configure_mpi_interoperability(bool separate_runtimes);
+      static void configure_interoperability(bool separate_runtimes);
       static RtEvent configure_runtime(int argc, char **argv,
           const LegionConfiguration &config, RealmRuntime &realm,
           Processor::Kind &startup_kind);
@@ -3324,7 +3288,7 @@ namespace Legion {
       static void set_top_level_task_id(TaskID top_id);
       static void set_top_level_task_mapper_id(MapperID mapper_id);
       static void configure_MPI_interoperability(int rank);
-      static void register_handshake(MPILegionHandshake &handshake);
+      static void register_handshake(LegionHandshake &handshake);
       static const ReductionOp* get_reduction_op(ReductionOpID redop_id,
                                                  bool has_lock = false);
       static const SerdezOp* get_serdez_op(CustomSerdezID serdez_id,
@@ -3351,7 +3315,7 @@ namespace Legion {
                                 get_pending_constraint_table(void);
       static std::map<ProjectionID,ProjectionFunctor*>&
                                 get_pending_projection_table(void);
-      static std::vector<MPILegionHandshake>&
+      static std::vector<LegionHandshake>&
                                 get_pending_handshake_table(void);
       static std::vector<RegistrationCallbackFnptr>&
                                 get_pending_registration_callbacks(void);

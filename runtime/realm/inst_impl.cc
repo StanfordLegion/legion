@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,8 +23,6 @@
 #ifdef USE_HDF
 #include "realm/hdf5/hdf5_access.h"
 #endif
-// For backwards compatability accessors
-#include "legion/accessor.h"
 
 TYPE_IS_SERIALIZABLE(Realm::InstanceLayoutGeneric::FieldLayout);
 
@@ -328,20 +326,6 @@ namespace Realm {
     }
 
     /*static*/ const RegionInstance RegionInstance::NO_INST = { 0 };
-
-    // a generic accessor just holds a pointer to the impl and passes all 
-    //  requests through
-    LegionRuntime::Accessor::RegionAccessor<LegionRuntime::Accessor::AccessorType::Generic> RegionInstance::get_accessor(void) const
-    {
-      // request metadata (if needed), but don't block on it yet
-      RegionInstanceImpl *i_impl = get_runtime()->get_instance_impl(*this);
-      // metadata must already be available
-      assert(i_impl->metadata.is_valid() &&
-	     "instance metadata must be valid before accesses are performed");
-      assert(i_impl->metadata.layout);
-	
-      return LegionRuntime::Accessor::RegionAccessor<LegionRuntime::Accessor::AccessorType::Generic>(LegionRuntime::Accessor::AccessorType::Generic::Untyped(*this));
-    }
 
     // before you can get an instance's index space or construct an accessor for
     //  a given processor, the necessary metadata for the instance must be
@@ -756,30 +740,6 @@ namespace Realm {
     }
 
     ActiveMessageHandlerReg<InstanceMetadataPrefetchRequest> inst_prefetch_msg_handler;
-
-    // helper function to figure out which field we're in
-    void find_field_start(const std::vector<size_t>& field_sizes, off_t byte_offset,
-			  size_t size, off_t& field_start, int& field_size)
-    {
-      off_t start = 0;
-      for(std::vector<size_t>::const_iterator it = field_sizes.begin();
-	  it != field_sizes.end();
-	  it++) {
-	assert((*it) > 0);
-	if(byte_offset < (off_t)(*it)) {
-	  if ((off_t)(byte_offset + size) > (off_t)(*it)) {
-      log_inst.error("Requested field does not match the expected field size");
-      assert(false);
-    }
-	  field_start = start;
-	  field_size = (*it);
-	  return;
-	}
-	start += (*it);
-	byte_offset -= (*it);
-      }
-      assert(0);
-    }
 
     bool RegionInstanceImpl::get_strided_parameters(void *&base, size_t &stride,
 						      off_t field_offset)

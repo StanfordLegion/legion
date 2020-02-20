@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2019 Stanford University
+# Copyright 2020 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,8 +19,8 @@ from __future__ import print_function
 
 import codecs
 
-import legion
-from legion import task, Future
+import pygion
+from pygion import task, Future
 
 @task
 def show(f):
@@ -47,7 +47,7 @@ def return_void():
     pass
 
 # the same, but typed at the task level
-@task(return_type=legion.void)
+@task(return_type=pygion.void)
 def return_void():
     pass
 
@@ -59,7 +59,7 @@ def main():
     assert f.get() == [1, 2, 3]
 
     # Explicit type specified, value not pickled
-    g = Future(123, legion.int64)
+    g = Future(123, pygion.int64)
     print("value of g.get() is %s" % g.get())
     assert g.get() == 123
 
@@ -69,7 +69,7 @@ def main():
     print("value of h.get_raw() is %s" % h_value)
     assert h_value == 'asdf'
 
-    i = Future(return_void(), value_type=legion.void)
+    i = Future(return_void(), value_type=pygion.void)
     print("value of i.get() is %s" % i.get())
 
     j = return_void()
@@ -81,7 +81,7 @@ def main():
 
     show_nested(f)
 
-    for i in legion.IndexLaunch([3]):
+    for i in pygion.IndexLaunch([3]):
         show_index(i, f)
 
 if __name__ == '__main__':

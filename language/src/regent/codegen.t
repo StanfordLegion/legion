@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University, NVIDIA Corporation
+-- Copyright 2020 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -133,6 +133,7 @@ function context:new_local_scope(divergence, must_epoch, must_epoch_point, break
     bounds_checks = self.bounds_checks,
     codegen_contexts = self.codegen_contexts,
     loop_symbol = self.loop_symbol,
+    parent = self,
   }, context)
 end
 
@@ -161,7 +162,8 @@ function context:new_task_scope(expected_return_type, constraints, orderings, le
     cleanup_items = terralib.newlist(),
     bounds_checks = bounds_checks,
     codegen_contexts = data.newmap(),
-    loop_symbol = false
+    loop_symbol = false,
+    parent = false,
   }, context)
 end
 
@@ -496,6 +498,28 @@ function context:get_cleanup_items()
     items:insert(self.cleanup_items[i])
   end
   return quote [items] end
+end
+
+function context:get_all_cleanup_items_for_break()
+  local break_label = self.break_label
+  assert(break_label)
+  local items = terralib.newlist()
+  local ctx = self
+  while ctx and ctx.break_label == break_label do
+    items:insert(ctx:get_cleanup_items())
+    ctx = ctx.parent
+  end
+  return items
+end
+
+function context:get_all_cleanup_items_for_return()
+  local items = terralib.newlist()
+  local ctx = self
+  while ctx do
+    items:insert(ctx:get_cleanup_items())
+    ctx = ctx.parent
+  end
+  return items
 end
 
 local function physical_region_get_base_pointer_setup(index_type, field_type, fastest_index, expected_stride,
@@ -951,7 +975,7 @@ function value:new(node, value_expr, value_type, field_path)
   return values.value(node, value_expr, value_type, field_path)
 end
 
-function value:address()
+function value:address(cx)
   assert(false)
 end
 
@@ -1324,7 +1348,7 @@ function ref:__ref(cx, expr_type)
   return actions, values, value_type, field_paths, field_types
 end
 
-function ref:address()
+function ref:address(cx)
   return values.value(self.node, self.expr, self.value_type)
 end
 
@@ -1628,7 +1652,7 @@ function aref:get_index(cx, node, index, result_type)
   return values.rawref(node, result, &result_type, data.newtuple())
 end
 
-function aref:address()
+function aref:address(cx)
   return values.value(self.node, self.expr, self.value_type)
 end
 
@@ -1705,7 +1729,7 @@ function vref:__unpack(cx)
   return field_paths, field_types, region_types, base_pointers_by_region
 end
 
-function vref:address()
+function vref:address(cx)
   assert(false)
 end
 
@@ -2034,9 +2058,10 @@ function rawref:__ref(cx)
   return expr.just(actions, result)
 end
 
-function rawref:address()
-  local actions = self.expr.actions
-  local result = `(&[self.expr.value])
+function rawref:address(cx)
+  local value_expr = self:__ref(cx)
+  local actions = value_expr.actions
+  local result = `(&[value_expr.value])
   return values.value(self.node, expr.just(actions, result), self.value_type)
 end
 
@@ -3547,11 +3572,12 @@ function codegen.expr_call(cx, node)
     local launcher_setup = quote
       var [task_args]
       [task_args_setup]
-      var [tag] = 0
-      [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
+      var mapper = [fn.value:has_mapper_id() or 0]
+      var [tag] = [fn.value:has_mapping_tag_id() or 0]
+      [codegen_hooks.gen_update_mapping_tag(tag, fn.value:has_mapping_tag_id(), cx.task)]
       var [launcher] = c.legion_task_launcher_create(
         [fn.value:get_task_id()], [task_args],
-        c.legion_predicate_true(), 0, [tag])
+        c.legion_predicate_true(), [mapper], [tag])
       [args_setup]
     end
 
@@ -4466,9 +4492,11 @@ function codegen.expr_region(cx, node)
     actions = quote
       [actions];
       var [tag] = 0
-      [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
+      [codegen_hooks.gen_update_mapping_tag(tag, false, cx.task)]
+      -- Note: it's safe to make this unconditionally write-discard
+      -- because this is guarranteed to be the first use of the region
       var il = c.legion_inline_launcher_create_logical_region(
-        [lr], c.READ_WRITE, c.EXCLUSIVE, [lr], 0, false, 0, [tag]);
+        [lr], c.WRITE_DISCARD, c.EXCLUSIVE, [lr], 0, false, 0, [tag]);
       [data.zip(field_ids, field_types):map(
          function(field)
            local field_id, field_type = unpack(field)
@@ -4565,7 +4593,7 @@ function codegen.expr_partition(cx, node)
     assert(false)
   end
 
-  args:insert(-1) -- AUTO_GENERATE_ID
+  args:insert(c.AUTO_GENERATE_ID)
 
 
   local ip = terralib.newsymbol(c.legion_index_partition_t, "ip")
@@ -4606,7 +4634,7 @@ function codegen.expr_partition_equal(cx, node)
         [cx.runtime], [colors.value].impl)
       var [ip] = c.legion_index_partition_create_equal(
         [cx.runtime], [cx.context], [region.value].impl.index_space,
-        [colors.value].impl, 1 --[[ granularity ]], -1 --[[ AUTO_GENERATE_ID ]])
+        [colors.value].impl, 1 --[[ granularity ]], c.AUTO_GENERATE_ID)
       var [lp] = c.legion_logical_partition_create(
         [cx.runtime], [cx.context], [region.value].impl, [ip])
     end
@@ -4662,12 +4690,12 @@ function codegen.expr_partition_equal(cx, node)
           [cx.runtime], [cx.context], [region.value].impl.index_space,
           [colors.value].impl,
           dtransform, dextent, c.DISJOINT_KIND,
-          -1 --[[ AUTO_GENERATE_ID ]])
+          c.AUTO_GENERATE_ID)
       else
         [ip] = c.legion_index_partition_create_equal(
           [cx.runtime], [cx.context], [region.value].impl.index_space,
           [colors.value].impl, 1,
-          -1 --[[ AUTO_GENERATE_ID ]])
+          c.AUTO_GENERATE_ID)
       end
       var [lp] = c.legion_logical_partition_create(
         [cx.runtime], [cx.context], [region.value].impl, [ip])
@@ -4711,7 +4739,7 @@ function codegen.expr_partition_by_field(cx, node)
     [actions]
     var [ip] = c.legion_index_partition_create_by_field(
       [cx.runtime], [cx.context], [region.value].impl, [parent_region].impl,
-      field_id, [colors.value].impl, -1)
+      field_id, [colors.value].impl, c.AUTO_GENERATE_ID, 0, 0, c.DISJOINT_KIND)
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [region.value].impl, [ip])
     [tag_imported(cx, lp)]
@@ -4824,7 +4852,7 @@ function codegen.expr_image(cx, node)
       [cx.runtime], [cx.context],
       [parent.value].impl.index_space,
       [partition.value].impl, [region_parent].impl, field_id,
-      colors, disjointness, -1)
+      colors, disjointness, c.AUTO_GENERATE_ID, 0, 0)
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [parent.value].impl, [ip])
     [tag_imported(cx, lp)]
@@ -4892,7 +4920,7 @@ function codegen.expr_preimage(cx, node)
     var [ip] = [create_partition](
       [cx.runtime], [cx.context], [partition.value].impl.index_partition,
       [parent.value].impl, [region_parent].impl, field_id, colors,
-      disjointness, -1)
+      disjointness, c.AUTO_GENERATE_ID, 0, 0)
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [region.value].impl, [ip])
     [tag_imported(cx, lp)]
@@ -6397,7 +6425,7 @@ local function expr_copy_setup_region(
   local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
   actions:insert(quote
     var [tag] = 0
-    [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
+    [codegen_hooks.gen_update_mapping_tag(tag, false, cx.task)]
     var [launcher] = c.legion_copy_launcher_create(
       c.legion_predicate_true(), 0, [tag])
   end)
@@ -6777,7 +6805,7 @@ local function expr_acquire_setup_region(
   local launcher = terralib.newsymbol(c.legion_acquire_launcher_t, "launcher")
   actions:insert(quote
     var tag = 0
-    [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
+    [codegen_hooks.gen_update_mapping_tag(tag, false, cx.task)]
     var [launcher] = c.legion_acquire_launcher_create(
       [dst_value].impl, [dst_parent],
       c.legion_predicate_true(), 0, tag)
@@ -6901,7 +6929,7 @@ local function expr_release_setup_region(
   local launcher = terralib.newsymbol(c.legion_release_launcher_t, "launcher")
   actions:insert(quote
     var tag = 0
-    [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
+    [codegen_hooks.gen_update_mapping_tag(tag, false, cx.task)]
     var [launcher] = c.legion_release_launcher_create(
       [dst_value].impl, [dst_parent],
       c.legion_predicate_true(), 0, tag)
@@ -7659,7 +7687,7 @@ end
 
 function codegen.expr_address_of(cx, node)
   local value = codegen.expr(cx, node.value)
-  return value:address()
+  return value:address(cx)
 end
 
 function codegen.expr_future(cx, node)
@@ -7899,7 +7927,7 @@ function codegen.expr_import_region(cx, node)
     actions = quote
       [actions];
       var [tag] = 0
-      [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
+      [codegen_hooks.gen_update_mapping_tag(tag, false, cx.task)]
       var il = c.legion_inline_launcher_create_logical_region(
         [lr], c.READ_WRITE, c.EXCLUSIVE, [lr], 0, false, 0, [tag]);
       [data.zip(field_ids, field_types):map(
@@ -9095,7 +9123,7 @@ function codegen.stat_must_epoch(cx, node)
   local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
   local actions = quote
     var [tag] = 0
-    [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
+    [codegen_hooks.gen_update_mapping_tag(tag, false, cx.task)]
     var [must_epoch] = c.legion_must_epoch_launcher_create(0, [tag])
     var [must_epoch_point] = 0
     [cleanup_after(cx, codegen.block(cx, node.block))]
@@ -9373,12 +9401,13 @@ local function stat_index_launch_setup(cx, node, domain, actions)
     var g_args : c.legion_task_argument_t
     g_args.args = nil
     g_args.arglen = 0
-    var [tag] = 0
-    [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
+    var mapper = [fn.value:has_mapper_id() or 0]
+    var [tag] = [fn.value:has_mapping_tag_id() or 0]
+    [codegen_hooks.gen_update_mapping_tag(tag, fn.value:has_mapping_tag_id(), cx.task)]
     var [launcher] = c.legion_index_launcher_create(
       [fn.value:get_task_id()],
       [domain], g_args, [argument_map],
-      c.legion_predicate_true(), false, 0, [tag])
+      c.legion_predicate_true(), false, [mapper], [tag])
     do
       var it = c.legion_domain_point_iterator_create([domain])
       var args_uninitialized = true
@@ -9713,6 +9742,7 @@ function codegen.stat_return(cx, node)
   if result_type == terralib.types.unit then
     return quote
       [actions]
+      [cx:get_all_cleanup_items_for_return()]
       return
     end
   else
@@ -9732,6 +9762,7 @@ function codegen.stat_return(cx, node)
         value = buffer,
         size = buffer_size,
       }
+      [cx:get_cleanup_items()]
       return
       -- Task wrapper is responsible for calling free.
     end
@@ -9740,7 +9771,7 @@ end
 
 function codegen.stat_break(cx, node)
   assert(cx.break_label)
-  return quote goto [cx.break_label] end
+  return quote [cx:get_all_cleanup_items_for_break()]; goto [cx.break_label] end
 end
 
 function codegen.stat_assignment(cx, node)
