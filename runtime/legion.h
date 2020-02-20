@@ -1670,12 +1670,14 @@ namespace Legion {
       inline void add_dst_field(unsigned idx, FieldID fid, bool inst = true);
     public:
       // Specify src/dst indirect requirements (must have exactly 1 field)
-      inline void add_src_indirect_field(const RegionRequirement &src_idx_req,
-                                         FieldID src_idx_fid, bool inst = true,
-                                         bool is_range_indirection = false);
-      inline void add_dst_indirect_field(const RegionRequirement &dst_idx_req,
-                                         FieldID dst_idx_fid, bool inst = true,
-                                         bool is_range_indirection = false);
+      inline void add_src_indirect_field(FieldID src_idx_fid,
+                                         const RegionRequirement &src_idx_req,
+                                         bool is_range_indirection = false,
+                                         bool inst = true);
+      inline void add_dst_indirect_field(FieldID dst_idx_fid,
+                                         const RegionRequirement &dst_idx_req,
+                                         bool is_range_indirection = false,
+                                         bool inst = true);
       inline RegionRequirement& add_src_indirect_field(
                                          const RegionRequirement &src_idx_req,
                                          bool is_range_indirection = false);
@@ -1746,12 +1748,14 @@ namespace Legion {
       inline void add_dst_field(unsigned idx, FieldID fid, bool inst = true);
     public:
       // Specify src/dst indirect requirements (must have exactly 1 field)
-      inline void add_src_indirect_field(const RegionRequirement &src_idx_req,
-                                         FieldID src_idx_fid, bool inst = true,
-                                         bool is_range_indirection = false);
-      inline void add_dst_indirect_field(const RegionRequirement &dst_idx_req,
-                                         FieldID dst_idx_fid, bool inst = true,
-                                         bool is_range_indirection = false);
+      inline void add_src_indirect_field(FieldID src_idx_fid,
+                                         const RegionRequirement &src_idx_req,
+                                         bool is_range_indirection = false,
+                                         bool inst = true);
+      inline void add_dst_indirect_field(FieldID dst_idx_fid,
+                                         const RegionRequirement &dst_idx_req,
+                                         bool is_range_indirection = false,
+                                         bool inst = true);
       inline RegionRequirement& add_src_indirect_field(
                                          const RegionRequirement &src_idx_req,
                                          bool is_range_indirection = false);
