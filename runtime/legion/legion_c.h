@@ -3296,6 +3296,7 @@ extern "C" {
     legion_coherence_property_t prop,
     legion_logical_region_t parent,
     legion_mapping_tag_id_t tag /* = 0 */,
+    bool is_range_indirection /* = false */,
     bool verified /* = false*/);
 
   /**
@@ -3309,6 +3310,7 @@ extern "C" {
     legion_coherence_property_t prop,
     legion_logical_region_t parent,
     legion_mapping_tag_id_t tag /* = 0 */,
+    bool is_range_indirection /* = false */,
     bool verified /* = false*/);
 
   /**
@@ -3484,6 +3486,7 @@ extern "C" {
     legion_coherence_property_t prop,
     legion_logical_region_t parent,
     legion_mapping_tag_id_t tag /* = 0 */,
+    bool is_range_indirection /* = false */,
     bool verified /* = false*/);
 
   /**
@@ -3498,6 +3501,7 @@ extern "C" {
     legion_coherence_property_t prop,
     legion_logical_region_t parent,
     legion_mapping_tag_id_t tag /* = 0 */,
+    bool is_range_indirection /* = false */,
     bool verified /* = false*/);
 
   /**
@@ -3512,6 +3516,7 @@ extern "C" {
     legion_coherence_property_t prop,
     legion_logical_region_t parent,
     legion_mapping_tag_id_t tag /* = 0 */,
+    bool is_range_indirection /* = false */,
     bool verified /* = false*/);
 
   /**
@@ -3526,6 +3531,7 @@ extern "C" {
     legion_coherence_property_t prop,
     legion_logical_region_t parent,
     legion_mapping_tag_id_t tag /* = 0 */,
+    bool is_range_indirection /* = false */,
     bool verified /* = false*/);
 
   /**

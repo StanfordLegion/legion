@@ -22,7 +22,9 @@ import os
 import sys
 import code
 import types
+import atexit
 import struct
+import readline
 import threading
 import importlib
 
@@ -80,9 +82,31 @@ def input_args(filter_runtime_options=False):
     return args
 
 
+# This code is borrowed from the Python docs:
+# https://docs.python.org/3/library/readline.html
+class LegionConsole(code.InteractiveConsole):
+    def __init__(self, locals=None, filename='<console>',
+                 histfile = os.path.expanduser('~/.python-history')):
+        code.InteractiveConsole.__init__(self, locals, filename)
+        self.init_history(histfile)
+
+    def init_history(self, histfile):
+        readline.parse_and_bind('tab: complete')
+        if hasattr(readline, 'read_history_file'):
+            try:
+                readline.read_history_file(histfile)
+            except FileNotFoundError:
+                pass
+            atexit.register(self.save_history, histfile)
+
+    def save_history(self, histfile):
+        readline.set_history_length(10000)
+        readline.write_history_file(histfile)
+
+
 def run_repl():
     try:
-        shell = code.InteractiveConsole()
+        shell = LegionConsole()
         shell.interact(banner='Welcome to Legion Python interactive console')
     except SystemExit:
         pass
