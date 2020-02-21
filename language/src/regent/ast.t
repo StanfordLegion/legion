@@ -120,6 +120,11 @@ ast.constraint:leaf("Constraint", {"lhs", "rhs", "op"})
 ast:inner("privilege")
 ast.privilege:leaf("Privilege", {"privilege", "region", "field_path"})
 
+-- Coherences
+
+ast:inner("coherence")
+ast.coherence:leaf("Coherence", {"coherence_mode", "region", "field_path"})
+
 -- Layout Constraints
 
 ast:inner("layout")
