@@ -2894,7 +2894,7 @@ legion_future_map_get_future(legion_future_map_t fm_,
 }
 
 legion_future_t
-legion_reduce_future_map(legion_runtime_t runtime_,
+legion_future_map_reduce(legion_runtime_t runtime_,
                          legion_context_t ctx_,
                          legion_future_map_t fm_,
                          legion_reduction_op_id_t redop,
