@@ -2457,7 +2457,7 @@ extern "C" {
    * @see Legion::Runtime::reduce_future_map
    */
   legion_future_t
-  legion_reduce_future_map(legion_runtime_t runtime,
+  legion_future_map_reduce(legion_runtime_t runtime,
                            legion_context_t ctx,
                            legion_future_map_t handle,
                            legion_reduction_op_id_t redop,
