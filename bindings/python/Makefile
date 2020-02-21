@@ -28,6 +28,7 @@ USE_HDF         ?= 0		# Include HDF5 support (requires HDF5)
 ALT_MAPPERS     ?= 0		# Include alternative mappers (not recommended)
 
 USE_PYTHON := 1
+DYNAMIC_LIBS := 1
 
 # Put the binary file name here
 OUTFILE		?= legion_python
@@ -41,12 +42,6 @@ CC_FLAGS	?= -DBINDINGS_AUGMENT_PYTHONPATH
 NVCC_FLAGS	?=
 GASNET_FLAGS	?=
 LD_FLAGS	?=
-
-ifeq ($(shell uname), Darwin)
-	LD_FLAGS += -Wl,-force_load,liblegion.a
-else
-	LD_FLAGS += -Wl,--whole-archive -llegion -Wl,--no-whole-archive
-endif
 
 # Use reduction operators for complex types by default
 CC_FLAGS += -DLEGION_REDOP_COMPLEX
