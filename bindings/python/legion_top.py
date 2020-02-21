@@ -35,6 +35,11 @@ try:
 except NameError:
     unicode = str # Python 3
 
+try:
+    FileNotFoundError # Python 3
+except:
+    FileNotFoundError = IOError # Python 2
+
 # This has to match the unique name in main.cc
 _unique_name = 'legion_python'
 
