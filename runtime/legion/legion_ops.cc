@@ -6797,6 +6797,12 @@ namespace Legion {
       gather_is_range           = owner->gather_is_range;
       scatter_is_range          = owner->scatter_is_range;
       predication_guard         = owner->predication_guard;
+      possible_src_indirect_out_of_range 
+                                = owner->possible_src_indirect_out_of_range;
+      possible_dst_indirect_out_of_range
+                                = owner->possible_dst_indirect_out_of_range;
+      possible_dst_indirect_aliasing
+                                = owner->possible_dst_indirect_aliasing;
       if (runtime->legion_spy_enabled)
         LegionSpy::log_index_point(owner->get_unique_op_id(), unique_op_id, p);
     }
