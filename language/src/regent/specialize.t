@@ -439,18 +439,36 @@ function specialize.effect_expr(cx, node)
     }
   end
 
+  local function make_coherence(value)
+    return ast.specialized.Coherence {
+      coherence_modes = terralib.newlist({value.coherence_mode}),
+      regions = terralib.newlist({
+        ast.specialized.region.Root {
+          symbol = value.region,
+          fields = make_fields(value.field_path),
+          span = span,
+        }
+      }),
+      span = span,
+    }
+  end
+
   local value = node.expr(cx.env:env())
   if terralib.islist(value) then
     return value:map(
       function(v)
         if v:is(ast.privilege.Privilege) then
           return make_privilege(v)
+        elseif v:is(ast.coherence.Coherence) then
+          return make_coherence(v)
         else
           assert(false, "unexpected value type " .. tostring(value:type()))
         end
       end)
   elseif value:is(ast.privilege.Privilege) then
     return make_privilege(value)
+  elseif value:is(ast.coherence.Coherence) then
+    return make_coherence(value)
   else
     assert(false, "unexpected value type " .. tostring(value:type()))
   end
