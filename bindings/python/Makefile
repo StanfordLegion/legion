@@ -28,7 +28,7 @@ USE_HDF         ?= 0		# Include HDF5 support (requires HDF5)
 ALT_MAPPERS     ?= 0		# Include alternative mappers (not recommended)
 
 USE_PYTHON := 1
-DYNAMIC_LIBS := 1
+SHARED_OBJECTS := 1 # Make liblegion.so and librealm.so
 
 # Put the binary file name here
 OUTFILE		?= legion_python
