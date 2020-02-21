@@ -2582,17 +2582,22 @@ namespace Legion {
           // remotely in which case we need to do the
           // mapping now, otherwise we can defer it
           // until the task ends up on the target processor
-          if (is_origin_mapped() && first_mapping)
+          if (is_origin_mapped())
           {
-            first_mapping = false;
-            const RtEvent done_mapping = perform_mapping();
-            if (!done_mapping.exists() || done_mapping.has_triggered())
+            if (first_mapping)
             {
-              if (distribute_task())
-                launch_task();
+              first_mapping = false;
+              const RtEvent done_mapping = perform_mapping();
+              if (!done_mapping.exists() || done_mapping.has_triggered())
+              {
+                if (distribute_task())
+                  launch_task();
+              }
+              else
+                defer_distribute_task(done_mapping);
             }
-            else
-              defer_distribute_task(done_mapping);
+            else if (distribute_task())
+              launch_task();
           }
           else
           {
