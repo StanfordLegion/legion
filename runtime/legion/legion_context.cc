@@ -5020,7 +5020,7 @@ namespace Legion {
                                                     launch_domain);
         FutureMapImpl *result = new FutureMapImpl(this, runtime, 
             launch_domain, runtime->get_available_distributed_id(),
-            runtime->address_space, ApEvent::NO_AP_EVENT);
+            runtime->address_space, RtEvent::NO_RT_EVENT);
         if (launcher.predicate_false_future.impl != NULL)
         {
           ApEvent ready_event = 
@@ -10514,7 +10514,7 @@ namespace Legion {
       }
       const DistributedID did = runtime->get_available_distributed_id();
       FutureMap future_map(new FutureMapImpl(this, runtime, fm_domain, did,
-            runtime->address_space, ApEvent::NO_AP_EVENT, true/*reg now*/,
+            runtime->address_space, RtEvent::NO_RT_EVENT, true/*reg now*/,
             deletion_precondition));
       // Prune out every N-th one for this shard and then pass through
       // the subset to the normal InnerContext variation of this
@@ -12223,7 +12223,7 @@ namespace Legion {
                                                     launch_domain);
         FutureMapImpl *result = new FutureMapImpl(this, runtime,
             launch_domain, runtime->get_available_distributed_id(), 
-            runtime->address_space, ApEvent::NO_AP_EVENT);
+            runtime->address_space, RtEvent::NO_RT_EVENT);
         if (launcher.predicate_false_future.impl != NULL)
         {
           ApEvent ready_event = 

@@ -1148,6 +1148,7 @@ namespace Legion {
       unsigned mapped_points;
       unsigned complete_points;
       unsigned committed_points;
+      RtUserEvent future_map_ready;
     protected:
       LegionMap<unsigned/*idx*/,VersionInfo>::aligned version_infos;
       std::vector<RegionTreePath> privilege_paths;

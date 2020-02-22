@@ -32,8 +32,21 @@ $(error LG_RT_DIR variable is not defined, aborting build)
 endif
 
 # generate libraries for Legion and Realm
+SHARED_OBJECTS ?= 0
+ifeq ($(strip $(SHARED_OBJECTS)),0)
 SLIB_LEGION     := liblegion.a
 SLIB_REALM      := librealm.a
+else
+CC_FLAGS	+= -fPIC
+NVCC_FLAGS	+= -Xcompiler -fPIC
+SLIB_LEGION     := liblegion.so
+SLIB_REALM      := librealm.so
+ifeq ($(strip $(DARWIN)),1)
+SO_FLAGS += -dynamiclib -single_module -undefined dynamic_lookup -fPIC
+else
+SO_FLAGS += -shared
+endif
+endif
 LEGION_LIBS     := -L. -llegion -lrealm
 
 # generate header files for public-facing defines
@@ -138,7 +151,7 @@ INC_FLAGS	+= -I$(DEFINE_HEADERS_DIR) -I$(LG_RT_DIR) -I$(LG_RT_DIR)/mappers
 ifeq ($(shell uname -s),Linux)
 LEGION_LD_FLAGS	+= -lrt -lpthread
 endif
-ifeq ($(shell uname -s),Darwin)
+ifeq ($(strip $(DARWIN)),1)
 LEGION_LD_FLAGS	+= -lpthread
 endif
 ifeq ($(shell uname -s),FreeBSD)
@@ -182,7 +195,7 @@ endif
 USE_LIBDL ?= 1
 ifeq ($(strip $(USE_LIBDL)),1)
 REALM_CC_FLAGS += -DUSE_LIBDL
-ifneq ($(shell uname -s),Darwin)
+ifneq ($(strip $(DARWIN)),1)
 #CC_FLAGS += -rdynamic
 # FreeBSD doesn't actually have a separate libdl
 ifneq ($(shell uname -s),FreeBSD)
@@ -720,6 +733,7 @@ $(OUTFILE) : $(GEN_OBJS) $(GEN_GPU_OBJS) $(SLIB_LEGION) $(SLIB_REALM)
 	@echo "---> Linking objects into one binary: $(OUTFILE)"
 	$(CXX) -o $(OUTFILE) $(GEN_OBJS) $(GEN_GPU_OBJS) $(LD_FLAGS) $(LEGION_LIBS) $(LEGION_LD_FLAGS) $(GASNET_FLAGS)
 
+ifeq ($(strip $(SHARED_OBJECTS)),0)
 $(SLIB_LEGION) : $(LEGION_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(GPU_RUNTIME_OBJS)
 	rm -f $@
 	$(AR) rc $@ $^
@@ -727,6 +741,25 @@ $(SLIB_LEGION) : $(LEGION_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(GPU_RUNTIME
 $(SLIB_REALM) : $(REALM_OBJS) $(REALM_INST_OBJS)
 	rm -f $@
 	$(AR) rc $@ $^
+else ifeq ($(strip $(DARWIN)),1)
+# On Darwin we need to link liblegion.so against librealm.so because it complains 
+# about having an illegal dependence on thread-local storage if we don't
+$(SLIB_LEGION) : $(LEGION_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(GPU_RUNTIME_OBJS) $(SLIB_REALM)
+	rm -f $@
+	$(CXX) $(SO_FLAGS) -o $@ $(LEGION_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(GPU_RUNTIME_OBJS) -L. -lrealm
+
+$(SLIB_REALM) : $(REALM_OBJS) $(REALM_INST_OBJS)
+	rm -f $@
+	$(CXX) $(SO_FLAGS) -o $@ $^
+else
+$(SLIB_LEGION) : $(LEGION_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(GPU_RUNTIME_OBJS)
+	rm -f $@
+	$(CXX) $(SO_FLAGS) -o $@ $^
+
+$(SLIB_REALM) : $(REALM_OBJS) $(REALM_INST_OBJS)
+	rm -f $@
+	$(CXX) $(SO_FLAGS) -o $@ $^
+endif
 
 $(GEN_OBJS) : %.cc.o : %.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS) $(OMP_FLAGS)

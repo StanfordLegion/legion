@@ -300,19 +300,20 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = FUTURE_MAP_ALLOC;
     public:
-      FutureMapImpl(TaskContext *ctx, Operation *op, const Domain &domain,
+      FutureMapImpl(TaskContext *ctx, Operation *op, 
+                    RtEvent ready, const Domain &domain,
                     Runtime *rt, DistributedID did, AddressSpaceID owner_space,
                     RtUserEvent deletion_trigger=RtUserEvent::NO_RT_USER_EVENT);
       FutureMapImpl(TaskContext *ctx, Runtime *rt, const Domain &domain,
                     DistributedID did, AddressSpaceID owner_space,
-                    ApEvent ready_event, bool register_now = true, // remote
+                    RtEvent ready_event, bool register_now = true, // remote
                     RtUserEvent deletion_trigger=RtUserEvent::NO_RT_USER_EVENT);
       FutureMapImpl(const FutureMapImpl &rhs);
       virtual ~FutureMapImpl(void);
     public:
       FutureMapImpl& operator=(const FutureMapImpl &rhs);
     public:
-      inline ApEvent get_ready_event(void) const { return ready_event; }
+      inline RtEvent get_ready_event(void) const { return ready_event; }
       inline const Domain& get_domain(void) const { return future_map_domain; }
       virtual bool is_replicate_future_map(void) const { return false; }
     public:
@@ -331,7 +332,7 @@ namespace Legion {
                             const char *warning_string = NULL);
       virtual void wait_all_results(bool silence_warnings = true,
                                     const char *warning_string = NULL);
-      bool reset_all_futures(void);
+      bool reset_all_futures(RtEvent new_ready_event);
       // Use this method to detect when we're wrapped by an argument
       // map which is mainly needed in control replication
       virtual void argument_map_wrap(void) { }
@@ -366,7 +367,7 @@ namespace Legion {
       const Domain future_map_domain;
     protected:
       mutable LocalLock future_map_lock;
-      ApEvent ready_event;
+      RtEvent ready_event;
       RtUserEvent delete_event;
       std::map<DomainPoint,Future> futures;
     };
@@ -404,7 +405,7 @@ namespace Legion {
         ReplFutureMapImpl *const impl;
       };
     public:
-      ReplFutureMapImpl(ReplicateContext *ctx, Operation *op, 
+      ReplFutureMapImpl(ReplicateContext *ctx, Operation *op, RtEvent ready, 
                         const Domain &domain, const Domain &shard_domain, 
                         Runtime *rt, DistributedID did, AddressSpaceID owner,
                         RtUserEvent deletion_trigger=
@@ -3163,7 +3164,7 @@ namespace Legion {
                                         int op_depth = 0);
       FutureMapImpl* find_or_create_future_map(DistributedID did, 
                           TaskContext *ctx, const Domain &domain, 
-                          ApEvent complete, ReferenceMutator *mutator);
+                          RtEvent complete, ReferenceMutator *mutator);
       IndexSpace find_or_create_index_slice_space(const Domain &launch_domain);
       IndexSpace find_or_create_index_slice_space(const Domain &launch_domain,
                                                   const void *realm_is,

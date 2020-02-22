@@ -11231,8 +11231,9 @@ namespace Legion {
               const Domain &domain, IndexSpace shard_space, RtUserEvent deleted)
     //--------------------------------------------------------------------------
     {
-      return new FutureMapImpl(ctx, this, domain, runtime,
-            runtime->get_available_distributed_id(), 
+      return new FutureMapImpl(ctx, this, 
+            Runtime::protect_event(get_completion_event()), domain, 
+            runtime, runtime->get_available_distributed_id(), 
             runtime->address_space, deleted);
     }
 
@@ -12565,8 +12566,7 @@ namespace Legion {
       // Give these slightly higher priority since they are likely
       // needed by later operations
       if (future_map.impl != NULL)
-        enqueue_ready_operation(Runtime::protect_event(
-              future_map.impl->get_ready_event()), 
+        enqueue_ready_operation(future_map.impl->get_ready_event(), 
             LG_THROUGHPUT_DEFERRED_PRIORITY);
       else
         enqueue_ready_operation(RtEvent::NO_RT_EVENT, 
@@ -16859,17 +16859,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       complete_mapping();
-      const ApEvent ready = future_map.impl->get_ready_event();
-      if (ready.exists())
+      const RtEvent ready = future_map.impl->get_ready_event();
+      if (ready.exists() && !ready.has_triggered())
       {
-        const RtEvent wait_on = Runtime::protect_event(ready);
-        if (wait_on.exists() && !wait_on.has_triggered())
-        {
-          DeferredExecuteArgs args(this);
-          runtime->issue_runtime_meta_task(args, 
-              LG_THROUGHPUT_DEFERRED_PRIORITY, wait_on);
-          return;
-        }
+        DeferredExecuteArgs args(this);
+        runtime->issue_runtime_meta_task(args, 
+            LG_THROUGHPUT_DEFERRED_PRIORITY, ready);
+        return;
       }
       // If we make it here we can just do this now
       deferred_execute();

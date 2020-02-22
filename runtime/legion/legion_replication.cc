@@ -884,6 +884,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(!future_map_ready.exists() || future_map_ready.has_triggered());
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(ctx);
       assert(repl_ctx != NULL);
 #else
@@ -894,9 +895,10 @@ namespace Legion {
         runtime->forest->find_launch_space_domain(shard_space, shard_domain);
       else
         shard_domain = index_domain;
+      future_map_ready = Runtime::create_rt_user_event();
       // Make a replicate future map 
-      return new ReplFutureMapImpl(repl_ctx, this, index_domain, shard_domain, 
-          runtime, runtime->get_available_distributed_id(), 
+      return new ReplFutureMapImpl(repl_ctx, this,future_map_ready,index_domain, 
+          shard_domain, runtime, runtime->get_available_distributed_id(), 
           runtime->address_space);
     }
 
@@ -3586,7 +3588,8 @@ namespace Legion {
         runtime->forest->find_launch_space_domain(shard_space, shard_domain);
       else
         shard_domain = domain;
-      return new ReplFutureMapImpl(repl_ctx, this, domain, shard_domain,
+      return new ReplFutureMapImpl(repl_ctx, this, 
+          Runtime::protect_event(get_completion_event()), domain, shard_domain,
           runtime, runtime->get_available_distributed_id(), 
           runtime->address_space);
     }

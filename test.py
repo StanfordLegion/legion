@@ -266,11 +266,17 @@ def run_test_legion_openmp_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread
 def run_test_legion_python_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     # Hack: legion_python currently requires the module name to come first
     flags = [] # ['-logfile', 'out_%.log']
+    python_dir = os.path.join(root_dir, 'bindings', 'python')
     # Hack: Fix up the environment so that Python can find all the examples.
     env = dict(list(env.items()) + [
-        ('PYTHONPATH', ':'.join([os.path.join(root_dir, 'bindings', 'python')])),
+        ('PYTHONPATH', ':'.join([python_dir])),
+        ('LD_LIBRARY_PATH', ':'.join([python_dir])),
     ])
+    # Clean up around python because we are going to make shared objects
+    # which is not something that anyone else does
+    cmd([make_exe, '-C', python_dir, 'clean'], env=env)
     run_cxx(legion_python_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count, timelimit)
+    cmd([make_exe, '-C', python_dir, 'clean'], env=env)
 
 def run_test_legion_hdf_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     flags = ['-logfile', 'out_%.log']
