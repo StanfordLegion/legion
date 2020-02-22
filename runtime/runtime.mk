@@ -14,6 +14,28 @@
 # limitations under the License.
 #
 
+CC_FLAGS ?=
+LD_FLAGS ?=
+SO_FLAGS ?=
+INC_FLAGS ?=
+NVCC_FLAGS ?=
+# These flags are NOT passed on the command line, but are used to
+# generate the public-facing legion/realm_defines.h files.
+# (Additional flags will be picked up from environment variables of
+# the same names.)
+LEGION_CC_FLAGS ?=
+REALM_CC_FLAGS ?=
+
+# Map some common GNU variable names into our variables
+CXXFLAGS ?=
+CPPFLAGS ?=
+LDLIBS ?=
+LDFLAGS ?=
+CC_FLAGS += $(CXXFLAGS) $(CPPFLAGS)
+NVCC_FLAGS += $(CXXFLAGS) $(CPPFLAGS)
+SO_FLAGS += $(LDLIBS)
+LD_FLAGS += $(LDFLAGS)
+
 USE_OPENMP ?= 0
 BOUNDS_CHECKS ?= 0
 ifeq ($(shell uname -s),Darwin)
@@ -53,13 +75,6 @@ LEGION_LIBS     := -L. -llegion -lrealm
 DEFINE_HEADERS_DIR ?= $(CURDIR)
 LEGION_DEFINES_HEADER := $(DEFINE_HEADERS_DIR)/legion_defines.h
 REALM_DEFINES_HEADER := $(DEFINE_HEADERS_DIR)/realm_defines.h
-
-# These flags are NOT passed on the command line, but are used to
-# generate the public-facing legion/realm_defines.h files.
-# (Additional flags will be picked up from environment variables of
-# the same names.)
-LEGION_CC_FLAGS ?=
-REALM_CC_FLAGS ?=
 
 # Handle some of the common machines we frequent
 
@@ -676,6 +691,83 @@ LEGION_SRC 	+= $(LG_RT_DIR)/legion/legion.cc \
 # LEGION_INST_SRC will be compiled {MAX_DIM}^2 times in parallel
 LEGION_INST_SRC  += $(LG_RT_DIR)/legion/region_tree_tmpl.cc
 
+# Header files for Legion installation
+INSTALL_HEADERS += legion.h \
+		   realm.h \
+		   accessor.h \
+		   arrays.h \
+		   bitmask.h \
+		   legion/legion.inl \
+		   legion/legion_agency.h \
+		   legion/legion_agency.inl \
+		   legion/accessor.h \
+		   legion/arrays.h \
+		   legion/legion_c.h \
+		   legion/legion_config.h \
+		   legion/legion_constraint.h \
+		   legion/legion_domain.h \
+		   legion/legion_domain.inl \
+		   legion/legion_mapping.h \
+		   legion/legion_mapping.inl \
+		   legion/legion_redop.h \
+		   legion/legion_redop.inl \
+		   legion/legion_stl.h \
+		   legion/legion_stl.inl \
+		   legion/legion_template_help.h \
+		   realm/realm_config.h \
+		   realm/realm_c.h \
+		   realm/profiling.h \
+		   realm/profiling.inl \
+		   realm/redop.h \
+		   realm/event.h \
+		   realm/event.inl \
+		   realm/reservation.h \
+		   realm/reservation.inl \
+		   realm/processor.h \
+		   realm/processor.inl \
+		   realm/memory.h \
+		   realm/instance.h \
+		   realm/instance.inl \
+		   realm/inst_layout.h \
+		   realm/inst_layout.inl \
+		   realm/logging.h \
+		   realm/logging.inl \
+		   realm/machine.h \
+		   realm/machine.inl \
+		   realm/runtime.h \
+		   realm/indexspace.h \
+		   realm/indexspace.inl \
+		   realm/codedesc.h \
+		   realm/codedesc.inl \
+		   realm/compiler_support.h \
+		   realm/bytearray.h \
+		   realm/bytearray.inl \
+		   realm/faults.h \
+		   realm/faults.inl \
+		   realm/atomics.h \
+		   realm/atomics.inl \
+		   realm/point.h \
+		   realm/point.inl \
+		   realm/custom_serdez.h \
+		   realm/custom_serdez.inl \
+		   realm/sparsity.h \
+		   realm/sparsity.inl \
+		   realm/dynamic_templates.h \
+		   realm/dynamic_templates.inl \
+		   realm/serialize.h \
+		   realm/serialize.inl \
+		   realm/timers.h \
+		   realm/timers.inl \
+		   realm/utils.h \
+		   realm/utils.inl
+
+ifeq ($(strip $(USE_HALF)),1)
+INSTALL_HEADERS += half.h
+endif
+ifeq ($(strip $(USE_COMPLEX)),1)
+INSTALL_HEADERS += complex.h
+endif
+
 # General shell commands
 SHELL	:= /bin/sh
 SH	:= sh
@@ -726,6 +818,32 @@ ifndef NO_BUILD_RULES
 ifndef NO_BUILD_ALL
 .PHONY: all
 all: $(OUTFILE)
+endif
+# Provide support for installing legion with the make build system
+.PHONY: install
+ifdef PREFIX
+INSTALL_BIN_FILES ?=
+INSTALL_INC_FILES ?=
+INSTALL_LIB_FILES ?=
+install: $(OUTFILE)
+	@echo "Installing into $(PREFIX)..."
+	@mkdir -p $(PREFIX)/bin
+	@mkdir -p $(PREFIX)/include/realm
+	@mkdir -p $(PREFIX)/include/legion
+	@mkdir -p $(PREFIX)/lib
+	@cp $(OUTFILE) $(PREFIX)/bin/$(OUTFILE)
+	@$(foreach file,$(INSTALL_BIN_FILES),cp $(file) $(PREFIX)/bin/$(file);)
+	@cp realm_defines.h $(PREFIX)/include/realm_defines.h
+	@cp legion_defines.h $(PREFIX)/include/legion_defines.h
+	@$(foreach file,$(INSTALL_HEADERS),cp $(LG_RT_DIR)/$(file) $(PREFIX)/include/$(file);)
+	@$(foreach file,$(INSTALL_INC_FILES),cp $(file) $(PREFIX)/include/$(file);)
+	@cp $(SLIB_REALM) $(PREFIX)/lib/$(SLIB_REALM)
+	@cp $(SLIB_LEGION) $(PREFIX)/lib/$(SLIB_LEGION)
+	@$(foreach file,$(INSTALL_LIB_FILES),cp $(file) $(PREFIX)/lib/$(file);)
+	@echo "Installation complete"
+else
+install:
+	$(error Must specify PREFIX for installation)
 endif
 
 # If we're using CUDA we have to link with nvcc
