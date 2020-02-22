@@ -6697,6 +6697,8 @@ namespace Legion {
         }
         origin_mapped_slices.clear();
       } 
+      if (future_map_ready.exists() && !future_map_ready.has_triggered())
+        Runtime::trigger_event(future_map_ready);
       // Remove our reference to the reduction future
       reduction_future = Future();
       map_applied_conditions.clear();
@@ -6777,8 +6779,9 @@ namespace Legion {
       if (launcher.predicate != Predicate::TRUE_PRED)
         initialize_predicate(launcher.predicate_false_future,
                              launcher.predicate_false_result);
-      future_map = FutureMap(new FutureMapImpl(ctx, this, runtime,
-            runtime->get_available_distributed_id(),
+      future_map_ready = Runtime::create_rt_user_event();
+      future_map = FutureMap(new FutureMapImpl(ctx, this, future_map_ready,
+            runtime, runtime->get_available_distributed_id(),
             runtime->address_space));
 #ifdef DEBUG_LEGION
       future_map.impl->add_valid_domain(index_domain);
@@ -7350,6 +7353,8 @@ namespace Legion {
                                             false/*owner*/);
         }
       }
+      else
+        Runtime::trigger_event(future_map_ready);
       if (must_epoch != NULL)
       {
         if (!complete_preconditions.empty())
@@ -8676,7 +8681,7 @@ namespace Legion {
       {
         DistributedID future_map_did;
         derez.deserialize(future_map_did);
-        ApEvent ready_event;
+        RtEvent ready_event;
         derez.deserialize(ready_event);
         WrapperReferenceMutator mutator(ready_events);
         future_map = FutureMap(
@@ -8726,7 +8731,7 @@ namespace Legion {
         derez.deserialize(future_map_did);
         if (future_map_did > 0)
         {
-          ApEvent ready_event;
+          RtEvent ready_event;
           derez.deserialize(ready_event);
           WrapperReferenceMutator mutator(ready_events);
           FutureMapImpl *impl = runtime->find_or_create_future_map(
@@ -8738,7 +8743,7 @@ namespace Legion {
         derez.deserialize(num_point_futures);
         if (num_point_futures > 0)
         {
-          ApEvent ready_event;
+          RtEvent ready_event;
           point_futures.resize(num_point_futures);
           WrapperReferenceMutator mutator(ready_events);
           for (unsigned idx = 0; idx < num_point_futures; idx++)

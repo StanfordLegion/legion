@@ -281,17 +281,17 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = FUTURE_MAP_ALLOC;
     public:
-      FutureMapImpl(TaskContext *ctx, Operation *op, 
+      FutureMapImpl(TaskContext *ctx, Operation *op, RtEvent ready_event, 
                     Runtime *rt, DistributedID did, AddressSpaceID owner_space);
       FutureMapImpl(TaskContext *ctx, Runtime *rt, 
                     DistributedID did, AddressSpaceID owner_space,
-                    ApEvent ready_event, bool register_now = true); // remote
+                    RtEvent ready_event, bool register_now = true); // remote
       FutureMapImpl(const FutureMapImpl &rhs);
       virtual ~FutureMapImpl(void);
     public:
       FutureMapImpl& operator=(const FutureMapImpl &rhs);
     public:
-      inline ApEvent get_ready_event(void) const { return ready_event; }
+      inline RtEvent get_ready_event(void) const { return ready_event; }
     public:
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_valid(ReferenceMutator *mutator);
@@ -309,7 +309,8 @@ namespace Legion {
                             const char *warning_string = NULL);
       void wait_all_results(bool silence_warnings = true,
                             const char *warning_string = NULL);
-      bool reset_all_futures(void);
+      // This marks that all the futures are ready somewhere
+      bool reset_all_futures(RtEvent new_ready_event);
     public:
       void get_all_futures(std::map<DomainPoint,Future> &futures) const;
 #ifdef DEBUG_LEGION
@@ -336,7 +337,7 @@ namespace Legion {
 #endif
     private:
       mutable LocalLock future_map_lock;
-      ApEvent ready_event;
+      RtEvent ready_event;
       std::map<DomainPoint,Future> futures;
 #ifdef DEBUG_LEGION
     private:
@@ -2759,7 +2760,7 @@ namespace Legion {
       FutureImpl* find_or_create_future(DistributedID did,
                                         ReferenceMutator *mutator);
       FutureMapImpl* find_or_create_future_map(DistributedID did, 
-                TaskContext *ctx, ApEvent complete, ReferenceMutator *mutator);
+                TaskContext *ctx, RtEvent complete, ReferenceMutator *mutator);
       IndexSpace find_or_create_index_slice_space(const Domain &launch_domain);
       IndexSpace find_or_create_index_slice_space(const Domain &launch_domain,
                                                   const void *realm_is,

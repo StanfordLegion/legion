@@ -4895,7 +4895,7 @@ namespace Legion {
       {
         FutureMapImpl *result = new FutureMapImpl(this, runtime,
             runtime->get_available_distributed_id(),
-            runtime->address_space, ApEvent::NO_AP_EVENT);
+            runtime->address_space, RtEvent::NO_RT_EVENT);
         if (launcher.predicate_false_future.impl != NULL)
         {
           ApEvent ready_event = 
