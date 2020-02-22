@@ -1506,7 +1506,7 @@ namespace Legion {
           RezCheck z(rez);
           rez.serialize(did);
           rez.serialize(point);
-          rez.serialize(ready_event);
+          rez.serialize(future_ready_event);
           rez.serialize<bool>(internal);
         }
         runtime->send_future_map_request_future(owner_space, rez);
