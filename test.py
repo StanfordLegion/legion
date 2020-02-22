@@ -269,6 +269,7 @@ def run_test_legion_python_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread
     # Hack: Fix up the environment so that Python can find all the examples.
     env = dict(list(env.items()) + [
         ('PYTHONPATH', ':'.join([python_dir])),
+        ('LD_LIBRARY_PATH', ':'.join([python_dir])),
     ])
     # Clean up around python because we are going to make shared objects
     # which is not something that anyone else does
