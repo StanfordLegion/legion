@@ -347,7 +347,7 @@ namespace Realm {
       protected:
         /* header_base, payload_base, playload_size */
         NodeID target;
-        Realm::NodeSet *targets;
+        Realm::NodeSet targets;
         bool is_multicast;
         void *dest_payload_addr;
         size_t header_size;
@@ -362,7 +362,6 @@ namespace Realm {
                                      size_t _max_payload_size,
                                      void *_dest_payload_addr)
         : target(_target)
-        , targets(0)
         , is_multicast(false)
         , dest_payload_addr(_dest_payload_addr)
         , header_size(_header_size)
@@ -381,7 +380,7 @@ namespace Realm {
                                      unsigned short _msgid,
                                      size_t _header_size,
                                      size_t _max_payload_size)
-        : targets(new NodeSet(_targets))
+        : targets(_targets)
         , is_multicast(true)
         , dest_payload_addr(0)
         , header_size(_header_size)
@@ -398,51 +397,17 @@ namespace Realm {
 
     MPIMessageImpl::~MPIMessageImpl()
     {
-        delete targets;
     }
-
-    class ActiveMessageSender {
-      public:
-        ActiveMessageSender(int _msgid, const void *_args, size_t _arglen,
-                            const void *_payload, size_t _payload_len)
-            : prev_target(-1)
-            , msgid(_msgid)
-            , header(_args)
-            , header_len(_arglen)
-            , payload(_payload)
-            , payload_len(_payload_len)
-        {}
-
-        void apply(NodeID target)
-        {
-            if(prev_target != -1) {
-                enqueue_message(prev_target, msgid, header, header_len, payload, payload_len, NULL);
-            }
-            prev_target = target;
-        }
-
-        void finish()
-        {
-            if(prev_target != -1) {
-                enqueue_message(prev_target, msgid, header, header_len, payload, payload_len, NULL);
-            }
-        }
-
-        NodeID prev_target;
-        int msgid;
-        const void *header;
-        size_t header_len;
-        const void *payload;
-        size_t payload_len;
-    };
 
     void MPIMessageImpl::commit(size_t act_payload_size)
     {
         if(is_multicast) {
-            ActiveMessageSender ams(msgid, &msg_header, header_size,
-                                    payload_base, act_payload_size);
-            targets->map(ams);
-            ams.finish();
+	    assert(dest_payload_addr == 0);
+	    for(NodeSet::const_iterator it = targets.begin();
+		it != targets.end();
+		++it)
+	       enqueue_message(*it, msgid, &msg_header, header_size,
+			       payload_base, act_payload_size, NULL);
         } else {
             enqueue_message(target, msgid, &msg_header, header_size,
                             payload_base, act_payload_size, dest_payload_addr);
