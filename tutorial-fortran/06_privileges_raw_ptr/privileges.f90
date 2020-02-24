@@ -121,11 +121,11 @@ contains
     call accessor_y%get_raw_ptr(rect_1d, subrect, offset, raw_ptr_y)
     call accessor_z%get_raw_ptr(rect_1d, subrect, offset, raw_ptr_z)
     index_size = rect_1d%get_volume()
-    call c_f_pointer(raw_ptr_x, x, [index_size-1])
-    call c_f_pointer(raw_ptr_y, y, [index_size-1])
-    call c_f_pointer(raw_ptr_z, z, [index_size-1])
+    call c_f_pointer(raw_ptr_x, x, [index_size])
+    call c_f_pointer(raw_ptr_y, y, [index_size])
+    call c_f_pointer(raw_ptr_z, z, [index_size])
     
-    Print *, "Daxpy Task!", alpha, index_size, offset
+    Print *, "Daxpy Task!", alpha, index_size, offset, rank(x)
     
     do i = 1, index_size
       z(i) = alpha*x(i) + y(i)
