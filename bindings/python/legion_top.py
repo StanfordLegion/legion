@@ -125,8 +125,12 @@ def run_cmd(cmd, run_name=None):
 
     # Hide the current module if it exists.
     sys.modules[run_name] = module
+    exec_locals = dict()
     code = compile(cmd, '<string>', 'eval')
-    exec(code, module.__dict__)
+    exec(code, module.__dict__, exec_locals)
+    # Remove the reference to execution locals to ensure nothing
+    # survives past the end of the top-level task
+    del exec_locals
 
 
 # We can't use runpy for this since runpy is aggressive about
@@ -146,9 +150,13 @@ def run_path(filename, run_name=None):
 
     sys.path.append(os.path.dirname(filename))
 
+    exec_locals = dict()
     with open(filename) as f:
         code = compile(f.read(), filename, 'exec')
-        exec(code, module.__dict__)
+        exec(code, module.__dict__, exec_locals)
+    # Remove the reference to execution locals to ensure nothing
+    # survives past the end of the top-level task
+    del exec_locals
 
     # FIXME: Can't restore the old module because tasks may be
     # continuing to execute asynchronously. We could fix this with
