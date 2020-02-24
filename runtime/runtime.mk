@@ -853,11 +853,11 @@ $(OUTFILE) : $(GEN_OBJS) $(GEN_GPU_OBJS) $(SLIB_LEGION) $(SLIB_REALM)
 ifeq ($(strip $(SHARED_OBJECTS)),0)
 $(SLIB_LEGION) : $(LEGION_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(GPU_RUNTIME_OBJS)
 	rm -f $@
-	$(AR) rc $@ $^
+	$(AR) rcs $@ $^
 
 $(SLIB_REALM) : $(REALM_OBJS) $(REALM_INST_OBJS)
 	rm -f $@
-	$(AR) rc $@ $^
+	$(AR) rcs $@ $^
 else ifeq ($(strip $(DARWIN)),1)
 # On Darwin we need to link liblegion.so against librealm.so because it complains 
 # about having an illegal dependence on thread-local storage if we don't
