@@ -32,7 +32,6 @@ CPPFLAGS ?=
 LDLIBS ?=
 LDFLAGS ?=
 CC_FLAGS += $(CXXFLAGS) $(CPPFLAGS)
-NVCC_FLAGS += $(CXXFLAGS) $(CPPFLAGS)
 SO_FLAGS += $(LDLIBS)
 LD_FLAGS += $(LDFLAGS)
 
@@ -374,6 +373,14 @@ endif
 # Add support for Legion GPU reductions
 CC_FLAGS	+= -DLEGION_GPU_REDUCTIONS
 NVCC_FLAGS	+= -DLEGION_GPU_REDUCTIONS
+# Convert CXXFLAGS and CPPFLAGS to NVCC_FLAGS
+# Need to detect whether nvcc supports them directly or to use -Xcompiler
+NVCC_FLAGS	+= $(shell for FLAG in $(CXXFLAGS); do \
+		   $(NVCC) $$FLAG -x cu -c /dev/null -o /dev/null 2> /dev/null && \
+		   echo "$$FLAG" || echo "-Xcompiler $$FLAG"; done)
+NVCC_FLAGS	+= $(shell for FLAG in $(CPPFLAGS); do \
+		   $(NVCC) $$FLAG -x cu -c /dev/null -o /dev/null 2> /dev/null && \
+		   echo "$$FLAG" || echo "-Xcompiler $$FLAG"; done)
 # CUDA arch variables
 
 # translate legacy arch names into numbers
