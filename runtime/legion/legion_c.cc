@@ -2814,6 +2814,16 @@ legion_future_get_void_result(legion_future_t handle_)
   handle->get_void_result();
 }
 
+void
+legion_future_wait(legion_future_t handle_,
+                   bool silence_warnings,
+                   const char *warning_string)
+{
+  Future *handle = CObjectWrapper::unwrap(handle_);
+
+  handle->get_void_result(silence_warnings, warning_string);
+}
+
 bool
 legion_future_is_empty(legion_future_t handle_,
                        bool block /* = false */)

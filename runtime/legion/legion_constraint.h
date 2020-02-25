@@ -345,7 +345,9 @@ namespace Legion {
                                             SPECIALIZED_CONSTRAINT;
     public:
       SpecializedConstraint(SpecializedKind kind = NORMAL_SPECIALIZE,
-                            ReductionOpID redop = 0, bool no_access = false);
+                            ReductionOpID redop = 0, 
+                            bool no_access = false,
+                            bool exact = false);
     public:
       bool entails(const SpecializedConstraint &other) const;
       bool conflicts(const SpecializedConstraint &other) const;
@@ -357,15 +359,21 @@ namespace Legion {
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
     public:
-      bool is_normal(void) const;
+      bool is_affine(void) const;
+      bool is_compact(void) const;
+      bool is_varfield(void) const;
       bool is_virtual(void) const;
       bool is_reduction(void) const;
       bool is_file(void) const;
-      bool is_no_access(void) const;
+      inline bool is_no_access(void) const { return no_access; }
+      inline bool is_exact(void) const { return exact; }
+      // For backwards compatibility
+      bool is_normal(void) const;
     public:
       SpecializedKind kind;
       ReductionOpID  redop;
       bool       no_access;
+      bool           exact;
     };
 
     /**

@@ -2366,7 +2366,8 @@ namespace Legion {
       LogicalRegion target_region = 
         default_policy_select_instance_region(ctx, target_memory, req,
                                               constraints, force_new, meets);
-      bool tight_region_bounds = (req.tag & DefaultMapper::EXACT_REGION) != 0;
+      bool tight_region_bounds = constraints.specialized_constraint.is_exact()
+        || ((req.tag & DefaultMapper::EXACT_REGION) != 0);
 
       // TODO: deal with task layout constraints that require multiple
       // region requirements to be mapped to the same instance

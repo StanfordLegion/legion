@@ -124,9 +124,24 @@ def run_cmd(cmd, run_name=None):
     setattr(module, '__package__', None)
 
     # Hide the current module if it exists.
+    old_module = sys.modules[run_name] if run_name in sys.modules else None
     sys.modules[run_name] = module
     code = compile(cmd, '<string>', 'eval')
-    exec(code, module.__dict__)
+    exec(code, module.__dict__, module.__dict__)
+    # Wait for execution to finish here before removing the module
+    # because executing tasks might still need to refer to it
+    future = c.legion_runtime_issue_execution_fence(
+            top_level.runtime[0], top_level.context[0])
+    # block waiting on the future
+    c.legion_future_wait(future, True, ffi.NULL)
+    c.legion_future_destroy(future)
+    # Make sure our module gets deleted to clean up any references
+    # to variables the user might have made
+    if old_module is None:
+        del sys.modules[run_name]
+    else:
+        sys.modules[run_name] = old_module
+    del module
 
 
 # We can't use runpy for this since runpy is aggressive about
@@ -148,14 +163,21 @@ def run_path(filename, run_name=None):
 
     with open(filename) as f:
         code = compile(f.read(), filename, 'exec')
-        exec(code, module.__dict__)
-
-    # FIXME: Can't restore the old module because tasks may be
-    # continuing to execute asynchronously. We could fix this with
-    # an execution fence but it doesn't seem worth it given that
-    # we'll be cleaning up the process right after this.
-
-    # sys.modules[run_name] = old_module
+        exec(code, module.__dict__, module.__dict__)
+    # Wait for execution to finish here before removing the module
+    # because executing tasks might still need to refer to it
+    future = c.legion_runtime_issue_execution_fence(
+            top_level.runtime[0], top_level.context[0])
+    # block waiting on the future
+    c.legion_future_wait(future, True, ffi.NULL)
+    c.legion_future_destroy(future)
+    # Make sure our module gets deleted to clean up any references
+    # to variables the user might have made
+    if old_module is None:
+        del sys.modules[run_name]
+    else:
+        sys.modules[run_name] = old_module
+    del module
 
 
 def import_global(module, check_depth=True):

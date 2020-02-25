@@ -578,14 +578,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     SpecializedConstraint::SpecializedConstraint(SpecializedKind k,
-                                                 ReductionOpID r, bool no)
-      : kind(k), redop(r), no_access(no)
+                                             ReductionOpID r, bool no, bool ext)
+      : kind(k), redop(r), no_access(no), exact(ext)
     //--------------------------------------------------------------------------
     {
       if (redop != 0)
       {
-        if ((kind != REDUCTION_FOLD_SPECIALIZE) &&
-            (kind != REDUCTION_LIST_SPECIALIZE))
+        if ((kind != AFFINE_REDUCTION_SPECIALIZE) &&
+            (kind != COMPACT_REDUCTION_SPECIALIZE))
         {
           fprintf(stderr,"Illegal specialize constraint with reduction op %d."
                          "Only reduction specialized constraints are "
@@ -610,6 +610,7 @@ namespace Legion {
         return false;
       if (no_access && !other.no_access)
         return false;
+      // We'll test for exactness inside the runtime
       return true;
     }
 
@@ -628,6 +629,7 @@ namespace Legion {
       if ((redop != other.redop) && (redop != 0) && (other.redop != 0))
         return true;
       // No access never causes a conflict
+      // We'll test for exactness inside the runtime
       return false;
     }
 
@@ -638,6 +640,7 @@ namespace Legion {
       SWAP_HELPER(SpecializedKind, kind)
       SWAP_HELPER(ReductionOpID, redop)
       SWAP_HELPER(bool, no_access)
+      SWAP_HELPER(bool, exact)
     }
 
     //--------------------------------------------------------------------------
@@ -645,10 +648,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       rez.serialize(kind);
-      if ((kind == REDUCTION_FOLD_SPECIALIZE) || 
-          (kind == REDUCTION_LIST_SPECIALIZE))
+      if ((kind == AFFINE_REDUCTION_SPECIALIZE) || 
+          (kind == COMPACT_REDUCTION_SPECIALIZE))
         rez.serialize(redop);
       rez.serialize<bool>(no_access);
+      rez.serialize<bool>(exact);
     }
 
     //--------------------------------------------------------------------------
@@ -656,17 +660,41 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       derez.deserialize(kind);
-      if ((kind == REDUCTION_FOLD_SPECIALIZE) || 
-          (kind == REDUCTION_LIST_SPECIALIZE))
+      if ((kind == AFFINE_REDUCTION_SPECIALIZE) || 
+          (kind == COMPACT_REDUCTION_SPECIALIZE))
         derez.deserialize(redop);
       derez.deserialize<bool>(no_access);
+      derez.deserialize<bool>(exact);
     }
 
     //--------------------------------------------------------------------------
     bool SpecializedConstraint::is_normal(void) const
     //--------------------------------------------------------------------------
     {
-      return (kind == NORMAL_SPECIALIZE);
+      return (kind == AFFINE_SPECIALIZE);
+    }
+
+    //--------------------------------------------------------------------------
+    bool SpecializedConstraint::is_affine(void) const
+    //--------------------------------------------------------------------------
+    {
+      return ((kind == AFFINE_SPECIALIZE) || 
+              (kind == AFFINE_REDUCTION_SPECIALIZE));
+    }
+
+    //--------------------------------------------------------------------------
+    bool SpecializedConstraint::is_compact(void) const
+    //--------------------------------------------------------------------------
+    {
+      return ((kind == COMPACT_SPECIALIZE) || 
+              (kind == COMPACT_REDUCTION_SPECIALIZE));
+    }
+
+    //--------------------------------------------------------------------------
+    bool SpecializedConstraint::is_varfield(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (kind == VARFIELD_SPECIALIZE);
     }
 
     //--------------------------------------------------------------------------
@@ -680,22 +708,15 @@ namespace Legion {
     bool SpecializedConstraint::is_reduction(void) const
     //--------------------------------------------------------------------------
     {
-      return ((kind == REDUCTION_FOLD_SPECIALIZE) || 
-              (kind == REDUCTION_LIST_SPECIALIZE));
+      return ((kind == AFFINE_REDUCTION_SPECIALIZE) || 
+              (kind == COMPACT_REDUCTION_SPECIALIZE));
     }
 
     //--------------------------------------------------------------------------
     bool SpecializedConstraint::is_file(void) const
     //--------------------------------------------------------------------------
     {
-      return (GENERIC_FILE_SPECIALIZE <= kind);
-    }
-
-    //--------------------------------------------------------------------------
-    bool SpecializedConstraint::is_no_access(void) const
-    //--------------------------------------------------------------------------
-    {
-      return no_access;
+      return (VIRTUAL_SPECIALIZE < kind);
     }
 
     /////////////////////////////////////////////////////////////

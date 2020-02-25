@@ -32,7 +32,6 @@ CPPFLAGS ?=
 LDLIBS ?=
 LDFLAGS ?=
 CC_FLAGS += $(CXXFLAGS) $(CPPFLAGS)
-NVCC_FLAGS += $(CXXFLAGS) $(CPPFLAGS)
 SO_FLAGS += $(LDLIBS)
 LD_FLAGS += $(LDFLAGS)
 
@@ -374,6 +373,14 @@ endif
 # Add support for Legion GPU reductions
 CC_FLAGS	+= -DLEGION_GPU_REDUCTIONS
 NVCC_FLAGS	+= -DLEGION_GPU_REDUCTIONS
+# Convert CXXFLAGS and CPPFLAGS to NVCC_FLAGS
+# Need to detect whether nvcc supports them directly or to use -Xcompiler
+NVCC_FLAGS	+= $(shell for FLAG in $(CXXFLAGS); do \
+		   $(NVCC) $$FLAG -x cu -c /dev/null -o /dev/null 2> /dev/null && \
+		   echo "$$FLAG" || echo "-Xcompiler $$FLAG"; done)
+NVCC_FLAGS	+= $(shell for FLAG in $(CPPFLAGS); do \
+		   $(NVCC) $$FLAG -x cu -c /dev/null -o /dev/null 2> /dev/null && \
+		   echo "$$FLAG" || echo "-Xcompiler $$FLAG"; done)
 # CUDA arch variables
 
 # translate legacy arch names into numbers
@@ -854,11 +861,11 @@ $(OUTFILE) : $(GEN_OBJS) $(GEN_GPU_OBJS) $(SLIB_LEGION) $(SLIB_REALM)
 ifeq ($(strip $(SHARED_OBJECTS)),0)
 $(SLIB_LEGION) : $(LEGION_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(GPU_RUNTIME_OBJS)
 	rm -f $@
-	$(AR) rc $@ $^
+	$(AR) rcs $@ $^
 
 $(SLIB_REALM) : $(REALM_OBJS) $(REALM_INST_OBJS)
 	rm -f $@
-	$(AR) rc $@ $^
+	$(AR) rcs $@ $^
 else ifeq ($(strip $(DARWIN)),1)
 # On Darwin we need to link liblegion.so against librealm.so because it complains 
 # about having an illegal dependence on thread-local storage if we don't

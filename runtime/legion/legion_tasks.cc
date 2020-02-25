@@ -3481,6 +3481,17 @@ namespace Legion {
           PhysicalManager *manager = ref.get_manager();
           if (manager->conflicts(constraints, &conflict_constraint))
             break;
+          // Check to see if we need an exact match on the layouts
+          if (constraints->specialized_constraint.is_exact())
+          {
+            std::vector<LogicalRegion> regions_to_check(1, 
+                                regions[it->first].region);
+            if (!manager->meets_regions(regions_to_check,true/*tight*/))
+            {
+              conflict_constraint = &constraints->specialized_constraint;
+              break;
+            }
+          }
         }
         if (conflict_constraint != NULL)
         {
