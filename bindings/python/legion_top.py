@@ -286,7 +286,7 @@ def legion_python_main(raw_args, user_data, proc):
     del top_level.task
     del top_level.cleanup_items
 
-    # Force a garbage collection so that we know that all objects whic can 
+    # Force a garbage collection so that we know that all objects which can 
     # be collected are actually collected before we exit the top-level task
     gc.collect()
 
