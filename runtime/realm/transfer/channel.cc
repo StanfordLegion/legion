@@ -437,6 +437,9 @@ namespace Realm {
 	    assert(srcptr != 0);
 	    unsigned cword;
 	    memcpy(&cword, srcptr, sizeof(unsigned));
+	    update_bytes_read(input_control.control_port_idx,
+                              icp.local_bytes_total, sizeof(unsigned));
+	    icp.local_bytes_total += sizeof(unsigned);
 	    input_control.remaining_count = cword >> 8;
 	    input_control.current_io_port = (cword & 0x7f) - 1;
 	    input_control.eos_received = (cword & 128) != 0;
@@ -466,6 +469,9 @@ namespace Realm {
 	    assert(srcptr != 0);
 	    unsigned cword;
 	    memcpy(&cword, srcptr, sizeof(unsigned));
+	    update_bytes_read(output_control.control_port_idx,
+                              ocp.local_bytes_total, sizeof(unsigned));
+	    ocp.local_bytes_total += sizeof(unsigned);
 	    output_control.remaining_count = cword >> 8;
 	    output_control.current_io_port = (cword & 0x7f) - 1;
 	    output_control.eos_received = (cword & 128) != 0;
