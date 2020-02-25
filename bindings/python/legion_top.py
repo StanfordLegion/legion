@@ -133,7 +133,7 @@ def run_cmd(cmd, run_name=None):
     future = c.legion_runtime_issue_execution_fence(
             top_level.runtime[0], top_level.context[0])
     # block waiting on the future
-    c.legion_future_get_void_result(future)
+    c.legion_future_wait(future, True, ffi.NULL)
     c.legion_future_destroy(future)
     # Make sure our module gets deleted to clean up any references
     # to variables the user might have made
@@ -169,7 +169,7 @@ def run_path(filename, run_name=None):
     future = c.legion_runtime_issue_execution_fence(
             top_level.runtime[0], top_level.context[0])
     # block waiting on the future
-    c.legion_future_get_void_result(future)
+    c.legion_future_wait(future, True, ffi.NULL)
     c.legion_future_destroy(future)
     # Make sure our module gets deleted to clean up any references
     # to variables the user might have made
