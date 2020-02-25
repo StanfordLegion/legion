@@ -2386,6 +2386,14 @@ extern "C" {
   legion_future_get_void_result(legion_future_t handle);
 
   /**
+   * @see Legion::Future::wait
+   */
+  void
+  legion_future_wait(legion_future_t handle, 
+                     bool silence_warnings /* = false */,
+                     const char *warning_string /* = NULL */);
+
+  /**
    * @see Legion::Future::is_empty()
    */
   bool
