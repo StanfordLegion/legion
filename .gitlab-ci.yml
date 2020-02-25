@@ -256,6 +256,8 @@ before_script:
 .cuda_p100: &cuda_p100
   CUDA: "/usr/local/cuda"
   USE_CUDA: "1"
+  # cmake needs to know where to find libcuda.so
+  CUDA_LIB_PATH: "/usr/local/nvidia/lib64"
 
 ###
 ### Docker Image
@@ -704,6 +706,14 @@ p100_clang7_cxx11_release_regent_cuda:
   <<: [*p100, *tests]
   variables:
     <<: [*clang7, *terra70, *release, *cxx11_normal, *cuda_p100, *regent]
+p100_gcc7_cxx11_release_legion_cmake_cuda:
+  <<: [*p100, *tests]
+  variables:
+    <<: [*gcc7, *release, *cxx11_normal, *cuda_p100, *cmake, *legion, *ctest]
+p100_clang7_cxx11_release_regent_cmake_cuda:
+  <<: [*p100, *tests]
+  variables:
+    <<: [*clang7, *terra70, *release, *cxx11_normal, *cuda_p100, *cmake, *regent]
 
 # Darwin Power9 tests:
 darwin_power9_gcc8_cxx17_release_legion:

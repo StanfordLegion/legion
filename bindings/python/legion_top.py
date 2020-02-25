@@ -124,7 +124,7 @@ def run_cmd(cmd, run_name=None):
     setattr(module, '__package__', None)
 
     # Hide the current module if it exists.
-    old_module = sys.modules[run_name] if run_name in sys.modules else None
+    old_module = sys.modules.get(run_name)
     sys.modules[run_name] = module
     code = compile(cmd, '<string>', 'eval')
     exec(code, module.__dict__, module.__dict__)
@@ -156,7 +156,7 @@ def run_path(filename, run_name=None):
     setattr(module, '__package__', run_name.rpartition('.')[0])
 
     # Hide the current module if it exists.
-    old_module = sys.modules[run_name] if run_name in sys.modules else None
+    old_module = sys.modules.get(run_name)
     sys.modules[run_name] = module
 
     sys.path.append(os.path.dirname(filename))
@@ -323,7 +323,7 @@ def legion_python_main(raw_args, user_data, proc):
     del top_level.task
     del top_level.cleanup_items
 
-    # Force a garbage collection so that we know that all objects whic can 
+    # Force a garbage collection so that we know that all objects which can 
     # be collected are actually collected before we exit the top-level task
     gc.collect()
 

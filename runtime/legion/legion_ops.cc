@@ -6813,6 +6813,9 @@ namespace Legion {
       execution_fence_event = own->get_execution_fence_event();
       // From Memoizable
       trace_local_id            = owner->get_trace_local_id().first;
+      tpl                       = owner->get_template();
+      if (tpl != NULL)
+        memo_state              = owner->get_memoizable_state();
       // From Copy
       src_requirements          = owner->src_requirements;
       dst_requirements          = owner->dst_requirements;
@@ -15407,6 +15410,9 @@ namespace Legion {
       execution_fence_event = own->get_execution_fence_event();
       // From Memoizable
       trace_local_id     = owner->get_trace_local_id().first;
+      tpl                = owner->get_template();
+      if (tpl != NULL)
+        memo_state       = owner->get_memoizable_state();
       // From Fill
       requirement        = owner->get_requirement();
       grants             = owner->grants;

@@ -23,7 +23,9 @@
 #include "realm/transfer/lowlevel_dma.h"
 #include "realm/transfer/channel.h"
 
+#ifdef REALM_USE_CUDART_HIJACK
 #include "realm/cuda/cudart_hijack.h"
+#endif
 
 #include "realm/mutex.h"
 #include "realm/utils.h"
@@ -1355,6 +1357,7 @@ namespace Realm {
       static REALM_THREAD_LOCAL GPUProcessor *current_gpu_proc = 0;
     };
 
+#ifdef REALM_USE_CUDART_HIJACK
     // this flag will be set on the first call into any of the hijack code in
     //  cudart_hijack.cc
     //  an application is linked with -lcudart, we will NOT be hijacking the
@@ -1363,6 +1366,7 @@ namespace Realm {
 
     // used in GPUTaskScheduler<T>::execute_task below
     static bool already_issued_hijack_warning = false;
+#endif
 
     template <typename T>
     bool GPUTaskScheduler<T>::execute_task(Task *task)
@@ -1401,6 +1405,7 @@ namespace Realm {
       CHECK_CU( cuStreamSynchronize(s->get_stream()) );
 #endif
 
+#ifdef REALM_USE_CUDART_HIJACK
       // if our hijack code is not active, the application may have put some work for this
       //  task on streams we don't know about, so it takes an expensive device synchronization
       //  to guarantee that any work enqueued on a stream in the future is ordered with respect
@@ -1415,6 +1420,10 @@ namespace Realm {
 	}
 	CHECK_CU( cuCtxSynchronize() );
       }
+#else
+      // no hijack at all, so always synchronize to ensure all effects are observable
+      CHECK_CU( cuCtxSynchronize() );
+#endif
       // pop the CUDA context for this GPU back off
       gpu_proc->gpu->pop_context();
 
@@ -2004,6 +2013,7 @@ namespace Realm {
       return ThreadLocal::current_gpu_proc;
     }
 
+#ifdef REALM_USE_CUDART_HIJACK
     void GPUProcessor::push_call_configuration(dim3 grid_dim, dim3 block_dim,
                                                size_t shared_size, void *stream)
     {
@@ -2022,6 +2032,7 @@ namespace Realm {
       *((cudaStream_t*)stream) = config.stream;
       call_configs.pop_back();
     }
+#endif
 
     void GPUProcessor::stream_synchronize(cudaStream_t stream)
     {
@@ -2072,6 +2083,7 @@ namespace Realm {
       }
     }
     
+#ifdef REALM_USE_CUDART_HIJACK
     void GPUProcessor::event_create(cudaEvent_t *event, int flags)
     {
       // int cu_flags = CU_EVENT_DEFAULT;
@@ -2199,6 +2211,7 @@ namespace Realm {
                                raw_stream,
                                args, NULL) );
     }
+#endif
 
     void GPUProcessor::gpu_memcpy(void *dst, const void *src, size_t size,
 				  cudaMemcpyKind kind)
@@ -2218,6 +2231,7 @@ namespace Realm {
       // no synchronization here
     }
 
+#ifdef REALM_USE_CUDART_HIJACK
     void GPUProcessor::gpu_memcpy_to_symbol(const void *dst, const void *src,
 					    size_t size, size_t offset,
 					    cudaMemcpyKind kind)
@@ -2263,6 +2277,7 @@ namespace Realm {
 			      size, current) );
       // no synchronization here
     }
+#endif
 
     void GPUProcessor::gpu_memset(void *dst, int value, size_t count)
     {
@@ -2285,14 +2300,12 @@ namespace Realm {
     // class GPU
 
     GPU::GPU(CudaModule *_module, GPUInfo *_info, GPUWorker *_worker,
+	     CUcontext _context,
 	     int num_streams)
       : module(_module), info(_info), worker(_worker)
-      , proc(0), fbmem(0), current_stream(0)
+      , proc(0), fbmem(0), context(_context), current_stream(0)
     {
-      // create a CUDA context for our device - automatically becomes current
-      CHECK_CU( cuCtxCreate(&context, 
-			    CU_CTX_MAP_HOST | CU_CTX_SCHED_BLOCKING_SYNC,
-			    info->device) );
+      // assume context is already current (happens automatically on creation)
 
       event_pool.init_pool();
 
@@ -2307,8 +2320,10 @@ namespace Realm {
 
       pop_context();
 
+#ifdef REALM_USE_CUDART_HIJACK
       // now hook into the cuda runtime fatbin/etc. registration path
       GlobalRegistrations::add_gpu_context(this);
+#endif
     }
 
     GPU::~GPU(void)
@@ -2439,6 +2454,7 @@ namespace Realm {
       runtime->add_memory(fbmem);
     }
 
+#ifdef REALM_USE_CUDART_HIJACK
     void GPU::register_fat_binary(const FatBin *fatbin)
     {
       AutoGPUContext agc(this);
@@ -2519,6 +2535,7 @@ namespace Realm {
       assert(finder != device_variables.end());
       return finder->second;
     }
+#endif
 
     CUmodule GPU::load_cuda_module(const void *data)
     {
@@ -2615,6 +2632,9 @@ namespace Realm {
       , cfg_pin_sysmem(true)
       , cfg_fences_use_callbacks(false)
       , cfg_suppress_hijack_warning(false)
+      , cfg_skip_gpu_count(0)
+      , cfg_skip_busy_gpus(false)
+      , cfg_min_avail_mem(0)
       , shared_worker(0), zcmem_cpu_base(0)
       , zcib_cpu_base(0), zcmem(0)
     {}
@@ -2641,9 +2661,6 @@ namespace Realm {
 	CHECK_CU( cuDeviceGetCount(&num_devices) );
 	for(int i = 0; i < num_devices; i++) {
 	  GPUInfo *info = new GPUInfo;
-
-	  // TODO: consider environment variables or other ways to tell if certain
-	  //  GPUs should be ignored
 
 	  info->index = i;
 	  CHECK_CU( cuDeviceGet(&info->device, i) );
@@ -2703,7 +2720,10 @@ namespace Realm {
 	  .add_option_int("-ll:gpuworker", m->cfg_use_shared_worker)
 	  .add_option_int("-ll:pin", m->cfg_pin_sysmem)
 	  .add_option_bool("-cuda:callbacks", m->cfg_fences_use_callbacks)
-	  .add_option_bool("-cuda:nohijack", m->cfg_suppress_hijack_warning);
+	  .add_option_bool("-cuda:nohijack", m->cfg_suppress_hijack_warning)
+	  .add_option_int("-cuda:skipgpus", m->cfg_skip_gpu_count)
+	  .add_option_bool("-cuda:skipbusy", m->cfg_skip_busy_gpus)
+	  .add_option_int_units("-cuda:minavailmem", m->cfg_min_avail_mem, 'm');
 	
 	bool ok = cp.parse_command_line(cmdline);
 	if(!ok) {
@@ -2721,12 +2741,6 @@ namespace Realm {
     {
       Module::initialize(runtime);
 
-      // sanity-check: do we even have enough gpus?
-      if(cfg_num_gpus > gpu_info.size()) {
-	log_gpu.fatal() << cfg_num_gpus << " GPUs requested, but only " << gpu_info.size() << " available!";
-	assert(false);
-      }
-
       // if we are using a shared worker, create that next
       if(cfg_use_shared_worker) {
 	shared_worker = new GPUWorker;
@@ -2736,9 +2750,41 @@ namespace Realm {
 						 1 << 20); // hardcoded worker stack size
       }
 
-      // just use the GPUs in order right now
       gpus.resize(cfg_num_gpus);
-      for(unsigned i = 0; i < cfg_num_gpus; i++) {
+      unsigned gpu_count = 0;
+      // try to get cfg_num_gpus, working through the list in order
+      for(size_t i = cfg_skip_gpu_count;
+          (i < gpu_info.size()) && (gpu_count < cfg_num_gpus);
+          i++) {
+	// try to create a context and possibly check available memory
+	CUcontext context;
+	CUresult res = cuCtxCreate(&context,
+				   CU_CTX_MAP_HOST | CU_CTX_SCHED_BLOCKING_SYNC,
+				   gpu_info[i]->device);
+	// a busy GPU might return INVALID_DEVICE or OUT_OF_MEMORY here
+	if((res == CUDA_ERROR_INVALID_DEVICE) ||
+	   (res == CUDA_ERROR_OUT_OF_MEMORY)) {
+	  if(cfg_skip_busy_gpus) {
+	    log_gpu.info() << "GPU " << gpu_info[i]->device << " appears to be busy (res=" << res << ") - skipping";
+	    continue;
+	  } else {
+	    log_gpu.fatal() << "GPU " << gpu_info[i]->device << " appears to be in use - use CUDA_VISIBLE_DEVICES, -cuda:skipgpus, or -cuda:skipbusy to select other GPUs";
+	    abort();
+	  }
+	}
+	// any other error is a (unknown) problem
+	CHECK_CU(res);
+
+	if(cfg_min_avail_mem > 0) {
+	  size_t total_mem, avail_mem;
+	  CHECK_CU( cuMemGetInfo(&avail_mem, &total_mem) );
+	  if(avail_mem < cfg_min_avail_mem) {
+	    log_gpu.info() << "GPU " << gpu_info[i]->device << " does not have enough available memory (" << avail_mem << " < " << cfg_min_avail_mem << ") - skipping";
+	    CHECK_CU( cuCtxDestroy(context) );
+	    continue;
+	  }
+	}
+	
 	// either create a worker for this GPU or use the shared one
 	GPUWorker *worker;
 	if(cfg_use_shared_worker) {
@@ -2751,12 +2797,18 @@ namespace Realm {
 					    1 << 20); // hardcoded worker stack size
 	}
 
-	GPU *g = new GPU(this, gpu_info[i], worker, cfg_gpu_streams);
+	GPU *g = new GPU(this, gpu_info[i], worker, context, cfg_gpu_streams);
 
 	if(!cfg_use_shared_worker)
 	  dedicated_workers[g] = worker;
 
-	gpus[i] = g;
+	gpus[gpu_count++] = g;
+      }
+
+      // did we actually get the requested number of GPUs?
+      if(gpu_count < cfg_num_gpus) {
+	log_gpu.fatal() << cfg_num_gpus << " GPUs requested, but only " << gpu_count << " available!";
+	assert(false);
       }
     }
 
@@ -3010,6 +3062,7 @@ namespace Realm {
     }
 
 
+#ifdef REALM_USE_CUDART_HIJACK
     ////////////////////////////////////////////////////////////////////////
     //
     // struct RegisteredFunction
@@ -3153,6 +3206,7 @@ namespace Realm {
 	  it++)
 	(*it)->register_function(func);
     }
+#endif
 
 
   }; // namespace Cuda

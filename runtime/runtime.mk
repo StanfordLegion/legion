@@ -358,6 +358,10 @@ NVCC	        ?= $(CUDA)/bin/nvcc
 # Latter is preferred, former is for backwards compatability
 REALM_CC_FLAGS        += -DUSE_CUDA -DREALM_USE_CUDA
 LEGION_CC_FLAGS       += -DLEGION_USE_CUDA
+USE_CUDART_HIJACK ?= 1
+ifeq ($(strip $(USE_CUDART_HIJACK)),1)
+REALM_CC_FLAGS        += -DREALM_USE_CUDART_HIJACK
+endif
 INC_FLAGS	+= -I$(CUDA)/include -I$(LG_RT_DIR)/realm/transfer
 ifeq ($(strip $(DEBUG)),1)
 NVCC_FLAGS	+= -g -O0
@@ -366,9 +370,17 @@ else
 NVCC_FLAGS	+= -O2
 endif
 ifeq ($(strip $(DARWIN)),1)
+ifeq ($(strip $(USE_CUDART_HIJACK)),1)
 LEGION_LD_FLAGS	+= -L$(CUDA)/lib -lcuda
 else
+LEGION_LD_FLAGS	+= -L$(CUDA)/lib -lcudart -lcuda
+endif
+else
+ifeq ($(strip $(USE_CUDART_HIJACK)),1)
 LEGION_LD_FLAGS	+= -L$(CUDA)/lib64 -L$(CUDA)/lib64/stubs -lcuda -Xlinker -rpath=$(CUDA)/lib64
+else
+LEGION_LD_FLAGS	+= -L$(CUDA)/lib64 -L$(CUDA)/lib64/stubs -lcudart -lcuda -Xlinker -rpath=$(CUDA)/lib64
+endif
 endif
 # Add support for Legion GPU reductions
 CC_FLAGS	+= -DLEGION_GPU_REDUCTIONS
@@ -643,8 +655,10 @@ REALM_SRC 	+= $(LG_RT_DIR)/realm/python/python_module.cc \
 		   $(LG_RT_DIR)/realm/python/python_source.cc
 endif
 ifeq ($(strip $(USE_CUDA)),1)
-REALM_SRC 	+= $(LG_RT_DIR)/realm/cuda/cuda_module.cc \
-		   $(LG_RT_DIR)/realm/cuda/cudart_hijack.cc
+REALM_SRC 	+= $(LG_RT_DIR)/realm/cuda/cuda_module.cc
+ifeq ($(strip $(USE_CUDART_HIJACK)),1)
+REALM_SRC       += $(LG_RT_DIR)/realm/cuda/cudart_hijack.cc
+endif
 endif
 ifeq ($(strip $(USE_LLVM)),1)
 REALM_SRC 	+= $(LG_RT_DIR)/realm/llvmjit/llvmjit_module.cc \
