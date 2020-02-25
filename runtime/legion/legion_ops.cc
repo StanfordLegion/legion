@@ -13188,11 +13188,10 @@ namespace Legion {
             (*it)->log_requirement();
         }
         // Launch the points
-        std::set<RtEvent> mapped_preconditions;
         for (std::vector<PointDepPartOp*>::const_iterator it = 
               points.begin(); it != points.end(); it++)
         {
-          mapped_preconditions.insert((*it)->get_mapped_event());
+          map_applied_conditions.insert((*it)->get_mapped_event());
           (*it)->launch();
         }
 #ifdef LEGION_SPY
@@ -13200,7 +13199,7 @@ namespace Legion {
                                         completion_event);
 #endif
         // We are mapped when all our points are mapped
-        complete_mapping(Runtime::merge_events(mapped_preconditions));
+        finalize_mapping();
       }
       else
       {
