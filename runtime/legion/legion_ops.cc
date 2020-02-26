@@ -4861,6 +4861,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert((tpl != NULL) && tpl->is_recording());
 #endif
+        // This can happen in cases when the copy index space is empty
+        if (!copy_done.exists())
+          copy_done = execution_fence_event;
         tpl->record_trigger_event(local_completion, copy_done);
       }
 #ifdef DEBUG_LEGION
@@ -6394,7 +6397,12 @@ namespace Legion {
       // Then call replay analysis on all of them
       for (std::vector<PointCopyOp*>::const_iterator it = 
             points.begin(); it != points.end(); it++)
+      {
+        (*it)->resolve_speculation();
         (*it)->replay_analysis();
+      }
+      complete_mapping();
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -15042,7 +15050,12 @@ namespace Legion {
       // Then call replay analysis on all of them
       for (std::vector<PointFillOp*>::const_iterator it = 
             points.begin(); it != points.end(); it++)
+      {
+        (*it)->resolve_speculation();
         (*it)->replay_analysis();
+      }
+      complete_mapping();
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------
