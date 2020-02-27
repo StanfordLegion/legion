@@ -723,10 +723,14 @@ function parser.expr_prefix(p)
       }
     -- case 2: old-style partition
     -- partition(disjointness, [completeness ,] region, colorring [,colorspace])
-    -- TODO @ndrewtl add completeness parameter here
     elseif p:is_disjointness_kind() then
       local disjointness = p:disjointness_kind()
       p:expect(",")
+      local completeness = false
+      if p:is_completeness_kind() then
+        completeness = p:completeness_kind()
+        p:expect(",")
+      end
       local region = p:expr()
       p:expect(",")
       local coloring = p:expr()
@@ -738,6 +742,7 @@ function parser.expr_prefix(p)
       p:expect(")")
       return ast.unspecialized.expr.Partition {
         disjointness = disjointness,
+        completeness = completeness,
         region = region,
         coloring = coloring,
         colors = colors,

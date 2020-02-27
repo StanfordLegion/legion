@@ -4562,8 +4562,7 @@ function codegen.expr_partition(cx, node)
     coloring_type == std.c.legion_domain_point_coloring_t or
     coloring_type == std.c.legion_multi_domain_point_coloring_t
   then
-    args:insert(
-      (partition_type:is_disjoint() and c.DISJOINT_KIND) or c.ALIASED_KIND)
+    args:insert(get_legion_partition_kind(node.disjointness, node.completeness))
   else
     assert(false)
   end

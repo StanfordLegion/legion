@@ -1553,6 +1553,7 @@ end
 
 function type_check.expr_partition(cx, node)
   local disjointness = node.disjointness
+  local completeness = node.completeness or std.incomplete
   local region = type_check.expr(cx, node.region)
   local region_type = std.check_read(cx, region)
   local coloring = type_check.expr(cx, node.coloring)
@@ -1562,6 +1563,8 @@ function type_check.expr_partition(cx, node)
 
   -- Note: This test can't fail because disjointness is tested in the parser.
   assert(disjointness:is(ast.disjointness_kind))
+  -- This should pass because we fell back on std.incomplete above
+  assert(completeness:is(ast.completeness_kind))
 
   if not std.is_region(region_type) then
     report.error(node, "type mismatch in argument 2: expected region but got " ..
@@ -1629,7 +1632,7 @@ function type_check.expr_partition(cx, node)
   elseif colors then
     colors_symbol = std.newsymbol(colors_type)
   end
-  local expr_type = std.partition(disjointness, region_symbol, colors_symbol)
+  local expr_type = std.partition(disjointness, completeness, region_symbol, colors_symbol)
 
   -- Hack: Stuff the region type back into the partition's region
   -- argument, if necessary.
@@ -1640,6 +1643,7 @@ function type_check.expr_partition(cx, node)
 
   return ast.typed.expr.Partition {
     disjointness = disjointness,
+    completeness = completeness,
     region = region,
     coloring = coloring,
     colors = colors,

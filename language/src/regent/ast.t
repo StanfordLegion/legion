@@ -254,7 +254,7 @@ ast.unspecialized.expr:leaf("StaticCast", {"type_expr", "value"})
 ast.unspecialized.expr:leaf("UnsafeCast", {"type_expr", "value"})
 ast.unspecialized.expr:leaf("Ispace", {"index_type_expr", "extent", "start"})
 ast.unspecialized.expr:leaf("Region", {"ispace", "fspace_type_expr"})
-ast.unspecialized.expr:leaf("Partition", {"disjointness", "region", "coloring",
+ast.unspecialized.expr:leaf("Partition", {"disjointness", "completeness", "region", "coloring",
                                           "colors"})
 ast.unspecialized.expr:leaf("PartitionEqual", {"region", "colors"})
 ast.unspecialized.expr:leaf("PartitionByField", {"region", "colors", "completeness"})
@@ -384,7 +384,7 @@ ast.specialized.expr:leaf("StaticCast", {"value", "expr_type"})
 ast.specialized.expr:leaf("UnsafeCast", {"value", "expr_type"})
 ast.specialized.expr:leaf("Ispace", {"index_type", "extent", "start"})
 ast.specialized.expr:leaf("Region", {"ispace", "fspace_type"})
-ast.specialized.expr:leaf("Partition", {"disjointness", "region", "coloring",
+ast.specialized.expr:leaf("Partition", {"disjointness", "completeness", "region", "coloring",
                                         "colors"})
 ast.specialized.expr:leaf("PartitionEqual", {"region", "colors"})
 ast.specialized.expr:leaf("PartitionByField", {"region", "colors", "completeness"})
@@ -494,7 +494,7 @@ ast.typed.expr:leaf("StaticCast", {"value", "parent_region_map"})
 ast.typed.expr:leaf("UnsafeCast", {"value"})
 ast.typed.expr:leaf("Ispace", {"index_type", "extent", "start"})
 ast.typed.expr:leaf("Region", {"ispace", "fspace_type"})
-ast.typed.expr:leaf("Partition", {"disjointness", "region", "coloring",
+ast.typed.expr:leaf("Partition", {"disjointness", "completeness", "region", "coloring",
                                   "colors"})
 ast.typed.expr:leaf("PartitionEqual", {"region", "colors"})
 ast.typed.expr:leaf("PartitionByField", {"region", "colors", "completeness"})

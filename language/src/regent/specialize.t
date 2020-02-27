@@ -851,6 +851,7 @@ end
 function specialize.expr_partition(cx, node, allow_lists)
   return ast.specialized.expr.Partition {
     disjointness = specialize.disjointness_kind(cx, node.disjointness),
+    completeness = node.completeness and specialize.completeness_kind(cx, node.completeness),
     region = specialize.expr(cx, node.region),
     coloring = specialize.expr(cx, node.coloring),
     colors = node.colors and specialize.expr(cx, node.colors),

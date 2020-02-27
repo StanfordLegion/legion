@@ -204,6 +204,7 @@ end
 function ast_util.mk_expr_partition(partition_type, colors, coloring)
   return ast.typed.expr.Partition {
     disjointness = partition_type.disjointness,
+    completeness = partition_type.completeness,
     region = ast_util.mk_expr_id(partition_type.parent_region_symbol),
     coloring = coloring,
     colors = colors,
