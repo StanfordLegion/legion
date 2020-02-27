@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2020 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,19 +14,17 @@
  */
 
 ////////////////////////////////////////////////////////////
-// THIS EXAMPLE MUST BE BUILT WITH A VERSION
-// OF GASNET CONFIGURED WITH MPI COMPATIBILITY
 //
-// NOTE THAT GASNET ONLY SUPPORTS MPI-COMPATIBILITY
-// ON SOME CONDUITS. CURRENTLY THESE ARE IBV, GEMINI,
-// ARIES, MXM, and OFI. IF YOU WOULD LIKE ADDITIONAL
-// CONDUITS SUPPORTED PLEASE CONTACT THE MAINTAINERS
-// OF GASNET.
+// This example must be built with a Realm network layer
+// that is compatible with MPI (e.g. a GASNet conduit that
+// supports (and is built with) --enable-mpi-compat, or the
+// MPI network layer).
 //
-// Note: there is a way to use this example with the
-// MPI conduit, but you have to have a version of 
-// MPI that supports MPI_THREAD_MULTIPLE. See the 
-// macro GASNET_CONDUIT_MPI below.
+// Any network layer that uses MPI for any communication
+// during the application (rather than just for bootstrapping)
+// additionally requires that the MPI implementation support
+// MPI_THREAD_MULTIPLE.
+//
 ////////////////////////////////////////////////////////////
 
 #include <cstdio>
@@ -136,9 +134,9 @@ void top_level_task(const Task *task,
 
 int main(int argc, char **argv)
 {
-#ifdef GASNET_CONDUIT_MPI
-  // The GASNet MPI conduit requires special start-up
-  // in order to handle MPI calls from multiple threads
+#if defined(GASNET_CONDUIT_MPI) || defined(REALM_USE_MPI)
+  // The GASNet MPI conduit and/or the Realm MPI network layer
+  // require that MPI be initialized for multiple threads
   int provided;
   MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &provided);
   // If you fail this assertion, then your version of MPI
@@ -147,7 +145,8 @@ int main(int argc, char **argv)
   if (provided < MPI_THREAD_MULTIPLE)
     printf("ERROR: Your implementation of MPI does not support "
            "MPI_THREAD_MULTIPLE which is required for use of the "
-           "GASNet MPI conduit with the Legion-MPI Interop!\n");
+           "GASNet MPI conduit or the Realm MPI network layer "
+           "with the Legion-MPI Interop!\n");
   assert(provided == MPI_THREAD_MULTIPLE);
 #else
   // Perform MPI start-up like normal for most GASNet conduits
