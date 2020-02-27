@@ -617,6 +617,7 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
     cmdline = ['cmake', '-DCMAKE_INSTALL_PREFIX=%s' % install_dir ]
     cmdline.append('-DCMAKE_BUILD_TYPE=%s' % ('Debug' if env['DEBUG'] == '1' else
                                               'Release'))
+    cmdline.append('-DLegion_BUILD_WARN_AS_ERROR=%s' % ('ON' if env.get('WARN_AS_ERROR','0') == '1' else 'OFF'))
     cmdline.append('-DLegion_MAX_DIM=%s' % env['MAX_DIM'])
     cmdline.append('-DLegion_NETWORKS=%s' % env['REALM_NETWORKS'])
     cmdline.append('-DLegion_USE_CUDA=%s' % ('ON' if env['USE_CUDA'] == '1' else 'OFF'))

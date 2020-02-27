@@ -203,6 +203,7 @@ endforeach()
 find_package(Threads REQUIRED)
 add_library(RealmRuntime ${REALM_SRC})
 target_compile_definitions(RealmRuntime PUBLIC REALM_USE_CMAKE)
+target_compile_options(RealmRuntime PRIVATE ${CXX_BUILD_WARNING_FLAGS})
 if(Legion_USE_LIBDL)
   target_link_libraries(RealmRuntime PRIVATE ${CMAKE_DL_LIBS})
   if(APPLE)
@@ -361,6 +362,7 @@ set_target_properties(LegionRuntime PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(LegionRuntime PROPERTIES OUTPUT_NAME "legion${INSTALL_SUFFIX}")
 set_target_properties(LegionRuntime PROPERTIES SOVERSION ${SOVERSION})
 target_compile_definitions(LegionRuntime PUBLIC LEGION_USE_CMAKE)
+target_compile_options(LegionRuntime PRIVATE ${CXX_BUILD_WARNING_FLAGS})
 
 target_include_directories(LegionRuntime
   INTERFACE
