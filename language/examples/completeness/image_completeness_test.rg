@@ -32,9 +32,18 @@ task f()
   end
 
   var p = partition(complete, r.color, ispace(int1d, 3))
-  -- This file is identical to the region_partition_by_field.rg except this line, which adds a
-  -- (hopefully) well-formed call to image
-  var img = image(aliased, complete, r, p, r.color)
+  -- This file is identical to the region_partition_by_field.rg except these line, which add a
+  -- (hopefully) well-formed call to image. Our goal is to test every permuatation of disjointness
+  -- and completeness here
+  var img = image(r, p, r.color)
+  var img2 = image(incomplete, r, p, r.color)
+  var img3 = image(complete, r, p, r.color)
+  var img4 = image(aliased, r, p, r.color)
+  var img5 = image(aliased, incomplete, r, p, r.color)
+  var img6 = image(aliased, complete, r, p, r.color)
+  var img7 = image(disjoint, r, p, r.color)
+  var img8 = image(disjoint, incomplete, r, p, r.color)
+  var img9 = image(disjoint, complete, r, p, r.color)
 
   for i = 0, 3 do
     var ri = p[i]
