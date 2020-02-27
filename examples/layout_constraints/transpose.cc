@@ -28,7 +28,7 @@ enum TaskIDs {
 };
 
 enum FieldIDs {
-  FID_X,
+  FID_MATRIX,
 };
 
 void top_level_task(const Task *task,
@@ -58,8 +58,8 @@ void top_level_task(const Task *task,
   {
     FieldAllocator allocator = 
       runtime->create_field_allocator(ctx, matrix_fs);
-    allocator.allocate_field(sizeof(coord_t),FID_X);
-    runtime->attach_name(matrix_fs, FID_X, "X");
+    allocator.allocate_field(sizeof(coord_t),FID_MATRIX);
+    runtime->attach_name(matrix_fs, FID_MATRIX, "X");
   }
   LogicalRegion input_lr = runtime->create_logical_region(ctx, matrix_is, matrix_fs);
   runtime->attach_name(input_lr, "input_lr");
@@ -69,22 +69,22 @@ void top_level_task(const Task *task,
   TaskLauncher init_launcher(INIT_MATRIX_TASK_ID, TaskArgument()); 
   init_launcher.add_region_requirement(
       RegionRequirement(input_lr, WRITE_DISCARD, EXCLUSIVE, input_lr));
-  init_launcher.region_requirements[0].add_field(FID_X);
+  init_launcher.region_requirements[0].add_field(FID_MATRIX);
   runtime->execute_task(ctx, init_launcher);
 
   TaskLauncher transpose_launcher(TRANSPOSE_MATRIX_TASK_ID, TaskArgument());
   transpose_launcher.add_region_requirement(
       RegionRequirement(output_lr, WRITE_DISCARD, EXCLUSIVE, output_lr));
-  transpose_launcher.region_requirements[0].add_field(FID_X);
+  transpose_launcher.region_requirements[0].add_field(FID_MATRIX);
   transpose_launcher.add_region_requirement(
       RegionRequirement(input_lr, READ_ONLY, EXCLUSIVE, input_lr));
-  transpose_launcher.region_requirements[1].add_field(FID_X);
+  transpose_launcher.region_requirements[1].add_field(FID_MATRIX);
   runtime->execute_task(ctx, transpose_launcher);
 
   TaskLauncher check_launcher(CHECK_MATRIX_TASK_ID, TaskArgument()); 
   check_launcher.add_region_requirement(
       RegionRequirement(output_lr, READ_ONLY, EXCLUSIVE, output_lr));
-  check_launcher.region_requirements[0].add_field(FID_X);
+  check_launcher.region_requirements[0].add_field(FID_MATRIX);
   runtime->execute_task(ctx, check_launcher);
 
   runtime->destroy_logical_region(ctx, input_lr);
@@ -121,10 +121,10 @@ void transpose_matrix_task(const Task *task,
   assert(regions.size() == 2);
   assert(task->regions.size() == 2);
   const FieldAccessor<WRITE_DISCARD,coord_t,2,coord_t,
-        Realm::AffineAccessor<coord_t,2,coord_t> > acc_out(regions[0], FID_X);
+        Realm::AffineAccessor<coord_t,2,coord_t> > acc_out(regions[0], FID_MATRIX);
   const FieldAccessor<READ_ONLY,coord_t,2,coord_t,
-        Realm::AffineAccessor<coord_t,2,coord_t> > acc_in(regions[1], FID_X);
-  printf("Transposing regions...\n");
+        Realm::AffineAccessor<coord_t,2,coord_t> > acc_in(regions[1], FID_MATRIX);
+  printf("Transposing matrix...\n");
   Rect<2> rect = runtime->get_index_space_domain(ctx,
                   task->regions[0].region.get_index_space());
 #ifdef SAFE_TRANSPOSE
@@ -136,7 +136,7 @@ void transpose_matrix_task(const Task *task,
   // Note that because we've explicitly specified layout constraints 
   // with opposing dimension orders when we registered this task variant
   // then we can just do a straight memcpy here as the transpose was 
-  // done by the DMA engine on the way in.
+  // done by the DMA engine for the input to row-major layout
   const coord_t *in_ptr = acc_in.ptr(rect);
   coord_t *out_ptr = acc_out.ptr(rect);
   memcpy(out_ptr, in_ptr, rect.volume() * sizeof(coord_t));
@@ -150,7 +150,7 @@ void check_matrix_task(const Task *task,
   assert(regions.size() == 1);
   assert(task->regions.size() == 1);
   const FieldAccessor<READ_ONLY,coord_t,2,coord_t,
-        Realm::AffineAccessor<coord_t,2,coord_t> > acc(regions[0], FID_X);
+        Realm::AffineAccessor<coord_t,2,coord_t> > acc(regions[0], FID_MATRIX);
 
   printf("Checking results...\n");
   Rect<2> rect = runtime->get_index_space_domain(ctx,
@@ -174,31 +174,23 @@ int main(int argc, char **argv)
 
   LayoutConstraintID column_major;
   {
-    OrderingConstraint order;
+    OrderingConstraint order(true/*contiguous*/);
     order.ordering.push_back(DIM_X);
     order.ordering.push_back(DIM_Y);
     order.ordering.push_back(DIM_F);
-    order.contiguous = true;
-    FieldConstraint fields;
-    fields.field_set.push_back(FID_X);
     LayoutConstraintRegistrar registrar;
     registrar.add_constraint(order);
-    registrar.add_constraint(fields);
     column_major = Runtime::preregister_layout(registrar);
   }
 
   LayoutConstraintID row_major;
   {
-    OrderingConstraint order;
+    OrderingConstraint order(true/*contiguous*/);
     order.ordering.push_back(DIM_Y);
     order.ordering.push_back(DIM_X);
     order.ordering.push_back(DIM_F);
-    order.contiguous = true;
-    FieldConstraint fields;
-    fields.field_set.push_back(FID_X);
     LayoutConstraintRegistrar registrar;
     registrar.add_constraint(order);
-    registrar.add_constraint(fields);
     row_major = Runtime::preregister_layout(registrar);
   }
 
