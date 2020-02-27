@@ -1947,44 +1947,57 @@ namespace Legion {
         // Get the constraints
         const LayoutConstraintSet &index_constraints = 
                   runtime->find_layout_constraints(ctx, lay_it->second);
-        std::vector<FieldID> overlaping_fields;
+        std::vector<FieldID> overlapping_fields;
         const std::vector<FieldID> &constraint_fields = 
           index_constraints.field_constraint.get_field_set();
-        for (unsigned idx = 0; idx < constraint_fields.size(); idx++)
+        if (!constraint_fields.empty())
         {
-          FieldID fid = constraint_fields[idx];
-          std::set<FieldID>::iterator finder = needed_fields.find(fid);
-          if (finder != needed_fields.end())
+          for (unsigned idx = 0; idx < constraint_fields.size(); idx++)
           {
-            overlaping_fields.push_back(fid);
-            // Remove from the needed fields since we're going to handle it
-            needed_fields.erase(finder);
+            FieldID fid = constraint_fields[idx];
+            std::set<FieldID>::iterator finder = needed_fields.find(fid);
+            if (finder != needed_fields.end())
+            {
+              overlapping_fields.push_back(fid);
+              // Remove from the needed fields since we're going to handle it
+              needed_fields.erase(finder);
+            }
           }
+          // If we don't have any overlapping fields, then keep going
+          if (overlapping_fields.empty())
+            continue;
         }
-        // If we don't have any overlapping fields, then keep going
-        if (overlaping_fields.empty())
-          continue;
+        else // otherwise it applies to all the fields
+        {
+          overlapping_fields.insert(overlapping_fields.end(),
+              needed_fields.begin(), needed_fields.end());
+          needed_fields.clear();
+        }
         // Now figure out how to make an instance
         instances.resize(instances.size()+1);
         // Check to see if these constraints conflict with our constraints
-        if (runtime->do_constraints_conflict(ctx, 
-                                              our_layout_id, lay_it->second))
+        // or whether they entail our mapper preferred constraints
+        if (runtime->do_constraints_conflict(ctx, our_layout_id, lay_it->second)
+            || runtime->do_constraints_entail(ctx, lay_it->second, our_layout_id))
         {
-          // They conflict, so we're just going to make an instance
-          // using these constraints
-          if (!default_make_instance(ctx, target_memory, index_constraints,
+          // They conflict or they entail our constraints so we're just going 
+          // to make an instance using these constraints
+          // Check to see if they have fields and if not constraints with fields
+          if (constraint_fields.empty())
+          {
+            LayoutConstraintSet creation_constraints = index_constraints;
+            creation_constraints.add_constraint(
+                FieldConstraint(overlapping_fields, 
+                  index_constraints.field_constraint.contiguous,
+                  index_constraints.field_constraint.inorder));
+            if (!default_make_instance(ctx, target_memory, creation_constraints,
+                         instances.back(), TASK_MAPPING, force_new_instances, 
+                         true/*meets*/, req, footprint))
+              return false;
+          }
+          else if (!default_make_instance(ctx, target_memory, index_constraints,
                      instances.back(), TASK_MAPPING, force_new_instances, 
                      false/*meets*/, req, footprint))
-            return false;
-        }
-        else if (runtime->do_constraints_entail(ctx, 
-                                                 lay_it->second, our_layout_id))
-        {
-          // These constraints do everything we want to do and maybe more
-          // so we can just use them directly
-          if (!default_make_instance(ctx, target_memory, index_constraints,
-                      instances.back(), TASK_MAPPING, force_new_instances, 
-                      true/*meets*/, req, footprint))
             return false;
         }
         else
@@ -1995,8 +2008,11 @@ namespace Legion {
           default_policy_select_constraints(ctx, creation_constraints, 
                                             target_memory, req);
           creation_constraints.add_constraint(
-              FieldConstraint(overlaping_fields,
-                false/*contig*/, false/*inorder*/));
+              FieldConstraint(overlapping_fields,
+                creation_constraints.field_constraint.contiguous ||
+                index_constraints.field_constraint.contiguous,
+                creation_constraints.field_constraint.inorder ||
+                index_constraints.field_constraint.inorder));
           if (!default_make_instance(ctx, target_memory, creation_constraints,
                          instances.back(), TASK_MAPPING, force_new_instances, 
                          true/*meets*/, req, footprint))
