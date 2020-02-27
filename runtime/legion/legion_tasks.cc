@@ -3464,12 +3464,16 @@ namespace Legion {
         // going to apply to any actual instances
         const std::vector<FieldID> &field_vec = 
           constraints->field_constraint.field_set;
-        if (field_vec.empty())
-          continue;
-        FieldSpaceNode *field_node = runtime->forest->get_node(
-                            regions[it->first].region.get_field_space());
-        std::set<FieldID> field_set(field_vec.begin(), field_vec.end());
-        const FieldMask constraint_mask = field_node->get_field_mask(field_set);
+        FieldMask constraint_mask;
+        if (!field_vec.empty())
+        {
+          FieldSpaceNode *field_node = runtime->forest->get_node(
+                              regions[it->first].region.get_field_space());
+          std::set<FieldID> field_set(field_vec.begin(), field_vec.end());
+          constraint_mask = field_node->get_field_mask(field_set);
+        }
+        else
+          constraint_mask = FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
         const LayoutConstraint *conflict_constraint = NULL;
         for (unsigned idx = 0; idx < instances.size(); idx++)
         {

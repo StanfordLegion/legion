@@ -128,6 +128,15 @@ if(REALM_USE_GASNET1)
   )
 endif()
 
+if(REALM_USE_MPI)
+  list(APPEND REALM_SRC
+    realm/mpi/mpi_module.h
+    realm/mpi/mpi_module.cc
+    realm/mpi/am_mpi.h
+    realm/mpi/am_mpi.cc
+  )
+endif()
+
 list(APPEND REALM_SRC
   realm.h
   realm/activemsg.h realm/activemsg.cc
@@ -214,6 +223,10 @@ endif()
 
 if(REALM_USE_GASNET1)
   target_link_libraries(RealmRuntime PRIVATE GASNet::GASNet)
+endif()
+
+if(REALM_USE_MPI)
+  target_link_libraries(RealmRuntime PRIVATE MPI::MPI_CXX)
 endif()
 
 if(Legion_USE_LLVM)

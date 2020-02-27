@@ -792,8 +792,8 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    FieldConstraint::FieldConstraint(void)
-      : contiguous(false)
+    FieldConstraint::FieldConstraint(bool contig, bool in)
+      : contiguous(contig), inorder(in)
     //--------------------------------------------------------------------------
     {
     }
@@ -825,6 +825,15 @@ namespace Legion {
         return false;
       if (field_set.size() < other.field_set.size())
         return false; // can't have all the fields
+      // If the other can have any fields then we can just test directly
+      if (field_set.empty() || other.field_set.empty())
+      {
+        if (other.contiguous && !contiguous)
+          return false;
+        if (other.inorder && !inorder)
+          return false;
+        return true;
+      }
       // Find the indexes of the other fields in our set
       std::vector<unsigned> field_indexes(other.field_set.size());
       unsigned local_idx = 0;
@@ -922,6 +931,10 @@ namespace Legion {
         return true;
       if (other.field_set.empty())
         return false;
+      // If we can have any of their fields and we haven't explicitly
+      // specified which ones we don't have then we don't conflict
+      if (field_set.empty() || other.field_set.empty())
+        return false;
       // See if they need us to be inorder
       if (other.inorder)
       {
@@ -1002,8 +1015,8 @@ namespace Legion {
     void FieldConstraint::serialize(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
-      rez.serialize(contiguous);
-      rez.serialize(inorder);
+      rez.serialize<bool>(contiguous);
+      rez.serialize<bool>(inorder);
       rez.serialize<size_t>(field_set.size());
       for (std::vector<FieldID>::const_iterator it = field_set.begin();
             it != field_set.end(); it++)
@@ -1014,8 +1027,8 @@ namespace Legion {
     void FieldConstraint::deserialize(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      derez.deserialize(contiguous);
-      derez.deserialize(inorder);
+      derez.deserialize<bool>(contiguous);
+      derez.deserialize<bool>(inorder);
       size_t num_orders;
       derez.deserialize(num_orders);
       field_set.resize(num_orders);
@@ -1029,8 +1042,8 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    OrderingConstraint::OrderingConstraint(void)
-      : contiguous(false)
+    OrderingConstraint::OrderingConstraint(bool contig)
+      : contiguous(contig)
     //--------------------------------------------------------------------------
     {
     }

@@ -515,7 +515,12 @@ ifneq ($(findstring gasnet1,$(REALM_NETWORKS)),)
     REALM_CC_FLAGS	+= -DGASNET_CONDUIT_UDP
     LEGION_LD_FLAGS	+= -lgasnet-udp-par -lamudp
   endif
+endif
 
+# Realm uses MPI if requested
+ifneq ($(findstring mpi,$(REALM_NETWORKS)),)
+    REALM_CC_FLAGS        += -DREALM_USE_MPI
+    USE_MPI = 1
 endif
 
 # Realm doesn't use HDF by default
@@ -643,6 +648,10 @@ REALM_SRC 	+= $(LG_RT_DIR)/realm/numa/numa_module.cc \
 ifneq ($(findstring gasnet1,$(REALM_NETWORKS)),)
 REALM_SRC 	+= $(LG_RT_DIR)/realm/gasnet1/gasnet1_module.cc \
                    $(LG_RT_DIR)/realm/gasnet1/gasnetmsg.cc
+endif
+ifneq ($(findstring mpi,$(REALM_NETWORKS)),)
+REALM_SRC 	+= $(LG_RT_DIR)/realm/mpi/mpi_module.cc \
+                   $(LG_RT_DIR)/realm/mpi/am_mpi.cc
 endif
 ifeq ($(strip $(USE_OPENMP)),1)
 REALM_SRC 	+= $(LG_RT_DIR)/realm/openmp/openmp_module.cc \

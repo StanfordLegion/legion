@@ -2050,10 +2050,14 @@ namespace Legion {
         if (!non_dominated)
           return true;
       }
-
 #ifdef DEBUG_LEGION
       assert(!!non_dominated);
 #endif
+      // In the case where we have a manager for an empty instance then
+      // it does not have to be explicitly dominated
+      PhysicalManager *manager = view->get_manager();
+      if (manager->instance_domain->is_empty())
+        return true;
       return false;
     }
 

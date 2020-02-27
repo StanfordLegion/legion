@@ -419,7 +419,7 @@ namespace Legion {
       static const LayoutConstraintKind constraint_kind = 
                                             FIELD_CONSTRAINT;
     public:
-      FieldConstraint(void);
+      FieldConstraint(bool contiguous = false, bool inorder = false);
       FieldConstraint(const std::vector<FieldID> &field_set,
                       bool contiguous, bool inorder = true);
       FieldConstraint(const std::set<FieldID> &field_set,
@@ -471,7 +471,7 @@ namespace Legion {
       static const LayoutConstraintKind constraint_kind = 
                                             ORDERING_CONSTRAINT;
     public:
-      OrderingConstraint(void);
+      OrderingConstraint(bool contiguous = false);
       OrderingConstraint(const std::vector<DimensionKind> &ordering,
                          bool contiguous);
     public:
