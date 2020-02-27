@@ -59,6 +59,8 @@
 #cmakedefine GASNET_CONDUIT_GEMINI
 #cmakedefine GASNET_CONDUIT_PSM
 
+#cmakedefine REALM_USE_MPI
+
 #ifndef REALM_USE_LLVM
 #cmakedefine REALM_USE_LLVM
 #cmakedefine REALM_LLVM_VERSION @REALM_LLVM_VERSION@
