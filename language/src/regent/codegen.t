@@ -2343,12 +2343,37 @@ function codegen.expr_field_access(cx, node)
     local value = codegen.expr(cx, node.value):read(cx)
     local expr_type = std.as_read(node.expr_type)
     local is = terralib.newsymbol(c.legion_index_space_t, "colors")
+
+    local bounds_actions, domain, bounds = index_space_bounds(cx, is, expr_type)
+
+    local it = false
+    if cache_index_iterator then
+      it = terralib.newsymbol(c.legion_terra_cached_index_iterator_t, "it")
+    end
+
     local actions = quote
       [value.actions]
       var [is] =
         c.legion_index_partition_get_color_space([cx.runtime],
                                                  [value.value].impl.index_partition)
+      [bounds_actions]
     end
+
+    if cache_index_iterator then
+      actions = quote
+        [actions];
+        var [it] = c.legion_terra_cached_index_iterator_create(
+          [cx.runtime], [cx.context], [is])
+      end
+    end
+
+    cx:add_ispace_root(
+      expr_type,
+      is,
+      it,
+      domain,
+      bounds)
+
     return values.value(
       node,
       expr.once_only(
