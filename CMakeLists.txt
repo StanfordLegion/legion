@@ -123,17 +123,24 @@ endif()
 # -O3 to -O2 and removes -DNDEBUG
 set(CMAKE_CXX_FLAGS_RELEASE "-O2")
 
-# For debug we can see if it supports the new -Og flag that gcc added recently
-check_cxx_compiler_flag("-Og" COMPILER_SUPPORTS_DEBUG_OPTIMIZATIONS)
-if(COMPILER_SUPPORTS_DEBUG_OPTIMIZATIONS)
-  set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -Og")
-endif()
-
 # Legion can't handle certain optimizations. See:
 # https://github.com/StanfordLegion/legion/issues/168#issuecomment-244582958
 check_cxx_compiler_flag("-fno-strict-aliasing" COMPILER_SUPPORTS_NO_STRICT_ALIASING)
 if(COMPILER_SUPPORTS_NO_STRICT_ALIASING)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-strict-aliasing")
+endif()
+
+# if requested (and we know how to) make any warnings during the build fatal
+option(Legion_BUILD_WARN_AS_ERROR "Consider warnings during build of Legion to be fatal errors" OFF)
+if(Legion_BUILD_WARN_AS_ERROR)
+  check_cxx_compiler_flag("-Wall -Werror" COMPILER_SUPPORTS_WALL_WERROR)
+  if(COMPILER_SUPPORTS_WALL_WERROR)
+    set(CXX_BUILD_WARNING_FLAGS -Wall -Werror)
+  else()
+    message(FATAL_ERROR "cannot determine how to convert warnings to errors in C++ compiler")
+  endif()
+else()
+  set(CXX_BUILD_WARNING_FLAGS "")
 endif()
 
 #------------------------------------------------------------------------------#
