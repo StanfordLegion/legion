@@ -1605,6 +1605,16 @@ namespace Legion {
               conflicts = true;
               break;
             }
+            if (constraints->specialized_constraint.is_exact())
+            {
+              std::vector<LogicalRegion> regions_to_check(1,
+                        task.regions[lay_it->first].region);
+              if (!manager->meets_regions(regions_to_check, true/*exact*/))
+              {
+                conflicts = true;
+                break;
+              }
+            }
           }
           if (conflicts)
             break;
@@ -1650,6 +1660,15 @@ namespace Legion {
             PhysicalManager *manager = it->impl;
             if (manager->conflicts(constraints, NULL))
               it = instances.erase(it);
+            else if (constraints->specialized_constraint.is_exact())
+            {
+              std::vector<LogicalRegion> regions_to_check(1,
+                        task.regions[lay_it->first].region);
+              if (!manager->meets_regions(regions_to_check,true/*tight*/))
+                it = instances.erase(it);
+              else
+                it++;
+            }
             else
               it++;
           }
@@ -1698,6 +1717,15 @@ namespace Legion {
           PhysicalManager *manager = it->impl;
           if (manager->conflicts(constraints, NULL))
             it = instances.erase(it);
+          else if (constraints->specialized_constraint.is_exact())
+          {
+            std::vector<LogicalRegion> regions_to_check(1,
+                      task.regions[lay_it->first].region);
+            if (!manager->meets_regions(regions_to_check,true/*tight*/))
+              it = instances.erase(it);
+            else
+              it++;
+          }
           else
             it++;
         }

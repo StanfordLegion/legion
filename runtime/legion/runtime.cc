@@ -250,7 +250,7 @@ namespace Legion {
       // We know that they are already completed 
       DistributedID did = runtime->get_available_distributed_id();
       future_map = new FutureMapImpl(ctx, runtime, did,
-          runtime->address_space, ApEvent::NO_AP_EVENT);
+          runtime->address_space, RtEvent::NO_RT_EVENT);
       future_map->add_base_gc_ref(FUTURE_HANDLE_REF);
       future_map->set_all_futures(arguments);
 #ifdef DEBUG_LEGION
@@ -1074,8 +1074,8 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    FutureMapImpl::FutureMapImpl(TaskContext *ctx, Operation *o, Runtime *rt,
-                                 DistributedID did, AddressSpaceID owner_space)
+    FutureMapImpl::FutureMapImpl(TaskContext *ctx, Operation *o, RtEvent ready,
+                     Runtime *rt, DistributedID did, AddressSpaceID owner_space)
       : DistributedCollectable(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC),  owner_space), 
         context(ctx), op(o), op_gen(o->get_generation()), 
@@ -1083,7 +1083,7 @@ namespace Legion {
 #ifdef LEGION_SPY
         op_uid(o->get_unique_op_id()),
 #endif
-        ready_event(o->get_completion_event())
+        ready_event(ready)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_GC
@@ -1095,7 +1095,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureMapImpl::FutureMapImpl(TaskContext *ctx, Runtime *rt,
                                  DistributedID did, AddressSpaceID owner_space,
-                                 ApEvent ready, bool register_now)
+                                 RtEvent ready, bool register_now)
       : DistributedCollectable(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC), 
           owner_space, register_now), 
@@ -1190,22 +1190,22 @@ namespace Legion {
             return finder->second;
         }
         // Make an event for when we have the answer
-        RtUserEvent ready_event = Runtime::create_rt_user_event();
+        RtUserEvent future_ready_event = Runtime::create_rt_user_event();
         // If not send a message to get it
         Serializer rez;
         {
           RezCheck z(rez);
           rez.serialize(did);
           rez.serialize(point);
-          rez.serialize(ready_event);
+          rez.serialize(future_ready_event);
         }
         runtime->send_future_map_request_future(owner_space, rez);
         if (wait_on != NULL)
         {
-          *wait_on = ready_event;
+          *wait_on = future_ready_event;
           return Future();
         }
-        ready_event.wait(); 
+        future_ready_event.wait(); 
         // When we wake up it should be here
         AutoLock fm_lock(future_map_lock,1,false/*exlusive*/);
         std::map<DomainPoint,Future>::const_iterator finder = 
@@ -1244,11 +1244,12 @@ namespace Legion {
           return finder->second;
         // Otherwise we need a future from the context to use for
         // the point that we will fill in later
-        Future result = runtime->help_create_future(ready_event, op);
+        Future result = 
+          runtime->help_create_future(ApEvent::NO_AP_EVENT, op);
         futures[point] = result;
         if (runtime->legion_spy_enabled)
           LegionSpy::log_future_creation(op->get_unique_op_id(),
-                         result.impl->get_ready_event(), point);
+                                   ApEvent::NO_AP_EVENT, point);
         return result;
       }
     }
@@ -1324,12 +1325,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool FutureMapImpl::reset_all_futures(void)
+    bool FutureMapImpl::reset_all_futures(RtEvent new_ready_event)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(is_owner());
 #endif
+      // TODO: send messages to all the remote copies of this
+      assert(false);
       bool result = false;
       AutoLock fm_lock(future_map_lock);
       for (std::map<DomainPoint,Future>::const_iterator it = 
@@ -18630,7 +18633,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMapImpl* Runtime::find_or_create_future_map(DistributedID did,
-                  TaskContext *ctx, ApEvent complete, ReferenceMutator *mutator)
+                  TaskContext *ctx, RtEvent complete, ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       did &= LEGION_DISTRIBUTED_ID_MASK;

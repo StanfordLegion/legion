@@ -2573,7 +2573,7 @@ legion_predicate_create(legion_runtime_t runtime_,
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   Future *f = CObjectWrapper::unwrap(f_);
 
-  Predicate result = runtime->create_predicate(ctx, f);
+  Predicate result = runtime->create_predicate(ctx, *f);
   return CObjectWrapper::wrap(new Predicate(result));
 }
 
@@ -2814,6 +2814,16 @@ legion_future_get_void_result(legion_future_t handle_)
   handle->get_void_result();
 }
 
+void
+legion_future_wait(legion_future_t handle_,
+                   bool silence_warnings,
+                   const char *warning_string)
+{
+  Future *handle = CObjectWrapper::unwrap(handle_);
+
+  handle->get_void_result(silence_warnings, warning_string);
+}
+
 bool
 legion_future_is_empty(legion_future_t handle_,
                        bool block /* = false */)
@@ -2894,7 +2904,7 @@ legion_future_map_get_future(legion_future_map_t fm_,
 }
 
 legion_future_t
-legion_reduce_future_map(legion_runtime_t runtime_,
+legion_future_map_reduce(legion_runtime_t runtime_,
                          legion_context_t ctx_,
                          legion_future_map_t fm_,
                          legion_reduction_op_id_t redop,
@@ -4062,6 +4072,7 @@ legion_copy_launcher_add_src_indirect_region_requirement_logical_region(
   legion_coherence_property_t prop,
   legion_logical_region_t parent_,
   legion_mapping_tag_id_t tag /* = 0 */,
+  bool is_range_indirection /* = false */,
   bool verified /* = false*/)
 {
   CopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
@@ -4069,8 +4080,9 @@ legion_copy_launcher_add_src_indirect_region_requirement_logical_region(
   LogicalRegion parent = CObjectWrapper::unwrap(parent_);
 
   unsigned idx = launcher->src_requirements.size();
-  launcher->add_src_indirect_field(
-    RegionRequirement(handle, READ_ONLY, prop, parent, tag, verified), fid);
+  launcher->add_src_indirect_field(fid,
+    RegionRequirement(handle, READ_ONLY, prop, parent, tag, verified),
+    is_range_indirection);
   return idx;
 }
 
@@ -4082,6 +4094,7 @@ legion_copy_launcher_add_dst_indirect_region_requirement_logical_region(
   legion_coherence_property_t prop,
   legion_logical_region_t parent_,
   legion_mapping_tag_id_t tag /* = 0 */,
+  bool is_range_indirection /* = false */,
   bool verified /* = false*/)
 {
   CopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
@@ -4089,8 +4102,9 @@ legion_copy_launcher_add_dst_indirect_region_requirement_logical_region(
   LogicalRegion parent = CObjectWrapper::unwrap(parent_);
 
   unsigned idx = launcher->dst_requirements.size();
-  launcher->add_dst_indirect_field(
-    RegionRequirement(handle, READ_ONLY, prop, parent, tag, verified), fid);
+  launcher->add_dst_indirect_field(fid,
+    RegionRequirement(handle, READ_ONLY, prop, parent, tag, verified),
+    is_range_indirection);
   return idx;
 }
 
@@ -4330,6 +4344,7 @@ legion_index_copy_launcher_add_src_indirect_region_requirement_logical_region(
   legion_coherence_property_t prop,
   legion_logical_region_t parent_,
   legion_mapping_tag_id_t tag /* = 0 */,
+  bool is_range_indirection /* = false */,
   bool verified /* = false*/)
 {
   IndexCopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
@@ -4337,8 +4352,9 @@ legion_index_copy_launcher_add_src_indirect_region_requirement_logical_region(
   LogicalRegion parent = CObjectWrapper::unwrap(parent_);
 
   unsigned idx = launcher->src_requirements.size();
-  launcher->add_src_indirect_field(
-    RegionRequirement(handle, proj, READ_ONLY, prop, parent, tag, verified), fid);
+  launcher->add_src_indirect_field(fid,
+    RegionRequirement(handle, proj, READ_ONLY, prop, parent, tag, verified),
+    is_range_indirection);
   return idx;
 }
 
@@ -4351,6 +4367,7 @@ legion_index_copy_launcher_add_dst_indirect_region_requirement_logical_region(
   legion_coherence_property_t prop,
   legion_logical_region_t parent_,
   legion_mapping_tag_id_t tag /* = 0 */,
+  bool is_range_indirection /* = false */,
   bool verified /* = false*/)
 {
   IndexCopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
@@ -4358,8 +4375,9 @@ legion_index_copy_launcher_add_dst_indirect_region_requirement_logical_region(
   LogicalRegion parent = CObjectWrapper::unwrap(parent_);
 
   unsigned idx = launcher->dst_requirements.size();
-  launcher->add_dst_indirect_field(
-    RegionRequirement(handle, proj, READ_ONLY, prop, parent, tag, verified), fid);
+  launcher->add_dst_indirect_field(fid,
+    RegionRequirement(handle, proj, READ_ONLY, prop, parent, tag, verified),
+    is_range_indirection);
   return idx;
 }
 
@@ -4372,6 +4390,7 @@ legion_index_copy_launcher_add_src_indirect_region_requirement_logical_partition
   legion_coherence_property_t prop,
   legion_logical_region_t parent_,
   legion_mapping_tag_id_t tag /* = 0 */,
+  bool is_range_indirection /* = false */,
   bool verified /* = false*/)
 {
   IndexCopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
@@ -4379,8 +4398,9 @@ legion_index_copy_launcher_add_src_indirect_region_requirement_logical_partition
   LogicalRegion parent = CObjectWrapper::unwrap(parent_);
 
   unsigned idx = launcher->src_requirements.size();
-  launcher->add_src_indirect_field(
-    RegionRequirement(handle, proj, READ_ONLY, prop, parent, tag, verified), fid);
+  launcher->add_src_indirect_field(fid,
+    RegionRequirement(handle, proj, READ_ONLY, prop, parent, tag, verified),
+    is_range_indirection);
   return idx;
 }
 
@@ -4393,6 +4413,7 @@ legion_index_copy_launcher_add_dst_indirect_region_requirement_logical_partition
   legion_coherence_property_t prop,
   legion_logical_region_t parent_,
   legion_mapping_tag_id_t tag /* = 0 */,
+  bool is_range_indirection /* = false */,
   bool verified /* = false*/)
 {
   IndexCopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
@@ -4400,8 +4421,9 @@ legion_index_copy_launcher_add_dst_indirect_region_requirement_logical_partition
   LogicalRegion parent = CObjectWrapper::unwrap(parent_);
 
   unsigned idx = launcher->dst_requirements.size();
-  launcher->add_dst_indirect_field(
-    RegionRequirement(handle, proj, READ_ONLY, prop, parent, tag, verified), fid);
+  launcher->add_dst_indirect_field(fid,
+    RegionRequirement(handle, proj, READ_ONLY, prop, parent, tag, verified),
+    is_range_indirection);
   return idx;
 }
 

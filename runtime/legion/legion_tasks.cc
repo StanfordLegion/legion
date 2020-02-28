@@ -2582,17 +2582,22 @@ namespace Legion {
           // remotely in which case we need to do the
           // mapping now, otherwise we can defer it
           // until the task ends up on the target processor
-          if (is_origin_mapped() && first_mapping)
+          if (is_origin_mapped())
           {
-            first_mapping = false;
-            const RtEvent done_mapping = perform_mapping();
-            if (!done_mapping.exists() || done_mapping.has_triggered())
+            if (first_mapping)
             {
-              if (distribute_task())
-                launch_task();
+              first_mapping = false;
+              const RtEvent done_mapping = perform_mapping();
+              if (!done_mapping.exists() || done_mapping.has_triggered())
+              {
+                if (distribute_task())
+                  launch_task();
+              }
+              else
+                defer_distribute_task(done_mapping);
             }
-            else
-              defer_distribute_task(done_mapping);
+            else if (distribute_task())
+              launch_task();
           }
           else
           {
@@ -3276,12 +3281,16 @@ namespace Legion {
         // going to apply to any actual instances
         const std::vector<FieldID> &field_vec = 
           constraints->field_constraint.field_set;
-        if (field_vec.empty())
-          continue;
-        FieldSpaceNode *field_node = runtime->forest->get_node(
-                            regions[it->first].region.get_field_space());
-        std::set<FieldID> field_set(field_vec.begin(), field_vec.end());
-        const FieldMask constraint_mask = field_node->get_field_mask(field_set);
+        FieldMask constraint_mask;
+        if (!field_vec.empty())
+        {
+          FieldSpaceNode *field_node = runtime->forest->get_node(
+                              regions[it->first].region.get_field_space());
+          std::set<FieldID> field_set(field_vec.begin(), field_vec.end());
+          constraint_mask = field_node->get_field_mask(field_set);
+        }
+        else
+          constraint_mask = FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
         const LayoutConstraint *conflict_constraint = NULL;
         for (unsigned idx = 0; idx < instances.size(); idx++)
         {
@@ -3293,6 +3302,17 @@ namespace Legion {
           PhysicalManager *manager = ref.get_manager();
           if (manager->conflicts(constraints, &conflict_constraint))
             break;
+          // Check to see if we need an exact match on the layouts
+          if (constraints->specialized_constraint.is_exact())
+          {
+            std::vector<LogicalRegion> regions_to_check(1, 
+                                regions[it->first].region);
+            if (!manager->meets_regions(regions_to_check,true/*tight*/))
+            {
+              conflict_constraint = &constraints->specialized_constraint;
+              break;
+            }
+          }
         }
         if (conflict_constraint != NULL)
         {
@@ -6692,6 +6712,8 @@ namespace Legion {
         }
         origin_mapped_slices.clear();
       } 
+      if (future_map_ready.exists() && !future_map_ready.has_triggered())
+        Runtime::trigger_event(future_map_ready);
       // Remove our reference to the reduction future
       reduction_future = Future();
       map_applied_conditions.clear();
@@ -6772,8 +6794,9 @@ namespace Legion {
       if (launcher.predicate != Predicate::TRUE_PRED)
         initialize_predicate(launcher.predicate_false_future,
                              launcher.predicate_false_result);
-      future_map = FutureMap(new FutureMapImpl(ctx, this, runtime,
-            runtime->get_available_distributed_id(),
+      future_map_ready = Runtime::create_rt_user_event();
+      future_map = FutureMap(new FutureMapImpl(ctx, this, future_map_ready,
+            runtime, runtime->get_available_distributed_id(),
             runtime->address_space));
 #ifdef DEBUG_LEGION
       future_map.impl->add_valid_domain(index_domain);
@@ -7345,6 +7368,8 @@ namespace Legion {
                                             false/*owner*/);
         }
       }
+      else
+        Runtime::trigger_event(future_map_ready);
       if (must_epoch != NULL)
       {
         if (!complete_preconditions.empty())
@@ -8671,7 +8696,7 @@ namespace Legion {
       {
         DistributedID future_map_did;
         derez.deserialize(future_map_did);
-        ApEvent ready_event;
+        RtEvent ready_event;
         derez.deserialize(ready_event);
         WrapperReferenceMutator mutator(ready_events);
         future_map = FutureMap(
@@ -8721,7 +8746,7 @@ namespace Legion {
         derez.deserialize(future_map_did);
         if (future_map_did > 0)
         {
-          ApEvent ready_event;
+          RtEvent ready_event;
           derez.deserialize(ready_event);
           WrapperReferenceMutator mutator(ready_events);
           FutureMapImpl *impl = runtime->find_or_create_future_map(
@@ -8733,7 +8758,7 @@ namespace Legion {
         derez.deserialize(num_point_futures);
         if (num_point_futures > 0)
         {
-          ApEvent ready_event;
+          RtEvent ready_event;
           point_futures.resize(num_point_futures);
           WrapperReferenceMutator mutator(ready_events);
           for (unsigned idx = 0; idx < num_point_futures; idx++)

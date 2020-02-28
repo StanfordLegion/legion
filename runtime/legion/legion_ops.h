@@ -926,6 +926,8 @@ namespace Legion {
       virtual bool is_memoizable_task(void) const { return false; }
       virtual AddressSpaceID get_origin_space(void) const 
         { return this->runtime->address_space; }
+      inline MemoizableState get_memoizable_state(void) const 
+        { return memo_state; }
     protected:
       // The physical trace for this operation if any
       PhysicalTemplate *tpl;
@@ -1231,7 +1233,7 @@ namespace Legion {
       int                                 profiling_priority;
       mutable int             outstanding_profiling_requests;
       mutable RtUserEvent                 profiling_reported;
-    protected:
+    public:
       bool                            possible_src_indirect_out_of_range;
       bool                            possible_dst_indirect_out_of_range;
       bool                            possible_dst_indirect_aliasing;

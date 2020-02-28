@@ -345,7 +345,9 @@ namespace Legion {
                                             SPECIALIZED_CONSTRAINT;
     public:
       SpecializedConstraint(SpecializedKind kind = NORMAL_SPECIALIZE,
-                            ReductionOpID redop = 0, bool no_access = false);
+                            ReductionOpID redop = 0, 
+                            bool no_access = false,
+                            bool exact = false);
     public:
       bool entails(const SpecializedConstraint &other) const;
       bool conflicts(const SpecializedConstraint &other) const;
@@ -357,15 +359,21 @@ namespace Legion {
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
     public:
-      bool is_normal(void) const;
+      bool is_affine(void) const;
+      bool is_compact(void) const;
+      bool is_varfield(void) const;
       bool is_virtual(void) const;
       bool is_reduction(void) const;
       bool is_file(void) const;
-      bool is_no_access(void) const;
+      inline bool is_no_access(void) const { return no_access; }
+      inline bool is_exact(void) const { return exact; }
+      // For backwards compatibility
+      bool is_normal(void) const;
     public:
       SpecializedKind kind;
       ReductionOpID  redop;
       bool       no_access;
+      bool           exact;
     };
 
     /**
@@ -411,7 +419,7 @@ namespace Legion {
       static const LayoutConstraintKind constraint_kind = 
                                             FIELD_CONSTRAINT;
     public:
-      FieldConstraint(void);
+      FieldConstraint(bool contiguous = false, bool inorder = false);
       FieldConstraint(const std::vector<FieldID> &field_set,
                       bool contiguous, bool inorder = true);
       FieldConstraint(const std::set<FieldID> &field_set,
@@ -463,7 +471,7 @@ namespace Legion {
       static const LayoutConstraintKind constraint_kind = 
                                             ORDERING_CONSTRAINT;
     public:
-      OrderingConstraint(void);
+      OrderingConstraint(bool contiguous = false);
       OrderingConstraint(const std::vector<DimensionKind> &ordering,
                          bool contiguous);
     public:

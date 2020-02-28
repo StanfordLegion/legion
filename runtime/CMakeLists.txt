@@ -74,8 +74,12 @@ list(APPEND REALM_SRC
 if(Legion_USE_CUDA)
   list(APPEND REALM_SRC
     realm/cuda/cuda_module.h    realm/cuda/cuda_module.cc
-    realm/cuda/cudart_hijack.h  realm/cuda/cudart_hijack.cc
   )
+  if(REALM_USE_CUDART_HIJACK)
+    list(APPEND REALM_SRC
+      realm/cuda/cudart_hijack.h  realm/cuda/cudart_hijack.cc
+    )
+  endif()
 endif()
 
 if(Legion_USE_LLVM)
@@ -121,6 +125,15 @@ if(REALM_USE_GASNET1)
     realm/gasnet1/gasnet1_module.cc
     realm/gasnet1/gasnetmsg.h
     realm/gasnet1/gasnetmsg.cc
+  )
+endif()
+
+if(REALM_USE_MPI)
+  list(APPEND REALM_SRC
+    realm/mpi/mpi_module.h
+    realm/mpi/mpi_module.cc
+    realm/mpi/am_mpi.h
+    realm/mpi/am_mpi.cc
   )
 endif()
 
@@ -190,6 +203,7 @@ endforeach()
 find_package(Threads REQUIRED)
 add_library(RealmRuntime ${REALM_SRC})
 target_compile_definitions(RealmRuntime PUBLIC REALM_USE_CMAKE)
+target_compile_options(RealmRuntime PRIVATE ${CXX_BUILD_WARNING_FLAGS})
 if(Legion_USE_LIBDL)
   target_link_libraries(RealmRuntime PRIVATE ${CMAKE_DL_LIBS})
   if(APPLE)
@@ -210,6 +224,10 @@ endif()
 
 if(REALM_USE_GASNET1)
   target_link_libraries(RealmRuntime PRIVATE GASNet::GASNet)
+endif()
+
+if(REALM_USE_MPI)
+  target_link_libraries(RealmRuntime PRIVATE MPI::MPI_CXX)
 endif()
 
 if(Legion_USE_LLVM)
@@ -301,7 +319,6 @@ list(APPEND LEGION_SRC
   legion/legion_ops.h                     legion/legion_ops.cc
   legion/legion_profiling.h               legion/legion_profiling.cc
   legion/legion_profiling_serializer.h    legion/legion_profiling_serializer.cc
-  legion/legion_realm.h
   legion/legion_spy.h                     legion/legion_spy.cc
   legion/legion_tasks.h                   legion/legion_tasks.cc
   legion/legion_trace.h                   legion/legion_trace.cc
@@ -354,6 +371,7 @@ set_target_properties(LegionRuntime PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(LegionRuntime PROPERTIES OUTPUT_NAME "legion${INSTALL_SUFFIX}")
 set_target_properties(LegionRuntime PROPERTIES SOVERSION ${SOVERSION})
 target_compile_definitions(LegionRuntime PUBLIC LEGION_USE_CMAKE)
+target_compile_options(LegionRuntime PRIVATE ${CXX_BUILD_WARNING_FLAGS})
 
 target_include_directories(LegionRuntime
   INTERFACE

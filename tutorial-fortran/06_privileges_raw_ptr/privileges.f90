@@ -125,7 +125,7 @@ contains
     call c_f_pointer(raw_ptr_y, y, [index_size])
     call c_f_pointer(raw_ptr_z, z, [index_size])
     
-    Print *, "Daxpy Task!", alpha, index_size, offset, rank(x)
+    Print *, "Daxpy Task!", alpha, index_size, offset, size(x, 1)
     
     do i = 1, index_size
       z(i) = alpha*x(i) + y(i)

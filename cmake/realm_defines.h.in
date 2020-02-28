@@ -43,6 +43,9 @@
 #ifndef REALM_USE_CUDA
 #cmakedefine REALM_USE_CUDA
 #endif
+#ifndef REALM_USE_CUDART_HIJACK
+#cmakedefine REALM_USE_CUDART_HIJACK
+#endif
 #ifndef USE_CUDA
 #cmakedefine USE_CUDA
 #endif
@@ -55,6 +58,8 @@
 #cmakedefine GASNET_CONDUIT_ARIES
 #cmakedefine GASNET_CONDUIT_GEMINI
 #cmakedefine GASNET_CONDUIT_PSM
+
+#cmakedefine REALM_USE_MPI
 
 #ifndef REALM_USE_LLVM
 #cmakedefine REALM_USE_LLVM

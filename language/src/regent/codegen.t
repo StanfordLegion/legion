@@ -2349,6 +2349,32 @@ function codegen.expr_field_access(cx, node)
         c.legion_index_partition_get_color_space([cx.runtime],
                                                  [value.value].impl.index_partition)
     end
+
+    if not cx:has_ispace(expr_type) then
+      local it = false
+      if cache_index_iterator then
+        it = terralib.newsymbol(c.legion_terra_cached_index_iterator_t, "it")
+        actions = quote
+          [actions];
+          var [it] = c.legion_terra_cached_index_iterator_create(
+            [cx.runtime], [cx.context], [is])
+        end
+      end
+
+      local bounds_actions, domain, bounds = index_space_bounds(cx, is, expr_type)
+      actions = quote
+        [actions];
+        [bounds_actions]
+      end
+
+      cx:add_ispace_root(
+        expr_type,
+        is,
+        it,
+        domain,
+        bounds)
+    end
+
     return values.value(
       node,
       expr.once_only(

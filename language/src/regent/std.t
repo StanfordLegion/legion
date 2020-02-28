@@ -107,7 +107,7 @@ std.subregion = ast.constraint_kind.Subregion {}
 std.disjointness = ast.constraint_kind.Disjointness {}
 
 -- #####################################
--- ## Privileges
+-- ## Privileges & Coherence modes
 -- #################
 
 function std.field_path(...)
@@ -149,6 +149,43 @@ function std.privileges(privilege, regions_fields)
     end
   end
   return privileges
+end
+
+function std.coherence(coherence, region, field_path)
+  assert(coherence:is(ast.coherence_kind), "coherence expected argument 1 to be a coherence kind")
+  assert(std.is_symbol(region), "coherence expected argument 2 to be a symbol")
+
+  if field_path == nil then
+    field_path = data.newtuple()
+  elseif type(field_path) == "string" then
+    field_path = data.newtuple(field_path)
+  end
+  assert(data.is_tuple(field_path), "coherence expected argument 3 to be a field")
+
+  return ast.coherence.Coherence {
+    region = region,
+    field_path = field_path,
+    coherence_mode = coherence,
+  }
+end
+
+function std.coherences(coherence, regions_fields)
+  local coherences = terralib.newlist()
+  for _, region_fields in ipairs(regions_fields) do
+    local region, fields
+    if std.is_symbol(region_fields) then
+      region = region_fields
+      fields = terralib.newlist({data.newtuple()})
+    else
+      region = region_fields.region
+      fields = region_fields.fields
+    end
+    assert(std.is_symbol(region) and terralib.islist(fields))
+    for _, field in ipairs(fields) do
+      coherences:insert(std.coherence(coherence, region, field))
+    end
+  end
+  return coherences
 end
 
 -- #####################################

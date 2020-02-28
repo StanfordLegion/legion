@@ -1,10 +1,11 @@
-# HWLOC is a private dependency and only needs to be pulled in for static
+# GASNet is a private dependency and only needs to be pulled in for static
 # builds
-set(Legion_USE_HWLOC @Legion_USE_HWLOC@)
-if((NOT @BUILD_SHARED_LIBS@) AND Legion_USE_HWLOC)
-  set(HWLOC_INCLUDE_DIR @HWLOC_INCLUDE_DIR@)
-  set(HWLOC_LIBRARY @HWLOC_LIBRARY@)
-  find_package(HWLOC REQUIRED)
+set(Legion_USE_GASNet @Legion_USE_GASNet@)
+if((NOT @BUILD_SHARED_LIBS@) AND Legion_USE_GASNet)
+  set(GASNet_THREADING @GASNet_THREADING@)
+  set(GASNet_PREFERRED_CONDUITS @GASNet_PREFERRED_CONDUITS@)
+  set(GASNet_ROOT_DIR @GASNet_ROOT_DIR@)
+  find_package(GASNet REQUIRED)
 endif()
 
 # LLVM is a private dependency and only needs to be pulled in for static
@@ -41,3 +42,20 @@ if(Legion_USE_CUDA AND NOT Legion_CUDA_NVCC_FLAGS_SET)
   set(Legion_CUDA_NVCC_FLAGS_SET ON)
 endif()
 
+# HWLOC is a private dependency and only needs to be pulled in for static
+# builds
+set(Legion_USE_HWLOC @Legion_USE_HWLOC@)
+if((NOT @BUILD_SHARED_LIBS@) AND Legion_USE_HWLOC)
+  set(HWLOC_INCLUDE_DIR @HWLOC_INCLUDE_DIR@)
+  set(HWLOC_LIBRARY @HWLOC_LIBRARY@)
+  find_package(HWLOC REQUIRED)
+endif()
+
+# ZLIB is a private dependency and only needs to be pulled in for static
+# builds
+set(Legion_USE_ZLIB @Legion_USE_ZLIB@)
+if((NOT @BUILD_SHARED_LIBS@) AND Legion_USE_ZLIB)
+  set(ZLIB_INCLUDE_DIRS @ZLIB_INCLUDE_DIRS@)
+  set(ZLIB_LIBRARIES @ZLIB_LIBRARIES@)
+  find_package(ZLIB REQUIRED)
+endif()

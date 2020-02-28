@@ -1655,13 +1655,19 @@ typedef enum legion_launch_constraint_t {
 
 typedef enum legion_specialized_constraint_t {
   NO_SPECIALIZE = 0,
-  NORMAL_SPECIALIZE = 1,
-  REDUCTION_FOLD_SPECIALIZE = 2,
-  REDUCTION_LIST_SPECIALIZE = 3,
-  VIRTUAL_SPECIALIZE = 4,
+  AFFINE_SPECIALIZE = 1, // affine layout
+  NORMAL_SPECIALIZE = AFFINE_SPECIALIZE, // backwards compatibility
+  COMPACT_SPECIALIZE = 2, // compacted sparsity
+  VARFIELD_SPECIALIZE = 3, // variable field size layout
+  AFFINE_REDUCTION_SPECIALIZE = 4,
+  REDUCTION_FOLD_SPECIALIZE = AFFINE_REDUCTION_SPECIALIZE, // backwards compat
+  COMPACT_REDUCTION_SPECIALIZE = 5,
+  REDUCTION_LIST_SPECIALIZE = COMPACT_REDUCTION_SPECIALIZE, // backwards compat
+  //VARFIELD_REDUCTION_SPECIALIZE = 6, // TODO
+  VIRTUAL_SPECIALIZE = 6,
   // All file types must go below here, everything else above
-  GENERIC_FILE_SPECIALIZE = 5,
-  HDF5_FILE_SPECIALIZE = 6,
+  GENERIC_FILE_SPECIALIZE = 7,
+  HDF5_FILE_SPECIALIZE = 8,
 } legion_specialized_constraint_t;
 
 // Keep this in sync with Domain::MAX_RECT_DIM in legion_domain.h

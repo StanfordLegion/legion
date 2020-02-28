@@ -2392,6 +2392,14 @@ extern "C" {
   legion_future_get_void_result(legion_future_t handle);
 
   /**
+   * @see Legion::Future::wait
+   */
+  void
+  legion_future_wait(legion_future_t handle, 
+                     bool silence_warnings /* = false */,
+                     const char *warning_string /* = NULL */);
+
+  /**
    * @see Legion::Future::is_empty()
    */
   bool
@@ -2463,7 +2471,7 @@ extern "C" {
    * @see Legion::Runtime::reduce_future_map
    */
   legion_future_t
-  legion_reduce_future_map(legion_runtime_t runtime,
+  legion_future_map_reduce(legion_runtime_t runtime,
                            legion_context_t ctx,
                            legion_future_map_t handle,
                            legion_reduction_op_id_t redop,
@@ -3302,6 +3310,7 @@ extern "C" {
     legion_coherence_property_t prop,
     legion_logical_region_t parent,
     legion_mapping_tag_id_t tag /* = 0 */,
+    bool is_range_indirection /* = false */,
     bool verified /* = false*/);
 
   /**
@@ -3315,6 +3324,7 @@ extern "C" {
     legion_coherence_property_t prop,
     legion_logical_region_t parent,
     legion_mapping_tag_id_t tag /* = 0 */,
+    bool is_range_indirection /* = false */,
     bool verified /* = false*/);
 
   /**
@@ -3490,6 +3500,7 @@ extern "C" {
     legion_coherence_property_t prop,
     legion_logical_region_t parent,
     legion_mapping_tag_id_t tag /* = 0 */,
+    bool is_range_indirection /* = false */,
     bool verified /* = false*/);
 
   /**
@@ -3504,6 +3515,7 @@ extern "C" {
     legion_coherence_property_t prop,
     legion_logical_region_t parent,
     legion_mapping_tag_id_t tag /* = 0 */,
+    bool is_range_indirection /* = false */,
     bool verified /* = false*/);
 
   /**
@@ -3518,6 +3530,7 @@ extern "C" {
     legion_coherence_property_t prop,
     legion_logical_region_t parent,
     legion_mapping_tag_id_t tag /* = 0 */,
+    bool is_range_indirection /* = false */,
     bool verified /* = false*/);
 
   /**
@@ -3532,6 +3545,7 @@ extern "C" {
     legion_coherence_property_t prop,
     legion_logical_region_t parent,
     legion_mapping_tag_id_t tag /* = 0 */,
+    bool is_range_indirection /* = false */,
     bool verified /* = false*/);
 
   /**

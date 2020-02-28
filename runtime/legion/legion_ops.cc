@@ -4861,6 +4861,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert((tpl != NULL) && tpl->is_recording());
 #endif
+        // This can happen in cases when the copy index space is empty
+        if (!copy_done.exists())
+          copy_done = execution_fence_event;
         tpl->record_trigger_event(local_completion, copy_done);
       }
 #ifdef DEBUG_LEGION
@@ -6394,7 +6397,12 @@ namespace Legion {
       // Then call replay analysis on all of them
       for (std::vector<PointCopyOp*>::const_iterator it = 
             points.begin(); it != points.end(); it++)
+      {
+        (*it)->resolve_speculation();
         (*it)->replay_analysis();
+      }
+      complete_mapping();
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -6778,6 +6786,9 @@ namespace Legion {
       execution_fence_event = own->get_execution_fence_event();
       // From Memoizable
       trace_local_id            = owner->get_trace_local_id().first;
+      tpl                       = owner->get_template();
+      if (tpl != NULL)
+        memo_state              = owner->get_memoizable_state();
       // From Copy
       src_requirements          = owner->src_requirements;
       dst_requirements          = owner->dst_requirements;
@@ -6797,6 +6808,12 @@ namespace Legion {
       gather_is_range           = owner->gather_is_range;
       scatter_is_range          = owner->scatter_is_range;
       predication_guard         = owner->predication_guard;
+      possible_src_indirect_out_of_range 
+                                = owner->possible_src_indirect_out_of_range;
+      possible_dst_indirect_out_of_range
+                                = owner->possible_dst_indirect_out_of_range;
+      possible_dst_indirect_aliasing
+                                = owner->possible_dst_indirect_aliasing;
       if (runtime->legion_spy_enabled)
         LegionSpy::log_index_point(owner->get_unique_op_id(), unique_op_id, p);
     }
@@ -11116,7 +11133,8 @@ namespace Legion {
       initialize_operation(ctx, true/*track*/);
       // Make a new future map for storing our results
       // We'll fill it in later
-      result_map = FutureMap(new FutureMapImpl(ctx, this, runtime,
+      result_map = FutureMap(new FutureMapImpl(ctx, this, 
+            Runtime::protect_event(get_completion_event()), runtime,
             runtime->get_available_distributed_id(),
             runtime->address_space));
       // Initialize operations for everything in the launcher
@@ -12409,8 +12427,7 @@ namespace Legion {
       // Give these slightly higher priority since they are likely
       // needed by later operations
       if (future_map.impl != NULL)
-        enqueue_ready_operation(Runtime::protect_event(
-              future_map.impl->get_ready_event()), 
+        enqueue_ready_operation(future_map.impl->get_ready_event(), 
             LG_THROUGHPUT_DEFERRED_PRIORITY);
       else
         enqueue_ready_operation(RtEvent::NO_RT_EVENT, 
@@ -15033,7 +15050,12 @@ namespace Legion {
       // Then call replay analysis on all of them
       for (std::vector<PointFillOp*>::const_iterator it = 
             points.begin(); it != points.end(); it++)
+      {
+        (*it)->resolve_speculation();
         (*it)->replay_analysis();
+      }
+      complete_mapping();
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -15186,6 +15208,9 @@ namespace Legion {
       execution_fence_event = own->get_execution_fence_event();
       // From Memoizable
       trace_local_id     = owner->get_trace_local_id().first;
+      tpl                = owner->get_template();
+      if (tpl != NULL)
+        memo_state       = owner->get_memoizable_state();
       // From Fill
       requirement        = owner->get_requirement();
       grants             = owner->grants;
@@ -16579,17 +16604,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       complete_mapping();
-      const ApEvent ready = future_map.impl->get_ready_event();
-      if (ready.exists())
+      const RtEvent ready = future_map.impl->get_ready_event();
+      if (ready.exists() && !ready.has_triggered())
       {
-        const RtEvent wait_on = Runtime::protect_event(ready);
-        if (wait_on.exists() && !wait_on.has_triggered())
-        {
-          DeferredExecuteArgs args(this);
-          runtime->issue_runtime_meta_task(args, 
-              LG_THROUGHPUT_DEFERRED_PRIORITY, wait_on);
-          return;
-        }
+        DeferredExecuteArgs args(this);
+        runtime->issue_runtime_meta_task(args, 
+            LG_THROUGHPUT_DEFERRED_PRIORITY, ready);
+        return;
       }
       // If we make it here we can just do this now
       deferred_execute();
