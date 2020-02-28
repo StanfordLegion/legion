@@ -1399,6 +1399,18 @@ module legion_fortran_c_interface
       logical(c_bool)                                     :: legion_physical_region_is_valid_f
       type(legion_physical_region_f_t), value, intent(in) :: handle
     end function legion_physical_region_is_valid_f
+    
+    ! @see Legion::PhysicalRegion::get_logical_region()
+    function legion_physical_region_get_logical_region_f(handle) &
+        bind(C, name="legion_physical_region_get_logical_region")
+      use iso_c_binding
+      import legion_physical_region_f_t
+      import legion_logical_region_f_t
+      implicit none
+      
+      type(legion_logical_region_f_t)                     :: legion_physical_region_get_logical_region_f
+      type(legion_physical_region_f_t), value, intent(in) :: handle
+    end function legion_physical_region_get_logical_region_f
 
     ! @see Legion::PhysicalRegion::get_field_accessor()
     function legion_physical_region_get_field_accessor_array_1d_f(handle, fid) &

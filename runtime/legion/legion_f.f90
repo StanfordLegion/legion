@@ -237,6 +237,7 @@ module legion_fortran
     type(legion_accessor_array_1d_f_t) :: accessor
   contains
     procedure :: get_raw_ptr => legion_field_accessor_1d_get_raw_ptr
+    procedure :: get_dense_array => legion_field_accessor_1d_get_dense_array_cptr
   end type FFieldAccessor1D
 
 #if LEGION_MAX_DIM >= 2
@@ -368,6 +369,9 @@ module legion_fortran
   
     ! @see Legion::PhysicalRegion::is_valid()
     procedure :: is_valid => legion_physical_region_is_valid
+    
+    ! @see Legion::PhysicalRegion::get_logical_region()
+    procedure :: get_logical_region => legion_physical_region_get_logical_region
   
     ! @see Legion::PhysicalRegion::~PhysicalRegion()
     procedure :: destroy =>legion_physical_region_destructor
@@ -1481,6 +1485,38 @@ contains
                 subrect%rect, tmp_offset)
     offset = tmp_offset%offset
   end subroutine legion_field_accessor_1d_get_raw_ptr
+  
+  subroutine legion_field_accessor_1d_get_dense_array_cptr(this, rect, raw_ptr)
+    implicit none
+
+    class(FFieldAccessor1D), intent(in) :: this
+    type(FRect1D), intent(in)           :: rect
+    type(c_ptr), intent(out)            :: raw_ptr
+    
+    type(legion_byte_offset_f_t) :: tmp_offset
+    type(legion_rect_1d_f_t) :: subrect
+      
+    raw_ptr = legion_accessor_array_1d_raw_rect_ptr_f(this%accessor, rect%rect, &
+                subrect, tmp_offset)
+  end subroutine legion_field_accessor_1d_get_dense_array_cptr
+  
+  subroutine legion_field_accessor_1d_get_dense_array_real8(this, rect, array)
+    implicit none
+
+    class(FFieldAccessor1D), intent(in)                 :: this
+    type(FRect1D), intent(in)                           :: rect
+    real(kind=8), pointer, dimension(:), intent(out) :: array
+    
+    type(legion_byte_offset_f_t) :: tmp_offset
+    type(legion_rect_1d_f_t) :: subrect
+    type(c_ptr) :: raw_ptr
+    integer(kind=8) :: size_1
+      
+    raw_ptr = legion_accessor_array_1d_raw_rect_ptr_f(this%accessor, rect%rect, &
+                subrect, tmp_offset)
+    size_1 = rect%get_volume()
+    call c_f_pointer(raw_ptr, array, [size_1])
+  end subroutine legion_field_accessor_1d_get_dense_array_real8
 
 #if LEGION_MAX_DIM >= 2  
   subroutine legion_field_accessor_2d_get_raw_ptr(this, rect, subrect, offset, raw_ptr)
@@ -1687,6 +1723,15 @@ contains
       
     legion_physical_region_is_valid = legion_physical_region_is_valid_f(this%pr)
   end function legion_physical_region_is_valid
+  
+  function legion_physical_region_get_logical_region(this)
+    implicit none
+     
+    type(FLogicalRegion)               :: legion_physical_region_get_logical_region
+    class(FPhysicalRegion), intent(in) :: this
+      
+    legion_physical_region_get_logical_region%lr = legion_physical_region_get_logical_region_f(this%pr)
+  end function legion_physical_region_get_logical_region
   
   ! ===============================================================================
   ! PhysicalRegionList

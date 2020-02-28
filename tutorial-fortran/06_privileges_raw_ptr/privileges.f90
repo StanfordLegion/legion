@@ -71,7 +71,6 @@ contains
     integer(c_size_t), value, intent(in) :: userlen
     integer(c_long_long), value, intent(in) :: p
 
-    type(legion_rect_1d_f_t) :: index_rect
     real(kind=8), target :: z_value, x_value, y_value
     integer(kind=8) :: i
     integer(c_size_t) :: arglen
@@ -113,13 +112,13 @@ contains
     accessor_x = FFieldAccessor1D(physical_region_0, 0, READ_ONLY, c_sizeof(x_value))
     accessor_y = FFieldAccessor1D(physical_region_0, 1, READ_ONLY, c_sizeof(y_value))
     accessor_z = FFieldAccessor1D(physical_region_1, 2, WRITE_DISCARD, c_sizeof(z_value))
-    logical_region = region_requirement%get_region()
+    !logical_region = region_requirement%get_region()
+    logical_region = physical_region_0%get_logical_region()
     index_space = logical_region%get_index_space()
     rect_1d = runtime%get_index_space_domain(ctx, index_space)
-    index_rect = rect_1d%rect
-    call accessor_x%get_raw_ptr(rect_1d, subrect, offset, raw_ptr_x)
-    call accessor_y%get_raw_ptr(rect_1d, subrect, offset, raw_ptr_y)
-    call accessor_z%get_raw_ptr(rect_1d, subrect, offset, raw_ptr_z)
+    call accessor_x%get_dense_array(rect_1d, raw_ptr_x)
+    call accessor_y%get_dense_array(rect_1d, raw_ptr_y)
+    call accessor_z%get_dense_array(rect_1d, raw_ptr_z)
     index_size = rect_1d%get_volume()
     call c_f_pointer(raw_ptr_x, x, [index_size])
     call c_f_pointer(raw_ptr_y, y, [index_size])
