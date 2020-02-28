@@ -2007,7 +2007,7 @@ namespace Legion {
      */
     struct PredicateLauncher {
     public:
-      PredicateLauncher(bool and_op = true);
+      explicit PredicateLauncher(bool and_op = true);
     public:
       inline void add_predicate(const Predicate &pred); 
     public:
