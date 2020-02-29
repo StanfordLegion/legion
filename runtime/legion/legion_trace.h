@@ -499,6 +499,7 @@ namespace Legion {
       PhysicalTemplate* current_template;
       LegionVector<PhysicalTemplate*>::aligned templates;
       unsigned nonreplayable_count;
+      unsigned new_template_count;
     private:
       ApEvent previous_template_completion;
       ApEvent execution_fence_event;
