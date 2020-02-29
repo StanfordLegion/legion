@@ -8146,6 +8146,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INLINE_CHILD_TASK_CALL);
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_inline_task(child->get_unique_id());
       // Remove this child from our context
       unregister_child_operation(child);
       // Check to see if the child is predicated

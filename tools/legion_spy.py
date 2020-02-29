@@ -5100,7 +5100,7 @@ class Operation(object):
                  'fully_logged', 'incoming', 'outgoing', 'logical_incoming', 
                  'logical_outgoing', 'physical_incoming', 'physical_outgoing', 
                  'eq_incoming', 'eq_outgoing', 'eq_privileges',
-                 'start_event', 'finish_event', 'inter_close_ops', 
+                 'start_event', 'finish_event', 'inter_close_ops', 'inlined',
                  'summary_op', 'task', 'task_id', 'predicate', 'predicate_result',
                  'futures', 'index_owner', 'points', 'launch_rect', 'creator', 
                  'realm_copies', 'realm_fills', 'realm_depparts', 'version_numbers', 
@@ -5143,6 +5143,7 @@ class Operation(object):
         self.task = None
         self.task_id = -1
         self.index_owner = None
+        self.inlined = False
         # Only valid for index operations 
         self.points = None
         self.launch_rect = None
@@ -6903,6 +6904,8 @@ class Task(object):
         # have them perform their analysis
         success = True
         for op in self.operations:
+            if op.inlined:
+                continue
             if not op.fully_logged:
                 print(('Warning: skipping logical analysis of %s because it '+
                         'was not fully logged...') % str(op))
@@ -7024,6 +7027,8 @@ class Task(object):
                                                                    add_restrictions)
         success = True
         for op in self.operations:
+            if op.inlined:
+                continue
             if not op.fully_logged:
                 print(('Warning: skipping physical verification of %s '+
                         'because it was not fully logged...') % str(op))
@@ -7058,6 +7063,8 @@ class Task(object):
         printer = GraphPrinter(path,filename)
         # First emit the nodes
         for op in self.operations:
+            if op.inlined:
+                continue
             if not op.fully_logged:
                 print(('Warning: skipping dataflow printing of %s because it '+
                         'was not fully logged...') % str(op))
@@ -7147,6 +7154,8 @@ class Task(object):
         else:
             previous_pairs = set()
             for op in self.operations:
+                if op.inlined:
+                    continue
                 if not op.fully_logged:
                     print(('Warning: skipping dataflow printing of %s because it '+
                             'was not fully logged...') % str(op))
@@ -7177,6 +7186,8 @@ class Task(object):
             printer.println(self.op.node_name + ' [shape=point,style=invis];')
         # Generate the sub-graph
         for op in self.operations:
+            if op.inlined:
+                continue
             if not op.fully_logged:
                 print(('Warning: skipping event graph printing of %s because it '+
                             'was not fully logged...') % str(op))
@@ -9002,6 +9013,8 @@ single_task_pat          = re.compile(
 index_task_pat           = re.compile(
     prefix+"Index Task (?P<ctx>[0-9]+) (?P<tid>[0-9]+) (?P<uid>[0-9]+) "+
             "(?P<name>[-$()<>:\w. ]+)")
+inline_task_pat          = re.compile(
+    prefix+"Inline Task (?P<uid>[0-9]+)")
 mapping_pat              = re.compile(
     prefix+"Mapping Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 close_pat                = re.compile(
@@ -9566,6 +9579,11 @@ def parse_legion_spy_line(line, state):
         op.set_task_id(int(m.group('tid')))
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
+        return True
+    m = inline_task_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid')))
+        op.inlined = True
         return True
     m = mapping_pat.match(line)
     if m is not None:
