@@ -150,6 +150,7 @@ function header_helper.generate_task_c_interface(task)
 
   local create_name = name .. "_create"
   local destroy_name = name .. "_destroy"
+  local set_enable_inlining_name = name .. "_set_enable_inlining"
   local execute_name = name .. "_execute"
 
   local create_args = terralib.newlist({
@@ -166,6 +167,13 @@ function header_helper.generate_task_c_interface(task)
   local destroy_proto = render_c_proto(
     destroy_name, destroy_args, "void")
 
+  local set_enable_inlining_args = terralib.newlist({
+    launcher_type .. " launcher",
+    "bool enable_inlining",
+  })
+  local set_enable_inlining_proto = render_c_proto(
+    set_enable_inlining_name, set_enable_inlining_args, "void")
+
   local execute_args = terralib.newlist({
     "legion_runtime_t runtime",
     "legion_context_t context",
@@ -174,7 +182,11 @@ function header_helper.generate_task_c_interface(task)
   local execute_proto = render_c_proto(
     execute_name, execute_args, "legion_future_t")
 
-  local result = terralib.newlist({launcher_proto, create_proto, destroy_proto, execute_proto})
+  local result = terralib.newlist({launcher_proto,
+                                   create_proto,
+                                   destroy_proto,
+                                   set_enable_inlining_proto,
+                                   execute_proto})
 
   local params = get_task_params(task)
   for _, param_list in ipairs(params) do
@@ -197,6 +209,7 @@ function header_helper.generate_task_cxx_interface(task)
 
   local c_create_name = name .. "_create"
   local c_destroy_name = name .. "_destroy"
+  local c_set_enable_inlining_name = name .. "_set_enable_inlining"
   local c_execute_name = name .. "_execute"
 
   local launcher_type = name
@@ -206,6 +219,7 @@ function header_helper.generate_task_cxx_interface(task)
 
   local ctor_name = launcher_type
   local dtor_name = "~" .. launcher_type
+  local set_enable_inlining_name = "set_enable_inlining"
   local execute_name = "execute"
 
   local ctor_args = terralib.newlist({
@@ -228,6 +242,15 @@ function header_helper.generate_task_cxx_interface(task)
       "delete predicate;",
     }))
 
+  local set_enable_inlining_args = terralib.newlist({
+    "bool enable_inlining"
+  })
+  local set_enable_inlining_def = render_c_def(
+    set_enable_inlining_name, set_enable_inlining_args, "void",
+    terralib.newlist({
+      c_set_enable_inlining_name .. "(launcher, enable_inlining);"
+    }))
+
   local execute_args = terralib.newlist({
     "Legion::Runtime *runtime",
     "Legion::Context ctx",
@@ -247,6 +270,7 @@ function header_helper.generate_task_cxx_interface(task)
   local body = terralib.newlist()
   body:insertall(ctor_def)
   body:insertall(dtor_def)
+  body:insertall(set_enable_inlining_def)
   body:insertall(execute_def)
 
   local task_param_symbols = task:get_param_symbols()
@@ -362,6 +386,16 @@ local function make_destroy_launcher(launcher_name, wrapper_type, state_type)
     c.free(launcher_state.task_args)
     c.free(launcher_state.args_provided)
     c.free(launcher_state)
+  end
+  helper:setname(helper_name)
+  return { helper_name, helper }
+end
+
+local function make_set_enable_inlining_launcher(launcher_name, wrapper_type, state_type)
+  local helper_name = launcher_name .. "_set_enable_inlining"
+  local terra helper(wrapper : wrapper_type, enable_inlining : bool)
+    var launcher_state = [&state_type](wrapper.impl)
+    c.legion_task_launcher_set_enable_inlining(launcher_state.launcher, enable_inlining)
   end
   helper:setname(helper_name)
   return { helper_name, helper }
@@ -562,9 +596,11 @@ function header_helper.generate_task_implementation(task)
     task, launcher_name, wrapper_type, state_type, params, params_struct_type)
   local destroy = make_destroy_launcher(
     launcher_name, wrapper_type, state_type)
+  local set_enable_inlining = make_set_enable_inlining_launcher(
+    launcher_name, wrapper_type, state_type)
   local execute = make_execute_launcher(
     launcher_name, wrapper_type, state_type, params)
-  local result = terralib.newlist({create, destroy, execute})
+  local result = terralib.newlist({create, destroy, set_enable_inlining, execute})
 
   local task_param_symbols = task:get_param_symbols()
   local param_field_ids = task:get_field_id_param_labels()
