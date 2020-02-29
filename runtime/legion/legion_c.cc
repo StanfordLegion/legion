@@ -3223,6 +3223,15 @@ legion_task_launcher_set_mapping_tag(legion_task_launcher_t launcher_,
   launcher->tag = tag;
 }
 
+void
+legion_task_launcher_set_enable_inlining(legion_task_launcher_t launcher_,
+                                         bool enable_inlining)
+{
+  TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->enable_inlining = enable_inlining;
+}
+
 legion_index_launcher_t
 legion_index_launcher_create(
   legion_task_id_t tid,

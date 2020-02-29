@@ -1979,7 +1979,7 @@ namespace Realm {
       size_t idx = path_infos.size();
       for(size_t j = 0; j < i; j++)
 	if(insts[i].get_location() == insts[j].get_location()) {
-	  idx = j;
+	  idx = path_idx[j];
 	  break;
 	}
 
@@ -2242,7 +2242,7 @@ namespace Realm {
       size_t idx = path_infos.size();
       for(size_t j = 0; j < i; j++)
 	if(insts[i].get_location() == insts[j].get_location()) {
-	  idx = j;
+	  idx = path_idx[j];
 	  break;
 	}
 

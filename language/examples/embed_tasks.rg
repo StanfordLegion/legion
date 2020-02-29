@@ -42,6 +42,13 @@ where reads writes(r.{x, y}, s.z), reads(r.z, s.x), reduces+(s.y) do
   regentlib.c.printf("Task with two region requirements\n")
 end
 
+__demand(__inner)
+task inline_regent_task(r : region(ispace(int1d), fs))
+where reads writes(r.{x, y, z}) do
+  regentlib.c.printf("Inline inner task\n")
+  my_regent_task(r, 0, 0.0, false)
+end
+
 local embed_tasks_dir
 if os.getenv('SAVEOBJ') == '1' then
   embed_tasks_dir = root_dir
@@ -57,6 +64,7 @@ end
 local task_whitelist = {}
 task_whitelist["my_regent_task"] = my_regent_task
 task_whitelist["other_regent_task"] = other_regent_task
+task_whitelist["inline_regent_task"] = inline_regent_task
 
 local embed_tasks_h = embed_tasks_dir .. "embed_tasks.h"
 local embed_tasks_so = embed_tasks_dir .. "libembed_tasks.so"
