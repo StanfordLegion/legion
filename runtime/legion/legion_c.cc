@@ -2573,7 +2573,7 @@ legion_predicate_create(legion_runtime_t runtime_,
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   Future *f = CObjectWrapper::unwrap(f_);
 
-  Predicate result = runtime->create_predicate(ctx, f);
+  Predicate result = runtime->create_predicate(ctx, *f);
   return CObjectWrapper::wrap(new Predicate(result));
 }
 
@@ -3221,6 +3221,15 @@ legion_task_launcher_set_mapping_tag(legion_task_launcher_t launcher_,
   TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
 
   launcher->tag = tag;
+}
+
+void
+legion_task_launcher_set_enable_inlining(legion_task_launcher_t launcher_,
+                                         bool enable_inlining)
+{
+  TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->enable_inlining = enable_inlining;
 }
 
 legion_index_launcher_t

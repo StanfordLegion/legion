@@ -2702,6 +2702,13 @@ extern "C" {
                                        legion_mapping_tag_id_t tag);
 
   /**
+   * @see Legion::TaskLauncher::enable_inlining
+   */
+  void
+  legion_task_launcher_set_enable_inlining(legion_task_launcher_t launcher,
+                                           bool enable_inlining);
+
+  /**
    * @return Caller takes ownership of return value.
    *
    * @see Legion::IndexTaskLauncher::IndexTaskLauncher()

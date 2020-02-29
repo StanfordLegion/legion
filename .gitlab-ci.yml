@@ -98,6 +98,8 @@ variables:
 .gasnetdbg: &gasnetdbg
   REALM_NETWORKS: "gasnet1"
   GASNET_DEBUG: "1"
+  # GASNet headers are not guaranteed to be warning-free in debug mode
+  WARN_AS_ERROR: "0"
 .gasnetex: &gasnetex
   REALM_NETWORKS: "gasnet1"
   GASNET_VERSION: "GASNet-EX-snapshot"
@@ -166,7 +168,6 @@ before_script:
       # export LAUNCHER="mpirun -n 2 -x TERRA_PATH -x INCLUDE_PATH -x LD_LIBRARY_PATH -x LG_RT_DIR -x USE_RDIR"
       # MPICH:
       export LAUNCHER="mpirun -n 2"
-      unset WARN_AS_ERROR
       export MPICH_CXX=${CXX}
       if [[ "$REALM_NETWORKS" = "gasnet1" ]]; then
         export CONDUIT=mpi

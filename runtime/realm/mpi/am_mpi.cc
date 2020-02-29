@@ -128,6 +128,11 @@ void AMPoll()
             int offset = *(int32_t *)(msg->stuff);
             header = msg->stuff + 4;
             payload = (char *) g_am_base + offset;
+        } else {
+            assert(0 && "invalid message type");
+            header = 0;
+            payload = 0;
+            msg->msgid = 0x7fff; // skips handler below
         }
 
         if (msg->msgid != 0x7fff) {
