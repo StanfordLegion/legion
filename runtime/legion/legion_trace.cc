@@ -1958,6 +1958,9 @@ namespace Legion {
          InstanceView *view, EquivalenceSet *eq, FieldMask &non_dominated) const
     //--------------------------------------------------------------------------
     {
+      // If this is for an empty equivalence set then it doesn't matter
+      if (eq->set_expr->is_empty())
+        return true;
       ViewSet::const_iterator finder = conditions.find(view);
       if (finder == conditions.end())
         return false;
@@ -1988,11 +1991,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!!non_dominated);
 #endif
-      // In the case where we have a manager for an empty instance then
-      // it does not have to be explicitly dominated
-      PhysicalManager *manager = view->get_manager();
-      if (manager->instance_domain->is_empty())
-        return true;
       return false;
     }
 
