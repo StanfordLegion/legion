@@ -545,7 +545,7 @@ namespace Legion {
       void make_ready(bool postcondition);
     public:
       bool require(Operation *op);
-      void ensure(Operation *op);
+      void ensure(Operation *op, std::set<RtEvent> &applied_events);
     private:
       bool cached;
       // The following containers are populated only when the 'cached' is true.
@@ -649,7 +649,8 @@ namespace Legion {
       void push_complete_replays(void);
     public:
       bool check_preconditions(TraceReplayOp *op);
-      void apply_postcondition(TraceSummaryOp *op);
+      void apply_postcondition(TraceSummaryOp *op,
+                               std::set<RtEvent> &applied_events);
     public:
       void register_operation(Operation *op);
       void execute_all(void);

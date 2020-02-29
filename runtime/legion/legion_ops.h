@@ -1380,6 +1380,7 @@ namespace Legion {
       void update_current_fence(void);
     protected:
       FenceKind fence_kind;
+      std::set<RtEvent> map_applied_conditions;
       ApEvent execution_precondition;
       Future result;
     };
