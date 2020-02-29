@@ -1756,7 +1756,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalTrace::PhysicalTrace(Runtime *rt, LegionTrace *lt)
       : runtime(rt), logical_trace(lt), current_template(NULL),
-        nonreplayable_count(0),
+        nonreplayable_count(0), new_template_count(0),
         previous_template_completion(ApEvent::NO_AP_EVENT),
         execution_fence_event(ApEvent::NO_AP_EVENT)
     //--------------------------------------------------------------------------
@@ -1777,7 +1777,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalTrace::PhysicalTrace(const PhysicalTrace &rhs)
       : runtime(NULL), logical_trace(NULL), current_template(NULL),
-        nonreplayable_count(0),
+        nonreplayable_count(0), new_template_count(0),
         previous_template_completion(ApEvent::NO_AP_EVENT),
         execution_fence_event(ApEvent::NO_AP_EVENT)
     //--------------------------------------------------------------------------
@@ -1837,6 +1837,20 @@ namespace Legion {
         // Reset the nonreplayable count when we find a replayable template
         nonreplayable_count = 0;
         templates.push_back(tpl);
+        if (++new_template_count > LEGION_NEW_TEMPLATE_WARNING_COUNT)
+        {
+          REPORT_LEGION_WARNING(LEGION_WARNING_NEW_TEMPLATE_COUNT_EXCEEDED,
+              "WARNING: The runtime has created %d new replayable templates "
+              "for trace %u without replaying any existing templates. This "
+              "may mean that your mapper is not making mapper decisions "
+              "conducive to replaying templates. Please check that your "
+              "mapper is making decisions that align with prior templates. "
+              "If you believe that this number of templates is reasonable "
+              "please adjust the settings for LEGION_NEW_TEMPLATE_WARNING_COUNT"
+              " in legion_config.h.", LEGION_NEW_TEMPLATE_WARNING_COUNT, 
+              logical_trace->get_trace_id())
+          new_template_count = 0;
+        }
       }
       return pending_deletion;
     }
@@ -1857,6 +1871,8 @@ namespace Legion {
           // Reset the nonreplayable count when a replayable template satisfies
           // the precondition
           nonreplayable_count = 0;
+          // Also reset the new template count as we found a replay
+          new_template_count = 0;
           current_template = *it;
           return;
         }
