@@ -541,6 +541,11 @@ namespace Legion {
 		      context, task_id, unique_id, name);
       }
 
+      static inline void log_inline_task(UniqueID unique_id)
+      {
+        log_spy.print("Inline Task %llu", unique_id);
+      }
+
       static inline void log_mapping_operation(UniqueID context,
                                                UniqueID unique_id)
       {

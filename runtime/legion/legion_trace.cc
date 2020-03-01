@@ -1758,7 +1758,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(current_template->is_replayable());
 #endif
-      current_template->apply_postcondition(this);
+      current_template->apply_postcondition(this, map_applied_conditions);
       FenceOp::trigger_mapping();
     }
 
@@ -2259,7 +2259,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceConditionSet::ensure(Operation *op)
+    void TraceConditionSet::ensure(Operation *op, 
+                                   std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2267,11 +2268,8 @@ namespace Legion {
 #endif
       const TraceInfo trace_info(op, false/*init*/);
       for (unsigned idx = 0; idx < views.size(); ++idx)
-      {
-        std::set<RtEvent> map_applied_events;
         forest->update_valid_instances(op, idx, version_infos[idx], views[idx],
-            PhysicalTraceInfo(trace_info, idx), map_applied_events);
-      }
+            PhysicalTraceInfo(trace_info, idx), applied_events);
     }
 
     /////////////////////////////////////////////////////////////
@@ -2422,10 +2420,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::apply_postcondition(TraceSummaryOp *op)
+    void PhysicalTemplate::apply_postcondition(TraceSummaryOp *op,
+                                              std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      post.ensure(op);
+      post.ensure(op, applied_events);
     }
 
     //--------------------------------------------------------------------------
@@ -2436,10 +2435,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::apply_postcondition(ReplTraceSummaryOp *op)
+    void PhysicalTemplate::apply_postcondition(ReplTraceSummaryOp *op,
+                                              std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      post.ensure(op);
+      post.ensure(op, applied_events);
     }
 
     //--------------------------------------------------------------------------

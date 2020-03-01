@@ -7113,6 +7113,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_operation();
+      map_applied_conditions.clear();
       result = Future(); // clear out our future reference
     }
 
@@ -7156,14 +7157,20 @@ namespace Legion {
       {
         case MAPPING_FENCE:
           {
-            complete_mapping();
+            if (!map_applied_conditions.empty())
+              complete_mapping(Runtime::merge_events(map_applied_conditions));
+            else
+              complete_mapping();
             complete_execution();
             break;
           }
         case EXECUTION_FENCE:
           {
             // Mark that we finished our mapping now
-            complete_mapping();
+            if (!map_applied_conditions.empty())
+              complete_mapping(Runtime::merge_events(map_applied_conditions));
+            else
+              complete_mapping();
             // We can always trigger the completion event when these are done
             request_early_complete(execution_precondition);
             if (!execution_precondition.has_triggered())

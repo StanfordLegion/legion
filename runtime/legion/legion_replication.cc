@@ -4397,7 +4397,11 @@ namespace Legion {
         case MAPPING_FENCE:
           {
             // Do our arrival
-            Runtime::phase_barrier_arrive(mapping_fence_barrier, 1/*count*/);
+            if (!map_applied_conditions.empty())
+              Runtime::phase_barrier_arrive(mapping_fence_barrier, 1/*count*/,
+                  Runtime::merge_events(map_applied_conditions));
+            else
+              Runtime::phase_barrier_arrive(mapping_fence_barrier, 1/*count*/);
             // We're mapped when everyone is mapped
             complete_mapping(mapping_fence_barrier);
             complete_execution();
@@ -4407,7 +4411,11 @@ namespace Legion {
           {
             // Do our arrival on our mapping fence, we're mapped when
             // everyone is mapped
-            Runtime::phase_barrier_arrive(mapping_fence_barrier, 1/*count*/);
+            if (!map_applied_conditions.empty())
+              Runtime::phase_barrier_arrive(mapping_fence_barrier, 1/*count*/,
+                  Runtime::merge_events(map_applied_conditions));
+            else
+              Runtime::phase_barrier_arrive(mapping_fence_barrier, 1/*count*/);
             complete_mapping(mapping_fence_barrier);
             // We arrive on our barrier when all our previous operations
             // have finished executing
@@ -6430,7 +6438,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (current_template->is_replayable())
-        current_template->apply_postcondition(this);
+        current_template->apply_postcondition(this, map_applied_conditions);
       ReplFenceOp::trigger_mapping();
     }
 
