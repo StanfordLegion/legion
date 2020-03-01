@@ -111,6 +111,7 @@ dep_part_kinds = {
     12 : 'Partition by Preimage',
     13 : 'Partition by Preimage Range',
     14 : 'Create Association',
+    15 : 'Partition by Weights',
 }
 
 # Micro-seconds per pixel
