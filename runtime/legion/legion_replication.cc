@@ -6148,7 +6148,9 @@ namespace Legion {
             // more templates we try to find to build consensus
             const unsigned number_to_find = 1 << round;
             if ((viable_templates.empty() || (viable_templates.back() >= 0)) &&
-                physical_trace->find_viable_templates(this, number_to_find, 
+                physical_trace->find_viable_templates(this, 
+                                                      map_applied_conditions,
+                                                      number_to_find, 
                                                       viable_templates))
             {
               // If we checked all the templates figure out what kind of 

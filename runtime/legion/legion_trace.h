@@ -462,9 +462,11 @@ namespace Legion {
       PhysicalTrace& operator=(const PhysicalTrace &rhs);
     public:
       void clear_cached_template(void) { current_template = NULL; }
-      void check_template_preconditions(TraceReplayOp *op);
+      void check_template_preconditions(TraceReplayOp *op,
+                                        std::set<RtEvent> &applied_events);
       // Return true if we evaluated all the templates
       bool find_viable_templates(ReplTraceReplayOp *op, 
+                                 std::set<RtEvent> &applied_events,
                                  unsigned templates_to_find,
                                  std::vector<int> &viable_templates);
       PhysicalTemplate* select_template(unsigned template_index);
@@ -550,7 +552,7 @@ namespace Legion {
     public:
       void make_ready(bool postcondition);
     public:
-      bool require(Operation *op);
+      bool require(Operation *op, std::set<RtEvent> &applied_events);
       void ensure(Operation *op, std::set<RtEvent> &applied_events);
     private:
       bool cached;
@@ -664,11 +666,13 @@ namespace Legion {
                           std::vector<unsigned> &inv_topo_order);
     public:
       // Variants for normal traces
-      bool check_preconditions(TraceReplayOp *op);
+      bool check_preconditions(TraceReplayOp *op,
+                               std::set<RtEvent> &applied_events);
       void apply_postcondition(TraceSummaryOp *op,
                                std::set<RtEvent> &applied_events);
       // Variants for control replication traces 
-      bool check_preconditions(ReplTraceReplayOp *op);
+      bool check_preconditions(ReplTraceReplayOp *op,
+                               std::set<RtEvent> &applied_events);
       void apply_postcondition(ReplTraceSummaryOp *op,
                                std::set<RtEvent> &applied_events);
     public:
