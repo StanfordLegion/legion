@@ -5606,7 +5606,7 @@ namespace Legion {
                                                      std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
-      const ShardID target_shard = find_view_owner(view); 
+      const ShardID target_shard = find_equivalence_owner(eq); 
       // Check to see if we're on the right shard, if not send the message
       if (target_shard != repl_ctx->owner_shard->shard_id)
       {
@@ -5681,7 +5681,7 @@ namespace Legion {
       std::vector<ShardID> owner_shards;
       {
         AutoLock tpl_lock(template_lock);
-        find_view_shards(view_owner, owner_shards);
+        find_owner_shards(view_owner, owner_shards);
       }
 #ifdef DEBUG_LEGION
       assert(!owner_shards.empty());
@@ -5719,7 +5719,7 @@ namespace Legion {
         // using the same algorithm that we use for other views above
         const AddressSpaceID view_owner = it->first->owner_space;
         std::vector<ShardID> owner_shards;
-        find_view_shards(view_owner, owner_shards);
+        find_owner_shards(view_owner, owner_shards);
 #ifdef DEBUG_LEGION
         assert(!owner_shards.empty());
 #endif
@@ -5763,7 +5763,7 @@ namespace Legion {
       PhysicalManager *manager = view->get_manager();
       const AddressSpaceID inst_owner = manager->owner_space;
       std::vector<ShardID> owner_shards;
-      find_view_shards(inst_owner, owner_shards);
+      find_owner_shards(inst_owner, owner_shards);
 #ifdef DEBUG_LEGION
       assert(!owner_shards.empty());
 #endif
@@ -5779,14 +5779,37 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardedPhysicalTemplate::find_view_shards(AddressSpaceID owner,
+    ShardID ShardedPhysicalTemplate::find_equivalence_owner(EquivalenceSet *eq)
+    //--------------------------------------------------------------------------
+    {
+      // This algorithm is the same as for views, except we do it based
+      // on the equivalence set owner
+      const AddressSpaceID eq_owner = eq->owner_space;
+      std::vector<ShardID> owner_shards;
+      find_owner_shards(eq_owner, owner_shards);
+#ifdef DEBUG_LEGION
+      assert(!owner_shards.empty());
+#endif
+      // Figure out which shard we should be sending this view to based on
+      // its set expression
+      if (owner_shards.size() > 1)
+      {
+        const IndexSpaceExprID eid = eq->set_expr->expr_id;
+        return owner_shards[eid % owner_shards.size()];
+      }
+      else // If there's only one shard then there is only one choice
+        return owner_shards.front();
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::find_owner_shards(AddressSpaceID owner,
                                                    std::vector<ShardID> &shards)
     //--------------------------------------------------------------------------
     {
       // See if we already computed it or not
       std::map<AddressSpaceID,std::vector<ShardID> >::const_iterator finder = 
-        view_shard_owners.find(owner);
-      if (finder != view_shard_owners.end())
+        did_shard_owners.find(owner);
+      if (finder != did_shard_owners.end())
       {
         shards = finder->second;
         return;
@@ -5816,7 +5839,7 @@ namespace Legion {
       assert(!shards.empty());
 #endif
       // Save the result so we don't have to do this again for this space
-      view_shard_owners[owner] = shards;
+      did_shard_owners[owner] = shards;
     }
 
     //--------------------------------------------------------------------------

@@ -916,6 +916,7 @@ namespace Legion {
       std::map<TraceLocalID,ViewExprs> op_views;
       std::map<unsigned,ViewExprs>     copy_views;
     protected:
+      // THESE ARE SHARDED FOR CONTROL REPLICATION!!!
       TraceConditionSet   pre, post;
       // THIS IS SHARDED FOR CONTROL REPLICATION!!!
       ViewGroups          view_groups;
@@ -1065,7 +1066,8 @@ namespace Legion {
       void record_replayed(void);
     protected:
       ShardID find_view_owner(InstanceView *view);
-      void find_view_shards(AddressSpace owner, std::vector<ShardID> &shards);
+      ShardID find_equivalence_owner(EquivalenceSet *set);
+      void find_owner_shards(AddressSpace owner, std::vector<ShardID> &shards);
       void find_last_users_sharded(InstanceView *view,
                                    IndexSpaceExpression *expr,
                                    const FieldMask &mask,
@@ -1097,7 +1099,7 @@ namespace Legion {
       std::map<ApEvent,RtEvent> pending_event_requests;
       std::map<ApEvent,BarrierArrival*> remote_arrivals;
       std::map<ApEvent,BarrierAdvance*> local_advances;
-      std::map<AddressSpaceID,std::vector<ShardID> > view_shard_owners;
+      std::map<AddressSpaceID,std::vector<ShardID> > did_shard_owners;
       std::map<unsigned/*Trace Local ID*/,ShardID> owner_shards;
       std::map<unsigned/*Trace Local ID*/,IndexSpace> local_spaces;
       std::map<unsigned/*Trace Local ID*/,ShardingFunction*> sharding_functions;
