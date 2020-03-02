@@ -461,7 +461,8 @@ namespace Legion {
       PhysicalTrace& operator=(const PhysicalTrace &rhs);
     public:
       void clear_cached_template(void) { current_template = NULL; }
-      void check_template_preconditions(TraceReplayOp *op);
+      void check_template_preconditions(TraceReplayOp *op,
+                                        std::set<RtEvent> &applied_events);
     public:
       PhysicalTemplate* get_current_template(void) { return current_template; }
       bool has_any_templates(void) const { return templates.size() > 0; }
@@ -544,7 +545,7 @@ namespace Legion {
     public:
       void make_ready(bool postcondition);
     public:
-      bool require(Operation *op);
+      bool require(Operation *op, std::set<RtEvent> &applied_events);
       void ensure(Operation *op, std::set<RtEvent> &applied_events);
     private:
       bool cached;
@@ -648,7 +649,8 @@ namespace Legion {
       void prepare_parallel_replay(const std::vector<unsigned> &gen);
       void push_complete_replays(void);
     public:
-      bool check_preconditions(TraceReplayOp *op);
+      bool check_preconditions(TraceReplayOp *op,
+                               std::set<RtEvent> &applied_events);
       void apply_postcondition(TraceSummaryOp *op,
                                std::set<RtEvent> &applied_events);
     public:

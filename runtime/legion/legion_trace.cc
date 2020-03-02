@@ -1509,7 +1509,8 @@ namespace Legion {
 #endif
 
         if (physical_trace->get_current_template() == NULL)
-          physical_trace->check_template_preconditions(this);
+          physical_trace->check_template_preconditions(this, 
+                                      map_applied_conditions);
 #ifdef DEBUG_LEGION
         assert(physical_trace->get_current_template() == NULL ||
                !physical_trace->get_current_template()->is_recording());
@@ -1856,14 +1857,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTrace::check_template_preconditions(TraceReplayOp *op)
+    void PhysicalTrace::check_template_preconditions(TraceReplayOp *op,
+                                              std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       current_template = NULL;
       for (LegionVector<PhysicalTemplate*>::aligned::reverse_iterator it =
            templates.rbegin(); it != templates.rend(); ++it)
       {
-        if ((*it)->check_preconditions(op))
+        if ((*it)->check_preconditions(op, applied_events))
         {
 #ifdef DEBUG_LEGION
           assert((*it)->is_replayable());
@@ -2176,7 +2178,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool TraceConditionSet::require(Operation *op)
+    bool TraceConditionSet::require(Operation *op, 
+                                    std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2185,10 +2188,10 @@ namespace Legion {
       for (unsigned idx = 0; idx < views.size(); ++idx)
       {
         FieldMaskSet<InstanceView> invalid_views;
-        std::set<RtEvent> map_applied_events;
         forest->find_invalid_instances(op, idx, version_infos[idx], views[idx],
-            invalid_views, map_applied_events);
-        if (invalid_views.size() > 0) return false;
+                                       invalid_views, applied_events);
+        if (!invalid_views.empty())
+          return false;
       }
       return true;
     }
@@ -2348,10 +2351,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalTemplate::check_preconditions(TraceReplayOp *op)
+    bool PhysicalTemplate::check_preconditions(TraceReplayOp *op,
+                                              std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      return pre.require(op);
+      return pre.require(op, applied_events);
     }
 
     //--------------------------------------------------------------------------
