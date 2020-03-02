@@ -1881,6 +1881,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
+        : field(fid), field_region(&region)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -1907,6 +1908,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
+        : field(fid), field_region(&region)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
