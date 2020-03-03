@@ -1906,7 +1906,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     TraceViewSet::TraceViewSet(RegionTreeForest *f)
-      : forest(f)
+      : forest(f), view_references(f->runtime->dump_physical_traces)
     //--------------------------------------------------------------------------
     {
     }
@@ -1915,6 +1915,13 @@ namespace Legion {
     TraceViewSet::~TraceViewSet(void)
     //--------------------------------------------------------------------------
     {
+      if (view_references)
+      {
+        for (ViewSet::const_iterator it = conditions.begin();
+              it != conditions.end(); it++)
+          if (it->first->remove_base_resource_ref(TRACE_REF))
+            delete it->first;
+      }
       conditions.clear();
     }
 
@@ -1923,6 +1930,8 @@ namespace Legion {
                   InstanceView *view, EquivalenceSet *eq, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
+      if (view_references && (conditions.find(view) == conditions.end()))
+        view->add_base_resource_ref(TRACE_REF);
       conditions[view].insert(eq, mask);
     }
 
@@ -1936,8 +1945,8 @@ namespace Legion {
         return;
 
       FieldMaskSet<EquivalenceSet> to_delete;
-      for (FieldMaskSet<EquivalenceSet>::iterator it = finder->second.begin();
-           it != finder->second.end(); ++it)
+      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+            finder->second.begin(); it != finder->second.end(); ++it)
       {
         FieldMask overlap = mask & it->second;
         if (!overlap)

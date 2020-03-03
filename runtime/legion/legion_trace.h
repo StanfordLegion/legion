@@ -533,6 +533,9 @@ namespace Legion {
       RegionTreeForest * const forest;
     protected:
       ViewSet conditions;
+      // Need to hold view references if we're going to be dumping
+      // this trace even past the end of execution
+      const bool view_references;
     };
 
     /**
