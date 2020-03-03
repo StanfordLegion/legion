@@ -6024,6 +6024,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::issue_summary_operations(
+                                  InnerContext *context, Operation *invalidator)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(context);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(context); 
+#endif
+      ReplTraceSummaryOp *op = trace->runtime->get_available_repl_summary_op();
+      op->initialize_summary(repl_ctx, this, invalidator);
+#ifdef LEGION_SPY
+      LegionSpy::log_summary_op_creator(op->get_unique_op_id(),
+                                        invalidator->get_unique_op_id());
+#endif
+      op->execute_dependence_analysis();
+    }
+
+    //--------------------------------------------------------------------------
     ShardID ShardedPhysicalTemplate::find_owner_shard(unsigned tid)
     //--------------------------------------------------------------------------
     {

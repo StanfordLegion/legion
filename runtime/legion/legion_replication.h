@@ -1911,7 +1911,7 @@ namespace Legion {
       ReplTraceSummaryOp& operator=(const ReplTraceSummaryOp &rhs);
     public:
       void initialize_summary(ReplicateContext *ctx,
-                              PhysicalTemplate *tpl,
+                              ShardedPhysicalTemplate *tpl,
                               Operation *invalidator);
       void perform_logging(void);
     public:

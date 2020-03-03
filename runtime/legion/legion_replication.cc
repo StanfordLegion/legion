@@ -6378,11 +6378,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplTraceSummaryOp::initialize_summary(ReplicateContext *ctx,
-                                                PhysicalTemplate *tpl,
+                                                ShardedPhysicalTemplate *tpl,
                                                 Operation *invalidator)
     //--------------------------------------------------------------------------
     {
       initialize_repl_fence(ctx, MAPPING_FENCE, false/*need future*/);
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_fence_operation(parent_ctx->get_unique_id(),
+                                       unique_op_id);
       context_index = invalidator->get_ctx_index();
       current_template = tpl;
       // The summary could have been marked as being traced,

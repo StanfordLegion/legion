@@ -683,8 +683,8 @@ namespace Legion {
       void execute_all(void);
       void execute_slice(unsigned slice_idx);
     public:
-      void issue_summary_operations(InnerContext* context,
-                                    Operation *invalidator);
+      virtual void issue_summary_operations(InnerContext* context,
+                                            Operation *invalidator);
     public:
       void dump_template(void);
     private:
@@ -1053,6 +1053,8 @@ namespace Legion {
       virtual void record_local_space(unsigned trace_local_id, IndexSpace sp);
       virtual void record_sharding_function(unsigned trace_local_id, 
                                             ShardingFunction *function);
+      virtual void issue_summary_operations(InnerContext *context,
+                                            Operation *invalidator);
     public:
       virtual ShardID find_owner_shard(unsigned trace_local_id);
       virtual IndexSpace find_local_space(unsigned trace_local_id);
