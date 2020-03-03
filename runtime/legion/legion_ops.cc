@@ -7081,10 +7081,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future FenceOp::initialize(InnerContext *ctx, FenceKind kind,
-                               bool need_future)
+                               bool need_future, bool track/*=true*/)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, track);
       fence_kind = kind;
       if (need_future)
       {

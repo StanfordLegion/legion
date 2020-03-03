@@ -1373,7 +1373,8 @@ namespace Legion {
     public:
       FenceOp& operator=(const FenceOp &rhs);
     public:
-      Future initialize(InnerContext *ctx, FenceKind kind, bool need_future);
+      Future initialize(InnerContext *ctx, FenceKind kind, 
+                        bool need_future, bool track=true);
     public:
       virtual void activate(void);
       virtual void deactivate(void);

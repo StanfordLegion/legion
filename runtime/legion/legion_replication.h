@@ -1635,7 +1635,7 @@ namespace Legion {
       ReplFenceOp& operator=(const ReplFenceOp &rhs);
     public:
       Future initialize_repl_fence(ReplicateContext *ctx, FenceKind kind, 
-                                   bool need_future);
+                                   bool need_future, bool track = true);
     public:
       virtual void activate(void);
       virtual void deactivate(void);

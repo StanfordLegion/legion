@@ -4378,10 +4378,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future ReplFenceOp::initialize_repl_fence(ReplicateContext *ctx, 
-                                              FenceKind k, bool need_future)
+                                      FenceKind k, bool need_future, bool track)
     //--------------------------------------------------------------------------
     {
-      Future f = initialize(ctx, k, need_future);
+      Future f = initialize(ctx, k, need_future, track);
       mapping_fence_barrier = ctx->get_next_mapping_fence_barrier();
       if (fence_kind == EXECUTION_FENCE)
         execution_fence_barrier = ctx->get_next_execution_fence_barrier();
@@ -6382,7 +6382,8 @@ namespace Legion {
                                                 Operation *invalidator)
     //--------------------------------------------------------------------------
     {
-      initialize_repl_fence(ctx, MAPPING_FENCE, false/*need future*/);
+      initialize_repl_fence(ctx, MAPPING_FENCE, 
+                            false/*need future*/, false/*track*/);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_fence_operation(parent_ctx->get_unique_id(),
                                        unique_op_id);
