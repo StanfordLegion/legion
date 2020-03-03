@@ -509,6 +509,7 @@ namespace Legion {
         "Defer Reduction Manager Registration",                   \
         "Defer Consensus Match",                                  \
         "Yield",                                                  \
+        "Defer Trace Update",                                     \
         "Remote Message",                                         \
         "Retry Shutdown",                                         \
       };
