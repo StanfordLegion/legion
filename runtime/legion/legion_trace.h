@@ -968,6 +968,25 @@ namespace Legion {
         FRONTIER_BARRIER_REFRESH,
       };
     public:
+      struct DeferTraceUpdateArgs : public LgTaskArgs<DeferTraceUpdateArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_TRACE_UPDATE_TASK_ID;
+      public:
+        DeferTraceUpdateArgs(ShardedPhysicalTemplate *target, 
+                             UpdateKind kind, RtUserEvent done, 
+                             AddressSpaceID source, Deserializer &derez, 
+                             LogicalView *view, EquivalenceSet *set = NULL);
+      public:
+        ShardedPhysicalTemplate *const target;
+        const UpdateKind kind;
+        const RtUserEvent done;
+        LogicalView *const view;
+        EquivalenceSet *const eq;
+        const AddressSpaceID source;
+        const size_t buffer_size;
+        void *const buffer;
+      };
+    public:
       ShardedPhysicalTemplate(PhysicalTrace *trace, ApEvent fence_event,
                               ReplicateContext *repl_ctx);
       ShardedPhysicalTemplate(const ShardedPhysicalTemplate &rhs);
@@ -1042,6 +1061,18 @@ namespace Legion {
       ApBarrier find_trace_shard_event(ApEvent event, ShardID remote_shard);
       void record_trace_shard_event(ApEvent event, ApBarrier result);
       void handle_trace_update(Deserializer &derez, AddressSpaceID source);
+      static void handle_deferred_trace_update(const void *args);
+    protected:
+      void handle_update_valid_views(InstanceView *view, EquivalenceSet *eq,
+                           Deserializer &derez, std::set<RtEvent> &applied);
+      void handle_update_pre_fill(FillView *view, Deserializer &derez,
+                                  std::set<RtEvent> &applied);
+      void handle_update_post_fill(FillView *view, Deserializer &derez,
+                                   std::set<RtEvent> &applied);
+      void handle_update_view_user(InstanceView *view, AddressSpaceID source,
+                            Deserializer &derez, std::set<RtEvent> &applied);
+      void handle_find_last_users(InstanceView *view, AddressSpaceID source,
+                            Deserializer &derez, std::set<RtEvent> &applied);
     protected:
 #ifdef DEBUG_LEGION
       virtual unsigned convert_event(const ApEvent &event, bool check = true);

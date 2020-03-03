@@ -4973,6 +4973,7 @@ namespace Legion {
       {
         case UPDATE_VALID_VIEWS:
           {
+            derez.deserialize(done);
             DistributedID view_did, eq_did;
             derez.deserialize(view_did);
             RtEvent view_ready;
@@ -4982,83 +4983,74 @@ namespace Legion {
             RtEvent eq_ready;
             EquivalenceSet *eq = 
               runtime->find_or_request_equivalence_set(eq_did, eq_ready);
-            RegionUsage usage;
-            derez.deserialize(usage);
-            FieldMask user_mask;
-            derez.deserialize(user_mask);
-            bool invalidates;
-            derez.deserialize<bool>(invalidates);
-            derez.deserialize(done);
-            if (view_ready.exists() && !view_ready.has_triggered())
-              view_ready.wait();
-            if (eq_ready.exists() && !eq_ready.has_triggered())
-              eq_ready.wait();
-            // We already know we're on the right shard so just do it
-            AutoLock tpl_lock(template_lock);
-            PhysicalTemplate::update_valid_views(view, eq, usage, user_mask,
-                                                 invalidates, applied);
+            if ((view_ready.exists() && !view_ready.has_triggered()) ||
+                (eq_ready.exists() && !eq_ready.has_triggered()))
+            {
+              const RtEvent pre = Runtime::merge_events(view_ready, eq_ready);
+              DeferTraceUpdateArgs args(this, kind, done, source,derez,view,eq);
+              runtime->issue_runtime_meta_task(args, 
+                  LG_LATENCY_MESSAGE_PRIORITY, pre);
+              return;
+            }
+            else
+              handle_update_valid_views(view, eq, derez, applied); 
             break;
           }
         case UPDATE_PRE_FILL:
           {
+            derez.deserialize(done);
             DistributedID view_did;
             derez.deserialize(view_did);
             RtEvent view_ready;
             FillView *view = static_cast<FillView*>(
                 runtime->find_or_request_logical_view(view_did, view_ready));
-            FieldMask view_mask;
-            derez.deserialize(view_mask);
-            derez.deserialize(done);
-            FieldMaskSet<FillView> views;
-            views.insert(view, view_mask);
             if (view_ready.exists() && !view_ready.has_triggered())
-              view_ready.wait();
-            // We already know we're on the right shard, so just do it
-            AutoLock tpl_lock(template_lock);
-            PhysicalTemplate::record_fill_views(views, applied);
+            {
+              DeferTraceUpdateArgs args(this, kind, done, source, derez, view);
+              runtime->issue_runtime_meta_task(args, 
+                  LG_LATENCY_MESSAGE_PRIORITY, view_ready);
+              return;
+            }
+            else
+              handle_update_pre_fill(view, derez, applied); 
             break;
           }
         case UPDATE_POST_FILL:
           {
+            derez.deserialize(done);
             DistributedID view_did;
             derez.deserialize(view_did);
             RtEvent view_ready;
             FillView *view = static_cast<FillView*>(
                 runtime->find_or_request_logical_view(view_did, view_ready));
-            FieldMask view_mask;
-            derez.deserialize(view_mask);
-            derez.deserialize(done);
             if (view_ready.exists() && !view_ready.has_triggered())
-              view_ready.wait();
-            // We already know we're on the right shard, so just do it
-            PhysicalTemplate::record_fill_view(view, view_mask, applied);
+            {
+              DeferTraceUpdateArgs args(this, kind, done, source, derez, view);
+              runtime->issue_runtime_meta_task(args, 
+                  LG_LATENCY_MESSAGE_PRIORITY, view_ready);
+              return;
+            }
+            else
+              handle_update_post_fill(view, derez, applied); 
             break;
           }
         case UPDATE_VIEW_USER:
           {
+            derez.deserialize(done);
             DistributedID view_did;
             derez.deserialize(view_did);
             RtEvent view_ready;
             InstanceView *view = static_cast<InstanceView*>(
                 runtime->find_or_request_logical_view(view_did, view_ready));
-            RegionUsage usage;
-            derez.deserialize(usage);
-            unsigned user_index;
-            derez.deserialize(user_index);
-            RegionTreeForest *forest = runtime->forest;
-            IndexSpaceExpression *user_expr = 
-              IndexSpaceExpression::unpack_expression(derez, forest, source);
-            FieldMask user_mask;
-            derez.deserialize(user_mask);
-            int owner_shard;
-            derez.deserialize(owner_shard);
-            derez.deserialize(done);
             if (view_ready.exists() && !view_ready.has_triggered())
-              view_ready.wait();
-            // We already know we're on the right shard so just do it
-            AutoLock tpl_lock(template_lock);
-            PhysicalTemplate::add_view_user(view, usage, user_index, user_expr,
-                                            user_mask, applied, owner_shard);
+            {
+              DeferTraceUpdateArgs args(this, kind, done, source, derez, view);
+              runtime->issue_runtime_meta_task(args, 
+                  LG_LATENCY_MESSAGE_PRIORITY, view_ready);
+              return;
+            }
+            else
+              handle_update_view_user(view, source, derez, applied); 
             break;
           }
         case UPDATE_LAST_USER:
@@ -5079,116 +5071,21 @@ namespace Legion {
           }
         case FIND_LAST_USERS_REQUEST:
           {
+            derez.deserialize(done);
             DistributedID view_did;
             derez.deserialize(view_did);
             RtEvent view_ready;
             InstanceView *view = static_cast<InstanceView*>(
                 runtime->find_or_request_logical_view(view_did, view_ready));
-            RegionTreeForest *forest = runtime->forest;
-            IndexSpaceExpression *user_expr = 
-              IndexSpaceExpression::unpack_expression(derez, forest, source);
-            FieldMask user_mask;
-            derez.deserialize(user_mask);
-            ShardID source_shard;
-            derez.deserialize(source_shard);
-            std::set<unsigned> *target;
-            derez.deserialize(target);
-            derez.deserialize(done);
             if (view_ready.exists() && !view_ready.has_triggered())
-              view_ready.wait();
-            // This is a local operation and all the data structures are
-            // read-only for this part so there is no need for the lock yet
-            std::set<std::pair<unsigned,ShardID> > sharded_users;
-            find_last_users_sharded(view, user_expr, user_mask, sharded_users);
-            // Sort these into where they should go
-            std::map<ShardID,std::vector<unsigned> > requests;
-            for (std::set<std::pair<unsigned,ShardID> >::const_iterator it =
-                  sharded_users.begin(); it != sharded_users.end(); it++)
-              requests[it->second].push_back(it->first);
-            // Send out the requests/responses
-            ShardManager *manager = repl_ctx->shard_manager;
-            const ShardID local_shard = repl_ctx->owner_shard->shard_id;
-            for (std::map<ShardID,std::vector<unsigned> >::const_iterator rit =
-                  requests.begin(); rit != requests.end(); rit++)
             {
-              RtUserEvent remote_done = Runtime::create_rt_user_event();
-              if (rit->first == source_shard)
-              {
-                // Special case for sending values directly back to the user
-                Serializer rez;
-                rez.serialize(manager->repl_id);
-                rez.serialize(source_shard);
-                rez.serialize(template_index);
-                rez.serialize(FIND_LAST_USERS_RESPONSE);
-                rez.serialize(target);
-                rez.serialize(remote_done);
-                rez.serialize<size_t>(rit->second.size());
-                for (std::vector<unsigned>::const_iterator it = 
-                      rit->second.begin(); it != rit->second.end(); it++)
-                  rez.serialize(*it);
-                manager->send_trace_update(source_shard, rez);
-              }
-              else if (rit->first == local_shard)
-              {
-                // Special case for ourselves so we can return the result as
-                // though we handled the remote frontier request
-                std::vector<ApBarrier> result_frontiers;
-                {
-                  AutoLock tpl_lock(template_lock);
-                  for (std::vector<unsigned>::const_iterator it = 
-                        rit->second.begin(); it != rit->second.end(); it++)
-                  {
-                    // These events have already been translated to frontiers
-                    // so we just need to look up the local frontiers
-                    // Check to see if we have a barrier for this event yet
-                    std::map<unsigned,ApBarrier>::const_iterator finder =
-                      local_frontiers.find(*it);
-                    if (finder == local_frontiers.end())
-                    {
-                      // Make a barrier and record it 
-                      const ApBarrier result(
-                          Realm::Barrier::create_barrier(1/*arrival count*/));
-                      local_frontiers[*it] = result;
-                      result_frontiers.push_back(result);
-                    }
-                    else
-                      result_frontiers.push_back(finder->second);
-                    // Record that this shard depends on this event
-                    local_subscriptions[*it].insert(source_shard);
-                  }
-                }
-                Serializer rez;
-                rez.serialize(manager->repl_id);
-                rez.serialize(source_shard);
-                rez.serialize(template_index);
-                rez.serialize(FIND_FRONTIER_RESPONSE);
-                rez.serialize(target);
-                rez.serialize<size_t>(result_frontiers.size());
-                for (std::vector<ApBarrier>::const_iterator it = 
-                      result_frontiers.begin(); it != 
-                      result_frontiers.end(); it++)
-                  rez.serialize(*it);
-                rez.serialize(remote_done);
-                manager->send_trace_update(source_shard, rez);
-              }
-              else
-              {
-                Serializer rez;
-                rez.serialize(manager->repl_id);
-                rez.serialize(rit->first);
-                rez.serialize(template_index);
-                rez.serialize(FIND_FRONTIER_REQUEST);
-                rez.serialize(source_shard);
-                rez.serialize(target);
-                rez.serialize<size_t>(rit->second.size());
-                for (std::vector<unsigned>::const_iterator it = 
-                      rit->second.begin(); it != rit->second.end(); it++)
-                  rez.serialize(*it); 
-                rez.serialize(remote_done);
-                manager->send_trace_update(rit->first, rez);
-              }
-              applied.insert(remote_done);
+              DeferTraceUpdateArgs args(this, kind, done, source, derez, view);
+              runtime->issue_runtime_meta_task(args, 
+                  LG_LATENCY_MESSAGE_PRIORITY, view_ready);
+              return;
             }
+            else
+              handle_find_last_users(view, source, derez, applied); 
             break;
           }
         case FIND_LAST_USERS_RESPONSE:
@@ -5417,6 +5314,247 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ShardedPhysicalTemplate::DeferTraceUpdateArgs::DeferTraceUpdateArgs(
+     ShardedPhysicalTemplate *t, UpdateKind k, RtUserEvent d, 
+     AddressSpaceID src, Deserializer &derez, LogicalView *v, EquivalenceSet *q)
+      : LgTaskArgs<DeferTraceUpdateArgs>(implicit_provenance),
+        target(t), kind(k), done(d), view(v), eq(q), source(src), 
+        buffer_size(derez.get_remaining_bytes()), buffer(malloc(buffer_size))
+    //--------------------------------------------------------------------------
+    {
+      memcpy(buffer, derez.get_current_pointer(), buffer_size);
+      derez.advance_pointer(buffer_size);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardedPhysicalTemplate::handle_deferred_trace_update(
+                                                               const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferTraceUpdateArgs *dargs = (const DeferTraceUpdateArgs*)args;
+      std::set<RtEvent> applied;
+      Deserializer derez(dargs->buffer, dargs->buffer_size);
+      switch (dargs->kind)
+      {
+        case UPDATE_VALID_VIEWS:
+          {
+            dargs->target->handle_update_valid_views(
+              static_cast<InstanceView*>(dargs->view),dargs->eq,derez,applied);
+            break;
+          }
+        case UPDATE_PRE_FILL:
+          {
+            dargs->target->handle_update_pre_fill(
+                static_cast<FillView*>(dargs->view), derez, applied);
+            break;
+          }
+        case UPDATE_POST_FILL:
+          {
+            dargs->target->handle_update_post_fill(
+                static_cast<FillView*>(dargs->view), derez, applied);
+            break;
+          }
+        case UPDATE_VIEW_USER:
+          {
+            dargs->target->handle_update_view_user(
+                static_cast<InstanceView*>(dargs->view), dargs->source,
+                derez, applied);
+            break;
+          }
+        case FIND_LAST_USERS_REQUEST:
+          {
+            dargs->target->handle_find_last_users(
+                static_cast<InstanceView*>(dargs->view), dargs->source,
+                derez, applied);
+            break;
+          }
+        default:
+          assert(false); // should never get here
+      }
+#ifdef DEBUG_LEGION
+      assert(dargs->done.exists());
+#endif
+      if (!applied.empty())
+        Runtime::trigger_event(dargs->done, Runtime::merge_events(applied));
+      else
+        Runtime::trigger_event(dargs->done);
+      free(dargs->buffer);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::handle_update_valid_views(InstanceView *view,
+            EquivalenceSet *eq, Deserializer &derez, std::set<RtEvent> &applied)
+    //--------------------------------------------------------------------------
+    {
+      RegionUsage usage;
+      derez.deserialize(usage);
+      FieldMask user_mask;
+      derez.deserialize(user_mask);
+      bool invalidates;
+      derez.deserialize<bool>(invalidates);
+      // We already know we're on the right shard so just do it
+      AutoLock tpl_lock(template_lock);
+      PhysicalTemplate::update_valid_views(view, eq, usage, user_mask,
+                                           invalidates, applied);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::handle_update_pre_fill(FillView *view,
+                                Deserializer &derez, std::set<RtEvent> &applied)
+    //--------------------------------------------------------------------------
+    {
+      FieldMask view_mask;
+      derez.deserialize(view_mask);
+      FieldMaskSet<FillView> views;
+      views.insert(view, view_mask);
+      // We already know we're on the right shard, so just do it
+      AutoLock tpl_lock(template_lock);
+      PhysicalTemplate::record_fill_views(views, applied);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::handle_update_post_fill(FillView *view,
+                                Deserializer &derez, std::set<RtEvent> &applied)
+    //--------------------------------------------------------------------------
+    {
+      FieldMask view_mask;
+      derez.deserialize(view_mask);
+      // We already know we're on the right shard, so just do it
+      PhysicalTemplate::record_fill_view(view, view_mask, applied);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::handle_update_view_user(InstanceView *view,
+         AddressSpaceID source, Deserializer &derez, std::set<RtEvent> &applied)
+    //--------------------------------------------------------------------------
+    {
+      RegionUsage usage;
+      derez.deserialize(usage);
+      unsigned user_index;
+      derez.deserialize(user_index);
+      RegionTreeForest *forest = repl_ctx->runtime->forest;
+      IndexSpaceExpression *user_expr = 
+        IndexSpaceExpression::unpack_expression(derez, forest, source);
+      FieldMask user_mask;
+      derez.deserialize(user_mask);
+      int owner_shard;
+      derez.deserialize(owner_shard);
+      // We already know we're on the right shard so just do it
+      AutoLock tpl_lock(template_lock);
+      PhysicalTemplate::add_view_user(view, usage, user_index, user_expr,
+                                      user_mask, applied, owner_shard);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::handle_find_last_users(InstanceView *view,
+         AddressSpaceID source, Deserializer &derez, std::set<RtEvent> &applied)
+    //--------------------------------------------------------------------------
+    {
+      RegionTreeForest *forest = repl_ctx->runtime->forest;
+      IndexSpaceExpression *user_expr = 
+        IndexSpaceExpression::unpack_expression(derez, forest, source);
+      FieldMask user_mask;
+      derez.deserialize(user_mask);
+      ShardID source_shard;
+      derez.deserialize(source_shard);
+      std::set<unsigned> *target;
+      derez.deserialize(target);
+      // This is a local operation and all the data structures are
+      // read-only for this part so there is no need for the lock yet
+      std::set<std::pair<unsigned,ShardID> > sharded_users;
+      find_last_users_sharded(view, user_expr, user_mask, sharded_users);
+      // Sort these into where they should go
+      std::map<ShardID,std::vector<unsigned> > requests;
+      for (std::set<std::pair<unsigned,ShardID> >::const_iterator it =
+            sharded_users.begin(); it != sharded_users.end(); it++)
+        requests[it->second].push_back(it->first);
+      // Send out the requests/responses
+      ShardManager *manager = repl_ctx->shard_manager;
+      const ShardID local_shard = repl_ctx->owner_shard->shard_id;
+      for (std::map<ShardID,std::vector<unsigned> >::const_iterator rit =
+            requests.begin(); rit != requests.end(); rit++)
+      {
+        RtUserEvent remote_done = Runtime::create_rt_user_event();
+        if (rit->first == source_shard)
+        {
+          // Special case for sending values directly back to the user
+          Serializer rez;
+          rez.serialize(manager->repl_id);
+          rez.serialize(source_shard);
+          rez.serialize(template_index);
+          rez.serialize(FIND_LAST_USERS_RESPONSE);
+          rez.serialize(target);
+          rez.serialize(remote_done);
+          rez.serialize<size_t>(rit->second.size());
+          for (std::vector<unsigned>::const_iterator it = 
+                rit->second.begin(); it != rit->second.end(); it++)
+            rez.serialize(*it);
+          manager->send_trace_update(source_shard, rez);
+        }
+        else if (rit->first == local_shard)
+        {
+          // Special case for ourselves so we can return the result as
+          // though we handled the remote frontier request
+          std::vector<ApBarrier> result_frontiers;
+          {
+            AutoLock tpl_lock(template_lock);
+            for (std::vector<unsigned>::const_iterator it = 
+                  rit->second.begin(); it != rit->second.end(); it++)
+            {
+              // These events have already been translated to frontiers
+              // so we just need to look up the local frontiers
+              // Check to see if we have a barrier for this event yet
+              std::map<unsigned,ApBarrier>::const_iterator finder =
+                local_frontiers.find(*it);
+              if (finder == local_frontiers.end())
+              {
+                // Make a barrier and record it 
+                const ApBarrier result(
+                    Realm::Barrier::create_barrier(1/*arrival count*/));
+                local_frontiers[*it] = result;
+                result_frontiers.push_back(result);
+              }
+              else
+                result_frontiers.push_back(finder->second);
+              // Record that this shard depends on this event
+              local_subscriptions[*it].insert(source_shard);
+            }
+          }
+          Serializer rez;
+          rez.serialize(manager->repl_id);
+          rez.serialize(source_shard);
+          rez.serialize(template_index);
+          rez.serialize(FIND_FRONTIER_RESPONSE);
+          rez.serialize(target);
+          rez.serialize<size_t>(result_frontiers.size());
+          for (std::vector<ApBarrier>::const_iterator it = 
+                result_frontiers.begin(); it != 
+                result_frontiers.end(); it++)
+            rez.serialize(*it);
+          rez.serialize(remote_done);
+          manager->send_trace_update(source_shard, rez);
+        }
+        else
+        {
+          Serializer rez;
+          rez.serialize(manager->repl_id);
+          rez.serialize(rit->first);
+          rez.serialize(template_index);
+          rez.serialize(FIND_FRONTIER_REQUEST);
+          rez.serialize(source_shard);
+          rez.serialize(target);
+          rez.serialize<size_t>(rit->second.size());
+          for (std::vector<unsigned>::const_iterator it = 
+                rit->second.begin(); it != rit->second.end(); it++)
+            rez.serialize(*it); 
+          rez.serialize(remote_done);
+          manager->send_trace_update(rit->first, rez);
+        }
+        applied.insert(remote_done);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void ShardedPhysicalTemplate::request_remote_shard_event(ApEvent event,
                                                          RtUserEvent done_event)
     //--------------------------------------------------------------------------
@@ -5625,12 +5763,12 @@ namespace Legion {
         rez.serialize(target_shard);
         rez.serialize(template_index);
         rez.serialize(UPDATE_VALID_VIEWS);
+        rez.serialize(done);
         rez.serialize(view->did);
         rez.serialize(eq->did);
         rez.serialize(usage);
         rez.serialize(user_mask);
         rez.serialize<bool>(invalidates);
-        rez.serialize(done);
         repl_ctx->shard_manager->send_trace_update(target_shard, rez);
         applied.insert(done);
       }
@@ -5660,6 +5798,7 @@ namespace Legion {
         rez.serialize(target_shard);
         rez.serialize(template_index);
         rez.serialize(UPDATE_VIEW_USER);
+        rez.serialize(done);
         rez.serialize(view->did);
         rez.serialize(usage);
         rez.serialize(user_index);
@@ -5669,7 +5808,6 @@ namespace Legion {
         assert(owner_shard < 0); // shouldn't have set this yet
 #endif
         rez.serialize(repl_ctx->owner_shard->shard_id);
-        rez.serialize(done);
         manager->send_trace_update(target_shard, rez);
         applied.insert(done);
       }
@@ -5705,9 +5843,9 @@ namespace Legion {
         rez.serialize(target_shard);
         rez.serialize(template_index);
         rez.serialize(UPDATE_POST_FILL);
+        rez.serialize(done);
         rez.serialize(view->did);
         rez.serialize(user_mask);
-        rez.serialize(done);
         repl_ctx->shard_manager->send_trace_update(target_shard,rez);
         applied.insert(done);
       }
@@ -5742,9 +5880,9 @@ namespace Legion {
           rez.serialize(target_shard);
           rez.serialize(template_index);
           rez.serialize(UPDATE_PRE_FILL);
+          rez.serialize(applied);
           rez.serialize(it->first->did);
           rez.serialize(it->second);
-          rez.serialize(applied);
           repl_ctx->shard_manager->send_trace_update(target_shard,rez);
           applied_events.insert(applied);
         }
@@ -5969,12 +6107,12 @@ namespace Legion {
         rez.serialize(owner_shard);
         rez.serialize(template_index);
         rez.serialize(FIND_LAST_USERS_REQUEST);
+        rez.serialize(done);
         rez.serialize(view->did);
         expr->pack_expression(rez, manager->get_shard_space(owner_shard));
         rez.serialize(mask);
         rez.serialize(repl_ctx->owner_shard->shard_id);
         rez.serialize(&users);
-        rez.serialize(done);
         manager->send_trace_update(owner_shard, rez);
         ready_events.insert(done);
       }

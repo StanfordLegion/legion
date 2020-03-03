@@ -378,6 +378,7 @@ namespace Legion {
       LG_DEFER_REDUCTION_MANAGER_TASK_ID,
       LG_DEFER_CONSENSUS_MATCH_TASK_ID,
       LG_YIELD_TASK_ID,
+      LG_DEFER_TRACE_UPDATE_TASK_ID,
       LG_MESSAGE_ID, // These two must be the last two
       LG_RETRY_SHUTDOWN_TASK_ID,
       LG_LAST_TASK_ID, // This one should always be last
