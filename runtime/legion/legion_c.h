@@ -3361,6 +3361,20 @@ extern "C" {
                                            legion_phase_barrier_t bar);
 
   /**
+   * @see Legion::CopyLauncher::possible_src_indirect_out_of_range
+   */
+  void
+  legion_copy_launcher_set_possible_src_indirect_out_of_range(
+      legion_copy_launcher_t launcher, bool flag);
+
+  /**
+   * @see Legion::CopyLauncher::possible_dst_indirect_out_of_range
+   */
+  void
+  legion_copy_launcher_set_possible_dst_indirect_out_of_range(
+      legion_copy_launcher_t launcher, bool flag);
+
+  /**
    * @return Caller does **NOT** take ownership of return value.
    *
    * @see Legion::Copy::src_requirements
@@ -3580,6 +3594,20 @@ extern "C" {
   void
   legion_index_copy_launcher_add_arrival_barrier(legion_index_copy_launcher_t launcher,
                                                  legion_phase_barrier_t bar);
+
+  /**
+   * @see Legion::IndexCopyLauncher::possible_src_indirect_out_of_range
+   */
+  void
+  legion_index_copy_launcher_set_possible_src_indirect_out_of_range(
+      legion_index_copy_launcher_t launcher, bool flag);
+
+  /**
+   * @see Legion::IndexCopyLauncher::possible_dst_indirect_out_of_range
+   */
+  void
+  legion_index_copy_launcher_set_possible_dst_indirect_out_of_range(
+      legion_index_copy_launcher_t launcher, bool flag);
 
   // -----------------------------------------------------------------------
   // Acquire Operations

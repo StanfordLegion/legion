@@ -4159,6 +4159,22 @@ legion_copy_launcher_add_arrival_barrier(legion_copy_launcher_t launcher_,
   launcher->add_arrival_barrier(bar);
 }
 
+void
+legion_copy_launcher_set_possible_src_indirect_out_of_range(
+    legion_copy_launcher_t launcher_, bool flag)
+{
+  CopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  launcher->possible_src_indirect_out_of_range = flag;
+}
+
+void
+legion_copy_launcher_set_possible_dst_indirect_out_of_range(
+    legion_copy_launcher_t launcher_, bool flag)
+{
+  CopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  launcher->possible_dst_indirect_out_of_range = flag;
+}
+
 legion_region_requirement_t
 legion_copy_get_requirement(legion_copy_t copy_, unsigned idx)
 {
@@ -4476,6 +4492,22 @@ legion_index_copy_launcher_add_arrival_barrier(legion_index_copy_launcher_t laun
   PhaseBarrier bar = CObjectWrapper::unwrap(bar_);
 
   launcher->add_arrival_barrier(bar);
+}
+
+void
+legion_index_copy_launcher_set_possible_src_indirect_out_of_range(
+    legion_index_copy_launcher_t launcher_, bool flag)
+{
+  IndexCopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  launcher->possible_src_indirect_out_of_range = flag;
+}
+
+void
+legion_index_copy_launcher_set_possible_dst_indirect_out_of_range(
+    legion_index_copy_launcher_t launcher_, bool flag)
+{
+  IndexCopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  launcher->possible_dst_indirect_out_of_range = flag;
 }
 
 // -----------------------------------------------------------------------
