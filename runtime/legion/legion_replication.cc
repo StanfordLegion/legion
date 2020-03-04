@@ -5859,6 +5859,12 @@ namespace Legion {
       assert(trace == NULL);
       assert(local_trace != NULL);
 #endif
+      // Indicate that this trace is done being captured
+      // This also registers that we have dependences on all operations
+      // in the trace.
+      local_trace->end_trace_execution(this);
+      parent_ctx->record_previous_trace(local_trace);
+
       if (local_trace->is_replaying())
       {
         PhysicalTrace *physical_trace = local_trace->get_physical_trace();
@@ -5885,7 +5891,7 @@ namespace Legion {
         parent_ctx->update_current_fence(this, true, true);
         parent_ctx->record_previous_trace(local_trace);
         physical_trace->record_previous_template_completion(
-            template_completion);
+            execution_fence_barrier);
         local_trace->initialize_tracing_state();
         replayed = true;
         return;
@@ -5900,22 +5906,7 @@ namespace Legion {
         physical_trace->record_previous_template_completion(
             get_completion_event());
         physical_trace->clear_cached_template();
-      }
-
-      // Indicate that this trace is done being captured
-      // This also registers that we have dependences on all operations
-      // in the trace.
-      local_trace->end_trace_execution(this);
-
-      // We always need to run the full fence analysis, otherwise
-      // the operations replayed in the following trace will race
-      // with those in the current trace
-      execution_precondition =
-        parent_ctx->perform_fence_analysis(this, true, true);
-
-      // Now update the parent context with this fence before we can complete
-      // the dependence analysis and possibly be deactivated
-      parent_ctx->update_current_fence(this, true, true);
+      } 
 
       // If this is a static trace, then we remove our reference when we're done
       if (local_trace->is_static_trace())
@@ -5924,7 +5915,7 @@ namespace Legion {
         if (static_trace->remove_reference())
           delete static_trace;
       }
-      parent_ctx->record_previous_trace(local_trace);
+      ReplFenceOp::trigger_dependence_analysis();
     }
 
     //--------------------------------------------------------------------------
