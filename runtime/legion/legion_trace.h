@@ -974,15 +974,29 @@ namespace Legion {
       public:
         DeferTraceUpdateArgs(ShardedPhysicalTemplate *target, 
                              UpdateKind kind, RtUserEvent done, 
-                             AddressSpaceID source, Deserializer &derez, 
-                             LogicalView *view, EquivalenceSet *set = NULL);
+                             Deserializer &derez, LogicalView *view,
+                             EquivalenceSet *set = NULL);
+        DeferTraceUpdateArgs(ShardedPhysicalTemplate *target, 
+                             UpdateKind kind, RtUserEvent done, 
+                             LogicalView *view, Deserializer &derez,
+                             IndexSpaceExpression *expr);
+        DeferTraceUpdateArgs(ShardedPhysicalTemplate *target, 
+                             UpdateKind kind, RtUserEvent done, 
+                             LogicalView *view, Deserializer &derez,
+                             IndexSpace handle);
+        DeferTraceUpdateArgs(ShardedPhysicalTemplate *target, 
+                             UpdateKind kind, RtUserEvent done, 
+                             LogicalView *view, Deserializer &derez,
+                             IndexSpaceExprID expr_id);
       public:
         ShardedPhysicalTemplate *const target;
         const UpdateKind kind;
         const RtUserEvent done;
         LogicalView *const view;
         EquivalenceSet *const eq;
-        const AddressSpaceID source;
+        IndexSpaceExpression *const expr;
+        const IndexSpaceExprID remote_expr_id;
+        const IndexSpace handle;
         const size_t buffer_size;
         void *const buffer;
       };
@@ -1063,7 +1077,7 @@ namespace Legion {
       ApBarrier find_trace_shard_event(ApEvent event, ShardID remote_shard);
       void record_trace_shard_event(ApEvent event, ApBarrier result);
       void handle_trace_update(Deserializer &derez, AddressSpaceID source);
-      static void handle_deferred_trace_update(const void *args);
+      static void handle_deferred_trace_update(const void *args, Runtime *rt);
     protected:
       void handle_update_valid_views(InstanceView *view, EquivalenceSet *eq,
                            Deserializer &derez, std::set<RtEvent> &applied);
@@ -1071,9 +1085,9 @@ namespace Legion {
                                   std::set<RtEvent> &applied);
       void handle_update_post_fill(FillView *view, Deserializer &derez,
                                    std::set<RtEvent> &applied);
-      void handle_update_view_user(InstanceView *view, AddressSpaceID source,
+      void handle_update_view_user(InstanceView *view, IndexSpaceExpression *ex,
                             Deserializer &derez, std::set<RtEvent> &applied);
-      void handle_find_last_users(InstanceView *view, AddressSpaceID source,
+      void handle_find_last_users(InstanceView *view, IndexSpaceExpression *ex,
                             Deserializer &derez, std::set<RtEvent> &applied);
     protected:
 #ifdef DEBUG_LEGION

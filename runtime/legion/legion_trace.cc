@@ -4987,7 +4987,7 @@ namespace Legion {
                 (eq_ready.exists() && !eq_ready.has_triggered()))
             {
               const RtEvent pre = Runtime::merge_events(view_ready, eq_ready);
-              DeferTraceUpdateArgs args(this, kind, done, source,derez,view,eq);
+              DeferTraceUpdateArgs args(this, kind, done, derez, view, eq);
               runtime->issue_runtime_meta_task(args, 
                   LG_LATENCY_MESSAGE_PRIORITY, pre);
               return;
@@ -5006,7 +5006,7 @@ namespace Legion {
                 runtime->find_or_request_logical_view(view_did, view_ready));
             if (view_ready.exists() && !view_ready.has_triggered())
             {
-              DeferTraceUpdateArgs args(this, kind, done, source, derez, view);
+              DeferTraceUpdateArgs args(this, kind, done, derez, view);
               runtime->issue_runtime_meta_task(args, 
                   LG_LATENCY_MESSAGE_PRIORITY, view_ready);
               return;
@@ -5025,7 +5025,7 @@ namespace Legion {
                 runtime->find_or_request_logical_view(view_did, view_ready));
             if (view_ready.exists() && !view_ready.has_triggered())
             {
-              DeferTraceUpdateArgs args(this, kind, done, source, derez, view);
+              DeferTraceUpdateArgs args(this, kind, done, derez, view);
               runtime->issue_runtime_meta_task(args, 
                   LG_LATENCY_MESSAGE_PRIORITY, view_ready);
               return;
@@ -5042,15 +5042,47 @@ namespace Legion {
             RtEvent view_ready;
             InstanceView *view = static_cast<InstanceView*>(
                 runtime->find_or_request_logical_view(view_did, view_ready));
-            if (view_ready.exists() && !view_ready.has_triggered())
+            bool is_local, is_index_space;
+            IndexSpace handle; 
+            IndexSpaceExprID remote_expr_id;
+            RtEvent expr_ready;
+            IndexSpaceExpression *user_expr = 
+              IndexSpaceExpression::unpack_expression(derez, runtime->forest, 
+                                    source, is_local, is_index_space, handle, 
+                                    remote_expr_id, expr_ready);
+            if ((view_ready.exists() && !view_ready.has_triggered()) ||
+                (expr_ready.exists() && !expr_ready.has_triggered()))
             {
-              DeferTraceUpdateArgs args(this, kind, done, source, derez, view);
-              runtime->issue_runtime_meta_task(args, 
-                  LG_LATENCY_MESSAGE_PRIORITY, view_ready);
+              if (user_expr != NULL)
+              {
+#ifdef DEBUG_LEGION
+                assert(!expr_ready.exists() || expr_ready.has_triggered());
+#endif
+                DeferTraceUpdateArgs args(this, kind,done,view,derez,user_expr);
+                runtime->issue_runtime_meta_task(args, 
+                    LG_LATENCY_MESSAGE_PRIORITY, view_ready);
+              }
+              else if (is_index_space)
+              {
+                DeferTraceUpdateArgs args(this, kind, done, view, derez,handle);
+                const RtEvent pre = !view_ready.exists() ? expr_ready : 
+                  Runtime::merge_events(view_ready, expr_ready);
+                runtime->issue_runtime_meta_task(args, 
+                    LG_LATENCY_MESSAGE_PRIORITY, pre);
+              }
+              else
+              {
+                DeferTraceUpdateArgs args(this, kind, done, view, 
+                                          derez, remote_expr_id);
+                const RtEvent pre = !view_ready.exists() ? expr_ready : 
+                  Runtime::merge_events(view_ready, expr_ready);
+                runtime->issue_runtime_meta_task(args, 
+                    LG_LATENCY_MESSAGE_PRIORITY, pre);
+              }
               return;
             }
             else
-              handle_update_view_user(view, source, derez, applied); 
+              handle_update_view_user(view, user_expr, derez, applied); 
             break;
           }
         case UPDATE_LAST_USER:
@@ -5077,15 +5109,47 @@ namespace Legion {
             RtEvent view_ready;
             InstanceView *view = static_cast<InstanceView*>(
                 runtime->find_or_request_logical_view(view_did, view_ready));
-            if (view_ready.exists() && !view_ready.has_triggered())
+            bool is_local, is_index_space;
+            IndexSpace handle; 
+            IndexSpaceExprID remote_expr_id;
+            RtEvent expr_ready;
+            IndexSpaceExpression *user_expr = 
+              IndexSpaceExpression::unpack_expression(derez, runtime->forest, 
+                                    source, is_local, is_index_space, handle,
+                                    remote_expr_id, expr_ready);
+            if ((view_ready.exists() && !view_ready.has_triggered()) ||
+                (expr_ready.exists() && !expr_ready.has_triggered()))
             {
-              DeferTraceUpdateArgs args(this, kind, done, source, derez, view);
-              runtime->issue_runtime_meta_task(args, 
-                  LG_LATENCY_MESSAGE_PRIORITY, view_ready);
+              if (user_expr != NULL)
+              {
+#ifdef DEBUG_LEGION
+                assert(!expr_ready.exists() || expr_ready.has_triggered());
+#endif
+                DeferTraceUpdateArgs args(this, kind,done,view,derez,user_expr);
+                runtime->issue_runtime_meta_task(args, 
+                    LG_LATENCY_MESSAGE_PRIORITY, view_ready);
+              }
+              else if (is_index_space)
+              {
+                DeferTraceUpdateArgs args(this, kind, done, view, derez, handle);
+                const RtEvent pre = !view_ready.exists() ? expr_ready : 
+                  Runtime::merge_events(view_ready, expr_ready);
+                runtime->issue_runtime_meta_task(args, 
+                    LG_LATENCY_MESSAGE_PRIORITY, pre);
+              }
+              else
+              {
+                DeferTraceUpdateArgs args(this, kind, done, view, 
+                                          derez, remote_expr_id);
+                const RtEvent pre = !view_ready.exists() ? expr_ready : 
+                  Runtime::merge_events(view_ready, expr_ready);
+                runtime->issue_runtime_meta_task(args, 
+                    LG_LATENCY_MESSAGE_PRIORITY, pre);
+              }
               return;
             }
             else
-              handle_find_last_users(view, source, derez, applied); 
+              handle_find_last_users(view, user_expr, derez, applied); 
             break;
           }
         case FIND_LAST_USERS_RESPONSE:
@@ -5316,9 +5380,49 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ShardedPhysicalTemplate::DeferTraceUpdateArgs::DeferTraceUpdateArgs(
      ShardedPhysicalTemplate *t, UpdateKind k, RtUserEvent d, 
-     AddressSpaceID src, Deserializer &derez, LogicalView *v, EquivalenceSet *q)
-      : LgTaskArgs<DeferTraceUpdateArgs>(implicit_provenance),
-        target(t), kind(k), done(d), view(v), eq(q), source(src), 
+     Deserializer &derez, LogicalView *v, EquivalenceSet *q)
+      : LgTaskArgs<DeferTraceUpdateArgs>(implicit_provenance), target(t), 
+        kind(k), done(d), view(v), eq(q), expr(NULL), remote_expr_id(0),
+        buffer_size(derez.get_remaining_bytes()), buffer(malloc(buffer_size))
+    //--------------------------------------------------------------------------
+    {
+      memcpy(buffer, derez.get_current_pointer(), buffer_size);
+      derez.advance_pointer(buffer_size);
+    }
+
+    //--------------------------------------------------------------------------
+    ShardedPhysicalTemplate::DeferTraceUpdateArgs::DeferTraceUpdateArgs(
+     ShardedPhysicalTemplate *t, UpdateKind k, RtUserEvent d, 
+     LogicalView *v, Deserializer &derez, IndexSpaceExpression *x)
+      : LgTaskArgs<DeferTraceUpdateArgs>(implicit_provenance), target(t), 
+        kind(k), done(d), view(v), eq(NULL), expr(x), remote_expr_id(0),
+        buffer_size(derez.get_remaining_bytes()), buffer(malloc(buffer_size))
+    //--------------------------------------------------------------------------
+    {
+      memcpy(buffer, derez.get_current_pointer(), buffer_size);
+      derez.advance_pointer(buffer_size);
+    }
+
+    //--------------------------------------------------------------------------
+    ShardedPhysicalTemplate::DeferTraceUpdateArgs::DeferTraceUpdateArgs(
+     ShardedPhysicalTemplate *t, UpdateKind k, RtUserEvent d, 
+     LogicalView *v, Deserializer &derez, IndexSpace h)
+      : LgTaskArgs<DeferTraceUpdateArgs>(implicit_provenance), target(t), 
+        kind(k), done(d), view(v), eq(NULL), expr(NULL), remote_expr_id(0),
+        handle(h), buffer_size(derez.get_remaining_bytes()), 
+        buffer(malloc(buffer_size))
+    //--------------------------------------------------------------------------
+    {
+      memcpy(buffer, derez.get_current_pointer(), buffer_size);
+      derez.advance_pointer(buffer_size);
+    }
+
+    //--------------------------------------------------------------------------
+    ShardedPhysicalTemplate::DeferTraceUpdateArgs::DeferTraceUpdateArgs(
+     ShardedPhysicalTemplate *t, UpdateKind k, RtUserEvent d, 
+     LogicalView *v, Deserializer &derez, IndexSpaceExprID x)
+      : LgTaskArgs<DeferTraceUpdateArgs>(implicit_provenance), target(t), 
+        kind(k), done(d), view(v), eq(NULL), expr(NULL), remote_expr_id(x),
         buffer_size(derez.get_remaining_bytes()), buffer(malloc(buffer_size))
     //--------------------------------------------------------------------------
     {
@@ -5328,7 +5432,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void ShardedPhysicalTemplate::handle_deferred_trace_update(
-                                                               const void *args)
+                                             const void *args, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       const DeferTraceUpdateArgs *dargs = (const DeferTraceUpdateArgs*)args;
@@ -5356,16 +5460,48 @@ namespace Legion {
           }
         case UPDATE_VIEW_USER:
           {
-            dargs->target->handle_update_view_user(
-                static_cast<InstanceView*>(dargs->view), dargs->source,
-                derez, applied);
+            if (dargs->expr != NULL)
+            {
+              dargs->target->handle_update_view_user(
+                  static_cast<InstanceView*>(dargs->view), 
+                  dargs->expr, derez, applied);
+            }
+            else if (dargs->handle.exists())
+            {
+              IndexSpaceNode *node = runtime->forest->get_node(dargs->handle);
+              dargs->target->handle_update_view_user(
+                  static_cast<InstanceView*>(dargs->view), node, derez,applied);
+            }
+            else
+            {
+              IndexSpaceExpression *expr = 
+                runtime->forest->find_remote_expression(dargs->remote_expr_id);
+              dargs->target->handle_update_view_user(
+                  static_cast<InstanceView*>(dargs->view), expr, derez,applied);
+            }
             break;
           }
         case FIND_LAST_USERS_REQUEST:
           {
-            dargs->target->handle_find_last_users(
-                static_cast<InstanceView*>(dargs->view), dargs->source,
-                derez, applied);
+            if (dargs->expr != NULL)
+            {
+              dargs->target->handle_find_last_users(
+                  static_cast<InstanceView*>(dargs->view), 
+                  dargs->expr, derez, applied);
+            }
+            else if (dargs->handle.exists())
+            {
+              IndexSpaceNode *node = runtime->forest->get_node(dargs->handle);
+              dargs->target->handle_find_last_users(
+                  static_cast<InstanceView*>(dargs->view), node, derez,applied);
+            }
+            else
+            {
+              IndexSpaceExpression *expr = 
+                runtime->forest->find_remote_expression(dargs->remote_expr_id);
+              dargs->target->handle_find_last_users(
+                  static_cast<InstanceView*>(dargs->view), expr, derez,applied);
+            }
             break;
           }
         default:
@@ -5425,16 +5561,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ShardedPhysicalTemplate::handle_update_view_user(InstanceView *view,
-         AddressSpaceID source, Deserializer &derez, std::set<RtEvent> &applied)
+                                              IndexSpaceExpression *user_expr, 
+                                              Deserializer &derez, 
+                                              std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
       RegionUsage usage;
       derez.deserialize(usage);
       unsigned user_index;
       derez.deserialize(user_index);
-      RegionTreeForest *forest = repl_ctx->runtime->forest;
-      IndexSpaceExpression *user_expr = 
-        IndexSpaceExpression::unpack_expression(derez, forest, source);
       FieldMask user_mask;
       derez.deserialize(user_mask);
       int owner_shard;
@@ -5447,12 +5582,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ShardedPhysicalTemplate::handle_find_last_users(InstanceView *view,
-         AddressSpaceID source, Deserializer &derez, std::set<RtEvent> &applied)
+                                                IndexSpaceExpression *user_expr,
+                                                Deserializer &derez, 
+                                                std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
-      RegionTreeForest *forest = repl_ctx->runtime->forest;
-      IndexSpaceExpression *user_expr = 
-        IndexSpaceExpression::unpack_expression(derez, forest, source);
       FieldMask user_mask;
       derez.deserialize(user_mask);
       ShardID source_shard;
@@ -5800,9 +5934,9 @@ namespace Legion {
         rez.serialize(UPDATE_VIEW_USER);
         rez.serialize(done);
         rez.serialize(view->did);
+        user_expr->pack_expression(rez, manager->get_shard_space(target_shard));
         rez.serialize(usage);
         rez.serialize(user_index);
-        user_expr->pack_expression(rez, manager->get_shard_space(target_shard));
         rez.serialize(user_mask);
 #ifdef DEBUG_LEGION
         assert(owner_shard < 0); // shouldn't have set this yet

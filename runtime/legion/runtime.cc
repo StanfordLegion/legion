@@ -25856,7 +25856,7 @@ namespace Legion {
           break; // nothing to do here
         case LG_DEFER_TRACE_UPDATE_TASK_ID:
           {
-            ShardedPhysicalTemplate::handle_deferred_trace_update(args);
+            ShardedPhysicalTemplate::handle_deferred_trace_update(args,runtime);
             break;
           }
         case LG_RETRY_SHUTDOWN_TASK_ID:
