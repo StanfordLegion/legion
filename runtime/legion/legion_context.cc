@@ -8868,8 +8868,9 @@ namespace Legion {
         next_future_map_bar_index(0), index_space_allocator_shard(0), 
         index_partition_allocator_shard(0), field_space_allocator_shard(0), 
         field_allocator_shard(0), logical_region_allocator_shard(0), 
-        next_available_collective_index(0), next_physical_template_index(0), 
-        next_replicate_bar_index(0), unordered_ops_counter(0), 
+        next_available_collective_index(0), summary_collective_id(0),
+        next_physical_template_index(0), next_replicate_bar_index(0), 
+        next_summary_bar_index(0), unordered_ops_counter(0), 
         unordered_ops_epoch(MIN_UNORDERED_OPS_EPOCH)
     //--------------------------------------------------------------------------
     {
@@ -8880,6 +8881,7 @@ namespace Legion {
       inline_mapping_barrier = manager->get_inline_mapping_barrier();
       external_resource_barrier = manager->get_external_resource_barrier();
       mapping_fence_barrier = manager->get_mapping_fence_barrier();
+      summary_fence_barrier = manager->get_summary_fence_barrier();
       execution_fence_barrier = manager->get_execution_fence_barrier();
       attach_broadcast_barrier = manager->get_attach_broadcast_barrier();
       attach_reduce_barrier = manager->get_attach_reduce_barrier();
@@ -12933,6 +12935,11 @@ namespace Legion {
           runtime->get_available_repl_trace_op();
         complete_op->initialize_complete(this, has_blocking_call);
         runtime->add_to_dependence_queue(this, executing_processor,complete_op);
+        // Make a summary collective ID here if we don't have one in case
+        // we need to regenerate the summary barrier during the dependence
+        // analysis stage of the pipeline
+        if (current_trace->has_physical_trace() && (summary_collective_id == 0))
+          summary_collective_id = get_next_collective_index(COLLECTIVE_LOC_100);
       }
       else
       {
@@ -14342,6 +14349,42 @@ namespace Legion {
     {
       ApBarrier result = execution_fence_barrier;
       advance_replicate_barrier(execution_fence_barrier, total_shards);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    RtBarrier ReplicateContext::get_next_summary_fence_barrier(void)
+    //--------------------------------------------------------------------------
+    {
+      const RtBarrier result = summary_fence_barrier;
+      Runtime::advance_barrier(summary_fence_barrier);
+      if (summary_fence_barrier.exists())
+        return result;
+      // If it doesn't exist then we have to make a new one
+      // We can't make a collective ID here because we're in the dependence
+      // analysis stage of the pipeline
+#ifdef DEBUG_LEGION
+      // There better be one of these here
+      assert(summary_collective_id > 0);
+#endif
+      ValueBroadcast<RtBarrier> 
+        collective(summary_collective_id, this, next_summary_bar_index);
+      if (owner_shard->shard_id == next_summary_bar_index++)
+      {
+        summary_fence_barrier = 
+          RtBarrier(Realm::Barrier::create_barrier(total_shards));
+        collective.broadcast(summary_fence_barrier);
+      }
+      else
+        summary_fence_barrier = collective.get_value();
+      // Check to see if we need to reset th next_summary_bar_index
+      if (next_summary_bar_index == total_shards)
+        next_summary_bar_index = 0;
+      // Set this back to zero so we can re-initialize it in the application
+      // at some point in the future. This is safe as long as we know there
+      // are more barrier generations than possible oustanding replays which
+      // should always be true
+      summary_collective_id = 0;
       return result;
     }
 

@@ -317,6 +317,8 @@ namespace Legion {
       ValueBroadcast(ReplicateContext *ctx, ShardID origin,
                      CollectiveIndexLocation loc)
         : BroadcastCollective(loc, ctx, origin) { }
+      ValueBroadcast(CollectiveID id, ReplicateContext *ctx, ShardID origin)
+        : BroadcastCollective(ctx, id, origin) { }
       ValueBroadcast(const ValueBroadcast &rhs) 
         : BroadcastCollective(rhs) { assert(false); }
       virtual ~ValueBroadcast(void) { }
@@ -2004,6 +2006,8 @@ namespace Legion {
         { return external_resource_barrier; }
       inline RtBarrier get_mapping_fence_barrier(void) const
         { return mapping_fence_barrier; }
+      inline RtBarrier get_summary_fence_barrier(void) const
+        { return summary_fence_barrier; }
       inline ApBarrier get_execution_fence_barrier(void) const
         { return execution_fence_barrier; }
       inline ApBarrier get_attach_broadcast_barrier(void) const
@@ -2143,6 +2147,7 @@ namespace Legion {
       RtBarrier inline_mapping_barrier;
       RtBarrier external_resource_barrier;
       RtBarrier mapping_fence_barrier;
+      RtBarrier summary_fence_barrier;
       ApBarrier execution_fence_barrier;
       ApBarrier attach_broadcast_barrier;
       ApBarrier attach_reduce_barrier;

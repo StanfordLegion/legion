@@ -1720,7 +1720,7 @@ namespace Legion {
     void TraceSummaryOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
-      deactivate_operation();
+      deactivate_fence();
       runtime->free_summary_op(this);
     }
 

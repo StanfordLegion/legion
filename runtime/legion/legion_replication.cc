@@ -6382,11 +6382,11 @@ namespace Legion {
                                                 Operation *invalidator)
     //--------------------------------------------------------------------------
     {
-      initialize_repl_fence(ctx, MAPPING_FENCE, 
-                            false/*need future*/, false/*track*/);
-      if (runtime->legion_spy_enabled)
-        LegionSpy::log_fence_operation(parent_ctx->get_unique_id(),
-                                       unique_op_id);
+      // Do NOT call initialize_repl_fence here, we're in the dependence
+      // analysis stage of the pipeline and we need to get our mapping
+      // fence from a different location to avoid racing with the application
+      initialize(ctx, MAPPING_FENCE, false/*need future*/, false/*track*/);
+      mapping_fence_barrier = ctx->get_next_summary_fence_barrier();
       context_index = invalidator->get_ctx_index();
       current_template = tpl;
       // The summary could have been marked as being traced,
@@ -6407,7 +6407,7 @@ namespace Legion {
     void ReplTraceSummaryOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
-      deactivate_operation();
+      deactivate_fence();
       runtime->free_repl_summary_op(this);
     }
 
@@ -6591,6 +6591,8 @@ namespace Legion {
         // Fence barriers need arrivals from everyone
         mapping_fence_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards));
+        summary_fence_barrier = 
+          RtBarrier(Realm::Barrier::create_barrier(total_shards));
         execution_fence_barrier = 
           ApBarrier(Realm::Barrier::create_barrier(total_shards));
         attach_broadcast_barrier = 
@@ -6651,6 +6653,7 @@ namespace Legion {
           inline_mapping_barrier.destroy_barrier();
           external_resource_barrier.destroy_barrier();
           mapping_fence_barrier.destroy_barrier();
+          summary_fence_barrier.destroy_barrier();
           execution_fence_barrier.destroy_barrier();
           attach_broadcast_barrier.destroy_barrier();
           attach_reduce_barrier.destroy_barrier();
@@ -6809,6 +6812,7 @@ namespace Legion {
           assert(inline_mapping_barrier.exists());
           assert(external_resource_barrier.exists());
           assert(mapping_fence_barrier.exists());
+          assert(summary_fence_barrier.exists());
           assert(execution_fence_barrier.exists());
           assert(attach_broadcast_barrier.exists());
           assert(attach_reduce_barrier.exists());
@@ -6821,6 +6825,7 @@ namespace Legion {
           rez.serialize(inline_mapping_barrier);
           rez.serialize(external_resource_barrier);
           rez.serialize(mapping_fence_barrier);
+          rez.serialize(summary_fence_barrier);
           rez.serialize(execution_fence_barrier);
           rez.serialize(attach_broadcast_barrier);
           rez.serialize(attach_reduce_barrier);
@@ -6869,6 +6874,7 @@ namespace Legion {
         derez.deserialize(inline_mapping_barrier);
         derez.deserialize(external_resource_barrier);
         derez.deserialize(mapping_fence_barrier);
+        derez.deserialize(summary_fence_barrier);
         derez.deserialize(execution_fence_barrier);
         derez.deserialize(attach_broadcast_barrier);
         derez.deserialize(attach_reduce_barrier);
