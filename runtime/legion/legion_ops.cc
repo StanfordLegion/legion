@@ -3749,10 +3749,18 @@ namespace Legion {
         // If our privilege is not reduce, then shift it to write discard
         // since we are going to write all over the region, although we
         // can only do this safely now if there is no scatter region
-        // requirement, otherwise we're doing it onto
-        if ((dst_requirements[idx].privilege != REDUCE) &&
-            (idx >= launcher.dst_indirect_requirements.size()))
-          dst_requirements[idx].privilege = WRITE_DISCARD;
+        // requirement or there is no gather indirect requirement 
+        // and we know we don't have any out of bounds accesses,
+        // otherwise we're doing it onto
+        if (dst_requirements[idx].privilege != REDUCE)
+        {
+          if (((idx < launcher.src_indirect_requirements.size()) &&
+                launcher.possible_src_indirect_out_of_range) ||
+              (idx < launcher.dst_indirect_requirements.size()))
+            dst_requirements[idx].privilege = READ_WRITE;
+          else
+            dst_requirements[idx].privilege = WRITE_DISCARD;
+        }
       }
       if (!launcher.src_indirect_requirements.empty())
       {
@@ -5966,10 +5974,18 @@ namespace Legion {
         // If our privilege is not reduce, then shift it to write discard
         // since we are going to write all over the region, although we
         // can only do this safely now if there is no scatter region
-        // requirement, otherwise we're doing it onto
-        if ((dst_requirements[idx].privilege != REDUCE) && 
-            (idx >= launcher.dst_indirect_requirements.size()))
-          dst_requirements[idx].privilege = WRITE_DISCARD;
+        // requirement or there is no gather indirect requirement 
+        // and we know we don't have any out of bounds accesses,
+        // otherwise we're doing it onto
+        if (dst_requirements[idx].privilege != REDUCE)
+        {
+          if (((idx < launcher.src_indirect_requirements.size()) &&
+                launcher.possible_src_indirect_out_of_range) ||
+              (idx < launcher.dst_indirect_requirements.size()))
+            dst_requirements[idx].privilege = READ_WRITE;
+          else
+            dst_requirements[idx].privilege = WRITE_DISCARD;
+        }
       }
       if (!launcher.src_indirect_requirements.empty())
       {
