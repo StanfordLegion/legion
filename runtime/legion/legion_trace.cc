@@ -4506,8 +4506,6 @@ namespace Legion {
                                              ApEvent completion, bool recurrent)
     //--------------------------------------------------------------------------
     {
-      // Do all the base updates first
-      PhysicalTemplate::initialize(runtime, completion, recurrent);
       // Now update all of our barrier information
       if (recurrent)
       {
@@ -4572,12 +4570,6 @@ namespace Legion {
           recurrent_replays = 0;
         }
         // Now we can do the normal update of events based on our barriers
-        for (std::vector<std::pair<ApBarrier,unsigned> >::iterator it = 
-              remote_frontiers.begin(); it != remote_frontiers.end(); it++)
-        {
-          events[it->second] = it->first;
-          Runtime::advance_barrier(it->first);
-        }
         for (std::map<unsigned,ApBarrier>::iterator it = 
               local_frontiers.begin(); it != local_frontiers.end(); it++)
         {
@@ -4585,9 +4577,17 @@ namespace Legion {
                                         events[it->first]);
           Runtime::advance_barrier(it->second);
         }
+        PhysicalTemplate::initialize(runtime, completion, recurrent);
+        for (std::vector<std::pair<ApBarrier,unsigned> >::iterator it = 
+              remote_frontiers.begin(); it != remote_frontiers.end(); it++)
+        {
+          events[it->second] = it->first;
+          Runtime::advance_barrier(it->first);
+        }
       }
       else
       {
+        PhysicalTemplate::initialize(runtime, completion, recurrent);
         for (std::vector<std::pair<ApBarrier,unsigned> >::const_iterator it =
               remote_frontiers.begin(); it != remote_frontiers.end(); it++)
           events[it->second] = completion;
