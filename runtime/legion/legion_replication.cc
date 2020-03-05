@@ -10164,15 +10164,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureNameExchange::FutureNameExchange(ReplicateContext *ctx,
-                                           CollectiveID id,ReplFutureMapImpl *m)
-      : AllGatherCollective(ctx, id), future_map(m)
+                   CollectiveID id, ReplFutureMapImpl *m, ReferenceMutator *mut)
+      : AllGatherCollective(ctx, id), future_map(m), mutator(mut)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     FutureNameExchange::FutureNameExchange(const FutureNameExchange &rhs)
-      : AllGatherCollective(rhs), future_map(rhs.future_map)
+      : AllGatherCollective(rhs), future_map(rhs.future_map), 
+        mutator(rhs.mutator)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -10225,13 +10226,18 @@ namespace Legion {
         DistributedID did;
         derez.deserialize(did);
         if (did > 0)
-          results[point] = 
-            Future(context->runtime->find_or_create_future(did, &mutator,
+        {
+          FutureImpl *impl = 
+            context->runtime->find_or_create_future(did, mutator,
                   future_map->op, future_map->op_gen,
 #ifdef LEGION_SPY
                   future_map->op_uid,
 #endif
-                  future_map->op_depth));
+                  future_map->op_depth);
+          // Add the reference ourselves so we can capture the effects
+          impl->add_base_gc_ref(FUTURE_HANDLE_REF, mutator);
+          results[point] = Future(impl, false/*need referece*/);
+        }
         else
           results[point] = Future();
       }

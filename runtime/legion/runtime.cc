@@ -1867,7 +1867,11 @@ namespace Legion {
       // reclamation of this future map
       if (has_non_trivial_call)
       {
-        Runtime::phase_barrier_arrive(future_map_barrier, 1/*count*/);
+        if (!exchange_events.empty())
+          Runtime::phase_barrier_arrive(future_map_barrier, 1/*count*/,
+              Runtime::merge_events(exchange_events));
+        else
+          Runtime::phase_barrier_arrive(future_map_barrier, 1/*count*/);
         if (!future_map_barrier.has_triggered())
         {
           // Add a reference to this to prevent it being collected
@@ -1969,10 +1973,11 @@ namespace Legion {
       // Now we've got all our local futures so we can do the exchange
       // Have to hold the lock when doing this as there might be
       // other requests for the future map
+      WrapperReferenceMutator mutator(exchange_events);
       AutoLock f_lock(future_map_lock);
       if (!collective_performed)
       {
-        FutureNameExchange collective(repl_ctx, collective_index, this);
+        FutureNameExchange collective(repl_ctx, collective_index,this,&mutator);
         collective.exchange_future_names(futures);
         // When the collective is done we can mark that we've done it
         // and then copy the results

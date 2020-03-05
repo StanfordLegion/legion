@@ -456,6 +456,7 @@ namespace Legion {
       const UniqueID op_uid;
     protected:
       std::vector<PendingRequest> pending_future_map_requests;
+      std::set<RtEvent> exchange_events;
       RtUserEvent sharding_function_ready;
       ShardingFunction *sharding_function;
       bool collective_performed;

@@ -697,7 +697,8 @@ namespace Legion {
     class FutureNameExchange : public AllGatherCollective<false> {
     public:
       FutureNameExchange(ReplicateContext *ctx, CollectiveID id, 
-                         ReplFutureMapImpl *future_map);
+                         ReplFutureMapImpl *future_map,
+                         ReferenceMutator *mutator);
       FutureNameExchange(const FutureNameExchange &rhs);
       virtual ~FutureNameExchange(void);
     public:
@@ -709,9 +710,9 @@ namespace Legion {
       void exchange_future_names(std::map<DomainPoint,Future> &futures);
     public:
       ReplFutureMapImpl *const future_map;
+      ReferenceMutator *const mutator;
     protected:
       std::map<DomainPoint,Future> results;
-      LocalReferenceMutator mutator;
     };
 
     /**
