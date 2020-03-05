@@ -937,7 +937,7 @@ namespace Legion {
       TraceViewSet consumed_reductions;
     private:
       std::map<TraceLocalID,std::set<ApEvent> > reduction_ready_events;
-    private:
+    protected:
       FieldMaskSet<FillView> pre_fill_views;
       FieldMaskSet<FillView> post_fill_views;
     private:
@@ -975,11 +975,15 @@ namespace Legion {
         DeferTraceUpdateArgs(ShardedPhysicalTemplate *target, 
                              UpdateKind kind, RtUserEvent done, 
                              Deserializer &derez, LogicalView *view,
-                             EquivalenceSet *set = NULL);
+                             EquivalenceSet *set = NULL,
+                             RtUserEvent deferral = 
+                              RtUserEvent::NO_RT_USER_EVENT);
         DeferTraceUpdateArgs(ShardedPhysicalTemplate *target, 
                              UpdateKind kind, RtUserEvent done, 
                              LogicalView *view, Deserializer &derez,
-                             IndexSpaceExpression *expr);
+                             IndexSpaceExpression *expr,
+                             RtUserEvent deferral = 
+                              RtUserEvent::NO_RT_USER_EVENT);
         DeferTraceUpdateArgs(ShardedPhysicalTemplate *target, 
                              UpdateKind kind, RtUserEvent done, 
                              LogicalView *view, Deserializer &derez,
@@ -988,6 +992,8 @@ namespace Legion {
                              UpdateKind kind, RtUserEvent done, 
                              LogicalView *view, Deserializer &derez,
                              IndexSpaceExprID expr_id);
+        DeferTraceUpdateArgs(const DeferTraceUpdateArgs &args,
+                             RtUserEvent deferral);
       public:
         ShardedPhysicalTemplate *const target;
         const UpdateKind kind;
@@ -999,6 +1005,7 @@ namespace Legion {
         const IndexSpace handle;
         const size_t buffer_size;
         void *const buffer;
+        const RtUserEvent deferral_event;
       };
     public:
       ShardedPhysicalTemplate(PhysicalTrace *trace, ApEvent fence_event,
@@ -1015,6 +1022,16 @@ namespace Legion {
       { return legion_alloc_aligned<ShardedPhysicalTemplate,true>(count); }
       static inline void operator delete(void *ptr)
       { free(ptr); }
+      inline RtEvent chain_deferral_events(RtUserEvent deferral_event)
+      {
+        volatile Realm::Event::id_t *ptr = &next_deferral_precondition.id;
+        RtEvent continuation_pre;
+        do {
+          continuation_pre.id = *ptr;
+        } while (!__sync_bool_compare_and_swap(ptr,
+                  continuation_pre.id, deferral_event.id));
+        return continuation_pre;
+      }
     public:
       virtual void initialize(Runtime *runtime, ApEvent fence_completion,
                               bool recurrent);
@@ -1079,14 +1096,20 @@ namespace Legion {
       void handle_trace_update(Deserializer &derez, AddressSpaceID source);
       static void handle_deferred_trace_update(const void *args, Runtime *rt);
     protected:
-      void handle_update_valid_views(InstanceView *view, EquivalenceSet *eq,
-                           Deserializer &derez, std::set<RtEvent> &applied);
-      void handle_update_pre_fill(FillView *view, Deserializer &derez,
-                                  std::set<RtEvent> &applied);
-      void handle_update_post_fill(FillView *view, Deserializer &derez,
-                                   std::set<RtEvent> &applied);
-      void handle_update_view_user(InstanceView *view, IndexSpaceExpression *ex,
-                            Deserializer &derez, std::set<RtEvent> &applied);
+      bool handle_update_valid_views(InstanceView *view, EquivalenceSet *eq,
+                           Deserializer &derez, std::set<RtEvent> &applied,
+                           RtUserEvent done, 
+                           const DeferTraceUpdateArgs *dargs = NULL);
+      bool handle_update_pre_fill(FillView *view, Deserializer &derez,
+                                  std::set<RtEvent> &applied, RtUserEvent done,
+                                  const DeferTraceUpdateArgs *dargs = NULL);
+      bool handle_update_post_fill(FillView *view, Deserializer &derez,
+                                   std::set<RtEvent> &applied, RtUserEvent done,
+                                   const DeferTraceUpdateArgs *dargs = NULL);
+      bool handle_update_view_user(InstanceView *view, IndexSpaceExpression *ex,
+                            Deserializer &derez, std::set<RtEvent> &applied,
+                            RtUserEvent done, 
+                            const DeferTraceUpdateArgs *dargs = NULL);
       void handle_find_last_users(InstanceView *view, IndexSpaceExpression *ex,
                             Deserializer &derez, std::set<RtEvent> &applied);
     protected:
@@ -1162,6 +1185,8 @@ namespace Legion {
       size_t updated_advances;
       // An event to signal when our advances are ready
       RtUserEvent update_advances_ready;
+      // An event for chainging deferrals of update tasks
+      RtEvent next_deferral_precondition;
     protected:
       // Count how many times we've done recurrent replay so we know when we're
       // going to run out of phase barrier generations

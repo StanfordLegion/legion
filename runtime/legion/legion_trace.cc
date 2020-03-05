@@ -4005,6 +4005,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock tpl_lock(template_lock);
+      // If you change this then also change 
+      // ShardedPhysicalTemplate::handle_update_post_fill
 #ifdef DEBUG_LEGION
       assert(is_recording());
 #endif
@@ -4992,8 +4994,8 @@ namespace Legion {
                   LG_LATENCY_MESSAGE_PRIORITY, pre);
               return;
             }
-            else
-              handle_update_valid_views(view, eq, derez, applied); 
+            else if (handle_update_valid_views(view, eq, derez, applied, done)) 
+              return;
             break;
           }
         case UPDATE_PRE_FILL:
@@ -5011,8 +5013,8 @@ namespace Legion {
                   LG_LATENCY_MESSAGE_PRIORITY, view_ready);
               return;
             }
-            else
-              handle_update_pre_fill(view, derez, applied); 
+            else if (handle_update_pre_fill(view, derez, applied, done)) 
+              return;
             break;
           }
         case UPDATE_POST_FILL:
@@ -5030,8 +5032,8 @@ namespace Legion {
                   LG_LATENCY_MESSAGE_PRIORITY, view_ready);
               return;
             }
-            else
-              handle_update_post_fill(view, derez, applied); 
+            else if (handle_update_post_fill(view, derez, applied, done)) 
+              return;
             break;
           }
         case UPDATE_VIEW_USER:
@@ -5081,8 +5083,9 @@ namespace Legion {
               }
               return;
             }
-            else
-              handle_update_view_user(view, user_expr, derez, applied); 
+            else if (handle_update_view_user(view, user_expr, 
+                                             derez, applied, done))
+              return;
             break;
           }
         case UPDATE_LAST_USER:
@@ -5380,10 +5383,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ShardedPhysicalTemplate::DeferTraceUpdateArgs::DeferTraceUpdateArgs(
      ShardedPhysicalTemplate *t, UpdateKind k, RtUserEvent d, 
-     Deserializer &derez, LogicalView *v, EquivalenceSet *q)
+     Deserializer &derez, LogicalView *v, EquivalenceSet *q, RtUserEvent u)
       : LgTaskArgs<DeferTraceUpdateArgs>(implicit_provenance), target(t), 
         kind(k), done(d), view(v), eq(q), expr(NULL), remote_expr_id(0),
-        buffer_size(derez.get_remaining_bytes()), buffer(malloc(buffer_size))
+        buffer_size(derez.get_remaining_bytes()), buffer(malloc(buffer_size)),
+        deferral_event(u)
     //--------------------------------------------------------------------------
     {
       memcpy(buffer, derez.get_current_pointer(), buffer_size);
@@ -5392,11 +5396,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ShardedPhysicalTemplate::DeferTraceUpdateArgs::DeferTraceUpdateArgs(
-     ShardedPhysicalTemplate *t, UpdateKind k, RtUserEvent d, 
-     LogicalView *v, Deserializer &derez, IndexSpaceExpression *x)
+     ShardedPhysicalTemplate *t, UpdateKind k, RtUserEvent d, LogicalView *v, 
+     Deserializer &derez, IndexSpaceExpression *x, RtUserEvent u)
       : LgTaskArgs<DeferTraceUpdateArgs>(implicit_provenance), target(t), 
         kind(k), done(d), view(v), eq(NULL), expr(x), remote_expr_id(0),
-        buffer_size(derez.get_remaining_bytes()), buffer(malloc(buffer_size))
+        buffer_size(derez.get_remaining_bytes()), buffer(malloc(buffer_size)),
+        deferral_event(u)
     //--------------------------------------------------------------------------
     {
       memcpy(buffer, derez.get_current_pointer(), buffer_size);
@@ -5431,6 +5436,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ShardedPhysicalTemplate::DeferTraceUpdateArgs::DeferTraceUpdateArgs(
+        const DeferTraceUpdateArgs &rhs, RtUserEvent d)
+      : LgTaskArgs<DeferTraceUpdateArgs>(rhs.provenance), target(rhs.target),
+        kind(rhs.kind), done(rhs.done), view(rhs.view), eq(rhs.eq), 
+        expr(rhs.expr), remote_expr_id(rhs.remote_expr_id), handle(rhs.handle),
+        buffer_size(rhs.buffer_size), buffer(rhs.buffer), deferral_event(d)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void ShardedPhysicalTemplate::handle_deferred_trace_update(
                                              const void *args, Runtime *runtime)
     //--------------------------------------------------------------------------
@@ -5442,42 +5458,53 @@ namespace Legion {
       {
         case UPDATE_VALID_VIEWS:
           {
-            dargs->target->handle_update_valid_views(
-              static_cast<InstanceView*>(dargs->view),dargs->eq,derez,applied);
+            if (dargs->target->handle_update_valid_views(
+                  static_cast<InstanceView*>(dargs->view),
+                  dargs->eq, derez, applied, dargs->done, dargs))
+              return;
             break;
           }
         case UPDATE_PRE_FILL:
           {
-            dargs->target->handle_update_pre_fill(
-                static_cast<FillView*>(dargs->view), derez, applied);
+            if (dargs->target->handle_update_pre_fill(
+                  static_cast<FillView*>(dargs->view), derez, applied, 
+                  dargs->done, dargs))
+              return;
             break;
           }
         case UPDATE_POST_FILL:
           {
-            dargs->target->handle_update_post_fill(
-                static_cast<FillView*>(dargs->view), derez, applied);
+            if (dargs->target->handle_update_post_fill(
+                  static_cast<FillView*>(dargs->view), derez, applied, 
+                  dargs->done, dargs))
+              return;
             break;
           }
         case UPDATE_VIEW_USER:
           {
             if (dargs->expr != NULL)
             {
-              dargs->target->handle_update_view_user(
-                  static_cast<InstanceView*>(dargs->view), 
-                  dargs->expr, derez, applied);
+              if (dargs->target->handle_update_view_user(
+                    static_cast<InstanceView*>(dargs->view), 
+                    dargs->expr, derez, applied, dargs->done, dargs))
+                return;
             }
             else if (dargs->handle.exists())
             {
               IndexSpaceNode *node = runtime->forest->get_node(dargs->handle);
-              dargs->target->handle_update_view_user(
-                  static_cast<InstanceView*>(dargs->view), node, derez,applied);
+              if (dargs->target->handle_update_view_user(
+                    static_cast<InstanceView*>(dargs->view), node, derez,
+                    applied, dargs->done, dargs))
+                return;
             }
             else
             {
               IndexSpaceExpression *expr = 
                 runtime->forest->find_remote_expression(dargs->remote_expr_id);
-              dargs->target->handle_update_view_user(
-                  static_cast<InstanceView*>(dargs->view), expr, derez,applied);
+              if (dargs->target->handle_update_view_user(
+                    static_cast<InstanceView*>(dargs->view), expr, derez,
+                    applied, dargs->done, dargs))
+                return;
             }
             break;
           }
@@ -5514,58 +5541,182 @@ namespace Legion {
         Runtime::trigger_event(dargs->done, Runtime::merge_events(applied));
       else
         Runtime::trigger_event(dargs->done);
+      if (dargs->deferral_event.exists())
+        Runtime::trigger_event(dargs->deferral_event);
       free(dargs->buffer);
     }
 
     //--------------------------------------------------------------------------
-    void ShardedPhysicalTemplate::handle_update_valid_views(InstanceView *view,
-            EquivalenceSet *eq, Deserializer &derez, std::set<RtEvent> &applied)
+    bool ShardedPhysicalTemplate::handle_update_valid_views(InstanceView *view,
+            EquivalenceSet *eq, Deserializer &derez, std::set<RtEvent> &applied,
+            RtUserEvent done, const DeferTraceUpdateArgs *dargs /*=NULL*/)
     //--------------------------------------------------------------------------
     {
+      AutoTryLock tpl_lock(template_lock);
+      if (!tpl_lock.has_lock())
+      {
+        RtUserEvent deferral;
+        if (dargs != NULL)
+          deferral = dargs->deferral_event;
+        RtEvent pre;
+        if (!deferral.exists())
+        {
+          deferral = Runtime::create_rt_user_event();
+          pre = chain_deferral_events(deferral);
+        }
+        else
+          pre = tpl_lock.try_next();
+        if (dargs == NULL)
+        {
+          DeferTraceUpdateArgs args(this, UPDATE_VALID_VIEWS, done,
+                                    derez, view, eq, deferral);
+          repl_ctx->runtime->issue_runtime_meta_task(args, 
+                  LG_LATENCY_MESSAGE_PRIORITY, pre);
+        }
+        else
+        {
+          DeferTraceUpdateArgs args(*dargs, deferral);
+          repl_ctx->runtime->issue_runtime_meta_task(args, 
+                  LG_LATENCY_MESSAGE_PRIORITY, pre);
+        }
+        return true;
+      }
       RegionUsage usage;
       derez.deserialize(usage);
       FieldMask user_mask;
       derez.deserialize(user_mask);
       bool invalidates;
       derez.deserialize<bool>(invalidates);
-      // We already know we're on the right shard so just do it
-      AutoLock tpl_lock(template_lock);
       PhysicalTemplate::update_valid_views(view, eq, usage, user_mask,
                                            invalidates, applied);
+      return false;
     }
 
     //--------------------------------------------------------------------------
-    void ShardedPhysicalTemplate::handle_update_pre_fill(FillView *view,
-                                Deserializer &derez, std::set<RtEvent> &applied)
+    bool ShardedPhysicalTemplate::handle_update_pre_fill(FillView *view,
+                            Deserializer &derez, std::set<RtEvent> &applied,
+                            RtUserEvent done, const DeferTraceUpdateArgs *dargs)
     //--------------------------------------------------------------------------
     {
+      AutoTryLock tpl_lock(template_lock);
+      if (!tpl_lock.has_lock())
+      {
+        RtUserEvent deferral;
+        if (dargs != NULL)
+          deferral = dargs->deferral_event;
+        RtEvent pre;
+        if (!deferral.exists())
+        {
+          deferral = Runtime::create_rt_user_event();
+          pre = chain_deferral_events(deferral);
+        }
+        else
+          pre = tpl_lock.try_next();
+        if (dargs == NULL)
+        {
+          DeferTraceUpdateArgs args(this, UPDATE_PRE_FILL, done,
+                                    derez, view, NULL, deferral);
+          repl_ctx->runtime->issue_runtime_meta_task(args, 
+                  LG_LATENCY_MESSAGE_PRIORITY, pre);
+        }
+        else
+        {
+          DeferTraceUpdateArgs args(*dargs, deferral);
+          repl_ctx->runtime->issue_runtime_meta_task(args, 
+                  LG_LATENCY_MESSAGE_PRIORITY, pre);
+        }
+        return true;
+      }
       FieldMask view_mask;
       derez.deserialize(view_mask);
       FieldMaskSet<FillView> views;
       views.insert(view, view_mask);
-      // We already know we're on the right shard, so just do it
-      AutoLock tpl_lock(template_lock);
       PhysicalTemplate::record_fill_views(views, applied);
+      return false;
     }
 
     //--------------------------------------------------------------------------
-    void ShardedPhysicalTemplate::handle_update_post_fill(FillView *view,
-                                Deserializer &derez, std::set<RtEvent> &applied)
+    bool ShardedPhysicalTemplate::handle_update_post_fill(FillView *view,
+                            Deserializer &derez, std::set<RtEvent> &applied,
+                            RtUserEvent done, const DeferTraceUpdateArgs *dargs)
     //--------------------------------------------------------------------------
     {
+      AutoTryLock tpl_lock(template_lock);
+      if (!tpl_lock.has_lock())
+      {
+        RtUserEvent deferral;
+        if (dargs != NULL)
+          deferral = dargs->deferral_event;
+        RtEvent pre;
+        if (!deferral.exists())
+        {
+          deferral = Runtime::create_rt_user_event();
+          pre = chain_deferral_events(deferral);
+        }
+        else
+          pre = tpl_lock.try_next();
+        if (dargs == NULL)
+        {
+          DeferTraceUpdateArgs args(this, UPDATE_POST_FILL, done,
+                                    derez, view, NULL, deferral);
+          repl_ctx->runtime->issue_runtime_meta_task(args, 
+                  LG_LATENCY_MESSAGE_PRIORITY, pre);
+        }
+        else
+        {
+          DeferTraceUpdateArgs args(*dargs, deferral);
+          repl_ctx->runtime->issue_runtime_meta_task(args, 
+                  LG_LATENCY_MESSAGE_PRIORITY, pre);
+        }
+        return true;
+      }
       FieldMask view_mask;
       derez.deserialize(view_mask);
-      // We already know we're on the right shard, so just do it
-      PhysicalTemplate::record_fill_view(view, view_mask, applied);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
+      post_fill_views.insert(view, view_mask);
+      return false;
     }
 
     //--------------------------------------------------------------------------
-    void ShardedPhysicalTemplate::handle_update_view_user(InstanceView *view,
+    bool ShardedPhysicalTemplate::handle_update_view_user(InstanceView *view,
                                               IndexSpaceExpression *user_expr, 
                                               Deserializer &derez, 
-                                              std::set<RtEvent> &applied)
+                                              std::set<RtEvent> &applied,
+                                              RtUserEvent done,
+                                              const DeferTraceUpdateArgs *dargs)
     //--------------------------------------------------------------------------
     {
+      AutoTryLock tpl_lock(template_lock);
+      if (!tpl_lock.has_lock())
+      {
+        RtUserEvent deferral;
+        if (dargs != NULL)
+          deferral = dargs->deferral_event;
+        RtEvent pre;
+        if (!deferral.exists())
+        {
+          deferral = Runtime::create_rt_user_event();
+          pre = chain_deferral_events(deferral);
+        }
+        else
+          pre = tpl_lock.try_next();
+        if (dargs == NULL)
+        {
+          DeferTraceUpdateArgs args(this, UPDATE_VIEW_USER, done, view,
+                                    derez, user_expr, deferral);
+          repl_ctx->runtime->issue_runtime_meta_task(args, 
+                  LG_LATENCY_MESSAGE_PRIORITY, pre);
+        }
+        else
+        {
+          DeferTraceUpdateArgs args(*dargs, deferral);
+          repl_ctx->runtime->issue_runtime_meta_task(args, 
+                  LG_LATENCY_MESSAGE_PRIORITY, pre);
+        }
+        return true;
+      }
       RegionUsage usage;
       derez.deserialize(usage);
       unsigned user_index;
@@ -5574,10 +5725,9 @@ namespace Legion {
       derez.deserialize(user_mask);
       int owner_shard;
       derez.deserialize(owner_shard);
-      // We already know we're on the right shard so just do it
-      AutoLock tpl_lock(template_lock);
       PhysicalTemplate::add_view_user(view, usage, user_index, user_expr,
                                       user_mask, applied, owner_shard);
+      return false;
     }
 
     //--------------------------------------------------------------------------
