@@ -829,7 +829,7 @@ local function unpack_region(cx, region_expr, region_type, static_region_type)
   assert(not cx:has_region(region_type))
 
   local r = terralib.newsymbol(region_type, "r")
-  local lr = terralib.newsymbol(c.legion_logical_region_t, "lr") 
+  local lr = terralib.newsymbol(c.legion_logical_region_t, "lr")
   local is = terralib.newsymbol(c.legion_index_space_t, "is")
   local it = false
   if cache_index_iterator then
@@ -3034,7 +3034,7 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
       elseif mappable_type == c.FILL_MAPPABLE then
         var fill = c.legion_mappable_as_fill(mappable)
         std.assert(idx == 0, "projection index for fill is not zero")
-        [requirement] = c.legion_fill_get_requirement(fill) 
+        [requirement] = c.legion_fill_get_requirement(fill)
       elseif mappable_type == c.INLINE_MAPPABLE then
         var mapping = c.legion_mappable_as_inline_mapping(mappable)
         std.assert(idx == 0, "projection index for inline mapping is not zero")
@@ -3750,7 +3750,7 @@ local lift_cast_to_futures = terralib.memoize(
         leaf = true,
         inner = false,
         idempotent = true,
-        replicable = false, 
+        replicable = false,
       },
       region_divergence = false,
       metadata = false,
@@ -4613,8 +4613,7 @@ function codegen.expr_partition(cx, node)
     coloring_type == std.c.legion_domain_point_coloring_t or
     coloring_type == std.c.legion_multi_domain_point_coloring_t
   then
-    args:insert(
-      (partition_type:is_disjoint() and c.DISJOINT_KIND) or c.ALIASED_KIND)
+    args:insert(get_legion_partition_kind(node.disjointness, node.completeness))
   else
     assert(false)
   end
@@ -4735,12 +4734,40 @@ function codegen.expr_partition_equal(cx, node)
     partition_type)
 end
 
+-- @author @ndrewtl
+-- this helper function takes completeness and disjointness and returns the corresponding
+-- `legion_partition_kind_t` object. See legion_config.h for the definition of the struct.
+function get_legion_partition_kind(disjointness, completeness)
+  -- This table maps [disjointness][completeness] to the correct struct member
+  -- As usual, `false` stands in for an unknown value
+  local mapping = {
+    [false] = {
+      [false] = c.COMPUTE_KIND;
+      [incomplete] = c.COMPUTE_INCOMPLETE_KIND;
+      [complete] = c.COMPUTE_COMPLETE_KIND;
+    };
+    [aliased] = {
+      [false] = c.ALIASED_KIND;
+      [incomplete] = c.ALIASED_INCOMPLETE_KIND;
+      [complete] = c.ALIASED_COMPLETE_KIND;
+    };
+    [disjoint] = {
+      [false] = c.DISJOINT_KIND;
+      [incomplete] = c.DISJOINT_INCOMPLETE_KIND;
+      [complete] = c.DISJOINT_COMPLETE_KIND;
+    };
+  }
+
+  return mapping[disjointness][completeness]
+end
+
 function codegen.expr_partition_by_field(cx, node)
   local region_type = std.as_read(node.region.expr_type)
   local region = codegen.expr_region_root(cx, node.region):read(cx)
   local colors_type = std.as_read(node.colors.expr_type)
   local colors = codegen.expr(cx, node.colors):read(cx)
   local partition_type = std.as_read(node.expr_type)
+  local completeness = node.completeness
   local actions = quote
     [region.actions];
     [colors.actions];
@@ -4761,11 +4788,12 @@ function codegen.expr_partition_by_field(cx, node)
 
   local ip = terralib.newsymbol(c.legion_index_partition_t, "ip")
   local lp = terralib.newsymbol(c.legion_logical_partition_t, "lp")
+  local legion_partition_kind = get_legion_partition_kind(disjoint, completeness)
   actions = quote
     [actions]
     var [ip] = c.legion_index_partition_create_by_field(
       [cx.runtime], [cx.context], [region.value].impl, [parent_region].impl,
-      field_id, [colors.value].impl, c.AUTO_GENERATE_ID, 0, 0, c.DISJOINT_KIND)
+      field_id, [colors.value].impl, c.AUTO_GENERATE_ID, 0, 0, [legion_partition_kind])
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [region.value].impl, [ip])
     [tag_imported(cx, lp)]
@@ -4778,6 +4806,8 @@ function codegen.expr_partition_by_field(cx, node)
 end
 
 function codegen.expr_partition_by_restriction(cx, node)
+  local disjointness = node.disjointness
+  local completeness = node.completeness
   local region_type = std.as_read(node.region.expr_type)
   local region = codegen.expr(cx, node.region):read(cx)
   local transform_type = std.as_read(node.transform.expr_type)
@@ -4801,15 +4831,11 @@ function codegen.expr_partition_by_restriction(cx, node)
   local lp = terralib.newsymbol(c.legion_logical_partition_t, "lp")
   actions = quote
     [actions]
-    var disjointness = [(node.disjointness and
-      ((node.disjointness:is(ast.disjointness_kind.Disjoint) and c.DISJOINT_KIND)
-       or c.ALIASED_KIND))
-      or c.COMPUTE_KIND]
     var [ip] = c.legion_index_partition_create_by_restriction(
       [cx.runtime], [cx.context],
       [region.value].impl.index_space,
       [colors.value].impl,
-      [transform.value], [extent.value], disjointness, -1)
+      [transform.value], [extent.value], [get_legion_partition_kind(disjointness, completeness)], -1)
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [region.value].impl, [ip])
     [tag_imported(cx, lp)]
@@ -4828,6 +4854,8 @@ function codegen.expr_image(cx, node)
   local partition = codegen.expr(cx, node.partition):read(cx)
   local region_type = std.as_read(node.region.expr_type)
   local region = codegen.expr_region_root(cx, node.region):read(cx)
+  local disjointness = node.disjointness
+  local completeness = node.completeness
 
   local result_type = std.as_read(node.expr_type)
   local actions = quote
@@ -4870,15 +4898,11 @@ function codegen.expr_image(cx, node)
     [actions]
     var colors = c.legion_index_partition_get_color_space(
       [cx.runtime], [partition.value].impl.index_partition)
-    var disjointness = [(node.disjointness and
-      ((node.disjointness:is(ast.disjointness_kind.Disjoint) and c.DISJOINT_KIND)
-       or c.ALIASED_KIND))
-      or c.COMPUTE_KIND]
     var [ip] = [create_partition](
       [cx.runtime], [cx.context],
       [parent.value].impl.index_space,
       [partition.value].impl, [region_parent].impl, field_id,
-      colors, disjointness, c.AUTO_GENERATE_ID, 0, 0)
+      colors, [get_legion_partition_kind(disjointness, completeness)], c.AUTO_GENERATE_ID, 0, 0)
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [parent.value].impl, [ip])
     [tag_imported(cx, lp)]
@@ -4897,6 +4921,8 @@ function codegen.expr_preimage(cx, node)
   local partition = codegen.expr(cx, node.partition):read(cx)
   local region_type = std.as_read(node.region.expr_type)
   local region = codegen.expr_region_root(cx, node.region):read(cx)
+  local disjointness = node.disjointness
+  local completeness = node.completeness
 
   local result_type = std.as_read(node.expr_type)
   local actions = quote
@@ -4939,14 +4965,10 @@ function codegen.expr_preimage(cx, node)
     [actions]
     var colors = c.legion_index_partition_get_color_space(
       [cx.runtime], [partition.value].impl.index_partition)
-    var disjointness = [(node.disjointness and
-      ((node.disjointness:is(ast.disjointness_kind.Disjoint) and c.DISJOINT_KIND)
-       or c.ALIASED_KIND))
-      or c.COMPUTE_KIND]
     var [ip] = [create_partition](
       [cx.runtime], [cx.context], [partition.value].impl.index_partition,
       [parent.value].impl, [region_parent].impl, field_id, colors,
-      disjointness, c.AUTO_GENERATE_ID, 0, 0)
+      [get_legion_partition_kind(disjointness, completeness)], c.AUTO_GENERATE_ID, 0, 0)
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [region.value].impl, [ip])
     [tag_imported(cx, lp)]
@@ -5026,7 +5048,7 @@ function codegen.expr_cross_product_array(cx, node)
     var color_space =
       c.legion_index_partition_get_color_space(
         [cx.runtime], [lhs.value].impl.index_partition)
-    var color_domain = 
+    var color_domain =
       c.legion_index_space_get_domain([cx.runtime], color_space)
     std.assert(color_domain.dim == 1, "color domain should be 1D")
     var start_color = color_domain.rect_data[0]
