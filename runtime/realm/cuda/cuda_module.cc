@@ -1799,6 +1799,13 @@ namespace Realm {
       return NULL;
     }
 
+    GPUStream* GPU::get_null_task_stream(void) const
+    {
+      GPUStream *stream = ThreadLocal::current_gpu_stream;
+      assert(stream != NULL);
+      return stream;
+    }
+
     GPUStream* GPU::get_next_task_stream(bool create)
     {
       if(create && !ThreadLocal::created_gpu_streams)

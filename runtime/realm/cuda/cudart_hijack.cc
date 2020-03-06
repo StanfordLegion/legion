@@ -212,16 +212,29 @@ namespace Realm {
       cudaError_t cudaStreamCreate(cudaStream_t *stream)
       {
 	GPUProcessor *p = get_gpu_or_die("cudaStreamCreate");
-	*stream = p->gpu->get_next_task_stream(true/*create*/)->get_stream();
+        // This needs to be a blocking stream that serializes with the
+        // "NULL" stream, which in this case is the original stream
+        // for the task, so the only way to enforce that currently is 
+        // with exactly the same stream
+        *stream = p->gpu->get_null_task_stream()->get_stream();
 	return cudaSuccess;
       }
 
       cudaError_t cudaStreamCreateWithFlags(cudaStream_t *stream, unsigned int flags)
       {
         GPUProcessor *p = get_gpu_or_die("cudaStreamCreateWithFlags");
-        // Ignore the flags for now
-	*stream = p->gpu->get_next_task_stream(true/*create*/)->get_stream();
+        if (flags == cudaStreamNonBlocking)
+          *stream = p->gpu->get_next_task_stream(true/*create*/)->get_stream();
+        else
+          *stream = p->gpu->get_null_task_stream()->get_stream();
 	return cudaSuccess;
+      }
+
+      cudaError_t cudaStreamCreateWithPriority(cudaStream_t *stream, 
+                                               unsigned int flags, int priority)
+      {
+        // We'll ignore the priority for now
+        return cudaStreamCreateWithFlags(stream, flags);
       }
 
       cudaError_t cudaStreamDestroy(cudaStream_t stream)

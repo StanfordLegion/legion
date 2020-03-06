@@ -559,6 +559,7 @@ namespace Realm {
       bool can_access_peer(GPU *peer);
 
       GPUStream *find_stream(CUstream stream) const;
+      GPUStream *get_null_task_stream(void) const;
       GPUStream *get_next_task_stream(bool create = false);
     protected:
       CUmodule load_cuda_module(const void *data);
