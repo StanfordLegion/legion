@@ -5612,7 +5612,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T> __CUDA_HD__
-    inline void DeferredValue<T>::write(T value)
+    inline void DeferredValue<T>::write(T value) const
     //--------------------------------------------------------------------------
     {
       accessor.write(Point<1,coord_t>(0), value);
@@ -5620,7 +5620,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T> __CUDA_HD__
-    inline T* DeferredValue<T>::ptr(void)
+    inline T* DeferredValue<T>::ptr(void) const
     //--------------------------------------------------------------------------
     {
       return accessor.ptr(Point<1,coord_t>(0));
@@ -5628,7 +5628,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T> __CUDA_HD__
-    inline T& DeferredValue<T>::ref(void)
+    inline T& DeferredValue<T>::ref(void) const
     //--------------------------------------------------------------------------
     {
       return accessor[Point<1,coord_t>(0)];
@@ -5644,7 +5644,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T> __CUDA_HD__
-    inline DeferredValue<T>& DeferredValue<T>::operator=(T value)
+    inline DeferredValue<T>& DeferredValue<T>::operator=(T value) const
     //--------------------------------------------------------------------------
     {
       accessor[Point<1,coord_t>(0)] = value;
@@ -5671,7 +5671,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
     inline void DeferredReduction<REDOP,EXCLUSIVE>::reduce(
-                                                      typename REDOP::RHS value)
+                                                typename REDOP::RHS value) const
     //--------------------------------------------------------------------------
     {
       REDOP::fold<EXCLUSIVE>(this->accessor[Point<1,coord_t>(0)], value);
@@ -5680,7 +5680,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
     inline void DeferredReduction<REDOP,EXCLUSIVE>::operator<<=(
-                                                      typename REDOP::RHS value)
+                                                typename REDOP::RHS value) const
     //--------------------------------------------------------------------------
     {
       REDOP::fold<EXCLUSIVE>(this->accessor[Point<1,coord_t>(0)], value);
