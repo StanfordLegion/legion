@@ -212,9 +212,7 @@ namespace Realm {
       cudaError_t cudaStreamCreate(cudaStream_t *stream)
       {
 	GPUProcessor *p = get_gpu_or_die("cudaStreamCreate");
-        // For now we always return the stream for this task in case the user actually uses it
-	// TODO: actually create sub-streams and connect them up
-	*stream = p->gpu->get_current_task_stream()->get_stream();
+	*stream = p->gpu->get_next_task_stream(true/*create*/)->get_stream();
 	return cudaSuccess;
       }
 
@@ -222,17 +220,14 @@ namespace Realm {
       {
         GPUProcessor *p = get_gpu_or_die("cudaStreamCreateWithFlags");
         // Ignore the flags for now
-        // For now we always return the stream for this task in case the user actually uses it
-	// TODO: actually create sub-streams and connect them up
-	*stream = p->gpu->get_current_task_stream()->get_stream();
+	*stream = p->gpu->get_next_task_stream(true/*create*/)->get_stream();
 	return cudaSuccess;
       }
 
       cudaError_t cudaStreamDestroy(cudaStream_t stream)
       {
 	/*GPUProcessor *p =*/ get_gpu_or_die("cudaStreamDestroy");
-        // Ignore this for now
-        // TODO: Do the right thing if we are making substreams
+        // Ignore this for now because we know our streams are not being created on the fly
 	return cudaSuccess;
       }
 
@@ -247,9 +242,9 @@ namespace Realm {
 				      cudaEvent_t event,
 				      unsigned int flags)
       {
-	/*GPUProcessor *p =*/ get_gpu_or_die("cudaStreamWaitEvent");
-	// since we don't support user-level streams yet, this falls through to cudaWaitSynchronize
-	return cudaEventSynchronize(event);
+	GPUProcessor *p = get_gpu_or_die("cudaStreamWaitEvent");
+        p->stream_wait_on_event(stream, event);
+        return cudaSuccess;
       }
 
       cudaError_t cudaConfigureCall(dim3 grid_dim,
