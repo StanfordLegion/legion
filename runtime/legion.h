@@ -2439,15 +2439,15 @@ namespace Legion {
       __CUDA_HD__
       inline T read(void) const;
       __CUDA_HD__
-      inline void write(T value);
+      inline void write(T value) const;
       __CUDA_HD__
-      inline T* ptr(void);
+      inline T* ptr(void) const;
       __CUDA_HD__
-      inline T& ref(void);
+      inline T& ref(void) const;
       __CUDA_HD__
       inline operator T(void) const;
       __CUDA_HD__
-      inline DeferredValue<T>& operator=(T value);
+      inline DeferredValue<T>& operator=(T value) const;
     public:
       inline void finalize(InternalContext ctx) const;
     protected:
@@ -2471,9 +2471,9 @@ namespace Legion {
       DeferredReduction(void);
     public:
       __CUDA_HD__
-      inline void reduce(typename REDOP::RHS val);
+      inline void reduce(typename REDOP::RHS val) const;
       __CUDA_HD__
-      inline void operator<<=(typename REDOP::RHS val);
+      inline void operator<<=(typename REDOP::RHS val) const;
     };
 
     /**

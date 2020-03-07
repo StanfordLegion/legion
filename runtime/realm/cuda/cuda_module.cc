@@ -106,7 +106,7 @@ namespace Realm {
       log_stream.debug() << "CUDA fence event " << e << " recorded on stream " << stream << " (GPU " << gpu << ")";
 
       add_event(e, fence, 0);
-    }
+    } 
 
     void GPUStream::add_start_event(GPUWorkStart *start)
     {
@@ -150,6 +150,28 @@ namespace Realm {
 
       if(add_to_worker)
 	worker->add_stream(this);
+    }
+
+    void GPUStream::wait_on_streams(const std::set<GPUStream*> &other_streams)
+    {
+      assert(!other_streams.empty());
+      for (std::set<GPUStream*>::const_iterator it = 
+            other_streams.begin(); it != other_streams.end(); it++)
+      {
+        if (*it == this)
+          continue;
+        CUevent e = gpu->event_pool.get_event();
+
+        CHECK_CU( cuEventRecord(e, (*it)->get_stream()) );
+
+        log_stream.debug() << "CUDA stream " << stream << " waiting on stream " 
+                           << (*it)->get_stream() << " (GPU " << gpu << ")";
+
+        CHECK_CU( cuStreamWaitEvent(stream, e, 0) );
+
+        // record this event on our stream
+        add_event(e, 0);
+      }
     }
 
     // to be called by a worker (that should already have the GPU context
@@ -1355,6 +1377,8 @@ namespace Realm {
 
     namespace ThreadLocal {
       static REALM_THREAD_LOCAL GPUProcessor *current_gpu_proc = 0;
+      static REALM_THREAD_LOCAL GPUStream *current_gpu_stream = 0;
+      static REALM_THREAD_LOCAL std::set<GPUStream*> *created_gpu_streams = 0;
     };
 
 #ifdef REALM_USE_CUDART_HIJACK
@@ -1382,7 +1406,10 @@ namespace Realm {
 
       // bump the current stream
       // TODO: sanity-check whether this even works right when GPU tasks suspend
-      GPUStream *s = gpu_proc->gpu->switch_to_next_task_stream();
+      assert(ThreadLocal::current_gpu_stream == 0);
+      GPUStream *s = gpu_proc->gpu->get_next_task_stream();
+      ThreadLocal::current_gpu_stream = s;
+      assert(!ThreadLocal::created_gpu_streams);
 
       // we'll use a "work fence" to track when the kernels launched by this task actually
       //  finish - this must be added to the task _BEFORE_ we execute
@@ -1396,6 +1423,16 @@ namespace Realm {
       start->enqueue_on_stream(s);
 
       bool ok = T::execute_task(task);
+
+      // if the user could have put work on any other streams then make our
+      // stream wait on those streams as well
+      // TODO: update this so that it works when GPU tasks suspend
+      if(ThreadLocal::created_gpu_streams)
+      {
+        s->wait_on_streams(*ThreadLocal::created_gpu_streams);
+        delete ThreadLocal::created_gpu_streams;
+        ThreadLocal::created_gpu_streams = 0;
+      }
 
       // now enqueue the fence on the local stream
       fence->enqueue_on_stream(s);
@@ -1429,6 +1466,8 @@ namespace Realm {
 
       assert(ThreadLocal::current_gpu_proc == gpu_proc);
       ThreadLocal::current_gpu_proc = 0;
+      assert(ThreadLocal::current_gpu_stream == s);
+      ThreadLocal::current_gpu_stream = 0;
 
       return ok;
     }
@@ -1749,18 +1788,40 @@ namespace Realm {
 						       f));
     }
 
-    GPUStream *GPU::get_current_task_stream(void)
+    GPUStream* GPU::find_stream(CUstream stream) const
     {
-      return task_streams[current_stream];
+      for (std::vector<GPUStream*>::const_iterator it = 
+            task_streams.begin(); it != task_streams.end(); it++)
+        if ((*it)->get_stream() == stream)
+          return *it;
+      // Should never end up here
+      assert(0);
+      return NULL;
     }
 
-    GPUStream *GPU::switch_to_next_task_stream(void)
+    GPUStream* GPU::get_null_task_stream(void) const
     {
-      current_stream++;
-      if(current_stream >= task_streams.size())
-	current_stream = 0;
-      return task_streams[current_stream];
+      GPUStream *stream = ThreadLocal::current_gpu_stream;
+      assert(stream != NULL);
+      return stream;
     }
+
+    GPUStream* GPU::get_next_task_stream(bool create)
+    {
+      if(create && !ThreadLocal::created_gpu_streams)
+      {
+        // First time we get asked to create, user our current stream
+        ThreadLocal::created_gpu_streams = new std::set<GPUStream*>();
+        assert(ThreadLocal::current_gpu_stream);
+        ThreadLocal::created_gpu_streams->insert(ThreadLocal::current_gpu_stream);
+        return ThreadLocal::current_gpu_stream;
+      }
+      unsigned index = next_stream.fetch_add(1) % task_streams.size();
+      GPUStream *result = task_streams[index];
+      if (create)
+        ThreadLocal::created_gpu_streams->insert(result);
+      return result;
+    } 
 
     void GPUProcessor::shutdown(void)
     {
@@ -2034,10 +2095,40 @@ namespace Realm {
     }
 #endif
 
+    void GPUProcessor::stream_wait_on_event(cudaStream_t stream, cudaEvent_t event)
+    {
+      if (stream == 0)
+        CHECK_CU( cuStreamWaitEvent(
+              ThreadLocal::current_gpu_stream->get_stream(), event, 0) );
+      else
+        CHECK_CU( cuStreamWaitEvent(stream, event, 0) );
+    }
+
     void GPUProcessor::stream_synchronize(cudaStream_t stream)
     {
-      // same as device_synchronize for now
-      device_synchronize();
+      // same as device_synchronize if stream is zero
+      if (stream != 0)
+      {
+        if(!block_on_synchronize) {
+          GPUStream *s = gpu->find_stream(stream);
+          // We don't actually want to block the GPU processor
+          // when synchronizing, so we instead register a cuda
+          // event on the stream and then use it triggering to
+          // indicate that the stream is caught up
+          // Make a completion notification to be notified when
+          // the event has actually triggered
+          GPUPreemptionWaiter waiter(gpu);
+          // Register the waiter with the stream 
+          s->add_notification(&waiter); 
+          // Perform the wait, this will preempt the thread
+          waiter.preempt();
+        } else {
+          // oh well...
+          CHECK_CU( cuStreamSynchronize(stream) );
+        }
+      }
+      else
+        device_synchronize();
     }
 
     GPUPreemptionWaiter::GPUPreemptionWaiter(GPU *g) : gpu(g)
@@ -2063,7 +2154,14 @@ namespace Realm {
 
     void GPUProcessor::device_synchronize(void)
     {
-      GPUStream *current = gpu->get_current_task_stream();
+      GPUStream *current = ThreadLocal::current_gpu_stream;
+
+      if(ThreadLocal::created_gpu_streams)
+      {
+        current->wait_on_streams(*ThreadLocal::created_gpu_streams); 
+        delete ThreadLocal::created_gpu_streams;
+        ThreadLocal::created_gpu_streams = 0;
+      }
 
       if(!block_on_synchronize) {
 	// We don't actually want to block the GPU processor
@@ -2107,10 +2205,10 @@ namespace Realm {
 
     void GPUProcessor::event_record(cudaEvent_t event, cudaStream_t stream)
     {
-      // ignore the provided stream and record the event on this task's assigned stream
       CUevent e = event;
-      GPUStream *current = gpu->get_current_task_stream();
-      CHECK_CU( cuEventRecord(e, current->get_stream()) );
+      if(stream == 0)
+        stream = ThreadLocal::current_gpu_stream->get_stream();
+      CHECK_CU( cuEventRecord(e, stream) );
     }
 
     void GPUProcessor::event_synchronize(cudaEvent_t event)
@@ -2142,7 +2240,7 @@ namespace Realm {
 				      size_t shared_mem,
 				      cudaStream_t stream)
     {
-      launch_configs.push_back(LaunchConfig(grid_dim, block_dim, shared_mem));
+      launch_configs.push_back(CallConfig(grid_dim, block_dim, shared_mem, stream));
     }
 
     void GPUProcessor::setup_argument(const void *arg,
@@ -2160,7 +2258,7 @@ namespace Realm {
     {
       // make sure we have a launch config
       assert(!launch_configs.empty());
-      LaunchConfig &config = launch_configs.back();
+      CallConfig &config = launch_configs.back();
 
       // Find our function
       CUfunction f = gpu->lookup_function(func);
@@ -2172,15 +2270,16 @@ namespace Realm {
         CU_LAUNCH_PARAM_END
       };
 
-      CUstream raw_stream = gpu->get_current_task_stream()->get_stream();
-      log_stream.debug() << "kernel " << func << " added to stream " << raw_stream;
+      if (config.stream == 0)
+        config.stream = ThreadLocal::current_gpu_stream->get_stream();
+      log_stream.debug() << "kernel " << func << " added to stream " << config.stream;
 
       // Launch the kernel on our stream dammit!
       CHECK_CU( cuLaunchKernel(f, 
 			       config.grid.x, config.grid.y, config.grid.z,
                                config.block.x, config.block.y, config.block.z,
                                config.shared,
-			       raw_stream,
+                               config.stream,
 			       NULL, extra) );
 
       // pop the config we just used
@@ -2195,28 +2294,37 @@ namespace Realm {
                                      dim3 block_dim,
                                      void **args,
                                      size_t shared_memory,
-                                     cudaStream_t stream)
+                                     cudaStream_t stream,
+                                     bool cooperative /*=false*/)
     {
       // Find our function
       CUfunction f = gpu->lookup_function(func);
 
-      CUstream raw_stream = gpu->get_current_task_stream()->get_stream();
-      log_stream.debug() << "kernel " << func << " added to stream " << raw_stream;
+      if (stream == 0)
+        stream = ThreadLocal::current_gpu_stream->get_stream();
+      log_stream.debug() << "kernel " << func << " added to stream " << stream;
 
-      // Launch the kernel on our stream dammit!
-      CHECK_CU( cuLaunchKernel(f,
-                               grid_dim.x, grid_dim.y, grid_dim.z,
-                               block_dim.x, block_dim.y, block_dim.z,
-                               shared_memory,
-                               raw_stream,
-                               args, NULL) );
+      if (cooperative)
+        CHECK_CU( cuLaunchCooperativeKernel(f,
+                                 grid_dim.x, grid_dim.y, grid_dim.z,
+                                 block_dim.x, block_dim.y, block_dim.z,
+                                 shared_memory,
+                                 stream,
+                                 args) );
+      else
+        CHECK_CU( cuLaunchKernel(f,
+                                 grid_dim.x, grid_dim.y, grid_dim.z,
+                                 block_dim.x, block_dim.y, block_dim.z,
+                                 shared_memory,
+                                 stream,
+                                 args, NULL) );
     }
 #endif
 
     void GPUProcessor::gpu_memcpy(void *dst, const void *src, size_t size,
 				  cudaMemcpyKind kind)
     {
-      CUstream current = gpu->get_current_task_stream()->get_stream();
+      CUstream current = ThreadLocal::current_gpu_stream->get_stream();
       // the synchronous copy still uses cuMemcpyAsync so that we can limit the
       //  synchronization to just the right stream
       CHECK_CU( cuMemcpyAsync((CUdeviceptr)dst, (CUdeviceptr)src, size, current) );
@@ -2226,8 +2334,9 @@ namespace Realm {
     void GPUProcessor::gpu_memcpy_async(void *dst, const void *src, size_t size,
 					cudaMemcpyKind kind, cudaStream_t stream)
     {
-      CUstream current = gpu->get_current_task_stream()->get_stream();
-      CHECK_CU( cuMemcpyAsync((CUdeviceptr)dst, (CUdeviceptr)src, size, current) );
+      if (stream == 0)
+        stream = ThreadLocal::current_gpu_stream->get_stream();
+      CHECK_CU( cuMemcpyAsync((CUdeviceptr)dst, (CUdeviceptr)src, size, stream) );
       // no synchronization here
     }
 
@@ -2236,7 +2345,7 @@ namespace Realm {
 					    size_t size, size_t offset,
 					    cudaMemcpyKind kind)
     {
-      CUstream current = gpu->get_current_task_stream()->get_stream();
+      CUstream current = ThreadLocal::current_gpu_stream->get_stream();
       CUdeviceptr var_base = gpu->lookup_variable(dst);
       CHECK_CU( cuMemcpyAsync(var_base + offset,
 			      (CUdeviceptr)src, size, current) );
@@ -2247,10 +2356,11 @@ namespace Realm {
 						  size_t size, size_t offset,
 						  cudaMemcpyKind kind, cudaStream_t stream)
     {
-      CUstream current = gpu->get_current_task_stream()->get_stream();
+      if (stream == 0)
+        stream = ThreadLocal::current_gpu_stream->get_stream();
       CUdeviceptr var_base = gpu->lookup_variable(dst);
       CHECK_CU( cuMemcpyAsync(var_base + offset,
-			      (CUdeviceptr)src, size, current) );
+			      (CUdeviceptr)src, size, stream) );
       // no synchronization here
     }
 
@@ -2258,7 +2368,7 @@ namespace Realm {
 					      size_t size, size_t offset,
 					      cudaMemcpyKind kind)
     {
-      CUstream current = gpu->get_current_task_stream()->get_stream();
+      CUstream current = ThreadLocal::current_gpu_stream->get_stream();
       CUdeviceptr var_base = gpu->lookup_variable(src);
       CHECK_CU( cuMemcpyAsync((CUdeviceptr)dst,
 			      var_base + offset,
@@ -2270,18 +2380,19 @@ namespace Realm {
 						    size_t size, size_t offset,
 						    cudaMemcpyKind kind, cudaStream_t stream)
     {
-      CUstream current = gpu->get_current_task_stream()->get_stream();
+      if (stream == 0)
+        stream = ThreadLocal::current_gpu_stream->get_stream();
       CUdeviceptr var_base = gpu->lookup_variable(src);
       CHECK_CU( cuMemcpyAsync((CUdeviceptr)dst,
 			      var_base + offset,
-			      size, current) );
+			      size, stream) );
       // no synchronization here
     }
 #endif
 
     void GPUProcessor::gpu_memset(void *dst, int value, size_t count)
     {
-      CUstream current = gpu->get_current_task_stream()->get_stream();
+      CUstream current = ThreadLocal::current_gpu_stream->get_stream();
       CHECK_CU( cuMemsetD8Async((CUdeviceptr)dst, (unsigned char)value, 
                                   count, current) );
     }
@@ -2289,9 +2400,10 @@ namespace Realm {
     void GPUProcessor::gpu_memset_async(void *dst, int value, 
                                         size_t count, cudaStream_t stream)
     {
-      CUstream current = gpu->get_current_task_stream()->get_stream();
+      if (stream == 0)
+        stream = ThreadLocal::current_gpu_stream->get_stream();
       CHECK_CU( cuMemsetD8Async((CUdeviceptr)dst, (unsigned char)value,
-                                  count, current) );
+                                  count, stream) );
     }
 
 
@@ -2303,7 +2415,7 @@ namespace Realm {
 	     CUcontext _context,
 	     int num_streams)
       : module(_module), info(_info), worker(_worker)
-      , proc(0), fbmem(0), context(_context), current_stream(0)
+      , proc(0), fbmem(0), context(_context), next_stream(0)
     {
       // assume context is already current (happens automatically on creation)
 
