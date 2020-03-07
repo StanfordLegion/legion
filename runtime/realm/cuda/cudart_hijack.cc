@@ -298,6 +298,19 @@ namespace Realm {
         return cudaSuccess;
       }
 
+      cudaError_t cudaLaunchCooperativeKernel(const void *func,
+                                              dim3 grid_dim,
+                                              dim3 block_dim,
+                                              void **args,
+                                              size_t shared_memory,
+                                              cudaStream_t stream)
+      {
+        GPUProcessor *p = get_gpu_or_die("cudaLaunchCooperativeKernel");
+        p->launch_kernel(func, grid_dim, block_dim, args, 
+              shared_memory, stream, true/*cooperative*/);
+        return cudaSuccess;
+      }
+
       cudaError_t cudaMalloc(void **ptr, size_t size)
       {
 	/*GPUProcessor *p =*/ get_gpu_or_die("cudaMalloc");

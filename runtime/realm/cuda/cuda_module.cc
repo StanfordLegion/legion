@@ -2294,7 +2294,8 @@ namespace Realm {
                                      dim3 block_dim,
                                      void **args,
                                      size_t shared_memory,
-                                     cudaStream_t stream)
+                                     cudaStream_t stream,
+                                     bool cooperative /*=false*/)
     {
       // Find our function
       CUfunction f = gpu->lookup_function(func);
@@ -2303,13 +2304,20 @@ namespace Realm {
         stream = ThreadLocal::current_gpu_stream->get_stream();
       log_stream.debug() << "kernel " << func << " added to stream " << stream;
 
-      // Launch the kernel on our stream dammit!
-      CHECK_CU( cuLaunchKernel(f,
-                               grid_dim.x, grid_dim.y, grid_dim.z,
-                               block_dim.x, block_dim.y, block_dim.z,
-                               shared_memory,
-                               stream,
-                               args, NULL) );
+      if (cooperative)
+        CHECK_CU( cuLaunchCooperativeKernel(f,
+                                 grid_dim.x, grid_dim.y, grid_dim.z,
+                                 block_dim.x, block_dim.y, block_dim.z,
+                                 shared_memory,
+                                 stream,
+                                 args) );
+      else
+        CHECK_CU( cuLaunchKernel(f,
+                                 grid_dim.x, grid_dim.y, grid_dim.z,
+                                 block_dim.x, block_dim.y, block_dim.z,
+                                 shared_memory,
+                                 stream,
+                                 args, NULL) );
     }
 #endif
 
