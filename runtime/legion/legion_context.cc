@@ -7586,47 +7586,55 @@ namespace Legion {
                                                regions[idx].region);
       }
       if (!created_requirements.empty())
-      {
-        TaskContext *outermost = find_outermost_local_context();
-        const bool is_outermost = (outermost == this);
-        RegionTreeContext outermost_ctx = outermost->get_context();
-        for (std::map<unsigned,RegionRequirement>::const_iterator it = 
-              created_requirements.begin(); it != 
-              created_requirements.end(); it++)
-        {
-#ifdef DEBUG_LEGION
-          assert(returnable_privileges.find(it->first) !=
-                  returnable_privileges.end());
-#endif
-          // See if we're a returnable privilege or not
-          if (returnable_privileges[it->first])
-          {
-            // If we're the outermost context or the requirement was
-            // deleted, then we can invalidate everything
-            // Otherwiswe we only invalidate the users
-            const bool users_only = !is_outermost;
-            runtime->forest->invalidate_current_context(outermost_ctx,
-                                        users_only, it->second.region);
-          }
-          else // Not returning so invalidate the full thing 
-          {
-            runtime->forest->invalidate_current_context(tree_context,
-                              false/*users only*/, it->second.region);
-            // Little tricky here, this is safe to invaliate the whole
-            // tree even if we only had privileges on a field because
-            // if we had privileges on the whole region in this context
-            // it would have merged the created_requirement and we wouldn't
-            // have a non returnable privilege requirement in this context
-            runtime->forest->invalidate_versions(tree_context, 
-                                                 it->second.region);
-          }
-        }
-      }
+        invalidate_created_requirement_contexts();
       // Clean up our instance top views
       if (!instance_top_views.empty())
         clear_instance_top_views();
       // Now we can free our region tree context
       runtime->free_region_tree_context(tree_context);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::invalidate_created_requirement_contexts(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!created_requirements.empty());
+#endif
+      TaskContext *outermost = find_outermost_local_context();
+      const bool is_outermost = (outermost == this);
+      RegionTreeContext outermost_ctx = outermost->get_context();
+      for (std::map<unsigned,RegionRequirement>::const_iterator it = 
+            created_requirements.begin(); it != 
+            created_requirements.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        assert(returnable_privileges.find(it->first) !=
+                returnable_privileges.end());
+#endif
+        // See if we're a returnable privilege or not
+        if (returnable_privileges[it->first])
+        {
+          // If we're the outermost context or the requirement was
+          // deleted, then we can invalidate everything
+          // Otherwiswe we only invalidate the users
+          const bool users_only = !is_outermost;
+          runtime->forest->invalidate_current_context(outermost_ctx,
+                                      users_only, it->second.region);
+        }
+        else // Not returning so invalidate the full thing 
+        {
+          runtime->forest->invalidate_current_context(tree_context,
+                            false/*users only*/, it->second.region);
+          // Little tricky here, this is safe to invaliate the whole
+          // tree even if we only had privileges on a field because
+          // if we had privileges on the whole region in this context
+          // it would have merged the created_requirement and we wouldn't
+          // have a non returnable privilege requirement in this context
+          runtime->forest->invalidate_versions(tree_context, 
+                                               it->second.region);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -9247,15 +9255,7 @@ namespace Legion {
                                                regions[idx].region);
       }
       if (!created_requirements.empty())
-      {
-        for (unsigned idx = 0; idx < created_requirements.size(); idx++)
-        {
-          runtime->forest->invalidate_current_context(tree_context,
-              false/*users only*/, created_requirements[idx].region);
-          runtime->forest->invalidate_versions(tree_context,
-                                   created_requirements[idx].region);
-        }
-      } 
+        invalidate_created_requirement_contexts();
       // Cannot clear our instance top view references until we are deleted 
       // as we might still need to help out our other sibling shards
       

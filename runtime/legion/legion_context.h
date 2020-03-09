@@ -1165,6 +1165,7 @@ namespace Legion {
           std::set<ApEvent> &preconditions,
           std::set<RtEvent> &applied_events);
       virtual void invalidate_region_tree_contexts(void);
+      void invalidate_created_requirement_contexts(void);
       virtual void invalidate_remote_tree_contexts(Deserializer &derez);
       virtual void send_back_created_state(AddressSpaceID target);
     public:
