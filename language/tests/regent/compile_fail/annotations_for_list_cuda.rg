@@ -13,19 +13,15 @@
 -- limitations under the License.
 
 -- fails-with:
--- invalid_import_ispace4.rg:28: cannot import a handle that is already imported
+-- annotations_for_list_cuda.rg:25: option __demand(__cuda) is not permitted
+--   for i in is do end
+--     ^
 
 import "regent"
 
-terra create_index_space(runtime : regentlib.c.legion_runtime_t,
-                         context : regentlib.c.legion_context_t)
-  return regentlib.c.legion_index_space_create(runtime, context, 1)
+task f()
+  var is = ispace(int1d, 5)
+  __demand(__cuda)
+  for i in is do end
 end
-
-task main()
-  var raw_is = create_index_space(__runtime(), __context())
-  var is = __import_ispace(int1d, raw_is)
-  var is_again = __import_ispace(int1d, raw_is)
-end
-
-regentlib.start(main)
+f:compile()
