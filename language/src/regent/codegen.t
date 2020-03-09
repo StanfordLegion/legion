@@ -881,12 +881,8 @@ local IMPORT_SEMANTIC_VALUE = 0xd93a28e2
 local function tag_imported(cx, handle)
   local attach = nil
   local handle_type = handle.type
-  if handle_type == std.c.legion_index_space_t then
-    attach = std.c.legion_index_space_attach_semantic_information
-  elseif handle_type == std.c.legion_logical_region_t then
+  if handle_type == std.c.legion_logical_region_t then
     attach = std.c.legion_logical_region_attach_semantic_information
-  elseif handle_type == std.c.legion_logical_partition_t then
-    attach = std.c.legion_logical_partition_attach_semantic_information
   else
     assert(false, "unreachable")
   end
@@ -903,12 +899,8 @@ end
 local function check_imported(cx, node, handle)
   local retrieve = nil
   local handle_type = handle.type
-  if handle_type == std.c.legion_index_space_t then
-    retrieve = std.c.legion_index_space_retrieve_semantic_information
-  elseif handle_type == std.c.legion_logical_region_t then
+  if handle_type == std.c.legion_logical_region_t then
     retrieve = std.c.legion_logical_region_retrieve_semantic_information
-  elseif handle_type == std.c.legion_logical_partition_t then
-    retrieve = std.c.legion_logical_partition_retrieve_semantic_information
   else
     assert(false, "unreachable")
   end
@@ -4378,7 +4370,6 @@ function codegen.expr_ispace(cx, node)
   actions = quote
     [actions]
     var [i] = [ispace_type]{ impl = [is] }
-    [tag_imported(cx, is)]
     [bounds_actions]
   end
 
@@ -4629,7 +4620,6 @@ function codegen.expr_partition(cx, node)
     var [ip] = [index_partition_create]([args])
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [region.value].impl, [ip])
-    [tag_imported(cx, lp)]
   end
 
   return values.value(
@@ -4725,7 +4715,6 @@ function codegen.expr_partition_equal(cx, node)
       end
       var [lp] = c.legion_logical_partition_create(
         [cx.runtime], [cx.context], [region.value].impl, [ip])
-      [tag_imported(cx, lp)]
     end
   end
 
@@ -4768,7 +4757,6 @@ function codegen.expr_partition_by_field(cx, node)
       field_id, [colors.value].impl, c.AUTO_GENERATE_ID, 0, 0, c.DISJOINT_KIND)
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [region.value].impl, [ip])
-    [tag_imported(cx, lp)]
   end
 
   return values.value(
@@ -4812,7 +4800,6 @@ function codegen.expr_partition_by_restriction(cx, node)
       [transform.value], [extent.value], disjointness, -1)
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [region.value].impl, [ip])
-    [tag_imported(cx, lp)]
   end
 
   return values.value(
@@ -4881,7 +4868,6 @@ function codegen.expr_image(cx, node)
       colors, disjointness, c.AUTO_GENERATE_ID, 0, 0)
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [parent.value].impl, [ip])
-    [tag_imported(cx, lp)]
   end
 
   return values.value(
@@ -4949,7 +4935,6 @@ function codegen.expr_preimage(cx, node)
       disjointness, c.AUTO_GENERATE_ID, 0, 0)
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [region.value].impl, [ip])
-    [tag_imported(cx, lp)]
   end
 
   return values.value(
@@ -4987,7 +4972,6 @@ function codegen.expr_cross_product(cx, node)
     var ip = c.legion_terra_index_cross_product_get_partition([product])
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], lr.impl, ip)
-    [tag_imported(cx, lp)]
   end
 
   return values.value(
@@ -5060,7 +5044,6 @@ function codegen.expr_cross_product_array(cx, node)
     [product].other_color = other_color
     var stop : double = c.legion_get_current_time_in_micros()/double(1e6)
     c.printf("codegen: cross_product_array %e\n", stop - start)
-    [tag_imported(cx, lp)]
   end
 
   return values.value(
@@ -7544,7 +7527,6 @@ function codegen.expr_binary(cx, node)
         var [lp] = c.legion_logical_partition_create_by_tree(
           [cx.runtime], [cx.context],
           [ip], [lhs.value].impl.field_space, [lhs.value].impl.tree_id)
-        [tag_imported(cx, lp)]
       end
     else
       actions = quote
@@ -7574,7 +7556,6 @@ function codegen.expr_binary(cx, node)
         var [lp] = c.legion_logical_partition_create_by_tree(
           [cx.runtime], [cx.context],
           [ip], [lhs.value].impl.field_space, [lhs.value].impl.tree_id)
-        [tag_imported(cx, lp)]
       end
     end
 
@@ -7833,8 +7814,6 @@ function codegen.expr_import_ispace(cx, node)
         std.c.legion_index_space_has_parent_index_partition([cx.runtime], [is]),
         [get_source_location(node) .. ": cannot import a subspace"])
     end
-    [check_imported(cx, node, is)]
-    [tag_imported(cx, is)]
   end
   if cache_index_iterator then
     actions = quote
@@ -8035,8 +8014,6 @@ function codegen.expr_import_partition(cx, node)
     [actions];
     var [lp] = [value.value]
     [check_actions];
-    [check_imported(cx, node, lp)];
-    [tag_imported(cx, lp)]
   end
 
   return values.value(
