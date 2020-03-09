@@ -2447,7 +2447,7 @@ namespace Legion {
       __CUDA_HD__
       inline operator T(void) const;
       __CUDA_HD__
-      inline DeferredValue<T>& operator=(T value) const;
+      inline DeferredValue<T>& operator=(T value);
     public:
       inline void finalize(InternalContext ctx) const;
     protected:
