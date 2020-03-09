@@ -2304,20 +2304,26 @@ namespace Realm {
         stream = ThreadLocal::current_gpu_stream->get_stream();
       log_stream.debug() << "kernel " << func << " added to stream " << stream;
 
-      if (cooperative)
+      if (cooperative) {
+#if CUDA_VERSION >= 9000
         CHECK_CU( cuLaunchCooperativeKernel(f,
                                  grid_dim.x, grid_dim.y, grid_dim.z,
                                  block_dim.x, block_dim.y, block_dim.z,
                                  shared_memory,
                                  stream,
                                  args) );
-      else
+#else
+	log_gpu.fatal() << "attempt to launch cooperative kernel on CUDA < 9.0!";
+	abort();
+#endif
+      } else {
         CHECK_CU( cuLaunchKernel(f,
                                  grid_dim.x, grid_dim.y, grid_dim.z,
                                  block_dim.x, block_dim.y, block_dim.z,
                                  shared_memory,
                                  stream,
                                  args, NULL) );
+      }
     }
 #endif
 
