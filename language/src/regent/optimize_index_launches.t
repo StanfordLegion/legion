@@ -225,7 +225,7 @@ local function analyze_noninterference_previous(
   for i, other_arg in pairs(regions_previously_used) do
     local other_region_type = std.as_read(other_arg.expr_type)
     if other_region_type:is_projected() then
-      other_region_type = region_type:get_projection_source()
+      other_region_type = other_region_type:get_projection_source()
     end
     local constraint = std.constraint(
       region_type,
