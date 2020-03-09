@@ -3127,9 +3127,13 @@ static void *bytedup(const void *data, size_t datalen)
 
   CompQueueImpl::CompQueueImpl(void)
     : next_free(0)
-    , wr_ptr(0), rd_ptr(0)
-    , cur_events(0), pending_events(0), max_events(0), resizable(false)
+    , resizable(false)
+    , max_events(0)
+    , wr_ptr(0), rd_ptr(0), pending_events(0)
+    , commit_ptr(0), consume_ptr(0)
+    , cur_events(0)
     , completed_events(0)
+    , has_progress_events(false)
     , local_progress_event(0)
     , first_free_waiter(0)
     , batches(0)
@@ -3138,10 +3142,11 @@ static void *bytedup(const void *data, size_t datalen)
   CompQueueImpl::~CompQueueImpl(void)
   {
     AutoLock<> al(mutex);
-    assert(pending_events == 0);
-    if(batches) {
+    assert(pending_events.load() == 0);
+    while(batches) {
+      CompQueueWaiterBatch *next_batch = batches->next_batch;
       delete batches;
-      batches = 0;
+      batches = next_batch;
     }
     if(completed_events)
       free(completed_events);
@@ -3156,22 +3161,37 @@ static void *bytedup(const void *data, size_t datalen)
   void CompQueueImpl::set_capacity(size_t _max_size, bool _resizable)
   {
     AutoLock<> al(mutex);
-    assert(completed_events == 0);
-    wr_ptr = rd_ptr = cur_events = pending_events = 0;
-    max_events = _max_size;
+    if(resizable)
+      assert(cur_events == 0);
+    else
+      assert(wr_ptr.load() == consume_ptr.load());
+    wr_ptr.store(0);
+    rd_ptr.store(0);
+    pending_events.store(0);
+    commit_ptr.store(0);
+    consume_ptr.store(0);
+    cur_events = 0;
     resizable = _resizable;
-    completed_events = reinterpret_cast<Event *>(malloc(sizeof(Event) * max_events));
-    assert(completed_events != 0);
+    // round up to a power of 2 for easy modulo arithmetic
+    max_events = 1;
+    while(max_events < _max_size)
+      max_events <<= 1;
+
+    void *ptr = malloc(sizeof(Event) * max_events);
+    assert(ptr != 0);
+    completed_events = reinterpret_cast<Event *>(ptr);
   }
 
   void CompQueueImpl::destroy(void)
   {
     AutoLock<> al(mutex);
     // ok to have completed events leftover, but no pending events
-    assert(pending_events == 0);
+    assert(pending_events.load() == 0);
     max_events = 0;
-    free(completed_events);
-    completed_events = 0;
+    if(completed_events) {
+      free(completed_events);
+      completed_events = 0;
+    }
 
     get_runtime()->local_compqueue_free_list->free_entry(this);
   }
@@ -3182,7 +3202,7 @@ static void *bytedup(const void *data, size_t datalen)
 
     // special case: NO_EVENT has no impl...
     if(!event.exists()) {
-      add_completed_event(event, false /*!was_pending*/);
+      add_completed_event(event, 0 /*no waiter*/);
       return;
     }
 
@@ -3194,26 +3214,40 @@ static void *bytedup(const void *data, size_t datalen)
 	log_compqueue.fatal() << "cannot enqueue poisoned event: cq=" << me << " event=" << event;
 	abort();
       } else
-	add_completed_event(event, false /*!was_pending*/);
+	add_completed_event(event, 0 /*no waiter*/);
     } else {
       // we need a free waiter - make some if needed
       CompQueueWaiter *waiter = 0;
       {
 	AutoLock<> al(mutex);
-	pending_events++;
-	if(first_free_waiter != 0) {
-	  waiter = first_free_waiter;
-	  first_free_waiter = first_free_waiter->next_free;
+	pending_events.fetch_add(1);
+
+	// try to pop a waiter from the free list - this needs to use
+	//  CAS to accomodate unsynchronized pushes to the list, but the
+	//  mutex we hold prevents any other poppers (so no ABA problem)
+	waiter = first_free_waiter.load();
+	while(waiter) {
+	  if(first_free_waiter.compare_exchange(waiter, waiter->next_free))
+	    break;
+	}
+
+	if(waiter) {
 	  waiter->next_free = 0;
 	} else {
 	  // create a batch of waiters, claim the first one and enqueue the others
 	  //  in the free list
 	  batches = new CompQueueWaiterBatch(this, batches);
 	  waiter = &batches->waiters[0];
-	  first_free_waiter = &batches->waiters[1];
 	  for(size_t i = 1; i < CQWAITER_BATCH_SIZE - 1; i++)
 	    batches->waiters[i].next_free = &batches->waiters[i + 1];
-	  batches->waiters[CQWAITER_BATCH_SIZE - 1].next_free = 0;
+	  // CAS for insertion into the free list
+	  CompQueueWaiter *old_head = first_free_waiter.load();
+	  while(true) {
+	    batches->waiters[CQWAITER_BATCH_SIZE - 1].next_free = old_head;
+	    if(first_free_waiter.compare_exchange(old_head,
+						  &batches->waiters[1]))
+	      break;
+	  }
 	}
       }
       // with the lock released, add the waiter
@@ -3225,11 +3259,24 @@ static void *bytedup(const void *data, size_t datalen)
 
   Event CompQueueImpl::get_local_progress_event(void)
   {
-    AutoLock<> al(mutex);
-    if(cur_events > 0) {
-      assert(local_progress_event == 0);
-      return Event::NO_EVENT;
+    // check for non-empty queue first and return NO_EVENT
+    if(resizable) {
+      AutoLock<> al(mutex);
+      if(cur_events > 0) {
+	assert(local_progress_event == 0);
+	return Event::NO_EVENT;
+      }
     } else {
+      if(rd_ptr.load() < commit_ptr.load()) {
+	// can't check has_progress_events in a race-free way
+	return Event::NO_EVENT;
+      }
+    }
+
+    // take lock and create event if needed
+    {
+      AutoLock<> al(mutex);
+
       if(local_progress_event) {
 	ID id(local_progress_event->me);
 	id.event_generation() = local_progress_event_gen;
@@ -3240,6 +3287,7 @@ static void *bytedup(const void *data, size_t datalen)
 	Event e = local_progress_event->current_event();
 	// TODO: we probably don't really need this field because it's always local
 	local_progress_event_gen = ID(e).event_generation();
+	has_progress_events.store(true);
 	return e;
       }
     }
@@ -3247,13 +3295,25 @@ static void *bytedup(const void *data, size_t datalen)
 
   void CompQueueImpl::add_remote_progress_event(Event event)
   {
+    // if queue is non-empty, we'll just immediately trigger the event
     bool immediate_trigger = false;
-    {
+    if(resizable) {
       AutoLock<> al(mutex);
-      if(cur_events > 0)
+      if(cur_events > 0) {
+	assert(local_progress_event == 0);
 	immediate_trigger = true;
-      else
-	remote_progress_events.push_back(event);
+      }
+    } else {
+      if(rd_ptr.load() < commit_ptr.load()) {
+	// can't check has_progress_events in a race-free way
+	immediate_trigger = true;
+      }
+    }
+
+    if(!immediate_trigger) {
+      AutoLock<> al(mutex);
+      remote_progress_events.push_back(event);
+      has_progress_events.store(true);
     }
 
     if(immediate_trigger) {
@@ -3264,82 +3324,173 @@ static void *bytedup(const void *data, size_t datalen)
 
   size_t CompQueueImpl::pop_events(Event *events, size_t max_to_pop)
   {
-    AutoLock<> al(mutex);
-    if((cur_events > 0) && (max_to_pop > 0)) {
-      size_t count = std::min(cur_events, max_to_pop);
+    if(resizable) {
+      AutoLock<> al(mutex);
+      if((cur_events > 0) && (max_to_pop > 0)) {
+	size_t count = std::min(cur_events, max_to_pop);
+
+	// get current offset and advance pointer
+	size_t rd_ofs = rd_ptr.fetch_add(count) & (max_events - 1);
+	if(events) {
+	  // does copy wrap around?	  
+	  if((rd_ofs + count) > max_events) {
+	    size_t before_wrap = max_events - rd_ofs;
+	    // yes, two memcpy's needed
+	    memcpy(events, completed_events + rd_ofs,
+		   before_wrap * sizeof(Event));
+	    memcpy(events + before_wrap, completed_events,
+		   (count - before_wrap) * sizeof(Event));
+	  } else {
+	    // no, single memcpy does the job
+	    memcpy(events, completed_events + rd_ofs, count * sizeof(Event));
+	  }
+	}
+
+	cur_events -= count;
+
+	return count;
+      } else
+	return 0;
+    } else {
+      // lock-free version for nonresizable queues
+      size_t count, old_rd_ptr;
+
+      // use CAS to move rd_ptr up to (but not past) commit_ptr
+      {
+	old_rd_ptr = rd_ptr.load();
+	while(true) {
+	  size_t old_commit = commit_ptr.load_acquire();
+	  if(old_rd_ptr == old_commit) {
+	    // queue is empty
+	    return 0;
+	  }
+	  count = std::min((old_commit - old_rd_ptr), max_to_pop);	  
+	  size_t new_rd_ptr = old_rd_ptr + count;
+	  if(rd_ptr.compare_exchange(old_rd_ptr, new_rd_ptr))
+	    break; // success
+	}
+      }
+
+      // get current offset and advance pointer
+      size_t rd_ofs = old_rd_ptr & (max_events - 1);
+
       if(events) {
-	// does copy wrap around?
-	if((rd_ptr + count) > max_events) {
-	  size_t before_wrap = max_events - rd_ptr;
-	  // two memcpy's needed
-	  memcpy(events, completed_events + rd_ptr, before_wrap * sizeof(Event));
+	// does copy wrap around?	  
+	if((rd_ofs + count) > max_events) {
+	  size_t before_wrap = max_events - rd_ofs;
+	  // yes, two memcpy's needed
+	  memcpy(events, completed_events + rd_ofs,
+		 before_wrap * sizeof(Event));
 	  memcpy(events + before_wrap, completed_events,
 		 (count - before_wrap) * sizeof(Event));
 	} else {
-	  // single memcpy does the job
-	  memcpy(events, completed_events + rd_ptr, count * sizeof(Event));
+	  // no, single memcpy does the job
+	  memcpy(events, completed_events + rd_ofs, count * sizeof(Event));
 	}
       }
-      // advance read pointer
-      rd_ptr += count;
-      if(rd_ptr >= max_events)
-	rd_ptr -= max_events;
 
-      cur_events -= count;
+      // once we've copied out our events, mark that we've consumed the
+      //  entries - this has to happen in the same order as the rd_ptr
+      //  bumps though
+      while(consume_ptr.load() != old_rd_ptr) { /*pause?*/ }
+      size_t check = consume_ptr.fetch_add(count);
+      assert(check == old_rd_ptr);
 
       return count;
-    } else
-      return 0;
+    }
   }
 
-  void CompQueueImpl::add_completed_event(Event event, bool was_pending)
+  void CompQueueImpl::add_completed_event(Event event, CompQueueWaiter *waiter)
   {
     log_compqueue.info() << "event pushed: cq=" << me << " event=" << event;
-    GenEventImpl *local_trigger;
+    GenEventImpl *local_trigger = 0;
     EventImpl::gen_t local_trigger_gen;
     std::vector<Event> remote_triggers;
-    {
-      // TODO: lock-free version for non-resizable case
+
+    if(resizable) {
       AutoLock<> al(mutex);
       // check for overflow
       if(cur_events >= max_events) {
-	if(!resizable) {
-	  log_compqueue.fatal() << "completion queue overflow: cq=" << me << " size=" << max_events;
-	  abort();
-	}
 	// should detect it precisely
 	assert(cur_events == max_events);
 	size_t new_size = max_events * 2;
 	Event *new_events = reinterpret_cast<Event *>(malloc(new_size * sizeof(Event)));
 	assert(new_events != 0);
-	if(rd_ptr > 0) {
+	size_t rd_ofs = rd_ptr.load() & (max_events - 1);
+	if(rd_ofs > 0) {
 	  // most cases wrap around
-	  memcpy(new_events, completed_events + rd_ptr,
-		 (cur_events - rd_ptr) * sizeof(Event));
-	  memcpy(new_events + (cur_events - rd_ptr), completed_events,
-		 rd_ptr * sizeof(Event));
+	  memcpy(new_events, completed_events + rd_ofs,
+		 (cur_events - rd_ofs) * sizeof(Event));
+	  memcpy(new_events + (cur_events - rd_ofs), completed_events,
+		 rd_ofs * sizeof(Event));
 	} else
 	  memcpy(new_events, completed_events, cur_events * sizeof(Event));
 	free(completed_events);
 	completed_events = new_events;
-	rd_ptr = 0;
-	wr_ptr = cur_events;
+	rd_ptr.store(0);
+	wr_ptr.store(cur_events);
 	max_events = new_size;
       }
 
       cur_events++;
-      if(was_pending)
-	pending_events--;
+      if(waiter != 0) {
+	pending_events.fetch_sub(1);
+	// add waiter to free list for reuse
+	waiter->next_free = first_free_waiter.load();
+	// cannot fail since we hold lock
+	bool ok = first_free_waiter.compare_exchange(waiter->next_free,
+						     waiter);
+	assert(ok);
+      }
 
-      completed_events[wr_ptr++] = event;
-      if(wr_ptr >= max_events)
-	wr_ptr -= max_events;
-
+      size_t wr_ofs = wr_ptr.fetch_add(1) & (max_events - 1);
+      completed_events[wr_ofs] = event;
+      
       // grab things-to-trigger so we can do it outside the lock
       local_trigger = local_progress_event;
       local_trigger_gen = local_progress_event_gen;
       local_progress_event = 0;
       remote_triggers.swap(remote_progress_events);
+    } else {
+      // lock-free version for non-resizable queues
+
+      // bump the write pointer and check for overflow
+      size_t old_consume = consume_ptr.load();
+      size_t old_wr_ptr = wr_ptr.fetch_add(1);
+      if((old_wr_ptr - old_consume) >= max_events) {
+	log_compqueue.fatal() << "completion queue overflow: cq=" << me << " size=" << max_events;
+	abort();
+      }
+
+      size_t wr_ofs = old_wr_ptr & (max_events - 1);
+      completed_events[wr_ofs] = event;
+
+      // bump commit pointer, but respecting order
+      while(commit_ptr.load() != old_wr_ptr) { /*pause?*/ }
+      size_t check = commit_ptr.fetch_add(1);
+      assert(check == old_wr_ptr);
+
+      // lock-free insertion of waiter into free list
+      if(waiter) {
+	pending_events.fetch_sub(1);
+	CompQueueWaiter *old_head = first_free_waiter.load();
+	while(true) {
+	  waiter->next_free = old_head;
+	  if(first_free_waiter.compare_exchange(old_head, waiter))
+	    break;
+	}
+      }
+
+      // see if we need to do any triggering
+      if(has_progress_events.load()) {
+	// take lock for this
+	AutoLock<> al(mutex);
+	local_trigger = local_progress_event;
+	local_trigger_gen = local_progress_event_gen;
+	local_progress_event = 0;
+	remote_triggers.swap(remote_progress_events);
+	has_progress_events.store(false);
+      }
     }
 
     if(local_trigger) {
@@ -3407,7 +3558,7 @@ static void *bytedup(const void *data, size_t datalen)
       log_compqueue.fatal() << "cannot enqueue poisoned event: cq=" << cq->me << " event=" << wait_on;
       abort();
     } else
-      cq->add_completed_event(wait_on, true /*was_pending*/);
+      cq->add_completed_event(wait_on, this);
   }
 
   void CompQueueImpl::CompQueueWaiter::print(std::ostream& os) const
@@ -3436,7 +3587,8 @@ static void *bytedup(const void *data, size_t datalen)
 
   CompQueueImpl::CompQueueWaiterBatch::~CompQueueWaiterBatch(void)
   {
-    delete next_batch;
+    // avoid recursive delete - destroyer should walk `next_batch` chain
+    //delete next_batch;
   }
 
 
