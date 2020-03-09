@@ -30,7 +30,7 @@ task partition_by_image_range(mat:region(ispace(int2d), double),
 where
   reads(clusters.bounds)
 do
-  var fid = __fields(clusters)[0]
+  var fid = __fields(clusters.bounds)[0]
 
   var ip = c.legion_index_partition_create_by_image_range(__runtime(),
                                                           __context(),

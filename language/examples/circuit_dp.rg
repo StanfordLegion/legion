@@ -839,15 +839,15 @@ where
         rw.{in_ptr, out_ptr, inductance, resistance, wire_cap}),
   reads writes(rw.{current, voltage})
 do
-  var phy_rpn = __physical(rpn)
-  var phy_rsn = __physical(rsn)
-  var phy_rgn = __physical(rgn)
-  var phy_rw = __physical(rw)
+  var phy_rpn = __physical(rpn.node_voltage)
+  var phy_rsn = __physical(rsn.node_voltage)
+  var phy_rgn = __physical(rgn.node_voltage)
+  var phy_rw = __physical(rw.{in_ptr, out_ptr, inductance, resistance, wire_cap})
 
-  var fid_rpn = __fields(rpn)
-  var fid_rsn = __fields(rsn)
-  var fid_rgn = __fields(rgn)
-  var fid_rw = __fields(rw)
+  var fid_rpn = __fields(rpn.node_voltage)
+  var fid_rsn = __fields(rsn.node_voltage)
+  var fid_rgn = __fields(rgn.node_voltage)
+  var fid_rw = __fields(rw.{in_ptr, out_ptr, inductance, resistance, wire_cap})
 
   var fa_current : c.legion_accessor_array_1d_t[WIRE_SEGMENTS]
   for i = 0, WIRE_SEGMENTS do
