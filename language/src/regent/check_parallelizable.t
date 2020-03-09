@@ -553,6 +553,10 @@ function analyze_access.expr_ctor(cx, node, privilege, field_path)
   return false, false, false
 end
 
+function analyze_access.expr_global(cx, node, privilege, field_path)
+  return false, false, false
+end
+
 function analyze_access.expr_not_analyzable(cx, node, privilege, field_path)
   cx:mark_inadmissible(node)
   return false, false, false
@@ -574,6 +578,7 @@ local analyze_access_expr_table = {
   [ast.typed.expr.Null]         = analyze_access.expr_constant,
   [ast.typed.expr.Isnull]       = analyze_access.expr_isnull,
   [ast.typed.expr.Ctor]         = analyze_access.expr_ctor,
+  [ast.typed.expr.Global]       = analyze_access.expr_global,
   [ast.typed.expr]              = analyze_access.expr_not_analyzable,
 }
 
