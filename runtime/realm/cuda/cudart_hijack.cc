@@ -298,6 +298,7 @@ namespace Realm {
         return cudaSuccess;
       }
 
+#if CUDA_VERSION >= 9000
       cudaError_t cudaLaunchCooperativeKernel(const void *func,
                                               dim3 grid_dim,
                                               dim3 block_dim,
@@ -310,6 +311,7 @@ namespace Realm {
               shared_memory, stream, true/*cooperative*/);
         return cudaSuccess;
       }
+#endif
 
       cudaError_t cudaMalloc(void **ptr, size_t size)
       {

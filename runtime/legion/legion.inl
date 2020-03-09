@@ -5644,7 +5644,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T> __CUDA_HD__
-    inline DeferredValue<T>& DeferredValue<T>::operator=(T value) const
+    inline DeferredValue<T>& DeferredValue<T>::operator=(T value)
     //--------------------------------------------------------------------------
     {
       accessor[Point<1,coord_t>(0)] = value;
