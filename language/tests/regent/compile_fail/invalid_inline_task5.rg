@@ -12,31 +12,32 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- fails-with:
+-- invalid_inline_task5.rg:42: ambiguous field access in __fields: every field path in an inline task must be fully specified.
+--   var a = __fields(t.{A})
+--                       ^
+
 import "regent"
 
 local c = regentlib.c
 
+struct Vec
+{
+  x : double,
+  y : double,
+}
+
 fspace Fields
 {
-  A : double,
-  B : double,
-  C : double
+  A : Vec,
+  B : Vec,
+  C : Vec
 }
 
 __demand(__inline)
 task test(t : region(ispace(int1d), Fields))
 where
-  reads(t.B), writes(t.A)
+  reads writes(t)
 do
-  var a = __fields(t.{A, B})
-  return a[0]
+  var a = __fields(t.{A})
 end
-
-task main()
-  var t = region(ispace(int1d, 2), Fields)
-  fill(t.{A, B, C}, 0)
-  var f = test(t)
-  regentlib.assert(f == __fields(t.A)[0], "test failed")
-end
-
-regentlib.start(main)
