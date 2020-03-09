@@ -1218,9 +1218,12 @@ function type_check.expr_raw_fields(cx, node)
     std.get_absolute_field_paths(region_type:fspace(), region.fields)
   local privilege_fields = terralib.newlist()
   for _, field_path in ipairs(absolute_field_paths) do
-    if std.check_any_privilege(cx, region_type, field_path) then
-      privilege_fields:insert(field_path)
+    if not std.check_any_privilege(cx, region_type, field_path) then
+      report.error(node, "invalid privilege: task has no privilege on " ..
+          string.gsub((pretty.entry_expr(region.region) .. "." ..
+              field_path:mkstring(".")), "[$]", ""))
     end
+    privilege_fields:insert(field_path)
   end
   local fields_type = std.c.legion_field_id_t[#privilege_fields]
 
@@ -1241,9 +1244,12 @@ function type_check.expr_raw_physical(cx, node)
     std.get_absolute_field_paths(region_type:fspace(), region.fields)
   local privilege_fields = terralib.newlist()
   for _, field_path in ipairs(absolute_field_paths) do
-    if std.check_any_privilege(cx, region_type, field_path) then
-      privilege_fields:insert(field_path)
+    if not std.check_any_privilege(cx, region_type, field_path) then
+      report.error(node, "invalid privilege: task has no privilege on " ..
+          string.gsub((pretty.entry_expr(region.region) .. "." ..
+              field_path:mkstring(".")), "[$]", ""))
     end
+    privilege_fields:insert(field_path)
   end
   local physical_type = std.c.legion_physical_region_t[#privilege_fields]
 
