@@ -93,8 +93,6 @@ local function unreachable(node)
   assert(false, "unreachable")
 end
 
-local permitted_for_num_annotations = terralib.newlist({"index_launch", "spmd", "trace", "vectorize"})
-
 local node_allow_annotations = {
   -- Expressions:
   [ast.typed.expr.Call] = allow({"parallel", "inline"}),
@@ -177,8 +175,8 @@ local node_allow_annotations = {
   [ast.typed.stat.If]        = deny_all,
   [ast.typed.stat.Elseif]    = deny_all,
   [ast.typed.stat.While]     = allow({"spmd", "trace"}),
-  [ast.typed.stat.ForNum]    = allow(permitted_for_num_annotations),
-  [ast.typed.stat.ForList]   = allow({"index_launch", "openmp", "spmd", "trace", "vectorize", "cuda"}),
+  [ast.typed.stat.ForNum]    = allow({"index_launch", "spmd", "trace", "vectorize"}),
+  [ast.typed.stat.ForList]   = allow({"index_launch", "openmp", "spmd", "trace", "vectorize"}),
   [ast.typed.stat.Repeat]    = allow({"spmd", "trace"}),
   [ast.typed.stat.MustEpoch] = deny_all,
   [ast.typed.stat.Block]     = allow({"spmd", "trace"}),
