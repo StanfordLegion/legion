@@ -6065,7 +6065,7 @@ namespace Legion {
         // Other things could be added to the queue by the time we're here
         PostEndArgs args(ctx->owner_task, this);
         runtime->issue_runtime_meta_task(args, 
-            LG_THROUGHPUT_WORK_PRIORITY, precondition);
+            LG_THROUGHPUT_DEFERRED_PRIORITY, precondition);
       }
     }
 
@@ -6159,7 +6159,7 @@ namespace Legion {
       {
         PostEndArgs args(next_ctx->owner_task, this);
         runtime->issue_runtime_meta_task(args, 
-            LG_THROUGHPUT_WORK_PRIORITY, precondition);
+            LG_THROUGHPUT_DEFERRED_PRIORITY, precondition);
       }
       // Now perform our operations
       if (!to_perform.empty())
