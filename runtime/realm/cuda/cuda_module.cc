@@ -2128,7 +2128,7 @@ namespace Realm {
             waiter.preempt();
           } else {
             log_gpu.warning() << "WARNING: Detected unknown CUDA stream "
-              << stream << "that Realm did not create which suggests "
+              << stream << " that Realm did not create which suggests "
               << "that there is another copy of the CUDA runtime "
               << "somewhere making its own streams... be VERY careful.";
             CHECK_CU( cuStreamSynchronize(stream) );
