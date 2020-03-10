@@ -1794,8 +1794,11 @@ namespace Realm {
             task_streams.begin(); it != task_streams.end(); it++)
         if ((*it)->get_stream() == stream)
           return *it;
-      // Should never end up here
-      assert(0);
+      // These should have never escpaed 
+      assert(host_to_device_stream->get_stream() != stream);
+      assert(device_to_host_stream->get_stream() != stream);
+      assert(device_to_device_stream->get_stream() != stream);
+      assert(peer_to_peer_stream->get_stream() != stream);
       return NULL;
     }
 
@@ -2111,17 +2114,25 @@ namespace Realm {
       {
         if(!block_on_synchronize) {
           GPUStream *s = gpu->find_stream(stream);
-          // We don't actually want to block the GPU processor
-          // when synchronizing, so we instead register a cuda
-          // event on the stream and then use it triggering to
-          // indicate that the stream is caught up
-          // Make a completion notification to be notified when
-          // the event has actually triggered
-          GPUPreemptionWaiter waiter(gpu);
-          // Register the waiter with the stream 
-          s->add_notification(&waiter); 
-          // Perform the wait, this will preempt the thread
-          waiter.preempt();
+          if(s) {
+            // We don't actually want to block the GPU processor
+            // when synchronizing, so we instead register a cuda
+            // event on the stream and then use it triggering to
+            // indicate that the stream is caught up
+            // Make a completion notification to be notified when
+            // the event has actually triggered
+            GPUPreemptionWaiter waiter(gpu);
+            // Register the waiter with the stream 
+            s->add_notification(&waiter); 
+            // Perform the wait, this will preempt the thread
+            waiter.preempt();
+          } else {
+            log_gpu.warning() << "WARNING: Detected unknown CUDA stream "
+              << stream << "that Realm did not create which suggests "
+              << "that there is another copy of the CUDA runtime "
+              << "somewhere making its own streams... be VERY careful.";
+            CHECK_CU( cuStreamSynchronize(stream) );
+          }
         } else {
           // oh well...
           CHECK_CU( cuStreamSynchronize(stream) );
