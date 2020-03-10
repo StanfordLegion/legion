@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- annotations_for_list_inline.rg:25: option __demand(__cuda) is not permitted
+-- annotations_for_list_cuda_without_task.rg:25: option __demand(__cuda) is not permitted
 --   for i in is do end
 --     ^
 
