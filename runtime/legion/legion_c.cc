@@ -3222,6 +3222,26 @@ legion_task_launcher_set_sharding_space(legion_task_launcher_t launcher_,
 }
 
 void
+legion_task_launcher_set_predicate_false_future(legion_task_launcher_t launcher_,
+                                                legion_future_t f_)
+{
+  TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  Future *f = CObjectWrapper::unwrap(f_);
+
+  launcher->predicate_false_future = *f;
+}
+
+void
+legion_task_launcher_set_predicate_false_result(legion_task_launcher_t launcher_,
+                                                legion_task_argument_t arg_)
+{
+  TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  TaskArgument arg = CObjectWrapper::unwrap(arg_);
+
+  launcher->predicate_false_result = arg;
+}
+
+void
 legion_task_launcher_set_mapper(legion_task_launcher_t launcher_,
                                 legion_mapper_id_t mapper_id)
 {

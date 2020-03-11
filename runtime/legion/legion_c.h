@@ -2700,6 +2700,20 @@ extern "C" {
                                           legion_index_space_t is);
 
   /**
+   * @see Legion::TaskLauncher::predicate_false_future
+   */
+  void
+  legion_task_launcher_set_predicate_false_future(legion_task_launcher_t launcher,
+                                                  legion_future_t f);
+
+  /**
+   * @see Legion::TaskLauncher::predicate_false_result
+   */
+  void
+  legion_task_launcher_set_predicate_false_result(legion_task_launcher_t launcher,
+                                                  legion_task_argument_t arg);
+
+  /**
    * @see Legion::TaskLauncher::map_id
    */
   void
