@@ -634,6 +634,22 @@ legion_index_space_create_domain(legion_runtime_t runtime_,
 }
 
 legion_index_space_t
+legion_index_space_create_future(legion_runtime_t runtime_,
+                                 legion_context_t ctx_,
+                                 size_t dimensions,
+                                 legion_future_t future_,
+                                 legion_type_tag_t type_tag)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  Future *future = CObjectWrapper::unwrap(future_);
+
+  IndexSpace is = 
+    runtime->create_index_space(ctx, dimensions, *future, type_tag);
+  return CObjectWrapper::wrap(is);
+}
+
+legion_index_space_t
 legion_index_space_union(legion_runtime_t runtime_,
                          legion_context_t ctx_,
                          const legion_index_space_t *spaces_,

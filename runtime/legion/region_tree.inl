@@ -869,11 +869,11 @@ namespace Legion {
 #endif
         
         if (is_index_space_tight)
-          node = context->create_node(handle, &tight_index_space, 
+          node = context->create_node(handle, &tight_index_space, false/*dom*/,
                               NULL/*parent*/, 0/*color*/, did,
                               realm_index_space_ready, expr_id, notify_remote);
         else
-          node = context->create_node(handle, &realm_index_space,
+          node = context->create_node(handle, &realm_index_space, false/*dom*/,
                               NULL/*parent*/, 0/*color*/, did,
                               realm_index_space_ready, expr_id, notify_remote);
       }
@@ -1674,15 +1674,20 @@ namespace Legion {
     template<int DIM, typename T>
     IndexSpaceNodeT<DIM,T>::IndexSpaceNodeT(RegionTreeForest *ctx, 
         IndexSpace handle, IndexPartNode *parent, LegionColor color,
-        const Realm::IndexSpace<DIM,T> *is, DistributedID did, 
+        const void *bounds, bool is_domain, DistributedID did, 
         ApEvent ready, IndexSpaceExprID expr_id)
       : IndexSpaceNode(ctx, handle, parent, color, did, ready, expr_id), 
         linearization_ready(false)
     //--------------------------------------------------------------------------
     {
-      if (is != NULL)
+      if (bounds != NULL)
       {
-        realm_index_space = *is;
+        if (is_domain)
+          realm_index_space = 
+            DomainT<DIM,T>(*static_cast<const Domain*>(bounds));
+        else
+          realm_index_space = 
+            *static_cast<const Realm::IndexSpace<DIM,T>*>(bounds);
         Runtime::trigger_event(realm_index_space_set);
       }
       else
@@ -1836,6 +1841,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    bool IndexSpaceNodeT<DIM,T>::set_domain(const Domain &domain, 
+                                            AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      const DomainT<DIM,T> realm_space(domain);
+      return set_realm_index_space(source, realm_space);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     void IndexSpaceNodeT<DIM,T>::tighten_index_space(void)
     //--------------------------------------------------------------------------
     {
@@ -1934,9 +1949,9 @@ namespace Legion {
       // Have to wait at least until we get our index space set
       if (!realm_index_space_set.has_triggered())
         realm_index_space_set.wait();
-      context->create_node(alias, &realm_index_space_set, NULL/*parent*/,
-                           0/*color*/, alias_did, index_space_ready, 
-                           expr_id/*alis*/, false/*notify remote*/);
+      context->create_node(alias, &realm_index_space_set, false/*is domain*/,
+                     NULL/*parent*/, 0/*color*/, alias_did, index_space_ready, 
+                     expr_id/*alis*/, false/*notify remote*/);
     }
 
     //--------------------------------------------------------------------------
@@ -5159,7 +5174,7 @@ namespace Legion {
       Realm::IndexSpace<DIM,T> realm_is(shard_points);
       const Domain domain((DomainT<DIM,T>(realm_is)));
       return context->runtime->find_or_create_index_slice_space(domain, 
-                                      &realm_is, handle.get_type_tag());
+                                                handle.get_type_tag());
     }
 
     //--------------------------------------------------------------------------

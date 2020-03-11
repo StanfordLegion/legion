@@ -4802,7 +4802,8 @@ namespace Legion {
         // Check to see if we need to get an index space for this domain
         if (!slice.domain_is.exists() && (slice.domain.get_volume() > 0))
           slice.domain_is = 
-            runtime->find_or_create_index_slice_space(slice.domain);
+            runtime->find_or_create_index_slice_space(slice.domain,
+                                    internal_space.get_type_tag());
         if (slice.domain_is.get_type_tag() != internal_space.get_type_tag())
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of 'slice_task' "

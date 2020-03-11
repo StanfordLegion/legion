@@ -2068,7 +2068,9 @@ namespace Legion {
       // Methods for creating index spaces which mappers need to do
       // in order to be able to properly slice index space operations
       //------------------------------------------------------------------------
-      IndexSpace create_index_space(MapperContext ctx, Domain bounds) const;
+      IndexSpace create_index_space(MapperContext ctx, 
+                                    const Domain &bounds,
+                                    TypeTag type_tag = 0) const;
       // Template version
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space(MapperContext ctx,
@@ -2108,9 +2110,6 @@ namespace Legion {
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> subtract_index_spaces(MapperContext ctx,
           IndexSpaceT<DIM,COORD_T> left, IndexSpaceT<DIM,COORD_T> right) const;
-    protected:
-      IndexSpace create_index_space_internal(MapperContext ctx, const Domain &d,
-                  const void *realm_is, TypeTag type_tag) const;
     public:
       //------------------------------------------------------------------------
       // Convenience methods for introspecting index spaces

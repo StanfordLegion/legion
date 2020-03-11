@@ -98,9 +98,10 @@ namespace Legion {
                                      size_t num_elements, size_t element_size);
     public:
       // Interface to operations performed by a context
-      virtual IndexSpace create_index_space(RegionTreeForest *forest,
-                                            const void *realm_is, 
+      virtual IndexSpace create_index_space(const Domain &bounds,
                                             TypeTag type_tag);
+      virtual IndexSpace create_index_space(const Future &future,
+                                            TypeTag type_tag) = 0;
       virtual IndexSpace union_index_spaces(RegionTreeForest *forest,
                            const std::vector<IndexSpace> &spaces);
       virtual IndexSpace intersect_index_spaces(RegionTreeForest *forest,
@@ -397,7 +398,7 @@ namespace Legion {
                                         bool mapping, bool execution) = 0;
       virtual void update_current_fence(FenceOp *op, 
                                         bool mapping, bool execution) = 0;
-      virtual void update_current_deppart(DependentPartitionOp *op) = 0;
+      virtual void update_current_implicit(Operation *op) = 0;
     public:
       virtual void begin_trace(TraceID tid, bool logical_only) = 0;
       virtual void end_trace(TraceID tid) = 0;
@@ -846,6 +847,7 @@ namespace Legion {
                                  const std::vector<FieldID> &to_remove);
     public:
       // Interface to operations performed by a context
+      virtual IndexSpace create_index_space(const Future &future, TypeTag tag);
       virtual void destroy_index_space(IndexSpace handle, const bool unordered);
       virtual void destroy_index_partition(IndexPartition handle,
                                            const bool unordered);
@@ -1118,7 +1120,7 @@ namespace Legion {
                                              bool mapping, bool execution);
       virtual void update_current_fence(FenceOp *op,
                                         bool mapping, bool execution);
-      virtual void update_current_deppart(DependentPartitionOp *op);
+      virtual void update_current_implicit(Operation *op);
     public:
       virtual void begin_trace(TraceID tid, bool logical_only);
       virtual void end_trace(TraceID tid);
@@ -1321,8 +1323,10 @@ namespace Legion {
       // any operations which might need downstream information about 
       // partitions or subspaces. Note that this means that all dependent
       // partitioning operations are guaranteed to map in order currently
-      DependentPartitionOp *last_deppart;
-      GenerationID last_deppart_gen;
+      // We've not extended this to include creation operations as well
+      // for similar reasons, so now this is a general operation class
+      Operation *last_implicit;
+      GenerationID last_implicit_gen;
     protected:
       // For managing changing task priorities
       ApEvent realm_done_event;
@@ -1509,8 +1513,9 @@ namespace Legion {
                         IndexSpaceExpression *expr, const FieldMask &mask,
                         AddressSpaceID source);
       // Interface to operations performed by a context
-      virtual IndexSpace create_index_space(RegionTreeForest *forest,
-                                            const void *realm_is, 
+      virtual IndexSpace create_index_space(const Domain &domain, 
+                                            TypeTag type_tag);
+      virtual IndexSpace create_index_space(const Future &future, 
                                             TypeTag type_tag);
       virtual IndexSpace union_index_spaces(RegionTreeForest *forest,
                            const std::vector<IndexSpace> &spaces);
@@ -2078,6 +2083,7 @@ namespace Legion {
       virtual bool is_leaf_context(void) const;
     public:
       // Interface to operations performed by a context
+      virtual IndexSpace create_index_space(const Future &future, TypeTag tag);
       virtual void destroy_index_space(IndexSpace handle, const bool unordered);
       virtual void destroy_index_partition(IndexPartition handle,
                                            const bool unordered);
@@ -2343,7 +2349,7 @@ namespace Legion {
                                              bool mapping, bool execution);
       virtual void update_current_fence(FenceOp *op,
                                         bool mapping, bool execution);
-      virtual void update_current_deppart(DependentPartitionOp *op);
+      virtual void update_current_implicit(Operation *op);
     public:
       virtual void begin_trace(TraceID tid, bool logical_only);
       virtual void end_trace(TraceID tid);
@@ -2433,9 +2439,8 @@ namespace Legion {
       virtual VariantImpl* select_inline_variant(TaskOp *child) const;
     public:
       // Interface to operations performed by a context
-      virtual IndexSpace create_index_space(RegionTreeForest *forest,
-                                            const void *realm_is, 
-                                            TypeTag type_tag);
+      virtual IndexSpace create_index_space(const Domain &domain, TypeTag tag);
+      virtual IndexSpace create_index_space(const Future &future, TypeTag tag);
       virtual IndexSpace union_index_spaces(RegionTreeForest *forest,
                            const std::vector<IndexSpace> &spaces);
       virtual IndexSpace intersect_index_spaces(RegionTreeForest *forest,
@@ -2721,7 +2726,7 @@ namespace Legion {
                                              bool mapping, bool execution);
       virtual void update_current_fence(FenceOp *op,
                                         bool mapping, bool execution);
-      virtual void update_current_deppart(DependentPartitionOp *op);
+      virtual void update_current_implicit(Operation *op);
     public:
       virtual void begin_trace(TraceID tid, bool logical_only);
       virtual void end_trace(TraceID tid);

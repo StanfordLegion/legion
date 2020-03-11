@@ -3501,15 +3501,39 @@ namespace Legion {
       ///@{
       /**
        * Create a new top-level index space based on the given domain bounds
+       * If the bounds contains a Realm index space then Legion will take
+       * ownership of any sparsity maps.
        * @param ctx the enclosing task context
        * @param bounds the bounds for the new index space
+       * @param type_tag optional type tag to use for the index space
        * @return the handle for the new index space
        */
-      IndexSpace create_index_space(Context ctx, Domain bounds);
+      IndexSpace create_index_space(Context ctx, const Domain &bounds,
+                                    TypeTag type_tag = 0);
       // Template version
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space(Context ctx,
-                                                  Rect<DIM,COORD_T> bounds);
+                                      const Rect<DIM,COORD_T> &bounds);
+      template<int DIM, typename COORD_T>
+      IndexSpaceT<DIM,COORD_T> create_index_space(Context ctx,
+                                    const DomainT<DIM,COORD_T> &bounds);
+      ///@}
+      ///@{
+      /**
+       * Create a new top-level index space from a future which contains
+       * a Domain object. If the Domain conaints a Realm index space then
+       * Legion will take ownership of any sparsity maps.
+       * @param ctx the enclosing task context
+       * @param dimensions number of dimensions for the created space
+       * @param future the future value containing the bounds
+       * @param type_tag optional type tag to use for the index space
+       *                 defaults to 'coord_t'
+       * @return the handle for the new index space
+       */
+      IndexSpace create_index_space(Context ctx, size_t dimensions, 
+                                    const Future &f, TypeTag type_tag = 0);
+      template<int DIM, typename COORD_T>
+      IndexSpaceT<DIM,COORD_T> create_index_space(Context ctx, const Future &f);
       ///@}
       ///@{
       /**
@@ -7941,9 +7965,6 @@ namespace Legion {
        */
       static Context get_context(void);
     private:
-      // Helper methods for templates
-      IndexSpace create_index_space_internal(Context ctx, const void *realm_is,
-                                             TypeTag type_tag);
       IndexPartition create_restricted_partition(Context ctx,
                                       IndexSpace parent,
                                       IndexSpace color_space,

@@ -1537,6 +1537,7 @@ namespace Legion {
     class PointCopyOp;
     class FenceOp;
     class FrameOp;
+    class CreationOp;
     class DeletionOp;
     class InternalOp;
     class CloseOp;
@@ -1830,6 +1831,7 @@ namespace Legion {
     friend class Internal::FenceOp;                         \
     friend class Internal::DynamicCollectiveOp;             \
     friend class Internal::FuturePredOp;                    \
+    friend class Internal::CreationOp;                      \
     friend class Internal::DeletionOp;                      \
     friend class Internal::CloseOp;                         \
     friend class Internal::MergeCloseOp;                    \

@@ -875,6 +875,18 @@ extern "C" {
                                    legion_domain_t domain);
 
   /**
+   * @return Caller takes ownership of return value
+   *
+   * @see Legion::Runtime::create_index_space(Context, size_t, Future, TypeTag)
+   */
+  legion_index_space_t
+  legion_index_space_create_future(legion_runtime_t runtime,
+                                   legion_context_t ctx,
+                                   size_t dimensions,
+                                   legion_future_t future,
+                                   legion_type_tag_t type_tag/*=0*/);
+
+  /**
    * @return Caller takes ownership of return value.
    *
    * @see Legion::Runtime::union_index_spaces

@@ -435,7 +435,7 @@ namespace Legion {
                       std::map<MemoryManager*,AcquireStatus> &acquire_requests);
     public:
       IndexSpace create_index_space(MappingCallInfo *info, const Domain &domain,
-                                    const void *realm_is, TypeTag type_tag);
+                                    TypeTag type_tag);
       IndexSpace union_index_spaces(MappingCallInfo *info, 
                                     const std::vector<IndexSpace> &sources);
       IndexSpace intersect_index_spaces(MappingCallInfo *info,

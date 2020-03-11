@@ -783,24 +783,27 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace MapperRuntime::create_index_space(MapperContext ctx, 
-                                                 Domain bounds) const
+                                   const Domain &bounds, TypeTag type_tag) const
     //--------------------------------------------------------------------------
     {
-      switch (bounds.get_dim())
+      if (type_tag == 0)
       {
+        switch (bounds.get_dim())
+        {
 #define DIMFUNC(DIM) \
-        case DIM: \
-          { \
-            DomainT<DIM,coord_t> realm_is = bounds; \
-            return ctx->manager->create_index_space(ctx, bounds, &realm_is, \
-              Legion::Internal::NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
-          }
-        LEGION_FOREACH_N(DIMFUNC)
+          case DIM: \
+            { \
+              type_tag = \
+                Legion::Internal::NT_TemplateHelper::encode_tag<DIM,coord_t>(); \
+              break; \
+            }
+          LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
-        default:
-          assert(false);
+          default:
+            assert(false);
+        }
       }
-      return IndexSpace::NO_SPACE;
+      return ctx->manager->create_index_space(ctx, bounds, type_tag);
     }
 
     //--------------------------------------------------------------------------
@@ -819,7 +822,7 @@ namespace Legion {
           DomainT<DIM,coord_t> realm_is( \
               (Realm::IndexSpace<DIM,coord_t>(realm_points))); \
           const Domain domain(realm_is); \
-          return ctx->manager->create_index_space(ctx, domain, &realm_is, \
+          return ctx->manager->create_index_space(ctx, domain, \
                     Internal::NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
         }
         LEGION_FOREACH_N(DIMFUNC)
@@ -846,7 +849,7 @@ namespace Legion {
             DomainT<DIM,coord_t> realm_is( \
                 (Realm::IndexSpace<DIM,coord_t>(realm_rects))); \
             const Domain domain(realm_is); \
-            return ctx->manager->create_index_space(ctx, domain, &realm_is, \
+            return ctx->manager->create_index_space(ctx, domain, \
                       Internal::NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
           }
         LEGION_FOREACH_N(DIMFUNC)
@@ -855,14 +858,6 @@ namespace Legion {
           assert(false);
       }
       return IndexSpace::NO_SPACE;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace MapperRuntime::create_index_space_internal(MapperContext ctx,
-                  const Domain &d, const void *realm_is, TypeTag type_tag) const
-    //--------------------------------------------------------------------------
-    {
-      return ctx->manager->create_index_space(ctx, d, realm_is, type_tag);
     }
 
     //--------------------------------------------------------------------------

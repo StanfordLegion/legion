@@ -3157,35 +3157,59 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace Runtime::create_index_space(Context ctx,
-                                                    size_t max_num_elmts)
+    IndexSpace Runtime::create_index_space(Context ctx, size_t max_num_elmts)
     //--------------------------------------------------------------------------
     {
-      Rect<1,coord_t> bounds((Point<1,coord_t>(0)),
-                             (Point<1,coord_t>(max_num_elmts-1)));
-      DomainT<1,coord_t> realm_index_space(bounds);
-      return create_index_space_internal(ctx, &realm_index_space, TYPE_TAG_1D);
+      const Rect<1,coord_t> bounds((Point<1,coord_t>(0)),
+                                   (Point<1,coord_t>(max_num_elmts-1)));
+      const Domain domain(bounds);
+      return create_index_space(ctx, domain, TYPE_TAG_1D);
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace Runtime::create_index_space(Context ctx, Domain domain)
+    IndexSpace Runtime::create_index_space(Context ctx, const Domain &domain,
+                                           TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
       switch (domain.get_dim())
       {
 #define DIMFUNC(DIM) \
-    case DIM:                       \
-      {                             \
-        Rect<DIM,coord_t> bounds = domain; \
-        DomainT<DIM,coord_t> realm_is(bounds); \
-        return create_index_space_internal(ctx, &realm_is, TYPE_TAG_##DIM##D); \
-      }
+        case DIM:                       \
+          {                             \
+            if (type_tag == 0) \
+              type_tag = TYPE_TAG_##DIM##D; \
+            return ctx->create_index_space(domain, type_tag); \
+          }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
         default:
           assert(false);
       }
       return IndexSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace Runtime::create_index_space(Context ctx, size_t dimensions,
+                                         const Future &future, TypeTag type_tag)
+    //--------------------------------------------------------------------------
+    {
+      if (type_tag == 0)
+      {
+        switch (dimensions)
+        {
+#define DIMFUNC(DIM) \
+        case DIM:                       \
+          {                             \
+            type_tag = TYPE_TAG_##DIM##D; \
+            break; \
+          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+        default:
+          assert(false);
+        }
+      }
+      return ctx->create_index_space(future, type_tag); 
     }
 
     //--------------------------------------------------------------------------
@@ -3205,15 +3229,17 @@ namespace Legion {
       switch (points[0].get_dim())
       {
 #define DIMFUNC(DIM) \
-    case DIM: \
-      { \
-        std::vector<Realm::Point<DIM,coord_t> > realm_points(points.size()); \
-        for (unsigned idx = 0; idx < points.size(); idx++) \
-          realm_points[idx] = Point<DIM,coord_t>(points[idx]); \
-        DomainT<DIM,coord_t> realm_is( \
-            (Realm::IndexSpace<DIM,coord_t>(realm_points))); \
-        return runtime->create_index_space(ctx, &realm_is, TYPE_TAG_##DIM##D); \
-      }
+        case DIM: \
+          { \
+            std::vector<Realm::Point<DIM,coord_t> > \
+              realm_points(points.size()); \
+            for (unsigned idx = 0; idx < points.size(); idx++) \
+              realm_points[idx] = Point<DIM,coord_t>(points[idx]); \
+            const DomainT<DIM,coord_t> realm_is( \
+                (Realm::IndexSpace<DIM,coord_t>(realm_points))); \
+            const Domain bounds(realm_is); \
+            return ctx->create_index_space(bounds, TYPE_TAG_##DIM##D); \
+          }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
         default:
@@ -3230,29 +3256,22 @@ namespace Legion {
       switch (rects[0].get_dim())
       {
 #define DIMFUNC(DIM) \
-    case DIM: \
-      { \
-        std::vector<Realm::Rect<DIM,coord_t> > realm_rects(rects.size()); \
-        for (unsigned idx = 0; idx < rects.size(); idx++) \
-          realm_rects[idx] = Rect<DIM,coord_t>(rects[idx]); \
-        DomainT<DIM,coord_t> realm_is( \
-            (Realm::IndexSpace<DIM,coord_t>(realm_rects))); \
-        return runtime->create_index_space(ctx, &realm_is, TYPE_TAG_##DIM##D); \
-      }
+        case DIM: \
+          { \
+            std::vector<Realm::Rect<DIM,coord_t> > realm_rects(rects.size()); \
+            for (unsigned idx = 0; idx < rects.size(); idx++) \
+              realm_rects[idx] = Rect<DIM,coord_t>(rects[idx]); \
+            const DomainT<DIM,coord_t> realm_is( \
+                (Realm::IndexSpace<DIM,coord_t>(realm_rects))); \
+            const Domain bounds(realm_is); \
+            return ctx->create_index_space(bounds, TYPE_TAG_##DIM##D);\
+          }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
         default:
           assert(false);
       }
       return IndexSpace::NO_SPACE;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace Runtime::create_index_space_internal(Context ctx, 
-                                         const void *realm_is, TypeTag type_tag)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->create_index_space(ctx, realm_is, type_tag);
     }
 
     //--------------------------------------------------------------------------
