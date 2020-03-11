@@ -1677,8 +1677,10 @@ namespace Legion {
       if (bounds != NULL)
       {
         if (is_domain)
-          realm_index_space = 
-            DomainT<DIM,T>(*static_cast<const Domain*>(bounds));
+        {
+          const DomainT<DIM,T> temp_space = *static_cast<const Domain*>(bounds);
+          realm_index_space = temp_space;
+        }
         else
           realm_index_space = 
             *static_cast<const Realm::IndexSpace<DIM,T>*>(bounds);
@@ -1839,7 +1841,7 @@ namespace Legion {
                                             AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      const DomainT<DIM,T> realm_space(domain);
+      const DomainT<DIM,T> realm_space = domain;
       return set_realm_index_space(source, realm_space);
     }
 
