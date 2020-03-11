@@ -1425,6 +1425,10 @@ typedef enum legion_redop_kind_t {
 #define MULTIPLY3(x) (x) + MULTIPLY2(x)
 #define MULTIPLY4(x) (x) + MULTIPLY3(x)
 #define MULTIPLY5(x) (x) + MULTIPLY4(x)
+#define MULTIPLY6(x) (x) + MULTIPLY5(x)
+#define MULTIPLY7(x) (x) + MULTIPLY6(x)
+#define MULTIPLY8(x) (x) + MULTIPLY7(x)
+#define MULTIPLY9(x) (x) + MULTIPLY8(x)
 
 #define MULTIPLY_(x,y) MULTIPLY##x(y)
 #define MULTIPLY(x,y) MULTIPLY_(x,y) 
@@ -1622,6 +1626,10 @@ typedef enum legion_builtin_redop_t {
 #undef MULTIPLY3
 #undef MULTIPLY4
 #undef MULTIPLY5
+#undef MULTIPLY6
+#undef MULTIPLY7
+#undef MULTIPLY8
+#undef MULTIPLY9
 #undef MULTIPLY_
 #undef MULTIPLY
 #endif
