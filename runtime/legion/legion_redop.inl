@@ -142,14 +142,14 @@ namespace Legion {
         newval.as_int = *target;                                           \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
-          newval.as_char.F += rhs;                                         \
+          newval.as_char.F += rhs2;                                        \
           newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
         } while (oldval.as_int != newval.as_int);                          \
         break;                                                             \
       }                                                                    \
 
     // GPU atomics need 4 byte alignment
-    char *ptr = (char*)&lhs;
+    char *ptr = (char*)&rhs1;
     switch ((((unsigned long long)ptr) % 4) == 0) {
       CASE(x, 0)
       CASE(y, 1)
@@ -374,14 +374,14 @@ namespace Legion {
         newval.as_int = *target;                                           \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
-          newval.as_char.F += rhs;                                         \
+          newval.as_char.F += rhs2;                                        \
           newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
         } while (oldval.as_int != newval.as_int);                          \
         break;                                                             \
       }                                                                    \
 
     // GPU atomics need 4 byte alignment
-    char *ptr = (char*)&lhs;
+    char *ptr = (char*)&rhs1;
     switch ((((unsigned long long)ptr) % 4) == 0) {
       CASE(x, 0)
       CASE(y, 1)
@@ -992,14 +992,14 @@ namespace Legion {
         newval.as_int = *target;                                           \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
-          newval.as_char.F += rhs;                                         \
+          newval.as_char.F += rhs2;                                        \
           newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
         } while (oldval.as_int != newval.as_int);                          \
         break;                                                             \
       }                                                                    \
 
     // GPU atomics need 4 byte alignment
-    char *ptr = (char*)&lhs;
+    char *ptr = (char*)&rhs1;
     switch ((((unsigned long long)ptr) % 4) == 0) {
       CASE(x, 0)
       CASE(y, 1)
@@ -1224,14 +1224,14 @@ namespace Legion {
         newval.as_int = *target;                                           \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
-          newval.as_char.F += rhs;                                         \
+          newval.as_char.F += rhs2;                                        \
           newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
         } while (oldval.as_int != newval.as_int);                          \
         break;                                                             \
       }                                                                    \
 
     // GPU atomics need 4 byte alignment
-    char *ptr = (char*)&lhs;
+    char *ptr = (char*)&rhs1;
     switch ((((unsigned long long)ptr) % 4) == 0) {
       CASE(x, 0)
       CASE(y, 1)
@@ -1838,14 +1838,14 @@ namespace Legion {
         newval.as_int = *target;                                           \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
-          newval.as_char.F *= rhs;                                         \
+          newval.as_char.F *= rhs2;                                        \
           newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
         } while (oldval.as_int != newval.as_int);                          \
         break;                                                             \
       }                                                                    \
 
     // GPU atomics need 4 byte alignment
-    char *ptr = (char*)&lhs;
+    char *ptr = (char*)&rhs1;
     switch ((((unsigned long long)ptr) % 4) == 0) {
       CASE(x, 0)
       CASE(y, 1)
@@ -2122,14 +2122,14 @@ namespace Legion {
         newval.as_int = *target;                                           \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
-          newval.as_char.F *= rhs;                                         \
+          newval.as_char.F *= rhs2;                                        \
           newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
         } while (oldval.as_int != newval.as_int);                          \
         break;                                                             \
       }                                                                    \
 
     // GPU atomics need 4 byte alignment
-    char *ptr = (char*)&lhs;
+    char *ptr = (char*)&rhs1;
     switch ((((unsigned long long)ptr) % 4) == 0) {
       CASE(x, 0)
       CASE(y, 1)
@@ -2722,14 +2722,14 @@ namespace Legion {
         newval.as_int = *target;                                           \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
-          newval.as_char.F *= rhs;                                         \
+          newval.as_char.F *= rhs2;                                        \
           newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
         } while (oldval.as_int != newval.as_int);                          \
         break;                                                             \
       }                                                                    \
 
     // GPU atomics need 4 byte alignment
-    char *ptr = (char*)&lhs;
+    char *ptr = (char*)&rhs1;
     switch ((((unsigned long long)ptr) % 4) == 0) {
       CASE(x, 0)
       CASE(y, 1)
@@ -3006,14 +3006,14 @@ namespace Legion {
         newval.as_int = *target;                                           \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
-          newval.as_char.F *= rhs;                                         \
+          newval.as_char.F *= rhs2;                                        \
           newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
         } while (oldval.as_int != newval.as_int);                          \
         break;                                                             \
       }                                                                    \
 
     // GPU atomics need 4 byte alignment
-    char *ptr = (char*)&lhs;
+    char *ptr = (char*)&rhs1;
     switch ((((unsigned long long)ptr) % 4) == 0) {
       CASE(x, 0)
       CASE(y, 1)
@@ -3673,7 +3673,7 @@ namespace Legion {
         newval.as_int = *target;                                           \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
-          newval.as_char.F = __MAX__(oldval.as_char.F, rhs);               \
+          newval.as_char.F = __MAX__(oldval.as_char.F, rhs2);              \
           if (newval.as_char.F == oldval.as_char.F)                        \
             break;                                                         \
           newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
@@ -3683,7 +3683,7 @@ namespace Legion {
 
 
     // GPU atomics need 4 byte alignment
-    char *ptr = (char*)&lhs;
+    char *ptr = (char*)&rhs1;
     switch ((((unsigned long long)ptr) % 4) == 0) {
       CASE(x, 0)
       CASE(y, 1)
@@ -3998,7 +3998,7 @@ namespace Legion {
         newval.as_int = *target;                                           \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
-          newval.as_char.F = __MAX__(oldval.as_char.F, rhs);               \
+          newval.as_char.F = __MAX__(oldval.as_char.F, rhs2);              \
           if (newval.as_char.F == oldval.as_char.F)                        \
             break;                                                         \
           newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
@@ -4008,7 +4008,7 @@ namespace Legion {
 
 
     // GPU atomics need 4 byte alignment
-    char *ptr = (char*)&lhs;
+    char *ptr = (char*)&rhs1;
     switch ((((unsigned long long)ptr) % 4) == 0) {
       CASE(x, 0)
       CASE(y, 1)
@@ -4618,7 +4618,7 @@ namespace Legion {
         newval.as_int = *target;                                           \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
-          newval.as_char.F = __MIN__(oldval.as_char.F, rhs);               \
+          newval.as_char.F = __MIN__(oldval.as_char.F, rhs2);              \
           if (newval.as_char.F == oldval.as_char.F)                        \
             break;                                                         \
           newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
@@ -4628,7 +4628,7 @@ namespace Legion {
 
 
     // GPU atomics need 4 byte alignment
-    char *ptr = (char*)&lhs;
+    char *ptr = (char*)&rhs1;
     switch ((((unsigned long long)ptr) % 4) == 0) {
       CASE(x, 0)
       CASE(y, 1)
@@ -4941,7 +4941,7 @@ namespace Legion {
         newval.as_int = *target;                                           \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
-          newval.as_char.F = __MIN__(oldval.as_char.F, rhs);               \
+          newval.as_char.F = __MIN__(oldval.as_char.F, rhs2);              \
           if (newval.as_char.F == oldval.as_char.F)                        \
             break;                                                         \
           newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
@@ -4951,7 +4951,7 @@ namespace Legion {
 
 
     // GPU atomics need 4 byte alignment
-    char *ptr = (char*)&lhs;
+    char *ptr = (char*)&rhs1;
     switch ((((unsigned long long)ptr) % 4) == 0) {
       CASE(x, 0)
       CASE(y, 1)
@@ -5486,14 +5486,14 @@ namespace Legion {
         newval.as_int = *target;                                           \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
-          newval.as_char.F |= rhs;                                         \
+          newval.as_char.F |= rhs2;                                        \
           newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
         } while (oldval.as_int != newval.as_int);                          \
         break;                                                             \
       }                                                                    \
 
     // GPU atomics need 4 byte alignment
-    char *ptr = (char*)&lhs;
+    char *ptr = (char*)&rhs1;
     switch ((((unsigned long long)ptr) % 4) == 0) {
       CASE(x, 0)
       CASE(y, 1)
@@ -5770,14 +5770,14 @@ namespace Legion {
         newval.as_int = *target;                                           \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
-          newval.as_char.F |= rhs;                                         \
+          newval.as_char.F |= rhs2;                                        \
           newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
         } while (oldval.as_int != newval.as_int);                          \
         break;                                                             \
       }                                                                    \
 
     // GPU atomics need 4 byte alignment
-    char *ptr = (char*)&lhs;
+    char *ptr = (char*)&rhs1;
     switch ((((unsigned long long)ptr) % 4) == 0) {
       CASE(x, 0)
       CASE(y, 1)
@@ -6054,14 +6054,14 @@ namespace Legion {
         newval.as_int = *target;                                           \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
-          newval.as_char.F &= rhs;                                         \
+          newval.as_char.F &= rhs2;                                        \
           newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
         } while (oldval.as_int != newval.as_int);                          \
         break;                                                             \
       }                                                                    \
 
     // GPU atomics need 4 byte alignment
-    char *ptr = (char*)&lhs;
+    char *ptr = (char*)&rhs1;
     switch ((((unsigned long long)ptr) % 4) == 0) {
       CASE(x, 0)
       CASE(y, 1)
@@ -6338,14 +6338,14 @@ namespace Legion {
         newval.as_int = *target;                                           \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
-          newval.as_char.F &= rhs;                                         \
+          newval.as_char.F &= rhs2;                                        \
           newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
         } while (oldval.as_int != newval.as_int);                          \
         break;                                                             \
       }                                                                    \
 
     // GPU atomics need 4 byte alignment
-    char *ptr = (char*)&lhs;
+    char *ptr = (char*)&rhs1;
     switch ((((unsigned long long)ptr) % 4) == 0) {
       CASE(x, 0)
       CASE(y, 1)
@@ -6686,14 +6686,14 @@ namespace Legion {
         newval.as_int = *target;                                           \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
-          newval.as_char.F ^= rhs;                                         \
+          newval.as_char.F ^= rhs2;                                        \
           newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
         } while (oldval.as_int != newval.as_int);                          \
         break;                                                             \
       }                                                                    \
 
     // GPU atomics need 4 byte alignment
-    char *ptr = (char*)&lhs;
+    char *ptr = (char*)&rhs1;
     switch ((((unsigned long long)ptr) % 4) == 0) {
       CASE(x, 0)
       CASE(y, 1)
@@ -6970,14 +6970,14 @@ namespace Legion {
         newval.as_int = *target;                                           \
         do {                                                               \
           oldval.as_int = newval.as_int;                                   \
-          newval.as_char.F ^= rhs;                                         \
+          newval.as_char.F ^= rhs2;                                        \
           newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
         } while (oldval.as_int != newval.as_int);                          \
         break;                                                             \
       }                                                                    \
 
     // GPU atomics need 4 byte alignment
-    char *ptr = (char*)&lhs;
+    char *ptr = (char*)&rhs1;
     switch ((((unsigned long long)ptr) % 4) == 0) {
       CASE(x, 0)
       CASE(y, 1)
