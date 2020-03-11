@@ -866,11 +866,11 @@ namespace Legion {
 #endif
         
         if (is_index_space_tight)
-          node = context->create_node(handle, &tight_index_space,
+          node = context->create_node(handle, &tight_index_space, false/*dom*/,
                                       NULL/*parent*/, 0/*color*/, did,
                                       realm_index_space_ready, expr_id);
         else
-          node = context->create_node(handle, &realm_index_space,
+          node = context->create_node(handle, &realm_index_space, false/*dom*/,
                                       NULL/*parent*/, 0/*color*/, did,
                                       realm_index_space_ready, expr_id);
       }
@@ -1668,15 +1668,20 @@ namespace Legion {
     template<int DIM, typename T>
     IndexSpaceNodeT<DIM,T>::IndexSpaceNodeT(RegionTreeForest *ctx, 
         IndexSpace handle, IndexPartNode *parent, LegionColor color,
-        const Realm::IndexSpace<DIM,T> *is, DistributedID did, 
+        const void *bounds, bool is_domain, DistributedID did, 
         ApEvent ready, IndexSpaceExprID expr_id)
       : IndexSpaceNode(ctx, handle, parent, color, did, ready, expr_id), 
         linearization_ready(false)
     //--------------------------------------------------------------------------
     {
-      if (is != NULL)
+      if (bounds != NULL)
       {
-        realm_index_space = *is;
+        if (is_domain)
+          realm_index_space = 
+            DomainT<DIM,T>(*static_cast<const Domain*>(bounds));
+        else
+          realm_index_space = 
+            *static_cast<const Realm::IndexSpace<DIM,T>*>(bounds);
         Runtime::trigger_event(realm_index_space_set);
       }
       else
@@ -1826,6 +1831,16 @@ namespace Legion {
       Realm::IndexSpace<DIM,T> result;
       ready = get_realm_index_space(result, need_tight);
       return DomainT<DIM,T>(result);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    bool IndexSpaceNodeT<DIM,T>::set_domain(const Domain &domain, 
+                                            AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      const DomainT<DIM,T> realm_space(domain);
+      return set_realm_index_space(source, realm_space);
     }
 
     //--------------------------------------------------------------------------

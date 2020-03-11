@@ -8423,12 +8423,32 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexSpaceT<DIM,T> Runtime::create_index_space(Context ctx, 
-                                                   Rect<DIM,T> bounds)
+                                                   const Rect<DIM,T> &bounds)
     //--------------------------------------------------------------------------
     {
-      // Make a Realm index space
-      DomainT<DIM,T> realm_is(bounds);
-      return IndexSpaceT<DIM,T>(create_index_space_internal(ctx, &realm_is,
+      const Domain domain(bounds);
+      return IndexSpaceT<DIM,T>(create_index_space(ctx, domain,
+                Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceT<DIM,T> Runtime::create_index_space(Context ctx, 
+                                                   const DomainT<DIM,T> &bounds)
+    //--------------------------------------------------------------------------
+    {
+      const Domain domain(bounds);
+      return IndexSpaceT<DIM,T>(create_index_space(ctx, domain,
+                Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceT<DIM,T> Runtime::create_index_space(Context ctx, 
+                                                   const Future &future)
+    //--------------------------------------------------------------------------
+    {
+      return IndexSpaceT<DIM,T>(create_index_space(ctx, DIM, future,
                 Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
     }
 
@@ -8442,8 +8462,9 @@ namespace Legion {
       std::vector<Realm::Point<DIM,T> > realm_points(points.size());
       for (unsigned idx = 0; idx < points.size(); idx++)
         realm_points[idx] = points[idx];
-      DomainT<DIM,T> realm_is((Realm::IndexSpace<DIM,T>(realm_points)));
-      return IndexSpaceT<DIM,T>(create_index_space_internal(ctx, &realm_is,
+      const DomainT<DIM,T> realm_is((Realm::IndexSpace<DIM,T>(realm_points)));
+      const Domain domain(realm_is);
+      return IndexSpaceT<DIM,T>(create_index_space(ctx, domain,
                 Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
     }
 
@@ -8457,8 +8478,9 @@ namespace Legion {
       std::vector<Realm::Rect<DIM,T> > realm_rects(rects.size());
       for (unsigned idx = 0; idx < rects.size(); idx++)
         realm_rects[idx] = rects[idx];
-      DomainT<DIM,T> realm_is((Realm::IndexSpace<DIM,T>(realm_rects)));
-      return IndexSpaceT<DIM,T>(create_index_space_internal(ctx, &realm_is,
+      const DomainT<DIM,T> realm_is((Realm::IndexSpace<DIM,T>(realm_rects)));
+      const Domain domain(realm_is);
+      return IndexSpaceT<DIM,T>(create_index_space(ctx, domain,
                 Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
     }
 

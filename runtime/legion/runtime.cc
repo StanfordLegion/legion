@@ -10320,6 +10320,13 @@ namespace Legion {
         delete (*it);
       }
       available_frame_ops.clear();
+      for (std::deque<CreationOp*>::const_iterator it = 
+            available_creation_ops.begin(); it != 
+            available_creation_ops.end(); it++)
+      {
+        delete (*it);
+      }
+      available_creation_ops.clear();
       for (std::deque<DeletionOp*>::const_iterator it = 
             available_deletion_ops.begin(); it != 
             available_deletion_ops.end(); it++)
@@ -11079,16 +11086,6 @@ namespace Legion {
 #else
       assert(false); // update this
 #endif
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace Runtime::create_index_space(Context ctx, const void *realm_is,
-                                           TypeTag type_tag)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context create index space!");
-      return ctx->create_index_space(forest, realm_is, type_tag);
     }
 
     //--------------------------------------------------------------------------
@@ -18684,33 +18681,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace Runtime::find_or_create_index_slice_space(const Domain &dom)
-    //--------------------------------------------------------------------------
-    {
-      switch (dom.get_dim())
-      {
-#define DIMFUNC(DIM) \
-        case DIM: \
-          { \
-            DomainT<DIM,coord_t> is = dom; \
-            return find_or_create_index_slice_space(dom, &is, \
-                NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
-          }
-        LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
-        default:
-          assert(false);
-      }
-      return IndexSpace::NO_SPACE;
-    } 
-
-    //--------------------------------------------------------------------------
-    IndexSpace Runtime::find_or_create_index_slice_space(const Domain &dom,
-                                                         const void *realm_is,
+    IndexSpace Runtime::find_or_create_index_slice_space(const Domain &domain,
                                                          TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
-      const std::pair<Domain,TypeTag> key(dom, type_tag);
+#ifdef DEBUG_LEGION
+      assert(type_tag != 0);
+#endif
+      const std::pair<Domain,TypeTag> key(domain, type_tag);
       {
         AutoLock is_lock(is_slice_lock,1,false/*exclusive*/);
         std::map<std::pair<Domain,TypeTag>,IndexSpace>::const_iterator finder =
@@ -18718,10 +18696,10 @@ namespace Legion {
         if (finder != index_slice_spaces.end())
           return finder->second;
       }
-      IndexSpace result(get_unique_index_space_id(),
-                        get_unique_index_tree_id(), type_tag);
-      DistributedID did = get_available_distributed_id();
-      forest->create_index_space(result, realm_is, did);
+      const IndexSpace result(get_unique_index_space_id(),
+                              get_unique_index_tree_id(), type_tag);
+      const DistributedID did = get_available_distributed_id();
+      forest->create_index_space(result, &domain, did);
       if (legion_spy_enabled)
         LegionSpy::log_top_index_space(result.id);
       // Overwrite and leak for now, don't care too much as this 
@@ -18729,7 +18707,7 @@ namespace Legion {
       AutoLock is_lock(is_slice_lock);
       index_slice_spaces[key] = result;
       return result;
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void Runtime::increment_outstanding_top_level_tasks(void)
@@ -19105,6 +19083,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    CreationOp* Runtime::get_available_creation_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return get_available(creation_op_lock, available_creation_ops);
+    }
+
+    //--------------------------------------------------------------------------
     DeletionOp* Runtime::get_available_deletion_op(void)
     //--------------------------------------------------------------------------
     {
@@ -19400,6 +19385,14 @@ namespace Legion {
     {
       AutoLock f_lock(frame_op_lock);
       release_operation<false>(available_frame_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_creation_op(CreationOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock d_lock(creation_op_lock);
+      release_operation<false>(available_creation_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -20318,6 +20311,8 @@ namespace Legion {
           return "Fence Op";
         case FRAME_OP_ALLOC:
           return "Frame Op";
+        case CREATION_OP_ALLOC:
+          return "Creation Op";
         case DELETION_OP_ALLOC:
           return "Deletion Op";
         case CLOSE_OP_ALLOC:

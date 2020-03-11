@@ -120,8 +120,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace TaskContext::create_index_space(RegionTreeForest *forest,
-                                         const void *realm_is, TypeTag type_tag)
+    IndexSpace TaskContext::create_index_space(const Domain &bounds, 
+                                               TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
@@ -134,7 +134,7 @@ namespace Legion {
 #endif
       if (runtime->legion_spy_enabled)
         LegionSpy::log_top_index_space(handle.id);
-      forest->create_index_space(handle, realm_is, did); 
+      runtime->forest->create_index_space(handle, &bounds, did); 
       register_index_space_creation(handle);
       return handle;
     }
@@ -2935,7 +2935,8 @@ namespace Legion {
         outstanding_subtasks(0), pending_subtasks(0), pending_frames(0), 
         currently_active_context(false), current_mapping_fence(NULL), 
         mapping_fence_gen(0), current_mapping_fence_index(0), 
-        current_execution_fence_index(0), last_deppart(NULL),last_deppart_gen(0)
+        current_execution_fence_index(0), last_implicit(NULL),
+        last_implicit_gen(0)
     //--------------------------------------------------------------------------
     {
       // Set some of the default values for a context
@@ -3346,6 +3347,32 @@ namespace Legion {
                         target_context_uid, req, target);
       }
     } 
+
+    //--------------------------------------------------------------------------
+    IndexSpace InnerContext::create_index_space(const Future &future, 
+                                                TypeTag type_tag)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      IndexSpace handle(runtime->get_unique_index_space_id(),
+                        runtime->get_unique_index_tree_id(), type_tag);
+      DistributedID did = runtime->get_available_distributed_id();
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating index space %x in task%s (ID %lld)", 
+                      handle.id, get_task_name(), get_unique_id()); 
+#endif
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_top_index_space(handle.id);
+      // Get a new creation operation
+      CreationOp *creator_op = runtime->get_available_creation_op();
+      const ApEvent ready = creator_op->get_completion_event();
+      IndexSpaceNode *node = 
+        runtime->forest->create_index_space(handle, NULL, did, ready);
+      creator_op->initialize_index_space(node, future);
+      register_index_space_creation(handle);
+      runtime->add_to_dependence_queue(this, executing_processor, creator_op);
+      return handle;
+    }
 
     //--------------------------------------------------------------------------
     void InnerContext::destroy_index_space(IndexSpace handle, 
@@ -6358,14 +6385,14 @@ namespace Legion {
       // If there are any outstanding unmapped dependent partition operations
       // outstanding then we might have an implicit dependence on its execution
       // so we always record a dependence on it
-      if (last_deppart != NULL)
+      if (last_implicit != NULL)
       {
 #ifdef LEGION_SPY
         // Can't prune when doing legion spy
-        op->register_dependence(last_deppart, last_deppart_gen);
+        op->register_dependence(last_implicit, last_implicit_gen);
 #else
-        if (op->register_dependence(last_deppart, last_deppart_gen))
-          last_deppart = NULL;
+        if (op->register_dependence(last_implicit, last_implicit_gen))
+          last_implicit = NULL;
 #endif
       }
       if (current_mapping_fence != NULL)
@@ -6678,13 +6705,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::update_current_deppart(DependentPartitionOp *op)
+    void InnerContext::update_current_implicit(Operation *op)
     //--------------------------------------------------------------------------
     {
       // Just overwrite since we know we already recorded a dependence
       // between this operation and the previous last deppart op
-      last_deppart = op;
-      last_deppart_gen = op->get_generation();
+      last_implicit = op;
+      last_implicit_gen = op->get_generation();
     }
 
     //--------------------------------------------------------------------------
@@ -8385,9 +8412,8 @@ namespace Legion {
 #define DIMFUNC(DIM) \
         case DIM: \
           { \
-            DomainT<DIM,coord_t> is = domain; \
-            result = create_index_space(runtime->forest, &is, \
-                NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
+            result = TaskContext::create_index_space(domain, \
+              NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
             break; \
           }
         LEGION_FOREACH_N(DIMFUNC)
@@ -9259,6 +9285,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return true;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace LeafContext::create_index_space(const Future &f, TypeTag tag)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+        "Illegal index space from future creation performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id())
+      return IndexSpace::NO_SPACE;
     }
 
     //--------------------------------------------------------------------------
@@ -10281,7 +10317,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::update_current_deppart(DependentPartitionOp *op) 
+    void LeafContext::update_current_implicit(Operation *op) 
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -10767,11 +10803,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace InlineContext::create_index_space(RegionTreeForest *forest,
-                                         const void *realm_is, TypeTag type_tag)
+    IndexSpace InlineContext::create_index_space(const Domain &domain, 
+                                                 TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
-      return enclosing->create_index_space(forest, realm_is, type_tag);
+      return enclosing->create_index_space(domain, type_tag);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace InlineContext::create_index_space(const Future &f, TypeTag tag)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_index_space(f, tag);
     }
 
     //--------------------------------------------------------------------------
@@ -11541,10 +11584,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InlineContext::update_current_deppart(DependentPartitionOp *op) 
+    void InlineContext::update_current_implicit(Operation *op) 
     //--------------------------------------------------------------------------
     {
-      enclosing->update_current_deppart(op);
+      enclosing->update_current_implicit(op);
     }
 
     //--------------------------------------------------------------------------

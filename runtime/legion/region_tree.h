@@ -148,8 +148,9 @@ namespace Legion {
     public:
       RegionTreeForest& operator=(const RegionTreeForest &rhs);
     public:
-      void create_index_space(IndexSpace handle, const void *realm_is,
-                              DistributedID did);
+      IndexSpaceNode* create_index_space(IndexSpace handle, 
+                              const Domain *domain, DistributedID did, 
+                              ApEvent ready = ApEvent::NO_AP_EVENT);
       IndexSpace find_or_create_union_space(TaskContext *ctx,
                               const std::vector<IndexSpace> &sources);
       IndexSpace find_or_create_intersection_space(TaskContext *ctx,
@@ -610,9 +611,9 @@ namespace Legion {
       void check_context_state(RegionTreeContext ctx);
     public:
       // We know the domain of the index space
-      IndexSpaceNode* create_node(IndexSpace is, const void *realm_is, 
-                                  IndexPartNode *par, LegionColor color,
-                                  DistributedID did,
+      IndexSpaceNode* create_node(IndexSpace is, const void *bounds, 
+                                  bool is_domain, IndexPartNode *par, 
+                                  LegionColor color, DistributedID did,
                                   ApEvent is_ready = ApEvent::NO_AP_EVENT,
                                   IndexSpaceExprID expr_id = 0);
       IndexSpaceNode* create_node(IndexSpace is, const void *realm_is, 
@@ -922,7 +923,7 @@ namespace Legion {
     public:
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag, 
                                            bool need_tight_result) = 0;
-      virtual Domain get_domain(ApEvent &ready, bool need_tight) = 0;
+      virtual Domain get_domain(ApEvent &ready, bool need_tight) = 0; 
       virtual void tighten_index_space(void) = 0;
       virtual bool check_empty(void) = 0;
       virtual size_t get_volume(void) = 0;
@@ -1736,6 +1737,7 @@ namespace Legion {
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
                                            bool need_tight_result) = 0;
       virtual Domain get_domain(ApEvent &ready, bool need_tight) = 0;
+      virtual bool set_domain(const Domain &domain, AddressSpaceID space) = 0;
       virtual void tighten_index_space(void) = 0;
       virtual bool check_empty(void) = 0;
       virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0;
@@ -1897,7 +1899,7 @@ namespace Legion {
     public:
       IndexSpaceNodeT(RegionTreeForest *ctx, IndexSpace handle,
                       IndexPartNode *parent, LegionColor color, 
-                      const Realm::IndexSpace<DIM,T> *realm_is,
+                      const void *bounds, bool is_domain,
                       DistributedID did, ApEvent ready_event,
                       IndexSpaceExprID expr_id);
       IndexSpaceNodeT(const IndexSpaceNodeT &rhs);
@@ -1914,6 +1916,7 @@ namespace Legion {
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
                                            bool need_tight_result);
       virtual Domain get_domain(ApEvent &ready, bool need_tight);
+      virtual bool set_domain(const Domain &domain, AddressSpaceID space);
       virtual void tighten_index_space(void);
       virtual bool check_empty(void);
       virtual void pack_expression(Serializer &rez, AddressSpaceID target);
@@ -2369,25 +2372,24 @@ namespace Legion {
      */
     class IndexSpaceCreator {
     public:
-      IndexSpaceCreator(RegionTreeForest *f, IndexSpace s, const void *i,
-                        IndexPartNode *p, LegionColor c, DistributedID d, 
-                        ApEvent r, IndexSpaceExprID e)
-        : forest(f), space(s), realm_is(i), parent(p), 
+      IndexSpaceCreator(RegionTreeForest *f, IndexSpace s, const void *b,
+                        bool is_dom, IndexPartNode *p, LegionColor c, 
+                        DistributedID d, ApEvent r, IndexSpaceExprID e)
+        : forest(f), space(s), bounds(b), is_domain(is_dom), parent(p), 
           color(c), did(d), ready(r), expr_id(e), result(NULL) { }
     public:
       template<typename N, typename T>
       static inline void demux(IndexSpaceCreator *creator)
       {
-        const Realm::IndexSpace<N::N,T> *is = 
-          (const Realm::IndexSpace<N::N,T>*)creator->realm_is;
         creator->result = new IndexSpaceNodeT<N::N,T>(creator->forest,
-            creator->space, creator->parent, creator->color, is,
-            creator->did, creator->ready, creator->expr_id);
+            creator->space, creator->parent, creator->color, creator->bounds,
+            creator->is_domain, creator->did, creator->ready, creator->expr_id);
       }
     public:
       RegionTreeForest *const forest;
       const IndexSpace space; 
-      const void *const realm_is;
+      const void *const bounds;
+      const bool is_domain;
       IndexPartNode *const parent;
       const LegionColor color;
       const DistributedID did;

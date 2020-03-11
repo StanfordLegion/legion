@@ -71,11 +71,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::create_index_space(IndexSpace handle,
-                                        const void *realm_is, DistributedID did)
+    IndexSpaceNode* RegionTreeForest::create_index_space(IndexSpace handle,
+                                        const Domain *domain, DistributedID did,
+                                        ApEvent ready /*=ApEvent::NO_AP_EVENT*/)
     //--------------------------------------------------------------------------
     {
-      create_node(handle, realm_is, NULL/*parent*/, 0/*color*/, did);
+      return create_node(handle, domain, true/*domain*/, 
+                         NULL/*parent*/, 0/*color*/, did, ready);
     }
 
     //--------------------------------------------------------------------------
@@ -3227,7 +3229,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpaceNode* RegionTreeForest::create_node(IndexSpace sp,
-                                                  const void *realm_is,
+                                                  const void *bounds,
+                                                  bool is_domain,
                                                   IndexPartNode *parent,
                                                   LegionColor color,
                                                   DistributedID did,
@@ -3235,7 +3238,7 @@ namespace Legion {
                                                   IndexSpaceExprID expr_id)
     //--------------------------------------------------------------------------
     { 
-      IndexSpaceCreator creator(this, sp, realm_is, parent, 
+      IndexSpaceCreator creator(this, sp, bounds, is_domain, parent, 
                                 color, did, is_ready, expr_id);
       NT_TemplateHelper::demux<IndexSpaceCreator>(sp.get_type_tag(), &creator);
       IndexSpaceNode *result = creator.result;  
@@ -3275,7 +3278,7 @@ namespace Legion {
       // we know that we'll probably need it later
       // We have to do this after we've added our reference in case
       // the tighten gets done and tries to delete the node
-      if (realm_is != NULL)
+      if (bounds != NULL)
         result->tighten_index_space();
       return result;
     }
@@ -3289,7 +3292,7 @@ namespace Legion {
                                                   ApUserEvent is_ready)
     //--------------------------------------------------------------------------
     { 
-      IndexSpaceCreator creator(this, sp, realm_is, parent, 
+      IndexSpaceCreator creator(this, sp, realm_is, false/*is domain*/, parent,
                                 color, did, is_ready, 0/*expr id*/);
       NT_TemplateHelper::demux<IndexSpaceCreator>(sp.get_type_tag(), &creator);
       IndexSpaceNode *result = creator.result;  
@@ -7280,7 +7283,7 @@ namespace Legion {
         assert(parent_node != NULL);
 #endif
       }
-      IndexSpaceNode *node = context->create_node(handle, index_space_ptr,
+      IndexSpaceNode *node = context->create_node(handle, index_space_ptr,false,
                                parent_node, color, did, ready_event, expr_id);
 #ifdef DEBUG_LEGION
       assert(node != NULL);
@@ -8094,7 +8097,7 @@ namespace Legion {
           }
           else
             // Make a new index space node ready when the partition is ready
-            result = context->create_node(is, NULL/*realm is*/, 
+            result = context->create_node(is, NULL/*realm is*/, false, 
                                           this, c, did, partition_ready);
           if (runtime->legion_spy_enabled)
             LegionSpy::log_index_subspace(handle.id, is.id, 

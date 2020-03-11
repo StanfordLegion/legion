@@ -1706,8 +1706,6 @@ namespace Legion {
                                  const TaskArgument &arg, MapperID map_id);
       void process_mapper_task_result(const MapperTaskArgs *args); 
     public:
-      IndexSpace create_index_space(Context ctx, const void *realm_is,
-                                    TypeTag type_tag);
       IndexSpace union_index_spaces(Context ctx, 
                                     const std::vector<IndexSpace> &spaces);
       IndexSpace intersect_index_spaces(Context ctx,
@@ -2761,9 +2759,7 @@ namespace Legion {
                                         ReferenceMutator *mutator);
       FutureMapImpl* find_or_create_future_map(DistributedID did, 
                 TaskContext *ctx, RtEvent complete, ReferenceMutator *mutator);
-      IndexSpace find_or_create_index_slice_space(const Domain &launch_domain);
       IndexSpace find_or_create_index_slice_space(const Domain &launch_domain,
-                                                  const void *realm_is,
                                                   TypeTag type_tag);
     public:
       void increment_outstanding_top_level_tasks(void);
@@ -2805,6 +2801,7 @@ namespace Legion {
       PointCopyOp*          get_available_point_copy_op(void);
       FenceOp*              get_available_fence_op(void);
       FrameOp*              get_available_frame_op(void);
+      CreationOp*           get_available_creation_op(void);
       DeletionOp*           get_available_deletion_op(void);
       MergeCloseOp*         get_available_merge_close_op(void);
       PostCloseOp*          get_available_post_close_op(void);
@@ -2843,6 +2840,7 @@ namespace Legion {
       void free_point_copy_op(PointCopyOp *op);
       void free_fence_op(FenceOp *op);
       void free_frame_op(FrameOp *op);
+      void free_creation_op(CreationOp *op);
       void free_deletion_op(DeletionOp *op);
       void free_merge_close_op(MergeCloseOp *op); 
       void free_post_close_op(PostCloseOp *op);
@@ -3163,6 +3161,7 @@ namespace Legion {
       mutable LocalLock copy_op_lock;
       mutable LocalLock fence_op_lock;
       mutable LocalLock frame_op_lock;
+      mutable LocalLock creation_op_lock;
       mutable LocalLock deletion_op_lock;
       mutable LocalLock merge_close_op_lock;
       mutable LocalLock post_close_op_lock;
@@ -3198,6 +3197,7 @@ namespace Legion {
       std::deque<PointCopyOp*>          available_point_copy_ops;
       std::deque<FenceOp*>              available_fence_ops;
       std::deque<FrameOp*>              available_frame_ops;
+      std::deque<CreationOp*>           available_creation_ops;
       std::deque<DeletionOp*>           available_deletion_ops;
       std::deque<MergeCloseOp*>         available_merge_close_ops;
       std::deque<PostCloseOp*>          available_post_close_ops;
