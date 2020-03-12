@@ -514,7 +514,7 @@ namespace Realm {
 						       dummy,
 						       flags & TransferIterator::DST_FLAGMASK,
 						       false /*!tentative*/);
-	      log_xd.print() << "skipping " << skip_bytes << " bytes of output";
+	      log_xd.debug() << "skipping " << skip_bytes << " bytes of output";
 	      assert(skip_bytes > 0);
 	      input_control.remaining_count -= skip_bytes;
 	      output_control.remaining_count -= skip_bytes;
@@ -548,7 +548,7 @@ namespace Realm {
 					     dummy,
 					     flags & TransferIterator::SRC_FLAGMASK,
 					     false /*!tentative*/);
-	    log_xd.print() << "skipping " << skip_bytes << " bytes of input";
+	    log_xd.debug() << "skipping " << skip_bytes << " bytes of input";
 	    assert(skip_bytes > 0);
 	    update_bytes_read(input_control.current_io_port,
 			      in_port->local_bytes_total,
