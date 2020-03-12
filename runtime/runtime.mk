@@ -18,7 +18,8 @@ CC_FLAGS ?=
 LD_FLAGS ?=
 SO_FLAGS ?=
 INC_FLAGS ?=
-NVCC_FLAGS ?=
+# Make sure that NVCC_FLAGS are simple expanded since later we use shell to append to it (performance).
+NVCC_FLAGS := $(NVCC_FLAGS)
 # These flags are NOT passed on the command line, but are used to
 # generate the public-facing legion/realm_defines.h files.
 # (Additional flags will be picked up from environment variables of
