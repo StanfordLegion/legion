@@ -845,7 +845,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexSpaceNode* IndexSpaceOperationT<DIM,T>::find_or_create_node(
-                                                               TaskContext *ctx)
+                                          TaskContext *ctx, RtEvent initialized)
     //--------------------------------------------------------------------------
     {
       if (node != NULL)
@@ -867,11 +867,11 @@ namespace Legion {
         
         if (is_index_space_tight)
           node = context->create_node(handle, &tight_index_space, false/*dom*/,
-                                      NULL/*parent*/, 0/*color*/, did,
+                                      NULL/*parent*/,0/*color*/,did,initialized,
                                       realm_index_space_ready, expr_id);
         else
           node = context->create_node(handle, &realm_index_space, false/*dom*/,
-                                      NULL/*parent*/, 0/*color*/, did,
+                                      NULL/*parent*/,0/*color*/,did,initialized,
                                       realm_index_space_ready, expr_id);
       }
       if (ctx != NULL)
@@ -1669,8 +1669,8 @@ namespace Legion {
     IndexSpaceNodeT<DIM,T>::IndexSpaceNodeT(RegionTreeForest *ctx, 
         IndexSpace handle, IndexPartNode *parent, LegionColor color,
         const void *bounds, bool is_domain, DistributedID did, 
-        ApEvent ready, IndexSpaceExprID expr_id)
-      : IndexSpaceNode(ctx, handle, parent, color, did, ready, expr_id), 
+        ApEvent ready, IndexSpaceExprID expr_id, RtEvent init)
+      : IndexSpaceNode(ctx, handle, parent, color, did, ready, expr_id, init), 
         linearization_ready(false)
     //--------------------------------------------------------------------------
     {
@@ -4597,8 +4597,10 @@ namespace Legion {
                                         IndexSpaceNode *par, IndexSpaceNode *cs,
                                         LegionColor c, bool disjoint, 
                                         int complete, DistributedID did,
-                                        ApEvent part_ready, ApUserEvent pend)
-      : IndexPartNode(ctx, p, par, cs, c, disjoint,complete,did,part_ready,pend)
+                                        ApEvent part_ready, ApUserEvent pend,
+                                        RtEvent init)
+      : IndexPartNode(ctx, p, par, cs, c, disjoint, complete, did, part_ready,
+                      pend, init)
     //--------------------------------------------------------------------------
     {
     }
@@ -4611,9 +4613,9 @@ namespace Legion {
                                         LegionColor c, RtEvent disjoint_event,
                                         int complete, DistributedID did,
                                         ApEvent partition_ready, 
-                                        ApUserEvent pending)
+                                        ApUserEvent pending, RtEvent init)
       : IndexPartNode(ctx, p, par, cs, c, disjoint_event, complete, did, 
-                      partition_ready, pending)
+                      partition_ready, pending, init)
     //--------------------------------------------------------------------------
     {
     }
