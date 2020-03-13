@@ -11806,8 +11806,8 @@ namespace Legion {
         check_privileges(rhs.check_privileges),
         num_profiling_nodes(rhs.num_profiling_nodes),
         legion_collective_radix(rhs.legion_collective_radix),
-        mpi_rank_table(NULL),
-        local_procs(rhs.local_procs), proc_spaces(rhs.proc_spaces)
+        mpi_rank_table(NULL), local_procs(rhs.local_procs), 
+        local_utils(rhs.local_utils), proc_spaces(rhs.proc_spaces)
     //--------------------------------------------------------------------------
     {
       // should never be called
