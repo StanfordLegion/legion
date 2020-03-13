@@ -848,7 +848,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexSpaceNode* IndexSpaceOperationT<DIM,T>::find_or_create_node(
-                                     TaskContext *ctx, const bool notify_remote)
+                TaskContext *ctx, RtEvent initialized, const bool notify_remote)
     //--------------------------------------------------------------------------
     {
       if (node != NULL)
@@ -870,11 +870,11 @@ namespace Legion {
         
         if (is_index_space_tight)
           node = context->create_node(handle, &tight_index_space, false/*dom*/,
-                              NULL/*parent*/, 0/*color*/, did,
+                              NULL/*parent*/, 0/*color*/, did, initialized,
                               realm_index_space_ready, expr_id, notify_remote);
         else
           node = context->create_node(handle, &realm_index_space, false/*dom*/,
-                              NULL/*parent*/, 0/*color*/, did,
+                              NULL/*parent*/, 0/*color*/, did, initialized,
                               realm_index_space_ready, expr_id, notify_remote);
       }
       if (ctx != NULL)
@@ -1675,8 +1675,8 @@ namespace Legion {
     IndexSpaceNodeT<DIM,T>::IndexSpaceNodeT(RegionTreeForest *ctx, 
         IndexSpace handle, IndexPartNode *parent, LegionColor color,
         const void *bounds, bool is_domain, DistributedID did, 
-        ApEvent ready, IndexSpaceExprID expr_id)
-      : IndexSpaceNode(ctx, handle, parent, color, did, ready, expr_id), 
+        ApEvent ready, IndexSpaceExprID expr_id, RtEvent init)
+      : IndexSpaceNode(ctx, handle, parent, color, did, ready, expr_id, init), 
         linearization_ready(false)
     //--------------------------------------------------------------------------
     {
@@ -1952,8 +1952,8 @@ namespace Legion {
       if (!realm_index_space_set.has_triggered())
         realm_index_space_set.wait();
       context->create_node(alias, &realm_index_space_set, false/*is domain*/,
-                     NULL/*parent*/, 0/*color*/, alias_did, index_space_ready, 
-                     expr_id/*alis*/, false/*notify remote*/);
+                     NULL/*parent*/, 0/*color*/, alias_did, initialized,
+                     index_space_ready, expr_id/*alis*/,false/*notify remote*/);
     }
 
     //--------------------------------------------------------------------------
@@ -5231,10 +5231,10 @@ namespace Legion {
                                         IndexSpaceNode *par, IndexSpaceNode *cs,
                                         LegionColor c, bool disjoint, 
                                         int complete, DistributedID did,
-                                        ApEvent partition_ready, 
-                                        ApBarrier pend, ShardMapping *map)
+                                        ApEvent partition_ready, ApBarrier pend,
+                                        RtEvent init, ShardMapping *map)
       : IndexPartNode(ctx, p, par, cs, c, disjoint, complete, did, 
-                      partition_ready, pend, map)
+                      partition_ready, pend, init, map)
     //--------------------------------------------------------------------------
     {
     }
@@ -5246,10 +5246,10 @@ namespace Legion {
                                         IndexSpaceNode *par, IndexSpaceNode *cs,
                                         LegionColor c, RtEvent disjoint_event,
                                         int comp, DistributedID did,
-                                        ApEvent partition_ready, 
-                                        ApBarrier pending, ShardMapping *map)
+                                        ApEvent partition_ready, ApBarrier pend,
+                                        RtEvent init, ShardMapping *map)
       : IndexPartNode(ctx, p, par, cs, c, disjoint_event, comp, did,
-                      partition_ready, pending, map)
+                      partition_ready, pend, init, map)
     //--------------------------------------------------------------------------
     {
     }
