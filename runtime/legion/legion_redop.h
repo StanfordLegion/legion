@@ -1430,7 +1430,7 @@ namespace Legion {
     typedef int8_t LHS;
     typedef int8_t RHS;
 
-    static const int8_t identity = 0xFF;
+    static const int8_t identity = (int8_t)0xFF;
     static const int REDOP_ID = LEGION_REDOP_OR_INT8;
 
     template<bool EXCLUSIVE> __CUDA_HD__
@@ -1445,7 +1445,7 @@ namespace Legion {
     typedef int16_t LHS;
     typedef int16_t RHS;
 
-    static const int16_t identity = 0xFFFF;
+    static const int16_t identity = (int16_t)0xFFFF;
     static const int REDOP_ID = LEGION_REDOP_OR_INT16;
 
     template<bool EXCLUSIVE> __CUDA_HD__
