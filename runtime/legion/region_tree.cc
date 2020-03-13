@@ -3985,9 +3985,9 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_INVALID_REQUEST_LOGICALREGION,
           "Invalid request for LogicalRegion NO_REGION.")
       // Check to see if the node already exists
-      bool has_top_level_region;
       RtEvent wait_on;
       RegionNode *result = NULL;
+      bool has_top_level_region = false;
       {
         AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
         std::map<LogicalRegion,RegionNode*>::const_iterator finder = 
