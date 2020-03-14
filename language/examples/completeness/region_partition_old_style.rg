@@ -40,10 +40,6 @@ task make_tile_partition(points : region(ispace(int2d), point),
   -- of disjointness and completeness
   var p = partition(disjoint, points, coloring, tiles)
   var p2 = partition(disjoint, incomplete, points, coloring, tiles)
-  var p3 = partition(disjoint, complete, points, coloring, tiles)
-  var p4 = partition(aliased, points, coloring, tiles)
-  var p5 = partition(aliased, incomplete, points, coloring, tiles)
-  var p6 = partition(aliased, complete, points, coloring, tiles)
   c.legion_domain_point_coloring_destroy(coloring)
   return p
 end

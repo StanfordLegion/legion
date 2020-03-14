@@ -33,8 +33,7 @@ task f()
 
   -- test new style partition
   var p = partition(r.color, ispace(int1d, 3))
-  var p1 = partition(incomplete, r.color, ispace(int1d, 3))
-  var p2 = partition(complete, r.color, ispace(int1d, 3))
+  var p2 = partition(incomplete, r.color, ispace(int1d, 3))
 
   for i = 0, 3 do
     var ri = p[i]

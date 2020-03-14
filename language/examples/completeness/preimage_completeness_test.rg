@@ -36,13 +36,7 @@ task f()
   -- (hopefully) well-formed call to image
   var pimg = preimage(r, p, r.color)
   var pimg1  = preimage(incomplete, r, p, r.color)
-  var pimg2  = preimage(complete, r, p, r.color)
-  var pimg3  = preimage(aliased, r, p, r.color)
-  var pimg4  = preimage(aliased, incomplete, r, p, r.color)
-  var pimg5  = preimage(aliased, complete, r, p, r.color)
-  var pimg6  = preimage(disjoint, r, p, r.color)
-  var pimg7  = preimage(disjoint, incomplete, r, p, r.color)
-  var pimg8  = preimage(disjoint, complete, r, p, r.color)
+  var pimg2  = preimage(aliased, incomplete, r, p, r.color)
 
   for i = 0, 3 do
     var ri = p[i]
