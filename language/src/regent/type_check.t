@@ -1643,7 +1643,7 @@ function type_check.expr_partition(cx, node)
 
   return ast.typed.expr.Partition {
     disjointness = disjointness,
-    completeness = completeness,
+    completeness = node.completeness,
     region = region,
     coloring = coloring,
     colors = colors,

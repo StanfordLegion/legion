@@ -4743,18 +4743,18 @@ function get_legion_partition_kind(disjointness, completeness)
   local mapping = {
     [false] = {
       [false] = c.COMPUTE_KIND;
-      [incomplete] = c.COMPUTE_INCOMPLETE_KIND;
-      [complete] = c.COMPUTE_COMPLETE_KIND;
+      [std.incomplete] = c.COMPUTE_INCOMPLETE_KIND;
+      [std.complete] = c.COMPUTE_COMPLETE_KIND;
     };
-    [aliased] = {
+    [std.aliased] = {
       [false] = c.ALIASED_KIND;
-      [incomplete] = c.ALIASED_INCOMPLETE_KIND;
-      [complete] = c.ALIASED_COMPLETE_KIND;
+      [std.incomplete] = c.ALIASED_INCOMPLETE_KIND;
+      [std.complete] = c.ALIASED_COMPLETE_KIND;
     };
-    [disjoint] = {
+    [std.disjoint] = {
       [false] = c.DISJOINT_KIND;
-      [incomplete] = c.DISJOINT_INCOMPLETE_KIND;
-      [complete] = c.DISJOINT_COMPLETE_KIND;
+      [std.incomplete] = c.DISJOINT_INCOMPLETE_KIND;
+      [std.complete] = c.DISJOINT_COMPLETE_KIND;
     };
   }
 
