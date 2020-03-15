@@ -184,9 +184,9 @@ namespace Legion {
                                           const std::vector<IndexSpace> &spaces)
     //--------------------------------------------------------------------------
     {
+      AutoRuntimeCall call(this); 
       if (spaces.empty())
         return IndexSpace::NO_SPACE;
-      AutoRuntimeCall call(this); 
       bool none_exists = true;
       for (std::vector<IndexSpace>::const_iterator it = 
             spaces.begin(); it != spaces.end(); it++)
@@ -216,9 +216,9 @@ namespace Legion {
                                           const std::vector<IndexSpace> &spaces)
     //--------------------------------------------------------------------------
     {
+      AutoRuntimeCall call(this); 
       if (spaces.empty())
         return IndexSpace::NO_SPACE;
-      AutoRuntimeCall call(this); 
       bool none_exists = true;
       for (std::vector<IndexSpace>::const_iterator it = 
             spaces.begin(); it != spaces.end(); it++)
@@ -9023,6 +9023,26 @@ namespace Legion {
         Realm::Barrier bar = future_map_barriers[idx];
         bar.destroy_barrier();
       }
+      while (!pending_index_spaces.empty())
+      {
+        std::pair<ValueBroadcast<ISBroadcast>*,bool> &collective = 
+          pending_index_spaces.front();
+        if (collective.second)
+        {
+          const ISBroadcast value = collective.first->get_value(false);
+          runtime->forest->revoke_pending_index_space(value.space_id);
+          runtime->free_distributed_id(value.did);
+        }
+        else
+        {
+          // Make sure this collective is done before we delete it
+          const RtEvent done = collective.first->get_done_event();
+          if (!done.has_triggered())
+            done.wait();
+        }
+        delete collective.first;
+        pending_index_spaces.pop_front();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -9353,51 +9373,103 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      IndexSpace handle = IndexSpace::NO_SPACE;
-      if (owner_shard->shard_id == index_space_allocator_shard)
+      // Seed this with the first index space broadcast
+      if (pending_index_spaces.empty())
+        increase_pending_index_spaces(1/*count*/, false/*double*/);
+      IndexSpace handle;
+      bool double_next = false;
+      bool double_buffer = false;
+      std::pair<ValueBroadcast<ISBroadcast>*,bool> &collective = 
+        pending_index_spaces.front();
+      if (collective.second)
       {
-        // We're the owner, so make it locally and then broadcast it
-        handle = IndexSpace(runtime->get_unique_index_space_id(),
-                            runtime->get_unique_index_tree_id(), type_tag);
-        const DistributedID did = runtime->get_available_distributed_id();
-        // Have to register this before broadcasting it
-        IndexSpaceNode *node = runtime->forest->create_index_space(handle, 
-            &domain, did, false/*notify remote*/);
-        // Do our arrival on this generation, should be the last one
-        ValueBroadcast<ISBroadcast> collective_space(this, COLLECTIVE_LOC_3);
-        collective_space.broadcast(ISBroadcast(handle, node->expr_id, did));
+        const ISBroadcast value = collective.first->get_value(false);
+        handle = IndexSpace(value.space_id, value.tid, type_tag);
+        double_buffer = value.double_buffer;
+        IndexSpaceNode *node = 
+          runtime->forest->create_index_space(handle, &domain, value.did, 
+              false/*notify remote*/, value.expr_id, ApEvent::NO_AP_EVENT,
+              creation_barrier);
+        // Now we can update the creation set
+        node->update_creation_set(shard_manager->get_mapping());
+        runtime->forest->revoke_pending_index_space(value.space_id);
 #ifdef DEBUG_LEGION
-        log_index.debug("Creating index space %x in task%s (ID %lld)", 
-                        handle.id, get_task_name(), get_unique_id()); 
+        log_index.debug("Creating index space %x in task%s (ID %lld)",
+                        handle.id, get_task_name(), get_unique_id());
 #endif
         if (runtime->legion_spy_enabled)
           LegionSpy::log_top_index_space(handle.id);
-        // Wait for the creation to finish
-        creation_barrier.wait();
-        // Now we can update the creation set
-        node->update_creation_set(shard_manager->get_mapping());
       }
       else
       {
-        // We need to get the barrier result 
-        ValueBroadcast<ISBroadcast> collective_space(this,
-                            index_space_allocator_shard, COLLECTIVE_LOC_3);
-        const ISBroadcast value = collective_space.get_value();
-        handle = value.handle;
+        const RtEvent done = collective.first->get_done_event();
+        if (!done.has_triggered())
+        {
+          double_next = true;
+          done.wait();
+        }
+        const ISBroadcast value = collective.first->get_value(false);
+        handle = IndexSpace(value.space_id, value.tid, type_tag);
+        double_buffer = value.double_buffer;
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
         runtime->forest->create_index_space(handle, &domain, value.did,
-                                   false/*notify remote*/, value.expr_id);
+               false/*notify remote*/, value.expr_id, ApEvent::NO_AP_EVENT,
+               creation_barrier);
         // Arrive on the creation barrier
         Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
+      delete collective.first;
+      pending_index_spaces.pop_front();
+      // Advance the creation barrier so that we know when it is ready
       advance_replicate_barrier(creation_barrier, total_shards-1);
+      // Record this in our context
       register_index_space_creation(handle);
-      index_space_allocator_shard++;
-      if (index_space_allocator_shard == total_shards)
-        index_space_allocator_shard = 0;
+      // Get new handles in flight for the next time we need them
+      // Always add a new one to replace the old one, but double the number
+      // in flight if we're not hiding the latency
+      increase_pending_index_spaces(double_buffer ? 
+          pending_index_spaces.size() + 1 : 1, double_next && !double_buffer);
       return handle;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::increase_pending_index_spaces(unsigned count,
+                                                         bool double_next)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < count; idx++)
+      {
+        if (owner_shard->shard_id == index_space_allocator_shard)
+        {
+          const IndexSpaceID space_id = runtime->get_unique_index_space_id(); 
+          // We're the owner, so make it locally and then broadcast it
+          runtime->forest->record_pending_index_space(space_id);
+          // Do our arrival on this generation, should be the last one
+          ValueBroadcast<ISBroadcast> *collective = 
+            new ValueBroadcast<ISBroadcast>(this, COLLECTIVE_LOC_3);
+          collective->broadcast(ISBroadcast(space_id,
+                runtime->get_unique_index_tree_id(),
+                runtime->get_unique_index_space_expr_id(), 
+                runtime->get_available_distributed_id(), double_next));
+          pending_index_spaces.push_back(
+              std::pair<ValueBroadcast<ISBroadcast>*,bool>(collective, true));
+        }
+        else
+        {
+          ValueBroadcast<ISBroadcast> *collective = 
+            new ValueBroadcast<ISBroadcast>(this, index_space_allocator_shard,
+                                            COLLECTIVE_LOC_3);
+          register_collective(collective);
+          pending_index_spaces.push_back(
+              std::pair<ValueBroadcast<ISBroadcast>*,bool>(collective, false));
+        }
+        index_space_allocator_shard++;
+        if (index_space_allocator_shard == total_shards)
+          index_space_allocator_shard = 0;
+        double_next = false;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -9411,151 +9483,236 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace ReplicateContext::union_index_spaces(RegionTreeForest *forest,
+    IndexSpace ReplicateContext::union_index_spaces(
                                           const std::vector<IndexSpace> &spaces)
     //--------------------------------------------------------------------------
     {
+      AutoRuntimeCall call(this);
       if (spaces.empty())
         return IndexSpace::NO_SPACE;
-      AutoRuntimeCall call(this);
-      IndexSpace handle = IndexSpace::NO_SPACE;
-      if (owner_shard->shard_id == index_space_allocator_shard)
+      bool none_exists = true;
+      for (std::vector<IndexSpace>::const_iterator it = 
+            spaces.begin(); it != spaces.end(); it++)
       {
-        // We're the owner, so make it locally and then broadcast it
-        handle = forest->find_or_create_union_space(this, spaces,
-                                                    false/*notify remote*/);
-        IndexSpaceNode *node = forest->get_node(handle);
-        ValueBroadcast<ISBroadcast> collective_space(this, COLLECTIVE_LOC_4);
-        collective_space.broadcast(ISBroadcast(handle,node->expr_id,node->did));
-        // Wait for the creation to finish
-        creation_barrier.wait();
+        if (none_exists && it->exists())
+          none_exists = false;
+        if (spaces[0].get_type_tag() != it->get_type_tag())
+          REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
+                        "Dynamic type mismatch in 'union_index_spaces' "
+                        "performed in task %s (UID %lld)",
+                        get_task_name(), get_unique_id())
+      }
+      if (none_exists)
+        return IndexSpace::NO_SPACE;
+      // Seed this with the first index space broadcast
+      if (pending_index_spaces.empty())
+        increase_pending_index_spaces(1/*count*/, false/*double*/);
+      IndexSpace handle;
+      bool double_next = false;
+      bool double_buffer = false;
+      std::pair<ValueBroadcast<ISBroadcast>*,bool> &collective = 
+        pending_index_spaces.front();
+      if (collective.second)
+      {
+        const ISBroadcast value = collective.first->get_value(false);
+        handle = IndexSpace(value.space_id, value.tid,spaces[0].get_type_tag());
+        double_buffer = value.double_buffer;
+        IndexSpaceNode *node = 
+          runtime->forest->create_union_space(handle, value.did,
+              spaces, creation_barrier, false/*notify remote*/, value.expr_id);
+        // Now we can update the creation set
         node->update_creation_set(shard_manager->get_mapping());
+        runtime->forest->revoke_pending_index_space(value.space_id);
+#ifdef DEBUG_LEGION
+        log_index.debug("Creating index space %x in task%s (ID %lld)",
+                        handle.id, get_task_name(), get_unique_id());
+#endif
+        if (runtime->legion_spy_enabled)
+          LegionSpy::log_top_index_space(handle.id);
       }
       else
       {
-        // Do our own local version of this
-        IndexSpace local = forest->find_or_create_union_space(NULL, spaces);
-        // We need to get the barrier result 
-        ValueBroadcast<ISBroadcast> collective_space(this,
-                            index_space_allocator_shard, COLLECTIVE_LOC_4);
-        const ISBroadcast value = collective_space.get_value();
-        handle = value.handle;
+        const RtEvent done = collective.first->get_done_event();
+        if (!done.has_triggered())
+        {
+          double_next = true;
+          done.wait();
+        }
+        const ISBroadcast value = collective.first->get_value(false);
+        handle = IndexSpace(value.space_id, value.tid,spaces[0].get_type_tag());
+        double_buffer = value.double_buffer;
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
-        // Check to see if they are the same, if not find or make one
-        // with the right name here and the local computation result
-        if (local != handle)
-          forest->find_or_create_sharded_index_space(this, handle, 
-                                                     local, value.did);
-        // Signal we're done our creation
+        runtime->forest->create_union_space(handle, value.did,
+            spaces, creation_barrier, false/*notify remote*/, value.expr_id);
+        // Arrive on the creation barrier
         Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
+      delete collective.first;
+      pending_index_spaces.pop_front();
+      // Advance the creation barrier so that we know when it is ready
       advance_replicate_barrier(creation_barrier, total_shards-1);
-      // Register the local creation
+      // Record this in our context
       register_index_space_creation(handle);
-      // Update our allocator shard
-      index_space_allocator_shard++;
-      if (index_space_allocator_shard == total_shards)
-        index_space_allocator_shard = 0;
+      // Get new handles in flight for the next time we need them
+      // Always add a new one to replace the old one, but double the number
+      // in flight if we're not hiding the latency
+      increase_pending_index_spaces(double_buffer ? 
+          pending_index_spaces.size() + 1 : 1, double_next && !double_buffer);
       return handle;
     }
 
     //--------------------------------------------------------------------------
     IndexSpace ReplicateContext::intersect_index_spaces(
-                RegionTreeForest *forest, const std::vector<IndexSpace> &spaces)
+                                          const std::vector<IndexSpace> &spaces)
     //--------------------------------------------------------------------------
     {
+      AutoRuntimeCall call(this);
       if (spaces.empty())
         return IndexSpace::NO_SPACE;
-      AutoRuntimeCall call(this);
-      IndexSpace handle = IndexSpace::NO_SPACE;
-      if (owner_shard->shard_id == index_space_allocator_shard)
+      bool none_exists = true;
+      for (std::vector<IndexSpace>::const_iterator it = 
+            spaces.begin(); it != spaces.end(); it++)
       {
-        // We're the owner, so make it locally and then broadcast it
-        handle = forest->find_or_create_intersection_space(this, spaces,
-                                                 false/*notify remote*/);
-        IndexSpaceNode *node = forest->get_node(handle);
-        ValueBroadcast<ISBroadcast> space_collective(this, COLLECTIVE_LOC_5);
-        space_collective.broadcast(ISBroadcast(handle,node->expr_id,node->did));
-        // Wait for the creation to finish
-        creation_barrier.wait();
+        if (none_exists && it->exists())
+          none_exists = false;
+        if (spaces[0].get_type_tag() != it->get_type_tag())
+          REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
+                        "Dynamic type mismatch in 'intersect_index_spaces' "
+                        "performed in task %s (UID %lld)",
+                        get_task_name(), get_unique_id())
+      }
+      if (none_exists)
+        return IndexSpace::NO_SPACE;
+      // Seed this with the first index space broadcast
+      if (pending_index_spaces.empty())
+        increase_pending_index_spaces(1/*count*/, false/*double*/);
+      IndexSpace handle;
+      bool double_next = false;
+      bool double_buffer = false;
+      std::pair<ValueBroadcast<ISBroadcast>*,bool> &collective = 
+        pending_index_spaces.front();
+      if (collective.second)
+      {
+        const ISBroadcast value = collective.first->get_value(false);
+        handle = IndexSpace(value.space_id, value.tid,spaces[0].get_type_tag());
+        double_buffer = value.double_buffer;
+        IndexSpaceNode *node = 
+          runtime->forest->create_intersection_space(handle, value.did,
+              spaces, creation_barrier, false/*notify remote*/, value.expr_id);
+        // Now we can update the creation set
         node->update_creation_set(shard_manager->get_mapping());
+        runtime->forest->revoke_pending_index_space(value.space_id);
+#ifdef DEBUG_LEGION
+        log_index.debug("Creating index space %x in task%s (ID %lld)",
+                        handle.id, get_task_name(), get_unique_id());
+#endif
+        if (runtime->legion_spy_enabled)
+          LegionSpy::log_top_index_space(handle.id);
       }
       else
       {
-        // Do our own local version of this
-        IndexSpace local = 
-          forest->find_or_create_intersection_space(NULL, spaces);
-        // We need to get the barrier result 
-        ValueBroadcast<ISBroadcast> space_collective(this,
-                            index_space_allocator_shard, COLLECTIVE_LOC_5);
-        const ISBroadcast value = space_collective.get_value();
-        handle = value.handle;
+        const RtEvent done = collective.first->get_done_event();
+        if (!done.has_triggered())
+        {
+          double_next = true;
+          done.wait();
+        }
+        const ISBroadcast value = collective.first->get_value(false);
+        handle = IndexSpace(value.space_id, value.tid,spaces[0].get_type_tag());
+        double_buffer = value.double_buffer;
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
-        // Check to see if they are the same, if not find or make one
-        // with the right name here and the local computation result
-        if (local != handle)
-          forest->find_or_create_sharded_index_space(this, handle, 
-                                                     local, value.did); 
-        // Signal that we're done our creation
+        runtime->forest->create_intersection_space(handle, value.did,
+            spaces, creation_barrier, false/*notify remote*/, value.expr_id);
+        // Arrive on the creation barrier
         Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
+      delete collective.first;
+      pending_index_spaces.pop_front();
+      // Advance the creation barrier so that we know when it is ready
       advance_replicate_barrier(creation_barrier, total_shards-1);
-      // Update the index space allocator shard
-      index_space_allocator_shard++;
-      if (index_space_allocator_shard == total_shards)
-        index_space_allocator_shard = 0;
+      // Record this in our context
+      register_index_space_creation(handle);
+      // Get new handles in flight for the next time we need them
+      // Always add a new one to replace the old one, but double the number
+      // in flight if we're not hiding the latency
+      increase_pending_index_spaces(double_buffer ? 
+          pending_index_spaces.size() + 1 : 1, double_next && !double_buffer);
       return handle;
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace ReplicateContext::subtract_index_spaces(RegionTreeForest *forest,
+    IndexSpace ReplicateContext::subtract_index_spaces(
                                               IndexSpace left, IndexSpace right)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      IndexSpace handle = IndexSpace::NO_SPACE;
-      if (owner_shard->shard_id == index_space_allocator_shard)
+      if (!left.exists())
+        return IndexSpace::NO_SPACE;
+      if (right.exists() && left.get_type_tag() != right.get_type_tag())
+        REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
+                        "Dynamic type mismatch in 'create_difference_spaces' "
+                        "performed in task %s (UID %lld)",
+                        get_task_name(), get_unique_id())
+      // Seed this with the first index space broadcast
+      if (pending_index_spaces.empty())
+        increase_pending_index_spaces(1/*count*/, false/*double*/);
+      IndexSpace handle;
+      bool double_next = false;
+      bool double_buffer = false;
+      std::pair<ValueBroadcast<ISBroadcast>*,bool> &collective = 
+        pending_index_spaces.front();
+      if (collective.second)
       {
-        // We're the owner, so make it locally and then broadcast it
-        handle = forest->find_or_create_difference_space(this, left, right,
-                                                   false/*notify remote*/);
-        IndexSpaceNode *node = forest->get_node(handle); 
-        ValueBroadcast<ISBroadcast> space_collective(this, COLLECTIVE_LOC_6);
-        space_collective.broadcast(ISBroadcast(handle,node->expr_id,node->did));
-        // Wait for the creation to finish
-        creation_barrier.wait();
+        const ISBroadcast value = collective.first->get_value(false);
+        handle = IndexSpace(value.space_id, value.tid, left.get_type_tag());
+        double_buffer = value.double_buffer;
+        IndexSpaceNode *node = 
+          runtime->forest->create_difference_space(handle, value.did, left,
+              right, creation_barrier, false/*notify remote*/, value.expr_id);
+        // Now we can update the creation set
         node->update_creation_set(shard_manager->get_mapping());
+        runtime->forest->revoke_pending_index_space(value.space_id);
+#ifdef DEBUG_LEGION
+        log_index.debug("Creating index space %x in task%s (ID %lld)",
+                        handle.id, get_task_name(), get_unique_id());
+#endif
+        if (runtime->legion_spy_enabled)
+          LegionSpy::log_top_index_space(handle.id);
       }
       else
       {
-        // Do our own local version of this
-        IndexSpace local = 
-          forest->find_or_create_difference_space(NULL, left, right);
-        // We need to get the barrier result 
-        ValueBroadcast<ISBroadcast> space_collective(this, 
-                            index_space_allocator_shard, COLLECTIVE_LOC_6);
-        const ISBroadcast value = space_collective.get_value();
-        handle = value.handle;
+        const RtEvent done = collective.first->get_done_event();
+        if (!done.has_triggered())
+        {
+          double_next = true;
+          done.wait();
+        }
+        const ISBroadcast value = collective.first->get_value(false);
+        handle = IndexSpace(value.space_id, value.tid, left.get_type_tag());
+        double_buffer = value.double_buffer;
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
-        // Check to see if they are the same, if not find or make one
-        // with the right name here and the local computation result
-        if (local != handle)
-          forest->find_or_create_sharded_index_space(this, handle, 
-                                                     local, value.did);
-        // Signal that we're done our creation
+        runtime->forest->create_difference_space(handle, value.did, left,
+            right, creation_barrier, false/*notify remote*/, value.expr_id);
+        // Arrive on the creation barrier
         Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
+      delete collective.first;
+      pending_index_spaces.pop_front();
+      // Advance the creation barrier so that we know when it is ready
       advance_replicate_barrier(creation_barrier, total_shards-1);
-      // Update the allocation shard
-      index_space_allocator_shard++;
-      if (index_space_allocator_shard == total_shards)
-        index_space_allocator_shard = 0;
+      // Record this in our context
+      register_index_space_creation(handle);
+      // Get new handles in flight for the next time we need them
+      // Always add a new one to replace the old one, but double the number
+      // in flight if we're not hiding the latency
+      increase_pending_index_spaces(double_buffer ? 
+          pending_index_spaces.size() + 1 : 1, double_next && !double_buffer);
       return handle;
     }
 

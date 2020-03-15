@@ -75,17 +75,19 @@ namespace Legion {
     IndexSpaceNode* RegionTreeForest::create_index_space(IndexSpace handle,
                              const Domain *domain, DistributedID did, 
                              const bool notify_remote, IndexSpaceExprID expr_id,
-                                        ApEvent ready /*=ApEvent::NO_AP_EVENT*/)
+                                        ApEvent ready /*=ApEvent::NO_AP_EVENT*/,
+                                        RtEvent init /*= RtEvent::NO_RT_EVENT*/)
     //--------------------------------------------------------------------------
     {
       return create_node(handle, domain, true/*is domain*/, NULL/*parent*/, 
-         0/*color*/, did, RtEvent::NO_RT_EVENT, ready, expr_id, notify_remote);
+                         0/*color*/, did, init, ready, expr_id, notify_remote);
     }
 
     //--------------------------------------------------------------------------
     IndexSpaceNode* RegionTreeForest::create_union_space(IndexSpace handle,
                     DistributedID did, const std::vector<IndexSpace> &sources, 
-                    RtEvent initialized, const bool notify_remote)
+                    RtEvent initialized, const bool notify_remote,
+                    IndexSpaceExprID expr_id)
     //--------------------------------------------------------------------------
     {
       // Construct the set of index space expressions
@@ -101,14 +103,15 @@ namespace Legion {
       assert(!exprs.empty());
 #endif
       IndexSpaceExpression *expr = union_index_spaces(exprs);
-      return expr->create_node(handle, did, initialized, notify_remote);
+      return expr->create_node(handle, did, initialized, notify_remote,expr_id);
     }
 
     //--------------------------------------------------------------------------
     IndexSpaceNode* RegionTreeForest::create_intersection_space(
                                   IndexSpace handle, DistributedID did,
                                   const std::vector<IndexSpace> &sources, 
-                                  RtEvent initialized, const bool notify_remote)
+                                  RtEvent initialized, const bool notify_remote,
+                                  IndexSpaceExprID expr_id)
     //--------------------------------------------------------------------------
     {
       // Construct the set of index space expressions
@@ -124,14 +127,15 @@ namespace Legion {
       assert(!exprs.empty());
 #endif
       IndexSpaceExpression *expr = intersect_index_spaces(exprs);
-      return expr->create_node(handle, did, initialized, notify_remote);
+      return expr->create_node(handle, did, initialized, notify_remote,expr_id);
     }
 
     //--------------------------------------------------------------------------
     IndexSpaceNode* RegionTreeForest::create_difference_space(
                                  IndexSpace handle, DistributedID did,
                                  IndexSpace left, IndexSpace right, 
-                                 RtEvent initialized, const bool notify_remote)
+                                 RtEvent initialized, const bool notify_remote,
+                                 IndexSpaceExprID expr_id)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -142,7 +146,7 @@ namespace Legion {
         return lhs->create_node(handle, did, initialized, notify_remote);
       IndexSpaceNode *rhs = get_node(right);
       IndexSpaceExpression *expr = subtract_index_spaces(lhs, rhs);
-      return expr->create_node(handle, did, initialized, notify_remote);
+      return expr->create_node(handle, did, initialized, notify_remote,expr_id);
     }
 
     //--------------------------------------------------------------------------
@@ -4115,8 +4119,38 @@ namespace Legion {
       // Couldn't find it, so send a request to the owner node
       AddressSpace owner = IndexSpaceNode::get_owner_space(space, runtime);
       if (owner == runtime->address_space)
-        REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
-          "Unable to find entry for index space %x.", space.id)
+      {
+        // See if it is in the set of pending spaces in which case we
+        // can wait for it to be recorded
+        RtEvent pending_wait;
+        {
+          AutoLock l_lock(lookup_lock);
+          std::map<IndexSpaceID,RtUserEvent>::iterator finder = 
+            pending_index_spaces.find(space.get_id());
+          if (finder != pending_index_spaces.end())
+          {
+            if (!finder->second.exists())
+              finder->second = Runtime::create_rt_user_event();
+            pending_wait = finder->second;
+          }
+        }
+        if (pending_wait.exists())
+        {
+          if (defer != NULL)
+          {
+            *defer = pending_wait;
+            return NULL;
+          }
+          else
+          {
+            pending_wait.wait();
+            return get_node(space, defer); 
+          }
+        }
+        else
+          REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
+            "Unable to find entry for index space %x.", space.id)
+      }
       // Retake the lock and get something to wait on
       {
         AutoLock l_lock(lookup_lock);
@@ -4755,6 +4789,40 @@ namespace Legion {
       }
       if (node->remove_base_resource_ref(REGION_TREE_REF))
         delete node;
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::record_pending_index_space(IndexSpaceID space)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      // We should be the owner for this space
+      assert((space % runtime->total_address_spaces) == runtime->address_space);
+#endif
+      AutoLock l_lock(lookup_lock);
+#ifdef DEBUG_LEGION
+      assert(pending_index_spaces.find(space) == pending_index_spaces.end());
+#endif
+      pending_index_spaces[space] = RtUserEvent::NO_RT_USER_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::revoke_pending_index_space(IndexSpaceID space)
+    //--------------------------------------------------------------------------
+    {
+      RtUserEvent to_trigger;
+      {
+        AutoLock l_lock(lookup_lock);
+        std::map<IndexSpaceID,RtUserEvent>::iterator finder = 
+          pending_index_spaces.find(space);
+#ifdef DEBUG_LEGION
+        assert(finder != pending_index_spaces.end());
+#endif
+        to_trigger = finder->second;
+        pending_index_spaces.erase(finder);
+      }
+      if (to_trigger.exists())
+        Runtime::trigger_event(to_trigger);
     }
 
     //--------------------------------------------------------------------------

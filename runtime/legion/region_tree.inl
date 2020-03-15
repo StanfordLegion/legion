@@ -848,18 +848,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexSpaceNode* IndexSpaceOperationT<DIM,T>::create_node(IndexSpace handle,
-               DistributedID did, RtEvent initialized, const bool notify_remote)
+                         DistributedID did, RtEvent initialized, 
+                         const bool notify_remote, IndexSpaceExprID new_expr_id)
     //--------------------------------------------------------------------------
     {
+      if (new_expr_id == 0)
+        new_expr_id = expr_id;
       AutoLock i_lock(inter_lock, 1, false/*exclusive*/);
       if (is_index_space_tight)
         return context->create_node(handle, &tight_index_space, false/*domain*/,
-                              NULL/*parent*/, 0/*color*/, did, initialized,
-                              realm_index_space_ready, expr_id, notify_remote);
+                          NULL/*parent*/, 0/*color*/, did, initialized,
+                          realm_index_space_ready, new_expr_id, notify_remote);
       else
         return context->create_node(handle, &realm_index_space, false/*domain*/,
-                              NULL/*parent*/, 0/*color*/, did, initialized,
-                              realm_index_space_ready, expr_id, notify_remote);
+                          NULL/*parent*/, 0/*color*/, did, initialized,
+                          realm_index_space_ready, new_expr_id, notify_remote);
     }
 
     //--------------------------------------------------------------------------
@@ -1954,9 +1957,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexSpaceNode* IndexSpaceNodeT<DIM,T>::create_node(IndexSpace new_handle,
-               DistributedID did, RtEvent initialized, const bool notify_remote)
+                         DistributedID did, RtEvent initialized, 
+                         const bool notify_remote, IndexSpaceExprID new_expr_id)
     //--------------------------------------------------------------------------
     {
+      if (new_expr_id == 0)
+        new_expr_id = expr_id;
 #ifdef DEBUG_LEGION
       assert(handle.get_type_tag() == new_handle.get_type_tag());
 #endif
@@ -1964,7 +1970,7 @@ namespace Legion {
       const ApEvent ready = get_realm_index_space(local_space, false/*tight*/);
       return context->create_node(new_handle, &local_space, false/*domain*/,
                                   NULL/*parent*/, 0/*color*/, did, initialized,
-                                  ready, expr_id, notify_remote);
+                                  ready, new_expr_id, notify_remote);
     }
 
     //--------------------------------------------------------------------------

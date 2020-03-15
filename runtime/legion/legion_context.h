@@ -1402,13 +1402,16 @@ namespace Legion {
     public: 
       struct ISBroadcast {
       public:
-        ISBroadcast(void) : expr_id(0), did(0) { }
-        ISBroadcast(IndexSpace h, IndexSpaceExprID e, DistributedID d)
-          : handle(h), expr_id(e), did(d) { }
+        ISBroadcast(void) : expr_id(0), did(0), double_buffer(false) { }
+        ISBroadcast(IndexSpaceID i, IndexTreeID t, IndexSpaceExprID e, 
+                    DistributedID d, bool db)
+          : space_id(i), tid(t), expr_id(e), did(d), double_buffer(db) { }
       public:
-        IndexSpace handle;
+        IndexSpaceID space_id;
+        IndexTreeID tid;
         IndexSpaceExprID expr_id;
         DistributedID did;
+        bool double_buffer;
       };
       struct IPBroadcast {
       public:
@@ -1791,6 +1794,8 @@ namespace Legion {
           const DomainPoint &point, RtEvent point_mapped, ShardID next_shard);
       void handle_intra_space_dependence(Deserializer &derez);
     public:
+      void increase_pending_index_spaces(unsigned count, bool double_buffer);
+    public:
       // Collective methods
       CollectiveID get_next_collective_index(CollectiveIndexLocation loc);
       void register_collective(ShardCollective *collective);
@@ -1892,6 +1897,10 @@ namespace Legion {
       // safe as long as we know we have more generations of phase barriers
       // than we can have outstanding replays, which is usually very true
       volatile CollectiveID summary_collective_id;
+    protected:
+      // Pending allocations of various resources
+      std::deque<std::pair<ValueBroadcast<ISBroadcast>*,bool> > 
+                                            pending_index_spaces;
     protected:
       std::map<RtEvent,ReplFutureMapImpl*> future_maps;
       std::map<RtEvent,std::vector<
