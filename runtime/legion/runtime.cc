@@ -11089,48 +11089,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace Runtime::union_index_spaces(Context ctx,
-                                          const std::vector<IndexSpace> &spaces)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context create index space!");
-      return ctx->union_index_spaces(forest, spaces);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace Runtime::intersect_index_spaces(Context ctx,
-                                          const std::vector<IndexSpace> &spaces)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context create index space!");
-      return ctx->intersect_index_spaces(forest, spaces);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace Runtime::subtract_index_spaces(Context ctx,
-                                              IndexSpace left, IndexSpace right)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context subtract index space!");
-      return ctx->subtract_index_spaces(forest, left, right);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::destroy_index_space(Context ctx, IndexSpace handle,
-                                      const bool unordered)
-    //--------------------------------------------------------------------------
-    {
-      if (!handle.exists())
-        return;
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context destroy index space!");
-      ctx->destroy_index_space(handle, unordered);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::destroy_index_partition(Context ctx, IndexPartition handle,
                                           const bool unordered)
     //--------------------------------------------------------------------------

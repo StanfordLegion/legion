@@ -844,41 +844,19 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    IndexSpaceNode* IndexSpaceOperationT<DIM,T>::find_or_create_node(
-                                          TaskContext *ctx, RtEvent initialized)
+    IndexSpaceNode* IndexSpaceOperationT<DIM,T>::create_node(IndexSpace handle,
+                                         DistributedID did, RtEvent initialized)
     //--------------------------------------------------------------------------
     {
-      if (node != NULL)
-        return node;
-      Runtime *runtime = context->runtime;
-      {
-        AutoLock i_lock(inter_lock);
-        // Retest after we get the lock
-        if (node != NULL)
-          return node;
-        // Make a handle and DID to use for this index space
-        IndexSpace handle = runtime->help_create_index_space_handle(type_tag);
-        DistributedID did = runtime->get_available_distributed_id();
-#ifdef DEBUG_LEGION
-        if (ctx != NULL)
-          log_index.debug("Creating index space %x in task%s (ID %lld)", 
-                handle.get_id(), ctx->get_task_name(), ctx->get_unique_id());
-#endif
-        
-        if (is_index_space_tight)
-          node = context->create_node(handle, &tight_index_space, false/*dom*/,
-                                      NULL/*parent*/,0/*color*/,did,initialized,
-                                      realm_index_space_ready, expr_id);
-        else
-          node = context->create_node(handle, &realm_index_space, false/*dom*/,
-                                      NULL/*parent*/,0/*color*/,did,initialized,
-                                      realm_index_space_ready, expr_id);
-      }
-      if (ctx != NULL)
-        ctx->register_index_space_creation(node->handle);
-      if (runtime->legion_spy_enabled)
-        LegionSpy::log_top_index_space(node->handle.get_id());
-      return node;
+      AutoLock i_lock(inter_lock, 1, false/*exclusive*/);
+      if (is_index_space_tight)
+        return context->create_node(handle, &tight_index_space, false/*domain*/,
+                                    NULL/*parent*/, 0/*color*/, did,initialized,
+                                    realm_index_space_ready, expr_id);
+      else
+        return context->create_node(handle, &realm_index_space, false/*domain*/,
+                                    NULL/*parent*/, 0/*color*/, did,initialized,
+                                    realm_index_space_ready, expr_id);
     }
 
     //--------------------------------------------------------------------------
@@ -1951,6 +1929,22 @@ namespace Legion {
       // never actually happen
       LocalReferenceMutator mutator;
       add_base_gc_ref(REMOTE_DID_REF, &mutator);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceNode* IndexSpaceNodeT<DIM,T>::create_node(IndexSpace new_handle,
+                                         DistributedID did, RtEvent initialized)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(handle.get_type_tag() == new_handle.get_type_tag());
+#endif
+      Realm::IndexSpace<DIM,T> local_space;
+      const ApEvent ready = get_realm_index_space(local_space, false/*tight*/);
+      return context->create_node(new_handle, &local_space, false/*domain*/,
+                                  NULL/*parent*/, 0/*color*/, did, initialized,
+                                  ready, expr_id);
     }
 
     //--------------------------------------------------------------------------

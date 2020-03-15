@@ -1706,15 +1706,6 @@ namespace Legion {
                                  const TaskArgument &arg, MapperID map_id);
       void process_mapper_task_result(const MapperTaskArgs *args); 
     public:
-      IndexSpace union_index_spaces(Context ctx, 
-                                    const std::vector<IndexSpace> &spaces);
-      IndexSpace intersect_index_spaces(Context ctx,
-                                    const std::vector<IndexSpace> &spaces);
-      IndexSpace subtract_index_spaces(Context ctx,
-                                    IndexSpace left, IndexSpace right);
-      void destroy_index_space(Context ctx, IndexSpace handle,
-                               const bool unordered);
-    public:
       void destroy_index_partition(Context ctx, IndexPartition handle,
                                    const bool unordered);
     public:
