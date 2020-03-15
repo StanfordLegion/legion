@@ -9477,9 +9477,69 @@ namespace Legion {
                                                     TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
-      // TODO: Implement this
-      assert(false);
-      return IndexSpace::NO_SPACE;
+      AutoRuntimeCall call(this);
+      // Seed this with the first index space broadcast
+      if (pending_index_spaces.empty())
+        increase_pending_index_spaces(1/*count*/, false/*double*/);
+      IndexSpace handle;
+      bool double_next = false;
+      bool double_buffer = false;
+      std::pair<ValueBroadcast<ISBroadcast>*,bool> &collective = 
+        pending_index_spaces.front();
+      IndexSpaceNode *node = NULL;
+      // Get a new creation operation
+      CreationOp *creator_op = runtime->get_available_creation_op();
+      const ApEvent ready = creator_op->get_completion_event();
+      if (collective.second)
+      {
+        const ISBroadcast value = collective.first->get_value(false);
+        handle = IndexSpace(value.space_id, value.tid, type_tag);
+        double_buffer = value.double_buffer;
+        node = runtime->forest->create_index_space(handle, NULL, value.did,
+              false/*notify remote*/, value.expr_id, ready, creation_barrier);
+        // Now we can update the creation set
+        node->update_creation_set(shard_manager->get_mapping());
+        runtime->forest->revoke_pending_index_space(value.space_id);
+#ifdef DEBUG_LEGION
+        log_index.debug("Creating index space %x in task%s (ID %lld)",
+                        handle.id, get_task_name(), get_unique_id());
+#endif
+        if (runtime->legion_spy_enabled)
+          LegionSpy::log_top_index_space(handle.id);
+      }
+      else
+      {
+        const RtEvent done = collective.first->get_done_event();
+        if (!done.has_triggered())
+        {
+          double_next = true;
+          done.wait();
+        }
+        const ISBroadcast value = collective.first->get_value(false);
+        handle = IndexSpace(value.space_id, value.tid, type_tag);
+        double_buffer = value.double_buffer;
+#ifdef DEBUG_LEGION
+        assert(handle.exists());
+#endif
+        node = runtime->forest->create_index_space(handle, NULL, value.did,
+               false/*notify remote*/, value.expr_id, ready, creation_barrier);
+        // Arrive on the creation barrier
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+      }
+      creator_op->initialize_index_space(node, future);
+      runtime->add_to_dependence_queue(this, executing_processor, creator_op);
+      delete collective.first;
+      pending_index_spaces.pop_front();
+      // Advance the creation barrier so that we know when it is ready
+      advance_replicate_barrier(creation_barrier, total_shards-1);
+      // Record this in our context
+      register_index_space_creation(handle);
+      // Get new handles in flight for the next time we need them
+      // Always add a new one to replace the old one, but double the number
+      // in flight if we're not hiding the latency
+      increase_pending_index_spaces(double_buffer ? 
+          pending_index_spaces.size() + 1 : 1, double_next && !double_buffer);
+      return handle;
     }
 
     //--------------------------------------------------------------------------
