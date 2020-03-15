@@ -154,14 +154,19 @@ namespace Legion {
                               const bool notify_remote = true,
                               IndexSpaceExprID expr_id = 0,
                               ApEvent ready = ApEvent::NO_AP_EVENT);
-      IndexSpace find_or_create_union_space(TaskContext *ctx,
+      IndexSpaceNode* create_union_space(IndexSpace handle, DistributedID did,
                               const std::vector<IndexSpace> &sources,
+                              RtEvent initialized = RtEvent::NO_RT_EVENT,
                               const bool notify_remote = true);
-      IndexSpace find_or_create_intersection_space(TaskContext *ctx,
+      IndexSpaceNode* create_intersection_space(IndexSpace handle, 
+                              DistributedID did,
                               const std::vector<IndexSpace> &sources,
-                              const bool notify_remote = true);
-      IndexSpace find_or_create_difference_space(TaskContext *ctx,
+                              RtEvent initialized = RtEvent::NO_RT_EVENT,
+                              const bool noitfy_remote = true);
+      IndexSpaceNode* create_difference_space(IndexSpace handle,
+                              DistributedID did,
                               IndexSpace left, IndexSpace right,
+                              RtEvent initialized = RtEvent::NO_RT_EVENT,
                               const bool notify_remote = true);
       void find_or_create_sharded_index_space(TaskContext *ctx,
                               IndexSpace handle, IndexSpace local,
@@ -1006,7 +1011,7 @@ namespace Legion {
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
       virtual bool test_intersection_nonblocking(IndexSpaceExpression *expr,
          RegionTreeForest *context, ApEvent &precondition, bool second = false);
-      virtual IndexSpaceNode* find_or_create_node(TaskContext *ctx,
+      virtual IndexSpaceNode* create_node(IndexSpace handle, DistributedID did,
           RtEvent initialized, const bool notify_remote = true) = 0;
     public:
       virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
@@ -1179,7 +1184,7 @@ namespace Legion {
       virtual void add_expression_reference(void);
       virtual bool remove_expression_reference(void);
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
-      virtual IndexSpaceNode* find_or_create_node(TaskContext *ctx,
+      virtual IndexSpaceNode* create_node(IndexSpace handle, DistributedID did,
           RtEvent initialized, const bool notify_remote = true) = 0;
     protected:
       void record_remote_expression(AddressSpaceID target);
@@ -1191,10 +1196,6 @@ namespace Legion {
     protected:
       mutable LocalLock inter_lock;
     protected:
-      // An equivalent index space node with the same IndexSpaceExprID as this
-      // We only make this if we actually need to since IndexSpaceNodes
-      // are more expensive to maintain
-      IndexSpaceNode *node; 
       std::set<AddressSpaceID> *remote_exprs;
     };
 
@@ -1224,7 +1225,7 @@ namespace Legion {
                                              const bool top) = 0;
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
       virtual bool remove_expression_reference(void);
-      virtual IndexSpaceNode* find_or_create_node(TaskContext *ctx,
+      virtual IndexSpaceNode* create_node(IndexSpace handle, DistributedID did, 
           RtEvent initialized, const bool notify_remote = true) = 0;
       virtual IndexSpaceExpression* find_congruence(void) = 0;
       virtual void activate_remote(void) = 0;
@@ -1271,7 +1272,7 @@ namespace Legion {
                                              AddressSpaceID target,
                                              const bool top) = 0;
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
-      virtual IndexSpaceNode* find_or_create_node(TaskContext *ctx,
+      virtual IndexSpaceNode* create_node(IndexSpace handle, DistributedID did,
           RtEvent initialized, const bool notify_remote = true);
       virtual IndexSpaceExpression* find_congruence(void) = 0;
     public:
@@ -1835,9 +1836,8 @@ namespace Legion {
       virtual void add_expression_reference(void);
       virtual bool remove_expression_reference(void);
       virtual bool remove_operation(RegionTreeForest *forest);
-      virtual IndexSpaceNode* find_or_create_node(TaskContext *ctx,
-          RtEvent initialized, const bool notify_remote = true)
-        { return this; }
+      virtual IndexSpaceNode* create_node(IndexSpace handle, DistributedID did,
+          RtEvent initialized, const bool notify_remote = true) = 0;
       virtual void create_sharded_alias(IndexSpace alias,DistributedID did) = 0;
     public:
       virtual ApEvent compute_pending_space(Operation *op,
@@ -2052,6 +2052,8 @@ namespace Legion {
       virtual void pack_expression_structure(Serializer &rez,
                                              AddressSpaceID target,
                                              const bool top);
+      virtual IndexSpaceNode* create_node(IndexSpace handle, DistributedID did,
+          RtEvent initialized, const bool notify_remote = true);
       virtual void create_sharded_alias(IndexSpace alias, DistributedID did);
     public:
       void log_index_space_points(const Realm::IndexSpace<DIM,T> &space) const;

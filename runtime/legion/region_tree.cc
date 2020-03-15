@@ -83,9 +83,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace RegionTreeForest::find_or_create_union_space(TaskContext *ctx,
-                                         const std::vector<IndexSpace> &sources,
-                                         const bool notify_remote)
+    IndexSpaceNode* RegionTreeForest::create_union_space(IndexSpace handle,
+                    DistributedID did, const std::vector<IndexSpace> &sources, 
+                    RtEvent initialized, const bool notify_remote)
     //--------------------------------------------------------------------------
     {
       // Construct the set of index space expressions
@@ -95,25 +95,20 @@ namespace Legion {
       {
         if (!it->exists())
           continue;
-        if (sources[0].get_type_tag() != it->get_type_tag())
-          REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
-                        "Dynamic type mismatch in 'union_index_spaces' "
-                        "performed in task %s (UID %lld)",
-                        ctx->get_task_name(), ctx->get_unique_id())
         exprs.insert(get_node(*it));
       }
-      if (exprs.empty())
-        return IndexSpace::NO_SPACE;
+#ifdef DEBUG_LEGION
+      assert(!exprs.empty());
+#endif
       IndexSpaceExpression *expr = union_index_spaces(exprs);
-      IndexSpaceNode *node = 
-        expr->find_or_create_node(ctx, RtEvent::NO_RT_EVENT, notify_remote);
-      return node->handle;
+      return expr->create_node(handle, did, initialized, notify_remote);
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace RegionTreeForest::find_or_create_intersection_space(
-                       TaskContext *ctx, const std::vector<IndexSpace> &sources,
-                       const bool notify_remote)
+    IndexSpaceNode* RegionTreeForest::create_intersection_space(
+                                  IndexSpace handle, DistributedID did,
+                                  const std::vector<IndexSpace> &sources, 
+                                  RtEvent initialized, const bool notify_remote)
     //--------------------------------------------------------------------------
     {
       // Construct the set of index space expressions
@@ -123,37 +118,31 @@ namespace Legion {
       {
         if (!it->exists())
           continue;
-        if (sources[0].get_type_tag() != it->get_type_tag())
-          REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
-                        "Dynamic type mismatch in 'intersect_index_spaces' "
-                        "performed in task %s (UID %lld)",
-                        ctx->get_task_name(), ctx->get_unique_id())
         exprs.insert(get_node(*it));
       }
-      if (exprs.empty())
-        return IndexSpace::NO_SPACE;
+#ifdef DEBUG_LEGION
+      assert(!exprs.empty());
+#endif
       IndexSpaceExpression *expr = intersect_index_spaces(exprs);
-      IndexSpaceNode *node = 
-        expr->find_or_create_node(ctx, RtEvent::NO_RT_EVENT, notify_remote);
-      return node->handle;
+      return expr->create_node(handle, did, initialized, notify_remote);
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace RegionTreeForest::find_or_create_difference_space(
-                            TaskContext *ctx, IndexSpace left, IndexSpace right,
-                            const bool notify_remote)
+    IndexSpaceNode* RegionTreeForest::create_difference_space(
+                                 IndexSpace handle, DistributedID did,
+                                 IndexSpace left, IndexSpace right, 
+                                 RtEvent initialized, const bool notify_remote)
     //--------------------------------------------------------------------------
     {
-      if (!left.exists())
-        return IndexSpace::NO_SPACE;
-      if (!right.exists())
-        return left;
+#ifdef DEBUG_LEGION
+      assert(left.exists());
+#endif
       IndexSpaceNode *lhs = get_node(left);
+      if (!right.exists())
+        return lhs->create_node(handle, did, initialized, notify_remote);
       IndexSpaceNode *rhs = get_node(right);
       IndexSpaceExpression *expr = subtract_index_spaces(lhs, rhs);
-      IndexSpaceNode *node = 
-        expr->find_or_create_node(ctx, RtEvent::NO_RT_EVENT, notify_remote);
-      return node->handle;
+      return expr->create_node(handle, did, initialized, notify_remote);
     }
 
     //--------------------------------------------------------------------------
@@ -6284,7 +6273,7 @@ namespace Legion {
     IntermediateExpression::IntermediateExpression(TypeTag tag,
                                                    RegionTreeForest *ctx)
       : IndexSpaceExpression(tag, ctx->runtime, inter_lock), 
-        context(ctx), node(NULL), remote_exprs(NULL)
+        context(ctx), remote_exprs(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -6292,7 +6281,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IntermediateExpression::IntermediateExpression(TypeTag tag,
                                      RegionTreeForest *ctx, IndexSpaceExprID id)
-      : IndexSpaceExpression(tag, id, inter_lock), context(ctx), node(NULL),
+      : IndexSpaceExpression(tag, id, inter_lock), context(ctx),
         remote_exprs(NULL)
     //--------------------------------------------------------------------------
     {

@@ -3279,7 +3279,7 @@ namespace Legion {
                                           const std::vector<IndexSpace> &spaces)
     //--------------------------------------------------------------------------
     {
-      return runtime->union_index_spaces(ctx, spaces);
+      return ctx->union_index_spaces(spaces);
     }
 
     //--------------------------------------------------------------------------
@@ -3287,7 +3287,7 @@ namespace Legion {
                                           const std::vector<IndexSpace> &spaces)
     //--------------------------------------------------------------------------
     {
-      return runtime->intersect_index_spaces(ctx, spaces);
+      return ctx->intersect_index_spaces(spaces);
     }
 
     //--------------------------------------------------------------------------
@@ -3295,7 +3295,7 @@ namespace Legion {
                                               IndexSpace left, IndexSpace right)
     //--------------------------------------------------------------------------
     {
-      return runtime->subtract_index_spaces(ctx, left, right);
+      return ctx->subtract_index_spaces(left, right);
     }
 
     //--------------------------------------------------------------------------
@@ -3303,7 +3303,7 @@ namespace Legion {
                                       const bool unordered)
     //--------------------------------------------------------------------------
     {
-      runtime->destroy_index_space(ctx, handle, unordered);
+      ctx->destroy_index_space(handle, unordered);
     } 
 
     //--------------------------------------------------------------------------

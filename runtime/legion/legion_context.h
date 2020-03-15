@@ -102,11 +102,11 @@ namespace Legion {
                                             TypeTag type_tag);
       virtual IndexSpace create_index_space(const Future &future,
                                             TypeTag type_tag) = 0;
-      virtual IndexSpace union_index_spaces(RegionTreeForest *forest,
+      virtual IndexSpace union_index_spaces(
                            const std::vector<IndexSpace> &spaces);
-      virtual IndexSpace intersect_index_spaces(RegionTreeForest *forest,
+      virtual IndexSpace intersect_index_spaces(
                            const std::vector<IndexSpace> &spaces);
-      virtual IndexSpace subtract_index_spaces(RegionTreeForest *forest,
+      virtual IndexSpace subtract_index_spaces(
                            IndexSpace left, IndexSpace right);
       virtual void destroy_index_space(IndexSpace handle,
                                        const bool unordered) = 0;
@@ -1517,11 +1517,11 @@ namespace Legion {
                                             TypeTag type_tag);
       virtual IndexSpace create_index_space(const Future &future, 
                                             TypeTag type_tag);
-      virtual IndexSpace union_index_spaces(RegionTreeForest *forest,
+      virtual IndexSpace union_index_spaces(
                            const std::vector<IndexSpace> &spaces);
-      virtual IndexSpace intersect_index_spaces(RegionTreeForest *forest,
+      virtual IndexSpace intersect_index_spaces(
                            const std::vector<IndexSpace> &spaces);
-      virtual IndexSpace subtract_index_spaces(RegionTreeForest *forest,
+      virtual IndexSpace subtract_index_spaces(
                            IndexSpace left, IndexSpace right);
       virtual void destroy_index_space(IndexSpace handle, const bool unordered);
       virtual void destroy_index_partition(IndexPartition handle, 
@@ -2441,11 +2441,11 @@ namespace Legion {
       // Interface to operations performed by a context
       virtual IndexSpace create_index_space(const Domain &domain, TypeTag tag);
       virtual IndexSpace create_index_space(const Future &future, TypeTag tag);
-      virtual IndexSpace union_index_spaces(RegionTreeForest *forest,
+      virtual IndexSpace union_index_spaces(
                            const std::vector<IndexSpace> &spaces);
-      virtual IndexSpace intersect_index_spaces(RegionTreeForest *forest,
+      virtual IndexSpace intersect_index_spaces(
                            const std::vector<IndexSpace> &spaces);
-      virtual IndexSpace subtract_index_spaces(RegionTreeForest *forest,
+      virtual IndexSpace subtract_index_spaces(
                            IndexSpace left, IndexSpace right);
       virtual void destroy_index_space(IndexSpace handle, const bool unordered);
       virtual void destroy_index_partition(IndexPartition handle,
