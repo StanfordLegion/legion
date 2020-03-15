@@ -2286,7 +2286,13 @@ class IndexExpr(object):
             self.kind = INDEX_SPACE_EXPR
             self.base = index_space
         elif self.kind == INDEX_SPACE_EXPR:
-            assert self.base is index_space
+            # If they aren't the same index space then
+            # check that they have the same set of points
+            if self.base is not index_space:
+                one = self.base.get_point_set()
+                two = index_space.get_point_set()
+                diff = one - two
+                assert len(one) == len(two) and len(diff) == 0
 
     def add_union_expr(self, union_expr):
         if self.kind != UNION_EXPR:
