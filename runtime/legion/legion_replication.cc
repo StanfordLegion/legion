@@ -6570,7 +6570,7 @@ namespace Legion {
         // Only need shards-1 for arrivals here since it is used
         // to signal from all the non-creator shards to the creator shard
         creation_barrier = 
-          RtBarrier(Realm::Barrier::create_barrier(total_shards-1));
+          RtBarrier(Realm::Barrier::create_barrier(total_shards));
         // Same thing as above for deletion barriers
         deletion_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards));

@@ -9392,6 +9392,8 @@ namespace Legion {
               creation_barrier);
         // Now we can update the creation set
         node->update_creation_set(shard_manager->get_mapping());
+        // Arrive on the creation barrier
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)",
@@ -9423,7 +9425,7 @@ namespace Legion {
       delete collective.first;
       pending_index_spaces.pop_front();
       // Advance the creation barrier so that we know when it is ready
-      advance_replicate_barrier(creation_barrier, total_shards-1);
+      advance_replicate_barrier(creation_barrier, total_shards);
       // Record this in our context
       register_index_space_creation(handle);
       // Get new handles in flight for the next time we need them
@@ -9499,6 +9501,8 @@ namespace Legion {
               false/*notify remote*/, value.expr_id, ready, creation_barrier);
         // Now we can update the creation set
         node->update_creation_set(shard_manager->get_mapping());
+        // Arrive on the creation barrier
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)",
@@ -9531,7 +9535,7 @@ namespace Legion {
       delete collective.first;
       pending_index_spaces.pop_front();
       // Advance the creation barrier so that we know when it is ready
-      advance_replicate_barrier(creation_barrier, total_shards-1);
+      advance_replicate_barrier(creation_barrier, total_shards);
       // Record this in our context
       register_index_space_creation(handle);
       // Get new handles in flight for the next time we need them
@@ -9582,6 +9586,8 @@ namespace Legion {
               spaces, creation_barrier, false/*notify remote*/, value.expr_id);
         // Now we can update the creation set
         node->update_creation_set(shard_manager->get_mapping());
+        // Arrive on the creation barrier
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)",
@@ -9612,7 +9618,7 @@ namespace Legion {
       delete collective.first;
       pending_index_spaces.pop_front();
       // Advance the creation barrier so that we know when it is ready
-      advance_replicate_barrier(creation_barrier, total_shards-1);
+      advance_replicate_barrier(creation_barrier, total_shards);
       // Record this in our context
       register_index_space_creation(handle);
       // Get new handles in flight for the next time we need them
@@ -9663,6 +9669,8 @@ namespace Legion {
               spaces, creation_barrier, false/*notify remote*/, value.expr_id);
         // Now we can update the creation set
         node->update_creation_set(shard_manager->get_mapping());
+        // Arrive on the creation barrier
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)",
@@ -9693,7 +9701,7 @@ namespace Legion {
       delete collective.first;
       pending_index_spaces.pop_front();
       // Advance the creation barrier so that we know when it is ready
-      advance_replicate_barrier(creation_barrier, total_shards-1);
+      advance_replicate_barrier(creation_barrier, total_shards);
       // Record this in our context
       register_index_space_creation(handle);
       // Get new handles in flight for the next time we need them
@@ -9735,6 +9743,8 @@ namespace Legion {
               right, creation_barrier, false/*notify remote*/, value.expr_id);
         // Now we can update the creation set
         node->update_creation_set(shard_manager->get_mapping());
+        // Arrive on the creation barrier
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)",
@@ -9765,7 +9775,7 @@ namespace Legion {
       delete collective.first;
       pending_index_spaces.pop_front();
       // Advance the creation barrier so that we know when it is ready
-      advance_replicate_barrier(creation_barrier, total_shards-1);
+      advance_replicate_barrier(creation_barrier, total_shards);
       // Record this in our context
       register_index_space_creation(handle);
       // Get new handles in flight for the next time we need them
@@ -9939,6 +9949,8 @@ namespace Legion {
           ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_8);
           color_collective.broadcast(partition_color);
         }
+        // Signal that we're done our creation
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
         // Wait for the creation to finish
         creation_barrier.wait();
       }
@@ -9976,7 +9988,7 @@ namespace Legion {
         // any shard can handle requests for sub-regions of a partition
         creation_barrier.wait();
       }
-      advance_replicate_barrier(creation_barrier, total_shards-1);
+      advance_replicate_barrier(creation_barrier, total_shards);
       part_op->initialize_equal_partition(this, pid, granularity);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
@@ -10044,6 +10056,8 @@ namespace Legion {
           ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_99);
           color_collective.broadcast(partition_color);
         }
+        // Signal that we're done our creation
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
         // Wait for the creation to finish
         creation_barrier.wait();
       }
@@ -10081,7 +10095,7 @@ namespace Legion {
         // any shard can handle requests for sub-regions of a partition
         creation_barrier.wait();
       }
-      advance_replicate_barrier(creation_barrier, total_shards-1);
+      advance_replicate_barrier(creation_barrier, total_shards);
       part_op->initialize_weight_partition(this, pid, weights, granularity);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
@@ -10196,6 +10210,8 @@ namespace Legion {
           ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_10);
           color_collective.broadcast(partition_color);
         }
+        // Signal that we're done our creation
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
         // Wait for the creation to be done
         creation_barrier.wait();
       }
@@ -10233,7 +10249,7 @@ namespace Legion {
         // any shard can handle requests for sub-regions of a partition
         creation_barrier.wait();
       }
-      advance_replicate_barrier(creation_barrier, total_shards-1);
+      advance_replicate_barrier(creation_barrier, total_shards);
       part_op->initialize_union_partition(this, pid, handle1, handle2);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
@@ -10347,6 +10363,8 @@ namespace Legion {
           ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_12);
           color_collective.broadcast(partition_color);
         }
+        // Signal that we are done our creation
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
         // Wait for the creation to be done
         creation_barrier.wait();
       }
@@ -10384,7 +10402,7 @@ namespace Legion {
         // any shard can handle requests for sub-regions of a partition
         creation_barrier.wait();
       }
-      advance_replicate_barrier(creation_barrier, total_shards-1);
+      advance_replicate_barrier(creation_barrier, total_shards);
       part_op->initialize_intersection_partition(this, pid, handle1, handle2);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
@@ -10488,6 +10506,8 @@ namespace Legion {
           ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_14);
           color_collective.broadcast(partition_color);
         }
+        // Signal that we're done with our creation
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
         // Wait for the creation to be done
         creation_barrier.wait();
       }
@@ -10525,7 +10545,7 @@ namespace Legion {
         // any shard can handle requests for sub-regions of a partition
         creation_barrier.wait();
       }
-      advance_replicate_barrier(creation_barrier, total_shards-1);
+      advance_replicate_barrier(creation_barrier, total_shards);
       part_op->initialize_difference_partition(this, pid, handle1, handle2);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
@@ -10587,6 +10607,7 @@ namespace Legion {
         // Now broadcast the chosen color to all the other shards
         ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_15);
         color_collective.broadcast(partition_color);
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
         // Wait for the creation to be done
         creation_barrier.wait();
       }
@@ -10614,7 +10635,7 @@ namespace Legion {
         // any shard can handle requests for any cross-product partition
         creation_barrier.wait();
       }
-      advance_replicate_barrier(creation_barrier, total_shards-1);
+      advance_replicate_barrier(creation_barrier, total_shards);
       part_op->initialize_cross_product(this, handle1, handle2,partition_color);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
@@ -10733,6 +10754,8 @@ namespace Legion {
           ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_17);
           color_collective.broadcast(part_color);
         }
+        // Signal we are done with the creation
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
         // Wait for the creation to be done
         creation_barrier.wait();
       }
@@ -10770,7 +10793,7 @@ namespace Legion {
         // any shard can handle requests for sub-regions of a partition
         creation_barrier.wait();
       }
-      advance_replicate_barrier(creation_barrier, total_shards-1);
+      advance_replicate_barrier(creation_barrier, total_shards);
       part_op->initialize_restricted_partition(this, pid, transform, 
                                 transform_size, extent, extent_size);
       // Now we can add the operation to the queue
@@ -10908,6 +10931,8 @@ namespace Legion {
           ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_17);
           color_collective.broadcast(part_color);
         }
+        // Signal we are done with the creation
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
         // Wait for the creation to be done
         creation_barrier.wait();
       }
@@ -10945,7 +10970,7 @@ namespace Legion {
         // any shard can handle requests for sub-regions of a partition
         creation_barrier.wait();
       }
-      advance_replicate_barrier(creation_barrier, total_shards-1);
+      advance_replicate_barrier(creation_barrier, total_shards);
       part_op->initialize_by_domain(this, pid, domains, perform_intersections);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
@@ -11018,6 +11043,8 @@ namespace Legion {
           ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_19);
           color_collective.broadcast(part_color);
         }
+        // Signal that we are done our creation
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
         // Wait for the creation to be done
         creation_barrier.wait();
       }
@@ -11055,7 +11082,7 @@ namespace Legion {
         // any shard can handle requests for sub-regions of a partition
         creation_barrier.wait();
       }
-      advance_replicate_barrier(creation_barrier, total_shards-1);
+      advance_replicate_barrier(creation_barrier, total_shards);
       part_op->initialize_by_field(this, index_partition_allocator_shard,
                                    pending_partition_barrier, pid, handle, 
                                    parent_priv, fid, id, tag,
@@ -11156,6 +11183,8 @@ namespace Legion {
           ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_21);
           color_collective.broadcast(part_color);
         }
+        // Signal that we are done with our creation
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
         // Wait for the creation to be done
         creation_barrier.wait();
       }
@@ -11193,7 +11222,7 @@ namespace Legion {
         // any shard can handle requests for sub-regions of a partition
         creation_barrier.wait();
       }
-      advance_replicate_barrier(creation_barrier, total_shards-1);
+      advance_replicate_barrier(creation_barrier, total_shards);
       part_op->initialize_by_image(this, 
 #ifndef SHARD_BY_IMAGE
                                    index_partition_allocator_shard,
@@ -11298,6 +11327,8 @@ namespace Legion {
           ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_23);
           color_collective.broadcast(part_color);
         }
+        // Signal that we are done with the creation
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
         // Wait for the creation to be done
         creation_barrier.wait();
       }
@@ -11335,7 +11366,7 @@ namespace Legion {
         // any shard can handle requests for sub-regions of a partition
         creation_barrier.wait();
       }
-      advance_replicate_barrier(creation_barrier, total_shards-1);
+      advance_replicate_barrier(creation_barrier, total_shards);
       part_op->initialize_by_image_range(this, 
 #ifndef SHARD_BY_IMAGE
                                          index_partition_allocator_shard,
@@ -11456,6 +11487,8 @@ namespace Legion {
           ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_25);
           color_collective.broadcast(part_color);
         }
+        // Signal that we are done with our creation
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
         // Wait for the creation to be done
         creation_barrier.wait();
       }
@@ -11493,7 +11526,7 @@ namespace Legion {
         // any shard can handle requests for sub-regions of a partition
         creation_barrier.wait();
       }
-      advance_replicate_barrier(creation_barrier, total_shards-1);
+      advance_replicate_barrier(creation_barrier, total_shards);
       part_op->initialize_by_preimage(this, index_partition_allocator_shard,
                                       pending_partition_barrier,
                                       pid, projection, handle,
@@ -11595,6 +11628,8 @@ namespace Legion {
           ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_27);
           color_collective.broadcast(part_color);
         }
+        // Signal that we are done with our creation
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
         // Wait for the creation to be done
         creation_barrier.wait();
       }
@@ -11632,7 +11667,7 @@ namespace Legion {
         // any shard can handle requests for sub-regions of a partition
         creation_barrier.wait();
       }
-      advance_replicate_barrier(creation_barrier, total_shards-1);
+      advance_replicate_barrier(creation_barrier, total_shards);
       part_op->initialize_by_preimage_range(this, 
                                             index_partition_allocator_shard, 
                                             pending_partition_barrier,
@@ -11734,6 +11769,8 @@ namespace Legion {
           ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_30);
           color_collective.broadcast(part_color);
         }
+        // Signal that we are done with our creation
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
         // Wait for the creation to be done
         creation_barrier.wait();
       }
@@ -11774,7 +11811,7 @@ namespace Legion {
         // any shard can handle requests for sub-regions of a partition
         creation_barrier.wait();
       }
-      advance_replicate_barrier(creation_barrier, total_shards-1);
+      advance_replicate_barrier(creation_barrier, total_shards);
       // Update our allocation shard
       index_partition_allocator_shard++;
       if (index_partition_allocator_shard == total_shards)
@@ -11929,6 +11966,8 @@ namespace Legion {
 #endif
         if (runtime->legion_spy_enabled)
           LegionSpy::log_field_space(space.id);
+        // Signal that we are done with our creation
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
         // Wait for the creation to be done
         creation_barrier.wait();
       }
@@ -11949,7 +11988,7 @@ namespace Legion {
         // races with field allocations
         creation_barrier.wait();
       }
-      advance_replicate_barrier(creation_barrier, total_shards-1); 
+      advance_replicate_barrier(creation_barrier, total_shards); 
       // Register the field space creation
       register_field_space_creation(space);
       // Update the allocator
@@ -12250,6 +12289,8 @@ namespace Legion {
         if (runtime->legion_spy_enabled)
           LegionSpy::log_top_region(index_space.id, field_space.id, 
                                     handle.tree_id);
+        // Signal that we are done our creation
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
         // Wait for the creation to be done
         creation_barrier.wait();
         node->update_creation_set(shard_manager->get_mapping());
@@ -12267,7 +12308,7 @@ namespace Legion {
         // Signal that we are done our creation
         Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
-      advance_replicate_barrier(creation_barrier, total_shards-1); 
+      advance_replicate_barrier(creation_barrier, total_shards); 
       // Register the creation of a top-level region with the context
       register_region_creation(handle, task_local);
       // Update the allocator shard
