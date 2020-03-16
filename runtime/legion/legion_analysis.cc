@@ -10912,7 +10912,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // No try lock since we can't defer this because of the overlap
-      AutoLock eq(eq_lock,1,false/*exclusive*/);
+      // Also, while you might think this could a read-only lock since
+      // we're just reading meta-data, that's not quite right because
+      // we need exclusive access to data structures in check_for_migration
+      AutoLock eq(eq_lock);
       // No alt-set tracking here for copy across because we might
       // need to to traverse this multiple times with different expressions
       if (!is_logical_owner())
