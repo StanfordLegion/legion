@@ -9987,7 +9987,7 @@ namespace Legion {
         no_trace_optimization(config.no_trace_optimization),
         no_fence_elision(config.no_fence_elision),
         replay_on_cpus(config.replay_on_cpus),
-        verify_disjointness(config.verify_disjointness),
+        verify_partitions(config.verify_partitions),
         runtime_warnings(config.runtime_warnings),
         warnings_backtrace(config.warnings_backtrace),
         report_leaks(config.report_leaks),
@@ -10188,7 +10188,7 @@ namespace Legion {
         no_trace_optimization(rhs.no_trace_optimization),
         no_fence_elision(rhs.no_fence_elision),
         replay_on_cpus(rhs.replay_on_cpus),
-        verify_disjointness(rhs.verify_disjointness),
+        verify_partitions(rhs.verify_partitions),
         runtime_warnings(rhs.runtime_warnings),
         warnings_backtrace(rhs.warnings_backtrace),
         report_leaks(rhs.report_leaks),
@@ -11088,6 +11088,7 @@ namespace Legion {
 #endif
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void Runtime::destroy_index_partition(Context ctx, IndexPartition handle,
                                           const bool unordered)
@@ -11580,6 +11581,7 @@ namespace Legion {
       return ctx->create_index_space_difference(forest, parent, realm_color,
                                                 type_tag, initial, handles);
     }
+#endif
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::get_index_partition(Context ctx, 
@@ -20992,7 +20994,9 @@ namespace Legion {
         .add_option_bool("-lg:replay_on_cpus",
                          config.replay_on_cpus, !filter)
         .add_option_bool("-lg:disjointness",
-                         config.verify_disjointness, !filter)
+                         config.verify_partitions, !filter)
+        .add_option_bool("-lg:partcheck",
+                         config.verify_partitions, !filter)
         .add_option_int("-lg:window", config.initial_task_window_size, !filter)
         .add_option_int("-lg:hysteresis", 
                         config.initial_task_window_hysteresis, !filter)
@@ -21035,7 +21039,7 @@ namespace Legion {
         .add_option_bool("-hl:unsafe_mapper",config.unsafe_mapper, !filter)
         .add_option_bool("-hl:safe_mapper",config.safe_mapper, !filter)
         .add_option_bool("-hl:inorder",config.program_order_execution, !filter)
-        .add_option_bool("-hl:disjointness",config.verify_disjointness, !filter)
+        .add_option_bool("-hl:disjointness",config.verify_partitions, !filter)
         .add_option_int("-hl:window", config.initial_task_window_size, !filter)
         .add_option_int("-hl:hysteresis", 
                         config.initial_task_window_hysteresis, !filter)
@@ -21094,10 +21098,6 @@ namespace Legion {
         REPORT_LEGION_WARNING(LEGION_WARNING_REGION_TREE_STATE_LOGGING,
             "Region tree state logging is disabled.  To enable region "
             "tree state logging compile in debug mode.")
-      if (config.verify_disjointness)
-        REPORT_LEGION_WARNING(LEGION_WARNING_DISJOINTNESS_VERIFICATION,
-            "Disjointness verification for partition creation is disabled. "
-            "To enable dynamic disjointness testing compile in debug mode.")
 #endif
       if (config.initial_task_window_hysteresis > 100)
         REPORT_LEGION_ERROR(ERROR_LEGION_CONFIGURATION,
@@ -21402,6 +21402,29 @@ namespace Legion {
         sleep(5);
       }
 #endif
+      if (config.verify_partitions && (config.num_profiling_nodes > 0))
+      {
+        // Give a massive warning about profiling with partition checks enabled
+        for (int i = 0; i < 2; i++)
+          fprintf(stderr,"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+        for (int i = 0; i < 4; i++)
+          fprintf(stderr,"!WARNING WARNING WARNING WARNING WARNING WARNING!\n");
+        for (int i = 0; i < 2; i++)
+          fprintf(stderr,"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+        fprintf(stderr,"!!! YOU ARE PROFILING WITH PARTITION CHECKS ON!!!\n");
+        fprintf(stderr,"!!! SERIOUS PERFORMANCE DEGRADATION WILL OCCUR!!!\n");
+        fprintf(stderr,"!!! DO NOT USE -lg:partcheck WITH PROFILING   !!!\n");
+        for (int i = 0; i < 2; i++)
+          fprintf(stderr,"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+        for (int i = 0; i < 4; i++)
+          fprintf(stderr,"!WARNING WARNING WARNING WARNING WARNING WARNING!\n");
+        for (int i = 0; i < 2; i++)
+          fprintf(stderr,"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+        fprintf(stderr,"\n");
+        fprintf(stderr,"SLEEPING FOR 5 SECONDS SO YOU READ THIS WARNING...\n");
+        fflush(stderr);
+        sleep(5);
+      }
     }
 
     //--------------------------------------------------------------------------

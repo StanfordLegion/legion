@@ -3552,7 +3552,7 @@ namespace Legion {
                                           const bool unordered)
     //--------------------------------------------------------------------------
     {
-      runtime->destroy_index_partition(ctx, handle, unordered);
+      ctx->destroy_index_partition(handle, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -3563,8 +3563,7 @@ namespace Legion {
                                                    Color color)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_equal_partition(ctx, parent, color_space,
-                                             granularity, color);
+      return ctx->create_equal_partition(parent, color_space,granularity,color);
     }
 
     //--------------------------------------------------------------------------
@@ -3605,8 +3604,8 @@ namespace Legion {
                                     Color color)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_partition_by_union(ctx, parent, handle1, handle2, 
-                                                color_space, kind, color);
+      return ctx->create_partition_by_union(parent, handle1, handle2, 
+                                            color_space, kind, color);
     }
 
     //--------------------------------------------------------------------------
@@ -3618,9 +3617,8 @@ namespace Legion {
                                                 PartitionKind kind, Color color) 
     //--------------------------------------------------------------------------
     {
-      return runtime->create_partition_by_intersection(ctx, parent, handle1,
-                                                       handle2, color_space,
-                                                       kind, color);
+      return ctx->create_partition_by_intersection(parent, handle1, handle2, 
+                                                   color_space, kind, color);
     }
 
     //--------------------------------------------------------------------------
@@ -3629,8 +3627,8 @@ namespace Legion {
                            PartitionKind part_kind, Color color, bool dominates)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_partition_by_intersection(ctx, parent, partition,
-                                                  part_kind, color, dominates);
+      return ctx->create_partition_by_intersection(parent, partition, part_kind,
+                                                   color, dominates);
     }
 
     //--------------------------------------------------------------------------
@@ -3642,9 +3640,8 @@ namespace Legion {
                                                 PartitionKind kind, Color color)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_partition_by_difference(ctx, parent, handle1,
-                                                     handle2, color_space,
-                                                     kind, color);
+      return ctx->create_partition_by_difference(parent, handle1, handle2, 
+                                                 color_space, kind, color);
     }
 
     //--------------------------------------------------------------------------
@@ -3654,8 +3651,8 @@ namespace Legion {
                                 PartitionKind kind, Color color)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_cross_product_partitions(ctx, handle1, handle2, 
-                                                      handles, kind, color);
+      return ctx->create_cross_product_partitions(handle1, handle2, handles, 
+                                                  kind, color);
     }
 
     //--------------------------------------------------------------------------
@@ -3667,8 +3664,7 @@ namespace Legion {
                                      MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
-      runtime->create_association(ctx, domain, domain_parent, domain_fid,
-                                  range, id, tag);
+      ctx->create_association(domain, domain_parent, domain_fid, range, id,tag);
     }
 
     //--------------------------------------------------------------------------
@@ -3782,9 +3778,8 @@ namespace Legion {
                                                         Color color)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_restricted_partition(ctx, parent, color_space,
-                            transform, transform_size, extent, extent_size,
-                            part_kind, color);
+      return ctx->create_restricted_partition(parent, color_space, transform, 
+                      transform_size, extent, extent_size, part_kind, color);
     }
 
     //--------------------------------------------------------------------------
@@ -3800,8 +3795,8 @@ namespace Legion {
         argmap.set_point(it->first,
             TaskArgument(&it->second, sizeof(it->second)));
       FutureMap future_map(argmap.impl->freeze(ctx));
-      return runtime->create_partition_by_domain(ctx, parent, future_map,
-                    color_space, perform_intersections, part_kind, color);
+      return ctx->create_partition_by_domain(parent, future_map, color_space, 
+                                    perform_intersections, part_kind, color);
     }
 
     //--------------------------------------------------------------------------
@@ -3811,8 +3806,8 @@ namespace Legion {
                              PartitionKind part_kind, Color color)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_partition_by_domain(ctx, parent, domains,
-                 color_space, perform_intersections, part_kind, color);
+      return ctx->create_partition_by_domain(parent, domains, color_space, 
+                                      perform_intersections, part_kind, color);
     }
 
     //--------------------------------------------------------------------------
@@ -3822,8 +3817,8 @@ namespace Legion {
                    MapperID id, MappingTagID tag, PartitionKind part_kind)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_partition_by_field(ctx, handle, parent, fid,
-                                  color_space, color, id, tag, part_kind);
+      return ctx->create_partition_by_field(handle, parent, fid, color_space, 
+                                            color, id, tag, part_kind);
     }
 
     //--------------------------------------------------------------------------
@@ -3834,9 +3829,8 @@ namespace Legion {
                   MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_partition_by_image(ctx, handle, projection,
-                                                parent, fid, color_space,
-                                                part_kind, color, id, tag);
+      return ctx->create_partition_by_image(handle, projection, parent, fid, 
+                                    color_space, part_kind, color, id, tag);
     }
 
     //--------------------------------------------------------------------------
@@ -3847,9 +3841,8 @@ namespace Legion {
                   MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_partition_by_image_range(ctx, handle, projection,
-                                                      parent, fid, color_space,
-                                                      part_kind, color, id,tag);
+      return ctx->create_partition_by_image_range(handle, projection, parent, 
+                                  fid, color_space, part_kind, color, id,tag);
     }
 
     //--------------------------------------------------------------------------
@@ -3860,9 +3853,8 @@ namespace Legion {
                   MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_partition_by_preimage(ctx, projection, handle,
-                                                   parent, fid, color_space,
-                                                   part_kind, color, id, tag);
+      return ctx->create_partition_by_preimage(projection, handle, parent,
+                                  fid, color_space, part_kind, color, id, tag);
     }
 
     //--------------------------------------------------------------------------
@@ -3873,9 +3865,8 @@ namespace Legion {
                   MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_partition_by_preimage_range(ctx, projection,handle,
-                                                       parent, fid, color_space,
-                                                       part_kind, color,id,tag);
+      return ctx->create_partition_by_preimage_range(projection, handle, parent,
+                                     fid, color_space, part_kind, color,id,tag);
     } 
 
     //--------------------------------------------------------------------------
@@ -3884,8 +3875,7 @@ namespace Legion {
                              PartitionKind part_kind, Color color)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_pending_partition(ctx, parent, color_space, 
-                                               part_kind, color);
+      return ctx->create_pending_partition(parent, color_space,part_kind,color);
     }
 
     //--------------------------------------------------------------------------
@@ -3900,8 +3890,8 @@ namespace Legion {
         case DIM: \
           { \
             Point<DIM,coord_t> point = color; \
-            return runtime->create_index_space_union(ctx, parent, &point, \
-                                             TYPE_TAG_##DIM##D, handles); \
+            return ctx->create_index_space_union(parent, &point, \
+                                     TYPE_TAG_##DIM##D, handles); \
           }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -3917,8 +3907,7 @@ namespace Legion {
                     const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_index_space_union(ctx, parent, 
-                                               color, type_tag, handles);
+      return ctx->create_index_space_union(parent, color, type_tag, handles);
     }
 
     //--------------------------------------------------------------------------
@@ -3933,8 +3922,8 @@ namespace Legion {
         case DIM: \
           { \
             Point<DIM,coord_t> point = color; \
-            return runtime->create_index_space_union(ctx, parent, &point, \
-                                               TYPE_TAG_##DIM##D, handle); \
+            return ctx->create_index_space_union(parent, &point, \
+                                     TYPE_TAG_##DIM##D, handle); \
           }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -3950,8 +3939,7 @@ namespace Legion {
                         TypeTag type_tag, IndexPartition handle)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_index_space_union(ctx, parent, realm_color,
-                                               type_tag, handle);
+      return ctx->create_index_space_union(parent, realm_color,type_tag,handle);
     }
 
     //--------------------------------------------------------------------------
@@ -3966,8 +3954,8 @@ namespace Legion {
       case DIM: \
         { \
           Point<DIM,coord_t> point = color; \
-          return runtime->create_index_space_intersection(ctx, parent, &point, \
-                                                  TYPE_TAG_##DIM##D, handles); \
+          return ctx->create_index_space_intersection(parent, &point, \
+                                          TYPE_TAG_##DIM##D, handles); \
         }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -3983,8 +3971,8 @@ namespace Legion {
                     const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_index_space_intersection(ctx, parent, 
-                                                      color, type_tag, handles);
+      return ctx->create_index_space_intersection(parent, color, 
+                                                  type_tag, handles);
     }
 
     //--------------------------------------------------------------------------
@@ -3999,8 +3987,8 @@ namespace Legion {
       case DIM: \
         { \
           Point<DIM,coord_t> point = color; \
-          return runtime->create_index_space_intersection(ctx, parent, &point, \
-                                                   TYPE_TAG_##DIM##D, handle); \
+          return ctx->create_index_space_intersection(parent, &point, \
+                                           TYPE_TAG_##DIM##D, handle); \
         }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -4016,8 +4004,8 @@ namespace Legion {
                         TypeTag type_tag, IndexPartition handle)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_index_space_intersection(ctx, parent, realm_color,
-                                                      type_tag, handle);
+      return ctx->create_index_space_intersection(parent, realm_color,
+                                                  type_tag, handle);
     }
 
     //--------------------------------------------------------------------------
@@ -4032,8 +4020,8 @@ namespace Legion {
       case DIM: \
         { \
           Point<DIM,coord_t> point = color; \
-          return runtime->create_index_space_difference(ctx, parent, &point, \
-                                        TYPE_TAG_##DIM##D, initial, handles); \
+          return ctx->create_index_space_difference(parent, &point, \
+                              TYPE_TAG_##DIM##D, initial, handles); \
         }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -4049,8 +4037,8 @@ namespace Legion {
         IndexSpace initial, const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_index_space_difference(ctx, parent,
-                        realm_color, type_tag, initial, handles);
+      return ctx->create_index_space_difference(parent, realm_color, type_tag, 
+                                                initial, handles);
     }
 
     //--------------------------------------------------------------------------

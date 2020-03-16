@@ -1463,7 +1463,7 @@ namespace Legion {
             no_trace_optimization(false),
             no_fence_elision(false),
             replay_on_cpus(false),
-            verify_disjointness(false),
+            verify_partitions(false),
             runtime_warnings(false),
             warnings_backtrace(false),
             report_leaks(false),
@@ -1514,7 +1514,7 @@ namespace Legion {
         bool no_trace_optimization;
         bool no_fence_elision;
         bool replay_on_cpus;
-        bool verify_disjointness;
+        bool verify_partitions;
         bool runtime_warnings;
         bool warnings_backtrace;
         bool report_leaks;
@@ -1658,7 +1658,7 @@ namespace Legion {
       const bool no_trace_optimization;
       const bool no_fence_elision;
       const bool replay_on_cpus;
-      const bool verify_disjointness;
+      const bool verify_partitions;
       const bool runtime_warnings;
       const bool warnings_backtrace;
       const bool report_leaks;
@@ -1705,6 +1705,7 @@ namespace Legion {
                                  TaskID tid,
                                  const TaskArgument &arg, MapperID map_id);
       void process_mapper_task_result(const MapperTaskArgs *args); 
+#if 0
     public:
       void destroy_index_partition(Context ctx, IndexPartition handle,
                                    const bool unordered);
@@ -1832,6 +1833,7 @@ namespace Legion {
                                                TypeTag type_tag,
                                                IndexSpace initial,
                                        const std::vector<IndexSpace> &handles);
+#endif
     public:
       IndexPartition get_index_partition(Context ctx, IndexSpace parent, 
                                          Color color);
