@@ -22440,6 +22440,11 @@ namespace Legion {
             ReductionManager::handle_defer_manager(args, runtime);
             break;
           }
+        case LG_DEFER_VERIFY_PARTITION_TASK_ID:
+          {
+            InnerContext::handle_partition_verification(args);
+            break;
+          }
         case LG_YIELD_TASK_ID:
           break; // nothing to do here
         case LG_RETRY_SHUTDOWN_TASK_ID:
