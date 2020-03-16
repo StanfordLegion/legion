@@ -112,7 +112,7 @@ namespace Legion {
                                        const bool unordered) = 0;
       virtual void destroy_index_partition(IndexPartition handle,
                                            const bool unordered) = 0;
-      virtual IndexPartition create_equal_partition(RegionTreeForest *forest,
+      virtual IndexPartition create_equal_partition(
                                             IndexSpace parent,
                                             IndexSpace color_space,
                                             size_t granularity,
@@ -122,7 +122,7 @@ namespace Legion {
                                             IndexSpace color_space,
                                             size_t granularity, 
                                             Color color) = 0;
-      virtual IndexPartition create_partition_by_union(RegionTreeForest *forest,
+      virtual IndexPartition create_partition_by_union(
                                             IndexSpace parent,
                                             IndexPartition handle1,
                                             IndexPartition handle2,
@@ -130,7 +130,6 @@ namespace Legion {
                                             PartitionKind kind,
                                             Color color) = 0;
       virtual IndexPartition create_partition_by_intersection(
-                                            RegionTreeForest *forest,
                                             IndexSpace parent,
                                             IndexPartition handle1,
                                             IndexPartition handle2,
@@ -138,14 +137,12 @@ namespace Legion {
                                             PartitionKind kind,
                                             Color color) = 0;
       virtual IndexPartition create_partition_by_intersection(
-                                            RegionTreeForest *forest,
                                             IndexSpace parent,
                                             IndexPartition partition,
                                             PartitionKind kind,
                                             Color color, 
                                             bool dominates) = 0;
       virtual IndexPartition create_partition_by_difference(
-                                            RegionTreeForest *forest,
                                             IndexSpace parent,
                                             IndexPartition handle1,
                                             IndexPartition handle2,
@@ -153,7 +150,6 @@ namespace Legion {
                                             PartitionKind kind,
                                             Color color) = 0;
       virtual Color create_cross_product_partitions(
-                                            RegionTreeForest *forest,
                                             IndexPartition handle1,
                                             IndexPartition handle2,
                               std::map<IndexSpace,IndexPartition> &handles,
@@ -165,7 +161,6 @@ namespace Legion {
                                             IndexSpace range,
                                             MapperID id, MappingTagID tag) = 0;
       virtual IndexPartition create_restricted_partition(
-                                            RegionTreeForest *forest,
                                             IndexSpace parent,
                                             IndexSpace color_space,
                                             const void *transform,
@@ -182,7 +177,6 @@ namespace Legion {
                                             PartitionKind part_kind,
                                             Color color) = 0;
       virtual IndexPartition create_partition_by_domain(
-                                            RegionTreeForest *forest,
                                             IndexSpace parent,
                                             const FutureMap &domains,
                                             IndexSpace color_space,
@@ -190,7 +184,6 @@ namespace Legion {
                                             PartitionKind part_kind,
                                             Color color) = 0;
       virtual IndexPartition create_partition_by_field(
-                                            RegionTreeForest *forest,
                                             LogicalRegion handle,
                                             LogicalRegion parent_priv,
                                             FieldID fid,
@@ -199,7 +192,6 @@ namespace Legion {
                                             MapperID id, MappingTagID tag,
                                             PartitionKind part_kind) = 0;
       virtual IndexPartition create_partition_by_image(
-                                            RegionTreeForest *forest,
                                             IndexSpace handle,
                                             LogicalPartition projection,
                                             LogicalRegion parent,
@@ -209,7 +201,6 @@ namespace Legion {
                                             Color color,
                                             MapperID id, MappingTagID tag) = 0;
       virtual IndexPartition create_partition_by_image_range(
-                                            RegionTreeForest *forest,
                                             IndexSpace handle,
                                             LogicalPartition projection,
                                             LogicalRegion parent,
@@ -219,7 +210,6 @@ namespace Legion {
                                             Color color,
                                             MapperID id, MappingTagID tag) = 0;
       virtual IndexPartition create_partition_by_preimage(
-                                            RegionTreeForest *forest,
                                             IndexPartition projection,
                                             LogicalRegion handle,
                                             LogicalRegion parent,
@@ -229,7 +219,6 @@ namespace Legion {
                                             Color color,
                                             MapperID id, MappingTagID tag) = 0;
       virtual IndexPartition create_partition_by_preimage_range(
-                                            RegionTreeForest *forest,
                                             IndexPartition projection,
                                             LogicalRegion handle,
                                             LogicalRegion parent,
@@ -239,37 +228,31 @@ namespace Legion {
                                             Color color,
                                             MapperID id, MappingTagID tag) = 0;
       virtual IndexPartition create_pending_partition(
-                                            RegionTreeForest *forest,
                                             IndexSpace parent,
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
                                             Color color) = 0;
       virtual IndexSpace create_index_space_union(
-                                            RegionTreeForest *forest,
                                             IndexPartition parent,
                                             const void *realm_color,
                                             TypeTag type_tag,
                                 const std::vector<IndexSpace> &handles) = 0;
       virtual IndexSpace create_index_space_union(
-                                            RegionTreeForest *forest,
                                             IndexPartition parent,
                                             const void *realm_color,
                                             TypeTag type_tag,
                                             IndexPartition handle) = 0;
       virtual IndexSpace create_index_space_intersection(
-                                            RegionTreeForest *forest,
                                             IndexPartition parent,
                                             const void *realm_color,
                                             TypeTag type_tag,
                                 const std::vector<IndexSpace> &handles) = 0;
       virtual IndexSpace create_index_space_intersection(
-                                            RegionTreeForest *forest,
                                             IndexPartition parent,
                                             const void *realm_color,
                                             TypeTag type_tag,
                                             IndexPartition handle) = 0;
       virtual IndexSpace create_index_space_difference(
-                                            RegionTreeForest *forest,
                                             IndexPartition parent,
                                             const void *realm_color,
                                             TypeTag type_tag,
@@ -851,7 +834,7 @@ namespace Legion {
       virtual void destroy_index_space(IndexSpace handle, const bool unordered);
       virtual void destroy_index_partition(IndexPartition handle,
                                            const bool unordered);
-      virtual IndexPartition create_equal_partition(RegionTreeForest *forest,
+      virtual IndexPartition create_equal_partition(
                                             IndexSpace parent,
                                             IndexSpace color_space,
                                             size_t granularity,
@@ -861,7 +844,7 @@ namespace Legion {
                                             IndexSpace color_space,
                                             size_t granularity, 
                                             Color color);
-      virtual IndexPartition create_partition_by_union(RegionTreeForest *forest,
+      virtual IndexPartition create_partition_by_union(
                                             IndexSpace parent,
                                             IndexPartition handle1,
                                             IndexPartition handle2,
@@ -869,7 +852,6 @@ namespace Legion {
                                             PartitionKind kind,
                                             Color color);
       virtual IndexPartition create_partition_by_intersection(
-                                            RegionTreeForest *forest,
                                             IndexSpace parent,
                                             IndexPartition handle1,
                                             IndexPartition handle2,
@@ -877,14 +859,12 @@ namespace Legion {
                                             PartitionKind kind,
                                             Color color);
       virtual IndexPartition create_partition_by_intersection(
-                                            RegionTreeForest *forest,
                                             IndexSpace parent,
                                             IndexPartition partition,
                                             PartitionKind kind,
                                             Color color,
                                             bool dominates);
       virtual IndexPartition create_partition_by_difference(
-                                            RegionTreeForest *forest,
                                             IndexSpace parent,
                                             IndexPartition handle1,
                                             IndexPartition handle2,
@@ -892,7 +872,6 @@ namespace Legion {
                                             PartitionKind kind,
                                             Color color);
       virtual Color create_cross_product_partitions(
-                                            RegionTreeForest *forest,
                                             IndexPartition handle1,
                                             IndexPartition handle2,
                               std::map<IndexSpace,IndexPartition> &handles,
@@ -904,7 +883,6 @@ namespace Legion {
                                             IndexSpace range,
                                             MapperID id, MappingTagID tag);
       virtual IndexPartition create_restricted_partition(
-                                            RegionTreeForest *forest,
                                             IndexSpace parent,
                                             IndexSpace color_space,
                                             const void *transform,
@@ -921,7 +899,6 @@ namespace Legion {
                                             PartitionKind part_kind,
                                             Color color);
       virtual IndexPartition create_partition_by_domain(
-                                            RegionTreeForest *forest,
                                             IndexSpace parent,
                                             const FutureMap &domains,
                                             IndexSpace color_space,
@@ -929,7 +906,6 @@ namespace Legion {
                                             PartitionKind part_kind,
                                             Color color);
       virtual IndexPartition create_partition_by_field(
-                                            RegionTreeForest *forest,
                                             LogicalRegion handle,
                                             LogicalRegion parent_priv,
                                             FieldID fid,
@@ -938,7 +914,6 @@ namespace Legion {
                                             MapperID id, MappingTagID tag,
                                             PartitionKind part_kind);
       virtual IndexPartition create_partition_by_image(
-                                            RegionTreeForest *forest,
                                             IndexSpace handle,
                                             LogicalPartition projection,
                                             LogicalRegion parent,
@@ -948,7 +923,6 @@ namespace Legion {
                                             Color color,
                                             MapperID id, MappingTagID tag);
       virtual IndexPartition create_partition_by_image_range(
-                                            RegionTreeForest *forest,
                                             IndexSpace handle,
                                             LogicalPartition projection,
                                             LogicalRegion parent,
@@ -958,7 +932,6 @@ namespace Legion {
                                             Color color,
                                             MapperID id, MappingTagID tag);
       virtual IndexPartition create_partition_by_preimage(
-                                            RegionTreeForest *forest,
                                             IndexPartition projection,
                                             LogicalRegion handle,
                                             LogicalRegion parent,
@@ -968,7 +941,6 @@ namespace Legion {
                                             Color color,
                                             MapperID id, MappingTagID tag);
       virtual IndexPartition create_partition_by_preimage_range(
-                                            RegionTreeForest *forest,
                                             IndexPartition projection,
                                             LogicalRegion handle,
                                             LogicalRegion parent,
@@ -978,42 +950,38 @@ namespace Legion {
                                             Color color,
                                             MapperID id, MappingTagID tag);
       virtual IndexPartition create_pending_partition(
-                                            RegionTreeForest *forest,
                                             IndexSpace parent,
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
                                             Color color);
       virtual IndexSpace create_index_space_union(
-                                            RegionTreeForest *forest,
                                             IndexPartition parent,
                                             const void *realm_color,
                                             TypeTag type_tag,
                                 const std::vector<IndexSpace> &handles);
       virtual IndexSpace create_index_space_union(
-                                            RegionTreeForest *forest,
                                             IndexPartition parent,
                                             const void *realm_color,
                                             TypeTag type_tag,
                                             IndexPartition handle);
       virtual IndexSpace create_index_space_intersection(
-                                            RegionTreeForest *forest,
                                             IndexPartition parent,
                                             const void *realm_color,
                                             TypeTag type_tag,
                                 const std::vector<IndexSpace> &handles);
       virtual IndexSpace create_index_space_intersection(
-                                            RegionTreeForest *forest,
                                             IndexPartition parent,
                                             const void *realm_color,
                                             TypeTag type_tag,
                                             IndexPartition handle);
       virtual IndexSpace create_index_space_difference(
-                                            RegionTreeForest *forest,
                                             IndexPartition parent,
                                             const void *realm_color,
                                             TypeTag type_tag,
                                             IndexSpace initial,
                                 const std::vector<IndexSpace> &handles);
+      virtual void verify_partition(IndexPartition pid, PartitionKind kind,
+                                    const char *function_name);
       virtual void destroy_field_space(FieldSpace handle, const bool unordered);
       virtual void allocate_local_field(FieldSpace space, size_t field_size,
                                      FieldID fid, CustomSerdezID serdez_id,
@@ -1529,7 +1497,7 @@ namespace Legion {
       virtual void destroy_index_space(IndexSpace handle, const bool unordered);
       virtual void destroy_index_partition(IndexPartition handle, 
                                            const bool unordered);
-      virtual IndexPartition create_equal_partition(RegionTreeForest *forest,
+      virtual IndexPartition create_equal_partition(
                                             IndexSpace parent,
                                             IndexSpace color_space,
                                             size_t granularity,
@@ -1539,7 +1507,7 @@ namespace Legion {
                                             IndexSpace color_space,
                                             size_t granularity, 
                                             Color color);
-      virtual IndexPartition create_partition_by_union(RegionTreeForest *forest,
+      virtual IndexPartition create_partition_by_union(
                                             IndexSpace parent,
                                             IndexPartition handle1,
                                             IndexPartition handle2,
@@ -1547,7 +1515,6 @@ namespace Legion {
                                             PartitionKind kind,
                                             Color color);
       virtual IndexPartition create_partition_by_intersection(
-                                            RegionTreeForest *forest,
                                             IndexSpace parent,
                                             IndexPartition handle1,
                                             IndexPartition handle2,
@@ -1555,7 +1522,6 @@ namespace Legion {
                                             PartitionKind kind,
                                             Color color);
       virtual IndexPartition create_partition_by_difference(
-                                            RegionTreeForest *forest,
                                             IndexSpace parent,
                                             IndexPartition handle1,
                                             IndexPartition handle2,
@@ -1563,7 +1529,6 @@ namespace Legion {
                                             PartitionKind kind,
                                             Color color);
       virtual Color create_cross_product_partitions(
-                                            RegionTreeForest *forest,
                                             IndexPartition handle1,
                                             IndexPartition handle2,
                               std::map<IndexSpace,IndexPartition> &handles,
@@ -1575,7 +1540,6 @@ namespace Legion {
                                             IndexSpace range,
                                             MapperID id, MappingTagID tag);
       virtual IndexPartition create_restricted_partition(
-                                            RegionTreeForest *forest,
                                             IndexSpace parent,
                                             IndexSpace color_space,
                                             const void *transform,
@@ -1592,7 +1556,6 @@ namespace Legion {
                                             PartitionKind part_kind,
                                             Color color);
       virtual IndexPartition create_partition_by_domain(
-                                            RegionTreeForest *forest,
                                             IndexSpace parent,
                                             const FutureMap &domains,
                                             IndexSpace color_space,
@@ -1600,7 +1563,6 @@ namespace Legion {
                                             PartitionKind part_kind,
                                             Color color);
       virtual IndexPartition create_partition_by_field(
-                                            RegionTreeForest *forest,
                                             LogicalRegion handle,
                                             LogicalRegion parent_priv,
                                             FieldID fid,
@@ -1609,7 +1571,6 @@ namespace Legion {
                                             MapperID id, MappingTagID tag,
                                             PartitionKind part_kind);
       virtual IndexPartition create_partition_by_image(
-                                            RegionTreeForest *forest,
                                             IndexSpace handle,
                                             LogicalPartition projection,
                                             LogicalRegion parent,
@@ -1619,7 +1580,6 @@ namespace Legion {
                                             Color color,
                                             MapperID id, MappingTagID tag);
       virtual IndexPartition create_partition_by_image_range(
-                                            RegionTreeForest *forest,
                                             IndexSpace handle,
                                             LogicalPartition projection,
                                             LogicalRegion parent,
@@ -1629,7 +1589,6 @@ namespace Legion {
                                             Color color,
                                             MapperID id, MappingTagID tag);
       virtual IndexPartition create_partition_by_preimage(
-                                            RegionTreeForest *forest,
                                             IndexPartition projection,
                                             LogicalRegion handle,
                                             LogicalRegion parent,
@@ -1639,7 +1598,6 @@ namespace Legion {
                                             Color color,
                                             MapperID id, MappingTagID tag);
       virtual IndexPartition create_partition_by_preimage_range(
-                                            RegionTreeForest *forest,
                                             IndexPartition projection,
                                             LogicalRegion handle,
                                             LogicalRegion parent,
@@ -1649,37 +1607,31 @@ namespace Legion {
                                             Color color,
                                             MapperID id, MappingTagID tag);
       virtual IndexPartition create_pending_partition(
-                                            RegionTreeForest *forest,
                                             IndexSpace parent,
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
                                             Color color);
       virtual IndexSpace create_index_space_union(
-                                            RegionTreeForest *forest,
                                             IndexPartition parent,
                                             const void *realm_color,
                                             TypeTag type_tag,
                                 const std::vector<IndexSpace> &handles);
       virtual IndexSpace create_index_space_union(
-                                            RegionTreeForest *forest,
                                             IndexPartition parent,
                                             const void *realm_color,
                                             TypeTag type_tag,
                                             IndexPartition handle);
       virtual IndexSpace create_index_space_intersection(
-                                            RegionTreeForest *forest,
                                             IndexPartition parent,
                                             const void *realm_color,
                                             TypeTag type_tag,
                                 const std::vector<IndexSpace> &handles);
       virtual IndexSpace create_index_space_intersection(
-                                            RegionTreeForest *forest,
                                             IndexPartition parent,
                                             const void *realm_color,
                                             TypeTag type_tag,
                                             IndexPartition handle);
       virtual IndexSpace create_index_space_difference(
-                                            RegionTreeForest *forest,
                                             IndexPartition parent,
                                             const void *realm_color,
                                             TypeTag type_tag,
@@ -2096,7 +2048,7 @@ namespace Legion {
       virtual void destroy_index_space(IndexSpace handle, const bool unordered);
       virtual void destroy_index_partition(IndexPartition handle,
                                            const bool unordered);
-      virtual IndexPartition create_equal_partition(RegionTreeForest *forest,
+      virtual IndexPartition create_equal_partition(
                                             IndexSpace parent,
                                             IndexSpace color_space,
                                             size_t granularity,
@@ -2106,7 +2058,7 @@ namespace Legion {
                                             IndexSpace color_space,
                                             size_t granularity, 
                                             Color color);
-      virtual IndexPartition create_partition_by_union(RegionTreeForest *forest,
+      virtual IndexPartition create_partition_by_union(
                                             IndexSpace parent,
                                             IndexPartition handle1,
                                             IndexPartition handle2,
@@ -2114,7 +2066,6 @@ namespace Legion {
                                             PartitionKind kind,
                                             Color color);
       virtual IndexPartition create_partition_by_intersection(
-                                            RegionTreeForest *forest,
                                             IndexSpace parent,
                                             IndexPartition handle1,
                                             IndexPartition handle2,
@@ -2122,14 +2073,12 @@ namespace Legion {
                                             PartitionKind kind,
                                             Color color);
       virtual IndexPartition create_partition_by_intersection(
-                                            RegionTreeForest *forest,
                                             IndexSpace parent,
                                             IndexPartition partition,
                                             PartitionKind kind,
                                             Color color,
                                             bool dominates);
       virtual IndexPartition create_partition_by_difference(
-                                            RegionTreeForest *forest,
                                             IndexSpace parent,
                                             IndexPartition handle1,
                                             IndexPartition handle2,
@@ -2137,7 +2086,6 @@ namespace Legion {
                                             PartitionKind kind,
                                             Color color);
       virtual Color create_cross_product_partitions(
-                                            RegionTreeForest *forest,
                                             IndexPartition handle1,
                                             IndexPartition handle2,
                               std::map<IndexSpace,IndexPartition> &handles,
@@ -2149,7 +2097,6 @@ namespace Legion {
                                             IndexSpace range,
                                             MapperID id, MappingTagID tag);
       virtual IndexPartition create_restricted_partition(
-                                            RegionTreeForest *forest,
                                             IndexSpace parent,
                                             IndexSpace color_space,
                                             const void *transform,
@@ -2166,7 +2113,6 @@ namespace Legion {
                                             PartitionKind part_kind,
                                             Color color);
       virtual IndexPartition create_partition_by_domain(
-                                            RegionTreeForest *forest,
                                             IndexSpace parent,
                                             const FutureMap &domains,
                                             IndexSpace color_space,
@@ -2174,7 +2120,6 @@ namespace Legion {
                                             PartitionKind part_kind,
                                             Color color);
       virtual IndexPartition create_partition_by_field(
-                                            RegionTreeForest *forest,
                                             LogicalRegion handle,
                                             LogicalRegion parent_priv,
                                             FieldID fid,
@@ -2183,7 +2128,6 @@ namespace Legion {
                                             MapperID id, MappingTagID tag,
                                             PartitionKind part_kind);
       virtual IndexPartition create_partition_by_image(
-                                            RegionTreeForest *forest,
                                             IndexSpace handle,
                                             LogicalPartition projection,
                                             LogicalRegion parent,
@@ -2193,7 +2137,6 @@ namespace Legion {
                                             Color color,
                                             MapperID id, MappingTagID tag);
       virtual IndexPartition create_partition_by_image_range(
-                                            RegionTreeForest *forest,
                                             IndexSpace handle,
                                             LogicalPartition projection,
                                             LogicalRegion parent,
@@ -2203,7 +2146,6 @@ namespace Legion {
                                             Color color,
                                             MapperID id, MappingTagID tag);
       virtual IndexPartition create_partition_by_preimage(
-                                            RegionTreeForest *forest,
                                             IndexPartition projection,
                                             LogicalRegion handle,
                                             LogicalRegion parent,
@@ -2213,7 +2155,6 @@ namespace Legion {
                                             Color color,
                                             MapperID id, MappingTagID tag);
       virtual IndexPartition create_partition_by_preimage_range(
-                                            RegionTreeForest *forest,
                                             IndexPartition projection,
                                             LogicalRegion handle,
                                             LogicalRegion parent,
@@ -2223,37 +2164,31 @@ namespace Legion {
                                             Color color,
                                             MapperID id, MappingTagID tag);
       virtual IndexPartition create_pending_partition(
-                                            RegionTreeForest *forest,
                                             IndexSpace parent,
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
                                             Color color);
       virtual IndexSpace create_index_space_union(
-                                            RegionTreeForest *forest,
                                             IndexPartition parent,
                                             const void *realm_color,
                                             TypeTag type_tag,
                                 const std::vector<IndexSpace> &handles);
       virtual IndexSpace create_index_space_union(
-                                            RegionTreeForest *forest,
                                             IndexPartition parent,
                                             const void *realm_color,
                                             TypeTag type_tag,
                                             IndexPartition handle);
       virtual IndexSpace create_index_space_intersection(
-                                            RegionTreeForest *forest,
                                             IndexPartition parent,
                                             const void *realm_color,
                                             TypeTag type_tag,
                                 const std::vector<IndexSpace> &handles);
       virtual IndexSpace create_index_space_intersection(
-                                            RegionTreeForest *forest,
                                             IndexPartition parent,
                                             const void *realm_color,
                                             TypeTag type_tag,
                                             IndexPartition handle);
       virtual IndexSpace create_index_space_difference(
-                                            RegionTreeForest *forest,
                                             IndexPartition parent,
                                             const void *realm_color,
                                             TypeTag type_tag,
@@ -2459,7 +2394,7 @@ namespace Legion {
       virtual void destroy_index_space(IndexSpace handle, const bool unordered);
       virtual void destroy_index_partition(IndexPartition handle,
                                            const bool unordered);
-      virtual IndexPartition create_equal_partition(RegionTreeForest *forest,
+      virtual IndexPartition create_equal_partition(
                                             IndexSpace parent,
                                             IndexSpace color_space,
                                             size_t granularity,
@@ -2469,7 +2404,7 @@ namespace Legion {
                                             IndexSpace color_space,
                                             size_t granularity, 
                                             Color color);
-      virtual IndexPartition create_partition_by_union(RegionTreeForest *forest,
+      virtual IndexPartition create_partition_by_union(
                                             IndexSpace parent,
                                             IndexPartition handle1,
                                             IndexPartition handle2,
@@ -2477,7 +2412,6 @@ namespace Legion {
                                             PartitionKind kind,
                                             Color color);
       virtual IndexPartition create_partition_by_intersection(
-                                            RegionTreeForest *forest,
                                             IndexSpace parent,
                                             IndexPartition handle1,
                                             IndexPartition handle2,
@@ -2485,14 +2419,12 @@ namespace Legion {
                                             PartitionKind kind,
                                             Color color);
       virtual IndexPartition create_partition_by_intersection(
-                                            RegionTreeForest *forest,
                                             IndexSpace parent,
                                             IndexPartition partition,
                                             PartitionKind kind,
                                             Color color,
                                             bool dominates);
       virtual IndexPartition create_partition_by_difference(
-                                            RegionTreeForest *forest,
                                             IndexSpace parent,
                                             IndexPartition handle1,
                                             IndexPartition handle2,
@@ -2500,7 +2432,6 @@ namespace Legion {
                                             PartitionKind kind,
                                             Color color);
       virtual Color create_cross_product_partitions(
-                                            RegionTreeForest *forest,
                                             IndexPartition handle1,
                                             IndexPartition handle2,
                               std::map<IndexSpace,IndexPartition> &handles,
@@ -2512,7 +2443,6 @@ namespace Legion {
                                             IndexSpace range,
                                             MapperID id, MappingTagID tag);
       virtual IndexPartition create_restricted_partition(
-                                            RegionTreeForest *forest,
                                             IndexSpace parent,
                                             IndexSpace color_space,
                                             const void *transform,
@@ -2529,7 +2459,6 @@ namespace Legion {
                                             PartitionKind part_kind,
                                             Color color);
       virtual IndexPartition create_partition_by_domain(
-                                            RegionTreeForest *forest,
                                             IndexSpace parent,
                                             const FutureMap &domains,
                                             IndexSpace color_space,
@@ -2537,7 +2466,6 @@ namespace Legion {
                                             PartitionKind part_kind,
                                             Color color);
       virtual IndexPartition create_partition_by_field(
-                                            RegionTreeForest *forest,
                                             LogicalRegion handle,
                                             LogicalRegion parent_priv,
                                             FieldID fid,
@@ -2546,7 +2474,6 @@ namespace Legion {
                                             MapperID id, MappingTagID tag,
                                             PartitionKind part_kind);
       virtual IndexPartition create_partition_by_image(
-                                            RegionTreeForest *forest,
                                             IndexSpace handle,
                                             LogicalPartition projection,
                                             LogicalRegion parent,
@@ -2556,7 +2483,6 @@ namespace Legion {
                                             Color color,
                                             MapperID id, MappingTagID tag);
       virtual IndexPartition create_partition_by_image_range(
-                                            RegionTreeForest *forest,
                                             IndexSpace handle,
                                             LogicalPartition projection,
                                             LogicalRegion parent,
@@ -2566,7 +2492,6 @@ namespace Legion {
                                             Color color,
                                             MapperID id, MappingTagID tag);
       virtual IndexPartition create_partition_by_preimage(
-                                            RegionTreeForest *forest,
                                             IndexPartition projection,
                                             LogicalRegion handle,
                                             LogicalRegion parent,
@@ -2576,7 +2501,6 @@ namespace Legion {
                                             Color color,
                                             MapperID id, MappingTagID tag);
       virtual IndexPartition create_partition_by_preimage_range(
-                                            RegionTreeForest *forest,
                                             IndexPartition projection,
                                             LogicalRegion handle,
                                             LogicalRegion parent,
@@ -2586,37 +2510,31 @@ namespace Legion {
                                             Color color,
                                             MapperID id, MappingTagID tag);
       virtual IndexPartition create_pending_partition(
-                                            RegionTreeForest *forest,
                                             IndexSpace parent,
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
                                             Color color);
       virtual IndexSpace create_index_space_union(
-                                            RegionTreeForest *forest,
                                             IndexPartition parent,
                                             const void *realm_color,
                                             TypeTag type_tag,
                                 const std::vector<IndexSpace> &handles);
       virtual IndexSpace create_index_space_union(
-                                            RegionTreeForest *forest,
                                             IndexPartition parent,
                                             const void *realm_color,
                                             TypeTag type_tag,
                                             IndexPartition handle);
       virtual IndexSpace create_index_space_intersection(
-                                            RegionTreeForest *forest,
                                             IndexPartition parent,
                                             const void *realm_color,
                                             TypeTag type_tag,
                                 const std::vector<IndexSpace> &handles);
       virtual IndexSpace create_index_space_intersection(
-                                            RegionTreeForest *forest,
                                             IndexPartition parent,
                                             const void *realm_color,
                                             TypeTag type_tag,
                                             IndexPartition handle);
       virtual IndexSpace create_index_space_difference(
-                                            RegionTreeForest *forest,
                                             IndexPartition parent,
                                             const void *realm_color,
                                             TypeTag type_tag,

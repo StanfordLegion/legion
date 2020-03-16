@@ -7286,17 +7286,23 @@ namespace Legion {
        *              and after every operation.  The runtime must be
        *              compiled in debug mode with the DEBUG_LEGION
        *              macro defined.
-       * -lg:disjointness Verify the specified disjointness of 
-       *              partitioning operations.  The runtime must be
-       *              compiled with the DEBUG_LEGION macro defined.
-       * -lg:separate Indicate that separate instances of the high
+       * -lg:disjointness Verify the specified disjointness of partitioning 
+       *              operations. This flag is now a synonym for -lg:partcheck 
+       * -lg:partcheck This flag will ask the runtime to dynamically verify
+       *              that all correctness properties for partitions are
+       *              upheld. This includes checking that the parent region
+       *              dominates all subregions and that all annotations of
+       *              disjointness and completeness from the user are correct.
+       *              This is an expensive test and users should expect a 
+       *              significant slow-down of their application when using it.
+       * -lg:separate Indicate that separate instances of the Legion 
        *              level runtime should be made for each processor.
        *              The default is one runtime instance per node.
        *              This is primarily useful for debugging purposes
        *              to force messages to be sent between runtime 
        *              instances on the same node.
-       * -lg:registration Record the mapping from low-level task IDs to
-       *              task variant names for debugging low-level runtime
+       * -lg:registration Record the mapping from Realm task IDs to
+       *              task variant names for debugging Realm runtime
        *              error messages.
        * -lg:test     Replace the default mapper with the test mapper
        *              which will generate sound but random mapping 

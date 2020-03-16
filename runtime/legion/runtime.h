@@ -1780,7 +1780,7 @@ namespace Legion {
             no_trace_optimization(false),
             no_fence_elision(false),
             replay_on_cpus(false),
-            verify_disjointness(false),
+            verify_partitions(false),
             runtime_warnings(false),
             warnings_backtrace(false),
             report_leaks(false),
@@ -1828,7 +1828,7 @@ namespace Legion {
         bool no_trace_optimization;
         bool no_fence_elision;
         bool replay_on_cpus;
-        bool verify_disjointness;
+        bool verify_partitions;
         bool runtime_warnings;
         bool warnings_backtrace;
         bool report_leaks;
@@ -1973,7 +1973,7 @@ namespace Legion {
       const bool no_trace_optimization;
       const bool no_fence_elision;
       const bool replay_on_cpus;
-      const bool verify_disjointness;
+      const bool verify_partitions;
       const bool runtime_warnings;
       const bool warnings_backtrace;
       const bool report_leaks;
@@ -2017,133 +2017,6 @@ namespace Legion {
                                  TaskID tid,
                                  const TaskArgument &arg, MapperID map_id);
       void process_mapper_task_result(const MapperTaskArgs *args); 
-    public:
-      void destroy_index_partition(Context ctx, IndexPartition handle,
-                                   const bool unordered);
-    public:
-      IndexPartition create_equal_partition(Context ctx, IndexSpace parent,
-                                            IndexSpace color_space, 
-                                            size_t granuarlity, Color color);
-      IndexPartition create_partition_by_union(Context ctx, IndexSpace parent,
-                                               IndexPartition handle1,
-                                               IndexPartition handle2,
-                                               IndexSpace color_space,
-                                               PartitionKind kind, Color color);
-      IndexPartition create_partition_by_intersection(Context ctx, 
-                                               IndexSpace parent,
-                                               IndexPartition handle1,
-                                               IndexPartition handle2,
-                                               IndexSpace color_space,
-                                               PartitionKind kind, Color color);
-      IndexPartition create_partition_by_intersection(Context ctx,
-                                               IndexSpace parent,
-                                               IndexPartition partition,
-                                               PartitionKind kind,
-                                               Color color, bool dominates);
-      IndexPartition create_partition_by_difference(Context ctx, 
-                                               IndexSpace parent,
-                                               IndexPartition handle1,
-                                               IndexPartition handle2,
-                                               IndexSpace color_space,
-                                               PartitionKind kind, Color color);
-      Color create_cross_product_partitions(Context ctx, 
-                                            IndexPartition handle1,
-                                            IndexPartition handle2,
-                                std::map<IndexSpace,IndexPartition> &handles,
-                                            PartitionKind kind, Color color);
-      void create_association(Context ctx,
-                              LogicalRegion domain,
-                              LogicalRegion domain_parent,
-                              FieldID domain_fid,
-                              IndexSpace range,
-                              MapperID id, MappingTagID tag);
-      IndexPartition create_restricted_partition(Context ctx,
-                                                 IndexSpace parent,
-                                                 IndexSpace color_space,
-                                                 const void *transform,
-                                                 size_t transform_size,
-                                                 const void *extent,
-                                                 size_t extent_size,
-                                                 PartitionKind part_kind,
-                                                 Color color);
-      IndexPartition create_partition_by_domain(Context ctx, IndexSpace parent,
-                                                const FutureMap &domains,
-                                                IndexSpace color_space,
-                                                bool perform_intersections,
-                                                PartitionKind part_kind,
-                                                Color color);
-      IndexPartition create_partition_by_field(Context ctx, 
-                                               LogicalRegion handle,
-                                               LogicalRegion parent,
-                                               FieldID fid,
-                                               IndexSpace color_space,
-                                               Color color,
-                                               MapperID id, MappingTagID tag,
-                                               PartitionKind part_kind);
-      IndexPartition create_partition_by_image(Context ctx,
-                                               IndexSpace handle,
-                                               LogicalPartition projection,
-                                               LogicalRegion parent,
-                                               FieldID fid, 
-                                               IndexSpace color_space,
-                                               PartitionKind part_kind,
-                                               Color color,
-                                               MapperID id, MappingTagID tag);
-      IndexPartition create_partition_by_image_range(Context ctx,
-                                               IndexSpace handle,
-                                               LogicalPartition projection,
-                                               LogicalRegion parent,
-                                               FieldID fid, 
-                                               IndexSpace color_space,
-                                               PartitionKind part_kind,
-                                               Color color,
-                                               MapperID id, MappingTagID tag);
-      IndexPartition create_partition_by_preimage(Context ctx,
-                                               IndexPartition projection,
-                                               LogicalRegion handle,
-                                               LogicalRegion parent,
-                                               FieldID fid,
-                                               IndexSpace color_space,
-                                               PartitionKind part_kind,
-                                               Color color,
-                                               MapperID id, MappingTagID tag);
-      IndexPartition create_partition_by_preimage_range(Context ctx,
-                                               IndexPartition projection,
-                                               LogicalRegion handle,
-                                               LogicalRegion parent,
-                                               FieldID fid,
-                                               IndexSpace color_space,
-                                               PartitionKind part_kind,
-                                               Color color,
-                                               MapperID id, MappingTagID tag);
-      IndexPartition create_pending_partition(Context ctx, IndexSpace parent,
-                                              IndexSpace color_space,
-                                              PartitionKind part_kind,
-                                              Color color);
-      IndexSpace create_index_space_union(Context ctx, IndexPartition parent,
-                                          const void *realm_color, 
-                                          TypeTag type_tag,
-                                        const std::vector<IndexSpace> &handles);
-      IndexSpace create_index_space_union(Context ctx, IndexPartition parent,
-                                          const void *realm_color,
-                                          TypeTag type_tag,
-                                          IndexPartition handle);
-      IndexSpace create_index_space_intersection(Context ctx, 
-                                                 IndexPartition parent,
-                                                 const void *realm_color,
-                                                 TypeTag type_tag,
-                                       const std::vector<IndexSpace> &handles);
-      IndexSpace create_index_space_intersection(Context ctx,
-                                                 IndexPartition parent,
-                                                 const void *realm_color,
-                                                 TypeTag type_tag,
-                                                 IndexPartition handle); 
-      IndexSpace create_index_space_difference(Context ctx, 
-                                               IndexPartition parent,
-                                               const void *realm_color,
-                                               TypeTag type_tag,
-                                               IndexSpace initial,
-                                       const std::vector<IndexSpace> &handles);
     public:
       IndexPartition get_index_partition(Context ctx, IndexSpace parent, 
                                          Color color);
