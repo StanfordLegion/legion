@@ -4589,6 +4589,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      PartitionKind verify_kind = COMPUTE_KIND;
+      if (runtime->verify_partitions)
+        SWAP_PART_KINDS(verify_kind, part_kind)
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
                          parent.get_tree_id(), parent.get_type_tag());
       DistributedID did = runtime->get_available_distributed_id();
@@ -4600,13 +4603,22 @@ namespace Legion {
       if (color != AUTO_GENERATE_ID)
         part_color = color;
       size_t color_space_size = runtime->forest->get_domain_volume(color_space);
-      ApBarrier partition_ready(
+      const ApBarrier partition_ready(
                      Realm::Barrier::create_barrier(color_space_size));
       RtEvent safe = runtime->forest->create_pending_partition(this, pid,parent,
         color_space, part_color, part_kind,did,partition_ready,partition_ready);
       // Wait for any notifications to occur before returning
       if (safe.exists())
         safe.wait();
+      if (runtime->verify_partitions)
+      {
+        // We can't block to check this here because the user needs 
+        // control back in order to fill in the pieces of the partitions
+        // so just launch a meta-task to check it when we can
+        VerifyPartitionArgs args(this, pid, verify_kind, __func__);
+        runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY, 
+            Runtime::protect_event(partition_ready));
+      }
       return pid;
     }
 
@@ -4947,6 +4959,14 @@ namespace Legion {
         }
         delete itr;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/void InnerContext::handle_partition_verification(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const VerifyPartitionArgs *vargs = (const VerifyPartitionArgs*)args;
+      vargs->proxy_this->verify_partition(vargs->pid, vargs->kind, vargs->func);
     }
 
     //--------------------------------------------------------------------------

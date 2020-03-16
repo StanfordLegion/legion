@@ -778,6 +778,20 @@ namespace Legion {
         const RtUserEvent to_trigger;
         const AddressSpaceID source;
       };
+      struct VerifyPartitionArgs : public LgTaskArgs<VerifyPartitionArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_VERIFY_PARTITION_TASK_ID;
+      public:
+        VerifyPartitionArgs(InnerContext *proxy, IndexPartition p, 
+                            PartitionKind k, const char *f)
+          : LgTaskArgs<VerifyPartitionArgs>(proxy->get_unique_id()), 
+            proxy_this(proxy), pid(p), kind(k), func(f) { }
+      public:
+        InnerContext *const proxy_this;
+        const IndexPartition pid;
+        const PartitionKind kind;
+        const char *const func;
+      };
       struct LocalFieldInfo {
       public:
         LocalFieldInfo(void)
@@ -982,6 +996,7 @@ namespace Legion {
                                 const std::vector<IndexSpace> &handles);
       virtual void verify_partition(IndexPartition pid, PartitionKind kind,
                                     const char *function_name);
+      static void handle_partition_verification(const void *args);
       virtual void destroy_field_space(FieldSpace handle, const bool unordered);
       virtual void allocate_local_field(FieldSpace space, size_t field_size,
                                      FieldID fid, CustomSerdezID serdez_id,

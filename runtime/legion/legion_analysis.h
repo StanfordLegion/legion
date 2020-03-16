@@ -2477,7 +2477,7 @@ namespace Legion {
       // Uses these for determining when we should do migration
       // There is an implicit assumption here that equivalence sets
       // are only used be a small number of nodes that is less than
-      // the smaples per migration count, if it ever exceeds this 
+      // the samples per migration count, if it ever exceeds this 
       // then we'll issue a warning
       static const unsigned SAMPLES_PER_MIGRATION_TEST = 64;
       // How many total epochs we want to remember

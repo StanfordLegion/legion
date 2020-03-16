@@ -25333,6 +25333,11 @@ namespace Legion {
             ReductionManager::handle_defer_manager(args, runtime);
             break;
           }
+        case LG_DEFER_VERIFY_PARTITION_TASK_ID:
+          {
+            InnerContext::handle_partition_verification(args);
+            break;
+          }
         case LG_DEFER_CONSENSUS_MATCH_TASK_ID:
           {
             ConsensusMatchBase::handle_consensus_match(args);

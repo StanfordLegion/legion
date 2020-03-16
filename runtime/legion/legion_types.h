@@ -376,6 +376,7 @@ namespace Legion {
       LG_DEFER_PERFORM_OUTPUT_TASK_ID,
       LG_DEFER_INSTANCE_MANAGER_TASK_ID,
       LG_DEFER_REDUCTION_MANAGER_TASK_ID,
+      LG_DEFER_VERIFY_PARTITION_TASK_ID,
       LG_DEFER_CONSENSUS_MATCH_TASK_ID,
       LG_YIELD_TASK_ID,
       LG_DEFER_TRACE_UPDATE_TASK_ID,
@@ -507,6 +508,7 @@ namespace Legion {
         "Defer Physical Analysis Output Stage",                   \
         "Defer Instance Manager Registration",                    \
         "Defer Reduction Manager Registration",                   \
+        "Defer Verify Partition",                                 \
         "Defer Consensus Match",                                  \
         "Yield",                                                  \
         "Defer Trace Update",                                     \
