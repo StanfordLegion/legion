@@ -1406,11 +1406,22 @@ namespace Legion {
       };
       struct FSBroadcast { 
       public:
-        FSBroadcast(void) : did(0) { }
-        FSBroadcast(FieldSpace h, DistributedID d) : handle(h), did(d) { }
+        FSBroadcast(void) : did(0), double_buffer(false) { }
+        FSBroadcast(FieldSpaceID i, DistributedID d, bool db) 
+          : space_id(i), did(d), double_buffer(db) { }
       public:
-        FieldSpace handle;
+        FieldSpaceID space_id;
         DistributedID did;
+        bool double_buffer;
+      };
+      struct LRBroadcast {
+      public:
+        LRBroadcast(void) : tid(0), double_buffer(0) { }
+        LRBroadcast(RegionTreeID t, bool db) :
+          tid(t), double_buffer(db) { }
+      public:
+        RegionTreeID tid;
+        bool double_buffer;
       };
       struct IntraSpaceDeps {
       public:
@@ -1764,6 +1775,8 @@ namespace Legion {
       void handle_intra_space_dependence(Deserializer &derez);
     public:
       void increase_pending_index_spaces(unsigned count, bool double_buffer);
+      void increase_pending_field_spaces(unsigned count, bool double_buffer);
+      void increase_pending_region_trees(unsigned count, bool double_buffer);
     public:
       // Collective methods
       CollectiveID get_next_collective_index(CollectiveIndexLocation loc);
@@ -1870,6 +1883,12 @@ namespace Legion {
       // Pending allocations of various resources
       std::deque<std::pair<ValueBroadcast<ISBroadcast>*,bool> > 
                                             pending_index_spaces;
+      std::deque<std::pair<ValueBroadcast<IPBroadcast>*,bool> >
+                                            pending_index_partitions;
+      std::deque<std::pair<ValueBroadcast<FSBroadcast>*,bool> >
+                                            pending_field_spaces;
+      std::deque<std::pair<ValueBroadcast<LRBroadcast>*,bool> >
+                                            pending_region_trees;
     protected:
       std::map<RtEvent,ReplFutureMapImpl*> future_maps;
       std::map<RtEvent,std::vector<

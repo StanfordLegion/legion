@@ -9375,6 +9375,45 @@ namespace Legion {
         delete collective.first;
         pending_index_spaces.pop_front();
       }
+      while (!pending_field_spaces.empty())
+      {
+        std::pair<ValueBroadcast<FSBroadcast>*,bool> &collective = 
+          pending_field_spaces.front();
+        if (collective.second)
+        {
+          const FSBroadcast value = collective.first->get_value(false);
+          runtime->forest->revoke_pending_field_space(value.space_id);
+          runtime->free_distributed_id(value.did);
+        }
+        else
+        {
+          // Make sure this collective is done before we delete it
+          const RtEvent done = collective.first->get_done_event();
+          if (!done.has_triggered())
+            done.wait();
+        }
+        delete collective.first;
+        pending_field_spaces.pop_front();
+      }
+      while (!pending_region_trees.empty())
+      {
+        std::pair<ValueBroadcast<LRBroadcast>*,bool> &collective = 
+          pending_region_trees.front();
+        if (collective.second)
+        {
+          const LRBroadcast value = collective.first->get_value(false);
+          runtime->forest->revoke_pending_region_tree(value.tid);
+        }
+        else
+        {
+          // Make sure this collective is done before we delete it
+          const RtEvent done = collective.first->get_done_event();
+          if (!done.has_triggered())
+            done.wait();
+        }
+        delete collective.first;
+        pending_region_trees.pop_front();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -12612,57 +12651,101 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      FieldSpace space = FieldSpace::NO_SPACE;
-      if (owner_shard->shard_id == field_space_allocator_shard)
+      // Seed this with the first field space broadcast
+      if (pending_field_spaces.empty())
+        increase_pending_field_spaces(1/*count*/, false/*double*/);
+      FieldSpace space;
+      bool double_next = false;
+      bool double_buffer = false;
+      std::pair<ValueBroadcast<FSBroadcast>*,bool> &collective = 
+        pending_field_spaces.front();
+      if (collective.second)
       {
-        // We're the owner so make it locally and then broadcast it
-        space = FieldSpace(runtime->get_unique_field_space_id());
-        const DistributedID did = runtime->get_available_distributed_id();
+        const FSBroadcast value = collective.first->get_value(false);
+        space = FieldSpace(value.space_id);
+        double_buffer = value.double_buffer;
         // Need to register this before broadcasting
-        FieldSpaceNode *node = forest->create_field_space(space, did, 
-                                                      false/*notify remote*/);
-        // A little strange but in this case we have to put this here in 
-        // order to avoid trying to do field allocations before the set
-        // of remote instances has been updated
+        FieldSpaceNode *node = forest->create_field_space(space, value.did, 
+                                  false/*notify remote*/, creation_barrier);
+        // Now we can update the creation set
         node->update_creation_set(shard_manager->get_mapping());
-        ValueBroadcast<FSBroadcast> space_collective(this, COLLECTIVE_LOC_31);
-        space_collective.broadcast(FSBroadcast(space, did));
+        // Arrive on the creation barrier
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        runtime->forest->revoke_pending_field_space(value.space_id);
 #ifdef DEBUG_LEGION
         log_field.debug("Creating field space %x in task %s (ID %lld)", 
-                      space.id, get_task_name(), get_unique_id());
+                        space.id, get_task_name(), get_unique_id());
 #endif
         if (runtime->legion_spy_enabled)
           LegionSpy::log_field_space(space.id);
-        // Signal that we are done with our creation
-        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
-        // Wait for the creation to be done
-        creation_barrier.wait();
       }
       else
       {
-        // We need to get the barrier result
-        ValueBroadcast<FSBroadcast> space_collective(this,
-                            field_space_allocator_shard, COLLECTIVE_LOC_31);
-        const FSBroadcast value = space_collective.get_value();
-        space = value.handle;
+        const RtEvent done = collective.first->get_done_event();
+        if (!done.has_triggered())
+        {
+          double_next = true;
+          done.wait();
+        }
+        const FSBroadcast value = collective.first->get_value(false);
+        space = FieldSpace(value.space_id);
+        double_buffer = value.double_buffer;
 #ifdef DEBUG_LEGION
         assert(space.exists());
 #endif
-        forest->create_field_space(space, value.did, false/*notify remote*/);  
-        // Signal that we are done with our creation
+        runtime->forest->create_field_space(space, value.did,
+                    false/*notify remote*/, creation_barrier);
+        // Arrive on the creation barrier
         Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
-        // Also have to wait for creation to be done here to avoid 
-        // races with field allocations
-        creation_barrier.wait();
       }
-      advance_replicate_barrier(creation_barrier, total_shards); 
-      // Register the field space creation
+      delete collective.first;
+      pending_field_spaces.pop_front();
+      // Advance the creation barrier so that we know when it is ready
+      advance_replicate_barrier(creation_barrier, total_shards);
+      // Record this in our context
       register_field_space_creation(space);
-      // Update the allocator
-      field_space_allocator_shard++;
-      if (field_space_allocator_shard == total_shards)
-        field_space_allocator_shard = 0;
+      // Get new handles in flight for the next time we need them
+      // Always add a new one to replace the old one, but double the number
+      // in flight if we're not hiding the latency
+      increase_pending_field_spaces(double_buffer ? 
+          pending_field_spaces.size() + 1 : 1, double_next && !double_buffer);
       return space;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::increase_pending_field_spaces(unsigned count,
+                                                         bool double_next)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < count; idx++)
+      {
+        if (owner_shard->shard_id == field_space_allocator_shard)
+        {
+          const FieldSpaceID space = runtime->get_unique_field_space_id();
+          // We're the owner, so make it locally and then broadcast it
+          runtime->forest->record_pending_field_space(space);
+          // Do our arrival on this generation, should be the last one
+          ValueBroadcast<FSBroadcast> *collective = 
+            new ValueBroadcast<FSBroadcast>(this, COLLECTIVE_LOC_31);
+          collective->broadcast(FSBroadcast(space, 
+                runtime->get_available_distributed_id(), double_next));
+          pending_field_spaces.push_back(
+              std::pair<ValueBroadcast<FSBroadcast>*,bool>(collective, true));
+        }
+        else
+        {
+          ValueBroadcast<FSBroadcast> *collective = 
+            new ValueBroadcast<FSBroadcast>(this, field_space_allocator_shard,
+                                            COLLECTIVE_LOC_31);
+          register_collective(collective);
+          pending_field_spaces.push_back(
+              std::pair<ValueBroadcast<FSBroadcast>*,bool>(collective, false));
+        }
+        field_space_allocator_shard++;
+        if (field_space_allocator_shard == total_shards)
+          field_space_allocator_shard = 0;
+        double_next = false;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -12936,17 +13019,27 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      // Seed this with the first field space broadcast
+      if (pending_region_trees.empty())
+        increase_pending_region_trees(1/*count*/, false/*double*/);
       LogicalRegion handle(0/*temp*/, index_space, field_space);
-      if (owner_shard->shard_id == logical_region_allocator_shard)
+      bool double_next = false;
+      bool double_buffer = false;
+      std::pair<ValueBroadcast<LRBroadcast>*,bool> &collective = 
+        pending_region_trees.front();
+      if (collective.second)
       {
-        // We're the owner so make it locally and then broadcast it
-        handle.tree_id = runtime->get_unique_region_tree_id();
+        const LRBroadcast value = collective.first->get_value(false);
+        handle.tree_id = value.tid;
+        double_buffer = value.double_buffer;
         // Have to register this before doing the broadcast
-        RegionNode *node = forest->create_logical_region(handle, 
-                                                      false/*notify remote*/);
-        
-        ValueBroadcast<RegionTreeID> tree_collective(this, COLLECTIVE_LOC_34);
-        tree_collective.broadcast(handle.tree_id);
+        RegionNode *node = 
+          forest->create_logical_region(handle, false/*notify remote*/);
+        // Now we can update the creation set
+        node->update_creation_set(shard_manager->get_mapping());
+        // Arrive on the creation barrier
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        runtime->forest->revoke_pending_region_tree(value.tid);
 #ifdef DEBUG_LEGION
         log_region.debug("Creating logical region in task %s (ID %lld) with "
                          "index space %x and field space %x in new tree %d",
@@ -12956,18 +13049,18 @@ namespace Legion {
         if (runtime->legion_spy_enabled)
           LegionSpy::log_top_region(index_space.id, field_space.id, 
                                     handle.tree_id);
-        // Signal that we are done our creation
-        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
-        // Wait for the creation to be done
-        creation_barrier.wait();
-        node->update_creation_set(shard_manager->get_mapping());
       }
       else
       {
-        // We need to get the barrier result
-        ValueBroadcast<RegionTreeID> tree_collective(this,
-                          logical_region_allocator_shard, COLLECTIVE_LOC_34);
-        handle.tree_id = tree_collective.get_value();
+        const RtEvent done = collective.first->get_done_event();
+        if (!done.has_triggered())
+        {
+          double_next = true;
+          done.wait();
+        }
+        const LRBroadcast value = collective.first->get_value(false);
+        handle.tree_id = value.tid;
+        double_buffer = value.double_buffer;
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
@@ -12975,14 +13068,53 @@ namespace Legion {
         // Signal that we are done our creation
         Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
-      advance_replicate_barrier(creation_barrier, total_shards); 
+      delete collective.first;
+      pending_region_trees.pop_front();
+      // Advance the creation barrier so that we know when it is ready
+      advance_replicate_barrier(creation_barrier, total_shards);
       // Register the creation of a top-level region with the context
       register_region_creation(handle, task_local);
-      // Update the allocator shard
-      logical_region_allocator_shard++;
-      if (logical_region_allocator_shard == total_shards)
-        logical_region_allocator_shard = 0;
+      // Get new handles in flight for the next time we need them
+      // Always add a new one to replace the old one, but double the number
+      // in flight if we're not hiding the latency
+      increase_pending_region_trees(double_buffer ? 
+          pending_region_trees.size() + 1 : 1, double_next && !double_buffer);
       return handle;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::increase_pending_region_trees(unsigned count,
+                                                         bool double_next)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < count; idx++)
+      {
+        if (owner_shard->shard_id == logical_region_allocator_shard)
+        {
+          const RegionTreeID tid = runtime->get_unique_region_tree_id();
+          // We're the owner, so make it locally and then broadcast it
+          runtime->forest->record_pending_region_tree(tid);
+          // Do our arrival on this generation, should be the last one
+          ValueBroadcast<LRBroadcast> *collective = 
+            new ValueBroadcast<LRBroadcast>(this, COLLECTIVE_LOC_34);
+          collective->broadcast(LRBroadcast(tid, double_next));
+          pending_region_trees.push_back(
+              std::pair<ValueBroadcast<LRBroadcast>*,bool>(collective, true));
+        }
+        else
+        {
+          ValueBroadcast<LRBroadcast> *collective = 
+            new ValueBroadcast<LRBroadcast>(this,logical_region_allocator_shard,
+                                            COLLECTIVE_LOC_34);
+          register_collective(collective);
+          pending_region_trees.push_back(
+              std::pair<ValueBroadcast<LRBroadcast>*,bool>(collective, false));
+        }
+        logical_region_allocator_shard++;
+        if (logical_region_allocator_shard == total_shards)
+          logical_region_allocator_shard = 0;
+        double_next = false;
+      }
     }
 
     //--------------------------------------------------------------------------

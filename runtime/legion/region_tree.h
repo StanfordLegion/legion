@@ -346,7 +346,8 @@ namespace Legion {
       bool has_index_partition(IndexSpace parent, Color color);
     public:
       FieldSpaceNode* create_field_space(FieldSpace handle, DistributedID did,
-                                         const bool notify_remote = true);
+                                   const bool notify_remote = true,
+                                   RtEvent initialized = RtEvent::NO_RT_EVENT);
       void destroy_field_space(FieldSpace handle, AddressSpaceID source,
                                std::set<RtEvent> &applied,
                                const bool collective = false);
@@ -391,7 +392,8 @@ namespace Legion {
                                   std::vector<FieldID> &fields);
     public:
       RegionNode* create_logical_region(LogicalRegion handle,
-                                        const bool notify_remote = true);
+                                    const bool notify_remote = true,
+                                    RtEvent initialized = RtEvent::NO_RT_EVENT);
       void destroy_logical_region(LogicalRegion handle, 
                                   AddressSpaceID source,
                                   std::set<RtEvent> &applied,
@@ -717,12 +719,15 @@ namespace Legion {
                                   RtEvent init,const bool notify_remote = true);
       PartitionNode*  create_node(LogicalPartition p, RegionNode *par);
     public:
-      IndexSpaceNode* get_node(IndexSpace space, RtEvent *defer = NULL);
+      IndexSpaceNode* get_node(IndexSpace space, 
+                               RtEvent *defer = NULL, bool first = true);
       IndexPartNode*  get_node(IndexPartition part, RtEvent *defer = NULL);
-      FieldSpaceNode* get_node(FieldSpace space, RtEvent *defer = NULL);
-      RegionNode*     get_node(LogicalRegion handle, bool need_check = true);
+      FieldSpaceNode* get_node(FieldSpace space, 
+                               RtEvent *defer = NULL, bool first = true);
+      RegionNode*     get_node(LogicalRegion handle, 
+                               bool need_check = true, bool first = true);
       PartitionNode*  get_node(LogicalPartition handle, bool need_check = true);
-      RegionNode*     get_tree(RegionTreeID tid);
+      RegionNode*     get_tree(RegionTreeID tid, bool first = true);
       // Request but don't block
       RtEvent request_node(IndexSpace space);
       // Find a local node if it exists and return it with reference
@@ -745,7 +750,12 @@ namespace Legion {
       void remove_node(LogicalPartition handle);
     public:
       void record_pending_index_space(IndexSpaceID space);
+      void record_pending_field_space(FieldSpaceID space);
+      void record_pending_region_tree(RegionTreeID tree);
+    public:
       void revoke_pending_index_space(IndexSpaceID space);
+      void revoke_pending_field_space(FieldSpaceID space);
+      void revoke_pending_region_tree(RegionTreeID tree);
     public:
       bool is_top_level_index_space(IndexSpace handle);
       bool is_top_level_region(LogicalRegion handle);
@@ -918,6 +928,8 @@ namespace Legion {
       std::map<RegionTreeID,RtEvent>     region_tree_requests;
     private:
       std::map<IndexSpaceID,RtUserEvent> pending_index_spaces;
+      std::map<FieldSpaceID,RtUserEvent> pending_field_spaces;
+      std::map<RegionTreeID,RtUserEvent> pending_region_trees;
     private:
       // Index space operations
       std::map<IndexSpaceExprID/*first*/,ExpressionTrieNode*> union_ops;

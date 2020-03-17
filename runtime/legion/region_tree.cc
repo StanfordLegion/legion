@@ -1138,10 +1138,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FieldSpaceNode* RegionTreeForest::create_field_space(FieldSpace handle,
                                                        DistributedID did,
-                                                       const bool notify_remote)
+                                                       const bool notify_remote,
+                                                       RtEvent initialized)
     //--------------------------------------------------------------------------
     {
-      return create_node(handle, did, RtEvent::NO_RT_EVENT, notify_remote);
+      return create_node(handle, did, initialized, notify_remote);
     }
 
     //--------------------------------------------------------------------------
@@ -1292,11 +1293,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RegionNode* RegionTreeForest::create_logical_region(LogicalRegion handle,
-                                                       const bool notify_remote)
+                                                       const bool notify_remote,
+                                                       RtEvent initialized)
     //--------------------------------------------------------------------------
     {
-      return create_node(handle, NULL/*parent*/, 
-                         RtEvent::NO_RT_EVENT, notify_remote);
+      return create_node(handle, NULL/*parent*/, initialized, notify_remote);
     }
 
     //--------------------------------------------------------------------------
@@ -4084,7 +4085,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpaceNode* RegionTreeForest::get_node(IndexSpace space,
-                                               RtEvent *defer /*=NULL*/)
+                                 RtEvent *defer /*=NULL*/, bool first /*=true*/)
     //--------------------------------------------------------------------------
     {
       if (!space.exists())
@@ -4123,6 +4124,7 @@ namespace Legion {
         // See if it is in the set of pending spaces in which case we
         // can wait for it to be recorded
         RtEvent pending_wait;
+        if (first)
         {
           AutoLock l_lock(lookup_lock);
           std::map<IndexSpaceID,RtUserEvent>::iterator finder = 
@@ -4144,7 +4146,7 @@ namespace Legion {
           else
           {
             pending_wait.wait();
-            return get_node(space, defer); 
+            return get_node(space, defer, false/*first*/); 
           }
         }
         else
@@ -4280,7 +4282,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FieldSpaceNode* RegionTreeForest::get_node(FieldSpace space,
-                                               RtEvent *defer /*=NULL*/) 
+                                 RtEvent *defer /*=NULL*/, bool first /*=true*/) 
     //--------------------------------------------------------------------------
     {
       if (!space.exists())
@@ -4315,8 +4317,39 @@ namespace Legion {
       // Couldn't find it, so send a request to the owner node
       AddressSpaceID owner = FieldSpaceNode::get_owner_space(space, runtime); 
       if (owner == runtime->address_space)
-        REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
-          "Unable to find entry for field space %x.", space.id)
+      {
+        // See if it is in the set of pending spaces in which case we
+        // can wait for it to be recorded
+        RtEvent pending_wait;
+        if (first)
+        {
+          AutoLock l_lock(lookup_lock);
+          std::map<FieldSpaceID,RtUserEvent>::iterator finder = 
+            pending_field_spaces.find(space.get_id());
+          if (finder != pending_field_spaces.end())
+          {
+            if (!finder->second.exists())
+              finder->second = Runtime::create_rt_user_event();
+            pending_wait = finder->second;
+          }
+        }
+        if (pending_wait.exists())
+        {
+          if (defer != NULL)
+          {
+            *defer = pending_wait;
+            return NULL;
+          }
+          else
+          {
+            pending_wait.wait();
+            return get_node(space, defer, false/*first*/);
+          }
+        }
+        else
+          REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
+            "Unable to find entry for field space %x.", space.id)
+      }
       {
         // Retake the lock in exclusive mode and 
         // check to make sure we didn't loose the race
@@ -4363,7 +4396,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RegionNode* RegionTreeForest::get_node(LogicalRegion handle,
-                                           bool need_check /* = true*/)
+                              bool need_check /* = true*/, bool first /*=true*/)
     //--------------------------------------------------------------------------
     {
       if (!handle.exists())
@@ -4406,10 +4439,30 @@ namespace Legion {
           RegionTreeNode::get_owner_space(handle.get_tree_id(), runtime);
         if (owner == runtime->address_space)
         {
-          REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
-            "Unable to find entry for logical region tree %d.",
-                           handle.get_tree_id());
-          assert(false);
+          // See if it is in the set of pending spaces in which case we
+          // can wait for it to be recorded
+          RtEvent pending_wait;
+          if (first)
+          {
+            AutoLock l_lock(lookup_lock);
+            std::map<RegionTreeID,RtUserEvent>::iterator finder = 
+              pending_region_trees.find(handle.get_tree_id());
+            if (finder != pending_region_trees.end())
+            {
+              if (!finder->second.exists())
+                finder->second = Runtime::create_rt_user_event();
+              pending_wait = finder->second;
+            }
+          }
+          if (pending_wait.exists())
+          {
+            pending_wait.wait();
+            return get_node(handle, need_check, false/*first*/); 
+          }
+          else
+            REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
+              "Unable to find entry for logical region tree %d.",
+                             handle.get_tree_id());
         }
         {
           // Retake the lock and make sure we didn't loose the race
@@ -4503,7 +4556,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RegionNode* RegionTreeForest::get_tree(RegionTreeID tid)
+    RegionNode* RegionTreeForest::get_tree(RegionTreeID tid,bool first/*=true*/)
     //--------------------------------------------------------------------------
     {
       if (tid == 0)
@@ -4533,8 +4586,31 @@ namespace Legion {
       // Couldn't find it, so send a request to the owner node
       AddressSpaceID owner = RegionTreeNode::get_owner_space(tid, runtime);
       if (owner == runtime->address_space)
-        REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
-          "Unable to find entry for region tree ID %d", tid)
+      {
+        // See if it is in the set of pending spaces in which case we
+        // can wait for it to be recorded
+        RtEvent pending_wait;
+        if (first)
+        {
+          AutoLock l_lock(lookup_lock);
+          std::map<RegionTreeID,RtUserEvent>::iterator finder = 
+            pending_region_trees.find(tid);
+          if (finder != pending_region_trees.end())
+          {
+            if (!finder->second.exists())
+              finder->second = Runtime::create_rt_user_event();
+            pending_wait = finder->second;
+          }
+        }
+        if (pending_wait.exists())
+        {
+          pending_wait.wait();
+          return get_tree(tid, false/*first*/); 
+        }
+        else
+          REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
+            "Unable to find entry for region tree ID %d", tid)
+      }
       {
         // Retake the lock in exclusive mode and check to
         // make sure that we didn't lose the race
@@ -4807,6 +4883,36 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RegionTreeForest::record_pending_field_space(FieldSpaceID space)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      // We should be the owner for this space
+      assert((space % runtime->total_address_spaces) == runtime->address_space);
+#endif
+      AutoLock l_lock(lookup_lock);
+#ifdef DEBUG_LEGION
+      assert(pending_field_spaces.find(space) == pending_field_spaces.end());
+#endif
+      pending_field_spaces[space] = RtUserEvent::NO_RT_USER_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::record_pending_region_tree(RegionTreeID tid)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      // We should be the owner for this space
+      assert((tid % runtime->total_address_spaces) == runtime->address_space);
+#endif
+      AutoLock l_lock(lookup_lock);
+#ifdef DEBUG_LEGION
+      assert(pending_region_trees.find(tid) == pending_region_trees.end());
+#endif
+      pending_region_trees[tid] = RtUserEvent::NO_RT_USER_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeForest::revoke_pending_index_space(IndexSpaceID space)
     //--------------------------------------------------------------------------
     {
@@ -4820,6 +4926,44 @@ namespace Legion {
 #endif
         to_trigger = finder->second;
         pending_index_spaces.erase(finder);
+      }
+      if (to_trigger.exists())
+        Runtime::trigger_event(to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::revoke_pending_field_space(FieldSpaceID space)
+    //--------------------------------------------------------------------------
+    {
+      RtUserEvent to_trigger;
+      {
+        AutoLock l_lock(lookup_lock);
+        std::map<FieldSpaceID,RtUserEvent>::iterator finder = 
+          pending_field_spaces.find(space);
+#ifdef DEBUG_LEGION
+        assert(finder != pending_field_spaces.end());
+#endif
+        to_trigger = finder->second;
+        pending_field_spaces.erase(finder);
+      }
+      if (to_trigger.exists())
+        Runtime::trigger_event(to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::revoke_pending_region_tree(RegionTreeID tid)
+    //--------------------------------------------------------------------------
+    {
+      RtUserEvent to_trigger;
+      {
+        AutoLock l_lock(lookup_lock);
+        std::map<RegionTreeID,RtUserEvent>::iterator finder = 
+          pending_region_trees.find(tid);
+#ifdef DEBUG_LEGION
+        assert(finder != pending_region_trees.end());
+#endif
+        to_trigger = finder->second;
+        pending_region_trees.erase(finder);
       }
       if (to_trigger.exists())
         Runtime::trigger_event(to_trigger);
