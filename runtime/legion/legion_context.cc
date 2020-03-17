@@ -10452,6 +10452,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      PartitionKind verify_kind = COMPUTE_KIND;
+      if (runtime->verify_partitions)
+        SWAP_PART_KINDS(verify_kind, kind)
 #ifdef DEBUG_LEGION 
       if (parent.get_tree_id() != handle1.get_tree_id())
         REPORT_LEGION_ERROR(ERROR_INDEX_TREE_MISMATCH,
@@ -10592,6 +10595,8 @@ namespace Legion {
       index_partition_allocator_shard++;
       if (index_partition_allocator_shard == total_shards)
         index_partition_allocator_shard = 0;
+      if (runtime->verify_partitions)
+        verify_partition(pid, verify_kind, __func__);
       return pid;
     }
 
@@ -10605,6 +10610,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      PartitionKind verify_kind = COMPUTE_KIND;
+      if (runtime->verify_partitions)
+        SWAP_PART_KINDS(verify_kind, kind)
 #ifdef DEBUG_LEGION 
       if (parent.get_tree_id() != handle1.get_tree_id())
         REPORT_LEGION_ERROR(ERROR_INDEX_TREE_MISMATCH,
@@ -10744,6 +10752,8 @@ namespace Legion {
       index_partition_allocator_shard++;
       if (index_partition_allocator_shard == total_shards)
         index_partition_allocator_shard = 0;
+      if (runtime->verify_partitions)
+        verify_partition(pid, verify_kind, __func__);
       return pid;
     }
 
@@ -10758,6 +10768,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
+      PartitionKind verify_kind = COMPUTE_KIND;
+      if (runtime->verify_partitions)
+        SWAP_PART_KINDS(verify_kind, kind)
 #ifdef DEBUG_LEGION 
       if (parent.get_tree_id() != handle1.get_tree_id())
         REPORT_LEGION_ERROR(ERROR_INDEX_TREE_MISMATCH,
@@ -10886,6 +10899,8 @@ namespace Legion {
       index_partition_allocator_shard++;
       if (index_partition_allocator_shard == total_shards)
         index_partition_allocator_shard = 0;
+      if (runtime->verify_partitions)
+        verify_partition(pid, verify_kind, __func__);
       return pid;
     }
 
@@ -10899,6 +10914,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      PartitionKind verify_kind = COMPUTE_KIND;
+      if (runtime->verify_partitions)
+        SWAP_PART_KINDS(verify_kind, kind)
 #ifdef DEBUG_LEGION
       log_index.debug("Creating cross product partitions in task %s (ID %lld)", 
                       get_task_name(), get_unique_id());
@@ -10978,6 +10996,46 @@ namespace Legion {
       index_partition_allocator_shard++;
       if (index_partition_allocator_shard == total_shards)
         index_partition_allocator_shard = 0;
+      if (runtime->verify_partitions)
+      {
+        Domain color_space = runtime->get_index_partition_color_space(handle1);
+        // This code will only work if the color space has type coord_t
+        switch (color_space.get_dim())
+        {
+#define DIMFUNC(DIM) \
+          case DIM: \
+            { \
+              TypeTag type_tag = NT_TemplateHelper::encode_tag<DIM,coord_t>(); \
+              assert(handle1.get_type_tag() == type_tag); \
+              break; \
+            }
+          LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+          default:
+            assert(false);
+        }
+        for (Domain::DomainPointIterator itr(color_space); itr; itr++)
+        {
+          IndexSpace subspace;
+          switch (color_space.get_dim())
+          {
+#define DIMFUNC(DIM) \
+            case DIM: \
+              { \
+                const Point<DIM,coord_t> p(itr.p); \
+                subspace = runtime->get_index_subspace(handle1, &p, sizeof(p));\
+                break; \
+              }
+            LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+            default:
+              assert(false);
+          }
+          IndexPartition part = 
+            runtime->get_index_partition(subspace, partition_color);
+          verify_partition(part, verify_kind, __func__);
+        }
+      }
       return partition_color;
     }
 
@@ -11034,6 +11092,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      PartitionKind verify_kind = COMPUTE_KIND;
+      if (runtime->verify_partitions)
+        SWAP_PART_KINDS(verify_kind, part_kind)
       LegionColor part_color = INVALID_COLOR;
       bool color_generated = false;
       if (color != AUTO_GENERATE_ID)
@@ -11133,6 +11194,8 @@ namespace Legion {
       index_partition_allocator_shard++;
       if (index_partition_allocator_shard == total_shards)
         index_partition_allocator_shard = 0;
+      if (runtime->verify_partitions)
+        verify_partition(pid, verify_kind, __func__);
       return pid;
     }
 
@@ -11210,6 +11273,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      PartitionKind verify_kind = COMPUTE_KIND;
+      if (runtime->verify_partitions)
+        SWAP_PART_KINDS(verify_kind, part_kind)
       LegionColor part_color = INVALID_COLOR;
       bool color_generated = false;
       if (color != AUTO_GENERATE_ID)
@@ -11308,6 +11374,8 @@ namespace Legion {
       index_partition_allocator_shard++;
       if (index_partition_allocator_shard == total_shards)
         index_partition_allocator_shard = 0;
+      if (runtime->verify_partitions)
+        verify_partition(pid, verify_kind, __func__);
       return pid;
     }
 
@@ -11323,6 +11391,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      PartitionKind verify_kind = COMPUTE_KIND;
+      if (runtime->verify_partitions)
+        SWAP_PART_KINDS(verify_kind, part_kind)
       IndexSpace parent = handle.get_index_space();  
       LegionColor part_color = INVALID_COLOR;
       bool color_generated = false;
@@ -11442,6 +11513,8 @@ namespace Legion {
       index_partition_allocator_shard++;
       if (index_partition_allocator_shard == total_shards)
         index_partition_allocator_shard = 0;
+      if (runtime->verify_partitions)
+        verify_partition(pid, verify_kind, __func__);
       return pid;
     }
 
@@ -11459,6 +11532,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);  
+      PartitionKind verify_kind = COMPUTE_KIND;
+      if (runtime->verify_partitions)
+        SWAP_PART_KINDS(verify_kind, part_kind)
       LegionColor part_color = INVALID_COLOR;
       bool color_generated = false;
       if (color != AUTO_GENERATE_ID)
@@ -11585,6 +11661,8 @@ namespace Legion {
       index_partition_allocator_shard++;
       if (index_partition_allocator_shard == total_shards)
         index_partition_allocator_shard = 0;
+      if (runtime->verify_partitions)
+        verify_partition(pid, verify_kind, __func__);
       return pid;
     }
 
@@ -11602,6 +11680,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);  
+      PartitionKind verify_kind = COMPUTE_KIND;
+      if (runtime->verify_partitions)
+        SWAP_PART_KINDS(verify_kind, part_kind)
       LegionColor part_color = INVALID_COLOR;
       bool color_generated = false;
       if (color != AUTO_GENERATE_ID)
@@ -11728,6 +11809,8 @@ namespace Legion {
       index_partition_allocator_shard++;
       if (index_partition_allocator_shard == total_shards)
         index_partition_allocator_shard = 0;
+      if (runtime->verify_partitions)
+        verify_partition(pid, verify_kind, __func__);
       return pid;
     }
 
@@ -11744,6 +11827,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);  
+      PartitionKind verify_kind = COMPUTE_KIND;
+      if (runtime->verify_partitions)
+        SWAP_PART_KINDS(verify_kind, part_kind)
       LegionColor part_color = INVALID_COLOR;
       bool color_generated = false;
       if (color != AUTO_GENERATE_ID)
@@ -11884,6 +11970,8 @@ namespace Legion {
       index_partition_allocator_shard++;
       if (index_partition_allocator_shard == total_shards)
         index_partition_allocator_shard = 0;
+      if (runtime->verify_partitions)
+        verify_partition(pid, verify_kind, __func__);
       return pid;
     }
 
@@ -11900,6 +11988,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);  
+      PartitionKind verify_kind = COMPUTE_KIND;
+      if (runtime->verify_partitions)
+        SWAP_PART_KINDS(verify_kind, part_kind)
       LegionColor part_color = INVALID_COLOR;
       bool color_generated = false;
       if (color != AUTO_GENERATE_ID)
@@ -12025,6 +12116,8 @@ namespace Legion {
       index_partition_allocator_shard++;
       if (index_partition_allocator_shard == total_shards)
         index_partition_allocator_shard = 0;
+      if (runtime->verify_partitions)
+        verify_partition(pid, verify_kind, __func__);
       return pid;
     }
 
@@ -12037,6 +12130,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      PartitionKind verify_kind = COMPUTE_KIND;
+      if (runtime->verify_partitions)
+        SWAP_PART_KINDS(verify_kind, part_kind)
       LegionColor part_color = INVALID_COLOR;
       bool color_generated = false;
       if (color != AUTO_GENERATE_ID)
@@ -12048,6 +12144,7 @@ namespace Legion {
         disjoint_result = new ValueBroadcast<bool>(this, 
             index_partition_allocator_shard, COLLECTIVE_LOC_69);
       IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
+      ApEvent defer_valid;
       if (owner_shard->shard_id == index_partition_allocator_shard)
       {
         // We're the owner, so mke it locally and then broadcast it
@@ -12062,6 +12159,7 @@ namespace Legion {
           runtime->forest->get_domain_volume(color_space);
         ApBarrier partition_ready(
                        Realm::Barrier::create_barrier(color_space_size));
+        defer_valid = partition_ready;
         // Tell the region tree forest about this partition
         RtEvent parent_notified = 
           runtime->forest->create_pending_partition_shard(
@@ -12108,6 +12206,7 @@ namespace Legion {
         assert(pid.exists());
 #endif
         ApBarrier partition_ready = bar_collective.get_value();
+        defer_valid = partition_ready;
         if (color_generated)
         {
           ValueBroadcast<LegionColor> color_collective(this,
@@ -12137,6 +12236,15 @@ namespace Legion {
       index_partition_allocator_shard++;
       if (index_partition_allocator_shard == total_shards)
         index_partition_allocator_shard = 0;
+      if (runtime->verify_partitions)
+      {
+        // We can't block to check this here because the user needs 
+        // control back in order to fill in the pieces of the partitions
+        // so just launch a meta-task to check it when we can
+        VerifyPartitionArgs args(this, pid, verify_kind, __func__);
+        runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY, 
+            Runtime::protect_event(defer_valid));
+      }
       return pid;
     }
 
@@ -12254,6 +12362,249 @@ namespace Legion {
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::verify_partition(IndexPartition pid, 
+                                  PartitionKind kind, const char *function_name)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartNode *node = runtime->forest->get_node(pid);
+      // Check containment first
+      if (node->total_children == node->max_linearized_color)
+      {
+        for (LegionColor color = owner_shard->shard_id; 
+              color < node->total_children; color+=total_shards)
+        {
+          IndexSpaceNode *child_node = node->get_child(color);
+          IndexSpaceExpression *diff = 
+            runtime->forest->subtract_index_spaces(child_node, node->parent);
+          if (!diff->is_empty())
+          {
+            const DomainPoint bad = 
+              node->color_space->delinearize_color_to_point(color);
+            switch (bad.get_dim())
+            {
+              case 1:
+                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+                    "Call to partition function %s in %s (UID %lld) has "
+                    "non-dominated child sub-region at color (%lld).",
+                    function_name, get_task_name(), get_unique_id(),
+                    bad[0])
+              case 2:
+                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+                    "Call to partition function %s in %s (UID %lld) has "
+                    "non-dominated child sub-region at color (%lld,%lld).",
+                    function_name, get_task_name(), get_unique_id(),
+                    bad[0], bad[1])
+              case 3:
+                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+                    "Call to partition function %s in %s (UID %lld) has "
+                    "non-dominated child sub-region at color (%lld,%lld,%lld).",
+                    function_name, get_task_name(), get_unique_id(),
+                    bad[0], bad[1], bad[2])
+              case 4:
+                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+                    "Call to partition function %s in %s (UID %lld) has "
+                    "non-dominated child sub-region at color (%lld,%lld,"
+                    "%lld,%lld).",
+                    function_name, get_task_name(), get_unique_id(),
+                    bad[0], bad[1], bad[2], bad[3])
+              case 5:
+                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+                    "Call to partition function %s in %s (UID %lld) has "
+                    "non-dominated child sub-region at color (%lld,%lld,"
+                    "%lld,%lld,%lld).",
+                    function_name, get_task_name(), get_unique_id(),
+                    bad[0], bad[1], bad[2], bad[3], bad[4])
+              case 6:
+                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+                    "Call to partition function %s in %s (UID %lld) has "
+                    "non-dominated child sub-region at color (%lld,%lld,"
+                    "%lld,%lld,%lld,%lld).",
+                    function_name, get_task_name(), get_unique_id(),
+                    bad[0], bad[1], bad[2], bad[3], bad[4], bad[5])
+              case 7:
+                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+                    "Call to partition function %s in %s (UID %lld) has "
+                    "non-dominated child sub-region at color (%lld,%lld,"
+                    "%lld,%lld,%lld,%lld,%lld).",
+                    function_name, get_task_name(), get_unique_id(),
+                    bad[0], bad[1], bad[2], bad[3], bad[4], bad[5], bad[6])
+              case 8:
+                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+                    "Call to partition function %s in %s (UID %lld) has "
+                    "non-dominated child sub-region at color (%lld,%lld,"
+                    "%lld,%lld,%lld,%lld,%lld,%lld).",
+                    function_name, get_task_name(), get_unique_id(),
+                    bad[0], bad[1], bad[2], bad[3], bad[4], bad[5], bad[6],
+                    bad[7])
+              case 9:
+                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+                    "Call to partition function %s in %s (UID %lld) has "
+                    "non-dominated child sub-region at color (%lld,%lld,"
+                    "%lld,%lld,%lld,%lld,%lld,%lld,%lld).",
+                    function_name, get_task_name(), get_unique_id(),
+                    bad[0], bad[1], bad[2], bad[3], bad[4], bad[5], bad[6],
+                    bad[7], bad[8])
+              default:
+                assert(false);
+            }
+          }
+        }
+      }
+      else
+      {
+        ColorSpaceIterator *itr =
+          node->color_space->create_color_space_iterator();
+        // Skip ahead if necessary for our shard
+        for (unsigned idx = 0; idx < owner_shard->shard_id; idx++)
+        {
+          itr->yield_color();
+          if (!itr->is_valid())
+            break;
+        }
+        while (itr->is_valid())
+        {
+          const LegionColor color = itr->yield_color();
+          IndexSpaceNode *child_node = node->get_child(color);
+          IndexSpaceExpression *diff = 
+            runtime->forest->subtract_index_spaces(child_node, node->parent);
+          if (!diff->is_empty())
+          {
+            const DomainPoint bad = 
+              node->color_space->delinearize_color_to_point(color);
+            switch (bad.get_dim())
+            {
+              case 1:
+                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+                    "Call to partition function %s in %s (UID %lld) has "
+                    "non-dominated child sub-region at color (%lld).",
+                    function_name, get_task_name(), get_unique_id(),
+                    bad[0])
+              case 2:
+                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+                    "Call to partition function %s in %s (UID %lld) has "
+                    "non-dominated child sub-region at color (%lld,%lld).",
+                    function_name, get_task_name(), get_unique_id(),
+                    bad[0], bad[1])
+              case 3:
+                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+                    "Call to partition function %s in %s (UID %lld) has "
+                    "non-dominated child sub-region at color (%lld,%lld,%lld).",
+                    function_name, get_task_name(), get_unique_id(),
+                    bad[0], bad[1], bad[2])
+              case 4:
+                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+                    "Call to partition function %s in %s (UID %lld) has "
+                    "non-dominated child sub-region at color (%lld,%lld,"
+                    "%lld,%lld).",
+                    function_name, get_task_name(), get_unique_id(),
+                    bad[0], bad[1], bad[2], bad[3])
+              case 5:
+                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+                    "Call to partition function %s in %s (UID %lld) has "
+                    "non-dominated child sub-region at color (%lld,%lld,"
+                    "%lld,%lld,%lld).",
+                    function_name, get_task_name(), get_unique_id(),
+                    bad[0], bad[1], bad[2], bad[3], bad[4])
+              case 6:
+                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+                    "Call to partition function %s in %s (UID %lld) has "
+                    "non-dominated child sub-region at color (%lld,%lld,"
+                    "%lld,%lld,%lld,%lld).",
+                    function_name, get_task_name(), get_unique_id(),
+                    bad[0], bad[1], bad[2], bad[3], bad[4], bad[5])
+              case 7:
+                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+                    "Call to partition function %s in %s (UID %lld) has "
+                    "non-dominated child sub-region at color (%lld,%lld,"
+                    "%lld,%lld,%lld,%lld,%lld).",
+                    function_name, get_task_name(), get_unique_id(),
+                    bad[0], bad[1], bad[2], bad[3], bad[4], bad[5], bad[6])
+              case 8:
+                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+                    "Call to partition function %s in %s (UID %lld) has "
+                    "non-dominated child sub-region at color (%lld,%lld,"
+                    "%lld,%lld,%lld,%lld,%lld,%lld).",
+                    function_name, get_task_name(), get_unique_id(),
+                    bad[0], bad[1], bad[2], bad[3], bad[4], bad[5], bad[6],
+                    bad[7])
+              case 9:
+                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+                    "Call to partition function %s in %s (UID %lld) has "
+                    "non-dominated child sub-region at color (%lld,%lld,"
+                    "%lld,%lld,%lld,%lld,%lld,%lld,%lld).",
+                    function_name, get_task_name(), get_unique_id(),
+                    bad[0], bad[1], bad[2], bad[3], bad[4], bad[5], bad[6],
+                    bad[7], bad[8])
+              default:
+                assert(false);
+            }
+            // Skip ahead for the next color if necessary
+            for (unsigned idx = 0; idx < (total_shards-1); idx++)
+            {
+              itr->yield_color();
+              if (!itr->is_valid())
+                break;
+            }
+          }
+        }
+        delete itr;
+      }
+      // Only need to do the rest of this on shard 0
+      if (owner_shard->shard_id > 0)
+        return;
+      // Check disjointness
+      if ((kind == DISJOINT_KIND) || (kind == DISJOINT_COMPLETE_KIND) ||
+          (kind == DISJOINT_INCOMPLETE_KIND))
+      {
+        if (!node->is_disjoint(true/*from application*/))
+          REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+              "Call to partitioning function %s in %s (UID %lld) specified "
+              "partition was %s but the partition is aliased.",
+              function_name, get_task_name(), get_unique_id(),
+              (kind == DISJOINT_KIND) ? "DISJOINT_KIND" :
+              (kind == DISJOINT_COMPLETE_KIND) ? "DISJOINT_COMPLETE_KIND" :
+              "DISJOINT_INCOMPLETE_KIND")
+      }
+      else if ((kind == ALIASED_KIND) || (kind == ALIASED_COMPLETE_KIND) ||
+               (kind == ALIASED_INCOMPLETE_KIND))
+      {
+        if (node->is_disjoint(true/*from application*/))
+          REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+              "Call to partitioning function %s in %s (UID %lld) specified "
+              "partition was %s but the partition is disjoint.",
+              function_name, get_task_name(), get_unique_id(),
+              (kind == ALIASED_KIND) ? "ALIASED_KIND" :
+              (kind == ALIASED_COMPLETE_KIND) ? "ALIASED_COMPLETE_KIND" :
+              "ALIASED_INCOMPLETE_KIND")
+      }
+      // Check completeness
+      if ((kind == DISJOINT_COMPLETE_KIND) || (kind == ALIASED_COMPLETE_KIND) ||
+          (kind == COMPUTE_COMPLETE_KIND))
+      {
+        if (!node->is_complete(true/*from application*/))
+          REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+              "Call to partitioning function %s in %s (UID %lld) specified "
+              "partition was %s but the partition is incomplete.",
+              function_name, get_task_name(), get_unique_id(),
+              (kind == DISJOINT_COMPLETE_KIND) ? "DISJOINT_COMPLETE_KIND" :
+              (kind == ALIASED_COMPLETE_KIND) ? "ALIASED_COMPLETE_KIND" :
+              "COMPUTE_COMPLETE_KIND")
+      }
+      else if ((kind == DISJOINT_INCOMPLETE_KIND) || 
+         (kind == ALIASED_INCOMPLETE_KIND) || (kind == COMPUTE_INCOMPLETE_KIND))
+      {
+        if (node->is_complete(true/*from application*/))
+          REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+              "Call to partitioning function %s in %s (UID %lld) specified "
+              "partition was %s but the partition is complete.",
+              function_name, get_task_name(), get_unique_id(),
+              (kind == DISJOINT_INCOMPLETE_KIND) ? "DISJOINT_INCOMPLETE_KIND" :
+              (kind == ALIASED_INCOMPLETE_KIND) ? "ALIASED_INCOMPLETE_KIND" :
+              "COMPUTE_INCOMPLETE_KIND")
+      }
     }
 
     //--------------------------------------------------------------------------

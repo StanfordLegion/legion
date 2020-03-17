@@ -1652,6 +1652,8 @@ namespace Legion {
                                             TypeTag type_tag,
                                             IndexSpace initial,
                                 const std::vector<IndexSpace> &handles);
+      virtual void verify_partition(IndexPartition pid, PartitionKind kind,
+                                    const char *function_name);
       virtual FieldSpace create_field_space(RegionTreeForest *forest);
       virtual void destroy_field_space(FieldSpace handle, const bool unordered);
       virtual FieldID allocate_field(FieldSpace space, size_t field_size,
