@@ -4629,57 +4629,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       IndexPartNode *node = runtime->forest->get_node(pid);
-      // Check disjointness
-      if ((kind == DISJOINT_KIND) || (kind == DISJOINT_COMPLETE_KIND) ||
-          (kind == DISJOINT_INCOMPLETE_KIND))
-      {
-        if (!node->is_disjoint(true/*from application*/))
-          REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
-              "Call to partitioning function %s in %s (UID %lld) specified "
-              "partition was %s but the partition is aliased.",
-              function_name, get_task_name(), get_unique_id(),
-              (kind == DISJOINT_KIND) ? "DISJOINT_KIND" :
-              (kind == DISJOINT_COMPLETE_KIND) ? "DISJOINT_COMPLETE_KIND" :
-              "DISJOINT_INCOMPLETE_KIND")
-      }
-      else if ((kind == ALIASED_KIND) || (kind == ALIASED_COMPLETE_KIND) ||
-               (kind == ALIASED_INCOMPLETE_KIND))
-      {
-        if (node->is_disjoint(true/*from application*/))
-          REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
-              "Call to partitioning function %s in %s (UID %lld) specified "
-              "partition was %s but the partition is disjoint.",
-              function_name, get_task_name(), get_unique_id(),
-              (kind == ALIASED_KIND) ? "ALIASED_KIND" :
-              (kind == ALIASED_COMPLETE_KIND) ? "ALIASED_COMPLETE_KIND" :
-              "ALIASED_INCOMPLETE_KIND")
-      }
-      // Check completeness
-      if ((kind == DISJOINT_COMPLETE_KIND) || (kind == ALIASED_COMPLETE_KIND) ||
-          (kind == COMPUTE_COMPLETE_KIND))
-      {
-        if (!node->is_complete(true/*from application*/))
-          REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
-              "Call to partitioning function %s in %s (UID %lld) specified "
-              "partition was %s but the partition is incomplete.",
-              function_name, get_task_name(), get_unique_id(),
-              (kind == DISJOINT_COMPLETE_KIND) ? "DISJOINT_COMPLETE_KIND" :
-              (kind == ALIASED_COMPLETE_KIND) ? "ALIASED_COMPLETE_KIND" :
-              "COMPUTE_COMPLETE_KIND")
-      }
-      else if ((kind == DISJOINT_INCOMPLETE_KIND) || 
-         (kind == ALIASED_INCOMPLETE_KIND) || (kind == COMPUTE_INCOMPLETE_KIND))
-      {
-        if (node->is_complete(true/*from application*/))
-          REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
-              "Call to partitioning function %s in %s (UID %lld) specified "
-              "partition was %s but the partition is complete.",
-              function_name, get_task_name(), get_unique_id(),
-              (kind == DISJOINT_INCOMPLETE_KIND) ? "DISJOINT_INCOMPLETE_KIND" :
-              (kind == ALIASED_INCOMPLETE_KIND) ? "ALIASED_INCOMPLETE_KIND" :
-              "COMPUTE_INCOMPLETE_KIND")
-      }
-      // Check containment
+      // Check containment first because our implementation of the algorithms
+      // for disjointnss and completeness rely upon it.
       if (node->total_children == node->max_linearized_color)
       {
         for (LegionColor color = 0; color < node->total_children; color++)
@@ -4846,6 +4797,56 @@ namespace Legion {
         }
         delete itr;
       }
+      // Check disjointness
+      if ((kind == DISJOINT_KIND) || (kind == DISJOINT_COMPLETE_KIND) ||
+          (kind == DISJOINT_INCOMPLETE_KIND))
+      {
+        if (!node->is_disjoint(true/*from application*/))
+          REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+              "Call to partitioning function %s in %s (UID %lld) specified "
+              "partition was %s but the partition is aliased.",
+              function_name, get_task_name(), get_unique_id(),
+              (kind == DISJOINT_KIND) ? "DISJOINT_KIND" :
+              (kind == DISJOINT_COMPLETE_KIND) ? "DISJOINT_COMPLETE_KIND" :
+              "DISJOINT_INCOMPLETE_KIND")
+      }
+      else if ((kind == ALIASED_KIND) || (kind == ALIASED_COMPLETE_KIND) ||
+               (kind == ALIASED_INCOMPLETE_KIND))
+      {
+        if (node->is_disjoint(true/*from application*/))
+          REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+              "Call to partitioning function %s in %s (UID %lld) specified "
+              "partition was %s but the partition is disjoint.",
+              function_name, get_task_name(), get_unique_id(),
+              (kind == ALIASED_KIND) ? "ALIASED_KIND" :
+              (kind == ALIASED_COMPLETE_KIND) ? "ALIASED_COMPLETE_KIND" :
+              "ALIASED_INCOMPLETE_KIND")
+      }
+      // Check completeness
+      if ((kind == DISJOINT_COMPLETE_KIND) || (kind == ALIASED_COMPLETE_KIND) ||
+          (kind == COMPUTE_COMPLETE_KIND))
+      {
+        if (!node->is_complete(true/*from application*/))
+          REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+              "Call to partitioning function %s in %s (UID %lld) specified "
+              "partition was %s but the partition is incomplete.",
+              function_name, get_task_name(), get_unique_id(),
+              (kind == DISJOINT_COMPLETE_KIND) ? "DISJOINT_COMPLETE_KIND" :
+              (kind == ALIASED_COMPLETE_KIND) ? "ALIASED_COMPLETE_KIND" :
+              "COMPUTE_COMPLETE_KIND")
+      }
+      else if ((kind == DISJOINT_INCOMPLETE_KIND) || 
+         (kind == ALIASED_INCOMPLETE_KIND) || (kind == COMPUTE_INCOMPLETE_KIND))
+      {
+        if (node->is_complete(true/*from application*/))
+          REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+              "Call to partitioning function %s in %s (UID %lld) specified "
+              "partition was %s but the partition is complete.",
+              function_name, get_task_name(), get_unique_id(),
+              (kind == DISJOINT_INCOMPLETE_KIND) ? "DISJOINT_INCOMPLETE_KIND" :
+              (kind == ALIASED_INCOMPLETE_KIND) ? "ALIASED_INCOMPLETE_KIND" :
+              "COMPUTE_INCOMPLETE_KIND")
+      } 
     }
 
     //--------------------------------------------------------------------------
