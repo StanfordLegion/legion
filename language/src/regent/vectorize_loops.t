@@ -518,7 +518,7 @@ function min_simd_width.expr(cx, reg_size, node)
     end
 
   elseif node:is(ast.typed.expr.IndexAccess) then
-    simd_width = min(simd_width, min_simd_width.expr(cx, reg_size, node.value))
+    simd_width = min(simd_width, min_simd_width.type(reg_size, std.as_read(node.expr_type)))
 
   elseif node:is(ast.typed.expr.Unary) then
     simd_width = min_simd_width.expr(cx, reg_size, node.rhs)
@@ -553,7 +553,7 @@ function min_simd_width.expr(cx, reg_size, node)
     simd_width = min(simd_width, min_simd_width.expr(cx, reg_size, node.value))
 
   elseif node:is(ast.typed.expr.Deref) then
-    simd_width = min(simd_width, min_simd_width.expr(cx, reg_size, node.value))
+    simd_width = min(simd_width, min_simd_width.type(reg_size, std.as_read(node.expr_type)))
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))

@@ -8930,113 +8930,119 @@ function codegen.stat_for_list_vectorized(cx, node)
     ispace_type = value_type
     is = `([value.value].impl)
   end
+  local index_type = ispace_type.index_type
 
-  local actions = quote
-    [value.actions]
-  end
-  local cleanup_actions = quote end
+  -- Retrieve dimension-specific handle types and functions from the C API
+  local dim = data.max(ispace_type.dim, 1)
+  local rect_type = c["legion_rect_" .. tostring(dim) .. "d_t"]
+  local rect_it_type =
+    c["legion_rect_in_domain_iterator_" .. tostring(dim) .. "d_t"]
+  local rect_it_create =
+    c["legion_rect_in_domain_iterator_create_" .. tostring(dim) .. "d"]
+  local rect_it_destroy =
+    c["legion_rect_in_domain_iterator_destroy_" .. tostring(dim) .. "d"]
+  local rect_it_valid =
+    c["legion_rect_in_domain_iterator_valid_" .. tostring(dim) .. "d"]
+  local rect_it_step =
+    c["legion_rect_in_domain_iterator_step_" .. tostring(dim) .. "d"]
+  local rect_it_get =
+    c["legion_rect_in_domain_iterator_get_rect_" .. tostring(dim) .. "d"]
 
+  -- Create variables for the outer loop that iterates over rectangles in a domain
   local domain = terralib.newsymbol(c.legion_domain_t, "domain")
-  actions = quote
-    [actions]
-    var [domain] = c.legion_index_space_get_domain([cx.runtime], [is])
+  local rect = terralib.newsymbol(rect_type, "rect")
+  local rect_it = terralib.newsymbol(rect_it_type, "rect_it")
+
+  local base = terralib.newsymbol(c.coord_t, "base")
+  local count = terralib.newsymbol(c.coord_t, "count")
+  local start = terralib.newsymbol(c.coord_t, "start")
+  local stop = terralib.newsymbol(c.coord_t, "stop")
+  local final = terralib.newsymbol(c.coord_t, "final")
+
+  local fields = index_type.fields
+  local indices = terralib.newlist()
+  if fields then
+    indices:insertall(fields:map(function(field)
+      return terralib.newsymbol(c.coord_t, tostring(field))
+    end))
+  else
+    indices:insert(terralib.newsymbol(c.coord_t, "x"))
   end
 
-  local fields = ispace_type.index_type.fields
-  if fields then
-    local rect_type = c["legion_rect_" .. tostring(ispace_type.dim) .. "d_t"]
-    local domain_get_rect = c["legion_domain_get_rect_" .. tostring(ispace_type.dim) .. "d"]
-    local rect = terralib.newsymbol(rect_type, "rect")
-    local index = fields:map(function(field) return terralib.newsymbol(c.coord_t, tostring(field)) end)
-    local base = terralib.newsymbol(c.coord_t, "base")
-    local count = terralib.newsymbol(c.coord_t, "base")
-    local start = terralib.newsymbol(c.coord_t, "base")
-    local stop = terralib.newsymbol(c.coord_t, "base")
-    local final = terralib.newsymbol(c.coord_t, "base")
-
-    local body = quote
-      var [ index[1] ] = base
-      if count >= [vector_width] then
-        while [ index[1] ] < [start] do
-          var [symbol] = [symbol.type] { __ptr = [symbol.type.index_type.impl_type]{ index } }
-          do
-            [orig_block_1]
-          end
-          [ index[1] ] = [ index[1] ] + 1
-        end
-        while [ index[1] ] < [stop] do
-          var [symbol] = [symbol.type] { __ptr = [symbol.type.index_type.impl_type]{ index } }
-          do
-            [block]
-          end
-          [ index[1] ] = [ index[1] ] + [vector_width]
-        end
-      end
-      while [ index[1] ] < [final] do
-        var [symbol] = [symbol.type] { __ptr = [symbol.type.index_type.impl_type]{ index } }
-        do
-          [orig_block_2]
-        end
-        [ index[1] ] = [ index[1] ] + 1
-      end
+  local symbol_setup = nil
+  if ispace_type.dim == 0 then
+    symbol_setup = quote
+      var [symbol] = [symbol.type]{
+        __ptr = ptr { __ptr = c.legion_ptr_t { value = [ indices[1] ] } }
+      }
     end
-    for i = 2, ispace_type.dim do
-      local rect_i = i - 1 -- C is zero-based, Lua is one-based
-      body = quote
-        for [ index[i] ] = [rect].lo.x[rect_i], [rect].hi.x[rect_i] + 1 do
-          [body]
-        end
-      end
-    end
-    return quote
-      [actions]
-      var [rect] = [domain_get_rect]([domain])
-      var alignment = [vector_width]
-      var [base] = [rect].lo.x[0]
-      var [count] = [rect].hi.x[0] - [rect].lo.x[0] + 1
-      var [start] = ([base] + alignment - 1) and not (alignment - 1)
-      var [stop] = ([base] + [count]) and not (alignment - 1)
-      var [final] = [base] + [count]
-      [body]
-      [cleanup_actions]
+  elseif ispace_type.dim == 1 then
+    symbol_setup = quote
+      var [symbol] = [symbol.type]{ __ptr = [ indices[1] ] }
     end
   else
-    return quote
-      [actions]
-      var rect = c.legion_domain_get_rect_1d([domain])
-      var alignment = [vector_width]
-      var base = rect.lo.x[0]
-      var count = rect.hi.x[0] - rect.lo.x[0] + 1
-      var start = (base + alignment - 1) and not (alignment - 1)
-      var stop = (base + count) and not (alignment - 1)
-      var final = base + count
-
-      var i = base
-      if count >= [vector_width] then
-        while i < start do
-          var [symbol] = [symbol.type]{ __ptr = i }
-          do
-            [orig_block_1]
-          end
-          i = i + 1
-        end
-        while i < stop do
-          var [symbol] = [symbol.type]{ __ptr = i }
-          do
-            [block]
-          end
-          i = i + [vector_width]
-        end
-      end
-      while i < final do
-        var [symbol] = [symbol.type]{ __ptr = i }
-        do
-          [orig_block_2]
-        end
-        i = i + 1
-      end
-      [cleanup_actions]
+    symbol_setup = quote
+      var [symbol] = [symbol.type] { __ptr = [index_type.impl_type]{ [indices] } }
     end
+  end
+
+  local bounds_setup = quote
+    var alignment = [vector_width]
+    var [base] = [rect].lo.x[0]
+    var [count] = [rect].hi.x[0] - [rect].lo.x[0] + 1
+    var [start] = ([base] + alignment - 1) and not (alignment - 1)
+    var [stop] = ([base] + [count]) and not (alignment - 1)
+    var [final] = [base] + [count]
+  end
+
+  local i = indices[1]
+  local body = quote
+    var [i] = [base]
+    if [count] >= [vector_width] then
+      while [i] < [start] do
+        [symbol_setup]
+        do
+          [orig_block_1]
+        end
+        [i] = [i] + 1
+      end
+      while [i] < [stop] do
+        [symbol_setup]
+        do
+          [block]
+        end
+        [i] = [i] + [vector_width]
+      end
+    end
+    while [i] < [final] do
+      [symbol_setup]
+      do
+        [orig_block_2]
+      end
+      [i] = [i] + 1
+    end
+  end
+
+  for i = 2, dim do
+    local rect_i = i - 1 -- C is zero-based, Lua is one-based
+    body = quote
+      for [ indices[i] ] = [rect].lo.x[rect_i], [rect].hi.x[rect_i] + 1 do
+        [body]
+      end
+    end
+  end
+
+  return quote
+    [value.actions]
+    var [domain] = c.legion_index_space_get_domain([cx.runtime], [is])
+    var [rect_it] = [rect_it_create]([domain])
+    while [rect_it_valid]([rect_it]) do
+      var [rect] = [rect_it_get]([rect_it])
+      [bounds_setup]
+      [body]
+      [rect_it_step]([rect_it])
+    end
+    [rect_it_destroy]([rect_it])
   end
 end
 
