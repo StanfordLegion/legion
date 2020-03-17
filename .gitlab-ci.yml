@@ -60,6 +60,8 @@ variables:
   USE_SPY: "1"
 .cxx11_normal: &cxx11_normal
   CC_FLAGS: "-std=c++11"
+.cxx11_hardened: &cxx11_hardened
+  CC_FLAGS: "-std=c++11 -D_FORTIFY_SOURCE=2 -D_GLIBCXX_ASSERTIONS"
 .cxx14_normal: &cxx14_normal
   CC_FLAGS: "-std=c++14"
 .cxx14_checks: &cxx14_checks
@@ -743,6 +745,16 @@ gcc8_cxx17_debug_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
     <<: [*gcc8, *terra38, *debug, *cxx17_normal, *regent]
+
+# GCC 8 with extra hardening
+gcc8_cxx11_hardened_legion:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*gcc8, *terra38, *release, *cxx11_hardened, *legion]
+gcc8_cxx11_hardened_regent:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*gcc8, *terra38, *release, *cxx11_hardened, *regent, *parallel]
 
 # Linux with Clang 3.5
 clang35_cxx98_debug_legion:
