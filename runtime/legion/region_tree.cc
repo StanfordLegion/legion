@@ -7929,7 +7929,8 @@ namespace Legion {
               color_map.begin(); it != color_map.end(); it++)
         {
           // Can be NULL in some cases of parallel partitioning
-          if (it->second != NULL)
+          if ((it->second != NULL) && (!it->second->initialized.exists() ||
+                it->second->initialized.has_triggered()))
             colors.push_back(it->first);
         }
       }

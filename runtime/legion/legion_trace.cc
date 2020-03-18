@@ -3238,7 +3238,7 @@ namespace Legion {
       int pos = chain_indices.size() - 1;
       while (true)
       {
-        while (chain_indices[pos] != -1U && pos >= 0)
+        while (pos >= 0 && chain_indices[pos] != -1U)
           --pos;
         if (pos < 0) break;
         unsigned curr = topo_order[pos];

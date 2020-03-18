@@ -95,8 +95,13 @@
 
 // REALM_ATTR_DEPRECATED(msg, thing) - indicates `thing` is deprecated, printing
 //                                     `msg` at compile time if possible
-#define REALM_ATTR_DEPRECATED(msg, thing)				\
+#ifdef __ICC
+  #define REALM_ATTR_DEPRECATED(msg, thing)				\
+                                    thing __attribute__((deprecated))
+#else
+  #define REALM_ATTR_DEPRECATED(msg, thing)				\
                                     thing __attribute__((deprecated(msg)))
+#endif
 
 // REALM_ALIGNOF(type) - returns the byte alignment required for `type`
 #if REALM_CXX_STANDARD >= 11
