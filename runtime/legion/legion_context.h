@@ -1398,11 +1398,13 @@ namespace Legion {
       };
       struct IPBroadcast {
       public:
-        IPBroadcast(void) : did(0) { }
-        IPBroadcast(IndexPartition p, DistributedID d) : pid(p), did(d) { }
+        IPBroadcast(void) : did(0), double_buffer(false) { }
+        IPBroadcast(IndexPartitionID p, DistributedID d, bool db) 
+          : pid(p), did(d), double_buffer(db) { }
       public:
-        IndexPartition pid;
+        IndexPartitionID pid;
         DistributedID did;
+        bool double_buffer;
       };
       struct FSBroadcast { 
       public:
@@ -1775,8 +1777,14 @@ namespace Legion {
       void handle_intra_space_dependence(Deserializer &derez);
     public:
       void increase_pending_index_spaces(unsigned count, bool double_buffer);
+      void increase_pending_partitions(unsigned count, bool double_buffer);
       void increase_pending_field_spaces(unsigned count, bool double_buffer);
       void increase_pending_region_trees(unsigned count, bool double_buffer);
+      bool create_shard_partition(IndexPartition &pid,
+          IndexSpace parent, IndexSpace color_space, PartitionKind part_kind,
+          LegionColor partition_color, bool color_generated,
+          ValueBroadcast<bool> *disjoint_result = NULL,
+          ApBarrier partition_ready = ApBarrier::NO_AP_BARRIER);
     public:
       // Collective methods
       CollectiveID get_next_collective_index(CollectiveIndexLocation loc);
@@ -1883,7 +1891,7 @@ namespace Legion {
       // Pending allocations of various resources
       std::deque<std::pair<ValueBroadcast<ISBroadcast>*,bool> > 
                                             pending_index_spaces;
-      std::deque<std::pair<ValueBroadcast<IPBroadcast>*,bool> >
+      std::deque<std::pair<ValueBroadcast<IPBroadcast>*,ShardID> >
                                             pending_index_partitions;
       std::deque<std::pair<ValueBroadcast<FSBroadcast>*,bool> >
                                             pending_field_spaces;

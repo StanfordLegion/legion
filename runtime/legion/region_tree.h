@@ -721,7 +721,8 @@ namespace Legion {
     public:
       IndexSpaceNode* get_node(IndexSpace space, 
                                RtEvent *defer = NULL, bool first = true);
-      IndexPartNode*  get_node(IndexPartition part, RtEvent *defer = NULL);
+      IndexPartNode*  get_node(IndexPartition part, 
+                               RtEvent *defer = NULL, bool first = true);
       FieldSpaceNode* get_node(FieldSpace space, 
                                RtEvent *defer = NULL, bool first = true);
       RegionNode*     get_node(LogicalRegion handle, 
@@ -750,10 +751,12 @@ namespace Legion {
       void remove_node(LogicalPartition handle);
     public:
       void record_pending_index_space(IndexSpaceID space);
+      void record_pending_partition(IndexPartitionID pid);
       void record_pending_field_space(FieldSpaceID space);
       void record_pending_region_tree(RegionTreeID tree);
     public:
       void revoke_pending_index_space(IndexSpaceID space);
+      void revoke_pending_partition(IndexPartitionID pid);
       void revoke_pending_field_space(FieldSpaceID space);
       void revoke_pending_region_tree(RegionTreeID tree);
     public:
@@ -928,6 +931,7 @@ namespace Legion {
       std::map<RegionTreeID,RtEvent>     region_tree_requests;
     private:
       std::map<IndexSpaceID,RtUserEvent> pending_index_spaces;
+      std::map<IndexPartitionID,RtUserEvent> pending_partitions;
       std::map<FieldSpaceID,RtUserEvent> pending_field_spaces;
       std::map<RegionTreeID,RtUserEvent> pending_region_trees;
     private:

@@ -4199,7 +4199,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexPartNode* RegionTreeForest::get_node(IndexPartition part,
-                                              RtEvent *defer/* = NULL*/)
+                               RtEvent *defer/* = NULL*/, bool first/* = true*/)
     //--------------------------------------------------------------------------
     {
       if (!part.exists())
@@ -4234,8 +4234,39 @@ namespace Legion {
       // Couldn't find it, so send a request to the owner node
       AddressSpace owner = IndexPartNode::get_owner_space(part, runtime);
       if (owner == runtime->address_space)
-        REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
-          "Unable to find entry for index partition %x.",part.id)
+      {
+        // See if it is in the set of pending partitions in which case we
+        // can wait for it to be recorded
+        RtEvent pending_wait;
+        if (first)
+        {
+          AutoLock l_lock(lookup_lock);
+          std::map<IndexPartitionID,RtUserEvent>::iterator finder = 
+            pending_partitions.find(part.get_id());
+          if (finder != pending_partitions.end())
+          {
+            if (!finder->second.exists())
+              finder->second = Runtime::create_rt_user_event();
+            pending_wait = finder->second;
+          }
+        }
+        if (pending_wait.exists())
+        {
+          if (defer != NULL)
+          {
+            *defer = pending_wait;
+            return NULL;
+          }
+          else
+          {
+            pending_wait.wait();
+            return get_node(part, defer, false/*first*/); 
+          }
+        }
+        else
+          REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
+            "Unable to find entry for index partition %x.",part.id)
+      }
       {
         // Retake the lock in exclusive mode and make
         // sure we didn't loose the race
@@ -4883,6 +4914,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RegionTreeForest::record_pending_partition(IndexPartitionID pid)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      // We should be the owner for this space
+      assert((pid % runtime->total_address_spaces) == runtime->address_space);
+#endif
+      AutoLock l_lock(lookup_lock);
+#ifdef DEBUG_LEGION
+      assert(pending_partitions.find(pid) == pending_partitions.end());
+#endif
+      pending_partitions[pid] = RtUserEvent::NO_RT_USER_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeForest::record_pending_field_space(FieldSpaceID space)
     //--------------------------------------------------------------------------
     {
@@ -4926,6 +4972,25 @@ namespace Legion {
 #endif
         to_trigger = finder->second;
         pending_index_spaces.erase(finder);
+      }
+      if (to_trigger.exists())
+        Runtime::trigger_event(to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::revoke_pending_partition(IndexPartitionID pid)
+    //--------------------------------------------------------------------------
+    {
+      RtUserEvent to_trigger;
+      {
+        AutoLock l_lock(lookup_lock);
+        std::map<IndexPartitionID,RtUserEvent>::iterator finder = 
+          pending_partitions.find(pid);
+#ifdef DEBUG_LEGION
+        assert(finder != pending_partitions.end());
+#endif
+        to_trigger = finder->second;
+        pending_partitions.erase(finder);
       }
       if (to_trigger.exists())
         Runtime::trigger_event(to_trigger);
