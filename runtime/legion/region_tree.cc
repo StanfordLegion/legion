@@ -476,7 +476,7 @@ namespace Legion {
                                 (part_kind == ALIASED_INCOMPLETE_KIND)) ? 0 :-1;
           part_node = create_node(pid, parent_node, color_node, partition_color,
             disjoint, complete, did, partition_ready, partial_pending,
-            RtEvent::NO_RT_EVENT, &mapping);
+            creation_ready, &mapping);
           if (runtime->legion_spy_enabled)
             LegionSpy::log_index_partition(parent.id, pid.id, disjoint,
                                            partition_color);
@@ -493,7 +493,7 @@ namespace Legion {
           part_node = create_node(pid, parent_node, color_node, partition_color,
                                   disjointness_event, complete, did,
                                   partition_ready, partial_pending,
-                                  RtEvent::NO_RT_EVENT, &mapping);
+                                  creation_ready, &mapping);
         }
         part_node->update_creation_set(mapping);
         ctx->register_index_partition_creation(pid);
@@ -539,7 +539,7 @@ namespace Legion {
                                 (part_kind == ALIASED_INCOMPLETE_KIND)) ? 0 :-1;
           part_node = create_node(pid, parent_node, color_node, partition_color,
             disjoint, complete, did, partition_ready, partial_pending,
-            RtEvent::NO_RT_EVENT, &mapping);
+            creation_ready, &mapping);
         }
         else
         {
@@ -550,7 +550,7 @@ namespace Legion {
           part_node = create_node(pid, parent_node, color_node, partition_color,
                                   disjointness_event, complete, did,
                                   partition_ready, partial_pending,
-                                  RtEvent::NO_RT_EVENT, &mapping);
+                                  creation_ready, &mapping);
         }
         part_node->update_creation_set(mapping);
         ctx->register_index_partition_creation(pid);
