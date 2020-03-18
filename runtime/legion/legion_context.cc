@@ -10332,6 +10332,8 @@ namespace Legion {
              ApBarrier partition_ready /*=ApBarrier::NO_AP_BARRIER*/)
     //--------------------------------------------------------------------------
     {
+      if (pending_index_partitions.empty())
+        increase_pending_partitions(1/*count*/, false/*double*/);
       bool double_next = false;
       bool double_buffer = false;
       std::pair<ValueBroadcast<IPBroadcast>*,ShardID> &collective = 
@@ -10424,8 +10426,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);  
-      if (pending_index_partitions.empty())
-        increase_pending_partitions(1/*count*/, false/*double*/);
       IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
       LegionColor partition_color = INVALID_COLOR;
       bool color_generated = false; 
@@ -10460,8 +10460,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);  
-      if (pending_index_partitions.empty())
-        increase_pending_partitions(1/*count*/, false/*double*/);
       IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
       LegionColor partition_color = INVALID_COLOR;
       bool color_generated = false;
