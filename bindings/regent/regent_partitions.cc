@@ -20,6 +20,18 @@
 #include "legion/legion_c_util.h"
 #include "legion/legion_utilities.h"
 
+// Disable deprecated warnings in this file since we are also
+// trying to maintain backwards compatibility support for older
+// interfaces here in the C API
+#ifdef __GNUC__
+#pragma GCC diagnostic ignored "-Wdeprecated"
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+#ifdef __clang__
+#pragma clang diagnostic ignored "-Wdeprecated"
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
+
 static inline legion_terra_index_space_list_list_t
 create_list_list(std::vector<IndexSpace> &spaces,
                  std::map<IndexSpace, std::vector<IndexSpace> > &product)
