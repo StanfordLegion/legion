@@ -10549,6 +10549,7 @@ namespace Legion {
       if ((kind == COMPUTE_KIND) || (kind == COMPUTE_COMPLETE_KIND) || 
           (kind == COMPUTE_INCOMPLETE_KIND))
         disjoint_result = new ValueBroadcast<bool>(this, 
+            pending_index_partitions.empty() ? index_partition_allocator_shard :
             pending_index_partitions.front().second, COLLECTIVE_LOC_61);
       IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
       if (create_shard_partition(pid, parent, color_space, kind, 
@@ -10634,6 +10635,7 @@ namespace Legion {
       if ((kind == COMPUTE_KIND) || (kind == COMPUTE_COMPLETE_KIND) ||
           (kind == COMPUTE_INCOMPLETE_KIND))
         disjoint_result = new ValueBroadcast<bool>(this, 
+            pending_index_partitions.empty() ? index_partition_allocator_shard :
             pending_index_partitions.front().second, COLLECTIVE_LOC_62);
       IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
       if (create_shard_partition(pid, parent, color_space, kind,
@@ -10709,6 +10711,7 @@ namespace Legion {
       if ((kind == COMPUTE_KIND) || (kind == COMPUTE_COMPLETE_KIND) ||
           (kind == COMPUTE_INCOMPLETE_KIND))
         disjoint_result = new ValueBroadcast<bool>(this, 
+            pending_index_partitions.empty() ? index_partition_allocator_shard :
             pending_index_partitions.front().second, COLLECTIVE_LOC_63);
       IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
       if (create_shard_partition(pid, parent, color_space, kind,
@@ -10932,6 +10935,7 @@ namespace Legion {
       if ((part_kind == COMPUTE_KIND) || (part_kind == COMPUTE_COMPLETE_KIND) ||
           (part_kind == COMPUTE_INCOMPLETE_KIND))
         disjoint_result = new ValueBroadcast<bool>(this, 
+            pending_index_partitions.empty() ? index_partition_allocator_shard :
             pending_index_partitions.front().second, COLLECTIVE_LOC_64);
       IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
       if (create_shard_partition(pid, parent, color_space, part_kind,
@@ -11041,6 +11045,7 @@ namespace Legion {
       if ((part_kind == COMPUTE_KIND) || (part_kind == COMPUTE_COMPLETE_KIND) ||
           (part_kind == COMPUTE_INCOMPLETE_KIND))
         disjoint_result = new ValueBroadcast<bool>(this, 
+            pending_index_partitions.empty() ? index_partition_allocator_shard :
             pending_index_partitions.front().second, COLLECTIVE_LOC_76);
       IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
       if (create_shard_partition(pid, parent, color_space, part_kind,
@@ -11155,6 +11160,7 @@ namespace Legion {
       if ((part_kind == COMPUTE_KIND) || (part_kind == COMPUTE_COMPLETE_KIND) ||
           (part_kind == COMPUTE_INCOMPLETE_KIND))
         disjoint_result = new ValueBroadcast<bool>(this, 
+            pending_index_partitions.empty() ? index_partition_allocator_shard :
             pending_index_partitions.front().second, COLLECTIVE_LOC_65);
       IndexPartition pid(0/*temp*/, handle.get_tree_id(),handle.get_type_tag());
       if (create_shard_partition(pid, handle, color_space, part_kind,
@@ -11231,6 +11237,7 @@ namespace Legion {
       if ((part_kind == COMPUTE_KIND) || (part_kind == COMPUTE_COMPLETE_KIND) ||
           (part_kind == COMPUTE_INCOMPLETE_KIND))
         disjoint_result = new ValueBroadcast<bool>(this, 
+            pending_index_partitions.empty() ? index_partition_allocator_shard :
             pending_index_partitions.front().second, COLLECTIVE_LOC_66);
       IndexPartition pid(0/*temp*/, handle.get_tree_id(),handle.get_type_tag());
       if (create_shard_partition(pid, handle, color_space, part_kind,
@@ -11322,6 +11329,7 @@ namespace Legion {
       if ((part_kind == COMPUTE_KIND) || (part_kind == COMPUTE_COMPLETE_KIND) ||
           (part_kind == COMPUTE_INCOMPLETE_KIND))
         disjoint_result = new ValueBroadcast<bool>(this, 
+            pending_index_partitions.empty() ? index_partition_allocator_shard :
             pending_index_partitions.front().second, COLLECTIVE_LOC_67);
       IndexPartition pid(0/*temp*/,
           handle.get_index_space().get_tree_id(), parent.get_type_tag());
@@ -11395,6 +11403,7 @@ namespace Legion {
       if ((part_kind == COMPUTE_KIND) || (part_kind == COMPUTE_COMPLETE_KIND) ||
           (part_kind == COMPUTE_INCOMPLETE_KIND))
         disjoint_result = new ValueBroadcast<bool>(this, 
+            pending_index_partitions.empty() ? index_partition_allocator_shard :
             pending_index_partitions.front().second, COLLECTIVE_LOC_68);
       IndexPartition pid(0/*temp*/,
           handle.get_index_space().get_tree_id(), parent.get_type_tag());
@@ -11465,6 +11474,7 @@ namespace Legion {
       if ((part_kind == COMPUTE_KIND) || (part_kind == COMPUTE_COMPLETE_KIND) ||
           (part_kind == COMPUTE_INCOMPLETE_KIND))
         disjoint_result = new ValueBroadcast<bool>(this, 
+            pending_index_partitions.empty() ? index_partition_allocator_shard :
             pending_index_partitions.front().second, COLLECTIVE_LOC_69);
       ApBarrier partition_ready;
       if (owner_shard->shard_id == index_partition_allocator_shard)
