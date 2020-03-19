@@ -7398,12 +7398,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CreationOp::initialize_index_space(IndexSpaceNode *n, const Future &f)
+    void CreationOp::initialize_index_space(
+                          InnerContext *ctx, IndexSpaceNode *n, const Future &f)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(index_space_node == NULL);
 #endif
+      initialize_operation(ctx, true);
       index_space_node = n;
       future = f;
     }
