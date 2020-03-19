@@ -31,13 +31,14 @@ task f()
   t[{0, 1}] = 0
   t[{1, 1}] = 1
   -- rectangle
-  var e : rect2d = [rect2d] { lo = [int2d] { 0, 0 }, hi = [int2d] { 3, 3 } }
+  var e : rect2d = [rect2d] { lo = [int2d] { 0, 0 }, hi = [int2d] { 1, 1 } }
   -- create colorspace for partition
-  var csize = 1200
+  var csize = 1000
   var colors = ispace(int2d, {csize, csize})
   -- Choose one of the following two lines to compare speed with and without completeness checks
-  -- var p = restrict(r, t, e, colors)
-  var p = restrict(complete, r, t, e, colors)
+  -- var p = restrict(disjoint, r, t, e, colors)
+  var p = restrict(disjoint, complete, r, t, e, colors)
+  c.printf("p is complete %d\n", c.legion_index_partition_is_complete(__runtime(), __raw(p).index_partition))
 end
 
 task main()
