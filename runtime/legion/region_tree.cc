@@ -3812,7 +3812,7 @@ namespace Legion {
             "Unable to find entry for index space %x."
                           "This is definitely a runtime bug.", space.id)
         wait_on.wait();
-        return get_node(space, NULL, false/*first*/);
+        return get_node(space, NULL);
       }
       else
       {
@@ -3850,7 +3850,7 @@ namespace Legion {
       }
       if (result != NULL)
       {
-        if (wait_on.has_triggered())
+        if (!wait_on.has_triggered())
           wait_on.wait();
         AutoLock l_lock(lookup_lock);
         result->initialized = RtEvent::NO_RT_EVENT;
@@ -3916,7 +3916,7 @@ namespace Legion {
             "Unable to find entry for index partition %x. "
                           "This is definitely a runtime bug.", part.id)
         wait_on.wait();
-        return get_node(part, NULL, false/*first*/);
+        return get_node(part, NULL);
       }
       else
       {
@@ -4020,7 +4020,7 @@ namespace Legion {
             "Unable to find entry for field space %x. "
                           "This is definitely a runtime bug.", space.id)
         wait_on.wait();
-        return get_node(space, NULL, false/*first*/);
+        return get_node(space, NULL);
       }
       else
       {
