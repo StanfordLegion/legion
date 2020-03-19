@@ -845,18 +845,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexSpaceNode* IndexSpaceOperationT<DIM,T>::create_node(IndexSpace handle,
-                                         DistributedID did, RtEvent initialized)
+             DistributedID did, RtEvent initialized, std::set<RtEvent> *applied)
     //--------------------------------------------------------------------------
     {
       AutoLock i_lock(inter_lock, 1, false/*exclusive*/);
       if (is_index_space_tight)
         return context->create_node(handle, &tight_index_space, false/*domain*/,
                                     NULL/*parent*/, 0/*color*/, did,initialized,
-                                    realm_index_space_ready, expr_id);
+                                    realm_index_space_ready, expr_id, applied);
       else
         return context->create_node(handle, &realm_index_space, false/*domain*/,
                                     NULL/*parent*/, 0/*color*/, did,initialized,
-                                    realm_index_space_ready, expr_id);
+                                    realm_index_space_ready, expr_id, applied);
     }
 
     //--------------------------------------------------------------------------
@@ -1934,7 +1934,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexSpaceNode* IndexSpaceNodeT<DIM,T>::create_node(IndexSpace new_handle,
-                                         DistributedID did, RtEvent initialized)
+             DistributedID did, RtEvent initialized, std::set<RtEvent> *applied)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1944,7 +1944,7 @@ namespace Legion {
       const ApEvent ready = get_realm_index_space(local_space, false/*tight*/);
       return context->create_node(new_handle, &local_space, false/*domain*/,
                                   NULL/*parent*/, 0/*color*/, did, initialized,
-                                  ready, expr_id);
+                                  ready, expr_id, applied);
     }
 
     //--------------------------------------------------------------------------
