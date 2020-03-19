@@ -4101,7 +4101,7 @@ namespace Legion {
         {
           if (!finder->second->initialized.exists())
             return finder->second;
-          if (defer != NULL)
+          if ((defer != NULL) && !finder->second->initialized.has_triggered())
           {
             *defer = finder->second->initialized;
             return finder->second;
@@ -4112,7 +4112,8 @@ namespace Legion {
       }
       if (result != NULL)
       {
-        wait_on.wait();
+        if (!wait_on.has_triggered())
+          wait_on.wait();
         AutoLock l_lock(lookup_lock);
         result->initialized = RtEvent::NO_RT_EVENT;
         return result;
@@ -4181,14 +4182,34 @@ namespace Legion {
       {
         // Wait on the event
         wait_on.wait();
-        AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
-        std::map<IndexSpace,IndexSpaceNode*>::const_iterator finder = 
-            index_nodes.find(space);
-        if (finder == index_nodes.end())
+        {
+          AutoLock l_lock(lookup_lock);
+          std::map<IndexSpace,IndexSpaceNode*>::iterator finder = 
+              index_nodes.find(space);
+          if (finder != index_nodes.end())
+          {
+            if (finder->second->initialized.exists())
+            {
+              if (finder->second->initialized.has_triggered())
+              {
+                finder->second->initialized = RtEvent::NO_RT_EVENT;
+                return finder->second;
+              }
+              else
+                wait_on = finder->second->initialized;
+            }
+            else
+              return finder->second;
+          }
+          else
+            wait_on = RtEvent::NO_RT_EVENT;
+        }
+        if (!wait_on.exists())
           REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
             "Unable to find entry for index space %x."
                           "This is definitely a runtime bug.", space.id)
-        return finder->second;
+        wait_on.wait();
+        return get_node(space, NULL, false/*first*/);
       }
       else
       {
@@ -4215,7 +4236,7 @@ namespace Legion {
         {
           if (!finder->second->initialized.exists())
             return finder->second;
-          if (defer != NULL)
+          if ((defer != NULL) && !finder->second->initialized.has_triggered())
           {
             *defer = finder->second->initialized;
             return finder->second;
@@ -4226,7 +4247,8 @@ namespace Legion {
       }
       if (result != NULL)
       {
-        wait_on.wait();
+        if (wait_on.has_triggered())
+          wait_on.wait();
         AutoLock l_lock(lookup_lock);
         result->initialized = RtEvent::NO_RT_EVENT;
         return result;
@@ -4295,14 +4317,34 @@ namespace Legion {
       {
         // Wait for the event
         wait_on.wait();
-        AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
-        std::map<IndexPartition,IndexPartNode*>::const_iterator finder = 
-          index_parts.find(part);
-        if (finder == index_parts.end())
+        {
+          AutoLock l_lock(lookup_lock);
+          std::map<IndexPartition,IndexPartNode*>::iterator finder = 
+            index_parts.find(part);
+          if (finder != index_parts.end())
+          {
+            if (finder->second->initialized.exists())
+            {
+              if (finder->second->initialized.has_triggered())
+              {
+                finder->second->initialized = RtEvent::NO_RT_EVENT;
+                return finder->second;
+              }
+              else
+                wait_on = finder->second->initialized;
+            }
+            else
+              return finder->second;
+          }
+          else
+            wait_on = RtEvent::NO_RT_EVENT;
+        }
+        if (!wait_on.exists())
           REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
             "Unable to find entry for index partition %x. "
                           "This is definitely a runtime bug.", part.id)
-        return finder->second;
+        wait_on.wait();
+        return get_node(part, NULL, false/*first*/);
       }
       else
       {
@@ -4329,7 +4371,7 @@ namespace Legion {
         {
           if (!finder->second->initialized.exists())
             return finder->second;
-          if (defer != NULL)
+          if ((defer != NULL) && !finder->second->initialized.has_triggered())
           {
             *defer = finder->second->initialized;
             return finder->second;
@@ -4340,7 +4382,8 @@ namespace Legion {
       }
       if (result != NULL)
       {
-        wait_on.wait();
+        if (!wait_on.has_triggered())
+          wait_on.wait();
         AutoLock l_lock(lookup_lock);
         result->initialized = RtEvent::NO_RT_EVENT;
         return result;
@@ -4409,14 +4452,34 @@ namespace Legion {
       {
         // Wait for the event to be ready
         wait_on.wait();
-        AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
-        std::map<FieldSpace,FieldSpaceNode*>::const_iterator finder = 
-          field_nodes.find(space);
-        if (finder == field_nodes.end())
+        {
+          AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
+          std::map<FieldSpace,FieldSpaceNode*>::const_iterator finder = 
+            field_nodes.find(space);
+          if (finder != field_nodes.end())
+          {
+            if (finder->second->initialized.exists())
+            {
+              if (finder->second->initialized.has_triggered())
+              {
+                finder->second->initialized = RtEvent::NO_RT_EVENT;
+                return finder->second;
+              }
+              else
+                wait_on = finder->second->initialized;
+            }
+            else
+              return finder->second;
+          }
+          else
+            wait_on = RtEvent::NO_RT_EVENT;
+        }
+        if (!wait_on.exists())
           REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
             "Unable to find entry for field space %x. "
                           "This is definitely a runtime bug.", space.id)
-        return finder->second;
+        wait_on.wait();
+        return get_node(space, NULL, false/*first*/);
       }
       else
       {
@@ -4457,7 +4520,8 @@ namespace Legion {
       }
       if (result != NULL)
       {
-        wait_on.wait();
+        if (!wait_on.has_triggered())
+          wait_on.wait();
         AutoLock l_lock(lookup_lock);
         result->initialized = RtEvent::NO_RT_EVENT;
         return result;
@@ -4529,13 +4593,30 @@ namespace Legion {
         if (wait_on.exists())
         {
           wait_on.wait();
-          // Retake the lock and see again if the handle we
-          // were looking for was the top-level node or not
-          AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
-          std::map<LogicalRegion,RegionNode*>::const_iterator it = 
-            region_nodes.find(handle);
-          if (it != region_nodes.end())
-            return it->second;
+          RegionNode *result = NULL;
+          {
+            // Retake the lock and see again if the handle we
+            // were looking for was the top-level node or not
+            AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
+            std::map<LogicalRegion,RegionNode*>::const_iterator it = 
+              region_nodes.find(handle);
+            if (it != region_nodes.end())
+            {
+              result = it->second;
+              wait_on = result->initialized;
+            }
+          }
+          if (result != NULL)
+          {
+            if (wait_on.exists())
+            {
+              if (!wait_on.has_triggered())
+                wait_on.wait();
+              AutoLock l_lock(lookup_lock);
+              result->initialized = RtEvent::NO_RT_EVENT;
+            }
+            return result;
+          }
         }
       }
       // Otherwise it hasn't been made yet, so make it
@@ -4551,9 +4632,21 @@ namespace Legion {
         // are guaranteed that the top level node exists
         PartitionNode *parent = get_node(parent_handle, false/*need check*/);
         // Now make our node and then return it
-        return create_node(handle, parent, RtEvent::NO_RT_EVENT);
+        result = create_node(handle, parent, RtEvent::NO_RT_EVENT);
       }
-      return create_node(handle, NULL, RtEvent::NO_RT_EVENT);
+      else
+        result = create_node(handle, NULL, RtEvent::NO_RT_EVENT);
+      {
+        AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
+        if (!result->initialized.exists())
+          return result;
+        wait_on = result->initialized;
+      }
+      if (!wait_on.has_triggered())
+        wait_on.wait();
+      AutoLock l_lock(lookup_lock);
+      result->initialized = RtEvent::NO_RT_EVENT;
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -4564,13 +4657,31 @@ namespace Legion {
       if (!handle.exists())
         REPORT_LEGION_ERROR(ERROR_INVALID_REQUEST_LOGICALPARTITION,
           "Invalid request for LogicalPartition NO_PART.")
+      RtEvent wait_on;
+      PartitionNode *result = NULL;
       // Check to see if the node already exists
       {
         AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
         std::map<LogicalPartition,PartitionNode*>::const_iterator it =
           part_nodes.find(handle);
         if (it != part_nodes.end())
-          return it->second;
+        {
+          if (it->second->initialized.exists())
+          {
+            wait_on = it->second->initialized;
+            result = it->second;
+          }
+          else
+            return it->second;
+        }
+      }
+      if (result != NULL)
+      {
+        if (!wait_on.has_triggered())
+          wait_on.wait();
+        AutoLock l_lock(lookup_lock);
+        result->initialized = RtEvent::NO_RT_EVENT;
+        return result;
       }
       // Otherwise it hasn't been made yet so make it
       IndexPartNode *index_node = get_node(handle.index_partition);
@@ -4583,7 +4694,18 @@ namespace Legion {
       // are guaranteed that the top level node exists
       RegionNode *parent = get_node(parent_handle, need_check);
       // Now create our node and return it
-      return create_node(handle, parent);
+      result = create_node(handle, parent);
+      {
+        AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
+        if (!result->initialized.exists())
+          return result;
+        wait_on = result->initialized;
+      }
+      if (!wait_on.has_triggered())
+        wait_on.wait();
+      AutoLock l_lock(lookup_lock);
+      result->initialized = RtEvent::NO_RT_EVENT;
+      return result;
     }
 
     //--------------------------------------------------------------------------
