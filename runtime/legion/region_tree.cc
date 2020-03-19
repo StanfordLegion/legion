@@ -4247,7 +4247,7 @@ namespace Legion {
       }
       if (result != NULL)
       {
-        if (wait_on.has_triggered())
+        if (!wait_on.has_triggered())
           wait_on.wait();
         AutoLock l_lock(lookup_lock);
         result->initialized = RtEvent::NO_RT_EVENT;

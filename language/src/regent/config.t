@@ -89,7 +89,6 @@ local default_options = {
 
   -- Miscellaneous, internal or special-purpose flags:
   ["aligned-instances"] = false,
-  ["cached-iterators"] = false,
   ["debug"] = false,
   ["warn-as-error"] = false,
   ["no-dynamic-branches"] = true,
