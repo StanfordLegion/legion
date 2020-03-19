@@ -48,8 +48,8 @@ variables:
 .release: &release
   DEBUG: "0"
 
-.max_dim4: &max_dim4
-  MAX_DIM: "4"
+.maxdim5: &maxdim5
+  MAX_DIM: "5"      # test up to 5-D (useful because 1-4 have special cases)
 
 .cxx98_normal: &cxx98_normal
   CC_FLAGS: "-std=c++98"
@@ -60,6 +60,8 @@ variables:
   USE_SPY: "1"
 .cxx11_normal: &cxx11_normal
   CC_FLAGS: "-std=c++11"
+.cxx11_hardened: &cxx11_hardened
+  CC_FLAGS: "-std=c++11 -D_FORTIFY_SOURCE=2 -D_GLIBCXX_ASSERTIONS"
 .cxx14_normal: &cxx14_normal
   CC_FLAGS: "-std=c++14"
 .cxx14_checks: &cxx14_checks
@@ -382,6 +384,15 @@ gcc49_cxx11_release_legion:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*gcc49, *terra38, *release, *cxx11_normal, *legion]
+#   * higher dimension support (5-D), with both c++98 and c++11
+gcc49_cxx98_release_maxdim5_regent:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra38, *release, *cxx98_normal, *maxdim5, *regent, *parallel]
+clang38_cxx11_release_maxdim5_regent:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*clang38, *terra38, *release, *cxx11_normal, *maxdim5, *regent, *parallel]
 # * Features: one test per feature
 #   * OpenMP
 gcc49_cxx98_debug_openmp_legion:
@@ -734,6 +745,16 @@ gcc8_cxx17_debug_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
     <<: [*gcc8, *terra38, *debug, *cxx17_normal, *regent]
+
+# GCC 8 with extra hardening
+gcc8_cxx11_hardened_legion:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*gcc8, *terra38, *release, *cxx11_hardened, *legion]
+gcc8_cxx11_hardened_regent:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*gcc8, *terra38, *release, *cxx11_hardened, *regent, *parallel]
 
 # Linux with Clang 3.5
 clang35_cxx98_debug_legion:

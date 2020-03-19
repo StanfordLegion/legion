@@ -5612,7 +5612,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T> __CUDA_HD__
-    inline void DeferredValue<T>::write(T value)
+    inline void DeferredValue<T>::write(T value) const
     //--------------------------------------------------------------------------
     {
       accessor.write(Point<1,coord_t>(0), value);
@@ -5620,7 +5620,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T> __CUDA_HD__
-    inline T* DeferredValue<T>::ptr(void)
+    inline T* DeferredValue<T>::ptr(void) const
     //--------------------------------------------------------------------------
     {
       return accessor.ptr(Point<1,coord_t>(0));
@@ -5628,7 +5628,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T> __CUDA_HD__
-    inline T& DeferredValue<T>::ref(void)
+    inline T& DeferredValue<T>::ref(void) const
     //--------------------------------------------------------------------------
     {
       return accessor[Point<1,coord_t>(0)];
@@ -5671,7 +5671,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
     inline void DeferredReduction<REDOP,EXCLUSIVE>::reduce(
-                                                      typename REDOP::RHS value)
+                                                typename REDOP::RHS value) const
     //--------------------------------------------------------------------------
     {
       REDOP::fold<EXCLUSIVE>(this->accessor[Point<1,coord_t>(0)], value);
@@ -5680,7 +5680,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
     inline void DeferredReduction<REDOP,EXCLUSIVE>::operator<<=(
-                                                      typename REDOP::RHS value)
+                                                typename REDOP::RHS value) const
     //--------------------------------------------------------------------------
     {
       REDOP::fold<EXCLUSIVE>(this->accessor[Point<1,coord_t>(0)], value);
@@ -8423,12 +8423,32 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexSpaceT<DIM,T> Runtime::create_index_space(Context ctx, 
-                                                   Rect<DIM,T> bounds)
+                                                   const Rect<DIM,T> &bounds)
     //--------------------------------------------------------------------------
     {
-      // Make a Realm index space
-      DomainT<DIM,T> realm_is(bounds);
-      return IndexSpaceT<DIM,T>(create_index_space_internal(ctx, &realm_is,
+      const Domain domain(bounds);
+      return IndexSpaceT<DIM,T>(create_index_space(ctx, domain,
+                Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceT<DIM,T> Runtime::create_index_space(Context ctx, 
+                                                   const DomainT<DIM,T> &bounds)
+    //--------------------------------------------------------------------------
+    {
+      const Domain domain(bounds);
+      return IndexSpaceT<DIM,T>(create_index_space(ctx, domain,
+                Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceT<DIM,T> Runtime::create_index_space(Context ctx, 
+                                                   const Future &future)
+    //--------------------------------------------------------------------------
+    {
+      return IndexSpaceT<DIM,T>(create_index_space(ctx, DIM, future,
                 Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
     }
 
@@ -8442,8 +8462,9 @@ namespace Legion {
       std::vector<Realm::Point<DIM,T> > realm_points(points.size());
       for (unsigned idx = 0; idx < points.size(); idx++)
         realm_points[idx] = points[idx];
-      DomainT<DIM,T> realm_is((Realm::IndexSpace<DIM,T>(realm_points)));
-      return IndexSpaceT<DIM,T>(create_index_space_internal(ctx, &realm_is,
+      const DomainT<DIM,T> realm_is((Realm::IndexSpace<DIM,T>(realm_points)));
+      const Domain domain(realm_is);
+      return IndexSpaceT<DIM,T>(create_index_space(ctx, domain,
                 Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
     }
 
@@ -8457,8 +8478,9 @@ namespace Legion {
       std::vector<Realm::Rect<DIM,T> > realm_rects(rects.size());
       for (unsigned idx = 0; idx < rects.size(); idx++)
         realm_rects[idx] = rects[idx];
-      DomainT<DIM,T> realm_is((Realm::IndexSpace<DIM,T>(realm_rects)));
-      return IndexSpaceT<DIM,T>(create_index_space_internal(ctx, &realm_is,
+      const DomainT<DIM,T> realm_is((Realm::IndexSpace<DIM,T>(realm_rects)));
+      const Domain domain(realm_is);
+      return IndexSpaceT<DIM,T>(create_index_space(ctx, domain,
                 Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
     }
 
@@ -8517,65 +8539,9 @@ namespace Legion {
         c[DomainPoint::from_point<T::IDIM>(pir.p)] =
           Domain::from_rect<T::IDIM>(preimage.intersection(parent_rect));
       }
-      IndexPartition result = create_index_partition(ctx, parent, 
+      return create_index_partition(ctx, parent, 
               Domain::from_rect<T::ODIM>(color_space), c, 
               DISJOINT_KIND, part_color);
-#ifdef DEBUG_LEGION
-      // We don't actually know if we're supposed to check disjointness
-      // so if we're in debug mode then just do it.
-      {
-        std::set<DomainPoint> current_colors;  
-        for (DomainPointColoring::const_iterator it1 = c.begin();
-              it1 != c.end(); it1++)
-        {
-          current_colors.insert(it1->first);
-          for (DomainPointColoring::const_iterator it2 = c.begin();
-                it2 != c.end(); it2++)
-          {
-            if (current_colors.find(it2->first) != current_colors.end())
-              continue;
-            LegionRuntime::Arrays::Rect<T::IDIM> rect1 = 
-              it1->second.get_rect<T::IDIM>();
-            LegionRuntime::Arrays::Rect<T::IDIM> rect2 = 
-              it2->second.get_rect<T::IDIM>();
-            if (rect1.overlaps(rect2))
-            {
-              switch (it1->first.dim)
-              {
-                case 1:
-                  fprintf(stderr, "ERROR: colors %d and %d of partition %d are "
-                                  "not disjoint rectangles as they should be!",
-                                   (int)(it1->first)[0],
-                                   (int)(it2->first)[0], result.id);
-                  break;
-                case 2:
-                  fprintf(stderr, "ERROR: colors (%d, %d) and (%d, %d) of "
-                                  "partition %d are not disjoint rectangles "
-                                  "as they should be!",
-                                  (int)(it1->first)[0], (int)(it1->first)[1],
-                                  (int)(it2->first)[0], (int)(it2->first)[1],
-                                  result.id);
-                  break;
-                case 3:
-                  fprintf(stderr, "ERROR: colors (%d, %d, %d) and (%d, %d, %d) "
-                                  "of partition %d are not disjoint rectangles "
-                                  "as they should be!",
-                                  (int)(it1->first)[0], (int)(it1->first)[1],
-                                  (int)(it1->first)[2], (int)(it2->first)[0],
-                                  (int)(it2->first)[1], (int)(it2->first)[2],
-                                  result.id);
-                  break;
-                default:
-                  assert(false);
-              }
-              assert(false);
-              exit(ERROR_DISJOINTNESS_TEST_FAILURE);
-            }
-          }
-        }
-      }
-#endif
-      return result;
     }
 
     //--------------------------------------------------------------------------

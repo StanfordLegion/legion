@@ -501,7 +501,7 @@ def is_rect_type(t):
 _redop_ids = {}
 def _fill_redop_ids():
     operators = ['+', '-', '*', '/', 'max', 'min']
-    types = [bool_, int16, int32, int64, uint16, uint32, uint64, None, float32, float64, None, complex64, complex128]
+    types = [bool_, int8, int16, int32, int64, uint8, uint16, uint32, uint64, None, float32, float64, None, complex64, complex128]
     next_id = 1048576
     for operator in operators:
         _redop_ids[operator] = {}

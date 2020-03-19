@@ -45,6 +45,7 @@ namespace Legion {
         COPY_OP_KIND,
         FENCE_OP_KIND,
         FRAME_OP_KIND,
+        CREATION_OP_KIND,
         DELETION_OP_KIND,
         MERGE_CLOSE_OP_KIND,
         POST_CLOSE_OP_KIND,
@@ -79,6 +80,7 @@ namespace Legion {
         "Copy",                     \
         "Fence",                    \
         "Frame",                    \
+        "Creation",                 \
         "Deletion",                 \
         "Merge Close",              \
         "Post Close",               \
@@ -1415,6 +1417,38 @@ namespace Legion {
       virtual void trigger_complete(void);
     protected:
       ApEvent previous_completion;
+    };
+
+    /**
+     * \class CreationOp
+     * A creation operation is used for deferring the creation of
+     * an particular resource until some event has transpired such
+     * as the resolution of a future.
+     */
+    class CreationOp : public Operation, public LegionHeapify<CreationOp> {
+    public:
+      static const AllocationType alloc_type = CREATION_OP_ALLOC;
+    public:
+      CreationOp(Runtime *rt);
+      CreationOp(const CreationOp &rhs);
+      virtual ~CreationOp(void);
+    public:
+      CreationOp& operator=(const CreationOp &rhs);
+    public:
+      void initialize_index_space(
+                 InnerContext *ctx, IndexSpaceNode *node, const Future &future);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+    public:
+      virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
+      virtual void trigger_mapping(void);
+    protected:
+      IndexSpaceNode *index_space_node;
+      Future future;
     };
 
     /**

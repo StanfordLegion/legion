@@ -50,6 +50,37 @@ local function check_valid_inline_task(node, task)
   if has_self_recursion then
     report.error(task, "inline tasks cannot be recursive")
   end
+  -- Reject any access to a field id or a physical region of a region argument
+  -- if it uses a field path that is not locally fully qualified. This is to
+  -- prevent the access from changing its meaning in a caller context.
+  local check_field_paths_qualified
+  local function check_field_path_qualified(name, field, type)
+    check_field_paths_qualified(name, field, field.fields, std.get_field(type, field.field_name))
+  end
+  function check_field_paths_qualified(name, node, fields, type)
+    if not fields then
+      if not (type:isprimitive() or type.__no_field_slicing or std.is_bounded_type(type)) then
+        report.error(node, "ambiguous field access in " .. name ..
+            ": every field path in an inline task must be fully specified.")
+      end
+    else
+      fields:map(function(field) check_field_path_qualified(name, field, type) end)
+    end
+  end
+  local function check_region_qualified(node)
+    if node:is(ast.specialized.expr.RawFields) or node:is(ast.specialized.expr.RawPhysical) then
+      local region_node = node.region
+      local region_symbol = region_node.region.value
+      -- If the region symbol does not have a type, that means the region is created
+      -- within this inline task, so the access will has the same semantics in any context.
+      if not region_symbol:hastype() then return false end
+      local name = (node:is(ast.specialized.expr.RawFields) and "__fields") or
+                   (node:is(ast.specialized.expr.RawPhysical) and "__physcal")
+      check_field_paths_qualified(name, region_node, region_node.fields,
+                                  region_symbol:hastype():fspace())
+    end
+  end
+  ast.traverse_node_postorder(check_region_qualified, body)
 end
 
 local function is_singleton_type(type)
@@ -172,7 +203,7 @@ local function substitute_stat_var(cx, node)
   local symbol = node.symbols
   -- We should ignore the type of the existing symbol as we want to type check it again.
   local symbol_type = symbol:hastype()
-  if node.values then
+  if is_singleton_type(symbol_type) then
     symbol_type = nil
   else
     symbol_type = std.type_sub(symbol_type, cx.symbol_mapping)

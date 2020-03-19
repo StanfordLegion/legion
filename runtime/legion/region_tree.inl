@@ -844,41 +844,19 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    IndexSpaceNode* IndexSpaceOperationT<DIM,T>::find_or_create_node(
-                                                               TaskContext *ctx)
+    IndexSpaceNode* IndexSpaceOperationT<DIM,T>::create_node(IndexSpace handle,
+             DistributedID did, RtEvent initialized, std::set<RtEvent> *applied)
     //--------------------------------------------------------------------------
     {
-      if (node != NULL)
-        return node;
-      Runtime *runtime = context->runtime;
-      {
-        AutoLock i_lock(inter_lock);
-        // Retest after we get the lock
-        if (node != NULL)
-          return node;
-        // Make a handle and DID to use for this index space
-        IndexSpace handle = runtime->help_create_index_space_handle(type_tag);
-        DistributedID did = runtime->get_available_distributed_id();
-#ifdef DEBUG_LEGION
-        if (ctx != NULL)
-          log_index.debug("Creating index space %x in task%s (ID %lld)", 
-                handle.get_id(), ctx->get_task_name(), ctx->get_unique_id());
-#endif
-        
-        if (is_index_space_tight)
-          node = context->create_node(handle, &tight_index_space,
-                                      NULL/*parent*/, 0/*color*/, did,
-                                      realm_index_space_ready, expr_id);
-        else
-          node = context->create_node(handle, &realm_index_space,
-                                      NULL/*parent*/, 0/*color*/, did,
-                                      realm_index_space_ready, expr_id);
-      }
-      if (ctx != NULL)
-        ctx->register_index_space_creation(node->handle);
-      if (runtime->legion_spy_enabled)
-        LegionSpy::log_top_index_space(node->handle.get_id());
-      return node;
+      AutoLock i_lock(inter_lock, 1, false/*exclusive*/);
+      if (is_index_space_tight)
+        return context->create_node(handle, &tight_index_space, false/*domain*/,
+                                    NULL/*parent*/, 0/*color*/, did,initialized,
+                                    realm_index_space_ready, expr_id, applied);
+      else
+        return context->create_node(handle, &realm_index_space, false/*domain*/,
+                                    NULL/*parent*/, 0/*color*/, did,initialized,
+                                    realm_index_space_ready, expr_id, applied);
     }
 
     //--------------------------------------------------------------------------
@@ -1668,15 +1646,22 @@ namespace Legion {
     template<int DIM, typename T>
     IndexSpaceNodeT<DIM,T>::IndexSpaceNodeT(RegionTreeForest *ctx, 
         IndexSpace handle, IndexPartNode *parent, LegionColor color,
-        const Realm::IndexSpace<DIM,T> *is, DistributedID did, 
-        ApEvent ready, IndexSpaceExprID expr_id)
-      : IndexSpaceNode(ctx, handle, parent, color, did, ready, expr_id), 
+        const void *bounds, bool is_domain, DistributedID did, 
+        ApEvent ready, IndexSpaceExprID expr_id, RtEvent init)
+      : IndexSpaceNode(ctx, handle, parent, color, did, ready, expr_id, init), 
         linearization_ready(false)
     //--------------------------------------------------------------------------
     {
-      if (is != NULL)
+      if (bounds != NULL)
       {
-        realm_index_space = *is;
+        if (is_domain)
+        {
+          const DomainT<DIM,T> temp_space = *static_cast<const Domain*>(bounds);
+          realm_index_space = temp_space;
+        }
+        else
+          realm_index_space = 
+            *static_cast<const Realm::IndexSpace<DIM,T>*>(bounds);
         Runtime::trigger_event(realm_index_space_set);
       }
       else
@@ -1830,6 +1815,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    bool IndexSpaceNodeT<DIM,T>::set_domain(const Domain &domain, 
+                                            AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      const DomainT<DIM,T> realm_space = domain;
+      return set_realm_index_space(source, realm_space);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     void IndexSpaceNodeT<DIM,T>::tighten_index_space(void)
     //--------------------------------------------------------------------------
     {
@@ -1934,6 +1929,22 @@ namespace Legion {
       // never actually happen
       LocalReferenceMutator mutator;
       add_base_gc_ref(REMOTE_DID_REF, &mutator);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceNode* IndexSpaceNodeT<DIM,T>::create_node(IndexSpace new_handle,
+             DistributedID did, RtEvent initialized, std::set<RtEvent> *applied)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(handle.get_type_tag() == new_handle.get_type_tag());
+#endif
+      Realm::IndexSpace<DIM,T> local_space;
+      const ApEvent ready = get_realm_index_space(local_space, false/*tight*/);
+      return context->create_node(new_handle, &local_space, false/*domain*/,
+                                  NULL/*parent*/, 0/*color*/, did, initialized,
+                                  ready, expr_id, applied);
     }
 
     //--------------------------------------------------------------------------
@@ -4580,8 +4591,10 @@ namespace Legion {
                                         IndexSpaceNode *par, IndexSpaceNode *cs,
                                         LegionColor c, bool disjoint, 
                                         int complete, DistributedID did,
-                                        ApEvent part_ready, ApUserEvent pend)
-      : IndexPartNode(ctx, p, par, cs, c, disjoint,complete,did,part_ready,pend)
+                                        ApEvent part_ready, ApUserEvent pend,
+                                        RtEvent init)
+      : IndexPartNode(ctx, p, par, cs, c, disjoint, complete, did, part_ready,
+                      pend, init)
     //--------------------------------------------------------------------------
     {
     }
@@ -4594,9 +4607,9 @@ namespace Legion {
                                         LegionColor c, RtEvent disjoint_event,
                                         int complete, DistributedID did,
                                         ApEvent partition_ready, 
-                                        ApUserEvent pending)
+                                        ApUserEvent pending, RtEvent init)
       : IndexPartNode(ctx, p, par, cs, c, disjoint_event, complete, did, 
-                      partition_ready, pending)
+                      partition_ready, pending, init)
     //--------------------------------------------------------------------------
     {
     }

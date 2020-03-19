@@ -2439,11 +2439,11 @@ namespace Legion {
       __CUDA_HD__
       inline T read(void) const;
       __CUDA_HD__
-      inline void write(T value);
+      inline void write(T value) const;
       __CUDA_HD__
-      inline T* ptr(void);
+      inline T* ptr(void) const;
       __CUDA_HD__
-      inline T& ref(void);
+      inline T& ref(void) const;
       __CUDA_HD__
       inline operator T(void) const;
       __CUDA_HD__
@@ -2471,9 +2471,9 @@ namespace Legion {
       DeferredReduction(void);
     public:
       __CUDA_HD__
-      inline void reduce(typename REDOP::RHS val);
+      inline void reduce(typename REDOP::RHS val) const;
       __CUDA_HD__
-      inline void operator<<=(typename REDOP::RHS val);
+      inline void operator<<=(typename REDOP::RHS val) const;
     };
 
     /**
@@ -3499,15 +3499,39 @@ namespace Legion {
       ///@{
       /**
        * Create a new top-level index space based on the given domain bounds
+       * If the bounds contains a Realm index space then Legion will take
+       * ownership of any sparsity maps.
        * @param ctx the enclosing task context
        * @param bounds the bounds for the new index space
+       * @param type_tag optional type tag to use for the index space
        * @return the handle for the new index space
        */
-      IndexSpace create_index_space(Context ctx, Domain bounds);
+      IndexSpace create_index_space(Context ctx, const Domain &bounds,
+                                    TypeTag type_tag = 0);
       // Template version
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space(Context ctx,
-                                                  Rect<DIM,COORD_T> bounds);
+                                      const Rect<DIM,COORD_T> &bounds);
+      template<int DIM, typename COORD_T>
+      IndexSpaceT<DIM,COORD_T> create_index_space(Context ctx,
+                                    const DomainT<DIM,COORD_T> &bounds);
+      ///@}
+      ///@{
+      /**
+       * Create a new top-level index space from a future which contains
+       * a Domain object. If the Domain conaints a Realm index space then
+       * Legion will take ownership of any sparsity maps.
+       * @param ctx the enclosing task context
+       * @param dimensions number of dimensions for the created space
+       * @param future the future value containing the bounds
+       * @param type_tag optional type tag to use for the index space
+       *                 defaults to 'coord_t'
+       * @return the handle for the new index space
+       */
+      IndexSpace create_index_space(Context ctx, size_t dimensions, 
+                                    const Future &f, TypeTag type_tag = 0);
+      template<int DIM, typename COORD_T>
+      IndexSpaceT<DIM,COORD_T> create_index_space(Context ctx, const Future &f);
       ///@}
       ///@{
       /**
@@ -7260,17 +7284,23 @@ namespace Legion {
        *              and after every operation.  The runtime must be
        *              compiled in debug mode with the DEBUG_LEGION
        *              macro defined.
-       * -lg:disjointness Verify the specified disjointness of 
-       *              partitioning operations.  The runtime must be
-       *              compiled with the DEBUG_LEGION macro defined.
-       * -lg:separate Indicate that separate instances of the high
+       * -lg:disjointness Verify the specified disjointness of partitioning 
+       *              operations. This flag is now a synonym for -lg:partcheck 
+       * -lg:partcheck This flag will ask the runtime to dynamically verify
+       *              that all correctness properties for partitions are
+       *              upheld. This includes checking that the parent region
+       *              dominates all subregions and that all annotations of
+       *              disjointness and completeness from the user are correct.
+       *              This is an expensive test and users should expect a 
+       *              significant slow-down of their application when using it.
+       * -lg:separate Indicate that separate instances of the Legion 
        *              level runtime should be made for each processor.
        *              The default is one runtime instance per node.
        *              This is primarily useful for debugging purposes
        *              to force messages to be sent between runtime 
        *              instances on the same node.
-       * -lg:registration Record the mapping from low-level task IDs to
-       *              task variant names for debugging low-level runtime
+       * -lg:registration Record the mapping from Realm task IDs to
+       *              task variant names for debugging Realm runtime
        *              error messages.
        * -lg:test     Replace the default mapper with the test mapper
        *              which will generate sound but random mapping 
@@ -7939,9 +7969,6 @@ namespace Legion {
        */
       static Context get_context(void);
     private:
-      // Helper methods for templates
-      IndexSpace create_index_space_internal(Context ctx, const void *realm_is,
-                                             TypeTag type_tag);
       IndexPartition create_restricted_partition(Context ctx,
                                       IndexSpace parent,
                                       IndexSpace color_space,

@@ -875,6 +875,18 @@ extern "C" {
                                    legion_domain_t domain);
 
   /**
+   * @return Caller takes ownership of return value
+   *
+   * @see Legion::Runtime::create_index_space(Context, size_t, Future, TypeTag)
+   */
+  legion_index_space_t
+  legion_index_space_create_future(legion_runtime_t runtime,
+                                   legion_context_t ctx,
+                                   size_t dimensions,
+                                   legion_future_t future,
+                                   legion_type_tag_t type_tag/*=0*/);
+
+  /**
    * @return Caller takes ownership of return value.
    *
    * @see Legion::Runtime::union_index_spaces
@@ -2686,6 +2698,20 @@ extern "C" {
   void
   legion_task_launcher_set_sharding_space(legion_task_launcher_t launcher,
                                           legion_index_space_t is);
+
+  /**
+   * @see Legion::TaskLauncher::predicate_false_future
+   */
+  void
+  legion_task_launcher_set_predicate_false_future(legion_task_launcher_t launcher,
+                                                  legion_future_t f);
+
+  /**
+   * @see Legion::TaskLauncher::predicate_false_result
+   */
+  void
+  legion_task_launcher_set_predicate_false_result(legion_task_launcher_t launcher,
+                                                  legion_task_argument_t arg);
 
   /**
    * @see Legion::TaskLauncher::map_id

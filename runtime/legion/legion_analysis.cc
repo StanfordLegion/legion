@@ -10516,11 +10516,11 @@ namespace Legion {
         sample_count = 0;
         return;
       }
-      // Sort the current samples so that they are in order
-#if MIGRATION_EPOCHS > 1
-      if (current_samples.size() > 1)
+      // Sort the current samples so that they are in order for
+      // single epoch cases, for multi-epoch cases they will be
+      // sorted by the summary computation below
+      if ((MIGRATION_EPOCHS == 1) && (current_samples.size() > 1))
         std::sort(current_samples.begin(), current_samples.end());
-#endif
       // Increment this for the next pass
       migration_index = (migration_index + 1) % MIGRATION_EPOCHS;
       // Don't do any migrations if we have any pending refinements
@@ -10533,44 +10533,48 @@ namespace Legion {
         user_samples[migration_index].clear();
         return;
       }
-      current_samples = user_samples[migration_index]; 
-#if MIGRATION_EPOCHS > 1
-      // Compute the summary from all the epochs into the epoch
-      // that we are about to clear
-      std::map<AddressSpaceID,unsigned> summary(
-          current_samples.begin(), current_samples.end());
-      for (unsigned idx = 1; idx < MIGRATION_EPOCHS; idx++)
+      std::vector<std::pair<AddressSpaceID,unsigned> > &next_samples = 
+        user_samples[migration_index];
+      if (MIGRATION_EPOCHS > 1)
       {
-        const std::vector<std::pair<AddressSpaceID,unsigned> > 
-          &next_samples[(migration_index + idx) % MIGRATION_EPOCHS];
-        for (std::vector<std::pair<AddressSpaceID,unsigned> >::const_iterator
-              it = next_samples.begin(); it != next_samples.end(); it++)
+        // Compute the summary from all the epochs into the epoch
+        // that we are about to clear
+        std::map<AddressSpaceID,unsigned> summary(
+            next_samples.begin(), next_samples.end());
+        for (unsigned idx = 1; idx < MIGRATION_EPOCHS; idx++)
         {
-          std::map<AddressSpaceID,unsigned>::iterator finder = 
-            summary.find(it->first);
-          if (finder == summary.end())
-            summary.insert(*it);
-          else
-            finder.second += it->second;
+          const std::vector<std::pair<AddressSpaceID,unsigned> > &other_samples
+            = user_samples[(migration_index + idx) % MIGRATION_EPOCHS];
+          for (std::vector<std::pair<AddressSpaceID,unsigned> >::const_iterator
+                it = other_samples.begin(); it != other_samples.end(); it++)
+          {
+            std::map<AddressSpaceID,unsigned>::iterator finder = 
+              summary.find(it->first);
+            if (finder == summary.end())
+              summary.insert(*it);
+            else
+              finder->second += it->second;
+          }
         }
+        next_samples.clear();
+        next_samples.insert(next_samples.begin(),summary.begin(),summary.end());
       }
-      current_samples.clear();
-      current_samples.insert(current_samples.begin(), 
-                             summary.begin(), summary.end());
-#endif
       AddressSpaceID new_logical_owner = logical_owner_space;
-      if (current_samples.size() > 1)
+#ifdef DEBUG_LEGION
+      assert(!next_samples.empty());
+#endif
+      if (next_samples.size() > 1)
       {
         int logical_owner_count = -1;
         // Figure out which node(s) has/have the most uses 
         // Make sure that the current owner node is sticky
         // if it is tied for the most uses
-        unsigned max_count = current_samples[0].second; 
-        AddressSpaceID max_user = current_samples[0].first;
-        for (unsigned idx = 1; idx < current_samples.size(); idx++)
+        unsigned max_count = next_samples[0].second; 
+        AddressSpaceID max_user = next_samples[0].first;
+        for (unsigned idx = 1; idx < next_samples.size(); idx++)
         {
-          const AddressSpaceID user = current_samples[idx].first;
-          const unsigned user_count = current_samples[idx].second;
+          const AddressSpaceID user = next_samples[idx].first;
+          const unsigned user_count = next_samples[idx].second;
           if (user == logical_owner_space)
             logical_owner_count = user_count;
           if (user_count < max_count)
@@ -10594,7 +10598,7 @@ namespace Legion {
             // the ping-pong case even when our sampling rate does not
             // naturally align with the number of nodes participating
             if ((max_count - unsigned(logical_owner_count)) > 
-                current_samples.size()) 
+                next_samples.size()) 
               new_logical_owner = max_user;
           }
         }
@@ -10605,11 +10609,11 @@ namespace Legion {
       }
       else
         // If all the requests came from the same node, send it there
-        new_logical_owner = current_samples[0].first;
+        new_logical_owner = next_samples[0].first;
       // This always get reset here
       sample_count = 0;
       // Reset this for the next iteration
-      current_samples.clear();
+      next_samples.clear();
       // See if we are actually going to do the migration
       if (logical_owner_space == new_logical_owner)
       {
@@ -10908,7 +10912,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // No try lock since we can't defer this because of the overlap
-      AutoLock eq(eq_lock,1,false/*exclusive*/);
+      // Also, while you might think this could a read-only lock since
+      // we're just reading meta-data, that's not quite right because
+      // we need exclusive access to data structures in check_for_migration
+      AutoLock eq(eq_lock);
       // No alt-set tracking here for copy across because we might
       // need to to traverse this multiple times with different expressions
       if (!is_logical_owner())

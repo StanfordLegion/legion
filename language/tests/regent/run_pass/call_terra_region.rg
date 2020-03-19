@@ -79,7 +79,7 @@ where
 do
   return edit(__runtime(), __context(),
               __physical(r), __fields(r),
-              __physical(s), __fields(s))
+              __physical(s.{a, b, c}), __fields(s.{a, b, c}))
 end
 
 task main()

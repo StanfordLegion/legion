@@ -13,14 +13,15 @@
 -- limitations under the License.
 
 -- fails-with:
--- invalid_import_ispace3.rg:23: cannot import a handle that is already imported
+-- annotations_for_list_cuda_without_task.rg:25: option __demand(__cuda) is not permitted
+--   for i in is do end
+--     ^
 
 import "regent"
 
-task main()
-  var is = ispace(int1d, 10)
-  var raw_is = __raw(is)
-  var is2 = __import_ispace(int1d, raw_is)
+task f()
+  var is = ispace(int1d, 5)
+  __demand(__cuda) -- invalid because task is not __demand(__cuda)
+  for i in is do end
 end
-
-regentlib.start(main)
+f:compile()

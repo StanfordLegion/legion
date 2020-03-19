@@ -371,6 +371,7 @@ namespace Legion {
       LG_DEFER_PERFORM_OUTPUT_TASK_ID,
       LG_DEFER_INSTANCE_MANAGER_TASK_ID,
       LG_DEFER_REDUCTION_MANAGER_TASK_ID,
+      LG_DEFER_VERIFY_PARTITION_TASK_ID,
       LG_YIELD_TASK_ID,
       LG_MESSAGE_ID, // These two must be the last two
       LG_RETRY_SHUTDOWN_TASK_ID,
@@ -496,6 +497,7 @@ namespace Legion {
         "Defer Physical Analysis Output Stage",                   \
         "Defer Instance Manager Registration",                    \
         "Defer Reduction Manager Registration",                   \
+        "Defer Verify Partition",                                 \
         "Yield",                                                  \
         "Remote Message",                                         \
         "Retry Shutdown",                                         \
@@ -1351,6 +1353,7 @@ namespace Legion {
     class PointCopyOp;
     class FenceOp;
     class FrameOp;
+    class CreationOp;
     class DeletionOp;
     class InternalOp;
     class CloseOp;
@@ -1593,6 +1596,7 @@ namespace Legion {
     friend class Internal::FenceOp;                         \
     friend class Internal::DynamicCollectiveOp;             \
     friend class Internal::FuturePredOp;                    \
+    friend class Internal::CreationOp;                      \
     friend class Internal::DeletionOp;                      \
     friend class Internal::CloseOp;                         \
     friend class Internal::MergeCloseOp;                    \

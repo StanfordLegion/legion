@@ -13,18 +13,31 @@
 -- limitations under the License.
 
 -- fails-with:
--- invalid_import_partition4.rg:27: cannot import a handle that is already imported
+-- invalid_inline_task5.rg:42: ambiguous field access in __fields: every field path in an inline task must be fully specified.
+--   var a = __fields(t.{A})
+--                       ^
 
 import "regent"
 
-task main()
-  var is = ispace(int1d, 5)
-  var r = region(is, int)
-  var cs = ispace(int1d, 2)
-  var p = partition(equal, r, cs)
+local c = regentlib.c
 
-  var raw_p = __raw(p)
-  var q = __import_partition(disjoint, r, cs, raw_p)
+struct Vec
+{
+  x : double,
+  y : double,
+}
+
+fspace Fields
+{
+  A : Vec,
+  B : Vec,
+  C : Vec
+}
+
+__demand(__inline)
+task test(t : region(ispace(int1d), Fields))
+where
+  reads writes(t)
+do
+  var a = __fields(t.{A})
 end
-
-regentlib.start(main)

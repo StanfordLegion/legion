@@ -36,12 +36,6 @@ local log_privileges = log.make_logger("privileges")
 -- LLR (because the shared LLR does not properly align instances).
 local aligned_instances = std.config["aligned-instances"]
 
--- Setting this flag to true allows the compiler to use cached index
--- iterators, which are generally faster (they only walk the index
--- space bitmask once) but are only safe when the index space itself
--- is never modified (by allocator or deleting elements).
-local cache_index_iterator = std.config["cached-iterators"]
-
 -- Setting this flag to true directs the compiler to emit assertions
 -- whenever two regions being placed in different physical regions
 -- would require the use of the divergence-safe code path to be used.
@@ -216,7 +210,7 @@ function context:ispace(ispace_type)
   return self.ispaces:lookup(nil, ispace_type)
 end
 
-function context:add_ispace_root(ispace_type, index_space, index_iterator,
+function context:add_ispace_root(ispace_type, index_space,
                                  domain, bounds)
   if not self.ispaces then
     error("not in task context", 2)
@@ -232,14 +226,13 @@ function context:add_ispace_root(ispace_type, index_space, index_iterator,
       {
         index_space = index_space,
         index_partition = nil,
-        index_iterator = index_iterator,
         root_ispace_type = ispace_type,
         domain = domain,
         bounds = bounds,
       }, ispace))
 end
 
-function context:add_ispace_subispace(ispace_type, index_space, index_iterator,
+function context:add_ispace_subispace(ispace_type, index_space,
                                       parent_ispace_type, domain, bounds)
   if not self.ispaces then
     error("not in task context", 2)
@@ -257,7 +250,6 @@ function context:add_ispace_subispace(ispace_type, index_space, index_iterator,
     setmetatable(
       {
         index_space = index_space,
-        index_iterator = index_iterator,
         root_ispace_type = self:ispace(parent_ispace_type).root_ispace_type,
         domain = domain,
         bounds = bounds,
@@ -831,24 +823,12 @@ local function unpack_region(cx, region_expr, region_type, static_region_type)
   local r = terralib.newsymbol(region_type, "r")
   local lr = terralib.newsymbol(c.legion_logical_region_t, "lr")
   local is = terralib.newsymbol(c.legion_index_space_t, "is")
-  local it = false
-  if cache_index_iterator then
-    it = terralib.newsymbol(c.legion_terra_cached_index_iterator_t, "it")
-  end
   local actions = quote
     [region_expr.actions]
     var [r] = [std.implicit_cast(
                  static_region_type, region_type, region_expr.value)]
     var [lr] = [r].impl
     var [is] = [lr].index_space
-  end
-
-  if cache_index_iterator then
-    actions = quote
-      [actions]
-      var [it] = c.legion_terra_cached_index_iterator_create(
-        [cx.runtime], [cx.context], [is])
-    end
   end
 
   local parent_region_type = std.search_constraint_predicate(
@@ -864,7 +844,7 @@ local function unpack_region(cx, region_expr, region_type, static_region_type)
     index_space_bounds(cx, is, region_type:ispace())
   actions = quote [actions]; [bounds_actions] end
 
-  cx:add_ispace_subispace(region_type:ispace(), is, it,
+  cx:add_ispace_subispace(region_type:ispace(), is,
                           parent_region_type:ispace(), domain, bounds)
   cx:add_region_subregion(region_type, r, parent_region_type)
 
@@ -881,12 +861,8 @@ local IMPORT_SEMANTIC_VALUE = 0xd93a28e2
 local function tag_imported(cx, handle)
   local attach = nil
   local handle_type = handle.type
-  if handle_type == std.c.legion_index_space_t then
-    attach = std.c.legion_index_space_attach_semantic_information
-  elseif handle_type == std.c.legion_logical_region_t then
+  if handle_type == std.c.legion_logical_region_t then
     attach = std.c.legion_logical_region_attach_semantic_information
-  elseif handle_type == std.c.legion_logical_partition_t then
-    attach = std.c.legion_logical_partition_attach_semantic_information
   else
     assert(false, "unreachable")
   end
@@ -903,12 +879,8 @@ end
 local function check_imported(cx, node, handle)
   local retrieve = nil
   local handle_type = handle.type
-  if handle_type == std.c.legion_index_space_t then
-    retrieve = std.c.legion_index_space_retrieve_semantic_information
-  elseif handle_type == std.c.legion_logical_region_t then
+  if handle_type == std.c.legion_logical_region_t then
     retrieve = std.c.legion_logical_region_retrieve_semantic_information
-  elseif handle_type == std.c.legion_logical_partition_t then
-    retrieve = std.c.legion_logical_partition_retrieve_semantic_information
   else
     assert(false, "unreachable")
   end
@@ -2351,16 +2323,6 @@ function codegen.expr_field_access(cx, node)
     end
 
     if not cx:has_ispace(expr_type) then
-      local it = false
-      if cache_index_iterator then
-        it = terralib.newsymbol(c.legion_terra_cached_index_iterator_t, "it")
-        actions = quote
-          [actions];
-          var [it] = c.legion_terra_cached_index_iterator_create(
-            [cx.runtime], [cx.context], [is])
-        end
-      end
-
       local bounds_actions, domain, bounds = index_space_bounds(cx, is, expr_type)
       actions = quote
         [actions];
@@ -2370,7 +2332,6 @@ function codegen.expr_field_access(cx, node)
       cx:add_ispace_root(
         expr_type,
         is,
-        it,
         domain,
         bounds)
     end
@@ -2412,10 +2373,6 @@ function codegen.expr_index_access(cx, node)
     local r = terralib.newsymbol(expr_type, "r")
     local lr = terralib.newsymbol(c.legion_logical_region_t, "lr")
     local is = terralib.newsymbol(c.legion_index_space_t, "is")
-    local it = false
-    if cache_index_iterator then
-      it = terralib.newsymbol(c.legion_terra_cached_index_iterator_t, "it")
-    end
 
     local color_type = value_type:colors().index_type
     local color = std.implicit_cast(index_type, color_type, index.value)
@@ -2429,19 +2386,11 @@ function codegen.expr_index_access(cx, node)
       var [r] = [expr_type] { impl = [lr] }
     end
 
-    if cache_index_iterator then
-      actions = quote
-        [actions]
-        var [it] = c.legion_terra_cached_index_iterator_create(
-          [cx.runtime], [cx.context], [is])
-      end
-    end
-
     local bounds_actions, domain, bounds =
       index_space_bounds(cx, is, expr_type:ispace())
     actions = quote [actions]; [bounds_actions] end
 
-    cx:add_ispace_subispace(expr_type:ispace(), is, it,
+    cx:add_ispace_subispace(expr_type:ispace(), is,
                             parent_region_type:ispace(), domain, bounds)
     cx:add_region_subregion(expr_type, r, parent_region_type)
 
@@ -2467,10 +2416,6 @@ function codegen.expr_index_access(cx, node)
       local r = terralib.newsymbol(region_type, "r")
       lr = terralib.newsymbol(c.legion_logical_region_t, "lr")
       local is = terralib.newsymbol(c.legion_index_space_t, "is")
-      local it = false
-      if cache_index_iterator then
-        it = terralib.newsymbol(c.legion_terra_cached_index_iterator_t, "it")
-      end
       actions = quote
         [actions]
         var dp = [color]:to_domain_point()
@@ -2480,19 +2425,11 @@ function codegen.expr_index_access(cx, node)
         var [r] = [region_type] { impl = [lr] }
       end
 
-      if cache_index_iterator then
-        actions = quote
-          [actions]
-          var [it] = c.legion_terra_cached_index_iterator_create(
-            [cx.runtime], [cx.context], [is])
-        end
-      end
-
       local bounds_actions, domain, bounds =
         index_space_bounds(cx, is, region_type:ispace())
       actions = quote [actions]; [bounds_actions] end
 
-      cx:add_ispace_subispace(region_type:ispace(), is, it,
+      cx:add_ispace_subispace(region_type:ispace(), is,
                               parent_region_type:ispace(), domain, bounds)
       cx:add_region_subregion(region_type, r, parent_region_type)
     else
@@ -2558,7 +2495,6 @@ function codegen.expr_index_access(cx, node)
           cx:add_ispace_root(
             region_type:ispace(),
             `([region.value].impl.index_space),
-            false,
             domain,
             bounds)
           cx:add_region_root(
@@ -4332,13 +4268,8 @@ function codegen.expr_ispace(cx, node)
   local is = terralib.newsymbol(c.legion_index_space_t, "is")
   local i = terralib.newsymbol(ispace_type, "i")
 
-  local it = false
-  if cache_index_iterator then
-    it = terralib.newsymbol(c.legion_terra_cached_index_iterator_t, "it")
-  end
-
   local bounds_actions, domain, bounds = index_space_bounds(cx, is, ispace_type)
-  cx:add_ispace_root(ispace_type, is, it, domain, bounds)
+  cx:add_ispace_root(ispace_type, is, domain, bounds)
 
   if ispace_type.dim == 0 then
     if start then
@@ -4350,14 +4281,6 @@ function codegen.expr_ispace(cx, node)
     actions = quote
       [actions]
       var [is] = c.legion_index_space_create([cx.runtime], [cx.context], [extent_value])
-    end
-
-    if cache_index_iterator then
-      actions = quote
-        [actions]
-        var [it] = c.legion_terra_cached_index_iterator_create(
-          [cx.runtime], [cx.context], [is])
-      end
     end
   else
     if not start then
@@ -4378,7 +4301,6 @@ function codegen.expr_ispace(cx, node)
   actions = quote
     [actions]
     var [i] = [ispace_type]{ impl = [is] }
-    [tag_imported(cx, is)]
     [bounds_actions]
   end
 
@@ -4628,7 +4550,6 @@ function codegen.expr_partition(cx, node)
     var [ip] = [index_partition_create]([args])
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [region.value].impl, [ip])
-    [tag_imported(cx, lp)]
   end
 
   return values.value(
@@ -4724,7 +4645,6 @@ function codegen.expr_partition_equal(cx, node)
       end
       var [lp] = c.legion_logical_partition_create(
         [cx.runtime], [cx.context], [region.value].impl, [ip])
-      [tag_imported(cx, lp)]
     end
   end
 
@@ -4796,7 +4716,6 @@ function codegen.expr_partition_by_field(cx, node)
       field_id, [colors.value].impl, c.AUTO_GENERATE_ID, 0, 0, [legion_partition_kind])
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [region.value].impl, [ip])
-    [tag_imported(cx, lp)]
   end
 
   return values.value(
@@ -4838,7 +4757,6 @@ function codegen.expr_partition_by_restriction(cx, node)
       [transform.value], [extent.value], [get_legion_partition_kind(disjointness, completeness)], -1)
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [region.value].impl, [ip])
-    [tag_imported(cx, lp)]
   end
 
   return values.value(
@@ -4905,7 +4823,6 @@ function codegen.expr_image(cx, node)
       colors, [get_legion_partition_kind(disjointness, completeness)], c.AUTO_GENERATE_ID, 0, 0)
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [parent.value].impl, [ip])
-    [tag_imported(cx, lp)]
   end
 
   return values.value(
@@ -4971,7 +4888,6 @@ function codegen.expr_preimage(cx, node)
       [get_legion_partition_kind(disjointness, completeness)], c.AUTO_GENERATE_ID, 0, 0)
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [region.value].impl, [ip])
-    [tag_imported(cx, lp)]
   end
 
   return values.value(
@@ -5009,7 +4925,6 @@ function codegen.expr_cross_product(cx, node)
     var ip = c.legion_terra_index_cross_product_get_partition([product])
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], lr.impl, ip)
-    [tag_imported(cx, lp)]
   end
 
   return values.value(
@@ -5082,7 +4997,6 @@ function codegen.expr_cross_product_array(cx, node)
     [product].other_color = other_color
     var stop : double = c.legion_get_current_time_in_micros()/double(1e6)
     c.printf("codegen: cross_product_array %e\n", stop - start)
-    [tag_imported(cx, lp)]
   end
 
   return values.value(
@@ -7566,7 +7480,6 @@ function codegen.expr_binary(cx, node)
         var [lp] = c.legion_logical_partition_create_by_tree(
           [cx.runtime], [cx.context],
           [ip], [lhs.value].impl.field_space, [lhs.value].impl.tree_id)
-        [tag_imported(cx, lp)]
       end
     else
       actions = quote
@@ -7596,7 +7509,6 @@ function codegen.expr_binary(cx, node)
         var [lp] = c.legion_logical_partition_create_by_tree(
           [cx.runtime], [cx.context],
           [ip], [lhs.value].impl.field_space, [lhs.value].impl.tree_id)
-        [tag_imported(cx, lp)]
       end
     end
 
@@ -7653,7 +7565,7 @@ function codegen.expr_binary(cx, node)
       end
       [bounds_actions]
     end
-    cx:add_ispace_root(expr_type, `([result].impl), false, domain, bounds)
+    cx:add_ispace_root(expr_type, `([result].impl), domain, bounds)
 
     return values.value(
       node,
@@ -7832,13 +7744,8 @@ function codegen.expr_import_ispace(cx, node)
   local is = terralib.newsymbol(c.legion_index_space_t, "is")
   local i = terralib.newsymbol(ispace_type, "i")
 
-  local it = false
-  if cache_index_iterator then
-    it = terralib.newsymbol(c.legion_terra_cached_index_iterator_t, "it")
-  end
-
   local bounds_actions, domain, bounds = index_space_bounds(cx, is, ispace_type)
-  cx:add_ispace_root(ispace_type, is, it, domain, bounds)
+  cx:add_ispace_root(ispace_type, is, domain, bounds)
 
   local actions = quote
     [value.actions];
@@ -7854,15 +7761,6 @@ function codegen.expr_import_ispace(cx, node)
       std.assert_error(not
         std.c.legion_index_space_has_parent_index_partition([cx.runtime], [is]),
         [get_source_location(node) .. ": cannot import a subspace"])
-    end
-    [check_imported(cx, node, is)]
-    [tag_imported(cx, is)]
-  end
-  if cache_index_iterator then
-    actions = quote
-      [actions];
-      var [it] = c.legion_terra_cached_index_iterator_create(
-        [cx.runtime], [cx.context], [is])
     end
   end
   return values.value(
@@ -8057,8 +7955,6 @@ function codegen.expr_import_partition(cx, node)
     [actions];
     var [lp] = [value.value]
     [check_actions];
-    [check_imported(cx, node, lp)];
-    [tag_imported(cx, lp)]
   end
 
   return values.value(
@@ -8966,186 +8862,128 @@ function codegen.stat_for_list_vectorized(cx, node)
   local orig_block_2 = cleanup_after(cx, codegen.block(cx, node.orig_block))
   local vector_width = node.vector_width
 
-  local ispace_type, is, it
+  local ispace_type, is
   if std.is_region(value_type) then
     ispace_type = value_type:ispace()
     assert(cx:has_ispace(ispace_type))
     is = `([value.value].impl.index_space)
-    it = cx:ispace(ispace_type).index_iterator
   else
     ispace_type = value_type
     is = `([value.value].impl)
   end
+  local index_type = ispace_type.index_type
 
-  local actions = quote
-    [value.actions]
+  -- Retrieve dimension-specific handle types and functions from the C API
+  local dim = data.max(ispace_type.dim, 1)
+  local rect_type = c["legion_rect_" .. tostring(dim) .. "d_t"]
+  local rect_it_type =
+    c["legion_rect_in_domain_iterator_" .. tostring(dim) .. "d_t"]
+  local rect_it_create =
+    c["legion_rect_in_domain_iterator_create_" .. tostring(dim) .. "d"]
+  local rect_it_destroy =
+    c["legion_rect_in_domain_iterator_destroy_" .. tostring(dim) .. "d"]
+  local rect_it_valid =
+    c["legion_rect_in_domain_iterator_valid_" .. tostring(dim) .. "d"]
+  local rect_it_step =
+    c["legion_rect_in_domain_iterator_step_" .. tostring(dim) .. "d"]
+  local rect_it_get =
+    c["legion_rect_in_domain_iterator_get_rect_" .. tostring(dim) .. "d"]
+
+  -- Create variables for the outer loop that iterates over rectangles in a domain
+  local domain = terralib.newsymbol(c.legion_domain_t, "domain")
+  local rect = terralib.newsymbol(rect_type, "rect")
+  local rect_it = terralib.newsymbol(rect_it_type, "rect_it")
+
+  local base = terralib.newsymbol(c.coord_t, "base")
+  local count = terralib.newsymbol(c.coord_t, "count")
+  local start = terralib.newsymbol(c.coord_t, "start")
+  local stop = terralib.newsymbol(c.coord_t, "stop")
+  local final = terralib.newsymbol(c.coord_t, "final")
+
+  local fields = index_type.fields
+  local indices = terralib.newlist()
+  if fields then
+    indices:insertall(fields:map(function(field)
+      return terralib.newsymbol(c.coord_t, tostring(field))
+    end))
+  else
+    indices:insert(terralib.newsymbol(c.coord_t, "x"))
   end
-  local cleanup_actions = quote end
 
-  local iterator_has_next, iterator_next_span -- For unstructured
-  local domain -- For structured
+  local symbol_setup = nil
   if ispace_type.dim == 0 then
-    if it and cache_index_iterator then
-      iterator_has_next = c.legion_terra_cached_index_iterator_has_next
-      iterator_next_span = c.legion_terra_cached_index_iterator_next_span
-      actions = quote
-        [actions]
-        c.legion_terra_cached_index_iterator_reset(it)
-      end
-    else
-      iterator_has_next = c.legion_index_iterator_has_next
-      iterator_next_span = c.legion_index_iterator_next_span
-      it = terralib.newsymbol(c.legion_index_iterator_t, "it")
-      actions = quote
-        [actions]
-        var [it] = c.legion_index_iterator_create([cx.runtime], [cx.context], [is])
-      end
-      cleanup_actions = quote
-        c.legion_index_iterator_destroy([it])
-      end
+    symbol_setup = quote
+      var [symbol] = [symbol.type]{
+        __ptr = ptr { __ptr = c.legion_ptr_t { value = [ indices[1] ] } }
+      }
+    end
+  elseif ispace_type.dim == 1 then
+    symbol_setup = quote
+      var [symbol] = [symbol.type]{ __ptr = [ indices[1] ] }
     end
   else
-    domain = terralib.newsymbol(c.legion_domain_t, "domain")
-    actions = quote
-      [actions]
-      var [domain] = c.legion_index_space_get_domain([cx.runtime], [is])
+    symbol_setup = quote
+      var [symbol] = [symbol.type] { __ptr = [index_type.impl_type]{ [indices] } }
     end
   end
 
-  if ispace_type.dim == 0 then
-    return quote
-      [actions]
-      while iterator_has_next([it]) do
-        var count : c.size_t = 0
-        var base = iterator_next_span([it], &count, -1).value
-        var alignment : c.size_t = [vector_width]
-        var start = (base + alignment - 1) and not (alignment - 1)
-        var stop = (base + count) and not (alignment - 1)
-        var final = base + count
-        var i = base
-        if count >= vector_width then
-          while i < start do
-            var [symbol] = [symbol.type]{ __ptr = [ptr]{ __ptr = c.legion_ptr_t { value = i }}}
-            do
-              [orig_block_1]
-            end
-            i = i + 1
-          end
-          while i < stop do
-            var [symbol] = [symbol.type]{ __ptr = [ptr]{ __ptr = c.legion_ptr_t { value = i }}}
-            do
-              [block]
-            end
-            i = i + [vector_width]
-          end
-        end
-        while i < final do
-          var [symbol] = [symbol.type]{ __ptr = [ptr]{ __ptr = c.legion_ptr_t { value = i }}}
-          do
-            [orig_block_2]
-          end
-          i = i + 1
-        end
-      end
-      [cleanup_actions]
-    end
-  else
-    local fields = ispace_type.index_type.fields
-    if fields then
-      local rect_type = c["legion_rect_" .. tostring(ispace_type.dim) .. "d_t"]
-      local domain_get_rect = c["legion_domain_get_rect_" .. tostring(ispace_type.dim) .. "d"]
-      local rect = terralib.newsymbol(rect_type, "rect")
-      local index = fields:map(function(field) return terralib.newsymbol(c.coord_t, tostring(field)) end)
-      local base = terralib.newsymbol(c.coord_t, "base")
-      local count = terralib.newsymbol(c.coord_t, "base")
-      local start = terralib.newsymbol(c.coord_t, "base")
-      local stop = terralib.newsymbol(c.coord_t, "base")
-      local final = terralib.newsymbol(c.coord_t, "base")
+  local bounds_setup = quote
+    var alignment = [vector_width]
+    var [base] = [rect].lo.x[0]
+    var [count] = [rect].hi.x[0] - [rect].lo.x[0] + 1
+    var [start] = ([base] + alignment - 1) and not (alignment - 1)
+    var [stop] = ([base] + [count]) and not (alignment - 1)
+    var [final] = [base] + [count]
+  end
 
-      local body = quote
-        var [ index[1] ] = base
-        if count >= [vector_width] then
-          while [ index[1] ] < [start] do
-            var [symbol] = [symbol.type] { __ptr = [symbol.type.index_type.impl_type]{ index } }
-            do
-              [orig_block_1]
-            end
-            [ index[1] ] = [ index[1] ] + 1
-          end
-          while [ index[1] ] < [stop] do
-            var [symbol] = [symbol.type] { __ptr = [symbol.type.index_type.impl_type]{ index } }
-            do
-              [block]
-            end
-            [ index[1] ] = [ index[1] ] + [vector_width]
-          end
+  local i = indices[1]
+  local body = quote
+    var [i] = [base]
+    if [count] >= [vector_width] then
+      while [i] < [start] do
+        [symbol_setup]
+        do
+          [orig_block_1]
         end
-        while [ index[1] ] < [final] do
-          var [symbol] = [symbol.type] { __ptr = [symbol.type.index_type.impl_type]{ index } }
-          do
-            [orig_block_2]
-          end
-          [ index[1] ] = [ index[1] ] + 1
-        end
+        [i] = [i] + 1
       end
-      for i = 2, ispace_type.dim do
-        local rect_i = i - 1 -- C is zero-based, Lua is one-based
-        body = quote
-          for [ index[i] ] = [rect].lo.x[rect_i], [rect].hi.x[rect_i] + 1 do
-            [body]
-          end
+      while [i] < [stop] do
+        [symbol_setup]
+        do
+          [block]
         end
+        [i] = [i] + [vector_width]
       end
-      return quote
-        [actions]
-        var [rect] = [domain_get_rect]([domain])
-        var alignment = [vector_width]
-        var [base] = [rect].lo.x[0]
-        var [count] = [rect].hi.x[0] - [rect].lo.x[0] + 1
-        var [start] = ([base] + alignment - 1) and not (alignment - 1)
-        var [stop] = ([base] + [count]) and not (alignment - 1)
-        var [final] = [base] + [count]
+    end
+    while [i] < [final] do
+      [symbol_setup]
+      do
+        [orig_block_2]
+      end
+      [i] = [i] + 1
+    end
+  end
+
+  for i = 2, dim do
+    local rect_i = i - 1 -- C is zero-based, Lua is one-based
+    body = quote
+      for [ indices[i] ] = [rect].lo.x[rect_i], [rect].hi.x[rect_i] + 1 do
         [body]
-        [cleanup_actions]
-      end
-    else
-      return quote
-        [actions]
-        var rect = c.legion_domain_get_rect_1d([domain])
-        var alignment = [vector_width]
-        var base = rect.lo.x[0]
-        var count = rect.hi.x[0] - rect.lo.x[0] + 1
-        var start = (base + alignment - 1) and not (alignment - 1)
-        var stop = (base + count) and not (alignment - 1)
-        var final = base + count
-
-        var i = base
-        if count >= [vector_width] then
-          while i < start do
-            var [symbol] = [symbol.type]{ __ptr = i }
-            do
-              [orig_block_1]
-            end
-            i = i + 1
-          end
-          while i < stop do
-            var [symbol] = [symbol.type]{ __ptr = i }
-            do
-              [block]
-            end
-            i = i + [vector_width]
-          end
-        end
-        while i < final do
-          var [symbol] = [symbol.type]{ __ptr = i }
-          do
-            [orig_block_2]
-          end
-          i = i + 1
-        end
-        [cleanup_actions]
       end
     end
+  end
+
+  return quote
+    [value.actions]
+    var [domain] = c.legion_index_space_get_domain([cx.runtime], [is])
+    var [rect_it] = [rect_it_create]([domain])
+    while [rect_it_valid]([rect_it]) do
+      var [rect] = [rect_it_get]([rect_it])
+      [bounds_setup]
+      [body]
+      [rect_it_step]([rect_it])
+    end
+    [rect_it_destroy]([rect_it])
   end
 end
 
@@ -10799,7 +10637,7 @@ function codegen.top_task(cx, node)
         local bounds_actions, domain, bounds =
           index_space_bounds(cx, `([param_symbol].impl), param_type)
         actions = quote [actions]; [bounds_actions] end
-        cx:add_ispace_root(param_type, `([param_symbol].impl), false, domain, bounds)
+        cx:add_ispace_root(param_type, `([param_symbol].impl), domain, bounds)
       end
       task_setup:insert(actions)
     end
@@ -10826,10 +10664,6 @@ function codegen.top_task(cx, node)
     local index_type = region_type:ispace().index_type
     local r = params[region_i]:getsymbol()
     local is = terralib.newsymbol(c.legion_index_space_t, "is")
-    local it = false
-    if cache_index_iterator then
-      it = terralib.newsymbol(c.legion_terra_cached_index_iterator_t, "it")
-    end
 
     local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
       std.find_task_privileges(region_type, task)
@@ -10910,15 +10744,6 @@ function codegen.top_task(cx, node)
       end
     end
 
-
-    if cache_index_iterator then
-      actions = quote
-        [actions]
-        var [it] = c.legion_terra_cached_index_iterator_create(
-          [cx.runtime], [cx.context], [r].impl.index_space)
-      end
-    end
-
     task_setup:insert(actions)
 
     for i, field_paths in ipairs(privilege_field_paths) do
@@ -10946,7 +10771,7 @@ function codegen.top_task(cx, node)
       local bounds_actions, domain, bounds =
         index_space_bounds(cx, `([r].impl.index_space), region_type:ispace())
       task_setup:insert(bounds_actions)
-      cx:add_ispace_root(region_type:ispace(), is, it, domain, bounds)
+      cx:add_ispace_root(region_type:ispace(), is, domain, bounds)
     end
 
     -- If the region does *NOT* have privileges, look for parents that

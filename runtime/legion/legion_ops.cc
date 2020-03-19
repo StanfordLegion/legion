@@ -7321,6 +7321,134 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Creation Operation 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    CreationOp::CreationOp(Runtime *rt)
+      : Operation(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    CreationOp::CreationOp(const CreationOp &rhs)
+      : Operation(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    CreationOp::~CreationOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    CreationOp& CreationOp::operator=(const CreationOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void CreationOp::initialize_index_space(
+                          InnerContext *ctx, IndexSpaceNode *n, const Future &f)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(index_space_node == NULL);
+#endif
+      initialize_operation(ctx, true);
+      index_space_node = n;
+      future = f;
+    }
+
+    //--------------------------------------------------------------------------
+    void CreationOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_operation();
+      index_space_node = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    void CreationOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_operation();
+      future = Future();
+      runtime->free_creation_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* CreationOp::get_logging_name(void) const
+    //--------------------------------------------------------------------------
+    {
+      return op_names[CREATION_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind CreationOp::get_operation_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return CREATION_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    void CreationOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(future.impl != NULL);
+#endif
+      // Register this operation as dependent on task that
+      // generated the future
+      future.impl->register_dependence(this);
+      // Record this with the context as an implicit dependence for all
+      // later operations which may rely on this index space for mapping
+      parent_ctx->update_current_implicit(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void CreationOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      const ApEvent ready = future.impl->subscribe();
+      // Give these slightly higher priority since they are likely
+      // needed by later operations
+      enqueue_ready_operation(Runtime::protect_event(ready), 
+                              LG_THROUGHPUT_DEFERRED_PRIORITY);
+    }
+
+    //--------------------------------------------------------------------------
+    void CreationOp::trigger_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+      // Pull the pointer for the domain out of the future and assign it to
+      // the index space node
+      FutureImpl *impl = future.impl;
+      const size_t future_size = impl->get_untyped_size(true/*internal*/);
+      if (future_size != sizeof(Domain))
+        REPORT_LEGION_ERROR(ERROR_CREATION_FUTURE_TYPE_MISMATCH,
+            "Future for index space creation in task %s (UID %lld) does not "
+            "have the same size as sizeof(Domain) (e.g. %zd bytes). The type "
+            "of futures for index space domains must be a Domain.",
+            parent_ctx->get_task_name(), 
+            parent_ctx->get_unique_id(), sizeof(Domain))
+      const Domain *domain = static_cast<Domain*>(
+          impl->get_untyped_result(true,NULL,true/*internal*/));
+      if (index_space_node->set_domain(*domain, runtime->address_space))
+        delete index_space_node;
+      // Record that we are done
+      Operation::trigger_mapping();
+    }
+
+    /////////////////////////////////////////////////////////////
     // Deletion Operation 
     /////////////////////////////////////////////////////////////
 
@@ -12968,7 +13096,7 @@ namespace Legion {
                                                    privilege_path);
       // Record this dependent partition op with the context so that it 
       // can track implicit dependences on it for later operations
-      parent_ctx->update_current_deppart(this);
+      parent_ctx->update_current_implicit(this);
     }
 
     //--------------------------------------------------------------------------

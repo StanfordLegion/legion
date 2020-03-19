@@ -437,8 +437,8 @@ namespace Realm {
     {
       size_t c = v.size();
       return ((s << c) &&
-	      s.enforce_alignment(REALM_ALIGNOF(T)) &&
-	      s.append_bytes(&v[0], sizeof(T) * c));
+	      ((c == 0) || (s.enforce_alignment(REALM_ALIGNOF(T)) &&
+	                    s.append_bytes(&v[0], sizeof(T) * c))));
     }
 
     template <typename T>
@@ -449,9 +449,8 @@ namespace Realm {
       if(!(s >> c)) return false;
       // TODO: sanity-check size?
       v.resize(c);
-      return (
-	      s.enforce_alignment(REALM_ALIGNOF(T)) &&
-	      s.extract_bytes(&v[0], sizeof(T) * c));
+      return ((c == 0) || (s.enforce_alignment(REALM_ALIGNOF(T)) &&
+	                   s.extract_bytes(&v[0], sizeof(T) * c)));
     }
 
 

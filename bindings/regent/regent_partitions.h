@@ -57,10 +57,6 @@ typedef struct legion_terra_logical_region_list_list_t {
   legion_terra_logical_region_list_t *sublists;
 } legion_terra_logical_region_list_list_t;
 
-typedef struct legion_terra_cached_index_iterator_t {
-  void *impl;
-} legion_terra_cached_index_iterator_t;
-
 legion_terra_index_cross_product_t
 legion_terra_index_cross_product_create(
   legion_runtime_t runtime,
@@ -114,30 +110,6 @@ legion_terra_index_cross_product_get_subpartition_by_color_domain_point(
   legion_context_t ctx,
   legion_terra_index_cross_product_t prod,
   legion_domain_point_t color_);
-
-legion_terra_cached_index_iterator_t
-legion_terra_cached_index_iterator_create(
-  legion_runtime_t runtime,
-  legion_context_t ctx,
-  legion_index_space_t handle);
-
-void
-legion_terra_cached_index_iterator_destroy(
-  legion_terra_cached_index_iterator_t handle);
-
-bool
-legion_terra_cached_index_iterator_has_next(
-  legion_terra_cached_index_iterator_t handle);
-
-legion_ptr_t
-legion_terra_cached_index_iterator_next_span(
-  legion_terra_cached_index_iterator_t handle,
-  size_t *count,
-  size_t req_count /* must be -1 */);
-
-void
-legion_terra_cached_index_iterator_reset(
-  legion_terra_cached_index_iterator_t handle);
 
 unsigned
 legion_terra_task_launcher_get_region_requirement_logical_region(

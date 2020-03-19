@@ -357,6 +357,7 @@ namespace Realm {
       void add_fence(GPUWorkFence *fence);
       void add_start_event(GPUWorkStart *start);
       void add_notification(GPUCompletionNotification *notification);
+      void wait_on_streams(const std::set<GPUStream*> &other_streams);
 
       // to be called by a worker (that should already have the GPU context
       //   current) - returns true if any work remains
@@ -557,9 +558,9 @@ namespace Realm {
 
       bool can_access_peer(GPU *peer);
 
-      GPUStream *switch_to_next_task_stream(void);
-      GPUStream *get_current_task_stream(void);
-
+      GPUStream *find_stream(CUstream stream) const;
+      GPUStream *get_null_task_stream(void) const;
+      GPUStream *get_next_task_stream(bool create = false);
     protected:
       CUmodule load_cuda_module(const void *data);
 
@@ -585,7 +586,7 @@ namespace Realm {
       GPUStream *device_to_device_stream;
       GPUStream *peer_to_peer_stream;
       std::vector<GPUStream *> task_streams;
-      unsigned current_stream;
+      atomic<unsigned> next_stream;
 
       GPUEventPool event_pool;
 
@@ -625,6 +626,7 @@ namespace Realm {
                                   size_t *shared_size, void *stream);
 #endif
 
+      void stream_wait_on_event(cudaStream_t stream, cudaEvent_t event);
       void stream_synchronize(cudaStream_t stream);
       void device_synchronize(void);
 
@@ -640,7 +642,8 @@ namespace Realm {
       void setup_argument(const void *arg, size_t size, size_t offset);
       void launch(const void *func);
       void launch_kernel(const void *func, dim3 grid_dim, dim3 block_dim, 
-                         void **args, size_t shared_memory, cudaStream_t stream);
+                         void **args, size_t shared_memory, 
+                         cudaStream_t stream, bool cooperative = false);
 #endif
 
       void gpu_memcpy(void *dst, const void *src, size_t size, cudaMemcpyKind kind);
@@ -675,7 +678,7 @@ namespace Realm {
         cudaStream_t stream; 
         CallConfig(dim3 _grid, dim3 _block, size_t _shared, cudaStream_t _stream);
       };
-      std::vector<LaunchConfig> launch_configs;
+      std::vector<CallConfig> launch_configs;
       std::vector<char> kernel_args;
       std::vector<CallConfig> call_configs;
       bool block_on_synchronize;
