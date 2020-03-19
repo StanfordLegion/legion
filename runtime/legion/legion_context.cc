@@ -3431,7 +3431,7 @@ namespace Legion {
       const ApEvent ready = creator_op->get_completion_event();
       IndexSpaceNode *node = 
         runtime->forest->create_index_space(handle, NULL, did, ready);
-      creator_op->initialize_index_space(node, future);
+      creator_op->initialize_index_space(this, node, future);
       register_index_space_creation(handle);
       runtime->add_to_dependence_queue(this, executing_processor, creator_op);
       return handle;

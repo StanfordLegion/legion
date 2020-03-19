@@ -1435,7 +1435,8 @@ namespace Legion {
     public:
       CreationOp& operator=(const CreationOp &rhs);
     public:
-      void initialize_index_space(IndexSpaceNode *node, const Future &future);
+      void initialize_index_space(
+                 InnerContext *ctx, IndexSpaceNode *node, const Future &future);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
