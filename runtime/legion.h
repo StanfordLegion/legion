@@ -5524,6 +5524,18 @@ namespace Legion {
                                ReductionOpID redop, bool deterministic = false);
 
       /**
+       * Construct a future map from a collection of futures. The user must
+       * also specify the domain of the futures and there must be one future
+       * for every point in the domain.
+       * @param ctx enclosing task context
+       * @param domain the domain that names all points in the future map
+       * @param futures the set of futures from which to create the future map
+       * @return a new future map containing all the futures
+       */
+      FutureMap construct_future_map(Context ctx, const Domain &domain,
+                           const std::map<DomainPoint,Future> &futures);
+
+      /**
        * @deprecated
        * An older method for launching a single task maintained for backwards
        * compatibility with older Legion programs.  

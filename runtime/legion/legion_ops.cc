@@ -7362,10 +7362,29 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(index_space_node == NULL);
+      assert(futures.empty());
 #endif
       initialize_operation(ctx, true);
+      kind = INDEX_SPACE_CREATION;
       index_space_node = n;
-      future = f;
+      futures.push_back(f);
+    }
+
+    //--------------------------------------------------------------------------
+    void CreationOp::initialize_map(
+           InnerContext *ctx, const std::map<DomainPoint,Future> &future_points)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(futures.empty());
+#endif
+      initialize_operation(ctx, true);
+      kind = FUTURE_MAP_CREATION;
+      futures.resize(future_points.size());
+      unsigned index = 0;
+      for (std::map<DomainPoint,Future>::const_iterator it = 
+            future_points.begin(); it != future_points.end(); it++, index++)
+        futures[index] = it->second;
     }
 
     //--------------------------------------------------------------------------
@@ -7381,7 +7400,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_operation();
-      future = Future();
+      futures.clear();
       runtime->free_creation_op(this);
     }
 
@@ -7404,46 +7423,84 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(future.impl != NULL);
+      assert(!futures.empty());
 #endif
-      // Register this operation as dependent on task that
-      // generated the future
-      future.impl->register_dependence(this);
+      for (std::vector<Future>::const_iterator it = 
+            futures.begin(); it != futures.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        assert(it->impl != NULL);
+#endif
+        // Register this operation as dependent on task that
+        // generated the future
+        it->impl->register_dependence(this);
+      }
       // Record this with the context as an implicit dependence for all
       // later operations which may rely on this index space for mapping
-      parent_ctx->update_current_implicit(this);
+      if (kind == INDEX_SPACE_CREATION)
+        parent_ctx->update_current_implicit(this);
     }
 
     //--------------------------------------------------------------------------
     void CreationOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
-      const ApEvent ready = future.impl->subscribe();
-      // Give these slightly higher priority since they are likely
-      // needed by later operations
-      enqueue_ready_operation(Runtime::protect_event(ready), 
-                              LG_THROUGHPUT_DEFERRED_PRIORITY);
+      switch (kind)
+      {
+        case INDEX_SPACE_CREATION:
+          {
+#ifdef DEBUG_LEGION
+            assert(futures.size() == 1);
+#endif
+            const ApEvent ready = futures[0].impl->subscribe();
+            // Give these slightly higher priority since they are likely
+            // needed by later operations
+            enqueue_ready_operation(Runtime::protect_event(ready), 
+                                    LG_THROUGHPUT_DEFERRED_PRIORITY);
+            break;
+          }
+        case FUTURE_MAP_CREATION:
+          {
+            // No need to wait for anything here
+            enqueue_ready_operation();
+            break;
+          }
+        default:
+          assert(false);
+      }
     }
 
     //--------------------------------------------------------------------------
     void CreationOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      // Pull the pointer for the domain out of the future and assign it to
-      // the index space node
-      FutureImpl *impl = future.impl;
-      const size_t future_size = impl->get_untyped_size(true/*internal*/);
-      if (future_size != sizeof(Domain))
-        REPORT_LEGION_ERROR(ERROR_CREATION_FUTURE_TYPE_MISMATCH,
-            "Future for index space creation in task %s (UID %lld) does not "
-            "have the same size as sizeof(Domain) (e.g. %zd bytes). The type "
-            "of futures for index space domains must be a Domain.",
-            parent_ctx->get_task_name(), 
-            parent_ctx->get_unique_id(), sizeof(Domain))
-      const Domain *domain = static_cast<Domain*>(
-          impl->get_untyped_result(true,NULL,true/*internal*/));
-      if (index_space_node->set_domain(*domain, runtime->address_space))
-        delete index_space_node;
+      switch (kind)
+      {
+        case INDEX_SPACE_CREATION:
+          {
+            // Pull the pointer for the domain out of the future and assign 
+            // it to the index space node
+            FutureImpl *impl = futures[0].impl;
+            const size_t future_size = impl->get_untyped_size(true/*internal*/);
+            if (future_size != sizeof(Domain))
+              REPORT_LEGION_ERROR(ERROR_CREATION_FUTURE_TYPE_MISMATCH,
+                  "Future for index space creation in task %s (UID %lld) does "
+                  "not have the same size as sizeof(Domain) (e.g. %zd bytes). "
+                  "The type of futures for index space domains must be a "
+                  "Domain.", parent_ctx->get_task_name(), 
+                  parent_ctx->get_unique_id(), sizeof(Domain))
+            const Domain *domain = static_cast<Domain*>(
+                impl->get_untyped_result(true,NULL,true/*internal*/));
+            if (index_space_node->set_domain(*domain, runtime->address_space))
+              delete index_space_node;
+            break;      
+          }
+        case FUTURE_MAP_CREATION:
+          // Nothing to do here
+          break;
+        default:
+          assert(false);
+      }
       // Record that we are done
       Operation::trigger_mapping();
     }

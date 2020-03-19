@@ -1429,6 +1429,12 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = CREATION_OP_ALLOC;
     public:
+      enum CreationKind {
+        INDEX_SPACE_CREATION,
+        FIELD_ALLOCATION,
+        FUTURE_MAP_CREATION,
+      };
+    public:
       CreationOp(Runtime *rt);
       CreationOp(const CreationOp &rhs);
       virtual ~CreationOp(void);
@@ -1437,6 +1443,8 @@ namespace Legion {
     public:
       void initialize_index_space(
                  InnerContext *ctx, IndexSpaceNode *node, const Future &future);
+      void initialize_map(InnerContext *ctx,
+                          const std::map<DomainPoint,Future> &futures);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1447,8 +1455,9 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
     protected:
+      CreationKind kind; 
       IndexSpaceNode *index_space_node;
-      Future future;
+      std::vector<Future> futures;
     };
 
     /**

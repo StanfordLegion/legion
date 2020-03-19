@@ -2483,6 +2483,19 @@ extern "C" {
                            legion_reduction_op_id_t redop,
                            bool deterministic);
 
+  /**
+   * @return Caller takes ownership of return value
+   *
+   * @see Legion::Runtime::construct_future_map
+   */
+  legion_future_map_t
+  legion_future_map_construct(legion_runtime_t runtime,
+                              legion_context_t ctx,
+                              legion_domain_t domain,
+                              legion_domain_point_t *points,
+                              legion_future_t *futures,
+                              size_t num_futures);
+
   // -----------------------------------------------------------------------
   // Deferred Buffer Operations
   // -----------------------------------------------------------------------

@@ -5109,6 +5109,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    FutureMap Runtime::construct_future_map(Context ctx, const Domain &domain,
+                                    const std::map<DomainPoint,Future> &futures)
+    //--------------------------------------------------------------------------
+    {
+      return ctx->construct_future_map(domain, futures);
+    }
+
+    //--------------------------------------------------------------------------
     Future Runtime::execute_task(Context ctx, 
                         TaskID task_id,
                         const std::vector<IndexSpaceRequirement> &indexes,
