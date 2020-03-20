@@ -7484,9 +7484,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CreationOp::trigger_ready(void)
+    void CreationOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
+      complete_mapping();
       switch (kind)
       {
         case INDEX_SPACE_CREATION:
@@ -7495,15 +7496,12 @@ namespace Legion {
             assert(futures.size() == 1);
 #endif
             const RtEvent ready = futures[0].impl->subscribe_internal();
-            // Give these slightly higher priority since they are likely
-            // needed by later operations
-            enqueue_ready_operation(ready, LG_THROUGHPUT_DEFERRED_PRIORITY);
+            complete_execution(ready); 
             break;
           }
         case FUTURE_MAP_CREATION:
           {
-            // No need to wait for anything here
-            enqueue_ready_operation();
+            complete_execution();
             break;
           }
         default:
@@ -7512,7 +7510,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CreationOp::trigger_mapping(void)
+    void CreationOp::trigger_complete(void)
     //--------------------------------------------------------------------------
     {
       switch (kind)
@@ -7542,8 +7540,7 @@ namespace Legion {
         default:
           assert(false);
       }
-      // Record that we are done
-      Operation::trigger_mapping();
+      complete_operation();
     }
 
     /////////////////////////////////////////////////////////////
