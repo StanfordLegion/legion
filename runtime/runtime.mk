@@ -745,6 +745,16 @@ INSTALL_HEADERS += legion.h \
 		   legion/legion_stl.h \
 		   legion/legion_stl.inl \
 		   legion/legion_template_help.h \
+		   legion/legion_types.h \
+		   mappers/debug_mapper.h \
+		   mappers/default_mapper.h \
+		   mappers/default_mapper.inl \
+		   mappers/mapping_utilities.h \
+		   mappers/null_mapper.h \
+		   mappers/replay_mapper.h \
+		   mappers/shim_mapper.h \
+		   mappers/test_mapper.h \
+		   mappers/wrapper_mapper.h \
 		   realm/realm_config.h \
 		   realm/realm_c.h \
 		   realm/profiling.h \
@@ -861,6 +871,7 @@ install: $(OUTFILE)
 	@mkdir -p $(PREFIX)/bin
 	@mkdir -p $(PREFIX)/include/realm
 	@mkdir -p $(PREFIX)/include/legion
+	@mkdir -p $(PREFIX)/include/mappers
 	@mkdir -p $(PREFIX)/lib
 	@cp $(OUTFILE) $(PREFIX)/bin/$(OUTFILE)
 	@$(foreach file,$(INSTALL_BIN_FILES),cp $(file) $(PREFIX)/bin/$(file);)
