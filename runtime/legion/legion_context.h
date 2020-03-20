@@ -306,6 +306,8 @@ namespace Legion {
                                    ReductionOpID redop, bool deterministic) = 0; 
       virtual Future reduce_future_map(const FutureMap &future_map,
                                    ReductionOpID redop, bool deterministic) = 0;
+      virtual FutureMap construct_future_map(const Domain &domain,
+                               const std::map<DomainPoint,Future> &futures) = 0;
       virtual PhysicalRegion map_region(const InlineLauncher &launcher) = 0;
       virtual ApEvent remap_region(PhysicalRegion region) = 0;
       virtual void unmap_region(PhysicalRegion region) = 0;
@@ -1029,6 +1031,8 @@ namespace Legion {
                                       ReductionOpID redop, bool deterministic);
       virtual Future reduce_future_map(const FutureMap &future_map,
                                        ReductionOpID redop, bool deterministic);
+      virtual FutureMap construct_future_map(const Domain &domain,
+                                   const std::map<DomainPoint,Future> &futures);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual ApEvent remap_region(PhysicalRegion region);
       virtual void unmap_region(PhysicalRegion region);
@@ -2269,6 +2273,8 @@ namespace Legion {
                                       ReductionOpID redop, bool deterministic);
       virtual Future reduce_future_map(const FutureMap &future_map,
                                        ReductionOpID redop, bool deterministic);
+      virtual FutureMap construct_future_map(const Domain &domain,
+                                   const std::map<DomainPoint,Future> &futures);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual ApEvent remap_region(PhysicalRegion region);
       virtual void unmap_region(PhysicalRegion region);
@@ -2629,6 +2635,8 @@ namespace Legion {
                                       ReductionOpID redop, bool deterministic);
       virtual Future reduce_future_map(const FutureMap &future_map,
                                        ReductionOpID redop, bool deterministic);
+      virtual FutureMap construct_future_map(const Domain &domain,
+                                   const std::map<DomainPoint,Future> &futures);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual ApEvent remap_region(PhysicalRegion region);
       virtual void unmap_region(PhysicalRegion region);

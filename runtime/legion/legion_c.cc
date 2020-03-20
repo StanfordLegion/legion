@@ -2934,6 +2934,27 @@ legion_future_map_reduce(legion_runtime_t runtime_,
         runtime->reduce_future_map(ctx, *fm, redop, deterministic)));
 }
 
+legion_future_map_t
+legion_future_map_construct(legion_runtime_t runtime_,
+                            legion_context_t ctx_,
+                            legion_domain_t domain_,
+                            legion_domain_point_t *points_,
+                            legion_future_t *futures_,
+                            size_t num_futures)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  Domain domain = CObjectWrapper::unwrap(domain_);
+  std::map<DomainPoint,Future> futures;
+  for (unsigned idx = 0; idx < num_futures; idx++)
+  {
+    DomainPoint point = CObjectWrapper::unwrap(points_[idx]);
+    futures[point] = *(CObjectWrapper::unwrap(futures_[idx]));
+  }
+  return CObjectWrapper::wrap(new FutureMap(
+        runtime->construct_future_map(ctx, domain, futures)));
+}
+
 // -----------------------------------------------------------------------
 // Deferred Buffer Operations
 // -----------------------------------------------------------------------

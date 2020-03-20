@@ -154,24 +154,28 @@ namespace Legion {
                               const bool notify_remote = true,
                               IndexSpaceExprID expr_id = 0,
                               ApEvent ready = ApEvent::NO_AP_EVENT,
-                              RtEvent initialized = RtEvent::NO_RT_EVENT);
+                              RtEvent initialized = RtEvent::NO_RT_EVENT,
+                              std::set<RtEvent> *applied = NULL);
       IndexSpaceNode* create_union_space(IndexSpace handle, DistributedID did,
                               const std::vector<IndexSpace> &sources,
                               RtEvent initialized = RtEvent::NO_RT_EVENT,
                               const bool notify_remote = true,
-                              IndexSpaceExprID expr_id = 0);
+                              IndexSpaceExprID expr_id = 0,
+                              std::set<RtEvent> *applied = NULL);
       IndexSpaceNode* create_intersection_space(IndexSpace handle, 
                               DistributedID did,
                               const std::vector<IndexSpace> &sources,
                               RtEvent initialized = RtEvent::NO_RT_EVENT,
                               const bool noitfy_remote = true,
-                              IndexSpaceExprID expr_id = 0);
+                              IndexSpaceExprID expr_id = 0,
+                              std::set<RtEvent> *applied = NULL);
       IndexSpaceNode* create_difference_space(IndexSpace handle,
                               DistributedID did,
                               IndexSpace left, IndexSpace right,
                               RtEvent initialized = RtEvent::NO_RT_EVENT,
                               const bool notify_remote = true,
-                              IndexSpaceExprID expr_id = 0);
+                              IndexSpaceExprID expr_id = 0,
+                              std::set<RtEvent> *applied = NULL);
       void find_or_create_sharded_index_space(TaskContext *ctx,
                               IndexSpace handle, IndexSpace local,
                               DistributedID did);
@@ -347,7 +351,8 @@ namespace Legion {
     public:
       FieldSpaceNode* create_field_space(FieldSpace handle, DistributedID did,
                                    const bool notify_remote = true,
-                                   RtEvent initialized = RtEvent::NO_RT_EVENT);
+                                   RtEvent initialized = RtEvent::NO_RT_EVENT,
+                                   std::set<RtEvent> *applied = NULL);
       void destroy_field_space(FieldSpace handle, AddressSpaceID source,
                                std::set<RtEvent> &applied,
                                const bool collective = false);
@@ -393,7 +398,8 @@ namespace Legion {
     public:
       RegionNode* create_logical_region(LogicalRegion handle,
                                     const bool notify_remote = true,
-                                    RtEvent initialized = RtEvent::NO_RT_EVENT);
+                                    RtEvent initialized = RtEvent::NO_RT_EVENT,
+                                    std::set<RtEvent> *applied = NULL);
       void destroy_logical_region(LogicalRegion handle, 
                                   AddressSpaceID source,
                                   std::set<RtEvent> &applied,
@@ -691,33 +697,40 @@ namespace Legion {
                                   RtEvent initialized,
                                   ApEvent is_ready = ApEvent::NO_AP_EVENT,
                                   IndexSpaceExprID expr_id = 0,
-                                  const bool notify_remote = true);
+                                  const bool notify_remote = true,
+                                  std::set<RtEvent> *applied = NULL);
       IndexSpaceNode* create_node(IndexSpace is, const void *realm_is, 
                                   IndexPartNode *par, LegionColor color,
                                   DistributedID did, RtEvent initialized,
                                   ApUserEvent is_ready,
-                                  const bool notify_remote = true);
+                                  const bool notify_remote = true,
+                                  std::set<RtEvent> *applied = NULL);
       // We know the disjointness of the index partition
       IndexPartNode*  create_node(IndexPartition p, IndexSpaceNode *par,
                                   IndexSpaceNode *color_space, 
                                   LegionColor color, bool disjoint,int complete,
                                   DistributedID did, ApEvent partition_ready, 
                                   ApBarrier partial_pending, RtEvent init,
-                                  ShardMapping *shard_mapping = NULL);
+                                  ShardMapping *shard_mapping = NULL,
+                                  std::set<RtEvent> *applied = NULL);
       // Give the event for when the disjointness information is ready
       IndexPartNode*  create_node(IndexPartition p, IndexSpaceNode *par,
                                   IndexSpaceNode *color_space,LegionColor color,
                                   RtEvent disjointness_ready_event,int complete,
                                   DistributedID did, ApEvent partition_ready, 
                                   ApBarrier partial_pending, RtEvent init,
-                                  ShardMapping *shard_mapping = NULL);
+                                  ShardMapping *shard_mapping = NULL,
+                                  std::set<RtEvent> *applied = NULL);
       FieldSpaceNode* create_node(FieldSpace space, DistributedID did,
-                                  RtEvent init,const bool notify_remote = true);
+                                  RtEvent init,const bool notify_remote = true,
+                                  std::set<RtEvent> *applied = NULL);
       FieldSpaceNode* create_node(FieldSpace space, DistributedID did,
                                   RtEvent initialized, Deserializer &derez);
       RegionNode*     create_node(LogicalRegion r, PartitionNode *par,
-                                  RtEvent init,const bool notify_remote = true);
-      PartitionNode*  create_node(LogicalPartition p, RegionNode *par);
+                                  RtEvent init,const bool notify_remote = true,
+                                  std::set<RtEvent> *applied = NULL);
+      PartitionNode*  create_node(LogicalPartition p, RegionNode *par,
+                                  std::set<RtEvent> *applied = NULL);
     public:
       IndexSpaceNode* get_node(IndexSpace space, 
                                RtEvent *defer = NULL, bool first = true);
@@ -1037,8 +1050,8 @@ namespace Legion {
       virtual bool test_intersection_nonblocking(IndexSpaceExpression *expr,
          RegionTreeForest *context, ApEvent &precondition, bool second = false);
       virtual IndexSpaceNode* create_node(IndexSpace handle, DistributedID did,
-          RtEvent initialized, const bool notify_remote = true,
-          IndexSpaceExprID expr_id = 0) = 0;
+          RtEvent initialized, std::set<RtEvent> *applied,
+          const bool notify_remote = true, IndexSpaceExprID expr_id = 0) = 0;
     public:
       virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
@@ -1211,8 +1224,8 @@ namespace Legion {
       virtual bool remove_expression_reference(void);
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
       virtual IndexSpaceNode* create_node(IndexSpace handle, DistributedID did,
-          RtEvent initialized, const bool notify_remote = true,
-          IndexSpaceExprID expr_id = 0) = 0;
+          RtEvent initialized, std::set<RtEvent> *applied,
+          const bool notify_remote = true, IndexSpaceExprID expr_id = 0) = 0;
     protected:
       void record_remote_expression(AddressSpaceID target);
     public:
@@ -1253,8 +1266,8 @@ namespace Legion {
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
       virtual bool remove_expression_reference(void);
       virtual IndexSpaceNode* create_node(IndexSpace handle, DistributedID did, 
-          RtEvent initialized, const bool notify_remote = true,
-          IndexSpaceExprID expr_id = 0) = 0;
+          RtEvent initialized, std::set<RtEvent> *applied,
+          const bool notify_remote = true, IndexSpaceExprID expr_id = 0) = 0;
       virtual IndexSpaceExpression* find_congruence(void) = 0;
       virtual void activate_remote(void) = 0;
     public:
@@ -1301,8 +1314,8 @@ namespace Legion {
                                              const bool top) = 0;
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
       virtual IndexSpaceNode* create_node(IndexSpace handle, DistributedID did,
-          RtEvent initialized, const bool notify_remote = true,
-          IndexSpaceExprID expr_id = 0);
+          RtEvent initialized, std::set<RtEvent> *applied,
+          const bool notify_remote = true, IndexSpaceExprID expr_id = 0);
       virtual IndexSpaceExpression* find_congruence(void) = 0;
     public:
       virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
@@ -1866,8 +1879,8 @@ namespace Legion {
       virtual bool remove_expression_reference(void);
       virtual bool remove_operation(RegionTreeForest *forest);
       virtual IndexSpaceNode* create_node(IndexSpace handle, DistributedID did,
-          RtEvent initialized, const bool notify_remote = true,
-          IndexSpaceExprID expr_id = 0) = 0;
+          RtEvent initialized, std::set<RtEvent> *applied,
+          const bool notify_remote = true, IndexSpaceExprID expr_id = 0) = 0;
       virtual void create_sharded_alias(IndexSpace alias,DistributedID did) = 0;
     public:
       virtual ApEvent compute_pending_space(Operation *op,
@@ -2083,8 +2096,8 @@ namespace Legion {
                                              AddressSpaceID target,
                                              const bool top);
       virtual IndexSpaceNode* create_node(IndexSpace handle, DistributedID did,
-          RtEvent initialized, const bool notify_remote = true,
-          IndexSpaceExprID expr_id = 0);
+          RtEvent initialized, std::set<RtEvent> *applied,
+          const bool notify_remote = true, IndexSpaceExprID expr_id = 0);
       virtual void create_sharded_alias(IndexSpace alias, DistributedID did);
     public:
       void log_index_space_points(const Realm::IndexSpace<DIM,T> &space) const;

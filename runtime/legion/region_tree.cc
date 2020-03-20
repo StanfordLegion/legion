@@ -76,18 +76,19 @@ namespace Legion {
                              const Domain *domain, DistributedID did, 
                              const bool notify_remote, IndexSpaceExprID expr_id,
                                         ApEvent ready /*=ApEvent::NO_AP_EVENT*/,
-                                        RtEvent init /*= RtEvent::NO_RT_EVENT*/)
+                                        RtEvent init /*= RtEvent::NO_RT_EVENT*/,
+                                        std::set<RtEvent> *applied /*= NULL*/)
     //--------------------------------------------------------------------------
     {
       return create_node(handle, domain, true/*is domain*/, NULL/*parent*/, 
-                         0/*color*/, did, init, ready, expr_id, notify_remote);
+             0/*color*/, did, init, ready, expr_id, notify_remote, applied);
     }
 
     //--------------------------------------------------------------------------
     IndexSpaceNode* RegionTreeForest::create_union_space(IndexSpace handle,
                     DistributedID did, const std::vector<IndexSpace> &sources, 
                     RtEvent initialized, const bool notify_remote,
-                    IndexSpaceExprID expr_id)
+                    IndexSpaceExprID expr_id, std::set<RtEvent> *applied)
     //--------------------------------------------------------------------------
     {
       // Construct the set of index space expressions
@@ -103,7 +104,8 @@ namespace Legion {
       assert(!exprs.empty());
 #endif
       IndexSpaceExpression *expr = union_index_spaces(exprs);
-      return expr->create_node(handle, did, initialized, notify_remote,expr_id);
+      return expr->create_node(handle, did, initialized, applied,
+                               notify_remote, expr_id);
     }
 
     //--------------------------------------------------------------------------
@@ -111,7 +113,8 @@ namespace Legion {
                                   IndexSpace handle, DistributedID did,
                                   const std::vector<IndexSpace> &sources, 
                                   RtEvent initialized, const bool notify_remote,
-                                  IndexSpaceExprID expr_id)
+                                  IndexSpaceExprID expr_id, 
+                                  std::set<RtEvent> *applied)
     //--------------------------------------------------------------------------
     {
       // Construct the set of index space expressions
@@ -127,7 +130,8 @@ namespace Legion {
       assert(!exprs.empty());
 #endif
       IndexSpaceExpression *expr = intersect_index_spaces(exprs);
-      return expr->create_node(handle, did, initialized, notify_remote,expr_id);
+      return expr->create_node(handle, did, initialized, applied,
+                               notify_remote, expr_id);
     }
 
     //--------------------------------------------------------------------------
@@ -135,7 +139,8 @@ namespace Legion {
                                  IndexSpace handle, DistributedID did,
                                  IndexSpace left, IndexSpace right, 
                                  RtEvent initialized, const bool notify_remote,
-                                 IndexSpaceExprID expr_id)
+                                 IndexSpaceExprID expr_id,
+                                 std::set<RtEvent> *applied)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -143,10 +148,11 @@ namespace Legion {
 #endif
       IndexSpaceNode *lhs = get_node(left);
       if (!right.exists())
-        return lhs->create_node(handle, did, initialized, notify_remote);
+        return lhs->create_node(handle, did, initialized,applied,notify_remote);
       IndexSpaceNode *rhs = get_node(right);
       IndexSpaceExpression *expr = subtract_index_spaces(lhs, rhs);
-      return expr->create_node(handle, did, initialized, notify_remote,expr_id);
+      return expr->create_node(handle, did, initialized, applied, 
+                               notify_remote, expr_id);
     }
 
     //--------------------------------------------------------------------------
@@ -176,7 +182,7 @@ namespace Legion {
                                                        PartitionKind part_kind,
                                                        DistributedID did,
                                                        ApEvent partition_ready,
-                                                    ApBarrier partial_pending)
+                                                     ApBarrier partial_pending)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -206,6 +212,7 @@ namespace Legion {
         runtime->send_index_partition_notification(parent_owner, rez);
         parent_notified = notified_event;
       }
+      std::set<RtEvent> applied;
       if ((part_kind == COMPUTE_KIND) || (part_kind == COMPUTE_COMPLETE_KIND) ||
           (part_kind == COMPUTE_INCOMPLETE_KIND))
       {
@@ -219,7 +226,7 @@ namespace Legion {
                              (part_kind == COMPUTE_INCOMPLETE_KIND) ? 0 : -1;
         create_node(pid, parent_node, color_node, partition_color,
                     disjointness_event, complete, did, partition_ready, 
-                    partial_pending, RtEvent::NO_RT_EVENT);
+                    partial_pending, RtEvent::NO_RT_EVENT, NULL, &applied);
       }
       else
       {
@@ -233,7 +240,8 @@ namespace Legion {
                              ((part_kind == DISJOINT_INCOMPLETE_KIND) ||
                               (part_kind == ALIASED_INCOMPLETE_KIND)) ? 0 : -1;
         create_node(pid, parent_node, color_node, partition_color, disjoint,
-         complete, did, partition_ready, partial_pending, RtEvent::NO_RT_EVENT);
+                    complete, did, partition_ready, partial_pending, 
+                    RtEvent::NO_RT_EVENT, NULL, &applied);
         if (runtime->legion_spy_enabled)
           LegionSpy::log_index_partition(parent.id, pid.id, disjoint,
                                          partition_color);
@@ -242,6 +250,12 @@ namespace Legion {
 						    partition_color);
       }
       ctx->register_index_partition_creation(pid);
+      if (!applied.empty())
+      {
+        if (parent_notified.exists())
+          applied.insert(parent_notified);
+        return Runtime::merge_events(applied);
+      }
       return parent_notified;
     }
 
@@ -375,7 +389,7 @@ namespace Legion {
           const RtEvent safe = 
             create_pending_partition(ctx, pid, child_node->handle, 
                                      source->color_space->handle, 
-                                     part_color, kind, did, domain_ready); 
+                                     part_color, kind, did, domain_ready);
           // If the user requested the handle for this point return it
           std::map<IndexSpace,IndexPartition>::iterator finder = 
             user_handles.find(child_node->handle);
@@ -462,6 +476,7 @@ namespace Legion {
           assert(part_result == NULL);
 #endif
         IndexPartNode *part_node;
+        std::set<RtEvent> applied;
         if ((part_kind != COMPUTE_KIND) && (part_kind != COMPUTE_COMPLETE_KIND)
             && (part_kind != COMPUTE_INCOMPLETE_KIND))
         {
@@ -476,7 +491,7 @@ namespace Legion {
                                 (part_kind == ALIASED_INCOMPLETE_KIND)) ? 0 :-1;
           part_node = create_node(pid, parent_node, color_node, partition_color,
             disjoint, complete, did, partition_ready, partial_pending,
-            creation_ready, &mapping);
+            creation_ready, &mapping, &applied);
           if (runtime->legion_spy_enabled)
             LegionSpy::log_index_partition(parent.id, pid.id, disjoint,
                                            partition_color);
@@ -493,10 +508,16 @@ namespace Legion {
           part_node = create_node(pid, parent_node, color_node, partition_color,
                                   disjointness_event, complete, did,
                                   partition_ready, partial_pending,
-                                  creation_ready, &mapping);
+                                  creation_ready, &mapping, &applied);
         }
         part_node->update_creation_set(mapping);
         ctx->register_index_partition_creation(pid);
+        if (!applied.empty())
+        {
+          if (parent_notified.exists())
+            applied.insert(parent_notified);
+          return Runtime::merge_events(applied);
+        }
         return parent_notified;
       }
       else
@@ -525,6 +546,7 @@ namespace Legion {
           assert(part_result == NULL);
 #endif
         IndexPartNode *part_node;
+        std::set<RtEvent> applied;
         if ((part_kind != COMPUTE_KIND) && (part_kind != COMPUTE_COMPLETE_KIND)
             && (part_kind != COMPUTE_INCOMPLETE_KIND))
         {
@@ -539,7 +561,7 @@ namespace Legion {
                                 (part_kind == ALIASED_INCOMPLETE_KIND)) ? 0 :-1;
           part_node = create_node(pid, parent_node, color_node, partition_color,
             disjoint, complete, did, partition_ready, partial_pending,
-            creation_ready, &mapping);
+            creation_ready, &mapping, &applied);
         }
         else
         {
@@ -550,12 +572,14 @@ namespace Legion {
           part_node = create_node(pid, parent_node, color_node, partition_color,
                                   disjointness_event, complete, did,
                                   partition_ready, partial_pending,
-                                  creation_ready, &mapping);
+                                  creation_ready, &mapping, &applied);
         }
         part_node->update_creation_set(mapping);
         ctx->register_index_partition_creation(pid);
         // We know the parent is notified or we wouldn't even have
         // been given our pid
+        if (!applied.empty())
+          return Runtime::merge_events(applied);
         return RtEvent::NO_RT_EVENT;
       }
     }
@@ -1139,10 +1163,11 @@ namespace Legion {
     FieldSpaceNode* RegionTreeForest::create_field_space(FieldSpace handle,
                                                        DistributedID did,
                                                        const bool notify_remote,
-                                                       RtEvent initialized)
+                                                       RtEvent initialized,
+                                                     std::set<RtEvent> *applied)
     //--------------------------------------------------------------------------
     {
-      return create_node(handle, did, initialized, notify_remote);
+      return create_node(handle, did, initialized, notify_remote, applied);
     }
 
     //--------------------------------------------------------------------------
@@ -1294,10 +1319,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RegionNode* RegionTreeForest::create_logical_region(LogicalRegion handle,
                                                        const bool notify_remote,
-                                                       RtEvent initialized)
+                                                       RtEvent initialized,
+                                                     std::set<RtEvent> *applied)
     //--------------------------------------------------------------------------
     {
-      return create_node(handle, NULL/*parent*/, initialized, notify_remote);
+      return create_node(handle, NULL/*parent*/, initialized, 
+                         notify_remote, applied);
     }
 
     //--------------------------------------------------------------------------
@@ -3578,17 +3605,29 @@ namespace Legion {
                                                   RtEvent initialized,
                                                   ApEvent is_ready,
                                                   IndexSpaceExprID expr_id,
-                                                  const bool notify_remote)
+                                                  const bool notify_remote,
+                                                  std::set<RtEvent> *applied)
     //--------------------------------------------------------------------------
     { 
+      RtUserEvent local_initialized;
+      std::set<RtEvent> local_applied;
+      if (applied == NULL)
+      {
+        applied = &local_applied;
+        local_initialized = Runtime::create_rt_user_event();
+        if (initialized.exists())
+          local_applied.insert(initialized);
+        initialized = local_initialized;
+      }
       IndexSpaceCreator creator(this, sp, bounds, is_domain, parent, 
                                 color, did, is_ready, expr_id, initialized);
       NT_TemplateHelper::demux<IndexSpaceCreator>(sp.get_type_tag(), &creator);
       IndexSpaceNode *result = creator.result;  
 #ifdef DEBUG_LEGION
       assert(result != NULL);
+      assert(applied != NULL);
 #endif
-      LocalReferenceMutator mutator;
+      WrapperReferenceMutator mutator(*applied);
       // Check to see if someone else has already made it
       {
         // Hold the lookup lock while modifying the lookup table
@@ -3597,6 +3636,9 @@ namespace Legion {
           index_nodes.find(sp);
         if (it != index_nodes.end())
         {
+          // Free up our user event since we don't need it
+          if (local_initialized.exists())
+            Runtime::trigger_event(local_initialized);
           // Need to remove resource reference if not owner
           if (result->is_owner() || 
               result->remove_base_resource_ref(REMOTE_DID_REF))
@@ -3617,6 +3659,14 @@ namespace Legion {
         if (parent != NULL)
           parent->add_child(result, &mutator);
       } 
+      if (local_initialized.exists())
+      {
+        if (!local_applied.empty())
+          Runtime::trigger_event(local_initialized,
+              Runtime::merge_events(local_applied));
+        else
+          Runtime::trigger_event(local_initialized);
+      }
       // If we had a realm index space issue the tighten now since
       // we know that we'll probably need it later
       // We have to do this after we've added our reference in case
@@ -3634,17 +3684,29 @@ namespace Legion {
                                                   DistributedID did,
                                                   RtEvent initialized,
                                                   ApUserEvent is_ready,
-                                                  const bool notify_remote)
+                                                  const bool notify_remote,
+                                                  std::set<RtEvent> *applied)
     //--------------------------------------------------------------------------
     { 
+      RtUserEvent local_initialized;
+      std::set<RtEvent> local_applied;
+      if (applied == NULL)
+      {
+        applied = &local_applied;
+        local_initialized = Runtime::create_rt_user_event();
+        if (initialized.exists())
+          local_applied.insert(initialized);
+        initialized = local_initialized;
+      }
       IndexSpaceCreator creator(this, sp, realm_is, false/*is domain*/, parent,
                                 color, did, is_ready, 0/*expr id*/,initialized);
       NT_TemplateHelper::demux<IndexSpaceCreator>(sp.get_type_tag(), &creator);
       IndexSpaceNode *result = creator.result;  
 #ifdef DEBUG_LEGION
       assert(result != NULL);
+      assert(applied != NULL);
 #endif
-      LocalReferenceMutator mutator;
+      WrapperReferenceMutator mutator(*applied);
       // Check to see if someone else has already made it
       {
         // Hold the lookup lock while modifying the lookup table
@@ -3653,6 +3715,9 @@ namespace Legion {
           index_nodes.find(sp);
         if (it != index_nodes.end())
         {
+          // Free up our user event since we don't need it
+          if (local_initialized.exists())
+            Runtime::trigger_event(local_initialized);
           // Need to remove resource reference if not owner
           if (result->is_owner() || 
               result->remove_base_resource_ref(REMOTE_DID_REF))
@@ -3675,6 +3740,14 @@ namespace Legion {
         if (parent != NULL)
           parent->add_child(result, &mutator);
       } 
+      if (local_initialized.exists())
+      {
+        if (!local_applied.empty())
+          Runtime::trigger_event(local_initialized,
+              Runtime::merge_events(local_applied));
+        else
+          Runtime::trigger_event(local_initialized);
+      }
       // If we had a realm index space issue the tighten now since
       // we know that we'll probably need it later
       // We have to do this after we've added our reference in case
@@ -3694,9 +3767,20 @@ namespace Legion {
                                                  ApEvent part_ready,
                                                  ApBarrier pending,
                                                  RtEvent initialized,
-                                                 ShardMapping *shard_mapping)
+                                                 ShardMapping *shard_mapping,
+                                                 std::set<RtEvent> *applied)
     //--------------------------------------------------------------------------
     {
+      RtUserEvent local_initialized;
+      std::set<RtEvent> local_applied;
+      if (applied == NULL)
+      {
+        applied = &local_applied;
+        local_initialized = Runtime::create_rt_user_event();
+        if (initialized.exists())
+          local_applied.insert(initialized);
+        initialized = local_initialized;
+      }
       IndexPartCreator creator(this, p, parent, color_space, color, disjoint,
                complete, did, part_ready, pending, initialized, shard_mapping);
       NT_TemplateHelper::demux<IndexPartCreator>(p.get_type_tag(), &creator);
@@ -3704,8 +3788,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(parent != NULL);
       assert(result != NULL);
+      assert(applied != NULL);
 #endif
-      LocalReferenceMutator mutator;
+      WrapperReferenceMutator mutator(*applied);
       // Check to see if someone else has already made it
       {
         // Hold the lookup lock while modifying the lookup table
@@ -3714,6 +3799,9 @@ namespace Legion {
           index_parts.find(p);
         if (it != index_parts.end())
         {
+          // Free up our user event since we don't need it
+          if (local_initialized.exists())
+            Runtime::trigger_event(local_initialized);
           // Need to remove resource reference if not owner
           if (result->is_owner() || 
               result->remove_base_resource_ref(REMOTE_DID_REF))
@@ -3768,6 +3856,14 @@ namespace Legion {
           result->register_with_runtime(&mutator);
         if (parent != NULL)
           parent->add_child(result, &mutator);
+      }
+      if (local_initialized.exists())
+      {
+        if (!local_applied.empty())
+          Runtime::trigger_event(local_initialized,
+              Runtime::merge_events(local_applied));
+        else
+          Runtime::trigger_event(local_initialized);
       }
       return result;
     }
@@ -3783,9 +3879,20 @@ namespace Legion {
                                                  ApEvent part_ready,
                                                  ApBarrier pending,
                                                  RtEvent initialized,
-                                                 ShardMapping *shard_mapping)
+                                                 ShardMapping *shard_mapping,
+                                                 std::set<RtEvent> *applied)
     //--------------------------------------------------------------------------
     {
+      RtUserEvent local_initialized;
+      std::set<RtEvent> local_applied;
+      if (applied == NULL)
+      {
+        applied = &local_applied;
+        local_initialized = Runtime::create_rt_user_event();
+        if (initialized.exists())
+          local_applied.insert(initialized);
+        initialized = local_initialized;
+      }
       IndexPartCreator creator(this, p, parent, color_space, color, 
                                disjointness_ready, complete, did, part_ready, 
                                pending, initialized, shard_mapping);
@@ -3794,8 +3901,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(parent != NULL);
       assert(result != NULL);
+      assert(applied != NULL);
 #endif
-      LocalReferenceMutator mutator;
+      WrapperReferenceMutator mutator(*applied);
       // Check to see if someone else has already made it
       {
         // Hold the lookup lock while modifying the lookup table
@@ -3804,6 +3912,9 @@ namespace Legion {
           index_parts.find(p);
         if (it != index_parts.end())
         {
+          // Free up our user event since we don't need it
+          if (local_initialized.exists())
+            Runtime::trigger_event(local_initialized);
           // Need to remove resource reference if not owner
           if (result->is_owner() || 
               result->remove_base_resource_ref(REMOTE_DID_REF))
@@ -3859,6 +3970,14 @@ namespace Legion {
         if (parent != NULL)
           parent->add_child(result, &mutator);
       }
+      if (local_initialized.exists())
+      {
+        if (!local_applied.empty())
+          Runtime::trigger_event(local_initialized,
+              Runtime::merge_events(local_applied));
+        else
+          Runtime::trigger_event(local_initialized);
+      }
       return result;
     }
  
@@ -3866,14 +3985,26 @@ namespace Legion {
     FieldSpaceNode* RegionTreeForest::create_node(FieldSpace space,
                                                   DistributedID did,
                                                   RtEvent initialized,
-                                                  const bool notify_remote)
+                                                  const bool notify_remote,
+                                                  std::set<RtEvent> *applied)
     //--------------------------------------------------------------------------
     {
+      RtUserEvent local_initialized;
+      std::set<RtEvent> local_applied;
+      if (applied == NULL)
+      {
+        applied = &local_applied;
+        local_initialized = Runtime::create_rt_user_event();
+        if (initialized.exists())
+          local_applied.insert(initialized);
+        initialized = local_initialized;
+      }
       FieldSpaceNode *result = new FieldSpaceNode(space, this, did,initialized);
 #ifdef DEBUG_LEGION
       assert(result != NULL);
+      assert(applied != NULL);
 #endif
-      LocalReferenceMutator mutator;
+      WrapperReferenceMutator mutator(*applied);
       // Hold the lookup lock while modifying the lookup table
       {
         AutoLock l_lock(lookup_lock);
@@ -3881,6 +4012,9 @@ namespace Legion {
           field_nodes.find(space);
         if (it != field_nodes.end())
         {
+          // Free up our user event since we don't need it
+          if (local_initialized.exists())
+            Runtime::trigger_event(local_initialized);
           // Need to remove resource reference if not owner
           if (result->is_owner() || 
               result->remove_base_resource_ref(REMOTE_DID_REF))
@@ -3899,6 +4033,14 @@ namespace Legion {
           result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
         result->register_with_runtime(&mutator, notify_remote);
       }
+      if (local_initialized.exists())
+      {
+        if (!local_applied.empty())
+          Runtime::trigger_event(local_initialized,
+              Runtime::merge_events(local_applied));
+        else
+          Runtime::trigger_event(local_initialized);
+      }
       return result;
     }
 
@@ -3909,12 +4051,17 @@ namespace Legion {
                                                   Deserializer &derez)
     //--------------------------------------------------------------------------
     {
+      std::set<RtEvent> local_applied;
+      RtUserEvent local_initialized = Runtime::create_rt_user_event();
+      if (initialized.exists())
+        local_applied.insert(initialized);
+      initialized = local_initialized;
       FieldSpaceNode *result = 
         new FieldSpaceNode(space, this, did, initialized, derez);
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
-      LocalReferenceMutator mutator;
+      WrapperReferenceMutator mutator(local_applied);
       // Hold the lookup lock while modifying the lookup table
       {
         AutoLock l_lock(lookup_lock);
@@ -3922,6 +4069,9 @@ namespace Legion {
           field_nodes.find(space);
         if (it != field_nodes.end())
         {
+          // Free up our user event since we don't need it
+          if (local_initialized.exists())
+            Runtime::trigger_event(local_initialized);
           // Need to remove resource reference if not owner
           if (result->is_owner() || 
               result->remove_base_resource_ref(REMOTE_DID_REF))
@@ -3940,6 +4090,11 @@ namespace Legion {
           result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
         result->register_with_runtime(&mutator);
       }
+      if (!local_applied.empty())
+        Runtime::trigger_event(local_initialized,
+            Runtime::merge_events(local_applied));
+      else
+        Runtime::trigger_event(local_initialized);
       return result;
     }
 
@@ -3947,7 +4102,8 @@ namespace Legion {
     RegionNode* RegionTreeForest::create_node(LogicalRegion r, 
                                               PartitionNode *parent,
                                               RtEvent initialized,
-                                              const bool notify_remote)
+                                              const bool notify_remote,
+                                              std::set<RtEvent> *applied)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3972,14 +4128,30 @@ namespace Legion {
         col_src = get_node(r.field_space);
         col_ready = RtEvent::NO_RT_EVENT;
       }
-      if (row_ready.exists() || col_ready.exists())
-        initialized = Runtime::merge_events(initialized, row_ready, col_ready);
+      
+      RtUserEvent local_initialized;
+      std::set<RtEvent> local_applied;
+      if (applied == NULL)
+      {
+        applied = &local_applied;
+        local_initialized = Runtime::create_rt_user_event();
+        if (initialized.exists())
+          local_applied.insert(initialized);
+        if (row_ready.exists())
+          local_applied.insert(row_ready);
+        if (col_ready.exists())
+          local_applied.insert(col_ready);
+        initialized = local_initialized;
+      }
+      else if (row_ready.exists() || col_ready.exists())
+        initialized = Runtime::merge_events(initialized, row_ready, col_ready); 
       RegionNode *result = new RegionNode(r, parent, row_src, col_src, this, 
         initialized, (parent == NULL) ? initialized : parent->tree_initialized);
 #ifdef DEBUG_LEGION
       assert(result != NULL);
+      assert(applied != NULL);
 #endif
-      LocalReferenceMutator mutator;
+      WrapperReferenceMutator mutator(*applied);
       // Special case here in case multiple clients attempt to
       // make the node at the same time
       {
@@ -3990,6 +4162,9 @@ namespace Legion {
           region_nodes.find(r);
         if (it != region_nodes.end())
         {
+          // Free up our user event since we don't need it
+          if (local_initialized.exists())
+            Runtime::trigger_event(local_initialized);
           // It already exists, delete our copy and return
           // the one that has already been made
           if (result->is_owner() || 
@@ -4017,12 +4192,21 @@ namespace Legion {
         // register these things with the runtime here
         result->record_registered(&mutator);
       }
+      if (local_initialized.exists())
+      {
+        if (!local_applied.empty())
+          Runtime::trigger_event(local_initialized,
+              Runtime::merge_events(local_applied));
+        else
+          Runtime::trigger_event(local_initialized);
+      }
       return result;
     }
 
     //--------------------------------------------------------------------------
     PartitionNode* RegionTreeForest::create_node(LogicalPartition p,
-                                                 RegionNode *parent)
+                                                 RegionNode *parent,
+                                                 std::set<RtEvent> *applied)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4046,14 +4230,29 @@ namespace Legion {
         col_ready = RtEvent::NO_RT_EVENT;
       }
       RtEvent initialized = parent->tree_initialized;
-      if (row_ready.exists() || col_ready.exists())
+      RtUserEvent local_initialized;
+      std::set<RtEvent> local_applied;
+      if (applied == NULL)
+      {
+        applied = &local_applied;
+        local_initialized = Runtime::create_rt_user_event();
+        if (initialized.exists())
+          local_applied.insert(initialized);
+        if (row_ready.exists())
+          local_applied.insert(row_ready);
+        if (col_ready.exists())
+          local_applied.insert(col_ready);
+        initialized = local_initialized;
+      }
+      else if (row_ready.exists() || col_ready.exists())
         initialized = Runtime::merge_events(initialized, row_ready, col_ready);
       PartitionNode *result = new PartitionNode(p, parent, row_src, col_src, 
                                 this, initialized, parent->tree_initialized);
 #ifdef DEBUG_LEGION
       assert(result != NULL);
+      assert(applied != NULL);
 #endif
-      LocalReferenceMutator mutator;
+      WrapperReferenceMutator mutator(*applied);
       // Special case here in case multiple clients attempt
       // to make the node at the same time
       {
@@ -4063,6 +4262,9 @@ namespace Legion {
           part_nodes.find(p);
         if (it != part_nodes.end())
         {
+          // Free up our user event since we don't need it
+          if (local_initialized.exists())
+            Runtime::trigger_event(local_initialized);
           // It already exists, delete our copy and
           // return the one that has already been made
           if (result->is_owner() || 
@@ -4079,6 +4281,14 @@ namespace Legion {
         // At some point in the future we might actually want to 
         // register these things with the runtime here
         result->record_registered(&mutator);
+      }
+      if (local_initialized.exists())
+      {
+        if (!local_applied.empty())
+          Runtime::trigger_event(local_initialized,
+              Runtime::merge_events(local_applied));
+        else
+          Runtime::trigger_event(local_initialized);
       }
       return result;
     }

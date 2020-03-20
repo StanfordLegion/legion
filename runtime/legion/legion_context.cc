@@ -5608,6 +5608,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    FutureMap InnerContext::construct_future_map(const Domain &domain,
+                                    const std::map<DomainPoint,Future> &futures)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (futures.size() != domain.get_volume())
+        REPORT_LEGION_ERROR(ERROR_FUTURE_MAP_COUNT_MISMATCH,
+            "The number of futures passed into a future map construction (%zd) "
+            "does not match the volume of the domain (%zd) for the future map "
+            "in task %s (UID %lld)", futures.size(), domain.get_volume(),
+            get_task_name(), get_unique_id())
+      CreationOp *creation_op = runtime->get_available_creation_op();
+      creation_op->initialize_map(this, futures);
+      const DistributedID did = runtime->get_available_distributed_id();
+      FutureMapImpl *impl = new FutureMapImpl(this, creation_op, 
+          RtEvent::NO_RT_EVENT, domain, runtime, did, runtime->address_space);
+      runtime->add_to_dependence_queue(this, executing_processor, creation_op);
+      impl->set_all_futures(futures);
+      return FutureMap(impl);
+    }
+
+    //--------------------------------------------------------------------------
     PhysicalRegion InnerContext::map_region(const InlineLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -9777,14 +9799,19 @@ namespace Legion {
         const ISBroadcast value = collective.first->get_value(false);
         handle = IndexSpace(value.space_id, value.tid, type_tag);
         double_buffer = value.double_buffer;
+        std::set<RtEvent> applied;
         IndexSpaceNode *node = 
           runtime->forest->create_index_space(handle, &domain, value.did, 
               false/*notify remote*/, value.expr_id, ApEvent::NO_AP_EVENT,
-              creation_barrier);
+              creation_barrier, &applied);
         // Now we can update the creation set
         node->update_creation_set(shard_manager->get_mapping());
         // Arrive on the creation barrier
-        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        if (!applied.empty())
+          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
+              Runtime::merge_events(applied));
+        else
+          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)",
@@ -9807,11 +9834,16 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
+        std::set<RtEvent> applied;
         runtime->forest->create_index_space(handle, &domain, value.did,
                false/*notify remote*/, value.expr_id, ApEvent::NO_AP_EVENT,
-               creation_barrier);
+               creation_barrier, &applied);
         // Arrive on the creation barrier
-        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        if (!applied.empty())
+          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
+              Runtime::merge_events(applied));
+        else
+          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
       delete collective.first;
       pending_index_spaces.pop_front();
@@ -9888,12 +9920,18 @@ namespace Legion {
         const ISBroadcast value = collective.first->get_value(false);
         handle = IndexSpace(value.space_id, value.tid, type_tag);
         double_buffer = value.double_buffer;
+        std::set<RtEvent> applied;
         node = runtime->forest->create_index_space(handle, NULL, value.did,
-              false/*notify remote*/, value.expr_id, ready, creation_barrier);
+                                false/*notify remote*/, value.expr_id, ready,
+                                creation_barrier, &applied);
         // Now we can update the creation set
         node->update_creation_set(shard_manager->get_mapping());
         // Arrive on the creation barrier
-        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        if (!applied.empty())
+          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
+              Runtime::merge_events(applied));
+        else
+          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)",
@@ -9916,10 +9954,16 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
+        std::set<RtEvent> applied;
         node = runtime->forest->create_index_space(handle, NULL, value.did,
-               false/*notify remote*/, value.expr_id, ready, creation_barrier);
+                                false/*notify remote*/, value.expr_id, ready,
+                                creation_barrier, &applied);
         // Arrive on the creation barrier
-        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        if (!applied.empty())
+          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
+              Runtime::merge_events(applied));
+        else
+          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
       creator_op->initialize_index_space(this, node, future);
       runtime->add_to_dependence_queue(this, executing_processor, creator_op);
@@ -9972,13 +10016,18 @@ namespace Legion {
         const ISBroadcast value = collective.first->get_value(false);
         handle = IndexSpace(value.space_id, value.tid,spaces[0].get_type_tag());
         double_buffer = value.double_buffer;
+        std::set<RtEvent> applied;
         IndexSpaceNode *node = 
-          runtime->forest->create_union_space(handle, value.did,
-              spaces, creation_barrier, false/*notify remote*/, value.expr_id);
+          runtime->forest->create_union_space(handle, value.did, spaces, 
+            creation_barrier, false/*notify remote*/, value.expr_id, &applied);
         // Now we can update the creation set
         node->update_creation_set(shard_manager->get_mapping());
         // Arrive on the creation barrier
-        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        if (!applied.empty())
+          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
+              Runtime::merge_events(applied));
+        else
+          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)",
@@ -10001,10 +10050,15 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
-        runtime->forest->create_union_space(handle, value.did,
-            spaces, creation_barrier, false/*notify remote*/, value.expr_id);
+        std::set<RtEvent> applied;
+        runtime->forest->create_union_space(handle, value.did, spaces, 
+            creation_barrier, false/*notify remote*/, value.expr_id, &applied);
         // Arrive on the creation barrier
-        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        if (!applied.empty())
+          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
+              Runtime::merge_events(applied));
+        else
+          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
       delete collective.first;
       pending_index_spaces.pop_front();
@@ -10055,13 +10109,18 @@ namespace Legion {
         const ISBroadcast value = collective.first->get_value(false);
         handle = IndexSpace(value.space_id, value.tid,spaces[0].get_type_tag());
         double_buffer = value.double_buffer;
+        std::set<RtEvent> applied;
         IndexSpaceNode *node = 
-          runtime->forest->create_intersection_space(handle, value.did,
-              spaces, creation_barrier, false/*notify remote*/, value.expr_id);
+          runtime->forest->create_intersection_space(handle, value.did, spaces,
+            creation_barrier, false/*notify remote*/, value.expr_id, &applied);
         // Now we can update the creation set
         node->update_creation_set(shard_manager->get_mapping());
         // Arrive on the creation barrier
-        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        if (!applied.empty())
+          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
+              Runtime::merge_events(applied));
+        else
+          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)",
@@ -10084,10 +10143,15 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
-        runtime->forest->create_intersection_space(handle, value.did,
-            spaces, creation_barrier, false/*notify remote*/, value.expr_id);
+        std::set<RtEvent> applied;
+        runtime->forest->create_intersection_space(handle, value.did, spaces,
+          creation_barrier, false/*notify remote*/, value.expr_id, &applied);
         // Arrive on the creation barrier
-        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        if (!applied.empty())
+          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
+              Runtime::merge_events(applied));
+        else
+          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
       delete collective.first;
       pending_index_spaces.pop_front();
@@ -10129,13 +10193,18 @@ namespace Legion {
         const ISBroadcast value = collective.first->get_value(false);
         handle = IndexSpace(value.space_id, value.tid, left.get_type_tag());
         double_buffer = value.double_buffer;
+        std::set<RtEvent> applied;
         IndexSpaceNode *node = 
           runtime->forest->create_difference_space(handle, value.did, left,
-              right, creation_barrier, false/*notify remote*/, value.expr_id);
+          right,creation_barrier,false/*notify remote*/,value.expr_id,&applied);
         // Now we can update the creation set
         node->update_creation_set(shard_manager->get_mapping());
         // Arrive on the creation barrier
-        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        if (!applied.empty())
+          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
+              Runtime::merge_events(applied));
+        else
+          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)",
@@ -10158,10 +10227,15 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
-        runtime->forest->create_difference_space(handle, value.did, left,
-            right, creation_barrier, false/*notify remote*/, value.expr_id);
+        std::set<RtEvent> applied;
+        runtime->forest->create_difference_space(handle, value.did, left, right,
+             creation_barrier, false/*notify remote*/, value.expr_id, &applied);
         // Arrive on the creation barrier
-        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        if (!applied.empty())
+          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
+              Runtime::merge_events(applied));
+        else
+          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
       delete collective.first;
       pending_index_spaces.pop_front();
@@ -11892,12 +11966,17 @@ namespace Legion {
         space = FieldSpace(value.space_id);
         double_buffer = value.double_buffer;
         // Need to register this before broadcasting
+        std::set<RtEvent> applied;
         FieldSpaceNode *node = forest->create_field_space(space, value.did, 
-                                  false/*notify remote*/, creation_barrier);
+                        false/*notify remote*/, creation_barrier, &applied);
         // Now we can update the creation set
         node->update_creation_set(shard_manager->get_mapping());
         // Arrive on the creation barrier
-        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        if (!applied.empty())
+          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
+              Runtime::merge_events(applied));
+        else
+          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/); 
         runtime->forest->revoke_pending_field_space(value.space_id);
 #ifdef DEBUG_LEGION
         log_field.debug("Creating field space %x in task %s (ID %lld)", 
@@ -11920,10 +11999,15 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(space.exists());
 #endif
+        std::set<RtEvent> applied;
         runtime->forest->create_field_space(space, value.did,
-                    false/*notify remote*/, creation_barrier);
+                    false/*notify remote*/, creation_barrier, &applied);
         // Arrive on the creation barrier
-        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        if (!applied.empty())
+          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
+              Runtime::merge_events(applied));
+        else
+          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
       delete collective.first;
       pending_field_spaces.pop_front();
@@ -12259,13 +12343,19 @@ namespace Legion {
         const LRBroadcast value = collective.first->get_value(false);
         handle.tree_id = value.tid;
         double_buffer = value.double_buffer;
+        std::set<RtEvent> applied;
         // Have to register this before doing the broadcast
         RegionNode *node = 
-          forest->create_logical_region(handle, false/*notify remote*/);
+          forest->create_logical_region(handle, false/*notify remote*/,
+                                        creation_barrier, &applied);
         // Now we can update the creation set
         node->update_creation_set(shard_manager->get_mapping());
         // Arrive on the creation barrier
-        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        if (!applied.empty())
+          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
+              Runtime::merge_events(applied));
+        else
+          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
         runtime->forest->revoke_pending_region_tree(value.tid);
 #ifdef DEBUG_LEGION
         log_region.debug("Creating logical region in task %s (ID %lld) with "
@@ -12291,9 +12381,15 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
-        forest->create_logical_region(handle, false/*notify remote*/);
+        std::set<RtEvent> applied;
+        forest->create_logical_region(handle, false/*notify remote*/, 
+                                      creation_barrier, &applied);
         // Signal that we are done our creation
-        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        if (!applied.empty())
+          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
+              Runtime::merge_events(applied));
+        else
+          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
       delete collective.first;
       pending_region_trees.pop_front();
@@ -16268,6 +16364,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    FutureMap LeafContext::construct_future_map(const Domain &domain,
+                                    const std::map<DomainPoint,Future> &futures)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,
+        "Illegal construct future map call performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id())
+      return FutureMap();
+    }
+
+    //--------------------------------------------------------------------------
     PhysicalRegion LeafContext::map_region(const InlineLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -17670,6 +17777,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return enclosing->reduce_future_map(future_map, redop, deterministic);
+    }
+
+    //--------------------------------------------------------------------------
+    FutureMap InlineContext::construct_future_map(const Domain &domain,
+                                    const std::map<DomainPoint,Future> &futures)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->construct_future_map(domain, futures);
     }
 
     //--------------------------------------------------------------------------
