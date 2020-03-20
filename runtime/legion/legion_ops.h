@@ -1452,8 +1452,8 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
     public:
       virtual void trigger_dependence_analysis(void);
-      virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
+      virtual void trigger_complete(void);
     protected:
       CreationKind kind; 
       IndexSpaceNode *index_space_node;
