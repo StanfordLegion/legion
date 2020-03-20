@@ -1812,6 +1812,7 @@ namespace Legion {
       // Fence barrier methods
       RtBarrier get_next_mapping_fence_barrier(void);
       ApBarrier get_next_execution_fence_barrier(void);
+      RtBarrier get_next_trace_recording_barrier(void);
       RtBarrier get_next_summary_fence_barrier(void);
       inline void advance_replicate_barrier(RtBarrier &bar, size_t arrivals)
         {
@@ -1864,6 +1865,7 @@ namespace Legion {
       RtBarrier inline_mapping_barrier;
       RtBarrier external_resource_barrier;
       RtBarrier mapping_fence_barrier;
+      RtBarrier trace_recording_barrier;
       RtBarrier summary_fence_barrier;
       ApBarrier execution_fence_barrier;
       ApBarrier attach_broadcast_barrier;
@@ -1890,6 +1892,7 @@ namespace Legion {
       // analsyis stage of the pipeline. Our use of this variable is only
       // safe as long as we know we have more generations of phase barriers
       // than we can have outstanding replays, which is usually very true
+      volatile CollectiveID trace_recording_collective_id;
       volatile CollectiveID summary_collective_id;
     protected:
       // Pending allocations of various resources
@@ -1930,6 +1933,7 @@ namespace Legion {
       std::map<std::pair<unsigned,unsigned>,RtUserEvent> pending_clone_barriers;
     protected:
       unsigned next_replicate_bar_index;
+      unsigned next_trace_bar_index;
       unsigned next_summary_bar_index;
     protected:
       static const unsigned MIN_UNORDERED_OPS_EPOCH = 32;

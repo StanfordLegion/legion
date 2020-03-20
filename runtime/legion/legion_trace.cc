@@ -2549,8 +2549,7 @@ namespace Legion {
     void PhysicalTemplate::finalize(bool has_blocking_call, ReplTraceOp *op)
     //--------------------------------------------------------------------------
     {
-      if (!recording_done.has_triggered())
-        Runtime::trigger_event(recording_done);
+      trigger_recording_done();
       recording = false;
       replayable = check_replayable(op, has_blocking_call);
 
@@ -4471,8 +4470,9 @@ namespace Legion {
         local_shard(repl_ctx->owner_shard->shard_id), 
         total_shards(repl_ctx->shard_manager->total_shards),
         template_index(repl_ctx->register_trace_template(this)),
-        total_replays(0), updated_advances(0), recurrent_replays(0), 
-        updated_frontiers(0)
+        total_replays(0), updated_advances(0), 
+        recording_barrier(repl_ctx->get_next_trace_recording_barrier()),
+        recurrent_replays(0), updated_frontiers(0)
     //--------------------------------------------------------------------------
     {
       repl_ctx->add_reference();
@@ -6371,6 +6371,18 @@ namespace Legion {
 #else
       return sharding_functions[tid];
 #endif
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::trigger_recording_done(void)
+    //--------------------------------------------------------------------------
+    {
+      if (recording_barrier.exists())
+      {
+        Runtime::phase_barrier_arrive(recording_barrier, 1/*count*/);
+        Runtime::trigger_event(recording_done, recording_barrier);
+        recording_barrier = RtBarrier::NO_RT_BARRIER;
+      }
     }
 
     //--------------------------------------------------------------------------

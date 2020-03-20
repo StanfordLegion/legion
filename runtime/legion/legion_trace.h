@@ -835,7 +835,7 @@ namespace Legion {
         { recording_done = Runtime::create_rt_user_event(); }
       RtEvent get_recording_done(void) const
         { return recording_done; }
-      void trigger_recording_done(void);
+      virtual void trigger_recording_done(void);
     private:
       TraceLocalID find_trace_local_id(Memoizable *memo);
       unsigned find_memo_entry(Memoizable *memo);
@@ -907,7 +907,7 @@ namespace Legion {
       // - after each replay, we do assignment 
       //    events[frontiers[idx]] = events[idx]
       std::map<unsigned,unsigned> frontiers;
-    private:
+    protected:
       RtUserEvent recording_done;
     private:
       RtUserEvent replay_ready;
@@ -1091,6 +1091,8 @@ namespace Legion {
       virtual IndexSpace find_local_space(unsigned trace_local_id);
       virtual ShardingFunction* find_sharding_function(unsigned trace_local_id);
     public:
+      virtual void trigger_recording_done(void);
+    public:
       ApBarrier find_trace_shard_event(ApEvent event, ShardID remote_shard);
       void record_trace_shard_event(ApEvent event, ApBarrier result);
       void handle_trace_update(Deserializer &derez, AddressSpaceID source);
@@ -1187,6 +1189,8 @@ namespace Legion {
       RtUserEvent update_advances_ready;
       // An event for chainging deferrals of update tasks
       RtEvent next_deferral_precondition;
+      // Barrier for signaliing when we are done recording our template
+      RtBarrier recording_barrier;
     protected:
       // Count how many times we've done recurrent replay so we know when we're
       // going to run out of phase barrier generations

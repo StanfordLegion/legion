@@ -2007,6 +2007,8 @@ namespace Legion {
         { return external_resource_barrier; }
       inline RtBarrier get_mapping_fence_barrier(void) const
         { return mapping_fence_barrier; }
+      inline RtBarrier get_trace_recording_barrier(void) const
+        { return trace_recording_barrier; }
       inline RtBarrier get_summary_fence_barrier(void) const
         { return summary_fence_barrier; }
       inline ApBarrier get_execution_fence_barrier(void) const
@@ -2148,6 +2150,7 @@ namespace Legion {
       RtBarrier inline_mapping_barrier;
       RtBarrier external_resource_barrier;
       RtBarrier mapping_fence_barrier;
+      RtBarrier trace_recording_barrier;
       RtBarrier summary_fence_barrier;
       ApBarrier execution_fence_barrier;
       ApBarrier attach_broadcast_barrier;
