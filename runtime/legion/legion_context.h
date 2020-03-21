@@ -1083,7 +1083,7 @@ namespace Legion {
                 const std::vector<StaticDependence> *dependences);
       virtual void register_new_internal_operation(InternalOp *op);
       // Must be called while holding the dependence lock
-      virtual void insert_unordered_ops(const bool end_task,
+      virtual void insert_unordered_ops(AutoLock &d_lock, const bool end_task,
                                         const bool progress);
       virtual size_t register_new_close_operation(CloseOp *op);
       virtual size_t register_new_summary_operation(TraceSummaryOp *op);
@@ -1694,7 +1694,7 @@ namespace Legion {
       virtual void destroy_logical_partition(LogicalPartition handle,
                                              const bool unordered);
     public:
-      virtual void insert_unordered_ops(const bool end_task,
+      virtual void insert_unordered_ops(AutoLock &d_lock, const bool end_task,
                                         const bool progress);
       virtual Future execute_task(const TaskLauncher &launcher);
       virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher);

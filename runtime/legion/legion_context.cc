@@ -6023,7 +6023,7 @@ namespace Legion {
         // If we have any unordered ops and we're not in the middle of
         // a trace then add them into the queue
         if (!unordered_ops.empty() && (current_trace == NULL))
-          insert_unordered_ops(false/*end task*/, true/*progress*/);
+          insert_unordered_ops(d_lock, false/*end task*/, true/*progress*/);
         if (dependence_queue.empty())
           return;
         if (!outstanding_dependence)
@@ -6415,8 +6415,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::insert_unordered_ops(const bool end_task,
-                                            const bool progress)
+    void InnerContext::insert_unordered_ops(AutoLock &d_lock, 
+                                       const bool end_task, const bool progress)
     //--------------------------------------------------------------------------
     {
       // If there are no unordered ops then we're done
@@ -6629,7 +6629,7 @@ namespace Legion {
         }
         dependence_queue.push_back(op);
         // Insert any unordered operations into the stream
-        insert_unordered_ops(false/*end task*/, false/*progress*/);
+        insert_unordered_ops(d_lock, false/*end task*/, false/*progress*/);
       }
       if (issue_task)
       {
@@ -8560,7 +8560,7 @@ namespace Legion {
       // Check to see if we have any unordered operations that we need to inject
       {
         AutoLock d_lock(dependence_lock);
-        insert_unordered_ops(true/*end task*/, false/*progress*/);
+        insert_unordered_ops(d_lock, true/*end task*/, false/*progress*/);
       }
       // Mark that we are done executing this operation
       // We're not actually done until we have registered our pending
@@ -12516,8 +12516,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::insert_unordered_ops(const bool end_task,
-                                                const bool progress)
+    void ReplicateContext::insert_unordered_ops(AutoLock &d_lock,
+                                       const bool end_task, const bool progress)
     //--------------------------------------------------------------------------
     {
       // If we have a trace then we're definitely not inserting operations
@@ -12550,10 +12550,18 @@ namespace Legion {
         return;
       // If we make it here then all the shards are agreed that they are
       // going to do the sync up and will exchange information 
+      // We're going to release the lock so we need to grab a local copy
+      // of all our unordered operations.
+      std::list<Operation*> local_unordered;
+      local_unordered.swap(unordered_ops);
+      // Now we can release the lock and do the exchange
+      d_lock.release();
       UnorderedExchange exchange(this, COLLECTIVE_LOC_88); 
       std::vector<Operation*> ready_ops;
       const bool any_unordered_ops = 
-        exchange.exchange_unordered_ops(unordered_ops, ready_ops);
+        exchange.exchange_unordered_ops(local_unordered, ready_ops);
+      // Reacquire the lock and handle the operations
+      d_lock.reacquire();
       if (!ready_ops.empty())
       {
         for (std::vector<Operation*>::const_iterator it = 
@@ -12563,12 +12571,12 @@ namespace Legion {
           dependence_queue.push_back(*it);
         }
         __sync_fetch_and_add(&outstanding_children_count, ready_ops.size());
-        if (ready_ops.size() != unordered_ops.size())
+        if (ready_ops.size() != local_unordered.size())
         {
-          // Filter out all the ready ops from the unordered list
-          unsigned removed = 0;
-          for (std::list<Operation*>::iterator it = 
-                unordered_ops.begin(); it != unordered_ops.end(); /*nothing*/)
+          // For any operations which we aren't in the ready ops
+          // then we need to put them back on the unordered list
+          for (std::list<Operation*>::const_reverse_iterator it = 
+                local_unordered.rbegin(); it != local_unordered.rend(); it++)
           {
             bool found = false;
             for (unsigned idx = 0; idx < ready_ops.size(); idx++)
@@ -12578,18 +12586,19 @@ namespace Legion {
               found = true;
               break;
             }
-            if (found)
-            {
-              it = unordered_ops.erase(it);
-              if (++removed == ready_ops.size())
-                break;
-            }
-            else
-              it++;
+            if (!found)
+              unordered_ops.push_front(*it);
           }
         }
-        else // If they're the same size we know we did them all
-          unordered_ops.clear();
+      }
+      else if (!local_unordered.empty())
+      {
+        // Put all our of items back on the unordered list
+        if (!unordered_ops.empty())
+          unordered_ops.insert(unordered_ops.begin(),
+              local_unordered.begin(), local_unordered.end());
+        else
+          unordered_ops.swap(local_unordered);
       }
       if (!end_task)
       {
