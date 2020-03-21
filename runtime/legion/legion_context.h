@@ -1114,7 +1114,7 @@ namespace Legion {
                                LegionTrace *current_trace, 
                                bool silence_warnings, bool inlining_enabled);
       // Must be called while holding the dependence lock
-      void insert_unordered_ops(void);
+      void insert_unordered_ops(AutoLock &d_lock);
     public:
       void clone_local_fields(
           std::map<FieldSpace,std::vector<LocalFieldInfo> > &child_local) const;

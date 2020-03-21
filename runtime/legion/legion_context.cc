@@ -5906,7 +5906,7 @@ namespace Legion {
         // If we have any unordered ops and we're not in the middle of
         // a trace then add them into the queue
         if (!unordered_ops.empty() && (current_trace == NULL))
-          insert_unordered_ops();
+          insert_unordered_ops(d_lock);
         if (dependence_queue.empty())
           return;
         if (!outstanding_dependence)
@@ -6179,7 +6179,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::insert_unordered_ops(void)
+    void InnerContext::insert_unordered_ops(AutoLock &d_lock)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -6392,7 +6392,7 @@ namespace Legion {
         // If we have any unordered ops and we're not in the middle of
         // a trace then add them into the queue
         if (!unordered_ops.empty() && (current_trace == NULL))
-          insert_unordered_ops();
+          insert_unordered_ops(d_lock);
       }
       if (issue_task)
       {
@@ -8367,7 +8367,7 @@ namespace Legion {
       {
         AutoLock d_lock(dependence_lock);
         if (!unordered_ops.empty())
-          insert_unordered_ops();
+          insert_unordered_ops(d_lock);
       }
       // Mark that we are done executing this operation
       // We're not actually done until we have registered our pending
