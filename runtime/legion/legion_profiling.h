@@ -518,7 +518,8 @@ namespace Legion {
     public:
       // Process low-level runtime profiling results
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
-                                      const Realm::ProfilingResponse &response);
+                                      const Realm::ProfilingResponse &response,
+                                      const void *orig, size_t orig_length);
     public:
       // Dump all the results
       void finalize(void);

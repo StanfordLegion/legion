@@ -1333,7 +1333,8 @@ namespace Legion {
     public:
       virtual void handle_profiling_response(
                 const ProfilingResponseBase *base,
-                const Realm::ProfilingResponse &response) = 0;
+                const Realm::ProfilingResponse &response,
+                const void *orig, size_t orig_length) = 0;
     };
     struct ProfilingResponseBase {
     public:

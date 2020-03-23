@@ -22489,10 +22489,10 @@ namespace Legion {
       {
         // If we got a NULL let's assume they meant the profiler
         // this mainly happens with messages that cross nodes
-        runtime->profiler->handle_profiling_response(base, response);
+        runtime->profiler->handle_profiling_response(base,response,args,arglen);
       }
       else
-        base->handler->handle_profiling_response(base, response);
+        base->handler->handle_profiling_response(base, response, args, arglen);
     }
 
     //--------------------------------------------------------------------------

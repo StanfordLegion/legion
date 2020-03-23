@@ -2407,7 +2407,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void InstanceBuilder::handle_profiling_response(
                                        const ProfilingResponseBase *base,
-                                       const Realm::ProfilingResponse &response)
+                                       const Realm::ProfilingResponse &response,
+                                       const void *orig, size_t orig_length)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
