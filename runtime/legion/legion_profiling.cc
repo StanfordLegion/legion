@@ -288,7 +288,10 @@ namespace Legion {
     void LegionProfInstance::register_physical_instance_field(UniqueID op_id,
 						              IDType inst_id,
 						              unsigned field_id,
-						              unsigned field_sp)
+						              unsigned field_sp,
+                                                              unsigned align,
+                                                              bool align_set,
+                                                              EqualityKind eqk)
     //--------------------------------------------------------------------------
     {
       phy_inst_layout_rdesc.push_back(PhysicalInstLayoutDesc());
@@ -297,6 +300,9 @@ namespace Legion {
       pdesc.inst_id = inst_id;
       pdesc.field_id = field_id;
       pdesc.fspace_id = field_sp;
+      pdesc.eqk = eqk;
+      pdesc.alignment = align;
+      pdesc.has_align = align_set;
       owner->update_footprint(sizeof(PhysicalInstLayoutDesc), this);
     }
 
@@ -315,6 +321,24 @@ namespace Legion {
       phy_instance_rdesc.fspace_id = handle.get_field_space().get_id();
       phy_instance_rdesc.tree_id = handle.get_tree_id();
       owner->update_footprint(sizeof(PhysicalInstRegionDesc), this);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfInstance::register_physical_instance_dim_order(
+                                                                UniqueID op_id,
+                                                                IDType inst_id,
+                                                                unsigned dim,
+                                                                DimensionKind k)
+    //--------------------------------------------------------------------------
+    {
+      phy_inst_dim_order_rdesc.push_back(PhysicalInstDimOrderDesc());
+      PhysicalInstDimOrderDesc &phy_instance_d_rdesc =
+        phy_inst_dim_order_rdesc.back();
+      phy_instance_d_rdesc.op_id = op_id;
+      phy_instance_d_rdesc.inst_id = inst_id;
+      phy_instance_d_rdesc.dim = dim;
+      phy_instance_d_rdesc.k = k;
+      owner->update_footprint(sizeof(PhysicalInstDimOrderDesc), this);
     }
 
     //--------------------------------------------------------------------------
@@ -542,6 +566,7 @@ namespace Legion {
       owner->update_footprint(sizeof(InstUsageInfo), this);
     }
 
+
     //--------------------------------------------------------------------------
     void LegionProfInstance::process_inst_timeline(UniqueID op_id,
             const Realm::ProfilingMeasurements::InstanceTimeline &timeline)
@@ -750,6 +775,13 @@ namespace Legion {
         serializer->serialize(*it);
       }
 
+      for (std::deque<PhysicalInstDimOrderDesc>::const_iterator it =
+	     phy_inst_dim_order_rdesc.begin();
+	   it != phy_inst_dim_order_rdesc.end(); it++)
+        {
+          serializer->serialize(*it);
+        }
+
       for (std::deque<MetaInfo>::const_iterator it = meta_infos.begin();
             it != meta_infos.end(); it++)
       {
@@ -806,6 +838,7 @@ namespace Legion {
       {
         serializer->serialize(*it);
       }
+
 #ifdef LEGION_PROF_SELF_PROFILE
       for (std::deque<ProfTaskInfo>::const_iterator it = 
             prof_task_infos.begin(); it != prof_task_infos.end(); it++)
@@ -831,6 +864,7 @@ namespace Legion {
       lr_desc.clear();
       phy_inst_layout_rdesc.clear();
       phy_inst_rdesc.clear();
+      phy_inst_dim_order_rdesc.clear();
       meta_infos.clear();
       copy_infos.clear();
       inst_create_infos.clear();
@@ -1033,6 +1067,18 @@ namespace Legion {
         if (t_curr >= t_stop)
           return diff;
       }
+
+      while (!phy_inst_dim_order_rdesc.empty())
+      {
+        PhysicalInstDimOrderDesc &front = phy_inst_dim_order_rdesc.front();
+        serializer->serialize(front);
+        diff += sizeof(front);
+        phy_inst_dim_order_rdesc.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if (t_curr >= t_stop)
+          return diff;
+      }
+
       while (!phy_inst_layout_rdesc.empty())
       {
         PhysicalInstLayoutDesc &front = phy_inst_layout_rdesc.front();
@@ -1138,6 +1184,7 @@ namespace Legion {
         if (t_curr >= t_stop)
           return diff;
       }
+
 #ifdef LEGION_PROF_SELF_PROFILE
       while (!prof_task_infos.empty())
       {
@@ -1430,6 +1477,55 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LegionProfiler::record_physical_instance_layout(UniqueID op_id,
+                                                IDType inst_id, FieldSpace fs,
+                                               const LayoutConstraints *lc)
+    //--------------------------------------------------------------------------
+    {
+      // get fields_constraints
+      // get_alignment_constraints
+      if (thread_local_profiling_instance == NULL)
+        create_thread_local_profiling_instance();
+
+      std::map<FieldID, AlignmentConstraint> align_map;
+      const std::vector<AlignmentConstraint> &alignment_constraints =
+        lc->alignment_constraints;
+      for (std::vector<AlignmentConstraint>::const_iterator it =
+             alignment_constraints.begin(); it !=
+             alignment_constraints.end(); it++) {
+        align_map[it->fid] = *it;
+      }
+      const std::vector<FieldID> &fields = lc->field_constraint.field_set;
+      for (std::vector<FieldID>::const_iterator it =
+             fields.begin(); it != fields.end(); it++) {
+        std::map<FieldID, AlignmentConstraint>::const_iterator align =
+          align_map.find(*it);
+      bool has_align=false;
+      unsigned alignment = 0;
+      EqualityKind eqk = LT_EK;
+      if (align != align_map.end()) {
+        has_align = true;
+        alignment = align->second.alignment;
+        eqk = align->second.eqk;
+      }
+      thread_local_profiling_instance->register_physical_instance_field(op_id,
+                                                 inst_id, *it, fs.get_id(),
+                                                 alignment, has_align,
+                                                 eqk);
+      }
+      const std::vector<DimensionKind> &dim_ordering_constr =
+        lc->ordering_constraint.ordering;
+      unsigned dim=0;
+      for (std::vector<DimensionKind>::const_iterator it =
+             dim_ordering_constr.begin();
+           it != dim_ordering_constr.end(); it++) {
+        thread_local_profiling_instance->
+          register_physical_instance_dim_order(op_id, inst_id, dim, *it);
+        dim++;
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void LegionProfiler::record_physical_instance_fields(UniqueID op_id, 
                                                 IDType inst_id, FieldSpace fs,
                                                 std::vector<FieldID> &fields)
@@ -1441,7 +1537,8 @@ namespace Legion {
       for (std::vector<FieldID>::const_iterator it = 
             fields.begin(); it != fields.end(); it++)
 	thread_local_profiling_instance->register_physical_instance_field(op_id,
-                                                     inst_id, *it, fs.get_id());
+                                              inst_id, *it, fs.get_id(),0,false,
+                                                                          LT_EK);
     }
 
     //--------------------------------------------------------------------------

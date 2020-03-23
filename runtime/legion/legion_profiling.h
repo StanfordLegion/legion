@@ -233,6 +233,16 @@ namespace Legion {
 	IDType inst_id;
 	unsigned field_id;
 	unsigned fspace_id;
+        EqualityKind eqk;
+        bool has_align;
+        unsigned alignment;
+      };
+      struct PhysicalInstDimOrderDesc {
+      public:
+        UniqueID op_id;
+        IDType inst_id;
+        unsigned dim;
+        DimensionKind k;
       };
       struct MetaInfo {
       public:
@@ -307,6 +317,7 @@ namespace Legion {
         timestamp_t start, stop;
       };
 #endif
+
     public:
       LegionProfInstance(LegionProfiler *owner);
       LegionProfInstance(const LegionProfInstance &rhs);
@@ -341,7 +352,15 @@ namespace Legion {
       void register_physical_instance_region(UniqueID op_id, IDType inst_id,
 					     LogicalRegion handle);
       void register_physical_instance_field(UniqueID op_id, IDType inst_id, 
-                                    unsigned field_id, unsigned fspace);
+                                            unsigned field_id,
+                                            unsigned fspace,
+                                            unsigned align,
+                                            bool has_align,
+                                            EqualityKind eqk);
+      void register_physical_instance_dim_order(UniqueID op_id,
+                                                IDType inst_id,
+                                                unsigned dim,
+                                                DimensionKind k);
     public:
       void process_task(TaskID task_id, VariantID variant_id, UniqueID op_id, 
             const Realm::ProfilingMeasurements::OperationTimeline &timeline,
@@ -412,6 +431,7 @@ namespace Legion {
       std::deque<LogicalRegionDesc> lr_desc;
       std::deque<PhysicalInstRegionDesc> phy_inst_rdesc;
       std::deque<PhysicalInstLayoutDesc> phy_inst_layout_rdesc;
+      std::deque<PhysicalInstDimOrderDesc> phy_inst_dim_order_rdesc;
       std::deque<MetaInfo> meta_infos;
       std::deque<CopyInfo> copy_infos;
       std::deque<FillInfo> fill_infos;
@@ -541,6 +561,9 @@ namespace Legion {
                                            LogicalRegion handle);
       void record_physical_instance_fields(UniqueID op_id, IDType inst_id, 
                                   FieldSpace fs, std::vector<FieldID>& fields);
+      void record_physical_instance_layout(UniqueID op_id,
+                                           IDType inst_id, FieldSpace fs,
+                                           const LayoutConstraints *lc);
       void record_index_part(UniqueID id, const char* name);
       void record_index_partition(UniqueID parent_id, UniqueID id, 
                                   bool disjoint, LegionColor c);
