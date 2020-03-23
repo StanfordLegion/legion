@@ -1528,7 +1528,7 @@ namespace Legion {
         assert(memo != NULL);
         assert(rec != NULL);
 #endif
-        op->pack_remote_operation(rez, target);
+        op->pack_remote_operation(rez, target, applied);
         memo->pack_remote_memoizable(rez, target);
         rez.serialize(index);
         rez.serialize(dst_index);
@@ -5358,7 +5358,7 @@ namespace Legion {
             rez.serialize(it->first->did);
             rez.serialize(it->second);
           }
-          op->pack_remote_operation(rez, target_addr);
+          op->pack_remote_operation(rez, target_addr, applied_events);
           rez.serialize(index);
           rez.serialize(redop);
           rez.serialize(target);
@@ -5601,7 +5601,7 @@ namespace Legion {
             rez.serialize(it->first->did);
             rez.serialize(it->second);
           }
-          op->pack_remote_operation(rez, target_addr);
+          op->pack_remote_operation(rez, target_addr, applied_events);
           rez.serialize(index);
           rez.serialize<size_t>(valid_instances.size());
           for (FieldMaskSet<InstanceView>::const_iterator it = 
@@ -5916,7 +5916,7 @@ namespace Legion {
             rez.serialize(it->first->did);
             rez.serialize(it->second);
           }
-          op->pack_remote_operation(rez, target);
+          op->pack_remote_operation(rez, target, applied_events);
           rez.serialize(index);
           rez.serialize(node->handle);
           rez.serialize(usage);
@@ -6272,7 +6272,7 @@ namespace Legion {
             rez.serialize(it->first->did);
             rez.serialize(it->second);
           }
-          op->pack_remote_operation(rez, target);
+          op->pack_remote_operation(rez, target, applied_events);
           rez.serialize(index);
           rez.serialize(returned);
           rez.serialize(applied);
@@ -6514,7 +6514,7 @@ namespace Legion {
             rez.serialize(it->first->did);
             rez.serialize(it->second);
           }
-          op->pack_remote_operation(rez, target);
+          op->pack_remote_operation(rez, target, applied_events);
           rez.serialize(index);
           rez.serialize(precondition);
           rez.serialize(returned);
@@ -6850,7 +6850,7 @@ namespace Legion {
             rez.serialize(it->first->did);
             rez.serialize(it->second);
           }
-          op->pack_remote_operation(rez, target);
+          op->pack_remote_operation(rez, target, applied_events);
           rez.serialize(src_index);
           rez.serialize(dst_index);
           rez.serialize(src_usage);
@@ -7348,7 +7348,7 @@ namespace Legion {
             rez.serialize(it->first->did);
             rez.serialize(it->second);
           }
-          op->pack_remote_operation(rez, target);
+          op->pack_remote_operation(rez, target, applied_events);
           rez.serialize(index);
           rez.serialize(usage);
           rez.serialize<size_t>(views.size());
@@ -7648,7 +7648,7 @@ namespace Legion {
             rez.serialize(it->first->did);
             rez.serialize(it->second);
           }
-          op->pack_remote_operation(rez, target);
+          op->pack_remote_operation(rez, target, applied_events);
           rez.serialize(index);
           if (inst_view != NULL)
           {
