@@ -2397,9 +2397,11 @@ namespace Legion {
               regions.begin(); it != regions.end(); it++)
           runtime->profiler->record_physical_instance_region(creator_id, 
                                                       instance.id, *it);
-        runtime->profiler->record_physical_instance_fields(creator_id, 
-                                    instance.id, layout->owner->handle, 
-                                    constraints.field_constraint.field_set);
+        runtime->profiler->record_physical_instance_layout(
+                                                     creator_id,
+                                                     instance.id,
+                                                     layout->owner->handle,
+                                                     layout->constraints);
       }
       return result;
     }

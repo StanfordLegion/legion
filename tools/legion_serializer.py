@@ -104,7 +104,8 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "IndexSubSpaceDesc": re.compile(prefix + r'Index Sub Space Desc (?P<parent_id>[a-f0-9]+) (?P<unique_id>[0-9]+)'),
         "LogicalRegionDesc": re.compile(prefix + r'Logical Region Desc (?P<ispace_id>[0-9]+) (?P<fspace_id>[0-9]+) (?P<tree_id>[0-9]+) (?P<name>[a-zA-Z0-9_ ]+)'),
         "PhysicalInstRegionDesc": re.compile(prefix + r'Physical Inst Region Desc (?P<op_id>[0-9]+) (?P<inst_id>[a-f0-9]+) (?P<ispace_id>[0-9]+) (?P<fspace_id>[0-9]+) (?P<tree_id>[0-9]+)'),
-        "PhysicalInstLayoutDesc": re.compile(prefix + r'Physical Inst Layout Desc (?P<op_id>[0-9]+) (?P<inst_id>[a-f0-9]+) (?P<field_id>[0-9]+) (?P<fspace_id>[0-9]+)'),
+        "PhysicalInstLayoutDesc": re.compile(prefix + r'Physical Inst Layout Desc (?P<op_id>[0-9]+) (?P<inst_id>[a-f0-9]+) (?P<field_id>[0-9]+) (?P<fspace_id>[0-9]+) (?P<has_align>[0-1]) (?P<eqk>[0-9]+) (?P<align_desc>[0-9]+)'),
+        "PhysicalInstDimOrderDesc": re.compile(prefix + r'Physical Inst Dim Order Desc (?P<op_id>[0-9]+) (?P<inst_id>[a-f0-9]+) (?P<dim>[0-9]+) (?P<dim_kind>[0-9]+)'),
         "TaskKind": re.compile(prefix + r'Prof Task Kind (?P<task_id>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>., ]+) (?P<overwrite>[0-1])'),
         "TaskVariant": re.compile(prefix + r'Prof Task Variant (?P<task_id>[0-9]+) (?P<variant_id>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>., ]+)'),
         "OperationInstance": re.compile(prefix + r'Prof Operation (?P<op_id>[0-9]+) (?P<kind>[0-9]+)'),
@@ -150,6 +151,7 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "ispace_id": long_type,
         "unique_id": long_type,
         "disjoint": bool,
+        "has_align": bool,
         "tree_id": int,
         "max_dim": read_max_dim,
         "rem": read_array,
@@ -169,6 +171,9 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "wait_start": read_time,
         "wait_ready": read_time,
         "wait_end": read_time,
+        "align_desc": int,
+        "eqk": int,
+        "dim_kind": int,
         "name": lambda x: x,
         "desc": lambda x: x
     }
