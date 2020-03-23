@@ -1484,12 +1484,27 @@ namespace Realm {
       // push the CUDA context for this GPU onto this thread
       gpu_proc->gpu->push_context();
 
+      assert(ThreadLocal::current_gpu_stream == 0);
+      GPUStream *s = gpu_proc->gpu->get_next_task_stream();
+      ThreadLocal::current_gpu_stream = s;
+      assert(!ThreadLocal::created_gpu_streams);
+
       // internal tasks aren't allowed to wait on events, so any cuda synch
       //  calls inside the call must be blocking
       gpu_proc->block_on_synchronize = true;
 
       // execute the internal task, whatever it is
       T::execute_internal_task(task);
+
+      // if the user could have put work on any other streams then make our
+      // stream wait on those streams as well
+      // TODO: update this so that it works when GPU tasks suspend
+      if(ThreadLocal::created_gpu_streams)
+      {
+        s->wait_on_streams(*ThreadLocal::created_gpu_streams);
+        delete ThreadLocal::created_gpu_streams;
+        ThreadLocal::created_gpu_streams = 0;
+      }
 
       // we didn't use streams here, so synchronize the whole context
       CHECK_CU( cuCtxSynchronize() );
@@ -1500,6 +1515,8 @@ namespace Realm {
 
       assert(ThreadLocal::current_gpu_proc == gpu_proc);
       ThreadLocal::current_gpu_proc = 0;
+      assert(ThreadLocal::current_gpu_stream == s);
+      ThreadLocal::current_gpu_stream = 0;
     }
 
 
