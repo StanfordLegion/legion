@@ -180,10 +180,21 @@ namespace Legion {
 
       ss << "PhysicalInstLayoutDesc {"
          << "id:" << PHYSICAL_INST_LAYOUT_ID                  << delim
-         << "op_id:UniqueID:"           << sizeof(InstID)     << delim
+         << "op_id:UniqueID:"           << sizeof(UniqueID)   << delim
          << "inst_id:InstID:"           << sizeof(InstID)     << delim
-	 << "field_id:unsigned:"        << sizeof(unsigned)   << delim
-	 << "fspace_id:unsigned:"       << sizeof(unsigned)
+         << "field_id:unsigned:"        << sizeof(unsigned)   << delim
+         << "fspace_id:unsigned:"       << sizeof(unsigned)   << delim
+         << "has_align:bool:"           << sizeof(bool)       << delim
+         << "eqk:unsigned:"             << sizeof(unsigned)   << delim
+         << "align_desc:unsigned:"      << sizeof(unsigned)
+         << "}" << std::endl;
+
+      ss << "PhysicalInstDimOrderDesc {"
+         << "id:" << PHYSICAL_INST_LAYOUT_DIM_ID              << delim
+         << "op_id:UniqueID:"           << sizeof(UniqueID)   << delim
+         << "inst_id:InstID:"           << sizeof(InstID)     << delim
+         << "dim:unsigned:"             << sizeof(unsigned)   << delim
+         << "dim_kind:unsigned:"        << sizeof(unsigned)
          << "}" << std::endl;
 
       ss << "TaskKind {" 
@@ -630,6 +641,23 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfBinarySerializer::serialize(
+           const LegionProfInstance::PhysicalInstDimOrderDesc
+           &phy_instance_dim_order_rdesc)
+    //--------------------------------------------------------------------------
+    {
+      int ID = PHYSICAL_INST_LAYOUT_DIM_ID;
+      lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*)&(phy_instance_dim_order_rdesc.op_id),
+                sizeof(UniqueID));
+      lp_fwrite(f, (char*)&(phy_instance_dim_order_rdesc.inst_id),
+                sizeof(IDType));
+      lp_fwrite(f, (char*)&(phy_instance_dim_order_rdesc.dim),
+                sizeof(unsigned));
+      lp_fwrite(f, (char*)&(phy_instance_dim_order_rdesc.k),
+                sizeof(unsigned));
+    }
+    //--------------------------------------------------------------------------
+    void LegionProfBinarySerializer::serialize(
                 const LegionProfInstance::PhysicalInstLayoutDesc 
                                                      &phy_instance_layout_rdesc)
     //--------------------------------------------------------------------------
@@ -641,6 +669,12 @@ namespace Legion {
       lp_fwrite(f, (char*)&(phy_instance_layout_rdesc.field_id),
                 sizeof(unsigned));
       lp_fwrite(f, (char*)&(phy_instance_layout_rdesc.fspace_id),
+                sizeof(unsigned));
+      lp_fwrite(f, (char*)&(phy_instance_layout_rdesc.has_align),
+                sizeof(bool));
+      lp_fwrite(f, (char*)&(phy_instance_layout_rdesc.eqk),
+                sizeof(unsigned));
+      lp_fwrite(f, (char*)&(phy_instance_layout_rdesc.alignment),
                 sizeof(unsigned));
     }
 
@@ -1332,15 +1366,34 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfASCIISerializer::serialize(
-              const LegionProfInstance::PhysicalInstLayoutDesc
-					             &phy_instance_layout_rdesc)
+           const LegionProfInstance::PhysicalInstDimOrderDesc
+           &phy_instance_dim_order_rdesc)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Physical Inst Layout Desc " "%llu " IDFMT " %u %u",
-		     phy_instance_layout_rdesc.op_id,
-		     phy_instance_layout_rdesc.inst_id,
-		     phy_instance_layout_rdesc.field_id,
-		     phy_instance_layout_rdesc.fspace_id);
+      log_prof.print("Physical Inst Dim Order Desc " "%llu " IDFMT " %u %u",
+                     phy_instance_dim_order_rdesc.op_id,
+                     phy_instance_dim_order_rdesc.inst_id,
+                     phy_instance_dim_order_rdesc.dim,
+                     phy_instance_dim_order_rdesc.k
+                     );
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfASCIISerializer::serialize(
+              const LegionProfInstance::PhysicalInstLayoutDesc
+              &phy_instance_layout_rdesc)
+    //--------------------------------------------------------------------------
+    {
+      log_prof.print("Physical Inst Layout Desc " "%llu " IDFMT " %u %u %u %u "
+                     "%u",
+                     phy_instance_layout_rdesc.op_id,
+                     phy_instance_layout_rdesc.inst_id,
+                     phy_instance_layout_rdesc.field_id,
+                     phy_instance_layout_rdesc.fspace_id,
+                     phy_instance_layout_rdesc.has_align,
+                     phy_instance_layout_rdesc.eqk,
+                     phy_instance_layout_rdesc.alignment
+                     );
     }
 
     //--------------------------------------------------------------------------

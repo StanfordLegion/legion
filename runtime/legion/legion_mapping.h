@@ -374,12 +374,10 @@ namespace Legion {
        * ----------------------------------------------------------------------
        *  Premap Task 
        * ----------------------------------------------------------------------
-       * This mapper call is only invoked for tasks which either explicitly
-       * requested it by setting 'premap_task' in the 'select_task_options'
-       * mapper call or by having a region requirement which needs to be 
-       * premapped (e.g. an in index space task launch with an individual
-       * region requirement with READ_WRITE EXCLUSIVE privileges that all
-       * tasks must share). The mapper is told the indicies of which 
+       * This mapper call is only invoked for tasks having a region requirement
+       * which needs to be premapped (e.g. an in index space task launch with 
+       * an individual region requirement with READ_WRITE EXCLUSIVE privileges 
+       * that all tasks must share). The mapper is told the indicies of which 
        * region requirements need to be premapped in the 'must_premap' set.
        * All other regions can be optionally mapped. The mapper is given
        * a vector containing sets of valid PhysicalInstances (if any) for
@@ -403,6 +401,8 @@ namespace Legion {
       struct PremapTaskOutput {
         Processor                                          new_target_proc;
         std::map<unsigned,std::vector<PhysicalInstance> >  premapped_instances;
+        ProfilingRequest                                   copy_prof_requests;
+        TaskPriority                                       profiling_priority;
       };
       //------------------------------------------------------------------------
       virtual void premap_task(const MapperContext      ctx,
@@ -719,11 +719,15 @@ namespace Legion {
        * profiling callback for the task itself, otherwise it is a
        * callback for one of the copies for the task'. If it is a
        * response for a copy the 'region_requirement_index' will say
-       * for which region requirement the copy was issued.
+       * for which region requirement the copy was issued. The runtime
+       * will also report the number of 'total_reports' to expect. There
+       * will always be at least one of these if the number of copy or
+       * task profiling requests is not empty.
        */
       struct TaskProfilingInfo {
 	ProfilingResponse                       profiling_responses;
         unsigned                                region_requirement_index;
+        unsigned                                total_reports;
         bool                                    task_response;
         bool                                    fill_response;
       };
@@ -840,10 +844,17 @@ namespace Legion {
        * ----------------------------------------------------------------------
        * If the mapper requested profiling information on the copies
        * generated during an inline mapping operations then this mapper
-       * call will be invoked to inform the mapper of the result.
+       * call will be invoked to inform the mapper of the result. You are
+       * always guaranteed to get at least one of these calls if the number
+       * of profiling requests is not empty even if there are no copies or
+       * fills performed in order to report the 'total_reports' to be expected. 
+       * If the number of 'total_reports' is zero then the that means that
+       * no copies or fills were generated and this is in the only response
+       * that should be expected and it contains no other valid information.
        */
       struct InlineProfilingInfo {
 	ProfilingResponse                       profiling_responses;
+        unsigned                                total_reports;
         bool                                    fill_response;
       };
       //------------------------------------------------------------------------
@@ -977,11 +988,22 @@ namespace Legion {
        * ----------------------------------------------------------------------
        * If the mapper requested profiling information for an explicit
        * copy operation then this call will return the profiling information.
+       * The 'src_index' and 'dst_index' fields will report which region
+       * requiremnts were responsible for generating the copy. The 
+       * 'fill_response' field says whether this is a fill operation or a
+       * copy operation. You are always guaranteed to get at least one of 
+       * these calls if the number of profiling requests is non-zero even 
+       * if there are no copies or fills performed in order to report the 
+       * 'total_reports' to be expected. If the number of 'total_reports' 
+       * is zero then the that means that no copies or fills were generated 
+       * and this is in the only response that should be expected and it 
+       * contains no other valid information. 
        */
       struct CopyProfilingInfo {
 	ProfilingResponse                       profiling_responses;
         unsigned                                src_index;
         unsigned                                dst_index;
+        unsigned                                total_reports;
         bool                                    fill_response;
       };
       //------------------------------------------------------------------------
@@ -1063,10 +1085,19 @@ namespace Legion {
        * ----------------------------------------------------------------------
        * If the mapper requested profiling information this close operation
        * then this call will return the profiling data back to the mapper
-       * for all the copy operations issued by the close operation.
+       * for all the copy operations issued by the close operation. The
+       * 'fill_response' field indicates whether this response is for a
+       * fill operation. You are always guaranteed to get at least one of 
+       * these calls if the number of profiling requests is not empty even 
+       * if there are no copies of fills performed in order to report the 
+       * 'total_reports' to be expected. If the number of 'total_reports' 
+       * is zero then the that means that no copies or fills were generated 
+       * and this is in the only response that should be expected and it 
+       * contains no other valid information. 
        */
       struct CloseProfilingInfo {
 	ProfilingResponse                       profiling_responses;
+        unsigned                                total_reports;
         bool                                    fill_response;
       };
       //------------------------------------------------------------------------
@@ -1139,10 +1170,17 @@ namespace Legion {
        * ----------------------------------------------------------------------
        * If the mapper requested profiling information on this acquire
        * operation, then this call will be invoked with the associated
-       * profiling data.
+       * profiling data. You are always guaranteed to get at least one of 
+       * these calls if the number of profiling requests is not empty even 
+       * if there are no copies or fills performed in order to report the 
+       * 'total_reports' to be expected. If the number of 'total_reports' 
+       * is zero then the that means that no copies or fills were generated 
+       * and this is in the only response that should be expected and it 
+       * contains no other valid information.  
        */
       struct AcquireProfilingInfo {
 	ProfilingResponse                       profiling_responses;
+        unsigned                                total_reports;
         bool                                    fill_response;
       };
       //------------------------------------------------------------------------
@@ -1252,10 +1290,17 @@ namespace Legion {
        * ----------------------------------------------------------------------
        * If the mapper requested profiling data for the release operation
        * then this call will be invoked to report the profiling results
-       * back to the mapper.
+       * back to the mapper. You are always guaranteed to get at least one of 
+       * these calls if the number of profiling requests is not empty even if 
+       * there are no copies or fills performed in order to report the 
+       * 'total_reports' to be expected. If the number of 'total_reports' is 
+       * zero then the that means that no copies or fills were generated and 
+       * this is in the only response that should be expected and it contains 
+       * no other valid information. 
        */
       struct ReleaseProfilingInfo {
 	ProfilingResponse                       profiling_responses;
+        unsigned                                total_reports;
         bool                                    fill_response;
       };
       //------------------------------------------------------------------------
@@ -1402,10 +1447,17 @@ namespace Legion {
        * ----------------------------------------------------------------------
        * If the mapper requested profiling information on the copies
        * generated during a dependent partition operation then this mapper
-       * call will be invoked to inform the mapper of the result.
+       * call will be invoked to inform the mapper of the result. You are
+       * always guaranteed to get at least one of these calls if the number
+       * of profiling requests is not empty even if there are no copies or
+       * fills performed in order to report the 'total_reports' to be expected. 
+       * If the number of 'total_reports' is zero then the that means that
+       * no copies or fills were generated and this is in the only response
+       * that should be expected and it contains no other valid information.
        */
       struct PartitionProfilingInfo {
 	ProfilingResponse                       profiling_responses;
+        unsigned                                total_reports;
         bool                                    fill_response;
       };
       //------------------------------------------------------------------------

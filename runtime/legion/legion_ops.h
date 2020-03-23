@@ -402,7 +402,8 @@ namespace Legion {
           unsigned dst_index, Realm::ProfilingRequestSet &reqeusts, bool fill);
       // Report a profiling result for this operation
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
-                                        const Realm::ProfilingResponse &result);
+                                        const Realm::ProfilingResponse &result,
+                                        const void *orig, size_t orig_length);
       virtual void handle_profiling_update(int count);
       // Compute the initial precondition for this operation
       virtual ApEvent compute_init_precondition(const TraceInfo &info);
@@ -554,8 +555,8 @@ namespace Legion {
 #endif
     public:
       // Pack the needed parts of this operation for a remote operation
-      virtual void pack_remote_operation(Serializer &rez,
-                                         AddressSpaceID target) const;
+      virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
+                                         std::set<RtEvent> &applied) const;
       void pack_local_remote_operation(Serializer &rez) const;
     protected:
       static inline void add_launch_space_reference(IndexSpaceNode *node)
@@ -1025,10 +1026,11 @@ namespace Legion {
       virtual void add_copy_profiling_request(unsigned src_index, 
           unsigned dst_index, Realm::ProfilingRequestSet &reqeusts, bool fill);
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
-                                      const Realm::ProfilingResponse &response);
+                                      const Realm::ProfilingResponse &response,
+                                      const void *orig, size_t orig_length);
       virtual void handle_profiling_update(int count);
-      virtual void pack_remote_operation(Serializer &rez,
-                                         AddressSpaceID target) const;
+      virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
+                                         std::set<RtEvent> &applied) const;
     protected:
       bool remap_region;
       ApUserEvent termination_event;
@@ -1042,10 +1044,17 @@ namespace Legion {
     protected:
       MapperManager *mapper;
     protected:
-      std::vector<ProfilingMeasurementID> profiling_requests;
-      int                                 profiling_priority;
-      mutable int             outstanding_profiling_requests;
-      mutable RtUserEvent                 profiling_reported;
+      struct MapProfilingInfo : public Mapping::Mapper::InlineProfilingInfo {
+      public:
+        void *buffer;
+        size_t buffer_size;
+      };
+      std::vector<ProfilingMeasurementID>           profiling_requests;
+      std::vector<MapProfilingInfo>                     profiling_info;
+      RtUserEvent                                   profiling_reported;
+      int                                           profiling_priority;
+      int                               outstanding_profiling_requests;
+      int                               outstanding_profiling_reported;
     };
 
     /**
@@ -1186,6 +1195,7 @@ namespace Legion {
                                const InstanceSet *scatter_targets,
                                const PhysicalTraceInfo &trace_info,
                                std::set<RtEvent> &applied_conditions);
+      void finalize_copy_profiling(void);
     public:
       static void handle_deferred_across(const void *args);
     public:
@@ -1207,10 +1217,11 @@ namespace Legion {
       virtual void add_copy_profiling_request(unsigned src_index,
           unsigned dst_index, Realm::ProfilingRequestSet &reqeusts, bool fill);
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
-                                      const Realm::ProfilingResponse &response);
+                                      const Realm::ProfilingResponse &response,
+                                      const void *orig, size_t orig_length);
       virtual void handle_profiling_update(int count);
-      virtual void pack_remote_operation(Serializer &rez,
-                                         AddressSpaceID target) const;
+      virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
+                                         std::set<RtEvent> &applied) const;
       // Separate function for this so it can be called by derived classes
       RtEvent perform_local_versioning_analysis(void);
     public:
@@ -1238,10 +1249,17 @@ namespace Legion {
     public:
       PredEvent                   predication_guard;
     protected:
-      std::vector<ProfilingMeasurementID> profiling_requests;
-      int                                 profiling_priority;
-      mutable int             outstanding_profiling_requests;
-      mutable RtUserEvent                 profiling_reported;
+      struct CopyProfilingInfo : public Mapping::Mapper::CopyProfilingInfo {
+      public:
+        void *buffer;
+        size_t buffer_size;
+      };
+      std::vector<ProfilingMeasurementID>         profiling_requests;
+      std::vector<CopyProfilingInfo>                  profiling_info;
+      RtUserEvent                                 profiling_reported;
+      int                                         profiling_priority;
+      int                             outstanding_profiling_requests;
+      int                             outstanding_profiling_reported;
     public:
       bool                            possible_src_indirect_out_of_range;
       bool                            possible_dst_indirect_out_of_range;
@@ -1534,8 +1552,8 @@ namespace Legion {
       virtual void trigger_mapping(void); 
       virtual void trigger_complete(void);
       virtual unsigned find_parent_index(unsigned idx);
-      virtual void pack_remote_operation(Serializer &rez,
-                                         AddressSpaceID target) const;
+      virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
+                                         std::set<RtEvent> &applied) const;
     protected:
       DeletionKind kind;
       IndexSpace index_space;
@@ -1732,10 +1750,11 @@ namespace Legion {
       virtual void add_copy_profiling_request(unsigned src_index,
           unsigned dst_index, Realm::ProfilingRequestSet &reqeusts, bool fill);
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
-                                      const Realm::ProfilingResponse &response);
+                                      const Realm::ProfilingResponse &response,
+                                      const void *orig, size_t orig_length);
       virtual void handle_profiling_update(int count);
-      virtual void pack_remote_operation(Serializer &rez,
-                                         AddressSpaceID target) const;
+      virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
+                                         std::set<RtEvent> &applied) const;
     protected:
       unsigned parent_idx;
       InstanceSet target_instances;
@@ -1744,10 +1763,17 @@ namespace Legion {
     protected:
       MapperManager *mapper;
     protected:
-      std::vector<ProfilingMeasurementID> profiling_requests;
-      int                                 profiling_priority;
-      mutable int             outstanding_profiling_requests;
-      mutable RtUserEvent                 profiling_reported;
+      struct CloseProfilingInfo : public Mapping::Mapper::CloseProfilingInfo {
+      public:
+        void *buffer;
+        size_t buffer_size;
+      };
+      std::vector<ProfilingMeasurementID>          profiling_requests;
+      std::vector<CloseProfilingInfo>                  profiling_info;
+      RtUserEvent                                  profiling_reported;
+      int                                          profiling_priority;
+      int                              outstanding_profiling_requests;
+      int                              outstanding_profiling_reported;
     };
 
     /**
@@ -1862,10 +1888,11 @@ namespace Legion {
       virtual void add_copy_profiling_request(unsigned src_index,
           unsigned dst_index, Realm::ProfilingRequestSet &reqeusts, bool fill);
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
-                                      const Realm::ProfilingResponse &response);
+                                      const Realm::ProfilingResponse &response,
+                                      const void *orig, size_t orig_length);
       virtual void handle_profiling_update(int count);
-      virtual void pack_remote_operation(Serializer &rez,
-                                         AddressSpaceID target) const;
+      virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
+                                         std::set<RtEvent> &applied) const;
     protected:
       RegionRequirement requirement;
       RegionTreePath    privilege_path;
@@ -1876,10 +1903,18 @@ namespace Legion {
     protected:
       MapperManager*    mapper;
     protected:
-      std::vector<ProfilingMeasurementID> profiling_requests;
-      int                                 profiling_priority;
-      mutable int             outstanding_profiling_requests;
-      mutable RtUserEvent                 profiling_reported;
+      struct AcquireProfilingInfo : 
+        public Mapping::Mapper::AcquireProfilingInfo {
+      public:
+        void *buffer;
+        size_t buffer_size;
+      };
+      std::vector<ProfilingMeasurementID>            profiling_requests;
+      std::vector<AcquireProfilingInfo>                  profiling_info;
+      RtUserEvent                                    profiling_reported;
+      int                                            profiling_priority;
+      int                                outstanding_profiling_requests;
+      int                                outstanding_profiling_reported;
     };
 
     /**
@@ -1965,10 +2000,11 @@ namespace Legion {
       virtual void add_copy_profiling_request(unsigned src_index,
           unsigned dst_index, Realm::ProfilingRequestSet &reqeusts, bool fill);
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
-                                      const Realm::ProfilingResponse &response);
+                                      const Realm::ProfilingResponse &response,
+                                      const void *orig, size_t orig_length);
       virtual void handle_profiling_update(int count);
-      virtual void pack_remote_operation(Serializer &rez,
-                                         AddressSpaceID target) const;
+      virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
+                                         std::set<RtEvent> &applied) const;
     protected:
       RegionRequirement requirement;
       RegionTreePath    privilege_path;
@@ -1979,10 +2015,18 @@ namespace Legion {
     protected:
       MapperManager*    mapper;
     protected:
-      std::vector<ProfilingMeasurementID> profiling_requests;
-      int                                 profiling_priority;
-      mutable int             outstanding_profiling_requests;
-      mutable RtUserEvent                 profiling_reported;
+      struct ReleaseProfilingInfo : 
+        public Mapping::Mapper::ReleaseProfilingInfo {
+      public:
+        void *buffer;
+        size_t buffer_size;
+      };
+      std::vector<ProfilingMeasurementID>            profiling_requests;
+      std::vector<ReleaseProfilingInfo>                  profiling_info;
+      RtUserEvent                                    profiling_reported;
+      int                                            profiling_priority;
+      int                                outstanding_profiling_requests;
+      int                                outstanding_profiling_reported;
     };
 
     /**
@@ -2939,10 +2983,11 @@ namespace Legion {
           unsigned dst_index, Realm::ProfilingRequestSet &reqeusts, bool fill);
       // Report a profiling result for this operation
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
-                                        const Realm::ProfilingResponse &result);
+                                        const Realm::ProfilingResponse &result,
+                                        const void *orig, size_t orig_length);
       virtual void handle_profiling_update(int count);
-      virtual void pack_remote_operation(Serializer &rez,
-                                         AddressSpaceID target) const;
+      virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
+                                         std::set<RtEvent> &applied) const;
     protected:
       void check_privilege(void);
       void compute_parent_index(void);
@@ -2950,6 +2995,7 @@ namespace Legion {
       bool invoke_mapper(InstanceSet &mapped_instances);
       void activate_dependent_op(void);
       void deactivate_dependent_op(void);
+      void finalize_partition_profiling(void);
     public:
       void handle_point_commit(RtEvent point_committed);
     public:
@@ -2976,10 +3022,18 @@ namespace Legion {
       ApUserEvent                       intermediate_index_event;
 #endif
     protected:
-      std::vector<ProfilingMeasurementID> profiling_requests;
-      int                                 profiling_priority;
-      mutable int             outstanding_profiling_requests;
-      mutable RtUserEvent                 profiling_reported;
+      struct PartitionProfilingInfo :
+        public Mapping::Mapper::PartitionProfilingInfo {
+      public:
+        void *buffer;
+        size_t buffer_size;
+      };
+      std::vector<ProfilingMeasurementID>              profiling_requests;
+      std::vector<PartitionProfilingInfo>                  profiling_info;
+      RtUserEvent                                      profiling_reported;
+      int                                              profiling_priority;
+      int                                  outstanding_profiling_requests;
+      int                                  outstanding_profiling_reported;
     };
 
     /**
@@ -3098,8 +3152,8 @@ namespace Legion {
       // From MemoizableOp
       virtual void replay_analysis(void);
     public:
-      virtual void pack_remote_operation(Serializer &rez,
-                                         AddressSpaceID target) const;
+      virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
+                                         std::set<RtEvent> &applied) const;
     public:
       RegionTreePath privilege_path;
       VersionInfo version_info;
@@ -3228,8 +3282,8 @@ namespace Legion {
       virtual unsigned find_parent_index(unsigned idx);
       virtual void trigger_commit(void);
       virtual void record_reference_mutation_effect(RtEvent event);
-      virtual void pack_remote_operation(Serializer &rez,
-                                         AddressSpaceID target) const;
+      virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
+                                         std::set<RtEvent> &applied) const;
     public:
       PhysicalInstance create_instance(IndexSpaceNode *node,
                                        const std::vector<FieldID> &field_set,
@@ -3299,8 +3353,8 @@ namespace Legion {
                                   std::vector<unsigned> &ranking);
       virtual void add_copy_profiling_request(unsigned src_index,
           unsigned dst_index, Realm::ProfilingRequestSet &reqeusts, bool fill);
-      virtual void pack_remote_operation(Serializer &rez,
-                                         AddressSpaceID target) const;
+      virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
+                                         std::set<RtEvent> &applied) const;
     protected:
       void compute_parent_index(void);
     public:
@@ -3386,12 +3440,6 @@ namespace Legion {
      */
     class RemoteOp : public Operation {
     public:
-      // If we have to create a remote operation for something that wants
-      // profiling responses we use this as an upper bound on how many
-      // profiling requests will be issued on the remote node to avoid
-      // the count going back to zero too early
-      static const int REMOTE_PROFILING_MAX_COUNT = 10000;
-    public:
       struct DeferRemoteOpDeletionArgs : 
         public LgTaskArgs<DeferRemoteOpDeletionArgs> {
       public:
@@ -3432,14 +3480,15 @@ namespace Legion {
                                               const RegionUsage usage,
                                               const char *field_string,
                                               RtUserEvent reported);
-      virtual void pack_remote_operation(Serializer &rez,
-                                         AddressSpaceID target) const = 0;
+      virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
+                                         std::set<RtEvent> &applied) const = 0;
     public:
       void defer_deletion(RtEvent precondition);
       void pack_remote_base(Serializer &rez) const;
       void unpack_remote_base(Deserializer &derez, Runtime *runtime,
                               std::set<RtEvent> &ready_events);
-      void pack_profiling_requests(Serializer &rez) const;
+      void pack_profiling_requests(Serializer &rez, 
+                                   std::set<RtEvent> &applied) const;
       void unpack_profiling_requests(Deserializer &derez);
       static void handle_deferred_deletion(const void *args);
       // Caller takes ownership of this object and must delete it when done
@@ -3457,8 +3506,9 @@ namespace Legion {
     protected:
       std::vector<ProfilingMeasurementID> profiling_requests;
       int                                 profiling_priority;
-      mutable int               available_profiling_requests;
       Processor                           profiling_target;
+      RtUserEvent                         profiling_response;
+      int                                 profiling_reports;
     };
 
     /**
@@ -3485,8 +3535,8 @@ namespace Legion {
                                   const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking); 
-      virtual void pack_remote_operation(Serializer &rez,
-                                         AddressSpaceID target) const;
+      virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
+                                         std::set<RtEvent> &applied) const;
       virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
     };
 
@@ -3514,8 +3564,8 @@ namespace Legion {
                                   const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
-      virtual void pack_remote_operation(Serializer &rez,
-                                         AddressSpaceID target) const;
+      virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
+                                         std::set<RtEvent> &applied) const;
       virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
     };
 
@@ -3543,8 +3593,8 @@ namespace Legion {
                                   const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
-      virtual void pack_remote_operation(Serializer &rez,
-                                         AddressSpaceID target) const;
+      virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
+                                         std::set<RtEvent> &applied) const;
       virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
     };
 
@@ -3572,8 +3622,8 @@ namespace Legion {
                                   const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
-      virtual void pack_remote_operation(Serializer &rez,
-                                         AddressSpaceID target) const;
+      virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
+                                         std::set<RtEvent> &applied) const;
       virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
     };
 
@@ -3601,8 +3651,8 @@ namespace Legion {
                                   const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
-      virtual void pack_remote_operation(Serializer &rez,
-                                         AddressSpaceID target) const;
+      virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
+                                         std::set<RtEvent> &applied) const;
       virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
     };
 
@@ -3630,8 +3680,8 @@ namespace Legion {
                                   const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
-      virtual void pack_remote_operation(Serializer &rez,
-                                         AddressSpaceID target) const;
+      virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
+                                         std::set<RtEvent> &applied) const;
       virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
     };
 
@@ -3660,8 +3710,8 @@ namespace Legion {
                                   const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
-      virtual void pack_remote_operation(Serializer &rez,
-                                         AddressSpaceID target) const;
+      virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
+                                         std::set<RtEvent> &applied) const;
       virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
     protected:
       PartitionKind part_kind;
@@ -3691,8 +3741,8 @@ namespace Legion {
                                   const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
-      virtual void pack_remote_operation(Serializer &rez,
-                                         AddressSpaceID target) const;
+      virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
+                                         std::set<RtEvent> &applied) const;
       virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
     };
 
@@ -3720,8 +3770,8 @@ namespace Legion {
                                   const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
-      virtual void pack_remote_operation(Serializer &rez,
-                                         AddressSpaceID target) const;
+      virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
+                                         std::set<RtEvent> &applied) const;
       virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
     };
 
@@ -3749,8 +3799,8 @@ namespace Legion {
                                   const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
-      virtual void pack_remote_operation(Serializer &rez,
-                                         AddressSpaceID target) const;
+      virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
+                                         std::set<RtEvent> &applied) const;
       virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
     };
 
@@ -3780,8 +3830,8 @@ namespace Legion {
                                   const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
-      virtual void pack_remote_operation(Serializer &rez,
-                                         AddressSpaceID target) const;
+      virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
+                                         std::set<RtEvent> &applied) const;
       virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
     };
 
@@ -3811,8 +3861,8 @@ namespace Legion {
                                   const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
-      virtual void pack_remote_operation(Serializer &rez,
-                                         AddressSpaceID target) const;
+      virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
+                                         std::set<RtEvent> &applied) const;
       virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
     };
 

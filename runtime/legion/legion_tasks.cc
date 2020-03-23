@@ -588,17 +588,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskOp::pack_remote_operation(Serializer &rez,
-                                       AddressSpaceID target) const
+    void TaskOp::pack_remote_operation(Serializer &rez, AddressSpaceID target,
+                                       std::set<RtEvent> &applied_events) const
     //--------------------------------------------------------------------------
     {
       pack_local_remote_operation(rez);
       pack_external_task(rez, target);
-      pack_profiling_requests(rez);
+      pack_profiling_requests(rez, applied_events);
     }
     
     //--------------------------------------------------------------------------
-    void TaskOp::pack_profiling_requests(Serializer &rez) const
+    void TaskOp::pack_profiling_requests(Serializer &rez,
+                                         std::set<RtEvent> &applied) const
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(0);
@@ -1791,219 +1792,7 @@ namespace Legion {
                                           privilege_paths);
       }
 #endif
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskOp::early_map_regions(std::set<RtEvent> &applied_conditions,
-                                   const std::vector<unsigned> &must_premap)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, EARLY_MAP_REGIONS_CALL);
-      // This always happens on the owner node so we can just do the 
-      // normal trace info creation here without needing to check
-      // whether we have a remote trace info
-      const TraceInfo trace_info(this);
-      ApEvent init_precondition = compute_init_precondition(trace_info);;
-      // A little bit of suckinesss here, it's unclear if we have
-      // our version infos with the proper versioning information
-      // so we might need to "page" it in now.  We'll overlap it as
-      // much as possible, but it will still suck. The common case is that
-      // we don't have anything to premap though so we shouldn't be
-      // doing this all that often.
-      std::set<RtEvent> version_ready_events;
-      for (std::vector<unsigned>::const_iterator it = must_premap.begin();
-            it != must_premap.end(); it++)
-      {
-        VersionInfo &version_info = get_version_info(*it); 
-        if (version_info.has_version_info())
-          continue;
-        runtime->forest->perform_versioning_analysis(this, *it, regions[*it],
-                                         version_info, version_ready_events);
-      }
-      Mapper::PremapTaskInput input;
-      Mapper::PremapTaskOutput output;
-      // Initialize this to not have a new target processor
-      output.new_target_proc = Processor::NO_PROC;
-      // Set up the inputs and outputs 
-      std::set<Memory> visible_memories;
-      runtime->machine.get_visible_memories(target_proc, visible_memories);
-      // At this point if we have any version ready events we need to wait
-      if (!version_ready_events.empty())
-      {
-        RtEvent wait_on = Runtime::merge_events(version_ready_events);
-        // This wait sucks but whatever for now
-        wait_on.wait();
-      }
-      for (std::vector<unsigned>::const_iterator it = must_premap.begin();
-            it != must_premap.end(); it++)
-      {
-        InstanceSet valid;    
-        VersionInfo &version_info = get_version_info(*it);
-        // Do the premapping
-        if (request_valid_instances)
-          runtime->forest->physical_premap_region(this, *it, regions[*it],
-                                  version_info, valid, applied_conditions);
-        // If we need visible instances, filter them as part of the conversion
-        if (regions[*it].is_no_access())
-          prepare_for_mapping(valid, input.valid_instances[*it]);
-        else
-          prepare_for_mapping(valid, visible_memories, 
-                              input.valid_instances[*it]);
-      }
-      // Now invoke the mapper call
-      if (mapper == NULL)
-        mapper = runtime->find_mapper(current_proc, map_id);
-      mapper->invoke_premap_task(this, &input, &output);
-      // See if we need to update the new target processor
-      if (output.new_target_proc.exists())
-        this->target_proc = output.new_target_proc;
-      // Now do the registration
-      for (std::vector<unsigned>::const_iterator it = must_premap.begin();
-            it != must_premap.end(); it++)
-      {
-        VersionInfo &version_info = get_version_info(*it);
-        InstanceSet &chosen_instances = early_mapped_regions[*it];
-        std::map<unsigned,std::vector<MappingInstance> >::const_iterator 
-          finder = output.premapped_instances.find(*it);
-        if (finder == output.premapped_instances.end())
-          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                        "Invalid mapper output from 'premap_task' invocation "
-                        "on mapper %s. Mapper failed to map required premap "
-                        "region requirement %d of task %s (ID %lld) launched "
-                        "in parent task %s (ID %lld).", 
-                        mapper->get_mapper_name(), *it, 
-                        get_task_name(), get_unique_id(),
-                        parent_ctx->get_task_name(), 
-                        parent_ctx->get_unique_id())
-        RegionTreeID bad_tree = 0;
-        std::vector<FieldID> missing_fields;
-        std::vector<PhysicalManager*> unacquired;
-        int composite_index = runtime->forest->physical_convert_mapping(
-            this, regions[*it], finder->second, 
-            chosen_instances, bad_tree, missing_fields,
-            runtime->unsafe_mapper ? NULL : get_acquired_instances_ref(),
-            unacquired, !runtime->unsafe_mapper);
-        if (bad_tree > 0)
-          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                        "Invalid mapper output from 'premap_task' invocation "
-                        "on mapper %s. Mapper provided an instance from "
-                        "region tree %d for use in satisfying region "
-                        "requirement %d of task %s (ID %lld) whose region "
-                        "is from region tree %d.", mapper->get_mapper_name(),
-                        bad_tree, *it,get_task_name(),get_unique_id(),
-                        regions[*it].region.get_tree_id())
-        if (!missing_fields.empty())
-        {
-          for (std::vector<FieldID>::const_iterator fit = 
-                missing_fields.begin(); fit != missing_fields.end(); fit++)
-          {
-            const void *name; size_t name_size;
-            if (!runtime->retrieve_semantic_information(
-                regions[*it].region.get_field_space(), *fit,
-                NAME_SEMANTIC_TAG, name, name_size, true, false))
-              name = "(no name)";
-            log_run.error("Missing instance for field %s (FieldID: %d)",
-                          static_cast<const char*>(name), *it);
-          }
-          REPORT_LEGION_ERROR(ERROR_MISSING_INSTANCE_FIELD,
-                        "Invalid mapper output from 'premap_task' invocation "
-                        "on mapper %s. Mapper failed to specify instances "
-                        "for %zd fields of region requirement %d of task %s "
-                        "(ID %lld) launched in parent task %s (ID %lld). "
-                        "The missing fields are listed below.",
-                        mapper->get_mapper_name(), missing_fields.size(),
-                        *it, get_task_name(), get_unique_id(),
-                        parent_ctx->get_task_name(), 
-                        parent_ctx->get_unique_id())
-          
-        }
-        if (!unacquired.empty())
-        {
-          std::map<PhysicalManager*,std::pair<unsigned,bool> > 
-            *acquired_instances = get_acquired_instances_ref();
-          for (std::vector<PhysicalManager*>::const_iterator uit = 
-                unacquired.begin(); uit != unacquired.end(); uit++)
-          {
-            if (acquired_instances->find(*uit) == acquired_instances->end())
-              REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                            "Invalid mapper output from 'premap_task' "
-                            "invocation on mapper %s. Mapper selected "
-                            "physical instance for region requirement "
-                            "%d of task %s (ID %lld) which has already "
-                            "been collected. If the mapper had properly "
-                            "acquired this instance as part of the mapper "
-                            "call it would have detected this. Please "
-                            "update the mapper to abide by proper mapping "
-                            "conventions.", mapper->get_mapper_name(),
-                            (*it), get_task_name(), get_unique_id())
-          }
-          // If we did successfully acquire them, still issue the warning
-          REPORT_LEGION_WARNING(LEGION_WARNING_MAPPER_FAILED_ACQUIRE,
-                          "mapper %s failed to acquire instances "
-                          "for region requirement %d of task %s (ID %lld) "
-                          "in 'premap_task' call. You may experience "
-                          "undefined behavior as a consequence.",
-                          mapper->get_mapper_name(), *it, 
-                          get_task_name(), get_unique_id());
-        }
-        if (composite_index >= 0)
-          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                        "Invalid mapper output from 'premap_task' invocation "
-                        "on mapper %s. Mapper requested composite instance "
-                        "creation on region requirement %d of task %s "
-                        "(ID %lld) launched in parent task %s (ID %lld).",
-                        mapper->get_mapper_name(), *it,
-                        get_task_name(), get_unique_id(),
-                        parent_ctx->get_task_name(),
-                        parent_ctx->get_unique_id())
-        if (runtime->legion_spy_enabled)
-          runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
-                                                *it, regions[*it],
-                                                chosen_instances);
-        if (!runtime->unsafe_mapper)
-        {
-          std::vector<LogicalRegion> regions_to_check(1, 
-                                        regions[*it].region);
-          for (unsigned check_idx = 0; 
-                check_idx < chosen_instances.size(); check_idx++)
-          {
-            if (!chosen_instances[check_idx].get_manager()->meets_regions(
-                                                          regions_to_check))
-              REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                            "Invalid mapper output from invocation of "
-                            "'premap_task' on mapper %s. Mapper specified an "
-                            "instance region requirement %d of task %s "
-                            "(ID %lld) that does not meet the logical region "
-                            "requirement. Task was launched in task %s "
-                            "(ID %lld).", mapper->get_mapper_name(), *it, 
-                            get_task_name(), get_unique_id(), 
-                            parent_ctx->get_task_name(), 
-                            parent_ctx->get_unique_id())
-          }
-        }
-        // TODO: Implement physical tracing for premapped regions
-        if (is_memoizing())
-          assert(false);
-        // Passed all the error checking tests so register it
-        // Always defer the users, the point tasks will do that
-        // for themselves when they map their regions
-        const bool track_effects = 
-          (!atomic_locks.empty() || !arrive_barriers.empty());
-        ApEvent effects_done = 
-          runtime->forest->physical_perform_updates_and_registration(
-                              regions[*it], version_info, 
-                              this, *it, init_precondition, completion_event,
-                              chosen_instances, 
-                              PhysicalTraceInfo(trace_info, *it), 
-                              applied_conditions,
-#ifdef DEBUG_LEGION
-                              get_logging_name(), unique_op_id,
-#endif
-                              track_effects);
-        if (effects_done.exists())
-          effects_postconditions.insert(effects_done);
-      }
-    }
+    } 
 
     //--------------------------------------------------------------------------
     bool TaskOp::prepare_steal(void)
@@ -2318,12 +2107,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteTaskOp::pack_remote_operation(Serializer &rez,
-                                             AddressSpaceID target) const
+                 AddressSpaceID target, std::set<RtEvent> &applied_events) const
     //--------------------------------------------------------------------------
     {
       pack_remote_base(rez);
       pack_external_task(rez, target);
-      pack_profiling_requests(rez);
+      pack_profiling_requests(rez, applied_events);
     }
 
     //--------------------------------------------------------------------------
@@ -2358,9 +2147,10 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, ACTIVATE_SINGLE_CALL);
       activate_task();
-      outstanding_profiling_requests = 1; // start at 1 as a guard
-      profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
+      profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
+      outstanding_profiling_requests = 0;
+      outstanding_profiling_reported = 0;
       selected_variant = 0;
       task_priority = 0;
       perform_postmap = false;
@@ -2387,6 +2177,12 @@ namespace Legion {
       map_applied_conditions.clear();
       task_profiling_requests.clear();
       copy_profiling_requests.clear();
+      if (!profiling_info.empty())
+      {
+        for (unsigned idx = 0; idx < profiling_info.size(); idx++)
+          free(profiling_info[idx].buffer);
+        profiling_info.clear();
+      }
       untracked_valid_regions.clear();
       if ((execution_context != NULL) && execution_context->remove_reference())
         delete execution_context;
@@ -2939,6 +2735,16 @@ namespace Legion {
               }
           }
         }
+#ifdef DEBUG_LEGION
+        assert(!profiling_reported.exists());
+        assert(outstanding_profiling_requests == 0);
+#endif
+        profiling_reported = Runtime::create_rt_user_event();
+        // Increment the number of profiling responses here since we
+        // know that we're going to get one for launching the task
+        // No need for the lock since no outstanding physical analyses
+        // can be running yet
+        outstanding_profiling_requests = 1;
       }
       if (!output.copy_prof_requests.empty())
       {
@@ -2946,6 +2752,8 @@ namespace Legion {
             output.copy_prof_requests.requested_measurements,
             copy_profiling_requests, true/*warn*/);
         profiling_priority = output.profiling_priority;
+        if (!profiling_reported.exists())
+          profiling_reported = Runtime::create_rt_user_event();
       }
       // See whether the mapper picked a variant or a generator
       VariantImpl *variant_impl = NULL;
@@ -3638,6 +3446,7 @@ namespace Legion {
       mapper->invoke_map_task(this, &input, &output);
       // Now we can convert the mapper output into our physical instances
       finalize_map_task_output(input, output, must_epoch_owner,valid_instances);
+
       if (is_recording())
       {
 #ifdef DEBUG_LEGION
@@ -4514,10 +4323,9 @@ namespace Legion {
               runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
               &response, sizeof(response));
           request.add_measurements(realm_measurements);
-          int previous = 
-            __sync_fetch_and_add(&outstanding_profiling_requests, 1);
-          if ((previous == 1) && !profiling_reported.exists())
-            profiling_reported = Runtime::create_rt_user_event();
+          // No need to increment the number of outstanding profiling
+          // requests here since it was already done when we invoked
+          // the mapper (see SingleTask::invoke_mapper)
         }
       }
       if (runtime->legion_spy_enabled)
@@ -4572,7 +4380,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::pack_profiling_requests(Serializer &rez) const
+    void SingleTask::pack_profiling_requests(Serializer &rez,
+                                             std::set<RtEvent> &applied) const
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(copy_profiling_requests.size());
@@ -4582,11 +4391,10 @@ namespace Legion {
           rez.serialize(copy_profiling_requests[idx]);
         rez.serialize(profiling_priority);
         rez.serialize(runtime->find_utility_group());
-        rez.serialize(RtEvent::NO_RT_EVENT);
-        int previous = __sync_fetch_and_add(&outstanding_profiling_requests,
-                                        RemoteOp::REMOTE_PROFILING_MAX_COUNT);
-        if ((previous == 1) && !profiling_reported.exists())
-          profiling_reported = Runtime::create_rt_user_event();
+        // Send a message to the owner with an update for the extra counts
+        const RtUserEvent done_event = Runtime::create_rt_user_event();
+        rez.serialize<RtEvent>(done_event);
+        applied.insert(done_event);
       }
     }
 
@@ -4609,41 +4417,101 @@ namespace Legion {
             copy_profiling_requests.begin(); it != 
             copy_profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
-      int previous = __sync_fetch_and_add(&outstanding_profiling_requests, 1);
-      if ((previous == 1) && !profiling_reported.exists())
-        profiling_reported = Runtime::create_rt_user_event();
+      handle_profiling_update(1/*count*/);
     }
 
     //--------------------------------------------------------------------------
     void SingleTask::handle_profiling_response(
                                        const ProfilingResponseBase *base,
-                                       const Realm::ProfilingResponse &response)
+                                       const Realm::ProfilingResponse &response,
+                                       const void *orig, size_t orig_length)
     //--------------------------------------------------------------------------
     {
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id); 
+      const OpProfilingResponse *task_prof = 
+            static_cast<const OpProfilingResponse*>(base);
+      // First see if this is a task response for an origin-mapped task
+      // on a remote node that needs to be sent back to the origin node
+      if (task_prof->task && is_origin_mapped() && is_remote())
+      {
+        // We need to send this response back to the owner node along
+        // with the overhead tracker
+        SingleTask *orig_task = get_origin_task();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(orig_task);
+          rez.serialize(orig_length);
+          rez.serialize(orig, orig_length);
+          if (execution_context->overhead_tracker)
+          {
+            rez.serialize<bool>(true);
+            rez.serialize(*execution_context->overhead_tracker);
+          }
+          else
+            rez.serialize<bool>(false);
+          
+        }
+        runtime->send_remote_task_profiling_response(orig_proc, rez);
+        return;
+      }
+#ifdef DEBUG_LEGION
+      assert(profiling_reported.exists());
+#endif
+      // Check to see if we are done mapping, if not then we need to defer
+      // this until we are done mapping so we know how many
+      if (!mapped_event.has_triggered())
+      {
+        // Take the lock and see if we lost the race
+        AutoLock o_lock(op_lock);
+        if (!mapped_event.has_triggered())
+        {
+          // Save this profiling response for later until we know the
+          // full count of profiling responses
+          profiling_info.resize(profiling_info.size() + 1);
+          SingleProfilingInfo &info = profiling_info.back();
+          info.task_response = task_prof->task; 
+          info.region_requirement_index = task_prof->src;
+          info.fill_response = task_prof->fill;
+          info.buffer_size = orig_length;
+          info.buffer = malloc(orig_length);
+          memcpy(info.buffer, orig, orig_length);
+          if (info.task_response)
+          {
+            // If we had an overhead tracker 
+            // see if this is the callback for the task
+            if (execution_context->overhead_tracker != NULL)
+              // This is the callback for the task itself
+              info.profiling_responses.attach_overhead(
+                  execution_context->overhead_tracker);
+          }
+          return;
+        }
+      }
+      // If we get here then we can handle the response now
       Mapping::Mapper::TaskProfilingInfo info;
       info.profiling_responses.attach_realm_profiling_response(response);
-      const OpProfilingResponse *task_prof= 
-        static_cast<const OpProfilingResponse*>(base);
-      info.task_response = task_prof->task;
+      info.task_response = task_prof->task; 
+      info.region_requirement_index = task_prof->src;
+      info.total_reports = outstanding_profiling_requests;
+      info.fill_response = task_prof->fill;
       if (info.task_response)
       {
         // If we had an overhead tracker 
         // see if this is the callback for the task
         if (execution_context->overhead_tracker != NULL)
-        {
           // This is the callback for the task itself
           info.profiling_responses.attach_overhead(
               execution_context->overhead_tracker);
-          // Mapper takes ownership
-          execution_context->overhead_tracker = NULL;
-        }
       }
-      info.region_requirement_index = task_prof->src;
-      info.fill_response = task_prof->fill;
       mapper->invoke_task_report_profiling(this, &info);
-      handle_profiling_update(-1);
+      const int count = __sync_add_and_fetch(&outstanding_profiling_reported,1);
+#ifdef DEBUG_LEGION
+      assert(count <= outstanding_profiling_requests);
+#endif
+      if (count == outstanding_profiling_requests)
+        Runtime::trigger_event(profiling_reported);
     } 
 
     //--------------------------------------------------------------------------
@@ -4651,13 +4519,111 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(outstanding_profiling_requests > 0);
+      assert(count > 0);
+      assert(!mapped_event.has_triggered());
+#endif
+      __sync_fetch_and_add(&outstanding_profiling_requests, count);
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::finalize_single_task_profiling(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
       assert(profiling_reported.exists());
 #endif
-      const int remaining = 
-        __sync_add_and_fetch(&outstanding_profiling_requests, count);
-      if (remaining == 0)
+      if (mapper == NULL)
+        mapper = runtime->find_mapper(current_proc, map_id);
+      if (outstanding_profiling_requests > 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(mapped_event.has_triggered());
+#endif
+        std::vector<SingleProfilingInfo> to_perform;
+        {
+          AutoLock o_lock(op_lock);
+          to_perform.swap(profiling_info);
+        }
+        if (!to_perform.empty())
+        {
+          for (unsigned idx = 0; idx < to_perform.size(); idx++)
+          {
+            SingleProfilingInfo &info = to_perform[idx];
+            const Realm::ProfilingResponse resp(info.buffer,info.buffer_size);
+            info.total_reports = outstanding_profiling_requests;
+            info.profiling_responses.attach_realm_profiling_response(resp);
+            mapper->invoke_task_report_profiling(this, &info);
+            free(info.buffer);
+          }
+          const int count = __sync_add_and_fetch(
+              &outstanding_profiling_reported, to_perform.size());
+#ifdef DEBUG_LEGION
+          assert(count <= outstanding_profiling_requests);
+#endif
+          if (count == outstanding_profiling_requests)
+            Runtime::trigger_event(profiling_reported);
+        }
+      }
+      else
+      {
+        // We're not expecting any profiling callbacks so we need to
+        // do one ourself to inform the mapper that there won't be any
+        Mapping::Mapper::TaskProfilingInfo info;
+        info.total_reports = 0;
+        info.task_response = true;
+        info.region_requirement_index = 0;
+        info.fill_response = false; // make valgrind happy
+        mapper->invoke_task_report_profiling(this, &info);    
         Runtime::trigger_event(profiling_reported);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::handle_remote_profiling_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      size_t buffer_size;
+      derez.deserialize(buffer_size);
+      const void *buffer = derez.get_current_pointer();
+      derez.advance_pointer(buffer_size);
+#ifdef DEBUG_LEGION
+      // Realm needs this buffer to have 8-byte alignment so check that it does
+      assert((uintptr_t(buffer) % 8) == 0);
+#endif
+      bool has_tracker;
+      derez.deserialize(has_tracker);
+      Mapping::ProfilingMeasurements::RuntimeOverhead tracker;
+      if (has_tracker)
+        derez.deserialize(tracker);
+      const Realm::ProfilingResponse response(buffer, buffer_size);
+      const OpProfilingResponse *task_prof = 
+            static_cast<const OpProfilingResponse*>(response.user_data());
+      Mapping::Mapper::TaskProfilingInfo info;
+      info.profiling_responses.attach_realm_profiling_response(response);
+      info.task_response = task_prof->task; 
+      info.region_requirement_index = task_prof->src;
+      info.total_reports = outstanding_profiling_requests;
+      info.fill_response = task_prof->fill;
+      if (has_tracker)
+        info.profiling_responses.attach_overhead(&tracker);
+      mapper->invoke_task_report_profiling(this, &info);
+      const int count = __sync_add_and_fetch(&outstanding_profiling_reported,1);
+#ifdef DEBUG_LEGION
+      assert(count <= outstanding_profiling_requests);
+#endif
+      if (count == outstanding_profiling_requests)
+        Runtime::trigger_event(profiling_reported);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void SingleTask::process_remote_profiling_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      SingleTask *target;
+      derez.deserialize(target);
+      target->handle_remote_profiling_response(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -5744,10 +5710,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDIVIDUAL_TRIGGER_COMPLETE_CALL);
-      // Remove profiling our guard and trigger the profiling event if necessary
-      if ((__sync_add_and_fetch(&outstanding_profiling_requests, -1) == 0) &&
-          profiling_reported.exists())
-        Runtime::trigger_event(profiling_reported);
       // Release any acquired instances that we have
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
@@ -5829,6 +5791,8 @@ namespace Legion {
         pack_remote_commit(rez);
         runtime->send_individual_remote_commit(orig_proc,rez);
       }
+      if (profiling_reported.exists())
+        finalize_single_task_profiling();
       if (must_epoch != NULL)
       {
         if (profiling_reported.exists() && !profiling_reported.has_triggered())
@@ -6300,6 +6264,7 @@ namespace Legion {
       activate_single();
       // Point tasks never have to resolve speculation
       resolve_speculation();
+      orig_task = this;
       slice_owner = NULL;
       point_termination = ApUserEvent::NO_AP_USER_EVENT;
     }
@@ -6664,10 +6629,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, POINT_TASK_COMPLETE_CALL);
-      // Remove profiling our guard and trigger the profiling event if necessary
-      if ((__sync_add_and_fetch(&outstanding_profiling_requests, -1) == 0) &&
-          profiling_reported.exists())
-        Runtime::trigger_event(profiling_reported);
       // Pass back our created and deleted operations 
       std::set<RtEvent> preconditions;
       if (execution_context != NULL)
@@ -6707,6 +6668,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, POINT_TASK_COMMIT_CALL);
+      if (profiling_reported.exists())
+        finalize_single_task_profiling();
       // A little strange here, but we don't directly commit this
       // operation, instead we just tell our slice that we are commited
       // In the deactivation of the slice task is when we will actually
@@ -6721,6 +6684,7 @@ namespace Legion {
       DETAILED_PROFILER(runtime, POINT_PACK_TASK_CALL);
       RezCheck z(rez);
       pack_single_task(rez, target);
+      rez.serialize(orig_task);
       rez.serialize(point_termination); 
 #ifdef DEBUG_LEGION
       assert(is_origin_mapped()); // should be origin mapped if we're here
@@ -6740,6 +6704,7 @@ namespace Legion {
       DETAILED_PROFILER(runtime, POINT_UNPACK_TASK_CALL);
       DerezCheck z(derez);
       unpack_single_task(derez, ready_events);
+      derez.deserialize(orig_task);
       derez.deserialize(point_termination);
 #ifdef DEBUG_LEGION
       assert(!deferred_effects.exists());
@@ -7692,6 +7657,10 @@ namespace Legion {
       complete_points = 0;
       committed_points = 0;
       need_intra_task_alias_analysis = true;
+      profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
+      profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
+      outstanding_profiling_requests = 0;
+      outstanding_profiling_reported = 0;
     }
 
     //--------------------------------------------------------------------------
@@ -7727,6 +7696,12 @@ namespace Legion {
       complete_preconditions.clear();
       commit_preconditions.clear();
       version_infos.clear();
+      if (!profiling_info.empty())
+      {
+        for (unsigned idx = 0; idx < profiling_info.size(); idx++)
+          free(profiling_info[idx].buffer);
+        profiling_info.clear();
+      }
 #ifdef DEBUG_LEGION
       interfering_requirements.clear();
       point_requirements.clear();
@@ -8255,6 +8230,231 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void IndexTask::early_map_regions(std::set<RtEvent> &applied_conditions,
+                                      const std::vector<unsigned> &must_premap)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(runtime, EARLY_MAP_REGIONS_CALL);
+      // This always happens on the owner node so we can just do the 
+      // normal trace info creation here without needing to check
+      // whether we have a remote trace info
+      const TraceInfo trace_info(this);
+      ApEvent init_precondition = compute_init_precondition(trace_info);;
+      // A little bit of suckinesss here, it's unclear if we have
+      // our version infos with the proper versioning information
+      // so we might need to "page" it in now.  We'll overlap it as
+      // much as possible, but it will still suck. The common case is that
+      // we don't have anything to premap though so we shouldn't be
+      // doing this all that often.
+      std::set<RtEvent> version_ready_events;
+      for (std::vector<unsigned>::const_iterator it = must_premap.begin();
+            it != must_premap.end(); it++)
+      {
+        VersionInfo &version_info = get_version_info(*it); 
+        if (version_info.has_version_info())
+          continue;
+        runtime->forest->perform_versioning_analysis(this, *it, regions[*it],
+                                         version_info, version_ready_events);
+      }
+      Mapper::PremapTaskInput input;
+      Mapper::PremapTaskOutput output;
+      // Initialize this to not have a new target processor
+      output.new_target_proc = Processor::NO_PROC;
+      output.profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
+      // Set up the inputs and outputs 
+      std::set<Memory> visible_memories;
+      runtime->machine.get_visible_memories(target_proc, visible_memories);
+      // At this point if we have any version ready events we need to wait
+      if (!version_ready_events.empty())
+      {
+        RtEvent wait_on = Runtime::merge_events(version_ready_events);
+        // This wait sucks but whatever for now
+        wait_on.wait();
+      }
+      for (std::vector<unsigned>::const_iterator it = must_premap.begin();
+            it != must_premap.end(); it++)
+      {
+        InstanceSet valid;    
+        VersionInfo &version_info = get_version_info(*it);
+        // Do the premapping
+        if (request_valid_instances)
+          runtime->forest->physical_premap_region(this, *it, regions[*it],
+                                  version_info, valid, applied_conditions);
+        // If we need visible instances, filter them as part of the conversion
+        if (regions[*it].is_no_access())
+          prepare_for_mapping(valid, input.valid_instances[*it]);
+        else
+          prepare_for_mapping(valid, visible_memories, 
+                              input.valid_instances[*it]);
+      }
+      // Now invoke the mapper call
+      if (mapper == NULL)
+        mapper = runtime->find_mapper(current_proc, map_id);
+      mapper->invoke_premap_task(this, &input, &output);
+      // See if we need to update the new target processor
+      if (output.new_target_proc.exists())
+        this->target_proc = output.new_target_proc;
+      // See if we have any profiling requests to handle
+      if (!output.copy_prof_requests.empty())
+      {
+        filter_copy_request_kinds(mapper, 
+            output.copy_prof_requests.requested_measurements,
+            copy_profiling_requests, true/*warn*/);
+        profiling_priority = output.profiling_priority;
+#ifdef DEBUG_LEGION
+        assert(!profiling_reported.exists());
+#endif
+        profiling_reported = Runtime::create_rt_user_event();
+      }
+      // Now do the registration
+      for (std::vector<unsigned>::const_iterator it = must_premap.begin();
+            it != must_premap.end(); it++)
+      {
+        VersionInfo &version_info = get_version_info(*it);
+        InstanceSet &chosen_instances = early_mapped_regions[*it];
+        std::map<unsigned,std::vector<MappingInstance> >::const_iterator 
+          finder = output.premapped_instances.find(*it);
+        if (finder == output.premapped_instances.end())
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from 'premap_task' invocation "
+                        "on mapper %s. Mapper failed to map required premap "
+                        "region requirement %d of task %s (ID %lld) launched "
+                        "in parent task %s (ID %lld).", 
+                        mapper->get_mapper_name(), *it, 
+                        get_task_name(), get_unique_id(),
+                        parent_ctx->get_task_name(), 
+                        parent_ctx->get_unique_id())
+        RegionTreeID bad_tree = 0;
+        std::vector<FieldID> missing_fields;
+        std::vector<PhysicalManager*> unacquired;
+        int composite_index = runtime->forest->physical_convert_mapping(
+            this, regions[*it], finder->second, 
+            chosen_instances, bad_tree, missing_fields,
+            runtime->unsafe_mapper ? NULL : get_acquired_instances_ref(),
+            unacquired, !runtime->unsafe_mapper);
+        if (bad_tree > 0)
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from 'premap_task' invocation "
+                        "on mapper %s. Mapper provided an instance from "
+                        "region tree %d for use in satisfying region "
+                        "requirement %d of task %s (ID %lld) whose region "
+                        "is from region tree %d.", mapper->get_mapper_name(),
+                        bad_tree, *it,get_task_name(),get_unique_id(),
+                        regions[*it].region.get_tree_id())
+        if (!missing_fields.empty())
+        {
+          for (std::vector<FieldID>::const_iterator fit = 
+                missing_fields.begin(); fit != missing_fields.end(); fit++)
+          {
+            const void *name; size_t name_size;
+            if (!runtime->retrieve_semantic_information(
+                regions[*it].region.get_field_space(), *fit,
+                NAME_SEMANTIC_TAG, name, name_size, true, false))
+              name = "(no name)";
+            log_run.error("Missing instance for field %s (FieldID: %d)",
+                          static_cast<const char*>(name), *it);
+          }
+          REPORT_LEGION_ERROR(ERROR_MISSING_INSTANCE_FIELD,
+                        "Invalid mapper output from 'premap_task' invocation "
+                        "on mapper %s. Mapper failed to specify instances "
+                        "for %zd fields of region requirement %d of task %s "
+                        "(ID %lld) launched in parent task %s (ID %lld). "
+                        "The missing fields are listed below.",
+                        mapper->get_mapper_name(), missing_fields.size(),
+                        *it, get_task_name(), get_unique_id(),
+                        parent_ctx->get_task_name(), 
+                        parent_ctx->get_unique_id())
+          
+        }
+        if (!unacquired.empty())
+        {
+          std::map<PhysicalManager*,std::pair<unsigned,bool> > 
+            *acquired_instances = get_acquired_instances_ref();
+          for (std::vector<PhysicalManager*>::const_iterator uit = 
+                unacquired.begin(); uit != unacquired.end(); uit++)
+          {
+            if (acquired_instances->find(*uit) == acquired_instances->end())
+              REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                            "Invalid mapper output from 'premap_task' "
+                            "invocation on mapper %s. Mapper selected "
+                            "physical instance for region requirement "
+                            "%d of task %s (ID %lld) which has already "
+                            "been collected. If the mapper had properly "
+                            "acquired this instance as part of the mapper "
+                            "call it would have detected this. Please "
+                            "update the mapper to abide by proper mapping "
+                            "conventions.", mapper->get_mapper_name(),
+                            (*it), get_task_name(), get_unique_id())
+          }
+          // If we did successfully acquire them, still issue the warning
+          REPORT_LEGION_WARNING(LEGION_WARNING_MAPPER_FAILED_ACQUIRE,
+                          "mapper %s failed to acquire instances "
+                          "for region requirement %d of task %s (ID %lld) "
+                          "in 'premap_task' call. You may experience "
+                          "undefined behavior as a consequence.",
+                          mapper->get_mapper_name(), *it, 
+                          get_task_name(), get_unique_id());
+        }
+        if (composite_index >= 0)
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from 'premap_task' invocation "
+                        "on mapper %s. Mapper requested composite instance "
+                        "creation on region requirement %d of task %s "
+                        "(ID %lld) launched in parent task %s (ID %lld).",
+                        mapper->get_mapper_name(), *it,
+                        get_task_name(), get_unique_id(),
+                        parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id())
+        if (runtime->legion_spy_enabled)
+          runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
+                                                *it, regions[*it],
+                                                chosen_instances);
+        if (!runtime->unsafe_mapper)
+        {
+          std::vector<LogicalRegion> regions_to_check(1, 
+                                        regions[*it].region);
+          for (unsigned check_idx = 0; 
+                check_idx < chosen_instances.size(); check_idx++)
+          {
+            if (!chosen_instances[check_idx].get_manager()->meets_regions(
+                                                          regions_to_check))
+              REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                            "Invalid mapper output from invocation of "
+                            "'premap_task' on mapper %s. Mapper specified an "
+                            "instance region requirement %d of task %s "
+                            "(ID %lld) that does not meet the logical region "
+                            "requirement. Task was launched in task %s "
+                            "(ID %lld).", mapper->get_mapper_name(), *it, 
+                            get_task_name(), get_unique_id(), 
+                            parent_ctx->get_task_name(), 
+                            parent_ctx->get_unique_id())
+          }
+        }
+        // TODO: Implement physical tracing for premapped regions
+        if (is_memoizing())
+          assert(false);
+        // Passed all the error checking tests so register it
+        // Always defer the users, the point tasks will do that
+        // for themselves when they map their regions
+        const bool track_effects = 
+          (!atomic_locks.empty() || !arrive_barriers.empty());
+        ApEvent effects_done = 
+          runtime->forest->physical_perform_updates_and_registration(
+                              regions[*it], version_info, 
+                              this, *it, init_precondition, completion_event,
+                              chosen_instances, 
+                              PhysicalTraceInfo(trace_info, *it), 
+                              applied_conditions,
+#ifdef DEBUG_LEGION
+                              get_logging_name(), unique_op_id,
+#endif
+                              track_effects);
+        if (effects_done.exists())
+          effects_postconditions.insert(effects_done);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     bool IndexTask::distribute_task(void)
     //--------------------------------------------------------------------------
     {
@@ -8416,6 +8616,61 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDEX_COMMIT_CALL);
+      if (profiling_reported.exists())
+      {
+        if (outstanding_profiling_requests > 0)
+        {
+#ifdef DEBUG_LEGION
+          assert(mapped_event.has_triggered());
+#endif
+          std::vector<IndexProfilingInfo> to_perform;
+          {
+            AutoLock o_lock(op_lock);
+            to_perform.swap(profiling_info);
+          }
+          if (!to_perform.empty())
+          {
+            for (unsigned idx = 0; idx < to_perform.size(); idx++)
+            {
+              IndexProfilingInfo &info = to_perform[idx];
+              const Realm::ProfilingResponse resp(info.buffer,info.buffer_size);
+              info.total_reports = outstanding_profiling_requests;
+              info.profiling_responses.attach_realm_profiling_response(resp);
+              mapper->invoke_task_report_profiling(this, &info);
+              free(info.buffer);
+            }
+            const int count = __sync_add_and_fetch(
+                &outstanding_profiling_reported, to_perform.size());
+#ifdef DEBUG_LEGION
+            assert(count <= outstanding_profiling_requests);
+#endif
+            if (count == outstanding_profiling_requests)
+              Runtime::trigger_event(profiling_reported);
+          }
+        }
+        else
+        {
+          // We're not expecting any profiling callbacks so we need to
+          // do one ourself to inform the mapper that there won't be any
+          Mapping::Mapper::TaskProfilingInfo info;
+          info.total_reports = 0;
+          info.task_response = true;
+          info.region_requirement_index = 0;
+          info.fill_response = false; // make valgrind happy
+          mapper->invoke_task_report_profiling(this, &info);    
+          Runtime::trigger_event(profiling_reported);
+        }
+        commit_preconditions.insert(profiling_reported);
+      }
+      // If we have an origin-mapped slices then we need to check to see
+      // if we're waiting on any profiling reports from them
+      if (!origin_mapped_slices.empty())
+      {
+        for (std::deque<SliceTask*>::const_iterator it = 
+              origin_mapped_slices.begin(); it != 
+              origin_mapped_slices.end(); it++)
+          (*it)->find_profiling_reported(commit_preconditions);
+      }
       if (must_epoch != NULL)
       {
         if (!commit_preconditions.empty())
@@ -8649,12 +8904,101 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::add_copy_profiling_request(unsigned src_index,
-                unsigned dst_index, Realm::ProfilingRequestSet &reqs, bool fill)
+    void IndexTask::pack_profiling_requests(Serializer &rez,
+                                            std::set<RtEvent> &applied) const
     //--------------------------------------------------------------------------
     {
-      // Nothing to do, there are no copy profiling requests for premap_task
-      // If that ever changes then we need to put something here
+      rez.serialize<size_t>(copy_profiling_requests.size());
+      if (!copy_profiling_requests.empty())
+      {
+        for (unsigned idx = 0; idx < copy_profiling_requests.size(); idx++)
+          rez.serialize(copy_profiling_requests[idx]);
+        rez.serialize(profiling_priority);
+        rez.serialize(runtime->find_utility_group());
+        // Send a message to the owner with an update for the extra counts
+        const RtUserEvent done_event = Runtime::create_rt_user_event();
+        rez.serialize<RtEvent>(done_event);
+        applied.insert(done_event);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexTask::add_copy_profiling_request(unsigned src_index,
+            unsigned dst_index, Realm::ProfilingRequestSet &requests, bool fill)
+    //--------------------------------------------------------------------------
+    {
+      // Nothing to do if we don't have any copy profiling requests
+      if (copy_profiling_requests.empty())
+        return;
+#ifdef DEBUG_LEGION
+      assert(src_index == dst_index);
+#endif
+      OpProfilingResponse response(this, src_index, dst_index, fill);
+      Realm::ProfilingRequest &request = requests.add_request(
+        runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
+        &response, sizeof(response));
+      for (std::vector<ProfilingMeasurementID>::const_iterator it = 
+            copy_profiling_requests.begin(); it != 
+            copy_profiling_requests.end(); it++)
+        request.add_measurement((Realm::ProfilingMeasurementID)(*it));
+      handle_profiling_update(1/*count*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexTask::handle_profiling_response(
+                                       const ProfilingResponseBase *base,
+                                       const Realm::ProfilingResponse &response,
+                                       const void *orig, size_t orig_length)
+    //--------------------------------------------------------------------------
+    {
+      const OpProfilingResponse *task_prof = 
+            static_cast<const OpProfilingResponse*>(base);
+      // Check to see if we are done mapping, if not then we need to defer
+      // this until we are done mapping so we know how many
+      if (!mapped_event.has_triggered())
+      {
+        // Take the lock and see if we lost the race
+        AutoLock o_lock(op_lock);
+        if (!mapped_event.has_triggered())
+        {
+          // Save this profiling response for later until we know the
+          // full count of profiling responses
+          profiling_info.resize(profiling_info.size() + 1);
+          IndexProfilingInfo &info = profiling_info.back();
+          info.task_response = task_prof->task; 
+          info.region_requirement_index = task_prof->src;
+          info.fill_response = task_prof->fill;
+          info.buffer_size = orig_length;
+          info.buffer = malloc(orig_length);
+          memcpy(info.buffer, orig, orig_length);
+          return;
+        }
+      }
+      // If we get here then we can handle the response now
+      Mapping::Mapper::TaskProfilingInfo info;
+      info.profiling_responses.attach_realm_profiling_response(response);
+      info.task_response = task_prof->task; 
+      info.region_requirement_index = task_prof->src;
+      info.total_reports = outstanding_profiling_requests;
+      info.fill_response = task_prof->fill;
+      mapper->invoke_task_report_profiling(this, &info);
+      const int count = __sync_add_and_fetch(&outstanding_profiling_reported,1);
+#ifdef DEBUG_LEGION
+      assert(count <= outstanding_profiling_requests);
+#endif
+      if (count == outstanding_profiling_requests)
+        Runtime::trigger_event(profiling_reported);
+    } 
+
+    //--------------------------------------------------------------------------
+    void IndexTask::handle_profiling_update(int count)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(count > 0);
+      assert(!mapped_event.has_triggered());
+#endif
+      __sync_fetch_and_add(&outstanding_profiling_requests, count);
     }
 
     //--------------------------------------------------------------------------
@@ -9672,18 +10016,21 @@ namespace Legion {
           rez.serialize(impl->get_ready_event());
         }
       }
-      bool deactivate_now = true;
-      if (!is_remote() && is_origin_mapped())
+      if (is_origin_mapped())
       {
         // If we're not remote and origin mapped then we need
         // to hold onto these version infos until we are done
         // with the whole index space task, so tell our owner
+        // Similarly for slices being removed remotely but are
+        // origin mapped we may need to receive profiling feedback
+        // to this node so also hold onto these slices until the
+        // index space is done
         index_owner->record_origin_mapped_slice(this);
-        deactivate_now = false;
+        return false;
       }
       // Always return true for slice tasks since they should
       // always be deactivated after they are sent somewhere else
-      return deactivate_now;
+      return true;
     }
     
     //--------------------------------------------------------------------------
@@ -10575,6 +10922,19 @@ namespace Legion {
     {
       for (unsigned idx = 0; idx < points.size(); idx++)
         points[idx]->complete_replay(instance_ready_event);
+    }
+
+    //--------------------------------------------------------------------------
+    void SliceTask::find_profiling_reported(std::set<RtEvent> &preconditions)
+    //--------------------------------------------------------------------------
+    {
+      for (std::vector<PointTask*>::const_iterator it = 
+            points.begin(); it != points.end(); it++)
+      {
+        const RtEvent profiling_reported = (*it)->get_profiling_reported();
+        if (profiling_reported.exists())
+          preconditions.insert(profiling_reported);
+      }
     }
 
     //--------------------------------------------------------------------------

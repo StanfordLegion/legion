@@ -691,6 +691,7 @@ namespace Legion {
       STEAL_MESSAGE,
       ADVERTISEMENT_MESSAGE,
       SEND_REMOTE_TASK_REPLAY,
+      SEND_REMOTE_TASK_PROFILING_RESPONSE,
       SEND_INDEX_SPACE_NODE,
       SEND_INDEX_SPACE_REQUEST,
       SEND_INDEX_SPACE_RETURN,
@@ -879,6 +880,7 @@ namespace Legion {
         "Steal Message",                                              \
         "Advertisement Message",                                      \
         "Send Remote Task Replay",                                    \
+        "Send Remote Task Profiling Response",                        \
         "Send Index Space Node",                                      \
         "Send Index Space Request",                                   \
         "Send Index Space Return",                                    \
@@ -1519,7 +1521,8 @@ namespace Legion {
     public:
       virtual void handle_profiling_response(
                 const ProfilingResponseBase *base,
-                const Realm::ProfilingResponse &response) = 0;
+                const Realm::ProfilingResponse &response,
+                const void *orig, size_t orig_length) = 0;
     };
     struct ProfilingResponseBase {
     public:

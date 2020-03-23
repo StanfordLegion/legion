@@ -2406,9 +2406,11 @@ namespace Legion {
               regions.begin(); it != regions.end(); it++)
           runtime->profiler->record_physical_instance_region(creator_id, 
                                                       instance.id, *it);
-        runtime->profiler->record_physical_instance_fields(creator_id, 
-                                    instance.id, layout->owner->handle, 
-                                    constraints.field_constraint.field_set);
+        runtime->profiler->record_physical_instance_layout(
+                                                     creator_id,
+                                                     instance.id,
+                                                     layout->owner->handle,
+                                                     layout->constraints);
       }
       return result;
     }
@@ -2416,7 +2418,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void InstanceBuilder::handle_profiling_response(
                                        const ProfilingResponseBase *base,
-                                       const Realm::ProfilingResponse &response)
+                                       const Realm::ProfilingResponse &response,
+                                       const void *orig, size_t orig_length)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION

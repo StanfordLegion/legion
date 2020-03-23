@@ -274,7 +274,8 @@ namespace Legion {
                              ProfilingMeasurements::RuntimeOverhead>(void) const 
     //--------------------------------------------------------------------------
     {
-      return overhead;
+      // Always produce a copy for the mapper to own
+      return new ProfilingMeasurements::RuntimeOverhead(*overhead);
     }
 
     //--------------------------------------------------------------------------

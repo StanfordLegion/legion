@@ -77,6 +77,8 @@ namespace Legion {
             (*it->second.second)(it->second.first);
         }
       }
+      if (overhead_tracker != NULL)
+        delete overhead_tracker;
     }
 
     //--------------------------------------------------------------------------

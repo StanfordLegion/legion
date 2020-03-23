@@ -6250,7 +6250,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplTraceReplayOp::pack_remote_operation(Serializer &rez,
-                                                  AddressSpaceID target) const
+                 AddressSpaceID target, std::set<RtEvent> &applied_events) const
     //--------------------------------------------------------------------------
     {
       pack_local_remote_operation(rez);
@@ -6443,7 +6443,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplTraceSummaryOp::pack_remote_operation(Serializer &rez,
-                                                   AddressSpaceID target) const
+                 AddressSpaceID target, std::set<RtEvent> &applied_events) const
     //--------------------------------------------------------------------------
     {
       pack_local_remote_operation(rez);

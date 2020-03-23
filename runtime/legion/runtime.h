@@ -2385,6 +2385,7 @@ namespace Legion {
       void send_advertisements(const std::set<Processor> &targets,
                               MapperID map_id, Processor source);
       void send_remote_task_replay(AddressSpaceID target, Serializer &rez);
+      void send_remote_task_profiling_response(Processor tar, Serializer &rez);
       void send_index_space_node(AddressSpaceID target, Serializer &rez);
       void send_index_space_request(AddressSpaceID target, Serializer &rez);
       void send_index_space_return(AddressSpaceID target, Serializer &rez);
@@ -2659,6 +2660,7 @@ namespace Legion {
       void handle_steal(Deserializer &derez);
       void handle_advertisement(Deserializer &derez);
       void handle_remote_task_replay(Deserializer &derez);
+      void handle_remote_task_profiling_response(Deserializer &derez);
       void handle_index_space_node(Deserializer &derez, AddressSpaceID source);
       void handle_index_space_request(Deserializer &derez, 
                                       AddressSpaceID source);
