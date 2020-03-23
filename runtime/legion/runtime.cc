@@ -6679,6 +6679,11 @@ namespace Legion {
               runtime->handle_remote_task_replay(derez);
               break;
             }
+          case SEND_REMOTE_TASK_PROFILING_RESPONSE:
+            {
+              runtime->handle_remote_task_profiling_response(derez);
+              break;
+            }
           case SEND_INDEX_SPACE_NODE:
             {
               runtime->handle_index_space_node(derez, remote_address_space);
@@ -14349,6 +14354,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_remote_task_profiling_response(Processor target,
+                                                      Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_REMOTE_TASK_PROFILING_RESPONSE, 
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_index_space_node(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -15861,6 +15876,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       TaskOp::process_remote_replay(this, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_remote_task_profiling_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      SingleTask::process_remote_profiling_response(derez);
     }
 
     //--------------------------------------------------------------------------

@@ -472,6 +472,8 @@ namespace Legion {
         { return no_access_regions; }
       inline VariantID get_selected_variant(void) const 
         { return selected_variant; }
+      inline RtEvent get_profiling_reported(void) const 
+        { return profiling_reported; }
     public:
       RtEvent perform_versioning_analysis(const bool post_mapper);
       void initialize_map_task_input(Mapper::MapTaskInput &input,
@@ -511,6 +513,7 @@ namespace Legion {
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0;
       virtual bool is_top_level_task(void) const { return false; }
+      virtual SingleTask* get_origin_task(void) const = 0;
     public:
       virtual void resolve_false(bool speculated, bool launched) = 0;
       virtual void launch_task(void);
@@ -549,6 +552,9 @@ namespace Legion {
         { return get_task_completion(); }
       virtual void replay_mapping_output(void) { replay_map_task_output(); }
       virtual void set_effects_postcondition(ApEvent postcondition);
+    public:
+      void handle_remote_profiling_response(Deserializer &derez); 
+      static void process_remote_profiling_response(Deserializer &derez);
     protected:
       // Boolean for each region saying if it is virtual mapped
       std::vector<bool>                     virtual_mapped;
@@ -714,6 +720,7 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
+      virtual SingleTask* get_origin_task(void) const { return orig_task; }
     public:
       Future initialize_task(InnerContext *ctx,
                              const TaskLauncher &launcher, 
@@ -826,6 +833,7 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
+      virtual SingleTask* get_origin_task(void) const { return orig_task; }
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
@@ -883,6 +891,7 @@ namespace Legion {
              const std::vector<DomainPoint> &dependences);
     protected:
       friend class SliceTask;
+      PointTask                   *orig_task;
       SliceTask                   *slice_owner;
       ApUserEvent                 point_termination;
       ApUserEvent                 deferred_effects;
@@ -1109,6 +1118,7 @@ namespace Legion {
       void check_target_processors(void) const;
       void update_target_processor(void);
       void expand_replay_slices(std::list<SliceTask*> &slices);
+      void find_profiling_reported(std::set<RtEvent> &preconditions);
     protected:
       virtual void trigger_task_complete(void);
       virtual void trigger_task_commit(void);

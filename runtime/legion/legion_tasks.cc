@@ -3242,17 +3242,6 @@ namespace Legion {
       // Sort out any profiling requests that we need to perform
       if (!output.task_prof_requests.empty())
       {
-        if (is_origin_mapped() && !runtime->is_local(target_proc)) 
-          REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
-              "Mapper %s requested task profiling feedback for task %s "
-              "(UID %lld) which is being origin mapped on node %d and "
-              "later sent to processor " IDFMT " on node %d. Legion "
-              "does not currently support profiling feedback for "
-              "profiling of tasks that are origin mapped to processors "
-              "on remote nodes. Please request this feature on "
-              "the Legion issue tracker.", mapper->get_mapper_name(),
-              get_task_name(), get_unique_id(), runtime->address_space,
-              target_proc.id, target_proc.address_space())
         profiling_priority = output.profiling_priority;
         // If we do any legion specific checks, make sure we ask
         // Realm for the proc profiling info so that we can get
@@ -4097,6 +4086,34 @@ namespace Legion {
         mapper = runtime->find_mapper(current_proc, map_id); 
       const OpProfilingResponse *task_prof = 
             static_cast<const OpProfilingResponse*>(base);
+      // First see if this is a task response for an origin-mapped task
+      // on a remote node that needs to be sent back to the origin node
+      if (task_prof->task && is_origin_mapped() && is_remote())
+      {
+        // We need to send this response back to the owner node along
+        // with the overhead tracker
+        SingleTask *orig_task = get_origin_task();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(orig_task);
+          rez.serialize(orig_length);
+          rez.serialize(orig, orig_length);
+          if (execution_context->overhead_tracker)
+          {
+            rez.serialize<bool>(true);
+            rez.serialize(*execution_context->overhead_tracker);
+          }
+          else
+            rez.serialize<bool>(false);
+          
+        }
+        runtime->send_remote_task_profiling_response(orig_proc, rez);
+        return;
+      }
+#ifdef DEBUG_LEGION
+      assert(profiling_reported.exists());
+#endif
       // Check to see if we are done mapping, if not then we need to defer
       // this until we are done mapping so we know how many
       if (!mapped_event.has_triggered())
@@ -4120,13 +4137,9 @@ namespace Legion {
             // If we had an overhead tracker 
             // see if this is the callback for the task
             if (execution_context->overhead_tracker != NULL)
-            {
               // This is the callback for the task itself
               info.profiling_responses.attach_overhead(
                   execution_context->overhead_tracker);
-              // Mapper takes ownership
-              execution_context->overhead_tracker = NULL;
-            }
           }
           return;
         }
@@ -4143,13 +4156,9 @@ namespace Legion {
         // If we had an overhead tracker 
         // see if this is the callback for the task
         if (execution_context->overhead_tracker != NULL)
-        {
           // This is the callback for the task itself
           info.profiling_responses.attach_overhead(
               execution_context->overhead_tracker);
-          // Mapper takes ownership
-          execution_context->overhead_tracker = NULL;
-        }
       }
       mapper->invoke_task_report_profiling(this, &info);
       const int count = __sync_add_and_fetch(&outstanding_profiling_reported,1);
@@ -4222,6 +4231,54 @@ namespace Legion {
         mapper->invoke_task_report_profiling(this, &info);    
         Runtime::trigger_event(profiling_reported);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::handle_remote_profiling_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      size_t buffer_size;
+      derez.deserialize(buffer_size);
+      const void *buffer = derez.get_current_pointer();
+      derez.advance_pointer(buffer_size);
+#ifdef DEBUG_LEGION
+      // Realm needs this buffer to have 8-byte alignment so check that it does
+      assert((uintptr_t(buffer) % 8) == 0);
+#endif
+      bool has_tracker;
+      derez.deserialize(has_tracker);
+      Mapping::ProfilingMeasurements::RuntimeOverhead tracker;
+      if (has_tracker)
+        derez.deserialize(tracker);
+      const Realm::ProfilingResponse response(buffer, buffer_size);
+      const OpProfilingResponse *task_prof = 
+            static_cast<const OpProfilingResponse*>(response.user_data());
+      Mapping::Mapper::TaskProfilingInfo info;
+      info.profiling_responses.attach_realm_profiling_response(response);
+      info.task_response = task_prof->task; 
+      info.region_requirement_index = task_prof->src;
+      info.total_reports = outstanding_profiling_requests;
+      info.fill_response = task_prof->fill;
+      if (has_tracker)
+        info.profiling_responses.attach_overhead(&tracker);
+      mapper->invoke_task_report_profiling(this, &info);
+      const int count = __sync_add_and_fetch(&outstanding_profiling_reported,1);
+#ifdef DEBUG_LEGION
+      assert(count <= outstanding_profiling_requests);
+#endif
+      if (count == outstanding_profiling_requests)
+        Runtime::trigger_event(profiling_reported);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void SingleTask::process_remote_profiling_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      SingleTask *target;
+      derez.deserialize(target);
+      target->handle_remote_profiling_response(derez);
     }
 
     /////////////////////////////////////////////////////////////
@@ -5829,6 +5886,7 @@ namespace Legion {
       activate_single();
       // Point tasks never have to resolve speculation
       resolve_speculation();
+      orig_task = this;
       slice_owner = NULL;
       point_termination = ApUserEvent::NO_AP_USER_EVENT;
     }
@@ -6255,6 +6313,7 @@ namespace Legion {
       DETAILED_PROFILER(runtime, POINT_PACK_TASK_CALL);
       RezCheck z(rez);
       pack_single_task(rez, target);
+      rez.serialize(orig_task);
       rez.serialize(point_termination); 
 #ifdef DEBUG_LEGION
       assert(is_origin_mapped()); // should be origin mapped if we're here
@@ -6274,6 +6333,7 @@ namespace Legion {
       DETAILED_PROFILER(runtime, POINT_UNPACK_TASK_CALL);
       DerezCheck z(derez);
       unpack_single_task(derez, ready_events);
+      derez.deserialize(orig_task);
       derez.deserialize(point_termination);
 #ifdef DEBUG_LEGION
       assert(!deferred_effects.exists());
@@ -7590,6 +7650,15 @@ namespace Legion {
           Runtime::trigger_event(profiling_reported);
         }
         commit_preconditions.insert(profiling_reported);
+      }
+      // If we have an origin-mapped slices then we need to check to see
+      // if we're waiting on any profiling reports from them
+      if (!origin_mapped_slices.empty())
+      {
+        for (std::deque<SliceTask*>::const_iterator it = 
+              origin_mapped_slices.begin(); it != 
+              origin_mapped_slices.end(); it++)
+          (*it)->find_profiling_reported(commit_preconditions);
       }
       if (must_epoch != NULL)
       {
@@ -8917,18 +8986,21 @@ namespace Legion {
           rez.serialize(impl->get_ready_event());
         }
       }
-      bool deactivate_now = true;
-      if (!is_remote() && is_origin_mapped())
+      if (is_origin_mapped())
       {
         // If we're not remote and origin mapped then we need
         // to hold onto these version infos until we are done
         // with the whole index space task, so tell our owner
+        // Similarly for slices being removed remotely but are
+        // origin mapped we may need to receive profiling feedback
+        // to this node so also hold onto these slices until the
+        // index space is done
         index_owner->record_origin_mapped_slice(this);
-        deactivate_now = false;
+        return false;
       }
       // Always return true for slice tasks since they should
       // always be deactivated after they are sent somewhere else
-      return deactivate_now;
+      return true;
     }
     
     //--------------------------------------------------------------------------
@@ -9811,6 +9883,19 @@ namespace Legion {
     {
       for (unsigned idx = 0; idx < points.size(); idx++)
         points[idx]->complete_replay(instance_ready_event);
+    }
+
+    //--------------------------------------------------------------------------
+    void SliceTask::find_profiling_reported(std::set<RtEvent> &preconditions)
+    //--------------------------------------------------------------------------
+    {
+      for (std::vector<PointTask*>::const_iterator it = 
+            points.begin(); it != points.end(); it++)
+      {
+        const RtEvent profiling_reported = (*it)->get_profiling_reported();
+        if (profiling_reported.exists())
+          preconditions.insert(profiling_reported);
+      }
     }
 
     //--------------------------------------------------------------------------
