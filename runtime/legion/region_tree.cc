@@ -1766,7 +1766,8 @@ namespace Legion {
             const FieldMask &inst_mask = targets[idx].get_valid_fields();
             ApEvent ready = analysis->target_views[idx]->register_user(
                 analysis->usage, inst_mask, local_expr, op_id, analysis->index, 
-                analysis->term_event, user_applied, trace_info, local_space);
+                analysis->term_event, analysis->term_event,
+                user_applied, trace_info, local_space);
             // Record the event as the precondition for the task
             targets[idx].set_ready_event(ready);
             if (trace_info.recording)
@@ -1789,7 +1790,7 @@ namespace Legion {
             const FieldMask &inst_mask = targets[idx].get_valid_fields();
             ApEvent ready = analysis->target_views[idx]->register_user(
                 analysis->usage, inst_mask, local_expr, op_id, analysis->index,
-                analysis->term_event, map_applied_events, 
+                analysis->term_event, analysis->term_event, map_applied_events, 
                 trace_info, local_space);
             // Record the event as the precondition for the task
             targets[idx].set_ready_event(ready);
@@ -1947,8 +1948,8 @@ namespace Legion {
         restricted_instances[inst_index++] = 
           InstanceRef(it->first->get_manager(), it->second);
         ApEvent ready = it->first->register_user(usage, it->second,
-            local_expr, op_id, index, term_event, map_applied_events,
-            trace_info, runtime->address_space);
+            local_expr, op_id, index, term_event, term_event,
+            map_applied_events, trace_info, runtime->address_space);
         if (ready.exists())
           acquired_events.insert(ready);
       }
@@ -2019,8 +2020,8 @@ namespace Legion {
         restricted_instances[inst_index++] = 
           InstanceRef(it->first->get_manager(), it->second);
         ApEvent ready = it->first->register_user(usage, it->second,
-            local_expr, op_id, index, term_event, map_applied_events,
-            trace_info, runtime->address_space);
+            local_expr, op_id, index, term_event, term_event,
+            map_applied_events, trace_info, runtime->address_space);
         if (ready.exists())
           released_events.insert(ready);
       }
@@ -2730,7 +2731,8 @@ namespace Legion {
       const UniqueID op_id = attach_op->get_unique_op_id();
       const ApEvent ready = local_view->register_user(usage, ext_mask,
                   region_node->row_source, op_id, index, termination_event,
-                  registration_applied, trace_info, runtime->address_space);
+                  termination_event, registration_applied, trace_info, 
+                  runtime->address_space);
       RtEvent guard_event;
       if (!registration_applied.empty())
       {
@@ -2783,6 +2785,7 @@ namespace Legion {
       const ApEvent done = local_view->register_user(usage, ext_mask, 
                                                      region_node->row_source,
                                                      op_id, index, term_event,
+                                                     term_event, 
                                                      map_applied_events, 
                                                      trace_info,
                                                      runtime->address_space);
