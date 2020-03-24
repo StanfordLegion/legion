@@ -1149,6 +1149,7 @@ namespace Legion {
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id);
       mapper->invoke_select_task_sources(this, &input, &output);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking);
     }
 
     //--------------------------------------------------------------------------
