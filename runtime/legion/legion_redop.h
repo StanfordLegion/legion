@@ -19,14 +19,14 @@
 #include <limits.h>
 
 #ifdef LEGION_REDOP_HALF
-#include "half.h"
+#include "mathtypes/half.h"
 #endif
 
 #ifdef LEGION_REDOP_COMPLEX
 #ifdef LEGION_REDOP_HALF
 #define COMPLEX_HALF 
 #endif
-#include "complex.h"
+#include "mathtypes/complex.h"
 #endif
 
 #ifndef __CUDA_HD__

@@ -403,6 +403,14 @@ function specialize.disjointness_kind(cx, node)
   end
 end
 
+function specialize.completeness_kind(cx, node)
+  if node:is(ast.completeness_kind) then
+    return node
+  else
+    assert(false, "unexpected node type " .. tostring(node:type()))
+  end
+end
+
 function specialize.effect_expr(cx, node)
   local span = ast.trivial_span()
 
@@ -861,6 +869,7 @@ end
 function specialize.expr_partition(cx, node, allow_lists)
   return ast.specialized.expr.Partition {
     disjointness = specialize.disjointness_kind(cx, node.disjointness),
+    completeness = node.completeness and specialize.completeness_kind(cx, node.completeness),
     region = specialize.expr(cx, node.region),
     coloring = specialize.expr(cx, node.coloring),
     colors = node.colors and specialize.expr(cx, node.colors),
@@ -880,6 +889,7 @@ end
 
 function specialize.expr_partition_by_field(cx, node, allow_lists)
   return ast.specialized.expr.PartitionByField {
+    completeness = node.completeness and specialize.completeness_kind(cx, node.completeness),
     region = specialize.expr_region_root(cx, node.region),
     colors = specialize.expr(cx, node.colors),
     annotations = node.annotations,
@@ -890,6 +900,7 @@ end
 function specialize.expr_partition_by_restriction(cx, node, allow_lists)
   return ast.specialized.expr.PartitionByRestriction {
     disjointness = node.disjointness and specialize.disjointness_kind(cx, node.disjointness),
+    completeness = node.completeness and specialize.completeness_kind(cx, node.completeness),
     region = specialize.expr(cx, node.region),
     transform = specialize.expr(cx, node.transform),
     extent = specialize.expr(cx, node.extent),
@@ -902,6 +913,7 @@ end
 function specialize.expr_image(cx, node, allow_lists)
   return ast.specialized.expr.Image {
     disjointness = node.disjointness and specialize.disjointness_kind(cx, node.disjointness),
+    completeness = node.completeness and specialize.completeness_kind(cx, node.completeness),
     parent = specialize.expr(cx, node.parent),
     partition = specialize.expr(cx, node.partition),
     region = specialize.expr_region_root(cx, node.region),
@@ -913,6 +925,7 @@ end
 function specialize.expr_preimage(cx, node, allow_lists)
   return ast.specialized.expr.Preimage {
     disjointness = node.disjointness and specialize.disjointness_kind(cx, node.disjointness),
+    completeness = node.completeness and specialize.completeness_kind(cx, node.completeness),
     parent = specialize.expr(cx, node.parent),
     partition = specialize.expr(cx, node.partition),
     region = specialize.expr_region_root(cx, node.region),

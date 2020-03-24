@@ -22,7 +22,7 @@
 #include <string.h>
 
 #include "legion.h"
-#include "bitmask.h"
+#include "legion/bitmask.h"
 #include "legion/legion_allocation.h"
 
 // Useful macros
