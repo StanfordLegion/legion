@@ -1562,16 +1562,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent RemoteMemoizable::get_collect_event(
-                     const TraceInfo &info, ApEvent complete_event) const
-    //--------------------------------------------------------------------------
-    {
-      // The owner node will make sure that this user won't get collected
-      // until the recording is done, if this user is being traced.
-      return completion_event;
-    }
-
-    //--------------------------------------------------------------------------
     const VersionInfo& RemoteMemoizable::get_version_info(unsigned idx) const
     //--------------------------------------------------------------------------
     {

@@ -2,6 +2,16 @@ This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
 Version 20.03.0 (March ??, 2020)
+  * Regent
+    - Behavior change: `__fields` and `__physical` now both require
+        explicit field names, i.e., `__fields(r.{x, y})` rather than
+        `__fields(r)`. This makes the behavior more unambiguous and
+        helps to avoid bugs
+    - Added `complete` and `incomplete` keywords that can be used to
+        mark partitions as such
+    - Added support for setting mapper ID and tag via
+        `t:set_mapper_id()` and `t:set_mapping_tag_id()`
+    - Fixed several bugs, memory leaks and improved compile times
   * Realm
     - Introduction of experimental MPI-based network layer, enabled with
         `REALM_NETWORKS=mpi` (make) or `-DRealm_NETWORKS=mpi` (cmake).

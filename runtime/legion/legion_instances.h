@@ -123,6 +123,9 @@ namespace Legion {
         CollectableInfo(void) : events_added(0) { }
       public:
         std::set<ApEvent> view_events;
+        // This event tracks when tracing is completed and it is safe
+        // to resume pruning of users from this view
+        RtEvent collect_event;
         // Events added since the last collection of view events
         unsigned events_added;
       };
@@ -248,7 +251,8 @@ namespace Legion {
       RtEvent detach_external_instance(void);
     public:
       void defer_collect_user(CollectableView *view, ApEvent term_event,
-               std::set<ApEvent> &to_collect, bool &add_ref, bool &remove_ref);
+                              RtEvent collect, std::set<ApEvent> &to_collect, 
+                              bool &add_ref, bool &remove_ref);
       void find_shutdown_preconditions(std::set<ApEvent> &preconditions);
     public:
       static inline DistributedID encode_instance_did(DistributedID did,

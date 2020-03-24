@@ -131,6 +131,7 @@ namespace Legion {
       virtual bool remove_recorder_reference(void) = 0;
       virtual void pack_recorder(Serializer &rez, 
           std::set<RtEvent> &applied, const AddressSpaceID target) = 0; 
+      virtual RtEvent get_collect_event(void) const = 0;
     public:
       virtual void record_get_term_event(Memoizable *memo) = 0;
       virtual void request_term_event(ApUserEvent &term_event) = 0;
@@ -230,7 +231,8 @@ namespace Legion {
       };
     public:
       RemoteTraceRecorder(Runtime *rt, AddressSpaceID origin,AddressSpace local,
-          Memoizable *memo, PhysicalTemplate *tpl, RtUserEvent applied_event);
+                          Memoizable *memo, PhysicalTemplate *tpl, 
+                          RtUserEvent applied_event, RtEvent collect_event);
       RemoteTraceRecorder(const RemoteTraceRecorder &rhs);
       virtual ~RemoteTraceRecorder(void);
     public:
@@ -241,6 +243,7 @@ namespace Legion {
       virtual bool remove_recorder_reference(void);
       virtual void pack_recorder(Serializer &rez, 
           std::set<RtEvent> &applied, const AddressSpaceID target);
+      virtual RtEvent get_collect_event(void) const { return collect_event; }
     public:
       virtual void record_get_term_event(Memoizable *memo);
       virtual void request_term_event(ApUserEvent &term_event);
@@ -331,6 +334,7 @@ namespace Legion {
       const RtUserEvent applied_event;
       mutable LocalLock applied_lock;
       std::set<RtEvent> applied_events;
+      const RtEvent collect_event;
     };
 
     /**
@@ -413,7 +417,13 @@ namespace Legion {
           rec->record_complete_replay(local, ready_event);
         }
     public:
-        ApEvent get_collect_event(ApEvent term_event) const;
+      inline RtEvent get_collect_event(void) const 
+        {
+          if ((memo == NULL) || !recording)
+            return RtEvent::NO_RT_EVENT;
+          else
+            return rec->get_collect_event();
+        }
     protected:
       inline void base_sanity_check(void) const
         {
@@ -589,7 +599,7 @@ namespace Legion {
     public:
 #ifdef ENABLE_VIEW_REPLICATION
       PhysicalUser(const RegionUsage &u, IndexSpaceExpression *expr,
-                   UniqueID op_id, unsigned index, ApEvent collect_event,
+                   UniqueID op_id, unsigned index, RtEvent collect_event,
                    bool copy, bool covers);
 #else
       PhysicalUser(const RegionUsage &u, IndexSpaceExpression *expr,
@@ -609,7 +619,7 @@ namespace Legion {
       const UniqueID op_id;
       const unsigned index; // region requirement index
 #ifdef ENABLE_VIEW_REPLICATION
-      const ApEvent collect_event;
+      const RtEvent collect_event;
 #endif
       const bool copy_user; // is this from a copy or an operation
       const bool covers; // whether the expr covers the ExprView its in

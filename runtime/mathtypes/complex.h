@@ -25,7 +25,7 @@
 #endif
 
 #ifdef COMPLEX_HALF
-#include "half.h"
+#include "mathtypes/half.h"
 #endif
 
 // Empty base version

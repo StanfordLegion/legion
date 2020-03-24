@@ -261,6 +261,7 @@ local node_allow_annotations = {
   [ast.privilege_kind] = pass,
   [ast.condition_kind] = pass,
   [ast.disjointness_kind] = pass,
+  [ast.completeness_kind] = pass,
   [ast.fence_kind] = pass,
   [ast.constraint] = pass,
   [ast.privilege] = pass,
