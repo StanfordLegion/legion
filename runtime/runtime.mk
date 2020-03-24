@@ -724,8 +724,6 @@ LEGION_INST_SRC  += $(LG_RT_DIR)/legion/region_tree_tmpl.cc
 # Header files for Legion installation
 INSTALL_HEADERS += legion.h \
 		   realm.h \
-		   accessor.h \
-		   arrays.h \
 		   legion/bitmask.h \
 		   legion/legion.inl \
 		   legion/legion_agency.h \
