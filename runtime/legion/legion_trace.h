@@ -792,6 +792,7 @@ namespace Legion {
       RtEvent get_recording_done(void) const
         { return recording_done; }
       void trigger_recording_done(void);
+      virtual RtEvent get_collect_event(void) const { return recording_done; }
     private:
       TraceLocalID find_trace_local_id(Memoizable *memo);
       unsigned find_memo_entry(Memoizable *memo);

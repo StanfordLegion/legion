@@ -71,7 +71,7 @@ namespace Legion {
 #ifdef ENABLE_VIEW_REPLICATION
     //--------------------------------------------------------------------------
     PhysicalUser::PhysicalUser(const RegionUsage &u, IndexSpaceExpression *e,
-                               UniqueID id, unsigned x, ApEvent collect,
+                               UniqueID id, unsigned x, RtEvent collect,
                                bool cpy, bool cov)
       : usage(u), expr(e), op_id(id), index(x), collect_event(collect),
         copy_user(cpy), covers(cov)
@@ -154,7 +154,7 @@ namespace Legion {
     {
       DerezCheck z(derez);
 #ifdef ENABLE_VIEW_REPLICATION
-      ApEvent collect_event;
+      RtEvent collect_event;
       derez.deserialize(collect_event);
 #endif
       RegionUsage usage;
@@ -265,9 +265,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RemoteTraceRecorder::RemoteTraceRecorder(Runtime *rt, AddressSpaceID origin,
                                     AddressSpaceID local, Memoizable *memo, 
-                                    PhysicalTemplate *tpl, RtUserEvent applied)
+                                    PhysicalTemplate *tpl, RtUserEvent applied,
+                                    RtEvent collect)
       : runtime(rt), origin_space(origin), local_space(local), memoizable(memo),
-        remote_tpl(tpl), applied_event(applied)
+        remote_tpl(tpl), applied_event(applied), collect_event(collect)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -279,7 +280,8 @@ namespace Legion {
     RemoteTraceRecorder::RemoteTraceRecorder(const RemoteTraceRecorder &rhs)
       : runtime(rhs.runtime), origin_space(rhs.origin_space), 
         local_space(rhs.local_space), memoizable(rhs.memoizable), 
-        remote_tpl(rhs.remote_tpl), applied_event(rhs.applied_event)
+        remote_tpl(rhs.remote_tpl), applied_event(rhs.applied_event),
+        collect_event(rhs.collect_event)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -335,6 +337,7 @@ namespace Legion {
       rez.serialize(remote_tpl);
       RtUserEvent remote_applied = Runtime::create_rt_user_event();
       rez.serialize(remote_applied);
+      rez.serialize(collect_event);
       // Only need to store this one locally since we already hooked our whole 
       // chain of events into the operations applied set on the origin node
       // See PhysicalTemplate::pack_recorder
@@ -855,8 +858,10 @@ namespace Legion {
       derez.deserialize(remote_tpl);
       RtUserEvent applied_event;
       derez.deserialize(applied_event);
-      return new RemoteTraceRecorder(runtime, origin_space, local_space,
-                                     memo, remote_tpl, applied_event);
+      RtEvent collect_event;
+      derez.deserialize(collect_event);
+      return new RemoteTraceRecorder(runtime, origin_space, local_space, memo,
+                                     remote_tpl, applied_event, collect_event);
     }
 
     //--------------------------------------------------------------------------
@@ -1498,16 +1503,6 @@ namespace Legion {
       }
       else
         return new TraceInfo(op, NULL, NULL, false/*recording*/);
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent TraceInfo::get_collect_event(ApEvent term_event) const
-    //--------------------------------------------------------------------------
-    {
-      if (memo == NULL || !recording)
-        return term_event;
-      else
-        return memo->get_collect_event(*this, term_event);
     }
 
     /////////////////////////////////////////////////////////////
@@ -4436,7 +4431,7 @@ namespace Legion {
         // Record the fill result in the destination 
         if (result.exists())
         {
-          ApEvent collect_event = trace_info.get_collect_event(result);
+          const RtEvent collect_event = trace_info.get_collect_event();
           if (update->across_helper != NULL)
           {
             const FieldMask dst_mask = 
@@ -4518,7 +4513,7 @@ namespace Legion {
                                                     fills[0]->across_helper,
                                                     tracing_src_fills,
                                                     tracing_dsts);
-          ApEvent collect_event = trace_info.get_collect_event(result);
+          const RtEvent collect_event = trace_info.get_collect_event();
           if (result.exists())
           {
             target->add_copy_user(false/*reading*/, result, collect_event,
@@ -4596,7 +4591,7 @@ namespace Legion {
                                     tracing_srcs, tracing_dsts);
           if (result.exists())
           {
-            ApEvent collect_event = trace_info.get_collect_event(result);
+            const RtEvent collect_event = trace_info.get_collect_event();
             source->add_copy_user(true/*reading*/, result, collect_event,
                                   copy_mask, copy_expr, op_id,src_index,
                                   effects, trace_info.recording, local_space);
@@ -4678,7 +4673,7 @@ namespace Legion {
                                     copy_mask, trace_info, 
                                     cit->second[0]->across_helper,
                                     tracing_srcs, tracing_dsts);
-            ApEvent collect_event = trace_info.get_collect_event(result);
+            const RtEvent collect_event = trace_info.get_collect_event();
             if (result.exists())
             {
               it->first->add_copy_user(true/*reading*/, result, collect_event,

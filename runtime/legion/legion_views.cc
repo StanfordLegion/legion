@@ -146,7 +146,7 @@ namespace Legion {
       derez.deserialize(index);
       ApEvent term_event;
       derez.deserialize(term_event);
-      ApEvent collect_event;
+      RtEvent collect_event;
       derez.deserialize(collect_event);
       ApUserEvent ready_event;
       derez.deserialize(ready_event);
@@ -385,7 +385,7 @@ namespace Legion {
       derez.deserialize(reading);
       ApEvent term_event;
       derez.deserialize(term_event);
-      ApEvent collect_event;
+      RtEvent collect_event;
       derez.deserialize(collect_event);
       FieldMask copy_mask;
       derez.deserialize(copy_mask);
@@ -511,15 +511,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CollectableView::defer_collect_user(PhysicalManager *manager,
-                                  ApEvent term_event, ReferenceMutator *mutator)
+                 ApEvent term_event, RtEvent collect, ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       // The runtime will add the gc reference to this view when necessary
       std::set<ApEvent> to_collect;
       bool add_ref = false;
       bool remove_ref = false;
-      manager->defer_collect_user(this, term_event, to_collect, 
-                                  add_ref, remove_ref);
+      manager->defer_collect_user(this, term_event, collect,
+                                  to_collect, add_ref, remove_ref);
       if (add_ref)
         add_collectable_reference(mutator);
       if (!to_collect.empty())
@@ -1148,7 +1148,7 @@ namespace Legion {
                                     UniqueID op_id, unsigned index,
                                     FieldMask user_mask,
                                     const ApEvent term_event,
-                                    const ApEvent collect_event,
+                                    const RtEvent collect_event,
                                     IndexSpaceExpression *user_expr,
                                     const size_t user_volume,
                                     const bool trace_recording)
@@ -1222,7 +1222,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ExprView::add_current_user(PhysicalUser *user,const ApEvent term_event,
-                              ApEvent collect_event, const FieldMask &user_mask,
+                              RtEvent collect_event, const FieldMask &user_mask,
                               const bool trace_recording)
     //--------------------------------------------------------------------------
     {
@@ -1236,7 +1236,7 @@ namespace Legion {
           issue_collect = false;
       }
       if (issue_collect)
-        defer_collect_user(manager, collect_event);
+        defer_collect_user(manager, term_event, collect_event);
     }
 
     //--------------------------------------------------------------------------
@@ -1448,7 +1448,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      std::set<ApEvent> to_collect;
+      std::map<ApEvent,RtEvent> to_collect;
       // Need a read-write lock since we're going to be mutating the structures
       {
         AutoLock v_lock(view_lock);
@@ -1462,7 +1462,7 @@ namespace Legion {
             current_epoch_users[user_event];
 #ifndef ENABLE_VIEW_REPLICATION
           if (current_users.empty())
-            to_collect.insert(user_event);
+            to_collect[user_event] = RtEvent::NO_RT_EVENT;
 #endif
           size_t num_users;
           derez.deserialize(num_users);
@@ -1480,7 +1480,7 @@ namespace Legion {
               // before we're done unpacking
               users.back()->add_reference();
 #ifdef ENABLE_VIEW_REPLICATION
-              to_collect.insert(users.back()->collect_event);
+              to_collect[user_event] = users.back()->collect_event;
 #endif
             }
             FieldMask user_mask;
@@ -1499,7 +1499,7 @@ namespace Legion {
             previous_epoch_users[user_event];
 #ifndef ENABLE_VIEW_REPLICATION
           if (previous_users.empty())
-            to_collect.insert(user_event);
+            to_collect[user_event] = RtEvent::NO_RT_EVENT;
 #endif
           size_t num_users;
           derez.deserialize(num_users);
@@ -1517,7 +1517,7 @@ namespace Legion {
               // before we're done unpacking
               users.back()->add_reference();
 #ifdef ENABLE_VIEW_REPLICATION
-              to_collect.insert(users.back()->collect_event);
+              to_collect[user_event] = users.back()->collect_event;
 #endif
             }
             FieldMask user_mask;
@@ -1571,9 +1571,9 @@ namespace Legion {
       }
       if (!to_collect.empty())
       {
-        for (std::set<ApEvent>::const_iterator it = 
+        for (std::map<ApEvent,RtEvent>::const_iterator it = 
               to_collect.begin(); it != to_collect.end(); it++)
-          defer_collect_user(manager, *it);
+          defer_collect_user(manager, it->first, it->second);
       }
     }
 
@@ -2183,7 +2183,7 @@ namespace Legion {
     PendingTaskUser::PendingTaskUser(const RegionUsage &u, const FieldMask &m,
                                      IndexSpaceNode *expr, const UniqueID id,
                                      const unsigned idx, const ApEvent term,
-                                     const ApEvent collect)
+                                     const RtEvent collect)
       : usage(u), user_mask(m), user_expr(expr), op_id(id), 
         index(idx), term_event(term), collect_event(collect)
     //--------------------------------------------------------------------------
@@ -2217,7 +2217,7 @@ namespace Legion {
     PendingCopyUser::PendingCopyUser(const bool read, const FieldMask &mask,
                                      IndexSpaceExpression *e, const UniqueID id,
                                      const unsigned idx, const ApEvent term,
-                                     const ApEvent collect)
+                                     const RtEvent collect)
       : reading(read), copy_mask(mask), copy_expr(e), op_id(id), 
         index(idx), term_event(term), collect_event(collect)
     //--------------------------------------------------------------------------
@@ -2406,8 +2406,8 @@ namespace Legion {
       // If it's the root this is easy
       if (user_expr == current_users->view_expr)
       {
-        current_users->add_current_user(user, term_event, 
-                                        term_event, user_mask, false);
+        current_users->add_current_user(user, term_event, RtEvent::NO_RT_EVENT,
+                                        user_mask, false);
         return;
       }
       // See if we have it in the cache
@@ -2438,8 +2438,8 @@ namespace Legion {
         }
       }
       // Now that the view is valid we can add the user to it
-      finder->second->add_current_user(user, term_event, 
-                                       term_event, user_mask, false);
+      finder->second->add_current_user(user, term_event, RtEvent::NO_RT_EVENT,
+                                       user_mask, false);
       // No need to launch a collection task as the destructor will handle it 
     }
 
@@ -2450,7 +2450,7 @@ namespace Legion {
                                             const UniqueID op_id,
                                             const unsigned index,
                                             ApEvent term_event,
-                                            ApEvent collect_event,
+                                            RtEvent collect_event,
                                             std::set<RtEvent> &applied_events,
                                             const PhysicalTraceInfo &trace_info,
                                             const AddressSpaceID source)
@@ -2842,7 +2842,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MaterializedView::add_copy_user(bool reading, ApEvent term_event,
-                                         ApEvent collect_event,
+                                         RtEvent collect_event,
                                          const FieldMask &copy_mask,
                                          IndexSpaceExpression *copy_expr,
                                          UniqueID op_id, unsigned index,
@@ -3205,7 +3205,7 @@ namespace Legion {
                                             IndexSpaceExpression *user_expr,
                                             const FieldMask &user_mask,
                                             ApEvent term_event, 
-                                            ApEvent collect_event, 
+                                            RtEvent collect_event, 
                                             UniqueID op_id,
                                             const unsigned index,
                                             const bool trace_recording)
@@ -3334,7 +3334,7 @@ namespace Legion {
                                             IndexSpaceExpression *user_expr,
                                             const FieldMask &user_mask,
                                             ApEvent term_event, 
-                                            ApEvent collect_event, 
+                                            RtEvent collect_event, 
                                             UniqueID op_id,
                                             const unsigned index,
                                             const bool trace_recording)
@@ -4429,7 +4429,7 @@ namespace Legion {
                                          const UniqueID op_id,
                                          const unsigned index,
                                          ApEvent term_event,
-                                         ApEvent collect_event,
+                                         RtEvent collect_event,
                                          std::set<RtEvent> &applied_events,
                                          const PhysicalTraceInfo &trace_info,
                                          const AddressSpaceID source)
@@ -4501,7 +4501,7 @@ namespace Legion {
         if (issue_collect)
         {
           WrapperReferenceMutator mutator(applied_events);
-          defer_collect_user(get_manager(), collect_event, &mutator);
+          defer_collect_user(get_manager(), term_event, collect_event,&mutator);
         }
         if (!wait_on_events.empty())
           return Runtime::merge_events(&trace_info, wait_on_events);
@@ -4594,7 +4594,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReductionView::add_copy_user(bool reading, ApEvent term_event, 
-                                      ApEvent collect_event,
+                                      RtEvent collect_event,
                                       const FieldMask &copy_mask,
                                       IndexSpaceExpression *copy_expr,
                                       UniqueID op_id, unsigned index,
@@ -4639,7 +4639,7 @@ namespace Legion {
         if (issue_collect)
         {
           WrapperReferenceMutator mutator(applied_events);
-          defer_collect_user(get_manager(), collect_event, &mutator);
+          defer_collect_user(get_manager(), term_event, collect_event,&mutator);
         }
       }
     }
@@ -4806,7 +4806,7 @@ namespace Legion {
     bool ReductionView::add_user(const RegionUsage &usage,
                                  IndexSpaceExpression *user_expr,
                                  const FieldMask &user_mask, 
-                                 ApEvent term_event, ApEvent collect_event,
+                                 ApEvent term_event, RtEvent collect_event,
                                  UniqueID op_id, unsigned index, bool copy_user,
                                  std::set<RtEvent> &applied_events,
                                  const bool trace_recording)

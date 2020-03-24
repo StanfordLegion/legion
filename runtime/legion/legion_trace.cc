@@ -3394,6 +3394,7 @@ namespace Legion {
       rez.serialize(this);
       RtUserEvent remote_applied = Runtime::create_rt_user_event();
       rez.serialize(remote_applied);
+      rez.serialize(recording_done);
       applied_events.insert(remote_applied);
     }
 

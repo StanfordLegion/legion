@@ -161,22 +161,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename OP>
-    ApEvent MemoizableOp<OP>::get_collect_event(
-                      const TraceInfo &trace_info, ApEvent complete_event) const
-    //--------------------------------------------------------------------------
-    {
-      if (tpl != NULL)
-      {
-        assert(tpl->is_recording());
-        complete_event =
-          Runtime::merge_events(&trace_info, complete_event,
-                              Runtime::ignorefaults(tpl->get_recording_done()));
-      }
-      return complete_event;
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename OP>
     void MemoizableOp<OP>::find_equivalence_sets(Runtime *runtime, unsigned idx, 
                  const FieldMask &mask, FieldMaskSet<EquivalenceSet> &eqs) const
     //--------------------------------------------------------------------------

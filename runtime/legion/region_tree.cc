@@ -1754,8 +1754,7 @@ namespace Legion {
       // no-event (happens with post-mapping and copies)
       if (analysis->term_event.exists())
       {
-        ApEvent collect_event =
-          trace_info.get_collect_event(analysis->term_event);
+        const RtEvent collect_event = trace_info.get_collect_event();
         // Perform the registration
         IndexSpaceNode *local_expr = analysis->node->row_source;
         const UniqueID op_id = analysis->op->get_unique_op_id();
@@ -1943,7 +1942,7 @@ namespace Legion {
       const RegionUsage usage(req);
       const UniqueID op_id = op->get_unique_op_id();
       IndexSpaceNode *local_expr = get_node(req.region.get_index_space());
-      ApEvent collect_event = trace_info.get_collect_event(term_event);
+      const RtEvent collect_event = trace_info.get_collect_event();
       // Now add users for all the instances
       for (FieldMaskSet<InstanceView>::const_iterator it = 
             instances.begin(); it != instances.end(); it++, inst_index++)
@@ -2017,7 +2016,7 @@ namespace Legion {
       // Make sure we're done applying our updates before we do our registration
       if (updates_done.exists() && !updates_done.has_triggered())
         updates_done.wait();
-      ApEvent collect_event = trace_info.get_collect_event(term_event);
+      const RtEvent collect_event = trace_info.get_collect_event();
       for (FieldMaskSet<InstanceView>::const_iterator it = 
             instances.begin(); it != instances.end(); it++, inst_index++)
       {
@@ -2733,7 +2732,7 @@ namespace Legion {
       // that we have some remote equivalence sets
       std::set<RtEvent> registration_applied;
       const UniqueID op_id = attach_op->get_unique_op_id();
-      ApEvent collect_event = trace_info.get_collect_event(termination_event);
+      const RtEvent collect_event = trace_info.get_collect_event();
       const ApEvent ready = local_view->register_user(usage, ext_mask,
                   region_node->row_source, op_id, index, termination_event,
                   collect_event, registration_applied, trace_info, 
@@ -2786,7 +2785,7 @@ namespace Legion {
       const FieldMask ext_mask = fs_node->get_field_mask(req.privilege_fields);
       const UniqueID op_id = detach_op->get_unique_op_id();
       const ApEvent term_event = detach_op->get_completion_event();
-      const ApEvent collect_event = trace_info.get_collect_event(term_event);
+      const RtEvent collect_event = trace_info.get_collect_event();
       const RegionUsage usage(req);
       const ApEvent done = local_view->register_user(usage, ext_mask, 
                                                      region_node->row_source,
