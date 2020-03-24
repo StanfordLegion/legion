@@ -818,6 +818,8 @@ namespace Legion {
       virtual void complete_replay(ApEvent complete_event) = 0;
       virtual void find_equivalence_sets(Runtime *runtime, unsigned idx,
         const FieldMask &mask, FieldMaskSet<EquivalenceSet> &target) const = 0;
+      virtual ApEvent get_collect_event(
+                       const TraceInfo &info, ApEvent complete_event) const = 0;
     protected:
       virtual const VersionInfo& get_version_info(unsigned idx) const = 0;
     public:
@@ -850,6 +852,8 @@ namespace Legion {
       virtual void complete_replay(ApEvent complete_event);
       virtual void find_equivalence_sets(Runtime *runtime, unsigned idx,
           const FieldMask &mask, FieldMaskSet<EquivalenceSet> &target) const;
+      virtual ApEvent get_collect_event(
+                       const TraceInfo &info, ApEvent complete_event) const;
     protected:
       virtual const VersionInfo& get_version_info(unsigned idx) const;
     public:
@@ -918,8 +922,8 @@ namespace Legion {
       virtual Operation::OpKind get_memoizable_kind(void) const
         { return this->get_operation_kind(); }
       virtual ApEvent compute_init_precondition(const TraceInfo &info);
-      virtual RtEvent complete_memoizable(
-                                 RtEvent complete_event = RtEvent::NO_RT_EVENT);
+      virtual ApEvent get_collect_event(
+                           const TraceInfo &info, ApEvent complete_event) const;
       virtual void find_equivalence_sets(Runtime *runtime, unsigned idx, 
           const FieldMask &mask, FieldMaskSet<EquivalenceSet> &eqs) const;
     protected:
@@ -2775,6 +2779,7 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
+      virtual void trigger_complete(void);
       virtual bool is_partition_op(void) const { return true; } 
     public:
       virtual void activate(void);

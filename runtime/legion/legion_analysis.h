@@ -411,7 +411,9 @@ namespace Legion {
         {
           base_sanity_check();
           rec->record_complete_replay(local, ready_event);
-        } 
+        }
+    public:
+        ApEvent get_collect_event(ApEvent term_event) const;
     protected:
       inline void base_sanity_check(void) const
         {
@@ -585,8 +587,14 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = PHYSICAL_USER_ALLOC;
     public:
+#ifdef ENABLE_VIEW_REPLICATION
+      PhysicalUser(const RegionUsage &u, IndexSpaceExpression *expr,
+                   UniqueID op_id, unsigned index, ApEvent collect_event,
+                   bool copy, bool covers);
+#else
       PhysicalUser(const RegionUsage &u, IndexSpaceExpression *expr,
                    UniqueID op_id, unsigned index, bool copy, bool covers);
+#endif
       PhysicalUser(const PhysicalUser &rhs);
       ~PhysicalUser(void);
     public:
@@ -600,6 +608,9 @@ namespace Legion {
       IndexSpaceExpression *const expr;
       const UniqueID op_id;
       const unsigned index; // region requirement index
+#ifdef ENABLE_VIEW_REPLICATION
+      const ApEvent collect_event;
+#endif
       const bool copy_user; // is this from a copy or an operation
       const bool covers; // whether the expr covers the ExprView its in
     };  

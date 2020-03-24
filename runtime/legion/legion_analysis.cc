@@ -69,6 +69,21 @@ namespace Legion {
     {
     }
 
+#ifdef ENABLE_VIEW_REPLICATION
+    //--------------------------------------------------------------------------
+    PhysicalUser::PhysicalUser(const RegionUsage &u, IndexSpaceExpression *e,
+                               UniqueID id, unsigned x, ApEvent collect,
+                               bool cpy, bool cov)
+      : usage(u), expr(e), op_id(id), index(x), collect_event(collect),
+        copy_user(cpy), covers(cov)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(expr != NULL);
+#endif
+      expr->add_expression_reference();
+    }
+#else
     //--------------------------------------------------------------------------
     PhysicalUser::PhysicalUser(const RegionUsage &u, IndexSpaceExpression *e,
                                UniqueID id, unsigned x, bool cpy, bool cov)
@@ -80,10 +95,14 @@ namespace Legion {
 #endif
       expr->add_expression_reference();
     }
+#endif
 
     //--------------------------------------------------------------------------
     PhysicalUser::PhysicalUser(const PhysicalUser &rhs) 
       : usage(rhs.usage), expr(rhs.expr), op_id(rhs.op_id), index(rhs.index),
+#ifdef ENABLE_VIEW_REPLICATION
+        collect_event(rhs.collect_event),
+#endif
         copy_user(rhs.copy_user), covers(rhs.covers)
     //--------------------------------------------------------------------------
     {
@@ -117,12 +136,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       RezCheck z(rez);
+#ifdef ENABLE_VIEW_REPLICATION
+      rez.serialize(collect_event);
+#endif
       rez.serialize(usage);
       expr->pack_expression(rez, target);
       rez.serialize(op_id);
       rez.serialize(index);
       rez.serialize<bool>(copy_user);
       rez.serialize<bool>(covers);
+
     }
 
     //--------------------------------------------------------------------------
@@ -131,6 +154,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
+#ifdef ENABLE_VIEW_REPLICATION
+      ApEvent collect_event;
+      derez.deserialize(collect_event);
+#endif
       RegionUsage usage;
       derez.deserialize(usage);
       IndexSpaceExpression *expr = 
@@ -142,7 +169,12 @@ namespace Legion {
       bool copy_user, covers;
       derez.deserialize<bool>(copy_user);
       derez.deserialize<bool>(covers);
+#ifdef ENABLE_VIEW_REPLICATION
+      return new PhysicalUser(usage, expr, op_id, index, collect_event,
+                              copy_user, covers);
+#else
       return new PhysicalUser(usage, expr, op_id, index, copy_user, covers);
+#endif
     }
 
     /////////////////////////////////////////////////////////////
@@ -1546,6 +1578,16 @@ namespace Legion {
       }
       else
         return new TraceInfo(op, NULL, NULL, false/*recording*/);
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent TraceInfo::get_collect_event(ApEvent term_event) const
+    //--------------------------------------------------------------------------
+    {
+      if (memo == NULL || !recording)
+        return term_event;
+      else
+        return memo->get_collect_event(*this, term_event);
     }
 
     /////////////////////////////////////////////////////////////
@@ -4816,12 +4858,13 @@ namespace Legion {
         // Record the fill result in the destination 
         if (result.exists())
         {
+          ApEvent collect_event = trace_info.get_collect_event(result);
           if (update->across_helper != NULL)
           {
             const FieldMask dst_mask = 
                 update->across_helper->convert_src_to_dst(fill_mask);
-            target->add_copy_user(false/*reading*/,
-                                  result, dst_mask, fill_expr, op_id, dst_index,
+            target->add_copy_user(false/*reading*/, result, collect_event,
+                                  dst_mask, fill_expr, op_id, dst_index,
                                   effects, trace_info.recording, local_space);
             // Record this for the next iteration if necessary
             if (has_dst_preconditions)
@@ -4830,8 +4873,8 @@ namespace Legion {
           }
           else
           {
-            target->add_copy_user(false/*reading*/,
-                                  result, fill_mask, fill_expr, op_id,dst_index,
+            target->add_copy_user(false/*reading*/, result, collect_event,
+                                  fill_mask, fill_expr, op_id,dst_index,
                                   effects, trace_info.recording, local_space);
             // Record this for the next iteration if necessary
             if (has_dst_preconditions)
@@ -4897,10 +4940,11 @@ namespace Legion {
                                                     fills[0]->across_helper,
                                                     &effects, tracing_src_fills,
                                                     tracing_dsts);
+          ApEvent collect_event = trace_info.get_collect_event(result);
           if (result.exists())
           {
-            target->add_copy_user(false/*reading*/,
-                                  result, dst_mask, fill_expr, op_id, dst_index,
+            target->add_copy_user(false/*reading*/, result, collect_event,
+                                  dst_mask, fill_expr, op_id, dst_index,
                                   effects, trace_info.recording, local_space);
             if (track_events)
               events.insert(result);
@@ -4974,15 +5018,16 @@ namespace Legion {
                                     &effects, tracing_srcs, tracing_dsts);
           if (result.exists())
           {
-            source->add_copy_user(true/*reading*/,
-                                  result, copy_mask, copy_expr, op_id,src_index,
+            ApEvent collect_event = trace_info.get_collect_event(result);
+            source->add_copy_user(true/*reading*/, result, collect_event,
+                                  copy_mask, copy_expr, op_id,src_index,
                                   effects, trace_info.recording, local_space);
             if (update->across_helper != NULL)
             {
               const FieldMask dst_mask = 
                 update->across_helper->convert_src_to_dst(copy_mask);
-              target->add_copy_user(false/*reading*/,
-                                  result, dst_mask, copy_expr, op_id, dst_index,
+              target->add_copy_user(false/*reading*/, result, collect_event,
+                                  dst_mask, copy_expr, op_id, dst_index,
                                   effects, trace_info.recording, local_space);
               // Record this for the next iteration if necessary
               if (has_dst_preconditions)
@@ -4991,8 +5036,8 @@ namespace Legion {
             }
             else
             {
-              target->add_copy_user(false/*reading*/,
-                                  result, copy_mask, copy_expr, op_id,dst_index,
+              target->add_copy_user(false/*reading*/, result, collect_event,
+                                  copy_mask, copy_expr, op_id,dst_index,
                                   effects, trace_info.recording, local_space);
               // Record this for the next iteration if necessary
               if (has_dst_preconditions)
@@ -5055,13 +5100,14 @@ namespace Legion {
                                     copy_mask, trace_info, 
                                     cit->second[0]->across_helper,
                                     &effects, tracing_srcs, tracing_dsts);
+            ApEvent collect_event = trace_info.get_collect_event(result);
             if (result.exists())
             {
-              it->first->add_copy_user(true/*reading*/,
-                                  result, copy_mask, copy_expr, op_id,src_index,
+              it->first->add_copy_user(true/*reading*/, result, collect_event,
+                                  copy_mask, copy_expr, op_id,src_index,
                                   effects, trace_info.recording, local_space);
-              target->add_copy_user(false/*reading*/,
-                                  result, dst_mask, copy_expr, op_id, dst_index,
+              target->add_copy_user(false/*reading*/, result, collect_event,
+                                  dst_mask, copy_expr, op_id, dst_index,
                                   effects, trace_info.recording, local_space);
               if (track_events)
                 events.insert(result);

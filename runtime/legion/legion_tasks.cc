@@ -1177,6 +1177,7 @@ namespace Legion {
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id);
       mapper->invoke_select_task_sources(this, &input, &output);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking);
     }
 
     //--------------------------------------------------------------------------
@@ -5762,7 +5763,7 @@ namespace Legion {
             wait_on.wait();
         }
         must_epoch->notify_subop_complete(this);
-        complete_operation(complete_memoizable());
+        complete_operation();
       }
       else
       {
@@ -5771,10 +5772,10 @@ namespace Legion {
         {
           RtEvent complete_precondition =
             Runtime::merge_events(completion_preconditions);
-          complete_operation(complete_memoizable(complete_precondition));
+          complete_operation(complete_precondition);
         }
         else
-          complete_operation(complete_memoizable());
+          complete_operation();
       }
       if (need_commit)
         trigger_children_committed();
@@ -6173,6 +6174,9 @@ namespace Legion {
           pack_task(rez, target_space);
         }
         runtime->send_remote_task_replay(target_space, rez);
+        complete_execution();
+        trigger_children_complete();
+        trigger_children_committed();
       }
       else
       { 
@@ -6267,6 +6271,7 @@ namespace Legion {
       orig_task = this;
       slice_owner = NULL;
       point_termination = ApUserEvent::NO_AP_USER_EVENT;
+      deferred_effects = ApUserEvent::NO_AP_USER_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -6922,6 +6927,10 @@ namespace Legion {
         runtime->find_address_space(target_processors.front());
       if (target_space != runtime->address_space)
       {
+#ifdef DEBUG_LEGION
+        assert(!deferred_effects.exists());
+#endif
+        deferred_effects = Runtime::create_ap_user_event();
         // This is the remote case, pack it up and ship it over
         // Update our target_proc so that the sending code is correct 
         Serializer rez;
@@ -6933,6 +6942,9 @@ namespace Legion {
           slice_owner->pack_task(rez, target_space);
         }
         runtime->send_remote_task_replay(target_space, rez);
+        // Record this slice as an origin-mapped slice so that it 
+        // will be deactivated accordingly
+        slice_owner->index_owner->record_origin_mapped_slice(slice_owner);
       }
       else
       {
@@ -6947,7 +6959,10 @@ namespace Legion {
         ApEvent postcondition = ApEvent::NO_AP_EVENT;
         if (effects_postconditions.size() > 0)
           postcondition = Runtime::merge_events(NULL, effects_postconditions);
-        slice_owner->record_child_mapped(RtEvent::NO_RT_EVENT, postcondition);
+        if (is_remote())
+          Runtime::trigger_event(deferred_effects, postcondition);
+        else
+          slice_owner->record_child_mapped(RtEvent::NO_RT_EVENT, postcondition);
       }
     }
 
@@ -7680,7 +7695,7 @@ namespace Legion {
       privilege_paths.clear();
       if (!origin_mapped_slices.empty())
       {
-        for (std::deque<SliceTask*>::const_iterator it = 
+        for (std::set<SliceTask*>::const_iterator it = 
               origin_mapped_slices.begin(); it != 
               origin_mapped_slices.end(); it++)
         {
@@ -8666,7 +8681,7 @@ namespace Legion {
       // if we're waiting on any profiling reports from them
       if (!origin_mapped_slices.empty())
       {
-        for (std::deque<SliceTask*>::const_iterator it = 
+        for (std::set<SliceTask*>::const_iterator it = 
               origin_mapped_slices.begin(); it != 
               origin_mapped_slices.end(); it++)
           (*it)->find_profiling_reported(commit_preconditions);
@@ -9079,7 +9094,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
-      origin_mapped_slices.push_back(local_slice);
+      origin_mapped_slices.insert(local_slice);
     }
 
     //--------------------------------------------------------------------------
