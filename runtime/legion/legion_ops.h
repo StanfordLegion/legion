@@ -2720,6 +2720,7 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
+      virtual void trigger_complete(void);
       virtual bool is_partition_op(void) const { return true; } 
     public:
       virtual void activate(void);

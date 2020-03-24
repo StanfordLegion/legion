@@ -146,10 +146,10 @@ namespace Legion {
       derez.deserialize(index);
       ApEvent term_event;
       derez.deserialize(term_event);
-      ApUserEvent ready_event;
-      derez.deserialize(ready_event);
       ApEvent collect_event;
       derez.deserialize(collect_event);
+      ApUserEvent ready_event;
+      derez.deserialize(ready_event);
       RtUserEvent applied_event;
       derez.deserialize(applied_event);
       const PhysicalTraceInfo trace_info = 
