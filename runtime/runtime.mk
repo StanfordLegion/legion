@@ -726,7 +726,7 @@ INSTALL_HEADERS += legion.h \
 		   realm.h \
 		   accessor.h \
 		   arrays.h \
-		   bitmask.h \
+		   legion/bitmask.h \
 		   legion/legion.inl \
 		   legion/legion_agency.h \
 		   legion/legion_agency.inl \
