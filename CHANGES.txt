@@ -7,6 +7,8 @@ Version 20.03.0 (March ??, 2020)
         explicit field names, i.e., `__fields(r.{x, y})` rather than
         `__fields(r)`. This makes the behavior more unambiguous and
         helps to avoid bugs
+    - Added `complete` and `incomplete` keywords that can be used to
+        mark partitions as such
     - Added support for setting mapper ID and tag via
         `t:set_mapper_id()` and `t:set_mapping_tag_id()`
     - Fixed several bugs, memory leaks and improved compile times
