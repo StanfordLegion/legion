@@ -1065,6 +1065,8 @@ function type_check.expr_call(cx, node)
     fn = fn,
     args = args,
     conditions = conditions,
+    predicate = false,
+    predicate_else_value = false,
     replicable = false,
     expr_type = expr_type,
     annotations = node.annotations,

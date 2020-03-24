@@ -75,6 +75,8 @@ function parser.annotation_name(p, required)
     return "optimize"
   elseif p:nextif("__parallel") then
     return "parallel"
+  elseif p:nextif("__predicate") then
+    return "predicate"
   elseif p:nextif("__replicable") then
     return "replicable"
   elseif p:nextif("__spmd") then

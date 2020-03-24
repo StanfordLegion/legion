@@ -3420,11 +3420,16 @@ function codegen.expr_call(cx, node)
     function(condition)
       return codegen.expr_condition(cx, condition)
     end)
+  local predicate = node.predicate and codegen.expr(cx, node.predicate):read(cx)
+  local predicate_else_value = node.predicate_else_value and
+    codegen.expr(cx, node.predicate_else_value):read(cx)
 
   local actions = quote
     [fn.actions];
     [args:map(function(arg) return arg.actions end)];
     [conditions:map(function(condition) return condition.actions end)];
+    [predicate and predicate.actions];
+    [predicate_else_value and predicate_else_value.actions];
     [emit_debuginfo(node)]
   end
 
@@ -3525,6 +3530,28 @@ function codegen.expr_call(cx, node)
         cx, fn.value, arg_type, param_type, launcher, false, args_setup)
     end
 
+    -- Setup predicate.
+    local predicate_symbol = terralib.newsymbol(c.legion_predicate_t, "predicate")
+    local predicate_value
+    if predicate then
+      predicate_value = `c.legion_predicate_create([cx.runtime], [cx.context], [predicate.value].__result)
+    else
+      predicate_value = `c.legion_predicate_true()
+    end
+    task_args_setup:insert(
+      quote
+        var [predicate_symbol] = [predicate_value]
+      end)
+
+    if predicate_else_value then
+      assert(std.is_future(std.as_read(node.predicate_else_value.expr_type)))
+      args_setup:insert(
+        quote
+          c.legion_task_launcher_set_predicate_false_future(
+            [launcher], [predicate_else_value.value].__result)
+        end)
+    end
+
     local future
     if not cx.must_epoch then
       future = terralib.newsymbol(c.legion_future_t, "future")
@@ -3539,7 +3566,7 @@ function codegen.expr_call(cx, node)
       [codegen_hooks.gen_update_mapping_tag(tag, fn.value:has_mapping_tag_id(), cx.task)]
       var [launcher] = c.legion_task_launcher_create(
         [fn.value:get_task_id()], [task_args],
-        c.legion_predicate_true(), [mapper], [tag])
+        [predicate_symbol], [mapper], [tag])
       [args_setup]
     end
 
@@ -3565,6 +3592,13 @@ function codegen.expr_call(cx, node)
       [actions]
       [launcher_setup]
       [launcher_execute]
+    end
+
+    if predicate then
+      actions = quote
+        [actions]
+        c.legion_predicate_destroy([predicate_symbol])
+      end
     end
 
     local future_type = value_type
@@ -3731,6 +3765,8 @@ function codegen.expr_cast(cx, node)
       },
       args = terralib.newlist({node.arg}),
       conditions = terralib.newlist(),
+      predicate = false,
+      predicate_else_value = false,
       replicable = false,
       expr_type = expr_type,
       annotations = node.annotations,
@@ -7393,6 +7429,8 @@ function codegen.expr_unary(cx, node)
       },
       args = terralib.newlist({node.rhs}),
       conditions = terralib.newlist(),
+      predicate = false,
+      predicate_else_value = false,
       replicable = false,
       expr_type = expr_type,
       annotations = node.annotations,
@@ -7522,6 +7560,8 @@ function codegen.expr_binary(cx, node)
       },
       args = terralib.newlist({node.lhs, node.rhs}),
       conditions = terralib.newlist(),
+      predicate = false,
+      predicate_else_value = false,
       replicable = false,
       expr_type = expr_type,
       annotations = node.annotations,

@@ -79,6 +79,7 @@ local language = {
     "__parallelize_with",
     "__parallel_prefix",
     "__physical",
+    "__predicate",
     "__raw",
     "__replicable",
     "__runtime",
