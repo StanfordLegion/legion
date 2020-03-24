@@ -332,6 +332,14 @@ list(APPEND LEGION_SRC
   legion/runtime.h                        legion/runtime.cc
 )
 
+if(Legion_REDOP_HALF)
+  list(APPEND LEGION_SRC mathtypes/half.h)
+endif()
+
+if(Legion_REDOP_COMPLEX)
+  list(APPEND LEGION_SRC mathtypes/complex.h)
+endif()
+
 # generate per-dimension object files for deppart stuff
 foreach(N1 RANGE 1 ${LEGION_MAX_DIM})
   # echo -e is not portable, so use perl and try to limit the escape

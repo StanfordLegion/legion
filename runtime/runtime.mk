@@ -802,10 +802,10 @@ INSTALL_HEADERS += legion.h \
 		   realm/utils.inl
 
 ifeq ($(strip $(USE_HALF)),1)
-INSTALL_HEADERS += half.h
+INSTALL_HEADERS += mathtypes/half.h
 endif
 ifeq ($(strip $(USE_COMPLEX)),1)
-INSTALL_HEADERS += complex.h
+INSTALL_HEADERS += mathtypes/complex.h
 endif
 
 # General shell commands
@@ -871,6 +871,7 @@ install: $(OUTFILE)
 	@mkdir -p $(PREFIX)/include/realm
 	@mkdir -p $(PREFIX)/include/legion
 	@mkdir -p $(PREFIX)/include/mappers
+	@mkdir -p $(PREFIX)/include/mathtypes
 	@mkdir -p $(PREFIX)/lib
 	@cp $(OUTFILE) $(PREFIX)/bin/$(OUTFILE)
 	@$(foreach file,$(INSTALL_BIN_FILES),cp $(file) $(PREFIX)/bin/$(file);)
