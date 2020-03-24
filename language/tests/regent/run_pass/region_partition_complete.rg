@@ -36,10 +36,7 @@ task make_tile_partition(points : region(ispace(int2d), point),
     var rect = rect2d { lo = lo, hi = hi }
     c.legion_domain_point_coloring_color_domain(coloring, i, rect)
   end
-  -- Here we jump in with a modification to the original test: we partition with every combination
-  -- of disjointness and completeness
-  var p = partition(disjoint, points, coloring, tiles)
-  var p2 = partition(disjoint, incomplete, points, coloring, tiles)
+  var p = partition(disjoint, complete, points, coloring, tiles)
   c.legion_domain_point_coloring_destroy(coloring)
   return p
 end
@@ -54,7 +51,7 @@ task make_interior_partition(points : region(ispace(int2d), point),
     var rect = rect2d { lo = lo, hi = hi }
     c.legion_domain_point_coloring_color_domain(coloring, i, rect)
   end
-  var p = partition(disjoint, points, coloring, tiles)
+  var p = partition(disjoint, incomplete, points, coloring, tiles)
   c.legion_domain_point_coloring_destroy(coloring)
   return p
 end
@@ -71,7 +68,7 @@ task make_bloated_partition(points : region(ispace(int2d), point),
                            hi = rect.hi + { x = radius, y = radius } }
     c.legion_domain_point_coloring_color_domain(coloring, i, bloated)
   end
-  var p = partition(aliased, points, coloring, tiles)
+  var p = partition(aliased, complete, points, coloring, tiles)
   c.legion_domain_point_coloring_destroy(coloring)
   return p
 end

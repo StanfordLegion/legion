@@ -21,7 +21,7 @@ struct t {
 local c = regentlib.c
 
 task test(explicit : bool)
-  var rsize = 1000
+  var rsize = 10
   var r = region(ispace(int2d, {rsize, rsize}), t)
   var t : transform(2, 2)
   t[{0, 0}] = 1
@@ -32,7 +32,7 @@ task test(explicit : bool)
   var csize = 10
   var colors = ispace(int2d, {csize, csize})
   if explicit then
-    var p = restrict(aliased, incomplete, r, t, e, colors)
+    var p = restrict(aliased, complete, r, t, e, colors)
     c.printf("p is complete %d\n", c.legion_index_partition_is_complete(__runtime(), __raw(p).index_partition))
   else
     var p = restrict(aliased, r, t, e, colors)
