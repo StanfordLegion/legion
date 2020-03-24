@@ -6572,11 +6572,9 @@ namespace Legion {
           slice_owner->pack_task(rez, target_space);
         }
         runtime->send_remote_task_replay(target_space, rez);
-        slice_owner->complete_mapping();
-        slice_owner->complete_execution();
-        complete_execution();
-        trigger_children_complete();
-        trigger_children_committed();
+        // Record this slice as an origin-mapped slice so that it 
+        // will be deactivated accordingly
+        slice_owner->index_owner->record_origin_mapped_slice(slice_owner);
       }
       else
       {
@@ -6592,9 +6590,7 @@ namespace Legion {
         if (effects_postconditions.size() > 0)
           postcondition = Runtime::merge_events(NULL, effects_postconditions);
         if (is_remote())
-        {
           Runtime::trigger_event(deferred_effects, postcondition);
-        }
         else
           slice_owner->record_child_mapped(RtEvent::NO_RT_EVENT, postcondition);
       }
@@ -6708,7 +6704,7 @@ namespace Legion {
       privilege_paths.clear();
       if (!origin_mapped_slices.empty())
       {
-        for (std::deque<SliceTask*>::const_iterator it = 
+        for (std::set<SliceTask*>::const_iterator it = 
               origin_mapped_slices.begin(); it != 
               origin_mapped_slices.end(); it++)
         {
@@ -7690,7 +7686,7 @@ namespace Legion {
       // if we're waiting on any profiling reports from them
       if (!origin_mapped_slices.empty())
       {
-        for (std::deque<SliceTask*>::const_iterator it = 
+        for (std::set<SliceTask*>::const_iterator it = 
               origin_mapped_slices.begin(); it != 
               origin_mapped_slices.end(); it++)
           (*it)->find_profiling_reported(commit_preconditions);
@@ -8088,7 +8084,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
-      origin_mapped_slices.push_back(local_slice);
+      origin_mapped_slices.insert(local_slice);
     }
 
     //--------------------------------------------------------------------------

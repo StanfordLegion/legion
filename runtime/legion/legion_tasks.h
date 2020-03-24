@@ -1027,7 +1027,7 @@ namespace Legion {
     protected:
       LegionMap<unsigned/*idx*/,VersionInfo>::aligned version_infos;
       std::vector<RegionTreePath> privilege_paths;
-      std::deque<SliceTask*> origin_mapped_slices;
+      std::set<SliceTask*> origin_mapped_slices;
     protected:
       std::set<RtEvent> map_applied_conditions;
       std::set<RtEvent> complete_preconditions;
