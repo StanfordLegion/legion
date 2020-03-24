@@ -16082,7 +16082,7 @@ namespace Legion {
           }
         case EXTERNAL_HDF5_FILE:
           {
-#ifndef USE_HDF
+#ifndef LEGION_USE_HDF5
             REPORT_LEGION_ERROR(ERROR_ATTACH_HDF5,
                 "Invalid attach HDF5 file in parent task %s (UID %lld). "
                 "Legion must be built with HDF5 support to attach regions "

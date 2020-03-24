@@ -42,9 +42,7 @@
 #cmakedefine LEGION_USE_CUDA
 #endif
 
-#ifndef USE_ZLIB
-#cmakedefine USE_ZLIB
-#endif
+#cmakedefine LEGION_USE_ZLIB
 
 #ifndef LEGION_REDOP_COMPLEX
 #cmakedefine LEGION_REDOP_COMPLEX
@@ -57,3 +55,6 @@
 #ifndef LEGION_WARNINGS_FATAL
 #cmakedefine LEGION_WARNINGS_FATAL
 #endif
+
+#cmakedefine LEGION_USE_HDF5
+

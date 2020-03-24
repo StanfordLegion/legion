@@ -44,9 +44,6 @@ CC_FLAGS += -DDARWIN
 ifeq ($(strip $(USE_OPENMP)),1)
 $(warning "Some versions of Clang on Mac OSX do not support OpenMP")
 endif
-else
-#use disk unless on DARWIN 
-CC_FLAGS += -DUSE_DISK 
 endif
 
 ifndef LG_RT_DIR
@@ -209,7 +206,7 @@ endif
 
 USE_LIBDL ?= 1
 ifeq ($(strip $(USE_LIBDL)),1)
-REALM_CC_FLAGS += -DUSE_LIBDL
+REALM_CC_FLAGS += -DREALM_USE_LIBDL
 ifneq ($(strip $(DARWIN)),1)
 #CC_FLAGS += -rdynamic
 # FreeBSD doesn't actually have a separate libdl
@@ -356,9 +353,10 @@ endif
 # General CUDA variables
 ifeq ($(strip $(USE_CUDA)),1)
 NVCC	        ?= $(CUDA)/bin/nvcc
-# Latter is preferred, former is for backwards compatability
-REALM_CC_FLAGS        += -DUSE_CUDA -DREALM_USE_CUDA
+REALM_CC_FLAGS        += -DREALM_USE_CUDA
 LEGION_CC_FLAGS       += -DLEGION_USE_CUDA
+# provide this for backward-compatibility in applications
+CC_FLAGS              += -DUSE_CUDA
 USE_CUDART_HIJACK ?= 1
 ifeq ($(strip $(USE_CUDART_HIJACK)),1)
 REALM_CC_FLAGS        += -DREALM_USE_CUDART_HIJACK
@@ -528,7 +526,10 @@ endif
 USE_HDF ?= 0
 HDF_LIBNAME ?= hdf5
 ifeq ($(strip $(USE_HDF)), 1)
-  REALM_CC_FLAGS      += -DUSE_HDF
+  REALM_CC_FLAGS      += -DREALM_USE_HDF5
+  LEGION_CC_FLAGS     += -DLEGION_USE_HDF5
+  # provide this for backward-compatibility in applications
+  CC_FLAGS            += -DUSE_HDF
   LEGION_LD_FLAGS      += -l$(HDF_LIBNAME)
   ifdef HDF_ROOT
        CC_FLAGS    += -I$(HDF_ROOT)/include
@@ -560,7 +561,7 @@ endif
 USE_ZLIB ?= 1
 ZLIB_LIBNAME ?= z
 ifeq ($(strip $(USE_ZLIB)),1)
-  CC_FLAGS      += -DUSE_ZLIB
+  LEGION_CC_FLAGS += -DLEGION_USE_ZLIB
   LEGION_LD_FLAGS += -l$(ZLIB_LIBNAME)
 endif
 
@@ -603,8 +604,6 @@ CC_FLAGS        += -Wall -Wno-strict-overflow
 ifeq ($(strip $(WARN_AS_ERROR)),1)
 CC_FLAGS        += -Werror
 endif
-
-#CC_FLAGS += -DUSE_MASKED_COPIES
 
 REALM_SRC	?=
 LEGION_SRC	?=

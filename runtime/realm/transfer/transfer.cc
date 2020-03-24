@@ -21,7 +21,7 @@
 #include "realm/transfer/lowlevel_dma.h"
 #include "realm/mem_impl.h"
 #include "realm/inst_layout.h"
-#ifdef USE_HDF
+#ifdef REALM_USE_HDF5
 #include "realm/hdf5/hdf5_access.h"
 #endif
 
@@ -50,7 +50,7 @@ namespace Realm {
     assert(0);
   }
   
-#ifdef USE_HDF
+#ifdef REALM_USE_HDF5
   size_t TransferIterator::step(size_t max_bytes, AddressInfoHDF5& info,
 				bool tentative /*= false*/)
   {
@@ -80,7 +80,7 @@ namespace Realm {
     virtual size_t step(size_t max_bytes, AddressInfo& info,
 			unsigned flags,
 			bool tentative = false);
-#ifdef USE_HDF
+#ifdef REALM_USE_HDF5
     virtual size_t step(size_t max_bytes, AddressInfoHDF5& info,
 			bool tentative = false);
 #endif
@@ -312,7 +312,7 @@ namespace Realm {
     return total_bytes;
   }
 
-#ifdef USE_HDF
+#ifdef REALM_USE_HDF5
   template <int N, typename T>
   size_t TransferIteratorBase<N,T>::step(size_t max_bytes, AddressInfoHDF5& info,
 						bool tentative /*= false*/)

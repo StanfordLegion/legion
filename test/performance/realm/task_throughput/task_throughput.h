@@ -34,7 +34,7 @@ namespace TestConfig {
 void dummy_task_body(const void *args, size_t arglen, 
 		     const void *userdata, size_t userlen, Processor p);
 
-#ifdef USE_CUDA
+#ifdef REALM_USE_CUDA
 void dummy_gpu_task(const void *args, size_t arglen, 
 		    const void *userdata, size_t userlen, Processor p);
 #endif
