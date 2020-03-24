@@ -13005,28 +13005,35 @@ namespace Legion {
     {
       // Give these slightly higher priority since they are likely
       // needed by later operations
-      if (future_map.impl != NULL)
-        enqueue_ready_operation(future_map.impl->get_ready_event(), 
-            LG_THROUGHPUT_DEFERRED_PRIORITY);
-      else
-        enqueue_ready_operation(RtEvent::NO_RT_EVENT, 
-                                LG_THROUGHPUT_DEFERRED_PRIORITY);
+      enqueue_ready_operation(RtEvent::NO_RT_EVENT, 
+                              LG_THROUGHPUT_DEFERRED_PRIORITY);
     }
 
     //--------------------------------------------------------------------------
     void PendingPartitionOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      // Perform the partitioning operation
-      ApEvent ready_event = thunk->perform(this, runtime->forest);
+      // Mark that this is mapped right away
       complete_mapping();
+      // If necessary defer execution until the future map is ready
+      RtEvent future_map_ready;
+      if (future_map.impl != NULL)
+        future_map_ready = future_map.impl->get_ready_event();
+      complete_execution(future_map_ready);
+    }
+
+    //--------------------------------------------------------------------------
+    void PendingPartitionOp::trigger_complete(void)
+    //--------------------------------------------------------------------------
+    {
+      // Perform the partitioning operation
+      const ApEvent ready_event = thunk->perform(this, runtime->forest);
 #ifdef LEGION_SPY
       // Still have to do this call to let Legion Spy know we're done
       LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
                                       ApEvent::NO_AP_EVENT);
 #endif
-      request_early_complete(ready_event);
-      complete_execution(Runtime::protect_event(ready_event));
+      complete_operation(Runtime::protect_event(ready_event));
     }
 
     //--------------------------------------------------------------------------
