@@ -6561,6 +6561,7 @@ namespace Legion {
         assert(!deferred_effects.exists());
 #endif
         deferred_effects = Runtime::create_ap_user_event();
+        slice_owner->record_child_mapped(RtEvent::NO_RT_EVENT,deferred_effects);
         // This is the remote case, pack it up and ship it over
         // Update our target_proc so that the sending code is correct 
         Serializer rez;
