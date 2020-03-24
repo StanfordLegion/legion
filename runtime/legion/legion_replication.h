@@ -1356,7 +1356,7 @@ namespace Legion {
       virtual void activate(void);
       virtual void deactivate(void);
     public:
-      virtual void trigger_mapping(void);
+      virtual void trigger_complete(void);
     };
 
     /**

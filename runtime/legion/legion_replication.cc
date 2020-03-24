@@ -2730,7 +2730,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplPendingPartitionOp::trigger_mapping(void)
+    void ReplPendingPartitionOp::trigger_complete(void)
     //--------------------------------------------------------------------------
     {
       // We know we are in a replicate context
@@ -2741,16 +2741,14 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       // Perform the partitioning operation
-      ApEvent ready_event = thunk->perform_shard(this, runtime->forest,
+      const ApEvent ready_event = thunk->perform_shard(this, runtime->forest,
         repl_ctx->owner_shard->shard_id, repl_ctx->shard_manager->total_shards);
-      complete_mapping();
 #ifdef LEGION_SPY
       // Still have to do this call to let Legion Spy know we're done
       LegionSpy::log_operation_events(unique_op_id, 
           ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
 #endif
-      request_early_complete(ready_event);
-      complete_execution(Runtime::protect_event(ready_event));
+      complete_operation(Runtime::protect_event(ready_event));
     }
 
     /////////////////////////////////////////////////////////////
