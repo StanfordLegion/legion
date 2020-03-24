@@ -5406,7 +5406,7 @@ namespace Legion {
             wait_on.wait();
         }
         must_epoch->notify_subop_complete(this);
-        complete_operation(complete_memoizable());
+        complete_operation();
       }
       else
       {
@@ -5415,10 +5415,10 @@ namespace Legion {
         {
           RtEvent complete_precondition =
             Runtime::merge_events(completion_preconditions);
-          complete_operation(complete_memoizable(complete_precondition));
+          complete_operation(complete_precondition);
         }
         else
-          complete_operation(complete_memoizable());
+          complete_operation();
       }
       if (need_commit)
         trigger_children_committed();
@@ -5796,6 +5796,9 @@ namespace Legion {
           pack_task(rez, target_space);
         }
         runtime->send_remote_task_replay(target_space, rez);
+        complete_execution();
+        trigger_children_complete();
+        trigger_children_committed();
       }
       else
       { 
@@ -5890,6 +5893,7 @@ namespace Legion {
       orig_task = this;
       slice_owner = NULL;
       point_termination = ApUserEvent::NO_AP_USER_EVENT;
+      deferred_effects = ApUserEvent::NO_AP_USER_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -6267,30 +6271,46 @@ namespace Legion {
       DETAILED_PROFILER(runtime, POINT_TASK_COMPLETE_CALL);
       // Pass back our created and deleted operations 
       std::set<RtEvent> preconditions;
-      slice_owner->return_privileges(execution_context, preconditions);
-      if (!preconditions.empty())
-        slice_owner->record_child_complete(
-            Runtime::merge_events(preconditions));
-      else
-        slice_owner->record_child_complete(RtEvent::NO_RT_EVENT);
-      // Since this point is now complete we know
-      // that we can trigger it. Note we don't need to do
-      // this if we're a leaf task because we would have 
-      // performed the leaf task early complete chaining operation.
-      if (!is_leaf())
-        Runtime::trigger_event(point_termination);
+      if (execution_context != NULL)
+      {
+        slice_owner->return_privileges(execution_context, preconditions);
+        if (!preconditions.empty())
+          slice_owner->record_child_complete(
+              Runtime::merge_events(preconditions));
+        else
+          slice_owner->record_child_complete(RtEvent::NO_RT_EVENT);
+        // Since this point is now complete we know
+        // that we can trigger it. Note we don't need to do
+        // this if we're a leaf task because we would have 
+        // performed the leaf task early complete chaining operation.
+        if (!is_leaf())
+          Runtime::trigger_event(point_termination);
 
-      if (runtime->legion_spy_enabled)
-        execution_context->log_created_requirements();
-      // Invalidate any context that we had so that the child
-      // operations can begin committing
-      execution_context->invalidate_region_tree_contexts(); 
-      // See if we need to trigger that our children are complete
-      const bool need_commit = execution_context->attempt_children_commit();
-      // Mark that this operation is now complete
-      complete_operation();
-      if (need_commit)
-        trigger_children_committed();
+        if (runtime->legion_spy_enabled)
+          execution_context->log_created_requirements();
+        // Invalidate any context that we had so that the child
+        // operations can begin committing
+        execution_context->invalidate_region_tree_contexts(); 
+        // See if we need to trigger that our children are complete
+        const bool need_commit = execution_context->attempt_children_commit();
+        // Mark that this operation is now complete
+        complete_operation();
+        if (need_commit)
+          trigger_children_committed();
+      }
+      else
+      {
+        if (!preconditions.empty())
+          slice_owner->record_child_complete(
+              Runtime::merge_events(preconditions));
+        else
+          slice_owner->record_child_complete(RtEvent::NO_RT_EVENT);
+
+        if (!is_leaf())
+          Runtime::trigger_event(point_termination);
+
+        complete_operation();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -6537,6 +6557,10 @@ namespace Legion {
         runtime->find_address_space(target_processors.front());
       if (target_space != runtime->address_space)
       {
+#ifdef DEBUG_LEGION
+        assert(!deferred_effects.exists());
+#endif
+        deferred_effects = Runtime::create_ap_user_event();
         // This is the remote case, pack it up and ship it over
         // Update our target_proc so that the sending code is correct 
         Serializer rez;
@@ -6548,6 +6572,11 @@ namespace Legion {
           slice_owner->pack_task(rez, target_space);
         }
         runtime->send_remote_task_replay(target_space, rez);
+        slice_owner->complete_mapping();
+        slice_owner->complete_execution();
+        complete_execution();
+        trigger_children_complete();
+        trigger_children_committed();
       }
       else
       {
@@ -6562,7 +6591,12 @@ namespace Legion {
         ApEvent postcondition = ApEvent::NO_AP_EVENT;
         if (effects_postconditions.size() > 0)
           postcondition = Runtime::merge_events(NULL, effects_postconditions);
-        slice_owner->record_child_mapped(RtEvent::NO_RT_EVENT, postcondition);
+        if (is_remote())
+        {
+          Runtime::trigger_event(deferred_effects, postcondition);
+        }
+        else
+          slice_owner->record_child_mapped(RtEvent::NO_RT_EVENT, postcondition);
       }
     }
 

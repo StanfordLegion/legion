@@ -1500,6 +1500,16 @@ namespace Legion {
         return new TraceInfo(op, NULL, NULL, false/*recording*/);
     }
 
+    //--------------------------------------------------------------------------
+    ApEvent TraceInfo::get_collect_event(ApEvent term_event) const
+    //--------------------------------------------------------------------------
+    {
+      if (memo == NULL || !recording)
+        return term_event;
+      else
+        return memo->get_collect_event(*this, term_event);
+    }
+
     /////////////////////////////////////////////////////////////
     // PhysicalTraceInfo
     /////////////////////////////////////////////////////////////
@@ -4426,12 +4436,13 @@ namespace Legion {
         // Record the fill result in the destination 
         if (result.exists())
         {
+          ApEvent collect_event = trace_info.get_collect_event(result);
           if (update->across_helper != NULL)
           {
             const FieldMask dst_mask = 
                 update->across_helper->convert_src_to_dst(fill_mask);
-            target->add_copy_user(false/*reading*/, result,
-                                  result, dst_mask, fill_expr, op_id, dst_index,
+            target->add_copy_user(false/*reading*/, result, collect_event,
+                                  dst_mask, fill_expr, op_id, dst_index,
                                   effects, trace_info.recording, local_space);
             // Record this for the next iteration if necessary
             if (has_dst_preconditions)
@@ -4440,8 +4451,8 @@ namespace Legion {
           }
           else
           {
-            target->add_copy_user(false/*reading*/, result,
-                                  result, fill_mask, fill_expr, op_id,dst_index,
+            target->add_copy_user(false/*reading*/, result, collect_event,
+                                  fill_mask, fill_expr, op_id,dst_index,
                                   effects, trace_info.recording, local_space);
             // Record this for the next iteration if necessary
             if (has_dst_preconditions)
@@ -4507,10 +4518,11 @@ namespace Legion {
                                                     fills[0]->across_helper,
                                                     tracing_src_fills,
                                                     tracing_dsts);
+          ApEvent collect_event = trace_info.get_collect_event(result);
           if (result.exists())
           {
-            target->add_copy_user(false/*reading*/, result,
-                                  result, dst_mask, fill_expr, op_id, dst_index,
+            target->add_copy_user(false/*reading*/, result, collect_event,
+                                  dst_mask, fill_expr, op_id, dst_index,
                                   effects, trace_info.recording, local_space);
             if (track_events)
               events.insert(result);
@@ -4584,15 +4596,16 @@ namespace Legion {
                                     tracing_srcs, tracing_dsts);
           if (result.exists())
           {
-            source->add_copy_user(true/*reading*/, result,
-                                  result, copy_mask, copy_expr, op_id,src_index,
+            ApEvent collect_event = trace_info.get_collect_event(result);
+            source->add_copy_user(true/*reading*/, result, collect_event,
+                                  copy_mask, copy_expr, op_id,src_index,
                                   effects, trace_info.recording, local_space);
             if (update->across_helper != NULL)
             {
               const FieldMask dst_mask = 
                 update->across_helper->convert_src_to_dst(copy_mask);
-              target->add_copy_user(false/*reading*/, result,
-                                  result, dst_mask, copy_expr, op_id, dst_index,
+              target->add_copy_user(false/*reading*/, result, collect_event,
+                                  dst_mask, copy_expr, op_id, dst_index,
                                   effects, trace_info.recording, local_space);
               // Record this for the next iteration if necessary
               if (has_dst_preconditions)
@@ -4601,8 +4614,8 @@ namespace Legion {
             }
             else
             {
-              target->add_copy_user(false/*reading*/, result,
-                                  result, copy_mask, copy_expr, op_id,dst_index,
+              target->add_copy_user(false/*reading*/, result, collect_event,
+                                  copy_mask, copy_expr, op_id,dst_index,
                                   effects, trace_info.recording, local_space);
               // Record this for the next iteration if necessary
               if (has_dst_preconditions)
@@ -4665,13 +4678,14 @@ namespace Legion {
                                     copy_mask, trace_info, 
                                     cit->second[0]->across_helper,
                                     tracing_srcs, tracing_dsts);
+            ApEvent collect_event = trace_info.get_collect_event(result);
             if (result.exists())
             {
-              it->first->add_copy_user(true/*reading*/, result,
-                                  result, copy_mask, copy_expr, op_id,src_index,
+              it->first->add_copy_user(true/*reading*/, result, collect_event,
+                                  copy_mask, copy_expr, op_id,src_index,
                                   effects, trace_info.recording, local_space);
-              target->add_copy_user(false/*reading*/, result,
-                                  result, dst_mask, copy_expr, op_id, dst_index,
+              target->add_copy_user(false/*reading*/, result, collect_event,
+                                  dst_mask, copy_expr, op_id, dst_index,
                                   effects, trace_info.recording, local_space);
               if (track_events)
                 events.insert(result);

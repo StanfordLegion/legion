@@ -161,12 +161,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename OP>
-    RtEvent MemoizableOp<OP>::complete_memoizable(RtEvent complete_event)
+    ApEvent MemoizableOp<OP>::get_collect_event(
+                      const TraceInfo &trace_info, ApEvent complete_event) const
     //--------------------------------------------------------------------------
     {
       if (tpl != NULL)
+      {
+        assert(tpl->is_recording());
         complete_event =
-          Runtime::merge_events(complete_event, tpl->get_recording_done());
+          Runtime::merge_events(&trace_info, complete_event,
+                              Runtime::ignorefaults(tpl->get_recording_done()));
+      }
       return complete_event;
     }
 

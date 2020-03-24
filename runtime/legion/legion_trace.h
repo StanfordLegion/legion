@@ -789,8 +789,6 @@ namespace Legion {
       static void handle_replay_slice(const void *args);
       static void handle_delete_template(const void *args);
     public:
-      void create_recording_done(void)
-        { recording_done = Runtime::create_rt_user_event(); }
       RtEvent get_recording_done(void) const
         { return recording_done; }
       void trigger_recording_done(void);

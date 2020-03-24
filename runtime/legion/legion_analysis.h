@@ -396,6 +396,8 @@ namespace Legion {
           base_sanity_check();
           rec->record_complete_replay(local, ready_event);
         }
+    public:
+        ApEvent get_collect_event(ApEvent term_event) const;
     protected:
       inline void base_sanity_check(void) const
         {

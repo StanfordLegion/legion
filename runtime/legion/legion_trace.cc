@@ -2229,7 +2229,7 @@ namespace Legion {
         fence_completion_id(0),
         replay_parallelism(t->runtime->max_replay_parallelism),
         has_virtual_mapping(false),
-        recording_done(RtUserEvent::NO_RT_USER_EVENT),
+        recording_done(Runtime::create_rt_user_event()),
         pre(t->runtime->forest), post(t->runtime->forest),
         pre_reductions(t->runtime->forest), post_reductions(t->runtime->forest),
         consumed_reductions(t->runtime->forest)

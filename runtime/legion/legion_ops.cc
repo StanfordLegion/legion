@@ -1564,6 +1564,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ApEvent RemoteMemoizable::get_collect_event(
+                     const TraceInfo &info, ApEvent complete_event) const
+    //--------------------------------------------------------------------------
+    {
+      // The owner node will make sure that this user won't get collected
+      // until the recording is done, if this user is being traced.
+      return completion_event;
+    }
+
+    //--------------------------------------------------------------------------
     const VersionInfo& RemoteMemoizable::get_version_info(unsigned idx) const
     //--------------------------------------------------------------------------
     {
@@ -4840,8 +4850,7 @@ namespace Legion {
         release_acquired_instances(acquired_instances);
       // Handle the case for marking when the copy completes
       request_early_complete(copy_complete_event);
-      complete_execution(
-          complete_memoizable(Runtime::protect_event(copy_complete_event)));
+      complete_execution(Runtime::protect_event(copy_complete_event));
     }
 
     //--------------------------------------------------------------------------
@@ -9517,8 +9526,7 @@ namespace Legion {
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
       request_early_complete(acquire_complete);
-      complete_execution(
-          complete_memoizable(Runtime::protect_event(acquire_complete)));
+      complete_execution(Runtime::protect_event(acquire_complete));
     }
 
     //--------------------------------------------------------------------------
@@ -10381,8 +10389,7 @@ namespace Legion {
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
       request_early_complete(release_complete);
-      complete_execution(
-          complete_memoizable(Runtime::protect_event(release_complete)));
+      complete_execution(Runtime::protect_event(release_complete));
     }
 
     //--------------------------------------------------------------------------
@@ -11044,7 +11051,7 @@ namespace Legion {
       LegionSpy::log_operation_events(unique_op_id,
           ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
 #endif
-      complete_operation(complete_memoizable());
+      complete_operation();
     }
 
     /////////////////////////////////////////////////////////////
@@ -15232,7 +15239,7 @@ namespace Legion {
           delete fill_view;
         fill_view = NULL;
       }
-      complete_operation(complete_memoizable());
+      complete_operation();
     }
 
     //--------------------------------------------------------------------------
