@@ -1,6 +1,23 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
+Version 20.03.0 (March ??, 2020)
+  * Realm
+    - Introduction of experimental MPI-based network layer, enabled with
+        `REALM_NETWORKS=mpi` (make) or `-DRealm_NETWORKS=mpi` (cmake).
+	Use `REALM_NETWORKS=gasnet1` (or USE_GASNET=1, which still works)
+	for the GASNet-based network layer (which works with GASNet-1 or
+	GASNet-EX)
+    - CUDA Runtime API interposer (a.k.a. "hijack") can now be disabled with
+        `USE_CUDART_HIJACK=0` (make) or	`-DLegion_HIJACK_CUDART=OFF` (cmake).
+	This can reduce effectivenes of task-parallelism for CUDA tasks, so
+	use only if needed
+    - More control over GPU selection via: `-cuda:skipgpus N` which leaves the
+        first N GPUs available for other uses, `-cuda:skipbusy` which skips
+	over busy GPUs, and `-cuda:minavailmem M` which skips GPUs with less
+	than M device memory available
+    - Reduction in memory usage of Realm internal data structures
+
 Version 19.12.0 (December 31, 2019)
   * Build
     - Both builds (Make and CMake) now generate `legion_defines.h` and
