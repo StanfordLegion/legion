@@ -32,10 +32,10 @@ task test(explicit : bool)
   var csize = 10
   var colors = ispace(int2d, {csize, csize})
   if explicit then
-    var p = restrict(disjoint, incomplete, r, t, e, colors)
+    var p = restrict(aliased, incomplete, r, t, e, colors)
     c.printf("p is complete %d\n", c.legion_index_partition_is_complete(__runtime(), __raw(p).index_partition))
   else
-    var p = restrict(disjoint, r, t, e, colors)
+    var p = restrict(aliased, r, t, e, colors)
     c.printf("p is complete %d\n", c.legion_index_partition_is_complete(__runtime(), __raw(p).index_partition))
   end
 end
