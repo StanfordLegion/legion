@@ -22,6 +22,7 @@ local ast = require("regent/ast")
 local data = require("common/data")
 local report = require("common/report")
 local std = require("regent/std")
+local task_helper = require("regent/task_helper")
 
 local optimize_predicate = {}
 
@@ -92,6 +93,7 @@ local node_is_side_effect_free = {
   end,
 
   [ast.typed.expr.MethodCall]                 = always_false,
+  [ast.typed.expr.Cast]                       = always_false,
   [ast.typed.expr.RawContext]                 = always_false,
   [ast.typed.expr.RawPhysical]                = always_false,
   [ast.typed.expr.RawRuntime]                 = always_false,
@@ -125,6 +127,8 @@ local node_is_side_effect_free = {
   [ast.typed.expr.DetachHDF5]                 = always_false,
   [ast.typed.expr.AllocateScratchFields]      = always_false,
   [ast.typed.expr.Condition]                  = always_false,
+  [ast.typed.expr.Unary]                      = always_false,
+  [ast.typed.expr.Binary]                     = always_false,
   [ast.typed.expr.Deref]                      = always_false,
   [ast.typed.expr.ImportIspace]               = always_false,
   [ast.typed.expr.ImportRegion]               = always_false,
@@ -135,7 +139,6 @@ local node_is_side_effect_free = {
   [ast.typed.expr.Global]                     = always_true,
   [ast.typed.expr.Function]                   = always_true,
   [ast.typed.expr.FieldAccess]                = always_true,
-  [ast.typed.expr.Cast]                       = always_true,
   [ast.typed.expr.Ctor]                       = always_true,
   [ast.typed.expr.CtorListField]              = always_true,
   [ast.typed.expr.CtorRecField]               = always_true,
@@ -155,8 +158,6 @@ local node_is_side_effect_free = {
   [ast.typed.expr.Advance]                    = always_true,
   [ast.typed.expr.WithScratchFields]          = always_true,
   [ast.typed.expr.RegionRoot]                 = always_true,
-  [ast.typed.expr.Unary]                      = always_true,
-  [ast.typed.expr.Binary]                     = always_true,
   [ast.typed.expr.AddressOf]                  = always_true,
   [ast.typed.expr.Future]                     = always_true,
   [ast.typed.expr.FutureGetResult]            = always_true,
@@ -188,10 +189,10 @@ local node_is_side_effect_free = {
 
   [ast.typed.stat.Block]                      = always_true,
   [ast.typed.stat.Var]                        = always_true,
+  [ast.typed.stat.Assignment]                 = always_true,
   [ast.typed.stat.Expr]                       = always_true,
 
   -- TODO: unimplemented
-  [ast.typed.stat.Assignment]                 = always_false,
 
   [ast.typed.stat.Internal]                   = unreachable,
   [ast.typed.stat.ForNumVectorized]           = unreachable,
@@ -217,8 +218,44 @@ local function predicate_call(cx, node)
   }
 end
 
-local function predicate_assign(cx, node)
-  assert(false, "unimplemented")
+local function predicate_assignment(cx, node)
+  local lhs_type = std.as_read(node.lhs.expr_type) -- FIXME: this is a write??
+  local rhs_type = std.as_read(node.rhs.expr_type)
+  assert(std.is_future(lhs_type))
+  assert(std.is_future(rhs_type))
+
+  -- If there's an existing call, reuse it.
+  if node.rhs:is(ast.typed.expr.Call) then
+    return node {
+      rhs = node.rhs {
+        predicate_else_value = node.lhs,
+      }
+    }
+  end
+
+  -- Otherwise create a dummy task and run the result through it.
+  local value_type = rhs_type.result_type
+  local identity_task = task_helper.make_identity_task(value_type)
+  return node {
+    rhs = ast.typed.expr.Call {
+      fn = ast.typed.expr.Function {
+        value = identity_task,
+        expr_type = identity_task:get_type(),
+        annotations = ast.default_annotations(),
+        span = node.span,
+      },
+      args = terralib.newlist({
+        node.rhs,
+      }),
+      conditions = terralib.newlist(),
+      predicate = cx.cond,
+      predicate_else_value = node.lhs,
+      replicable = false,
+      expr_type = rhs_type,
+      annotations = ast.default_annotations(),
+      span = node.span,
+    },
+  }
 end
 
 local function do_nothing(cx, node) return node end
@@ -227,7 +264,7 @@ local predicate_node_table = {
   [ast.typed.expr.Call]   = predicate_call,
   [ast.typed.expr]        = do_nothing,
 
-  [ast.typed.stat.Assignment] = predicate_assign,
+  [ast.typed.stat.Assignment] = predicate_assignment,
   [ast.typed.stat]            = do_nothing,
 }
 

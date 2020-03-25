@@ -345,7 +345,7 @@ function pretty.expr_call(cx, node)
     args:insert(join({"predicate=", pretty.expr(cx, node.predicate)}))
   end
   if node.predicate_else_value then
-    args:insert(join({"predicate_else_value=", pretty.expr(cx, node.predicate)}))
+    args:insert(join({"predicate_else_value=", pretty.expr(cx, node.predicate_else_value)}))
   end
   return join({pretty.expr(cx, node.fn), "(", commas(args) , ")"})
 end

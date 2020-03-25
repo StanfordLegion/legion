@@ -21,7 +21,7 @@ task condition1()
 end
 
 task condition2()
-  return true
+  return false
 end
 
 task body1()
@@ -38,15 +38,33 @@ task main()
     body1()
   end
 
-  -- Blocks (without control flow) and variables are ok.
+  -- Do blocks, variables, assignment, simple expressions are all ok.
+  var z = 123
   __demand(__predicate)
-  if condition2() then
+  if condition1() then
     do
       var x = 1
       do
         var y = body2(x)
       end
+      z = body2(x) + 10
+      z = z + 200
     end
   end
+  regentlib.assert(z == 212, "test failed")
+
+  -- Make sure assignment doesn't take effect if the condition is false.
+  var w = 123
+  var u = 456
+  var v = 789 -- this variable is NOT assigned to the result of a task
+  __demand(__predicate)
+  if condition2() then
+    w = body2(10) + 10
+    u = body2(100)
+    v = 1000
+  end
+  regentlib.assert(w == 123, "test failed")
+  regentlib.assert(u == 456, "test failed")
+  regentlib.assert(v == 789, "test failed")
 end
 regentlib.start(main)
