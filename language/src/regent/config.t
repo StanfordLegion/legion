@@ -65,7 +65,7 @@ local default_options = {
   ["openmp"] = config.UNSPECIFIED,
   ["openmp-offline"] = not data.is_luajit(),
   ["openmp-strict"] = false,
-  ["skip-empty-tasks"] = true,
+  ["skip-empty-tasks"] = false,
   ["vectorize"] = true,
 
   -- Legion runtime optimization flags:

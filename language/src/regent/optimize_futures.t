@@ -338,9 +338,12 @@ function analyze_var_flow.stat_assignment(cx, node)
   local rhs = analyze_var_flow.expr(cx, node.rhs)
   flow_value_into(cx, lhs, rhs)
 
-  -- Make sure any dominating conditions flow into this assignment.
-  for _, cond in pairs(cx.conds) do
-    flow_value_into(cx, lhs, cond)
+  -- FIXME: This breaks some tests, like Pennant.
+  if std.config["predicate"] then
+    -- Make sure any dominating conditions flow into this assignment.
+    for _, cond in pairs(cx.conds) do
+      flow_value_into(cx, lhs, cond)
+    end
   end
 end
 
@@ -349,9 +352,12 @@ function analyze_var_flow.stat_reduce(cx, node)
   local rhs = analyze_var_flow.expr(cx, node.rhs)
   flow_value_into(cx, lhs, rhs)
 
-  -- Make sure any dominating conditions flow into this assignment.
-  for _, cond in pairs(cx.conds) do
-    flow_value_into(cx, lhs, cond)
+  -- FIXME: This breaks some tests, like Pennant.
+  if std.config["predicate"] then
+    -- Make sure any dominating conditions flow into this assignment.
+    for _, cond in pairs(cx.conds) do
+      flow_value_into(cx, lhs, cond)
+    end
   end
 end
 

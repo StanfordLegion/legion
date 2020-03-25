@@ -8803,6 +8803,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
     function(condition)
       return codegen.expr_condition(cx, condition)
     end)
+  local predicate = node.call.predicate and codegen.expr(cx, node.call.predicate):read(cx)
 
   local symbol_type = node.symbol:gettype()
   local symbol = node.symbol:getsymbol()
@@ -8828,6 +8829,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
          return arg_actions
        end)];
     [conditions:map(function(condition) return condition.actions end)]
+    [predicate and predicate.actions]
   end
 
   local arg_types = terralib.newlist()
@@ -8972,6 +8974,18 @@ local function stat_index_launch_setup(cx, node, domain, actions)
     end
   end
 
+  -- Setup predicate.
+  local predicate_symbol = terralib.newsymbol(c.legion_predicate_t, "predicate")
+  local predicate_value
+  if predicate then
+    predicate_value = `c.legion_predicate_create([cx.runtime], [cx.context], [predicate.value].__result)
+  else
+    predicate_value = `c.legion_predicate_true()
+  end
+  local predicate_setup = quote
+    var [predicate_symbol] = [predicate_value]
+  end
+
   local argument_map = terralib.newsymbol(c.legion_argument_map_t, "argument_map")
   local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
   local launcher_setup = quote
@@ -8980,13 +8994,14 @@ local function stat_index_launch_setup(cx, node, domain, actions)
     var g_args : c.legion_task_argument_t
     g_args.args = nil
     g_args.arglen = 0
+    [predicate_setup]
     var mapper = [fn.value:has_mapper_id() or 0]
     var [tag] = [fn.value:has_mapping_tag_id() or 0]
     [codegen_hooks.gen_update_mapping_tag(tag, fn.value:has_mapping_tag_id(), cx.task)]
     var [launcher] = c.legion_index_launcher_create(
       [fn.value:get_task_id()],
       [domain], g_args, [argument_map],
-      c.legion_predicate_true(), false, [mapper], [tag])
+      [predicate_symbol], false, [mapper], [tag])
     do
       var it = c.legion_domain_point_iterator_create([domain])
       var args_uninitialized = true
@@ -9117,6 +9132,13 @@ local function stat_index_launch_setup(cx, node, domain, actions)
   else
     launcher_cleanup = quote
       c.legion_argument_map_destroy([argument_map])
+    end
+  end
+
+  if predicate then
+    launcher_cleanup = quote
+      [launcher_cleanup]
+      c.legion_predicate_destroy([predicate_symbol])
     end
   end
 

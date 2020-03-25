@@ -93,7 +93,6 @@ local node_is_side_effect_free = {
   end,
 
   [ast.typed.expr.MethodCall]                 = always_false,
-  [ast.typed.expr.Cast]                       = always_false,
   [ast.typed.expr.RawContext]                 = always_false,
   [ast.typed.expr.RawPhysical]                = always_false,
   [ast.typed.expr.RawRuntime]                 = always_false,
@@ -139,6 +138,7 @@ local node_is_side_effect_free = {
   [ast.typed.expr.Global]                     = always_true,
   [ast.typed.expr.Function]                   = always_true,
   [ast.typed.expr.FieldAccess]                = always_true,
+  [ast.typed.expr.Cast]                       = always_true,
   [ast.typed.expr.Ctor]                       = always_true,
   [ast.typed.expr.CtorListField]              = always_true,
   [ast.typed.expr.CtorRecField]               = always_true,
@@ -167,15 +167,17 @@ local node_is_side_effect_free = {
   [ast.typed.expr.Internal]                   = unreachable,
 
   -- Statements:
+  [ast.typed.stat.IndexLaunchList] = function(cx, node)
+    return {not node.reduce_op, node}
+  end,
+  [ast.typed.stat.IndexLaunchNum] = function(cx, node)
+    return {not node.reduce_op, node}
+  end,
+
   [ast.typed.stat.If]                         = always_false,
   [ast.typed.stat.Elseif]                     = always_false,
   [ast.typed.stat.While]                      = always_false,
-  [ast.typed.stat.ForNum]                     = always_false,
-  [ast.typed.stat.ForList]                    = always_false,
-  [ast.typed.stat.Repeat]                     = always_false,
   [ast.typed.stat.MustEpoch]                  = always_false,
-  [ast.typed.stat.IndexLaunchNum]             = always_false,
-  [ast.typed.stat.IndexLaunchList]            = always_false,
   [ast.typed.stat.VarUnpack]                  = always_false,
   [ast.typed.stat.Return]                     = always_false,
   [ast.typed.stat.Break]                      = always_false,
@@ -187,6 +189,9 @@ local node_is_side_effect_free = {
   [ast.typed.stat.BeginTrace]                 = always_false,
   [ast.typed.stat.EndTrace]                   = always_false,
 
+  [ast.typed.stat.ForNum]                     = always_true,
+  [ast.typed.stat.ForList]                    = always_true,
+  [ast.typed.stat.Repeat]                     = always_true,
   [ast.typed.stat.Block]                      = always_true,
   [ast.typed.stat.Var]                        = always_true,
   [ast.typed.stat.Assignment]                 = always_true,
@@ -215,6 +220,14 @@ end
 local function predicate_call(cx, node)
   return node {
     predicate = cx.cond,
+  }
+end
+
+local function predicate_index_launch(cx, node)
+  return node {
+    call = node.call {
+      predicate = cx.cond,
+    },
   }
 end
 
@@ -261,11 +274,13 @@ end
 local function do_nothing(cx, node) return node end
 
 local predicate_node_table = {
-  [ast.typed.expr.Call]   = predicate_call,
-  [ast.typed.expr]        = do_nothing,
+  [ast.typed.expr.Call]            = predicate_call,
+  [ast.typed.expr]                 = do_nothing,
 
-  [ast.typed.stat.Assignment] = predicate_assignment,
-  [ast.typed.stat]            = do_nothing,
+  [ast.typed.stat.IndexLaunchNum]  = predicate_index_launch,
+  [ast.typed.stat.IndexLaunchList] = predicate_index_launch,
+  [ast.typed.stat.Assignment]      = predicate_assignment,
+  [ast.typed.stat]                 = do_nothing,
 }
 
 local predicate_node = ast.make_single_dispatch(
@@ -295,6 +310,7 @@ function optimize_predicate.stat_if(cx, node)
 
   local result, result_node = unpack(analyze_is_side_effect_free(cx, node.then_block))
   if not result then
+    result_node:printpretty(true)
     report_fail(result_node, "cannot predicate if statement: body is not side-effect free")
     return node
   end
