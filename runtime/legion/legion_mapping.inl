@@ -83,7 +83,7 @@ namespace Legion {
     {
       DomainT<DIM,T> realm_is((Realm::IndexSpace<DIM,T>(bounds)));
       const Domain dom(realm_is);
-      return IndexSpaceT<DIM,T>(create_index_space_internal(ctx, dom, &realm_is,
+      return IndexSpaceT<DIM,T>(create_index_space(ctx, dom,
             Legion::Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
     }
 
@@ -99,7 +99,7 @@ namespace Legion {
         realm_points[idx] = points[idx];
       DomainT<DIM,T> realm_is((Realm::IndexSpace<DIM,T>(realm_points)));
       const Domain dom(realm_is);
-      return IndexSpaceT<DIM,T>(create_index_space_internal(ctx, dom, &realm_is,
+      return IndexSpaceT<DIM,T>(create_index_space(ctx, dom,
                 Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
     }
 
@@ -274,7 +274,8 @@ namespace Legion {
                              ProfilingMeasurements::RuntimeOverhead>(void) const 
     //--------------------------------------------------------------------------
     {
-      return overhead;
+      // Always produce a copy for the mapper to own
+      return new ProfilingMeasurements::RuntimeOverhead(*overhead);
     }
 
     //--------------------------------------------------------------------------

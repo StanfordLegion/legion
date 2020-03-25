@@ -357,7 +357,7 @@ void check_result_task(const void *args, size_t arglen,
     printf("FAILURE!\n\n");
 }
 
-#ifdef USE_CUDA
+#ifdef REALM_USE_CUDA
 extern void gpu_saxpy_task(const void *args, size_t arglen,
                            const void *userdata, size_t userlen, Processor p);
 #endif
@@ -370,7 +370,7 @@ int main(int argc, char **argv)
 
   rt.register_task(TOP_LEVEL_TASK, top_level_task);
   rt.register_task(CPU_SAXPY_TASK, cpu_saxpy_task);
-#ifdef USE_CUDA
+#ifdef REALM_USE_CUDA
   rt.register_task(GPU_SAXPY_TASK, gpu_saxpy_task);
 #endif
   rt.register_task(CHECK_RESULT_TASK, check_result_task);

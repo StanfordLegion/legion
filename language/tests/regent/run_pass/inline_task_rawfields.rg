@@ -28,7 +28,7 @@ task test(t : region(ispace(int1d), Fields))
 where
   reads(t.B), writes(t.A)
 do
-  var a = __fields(t)
+  var a = __fields(t.{A, B})
   return a[0]
 end
 

@@ -131,6 +131,7 @@ namespace Legion {
       virtual bool remove_recorder_reference(void) = 0;
       virtual void pack_recorder(Serializer &rez, 
           std::set<RtEvent> &applied, const AddressSpaceID target) = 0; 
+      virtual RtEvent get_collect_event(void) const = 0;
     public:
       virtual void record_get_term_event(Memoizable *memo) = 0;
       virtual void record_create_ap_user_event(ApUserEvent lhs, 
@@ -224,7 +225,8 @@ namespace Legion {
       };
     public:
       RemoteTraceRecorder(Runtime *rt, AddressSpaceID origin,AddressSpace local,
-          Memoizable *memo, PhysicalTemplate *tpl, RtUserEvent applied_event);
+                          Memoizable *memo, PhysicalTemplate *tpl, 
+                          RtUserEvent applied_event, RtEvent collect_event);
       RemoteTraceRecorder(const RemoteTraceRecorder &rhs);
       virtual ~RemoteTraceRecorder(void);
     public:
@@ -235,6 +237,7 @@ namespace Legion {
       virtual bool remove_recorder_reference(void);
       virtual void pack_recorder(Serializer &rez, 
           std::set<RtEvent> &applied, const AddressSpaceID target);
+      virtual RtEvent get_collect_event(void) const { return collect_event; }
     public:
       virtual void record_get_term_event(Memoizable *memo);
       virtual void record_create_ap_user_event(ApUserEvent lhs, 
@@ -320,6 +323,7 @@ namespace Legion {
       const RtUserEvent applied_event;
       mutable LocalLock applied_lock;
       std::set<RtEvent> applied_events;
+      const RtEvent collect_event;
     };
 
     /**
@@ -395,6 +399,14 @@ namespace Legion {
         {
           base_sanity_check();
           rec->record_complete_replay(local, ready_event);
+        }
+    public:
+      inline RtEvent get_collect_event(void) const 
+        {
+          if ((memo == NULL) || !recording)
+            return RtEvent::NO_RT_EVENT;
+          else
+            return rec->get_collect_event();
         }
     protected:
       inline void base_sanity_check(void) const
@@ -558,8 +570,14 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = PHYSICAL_USER_ALLOC;
     public:
+#ifdef ENABLE_VIEW_REPLICATION
+      PhysicalUser(const RegionUsage &u, IndexSpaceExpression *expr,
+                   UniqueID op_id, unsigned index, RtEvent collect_event,
+                   bool copy, bool covers);
+#else
       PhysicalUser(const RegionUsage &u, IndexSpaceExpression *expr,
                    UniqueID op_id, unsigned index, bool copy, bool covers);
+#endif
       PhysicalUser(const PhysicalUser &rhs);
       ~PhysicalUser(void);
     public:
@@ -573,6 +591,9 @@ namespace Legion {
       IndexSpaceExpression *const expr;
       const UniqueID op_id;
       const unsigned index; // region requirement index
+#ifdef ENABLE_VIEW_REPLICATION
+      const RtEvent collect_event;
+#endif
       const bool copy_user; // is this from a copy or an operation
       const bool covers; // whether the expr covers the ExprView its in
     };  
@@ -2414,7 +2435,7 @@ namespace Legion {
       // Uses these for determining when we should do migration
       // There is an implicit assumption here that equivalence sets
       // are only used be a small number of nodes that is less than
-      // the smaples per migration count, if it ever exceeds this 
+      // the samples per migration count, if it ever exceeds this 
       // then we'll issue a warning
       static const unsigned SAMPLES_PER_MIGRATION_TEST = 64;
       // How many total epochs we want to remember

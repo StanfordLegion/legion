@@ -21,7 +21,7 @@
 #include <sys/types.h>
 #include <fcntl.h>
 #include "legion.h"
-#ifdef USE_HDF
+#ifdef LEGION_USE_HDF5
 #include <hdf5.h>
 #endif
 using namespace Legion;
@@ -78,7 +78,7 @@ bool generate_disk_file(const char *file_name, int num_elements)
   return true;
 }
 
-#ifdef USE_HDF
+#ifdef LEGION_USE_HDF5
 bool generate_hdf_file(const char *file_name, const char *dataset_name, int num_elements)
 {
   // strip off any filename prefix starting with a colon
@@ -161,7 +161,7 @@ void top_level_task(const Task *task,
   int num_subregions = 4;
   char disk_file_name[256];
   strcpy(disk_file_name, "checkpoint.dat");
-#ifdef USE_HDF
+#ifdef LEGION_USE_HDF5
   char hdf5_file_name[256];
   char hdf5_dataset_name[256];
   hdf5_file_name[0] = 0;
@@ -178,7 +178,7 @@ void top_level_task(const Task *task,
         num_subregions = atoi(command_args.argv[++i]);
       if (!strcmp(command_args.argv[i],"-f"))
 	strcpy(disk_file_name, command_args.argv[++i]);
-#ifdef USE_HDF
+#ifdef LEGION_USE_HDF5
       if (!strcmp(command_args.argv[i],"-h"))
 	strcpy(hdf5_file_name, command_args.argv[++i]);
       if (!strcmp(command_args.argv[i],"-d"))
@@ -253,7 +253,7 @@ void top_level_task(const Task *task,
   double ts_start, ts_mid, ts_end;
   ts_start = Realm::Clock::current_time_in_microseconds();
   PhysicalRegion cp_pr;
-#ifdef USE_HDF
+#ifdef LEGION_USE_HDF5
   if(*hdf5_file_name) {
     // create the HDF5 file first - attach wants it to already exist
     bool ok = generate_hdf_file(hdf5_file_name, hdf5_dataset_name, num_elements);
@@ -288,7 +288,7 @@ void top_level_task(const Task *task,
   
   //clock_gettime(CLOCK_MONOTONIC, &ts_mid);
   ts_mid = Realm::Clock::current_time_in_microseconds();
-#ifdef USE_HDF
+#ifdef LEGION_USE_HDF5
   if(*hdf5_file_name) {
     runtime->detach_hdf5(ctx, cp_pr);
   } else

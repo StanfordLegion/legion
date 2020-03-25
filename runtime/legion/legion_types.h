@@ -371,6 +371,7 @@ namespace Legion {
       LG_DEFER_PERFORM_OUTPUT_TASK_ID,
       LG_DEFER_INSTANCE_MANAGER_TASK_ID,
       LG_DEFER_REDUCTION_MANAGER_TASK_ID,
+      LG_DEFER_VERIFY_PARTITION_TASK_ID,
       LG_YIELD_TASK_ID,
       LG_MESSAGE_ID, // These two must be the last two
       LG_RETRY_SHUTDOWN_TASK_ID,
@@ -496,6 +497,7 @@ namespace Legion {
         "Defer Physical Analysis Output Stage",                   \
         "Defer Instance Manager Registration",                    \
         "Defer Reduction Manager Registration",                   \
+        "Defer Verify Partition",                                 \
         "Yield",                                                  \
         "Remote Message",                                         \
         "Retry Shutdown",                                         \
@@ -658,6 +660,7 @@ namespace Legion {
       STEAL_MESSAGE,
       ADVERTISEMENT_MESSAGE,
       SEND_REMOTE_TASK_REPLAY,
+      SEND_REMOTE_TASK_PROFILING_RESPONSE,
       SEND_INDEX_SPACE_NODE,
       SEND_INDEX_SPACE_REQUEST,
       SEND_INDEX_SPACE_RETURN,
@@ -823,6 +826,7 @@ namespace Legion {
         "Steal Message",                                              \
         "Advertisement Message",                                      \
         "Send Remote Task Replay",                                    \
+        "Send Remote Task Profiling Response",                        \
         "Send Index Space Node",                                      \
         "Send Index Space Request",                                   \
         "Send Index Space Return",                                    \
@@ -1331,7 +1335,8 @@ namespace Legion {
     public:
       virtual void handle_profiling_response(
                 const ProfilingResponseBase *base,
-                const Realm::ProfilingResponse &response) = 0;
+                const Realm::ProfilingResponse &response,
+                const void *orig, size_t orig_length) = 0;
     };
     struct ProfilingResponseBase {
     public:
@@ -1351,6 +1356,7 @@ namespace Legion {
     class PointCopyOp;
     class FenceOp;
     class FrameOp;
+    class CreationOp;
     class DeletionOp;
     class InternalOp;
     class CloseOp;
@@ -1593,6 +1599,7 @@ namespace Legion {
     friend class Internal::FenceOp;                         \
     friend class Internal::DynamicCollectiveOp;             \
     friend class Internal::FuturePredOp;                    \
+    friend class Internal::CreationOp;                      \
     friend class Internal::DeletionOp;                      \
     friend class Internal::CloseOp;                         \
     friend class Internal::MergeCloseOp;                    \

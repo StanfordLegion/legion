@@ -13,18 +13,18 @@
 -- limitations under the License.
 
 -- fails-with:
--- invalid_import_partition4.rg:27: cannot import a handle that is already imported
+-- optimize_predicate1.rg:26: cannot predicate if statement: condition is not a future
+--   if true then
+--    ^
 
 import "regent"
 
+task f() end
+
 task main()
-  var is = ispace(int1d, 5)
-  var r = region(is, int)
-  var cs = ispace(int1d, 2)
-  var p = partition(equal, r, cs)
-
-  var raw_p = __raw(p)
-  var q = __import_partition(disjoint, r, cs, raw_p)
+  __demand(__predicate)
+  if true then
+    f()
+  end
 end
-
-regentlib.start(main)
+main:compile()

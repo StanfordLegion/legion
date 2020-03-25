@@ -22,7 +22,7 @@
 #include "realm/memory.h"
 #include "realm/indexspace.h"
 
-#ifdef USE_HDF
+#ifdef REALM_USE_HDF5
 #include "realm/hdf5/hdf5_internal.h"
 #endif
 
@@ -77,7 +77,7 @@ namespace Realm {
       size_t plane_stride;
     };
 
-#ifdef USE_HDF
+#ifdef REALM_USE_HDF5
     struct AddressInfoHDF5 {
       //hid_t dset_id;
       //hid_t dtype_id;
@@ -94,7 +94,7 @@ namespace Realm {
     //  another one is possible
     virtual size_t step(size_t max_bytes, AddressInfo& info, unsigned flags,
 			bool tentative = false) = 0;
-#ifdef USE_HDF
+#ifdef REALM_USE_HDF5
     virtual size_t step(size_t max_bytes, AddressInfoHDF5& info,
 			bool tentative = false);
 #endif

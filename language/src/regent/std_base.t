@@ -1373,6 +1373,11 @@ function base.task:set_task_id(task_id)
   self.taskid = terralib.constant(c.legion_task_id_t, task_id)
 end
 
+-- TODO: This is actually safe once we make task ids global variables
+function base.task:set_task_id_unsafe(task_id)
+  self.taskid = terralib.constant(c.legion_task_id_t, task_id)
+end
+
 function base.task:get_task_id()
   return self.taskid
 end

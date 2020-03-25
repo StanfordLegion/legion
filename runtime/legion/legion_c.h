@@ -875,6 +875,18 @@ extern "C" {
                                    legion_domain_t domain);
 
   /**
+   * @return Caller takes ownership of return value
+   *
+   * @see Legion::Runtime::create_index_space(Context, size_t, Future, TypeTag)
+   */
+  legion_index_space_t
+  legion_index_space_create_future(legion_runtime_t runtime,
+                                   legion_context_t ctx,
+                                   size_t dimensions,
+                                   legion_future_t future,
+                                   legion_type_tag_t type_tag/*=0*/);
+
+  /**
    * @return Caller takes ownership of return value.
    *
    * @see Legion::Runtime::union_index_spaces
@@ -2477,6 +2489,19 @@ extern "C" {
                            legion_reduction_op_id_t redop,
                            bool deterministic);
 
+  /**
+   * @return Caller takes ownership of return value
+   *
+   * @see Legion::Runtime::construct_future_map
+   */
+  legion_future_map_t
+  legion_future_map_construct(legion_runtime_t runtime,
+                              legion_context_t ctx,
+                              legion_domain_t domain,
+                              legion_domain_point_t *points,
+                              legion_future_t *futures,
+                              size_t num_futures);
+
   // -----------------------------------------------------------------------
   // Deferred Buffer Operations
   // -----------------------------------------------------------------------
@@ -2694,6 +2719,20 @@ extern "C" {
                                           legion_index_space_t is);
 
   /**
+   * @see Legion::TaskLauncher::predicate_false_future
+   */
+  void
+  legion_task_launcher_set_predicate_false_future(legion_task_launcher_t launcher,
+                                                  legion_future_t f);
+
+  /**
+   * @see Legion::TaskLauncher::predicate_false_result
+   */
+  void
+  legion_task_launcher_set_predicate_false_result(legion_task_launcher_t launcher,
+                                                  legion_task_argument_t arg);
+
+  /**
    * @see Legion::TaskLauncher::map_id
    */
   void
@@ -2706,6 +2745,13 @@ extern "C" {
   void
   legion_task_launcher_set_mapping_tag(legion_task_launcher_t launcher,
                                        legion_mapping_tag_id_t tag);
+
+  /**
+   * @see Legion::TaskLauncher::enable_inlining
+   */
+  void
+  legion_task_launcher_set_enable_inlining(legion_task_launcher_t launcher,
+                                           bool enable_inlining);
 
   /**
    * @return Caller takes ownership of return value.
@@ -3360,6 +3406,20 @@ extern "C" {
                                            legion_phase_barrier_t bar);
 
   /**
+   * @see Legion::CopyLauncher::possible_src_indirect_out_of_range
+   */
+  void
+  legion_copy_launcher_set_possible_src_indirect_out_of_range(
+      legion_copy_launcher_t launcher, bool flag);
+
+  /**
+   * @see Legion::CopyLauncher::possible_dst_indirect_out_of_range
+   */
+  void
+  legion_copy_launcher_set_possible_dst_indirect_out_of_range(
+      legion_copy_launcher_t launcher, bool flag);
+
+  /**
    * @return Caller does **NOT** take ownership of return value.
    *
    * @see Legion::Copy::src_requirements
@@ -3579,6 +3639,20 @@ extern "C" {
   void
   legion_index_copy_launcher_add_arrival_barrier(legion_index_copy_launcher_t launcher,
                                                  legion_phase_barrier_t bar);
+
+  /**
+   * @see Legion::IndexCopyLauncher::possible_src_indirect_out_of_range
+   */
+  void
+  legion_index_copy_launcher_set_possible_src_indirect_out_of_range(
+      legion_index_copy_launcher_t launcher, bool flag);
+
+  /**
+   * @see Legion::IndexCopyLauncher::possible_dst_indirect_out_of_range
+   */
+  void
+  legion_index_copy_launcher_set_possible_dst_indirect_out_of_range(
+      legion_index_copy_launcher_t launcher, bool flag);
 
   // -----------------------------------------------------------------------
   // Acquire Operations

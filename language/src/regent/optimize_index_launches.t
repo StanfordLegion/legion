@@ -225,7 +225,7 @@ local function analyze_noninterference_previous(
   for i, other_arg in pairs(regions_previously_used) do
     local other_region_type = std.as_read(other_arg.expr_type)
     if other_region_type:is_projected() then
-      other_region_type = region_type:get_projection_source()
+      other_region_type = other_region_type:get_projection_source()
     end
     local constraint = std.constraint(
       region_type,
@@ -1198,6 +1198,7 @@ function optimize_index_launch.stat_for_num(cx, node)
     call = body.call,
     reduce_lhs = body.reduce_lhs,
     reduce_op = body.reduce_op,
+    reduce_task = false,
     args_provably = body.args_provably,
     free_vars = body.free_variables,
     loop_vars = body.loop_variables,
@@ -1241,6 +1242,7 @@ function optimize_index_launch.stat_for_list(cx, node)
     call = body.call,
     reduce_lhs = body.reduce_lhs,
     reduce_op = body.reduce_op,
+    reduce_task = false,
     args_provably = body.args_provably,
     free_vars = body.free_variables,
     loop_vars = body.loop_variables,

@@ -563,18 +563,7 @@ namespace Legion {
         instance_domain->add_expression_reference();
       // Add a reference to the layout
       if (layout != NULL)
-        layout->add_reference();
-      if (!gc_events.empty())
-      {
-        // There's no need to launch a task to do this, if we're being
-        // deleted it's because the instance was deleted and therefore
-        // all the users are done using it
-        for (std::map<CollectableView*,CollectableInfo>::iterator it = 
-              gc_events.begin(); it != gc_events.end(); it++)
-          CollectableView::handle_deferred_collect(it->first,
-                                                   it->second.view_events);
-        gc_events.clear();
-      }
+        layout->add_reference(); 
     }
 
     //--------------------------------------------------------------------------
@@ -594,6 +583,22 @@ namespace Legion {
         memory_manager->unregister_remote_instance(this);
       if ((layout != NULL) && layout->remove_reference())
         delete layout;
+      if (!gc_events.empty())
+      {
+        // There's no need to launch a task to do this, if we're being
+        // deleted it's because the instance was deleted and therefore
+        // all the users are done using it
+        for (std::map<CollectableView*,CollectableInfo>::iterator it = 
+              gc_events.begin(); it != gc_events.end(); it++)
+        {
+          if (it->second.collect_event.exists() &&
+              !it->second.collect_event.has_triggered())
+            it->second.collect_event.wait();
+          CollectableView::handle_deferred_collect(it->first,
+                                                   it->second.view_events);
+        }
+        gc_events.clear();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -726,9 +731,13 @@ namespace Legion {
               gc_events.begin(); it != gc_events.end(); it++)
         {
           GarbageCollectionArgs args(it->first, new std::set<ApEvent>());
-          const RtEvent precondition = 
+          RtEvent precondition =
             Runtime::protect_merge_events(it->second.view_events);
           args.to_collect->swap(it->second.view_events);
+          if (it->second.collect_event.exists() &&
+              !it->second.collect_event.has_triggered())
+            precondition = Runtime::merge_events(precondition, 
+                                    it->second.collect_event);
           runtime->issue_runtime_meta_task(args, 
               LG_THROUGHPUT_WORK_PRIORITY, precondition);
         }
@@ -1078,8 +1087,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalManager::defer_collect_user(CollectableView *view,
-                              ApEvent term_event, std::set<ApEvent> &to_collect,
-                              bool &add_ref, bool &remove_ref) 
+                                             ApEvent term_event,RtEvent collect,
+                                             std::set<ApEvent> &to_collect,
+                                             bool &add_ref, bool &remove_ref) 
     //--------------------------------------------------------------------------
     {
       AutoLock inst(inst_lock);
@@ -1087,8 +1097,20 @@ namespace Legion {
       if (info.view_events.empty())
         add_ref = true;
       info.view_events.insert(term_event);
+      info.events_added++;
+      if (collect.exists())
+        info.collect_event = collect;
+      // Skip collections if there is a collection event guarding 
+      // collection in the case of tracing
+      if (info.collect_event.exists())
+      {
+        if (!info.collect_event.has_triggered())
+          return;
+        else
+          info.collect_event = RtEvent::NO_RT_EVENT;
+      }
       // Only do the pruning for every so many adds
-      if ((++info.events_added) == runtime->gc_epoch_size)
+      if (info.events_added >= runtime->gc_epoch_size)
       {
         for (std::set<ApEvent>::iterator it = info.view_events.begin();
               it != info.view_events.end(); /*nothing*/)
@@ -2397,9 +2419,11 @@ namespace Legion {
               regions.begin(); it != regions.end(); it++)
           runtime->profiler->record_physical_instance_region(creator_id, 
                                                       instance.id, *it);
-        runtime->profiler->record_physical_instance_fields(creator_id, 
-                                    instance.id, layout->owner->handle, 
-                                    constraints.field_constraint.field_set);
+        runtime->profiler->record_physical_instance_layout(
+                                                     creator_id,
+                                                     instance.id,
+                                                     layout->owner->handle,
+                                                     layout->constraints);
       }
       return result;
     }
@@ -2407,7 +2431,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void InstanceBuilder::handle_profiling_response(
                                        const ProfilingResponseBase *base,
-                                       const Realm::ProfilingResponse &response)
+                                       const Realm::ProfilingResponse &response,
+                                       const void *orig, size_t orig_length)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION

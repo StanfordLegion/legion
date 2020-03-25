@@ -194,6 +194,7 @@ local update_block_with_loop_values = update_block_with_symbol_value("symbol", "
 local node_alpha_conversion = {
   [ast.condition_kind]           = pass_through,
   [ast.disjointness_kind]        = pass_through,
+  [ast.completeness_kind]        = pass_through,
   [ast.fence_kind]               = pass_through,
 
   [ast.specialized.region.Bare]  = update_value,

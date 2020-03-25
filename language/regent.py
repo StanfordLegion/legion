@@ -40,12 +40,9 @@ bindings_dir = os.path.join(os.path.dirname(runtime_dir), 'bindings', 'regent')
 python_dir = os.path.join(os.path.dirname(runtime_dir), 'bindings', 'python')
 
 # Find CUDA.
-if 'CUDA' in os.environ:
-    cuda_dir = os.path.realpath(os.environ['CUDA'])
-elif 'CUDATOOLKIT_HOME' in os.environ:
-    cuda_dir = os.path.realpath(os.environ['CUDATOOLKIT_HOME'])
-else:
-    cuda_dir = None
+cuda_dir = os.environ.get('CUDA') or os.environ.get('CUDA_HOME') or os.environ.get('CUDATOOLKIT_HOME')
+if cuda_dir:
+    cuda_dir = os.path.realpath(cuda_dir)
 cuda_include_dir = os.path.join(cuda_dir, 'include') if cuda_dir is not None else None
 
 # Find RDIR.

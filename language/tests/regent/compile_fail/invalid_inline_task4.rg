@@ -13,19 +13,25 @@
 -- limitations under the License.
 
 -- fails-with:
--- invalid_import_ispace4.rg:28: cannot import a handle that is already imported
+-- invalid_inline_task4.rg:36: ambiguous field access in __fields: every field path in an inline task must be fully specified.
+--   var a = __fields(t)
+--                      ^
 
 import "regent"
 
-terra create_index_space(runtime : regentlib.c.legion_runtime_t,
-                         context : regentlib.c.legion_context_t)
-  return regentlib.c.legion_index_space_create(runtime, context, 1)
-end
+local c = regentlib.c
 
-task main()
-  var raw_is = create_index_space(__runtime(), __context())
-  var is = __import_ispace(int1d, raw_is)
-  var is_again = __import_ispace(int1d, raw_is)
-end
+fspace Fields
+{
+  A : double,
+  B : double,
+  C : double
+}
 
-regentlib.start(main)
+__demand(__inline)
+task test(t : region(ispace(int1d), Fields))
+where
+  reads(t)
+do
+  var a = __fields(t)
+end

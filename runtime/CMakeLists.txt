@@ -251,11 +251,15 @@ if(Legion_USE_CUDA)
 
   target_include_directories(RealmRuntime PRIVATE ${CUDA_INCLUDE_DIRS})
   target_link_libraries(RealmRuntime PRIVATE ${CUDA_CUDA_LIBRARY})
+  # for backwards compatibility in applications
+  target_compile_definitions(RealmRuntime INTERFACE USE_CUDA)
 endif()
 
 if(Legion_USE_HDF5)
   target_include_directories(RealmRuntime PRIVATE ${HDF5_INCLUDE_DIRS})
   target_link_libraries(RealmRuntime PRIVATE ${HDF5_LIBRARIES})
+  # for backwards compatibility in applications
+  target_compile_definitions(RealmRuntime INTERFACE USE_HDF)
 endif()
 
 if(Legion_USE_Python)
@@ -300,6 +304,7 @@ list(APPEND LEGION_SRC
   legion.h
   legion/accessor.h
   legion/arrays.h
+  legion/bitmask.h
   legion/field_tree.h
   legion/garbage_collection.h             legion/garbage_collection.cc
   legion/interval_tree.h                 
@@ -331,6 +336,14 @@ list(APPEND LEGION_SRC
   legion/region_tree.h                    legion/region_tree.cc
   legion/runtime.h                        legion/runtime.cc
 )
+
+if(Legion_REDOP_HALF)
+  list(APPEND LEGION_SRC mathtypes/half.h)
+endif()
+
+if(Legion_REDOP_COMPLEX)
+  list(APPEND LEGION_SRC mathtypes/complex.h)
+endif()
 
 # generate per-dimension object files for deppart stuff
 foreach(N1 RANGE 1 ${LEGION_MAX_DIM})

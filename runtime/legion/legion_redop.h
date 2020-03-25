@@ -19,14 +19,14 @@
 #include <limits.h>
 
 #ifdef LEGION_REDOP_HALF
-#include "half.h"
+#include "mathtypes/half.h"
 #endif
 
 #ifdef LEGION_REDOP_COMPLEX
 #ifdef LEGION_REDOP_HALF
 #define COMPLEX_HALF 
 #endif
-#include "complex.h"
+#include "mathtypes/complex.h"
 #endif
 
 #ifndef __CUDA_HD__
@@ -53,6 +53,21 @@ namespace Legion {
 
     static const bool identity = false;
     static const int REDOP_ID = LEGION_REDOP_OR_BOOL;
+
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void apply(LHS &lhs, RHS rhs);
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void fold(RHS &rhs1, RHS rhs2);
+  };
+
+  template<>
+  class SumReduction<int8_t> {
+  public:
+    typedef int8_t LHS;
+    typedef int8_t RHS;
+
+    static const int8_t identity = 0;
+    static const int REDOP_ID = LEGION_REDOP_SUM_INT8;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -98,6 +113,21 @@ namespace Legion {
 
     static const int64_t identity = 0;
     static const int REDOP_ID = LEGION_REDOP_SUM_INT64;
+
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void apply(LHS &lhs, RHS rhs);
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void fold(RHS &rhs1, RHS rhs2);
+  };
+
+  template<>
+  class SumReduction<uint8_t> {
+  public:
+    typedef uint8_t LHS;
+    typedef uint8_t RHS;
+
+    static const uint8_t identity = 0;
+    static const int REDOP_ID = LEGION_REDOP_SUM_UINT8;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -257,6 +287,21 @@ namespace Legion {
   };
 
   template<>
+  class DiffReduction<int8_t> {
+  public:
+    typedef int8_t LHS;
+    typedef int8_t RHS;
+
+    static const int8_t identity = 0;
+    static const int REDOP_ID = LEGION_REDOP_DIFF_INT8;
+
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void apply(LHS &lhs, RHS rhs);
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void fold(RHS &rhs1, RHS rhs2);
+  };
+
+  template<>
   class DiffReduction<int16_t> {
   public:
     typedef int16_t LHS;
@@ -294,6 +339,21 @@ namespace Legion {
 
     static const int64_t identity = 0;
     static const int REDOP_ID = LEGION_REDOP_DIFF_INT64;
+
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void apply(LHS &lhs, RHS rhs);
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void fold(RHS &rhs1, RHS rhs2);
+  };
+
+  template<>
+  class DiffReduction<uint8_t> {
+  public:
+    typedef uint8_t LHS;
+    typedef uint8_t RHS;
+
+    static const uint8_t identity = 0;
+    static const int REDOP_ID = LEGION_REDOP_DIFF_UINT8;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -449,6 +509,21 @@ namespace Legion {
   };
 
   template<>
+  class ProdReduction<int8_t> {
+  public:
+    typedef int8_t LHS;
+    typedef int8_t RHS;
+
+    static const int8_t identity = 1;
+    static const int REDOP_ID = LEGION_REDOP_PROD_INT8;
+
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void apply(LHS &lhs, RHS rhs);
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void fold(RHS &rhs1, RHS rhs2);
+  };
+
+  template<>
   class ProdReduction<int16_t> {
   public:
     typedef int16_t LHS;
@@ -486,6 +561,21 @@ namespace Legion {
 
     static const int64_t identity = 1;
     static const int REDOP_ID = LEGION_REDOP_PROD_INT64;
+
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void apply(LHS &lhs, RHS rhs);
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void fold(RHS &rhs1, RHS rhs2);
+  };
+
+  template<>
+  class ProdReduction<uint8_t> {
+  public:
+    typedef uint8_t LHS;
+    typedef uint8_t RHS;
+
+    static const uint8_t identity = 1;
+    static const int REDOP_ID = LEGION_REDOP_PROD_UINT8;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -626,6 +716,21 @@ namespace Legion {
   };
 
   template<>
+  class DivReduction<int8_t> {
+  public:
+    typedef int8_t LHS;
+    typedef int8_t RHS;
+
+    static const int8_t identity = 1;
+    static const int REDOP_ID = LEGION_REDOP_PROD_INT8;
+
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void apply(LHS &lhs, RHS rhs);
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void fold(RHS &rhs1, RHS rhs2);
+  };
+
+  template<>
   class DivReduction<int16_t> {
   public:
     typedef int16_t LHS;
@@ -663,6 +768,21 @@ namespace Legion {
 
     static const int64_t identity = 1;
     static const int REDOP_ID = LEGION_REDOP_PROD_INT64;
+
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void apply(LHS &lhs, RHS rhs);
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void fold(RHS &rhs1, RHS rhs2);
+  };
+
+  template<>
+  class DivReduction<uint8_t> {
+  public:
+    typedef uint8_t LHS;
+    typedef uint8_t RHS;
+
+    static const uint8_t identity = 1;
+    static const int REDOP_ID = LEGION_REDOP_PROD_UINT8;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -818,6 +938,21 @@ namespace Legion {
   };
 
   template<>
+  class MaxReduction<int8_t> {
+  public:
+    typedef int8_t LHS;
+    typedef int8_t RHS;
+
+    static const int8_t identity = SCHAR_MIN;
+    static const int REDOP_ID = LEGION_REDOP_MAX_INT8;
+
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void apply(LHS &lhs, RHS rhs);
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void fold(RHS &rhs1, RHS rhs2);
+  };
+
+  template<>
   class MaxReduction<int16_t> {
   public:
     typedef int16_t LHS;
@@ -855,6 +990,21 @@ namespace Legion {
 
     static const int64_t identity = LLONG_MIN;
     static const int REDOP_ID = LEGION_REDOP_MAX_INT64;
+
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void apply(LHS &lhs, RHS rhs);
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void fold(RHS &rhs1, RHS rhs2);
+  };
+
+  template<>
+  class MaxReduction<uint8_t> {
+  public:
+    typedef uint8_t LHS;
+    typedef uint8_t RHS;
+
+    static const uint8_t identity = 0;
+    static const int REDOP_ID = LEGION_REDOP_MAX_UINT8;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -976,6 +1126,21 @@ namespace Legion {
   };
 
   template<>
+  class MinReduction<int8_t> {
+  public:
+    typedef int8_t LHS;
+    typedef int8_t RHS;
+
+    static const int8_t identity = SCHAR_MAX;
+    static const int REDOP_ID = LEGION_REDOP_MIN_INT8;
+
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void apply(LHS &lhs, RHS rhs);
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void fold(RHS &rhs1, RHS rhs2);
+  };
+
+  template<>
   class MinReduction<int16_t> {
   public:
     typedef int16_t LHS;
@@ -1013,6 +1178,21 @@ namespace Legion {
 
     static const int64_t identity = LLONG_MAX;
     static const int REDOP_ID = LEGION_REDOP_MIN_INT64;
+
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void apply(LHS &lhs, RHS rhs);
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void fold(RHS &rhs1, RHS rhs2);
+  };
+
+  template<>
+  class MinReduction<uint8_t> {
+  public:
+    typedef uint8_t LHS;
+    typedef uint8_t RHS;
+
+    static const uint8_t identity = UCHAR_MAX;
+    static const int REDOP_ID = LEGION_REDOP_MIN_UINT8;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1105,6 +1285,399 @@ namespace Legion {
 
     static const double identity;
     static const int REDOP_ID = LEGION_REDOP_MIN_FLOAT64;
+
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void apply(LHS &lhs, RHS rhs);
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void fold(RHS &rhs1, RHS rhs2);
+  };
+
+  template<typename T>
+  class OrReduction {
+    // Empty definition
+    // Specializations provided for each type
+  };
+
+  template<>
+  class OrReduction<int8_t> {
+  public:
+    typedef int8_t LHS;
+    typedef int8_t RHS;
+
+    static const int8_t identity = 0;
+    static const int REDOP_ID = LEGION_REDOP_OR_INT8;
+
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void apply(LHS &lhs, RHS rhs);
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void fold(RHS &rhs1, RHS rhs2);
+  };
+
+  template<>
+  class OrReduction<int16_t> {
+  public:
+    typedef int16_t LHS;
+    typedef int16_t RHS;
+
+    static const int16_t identity = 0;
+    static const int REDOP_ID = LEGION_REDOP_OR_INT16;
+
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void apply(LHS &lhs, RHS rhs);
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void fold(RHS &rhs1, RHS rhs2);
+  };
+
+  template<>
+  class OrReduction<int32_t> {
+  public:
+    typedef int32_t LHS;
+    typedef int32_t RHS;
+
+    static const int32_t identity = 0;
+    static const int REDOP_ID = LEGION_REDOP_OR_INT32;
+
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void apply(LHS &lhs, RHS rhs);
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void fold(RHS &rhs1, RHS rhs2);
+  };
+
+  template<>
+  class OrReduction<int64_t> {
+  public:
+    typedef int64_t LHS;
+    typedef int64_t RHS;
+
+    static const int64_t identity = 0;
+    static const int REDOP_ID = LEGION_REDOP_OR_INT64;
+
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void apply(LHS &lhs, RHS rhs);
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void fold(RHS &rhs1, RHS rhs2);
+  };
+
+  template<>
+  class OrReduction<uint8_t> {
+  public:
+    typedef uint8_t LHS;
+    typedef uint8_t RHS;
+
+    static const uint8_t identity = 0;
+    static const int REDOP_ID = LEGION_REDOP_OR_UINT8;
+
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void apply(LHS &lhs, RHS rhs);
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void fold(RHS &rhs1, RHS rhs2);
+  };
+
+  template<>
+  class OrReduction<uint16_t> {
+  public:
+    typedef uint16_t LHS;
+    typedef uint16_t RHS;
+
+    static const uint16_t identity = 0;
+    static const int REDOP_ID = LEGION_REDOP_OR_UINT16;
+
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void apply(LHS &lhs, RHS rhs);
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void fold(RHS &rhs1, RHS rhs2);
+  };
+
+  template<>
+  class OrReduction<uint32_t> {
+  public:
+    typedef uint32_t LHS;
+    typedef uint32_t RHS;
+
+    static const uint32_t identity = 0;
+    static const int REDOP_ID = LEGION_REDOP_OR_UINT32;
+
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void apply(LHS &lhs, RHS rhs);
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void fold(RHS &rhs1, RHS rhs2);
+  };
+
+  template<>
+  class OrReduction<uint64_t> {
+  public:
+    typedef uint64_t LHS;
+    typedef uint64_t RHS;
+
+    static const uint64_t identity = 0;
+    static const int REDOP_ID = LEGION_REDOP_OR_UINT64;
+
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void apply(LHS &lhs, RHS rhs);
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void fold(RHS &rhs1, RHS rhs2);
+  };
+
+  template<typename T>
+  class AndReduction {
+    // Empty definition
+    // Specializations provided for each type
+  };
+
+  template<>
+  class AndReduction<int8_t> {
+  public:
+    typedef int8_t LHS;
+    typedef int8_t RHS;
+
+    static const int8_t identity = (int8_t)0xFF;
+    static const int REDOP_ID = LEGION_REDOP_OR_INT8;
+
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void apply(LHS &lhs, RHS rhs);
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void fold(RHS &rhs1, RHS rhs2);
+  };
+
+  template<>
+  class AndReduction<int16_t> {
+  public:
+    typedef int16_t LHS;
+    typedef int16_t RHS;
+
+    static const int16_t identity = (int16_t)0xFFFF;
+    static const int REDOP_ID = LEGION_REDOP_OR_INT16;
+
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void apply(LHS &lhs, RHS rhs);
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void fold(RHS &rhs1, RHS rhs2);
+  };
+
+  template<>
+  class AndReduction<int32_t> {
+  public:
+    typedef int32_t LHS;
+    typedef int32_t RHS;
+
+    static const int32_t identity = 0xFFFF;
+    static const int REDOP_ID = LEGION_REDOP_OR_INT32;
+
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void apply(LHS &lhs, RHS rhs);
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void fold(RHS &rhs1, RHS rhs2);
+  };
+
+  template<>
+  class AndReduction<int64_t> {
+  public:
+    typedef int64_t LHS;
+    typedef int64_t RHS;
+
+    static const int64_t identity = 0xFFFFFFFFL;
+    static const int REDOP_ID = LEGION_REDOP_OR_INT64;
+
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void apply(LHS &lhs, RHS rhs);
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void fold(RHS &rhs1, RHS rhs2);
+  };
+
+  template<>
+  class AndReduction<uint8_t> {
+  public:
+    typedef uint8_t LHS;
+    typedef uint8_t RHS;
+
+    static const uint8_t identity = 0xFFU;
+    static const int REDOP_ID = LEGION_REDOP_OR_UINT8;
+
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void apply(LHS &lhs, RHS rhs);
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void fold(RHS &rhs1, RHS rhs2);
+  };
+
+  template<>
+  class AndReduction<uint16_t> {
+  public:
+    typedef uint16_t LHS;
+    typedef uint16_t RHS;
+
+    static const uint16_t identity = 0xFFFFU;
+    static const int REDOP_ID = LEGION_REDOP_OR_UINT16;
+
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void apply(LHS &lhs, RHS rhs);
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void fold(RHS &rhs1, RHS rhs2);
+  };
+
+  template<>
+  class AndReduction<uint32_t> {
+  public:
+    typedef uint32_t LHS;
+    typedef uint32_t RHS;
+
+    static const uint32_t identity = 0xFFFFFFFFU;
+    static const int REDOP_ID = LEGION_REDOP_OR_UINT32;
+
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void apply(LHS &lhs, RHS rhs);
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void fold(RHS &rhs1, RHS rhs2);
+  };
+
+  template<>
+  class AndReduction<uint64_t> {
+  public:
+    typedef uint64_t LHS;
+    typedef uint64_t RHS;
+
+    static const uint64_t identity = 0xFFFFFFFFUL;
+    static const int REDOP_ID = LEGION_REDOP_OR_UINT64;
+
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void apply(LHS &lhs, RHS rhs);
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void fold(RHS &rhs1, RHS rhs2);
+  };
+
+  template<typename T>
+  class XorReduction {
+    // Empty definition
+    // Specializations provided for each type
+  };
+
+  template<>
+  class XorReduction<bool> {
+  public:
+    typedef bool LHS;
+    typedef bool RHS;
+
+    static const bool identity = false;
+    static const int REDOP_ID = LEGION_REDOP_OR_BOOL;
+
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void apply(LHS &lhs, RHS rhs);
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void fold(RHS &rhs1, RHS rhs2);
+  };
+
+  template<>
+  class XorReduction<int8_t> {
+  public:
+    typedef int8_t LHS;
+    typedef int8_t RHS;
+
+    static const int8_t identity = 0;
+    static const int REDOP_ID = LEGION_REDOP_OR_INT8;
+
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void apply(LHS &lhs, RHS rhs);
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void fold(RHS &rhs1, RHS rhs2);
+  };
+
+  template<>
+  class XorReduction<int16_t> {
+  public:
+    typedef int16_t LHS;
+    typedef int16_t RHS;
+
+    static const int16_t identity = 0;
+    static const int REDOP_ID = LEGION_REDOP_OR_INT16;
+
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void apply(LHS &lhs, RHS rhs);
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void fold(RHS &rhs1, RHS rhs2);
+  };
+
+  template<>
+  class XorReduction<int32_t> {
+  public:
+    typedef int32_t LHS;
+    typedef int32_t RHS;
+
+    static const int32_t identity = 0;
+    static const int REDOP_ID = LEGION_REDOP_OR_INT32;
+
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void apply(LHS &lhs, RHS rhs);
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void fold(RHS &rhs1, RHS rhs2);
+  };
+
+  template<>
+  class XorReduction<int64_t> {
+  public:
+    typedef int64_t LHS;
+    typedef int64_t RHS;
+
+    static const int64_t identity = 0;
+    static const int REDOP_ID = LEGION_REDOP_OR_INT64;
+
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void apply(LHS &lhs, RHS rhs);
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void fold(RHS &rhs1, RHS rhs2);
+  };
+
+  template<>
+  class XorReduction<uint8_t> {
+  public:
+    typedef uint8_t LHS;
+    typedef uint8_t RHS;
+
+    static const uint8_t identity = 0;
+    static const int REDOP_ID = LEGION_REDOP_OR_UINT8;
+
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void apply(LHS &lhs, RHS rhs);
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void fold(RHS &rhs1, RHS rhs2);
+  };
+
+  template<>
+  class XorReduction<uint16_t> {
+  public:
+    typedef uint16_t LHS;
+    typedef uint16_t RHS;
+
+    static const uint16_t identity = 0;
+    static const int REDOP_ID = LEGION_REDOP_OR_UINT16;
+
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void apply(LHS &lhs, RHS rhs);
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void fold(RHS &rhs1, RHS rhs2);
+  };
+
+  template<>
+  class XorReduction<uint32_t> {
+  public:
+    typedef uint32_t LHS;
+    typedef uint32_t RHS;
+
+    static const uint32_t identity = 0;
+    static const int REDOP_ID = LEGION_REDOP_OR_UINT32;
+
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void apply(LHS &lhs, RHS rhs);
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void fold(RHS &rhs1, RHS rhs2);
+  };
+
+  template<>
+  class XorReduction<uint64_t> {
+  public:
+    typedef uint64_t LHS;
+    typedef uint64_t RHS;
+
+    static const uint64_t identity = 0;
+    static const int REDOP_ID = LEGION_REDOP_OR_UINT64;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);

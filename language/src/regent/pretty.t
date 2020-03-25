@@ -341,6 +341,12 @@ function pretty.expr_call(cx, node)
   args:insertall(
     node.conditions:map(
       function(condition) return pretty.expr_condition(cx, condition) end))
+  if node.predicate then
+    args:insert(join({"predicate=", pretty.expr(cx, node.predicate)}))
+  end
+  if node.predicate_else_value then
+    args:insert(join({"predicate_else_value=", pretty.expr(cx, node.predicate_else_value)}))
+  end
   return join({pretty.expr(cx, node.fn), "(", commas(args) , ")"})
 end
 

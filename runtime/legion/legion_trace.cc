@@ -182,23 +182,6 @@ namespace Legion {
 #endif
 
     //--------------------------------------------------------------------------
-    void LegionTrace::record_blocking_call(void)
-    //--------------------------------------------------------------------------
-    {
-      blocking_call_observed = true;
-      if (physical_trace == NULL)
-        return;
-      PhysicalTemplate *tpl = physical_trace->get_current_template();
-      if (tpl != NULL)
-        tpl->trigger_recording_done();
-      if (is_replaying())
-        REPORT_LEGION_ERROR(ERROR_INVALID_PHYSICAL_TRACING,
-            "Physical tracing violation! The trace has a blocking API call "
-            "that was unseen when it was recorded. Please make sure that "
-            "the trace does not change its behavior.");
-    }
-
-    //--------------------------------------------------------------------------
     void LegionTrace::invalidate_trace_cache(Operation *invalidator)
     //--------------------------------------------------------------------------
     {
@@ -1390,6 +1373,13 @@ namespace Legion {
       }
       else if (replayed)
       {
+        if (has_blocking_call)
+          REPORT_LEGION_ERROR(ERROR_INVALID_PHYSICAL_TRACING,
+            "Physical tracing violation! Trace %d in task %s (UID %lld) "
+            "encountered a blocking API call that was unseen when it was "
+            "recorded. It is required that traces do not change their "
+            "behavior.", local_trace->get_trace_id(),
+            parent_ctx->get_task_name(), parent_ctx->get_unique_id())
         complete_mapping();
         need_completion_trigger = false;
         if (!template_completion.has_triggered())
@@ -1509,7 +1499,8 @@ namespace Legion {
 #endif
 
         if (physical_trace->get_current_template() == NULL)
-          physical_trace->check_template_preconditions(this);
+          physical_trace->check_template_preconditions(this, 
+                                      map_applied_conditions);
 #ifdef DEBUG_LEGION
         assert(physical_trace->get_current_template() == NULL ||
                !physical_trace->get_current_template()->is_recording());
@@ -1550,7 +1541,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TraceReplayOp::pack_remote_operation(Serializer &rez, 
-                                              AddressSpaceID target) const
+                 AddressSpaceID target, std::set<RtEvent> &applied_events) const
     //--------------------------------------------------------------------------
     {
       pack_local_remote_operation(rez);
@@ -1737,13 +1728,13 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(current_template->is_replayable());
 #endif
-      current_template->apply_postcondition(this);
+      current_template->apply_postcondition(this, map_applied_conditions);
       FenceOp::trigger_mapping();
     }
 
     //--------------------------------------------------------------------------
     void TraceSummaryOp::pack_remote_operation(Serializer &rez,
-                                               AddressSpaceID target) const
+                 AddressSpaceID target, std::set<RtEvent> &applied_events) const
     //--------------------------------------------------------------------------
     {
       pack_local_remote_operation(rez);
@@ -1756,7 +1747,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalTrace::PhysicalTrace(Runtime *rt, LegionTrace *lt)
       : runtime(rt), logical_trace(lt), current_template(NULL),
-        nonreplayable_count(0),
+        nonreplayable_count(0), new_template_count(0),
         previous_template_completion(ApEvent::NO_AP_EVENT),
         execution_fence_event(ApEvent::NO_AP_EVENT)
     //--------------------------------------------------------------------------
@@ -1777,7 +1768,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalTrace::PhysicalTrace(const PhysicalTrace &rhs)
       : runtime(NULL), logical_trace(NULL), current_template(NULL),
-        nonreplayable_count(0),
+        nonreplayable_count(0), new_template_count(0),
         previous_template_completion(ApEvent::NO_AP_EVENT),
         execution_fence_event(ApEvent::NO_AP_EVENT)
     //--------------------------------------------------------------------------
@@ -1837,19 +1828,34 @@ namespace Legion {
         // Reset the nonreplayable count when we find a replayable template
         nonreplayable_count = 0;
         templates.push_back(tpl);
+        if (++new_template_count > LEGION_NEW_TEMPLATE_WARNING_COUNT)
+        {
+          REPORT_LEGION_WARNING(LEGION_WARNING_NEW_TEMPLATE_COUNT_EXCEEDED,
+              "WARNING: The runtime has created %d new replayable templates "
+              "for trace %u without replaying any existing templates. This "
+              "may mean that your mapper is not making mapper decisions "
+              "conducive to replaying templates. Please check that your "
+              "mapper is making decisions that align with prior templates. "
+              "If you believe that this number of templates is reasonable "
+              "please adjust the settings for LEGION_NEW_TEMPLATE_WARNING_COUNT"
+              " in legion_config.h.", LEGION_NEW_TEMPLATE_WARNING_COUNT, 
+              logical_trace->get_trace_id())
+          new_template_count = 0;
+        }
       }
       return pending_deletion;
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTrace::check_template_preconditions(TraceReplayOp *op)
+    void PhysicalTrace::check_template_preconditions(TraceReplayOp *op,
+                                              std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       current_template = NULL;
       for (LegionVector<PhysicalTemplate*>::aligned::reverse_iterator it =
            templates.rbegin(); it != templates.rend(); ++it)
       {
-        if ((*it)->check_preconditions(op))
+        if ((*it)->check_preconditions(op, applied_events))
         {
 #ifdef DEBUG_LEGION
           assert((*it)->is_replayable());
@@ -1857,6 +1863,8 @@ namespace Legion {
           // Reset the nonreplayable count when a replayable template satisfies
           // the precondition
           nonreplayable_count = 0;
+          // Also reset the new template count as we found a replay
+          new_template_count = 0;
           current_template = *it;
           return;
         }
@@ -1888,7 +1896,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     TraceViewSet::TraceViewSet(RegionTreeForest *f)
-      : forest(f)
+      : forest(f), view_references(f->runtime->dump_physical_traces)
     //--------------------------------------------------------------------------
     {
     }
@@ -1897,6 +1905,13 @@ namespace Legion {
     TraceViewSet::~TraceViewSet(void)
     //--------------------------------------------------------------------------
     {
+      if (view_references)
+      {
+        for (ViewSet::const_iterator it = conditions.begin();
+              it != conditions.end(); it++)
+          if (it->first->remove_base_resource_ref(TRACE_REF))
+            delete it->first;
+      }
       conditions.clear();
     }
 
@@ -1905,6 +1920,8 @@ namespace Legion {
                   InstanceView *view, EquivalenceSet *eq, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
+      if (view_references && (conditions.find(view) == conditions.end()))
+        view->add_base_resource_ref(TRACE_REF);
       conditions[view].insert(eq, mask);
     }
 
@@ -1918,8 +1935,8 @@ namespace Legion {
         return;
 
       FieldMaskSet<EquivalenceSet> to_delete;
-      for (FieldMaskSet<EquivalenceSet>::iterator it = finder->second.begin();
-           it != finder->second.end(); ++it)
+      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+            finder->second.begin(); it != finder->second.end(); ++it)
       {
         FieldMask overlap = mask & it->second;
         if (!overlap)
@@ -1958,6 +1975,9 @@ namespace Legion {
          InstanceView *view, EquivalenceSet *eq, FieldMask &non_dominated) const
     //--------------------------------------------------------------------------
     {
+      // If this is for an empty equivalence set then it doesn't matter
+      if (eq->set_expr->is_empty())
+        return true;
       ViewSet::const_iterator finder = conditions.find(view);
       if (finder == conditions.end())
         return false;
@@ -1988,11 +2008,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!!non_dominated);
 #endif
-      // In the case where we have a manager for an empty instance then
-      // it does not have to be explicitly dominated
-      PhysicalManager *manager = view->get_manager();
-      if (manager->instance_domain->is_empty())
-        return true;
       return false;
     }
 
@@ -2162,7 +2177,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool TraceConditionSet::require(Operation *op)
+    bool TraceConditionSet::require(Operation *op, 
+                                    std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2171,16 +2187,17 @@ namespace Legion {
       for (unsigned idx = 0; idx < views.size(); ++idx)
       {
         FieldMaskSet<InstanceView> invalid_views;
-        std::set<RtEvent> map_applied_events;
         forest->find_invalid_instances(op, idx, version_infos[idx], views[idx],
-            invalid_views, map_applied_events);
-        if (invalid_views.size() > 0) return false;
+                                       invalid_views, applied_events);
+        if (!invalid_views.empty())
+          return false;
       }
       return true;
     }
 
     //--------------------------------------------------------------------------
-    void TraceConditionSet::ensure(Operation *op)
+    void TraceConditionSet::ensure(Operation *op, 
+                                   std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2188,11 +2205,8 @@ namespace Legion {
 #endif
       const TraceInfo trace_info(op, false/*init*/);
       for (unsigned idx = 0; idx < views.size(); ++idx)
-      {
-        std::set<RtEvent> map_applied_events;
         forest->update_valid_instances(op, idx, version_infos[idx], views[idx],
-            PhysicalTraceInfo(trace_info, idx), map_applied_events);
-      }
+            PhysicalTraceInfo(trace_info, idx), applied_events);
     }
 
     /////////////////////////////////////////////////////////////
@@ -2205,7 +2219,7 @@ namespace Legion {
         fence_completion_id(0),
         replay_parallelism(t->runtime->max_replay_parallelism),
         has_virtual_mapping(false),
-        recording_done(RtUserEvent::NO_RT_USER_EVENT),
+        recording_done(Runtime::create_rt_user_event()),
         pre(t->runtime->forest), post(t->runtime->forest),
         pre_reductions(t->runtime->forest), post_reductions(t->runtime->forest),
         consumed_reductions(t->runtime->forest)
@@ -2336,17 +2350,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalTemplate::check_preconditions(TraceReplayOp *op)
+    bool PhysicalTemplate::check_preconditions(TraceReplayOp *op,
+                                              std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      return pre.require(op);
+      return pre.require(op, applied_events);
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::apply_postcondition(TraceSummaryOp *op)
+    void PhysicalTemplate::apply_postcondition(TraceSummaryOp *op,
+                                              std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      post.ensure(op);
+      post.ensure(op, applied_events);
     }
 
     //--------------------------------------------------------------------------
@@ -3075,7 +3091,7 @@ namespace Legion {
       int pos = chain_indices.size() - 1;
       while (true)
       {
-        while (chain_indices[pos] != -1U && pos >= 0)
+        while (pos >= 0 && chain_indices[pos] != -1U)
           --pos;
         if (pos < 0) break;
         unsigned curr = topo_order[pos];
@@ -3368,6 +3384,7 @@ namespace Legion {
       rez.serialize(this);
       RtUserEvent remote_applied = Runtime::create_rt_user_event();
       rez.serialize(remote_applied);
+      rez.serialize(recording_done);
       applied_events.insert(remote_applied);
     }
 
@@ -4075,8 +4092,10 @@ namespace Legion {
     void PhysicalTemplate::trigger_recording_done(void)
     //--------------------------------------------------------------------------
     {
-      if (!recording_done.has_triggered())
-        Runtime::trigger_event(recording_done);
+#ifdef DEBUG_LEGION
+      assert(!recording_done.has_triggered());
+#endif
+      Runtime::trigger_event(recording_done);
     }
 
     //--------------------------------------------------------------------------

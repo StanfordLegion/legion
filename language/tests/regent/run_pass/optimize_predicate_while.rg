@@ -12,15 +12,25 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- fails-with:
--- invalid_import_ispace3.rg:23: cannot import a handle that is already imported
+--runs-with:
+-- [[], ["-fpredicate-unroll", "0"], ["-fpredicate-unroll", "1"], ["-fpredicate-unroll", "5"]]
 
 import "regent"
 
-task main()
-  var is = ispace(int1d, 10)
-  var raw_is = __raw(is)
-  var is2 = __import_ispace(int1d, raw_is)
+task condition(i : int)
+  return i < 10
 end
 
+task body(i : int)
+  return i + 1
+end
+
+task main()
+  var i = 0
+  __demand(__predicate)
+  while condition(i) do
+    i = body(i)
+  end
+  regentlib.assert(i == 10, "test failed")
+end
 regentlib.start(main)

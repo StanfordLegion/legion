@@ -6679,6 +6679,11 @@ namespace Legion {
               runtime->handle_remote_task_replay(derez);
               break;
             }
+          case SEND_REMOTE_TASK_PROFILING_RESPONSE:
+            {
+              runtime->handle_remote_task_profiling_response(derez);
+              break;
+            }
           case SEND_INDEX_SPACE_NODE:
             {
               runtime->handle_index_space_node(derez, remote_address_space);
@@ -9987,7 +9992,7 @@ namespace Legion {
         no_trace_optimization(config.no_trace_optimization),
         no_fence_elision(config.no_fence_elision),
         replay_on_cpus(config.replay_on_cpus),
-        verify_disjointness(config.verify_disjointness),
+        verify_partitions(config.verify_partitions),
         runtime_warnings(config.runtime_warnings),
         warnings_backtrace(config.warnings_backtrace),
         report_leaks(config.report_leaks),
@@ -10188,7 +10193,7 @@ namespace Legion {
         no_trace_optimization(rhs.no_trace_optimization),
         no_fence_elision(rhs.no_fence_elision),
         replay_on_cpus(rhs.replay_on_cpus),
-        verify_disjointness(rhs.verify_disjointness),
+        verify_partitions(rhs.verify_partitions),
         runtime_warnings(rhs.runtime_warnings),
         warnings_backtrace(rhs.warnings_backtrace),
         report_leaks(rhs.report_leaks),
@@ -10320,6 +10325,13 @@ namespace Legion {
         delete (*it);
       }
       available_frame_ops.clear();
+      for (std::deque<CreationOp*>::const_iterator it = 
+            available_creation_ops.begin(); it != 
+            available_creation_ops.end(); it++)
+      {
+        delete (*it);
+      }
+      available_creation_ops.clear();
       for (std::deque<DeletionOp*>::const_iterator it = 
             available_deletion_ops.begin(); it != 
             available_deletion_ops.end(); it++)
@@ -11079,551 +11091,6 @@ namespace Legion {
 #else
       assert(false); // update this
 #endif
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace Runtime::create_index_space(Context ctx, const void *realm_is,
-                                           TypeTag type_tag)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context create index space!");
-      return ctx->create_index_space(forest, realm_is, type_tag);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace Runtime::union_index_spaces(Context ctx,
-                                          const std::vector<IndexSpace> &spaces)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context create index space!");
-      return ctx->union_index_spaces(forest, spaces);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace Runtime::intersect_index_spaces(Context ctx,
-                                          const std::vector<IndexSpace> &spaces)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context create index space!");
-      return ctx->intersect_index_spaces(forest, spaces);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace Runtime::subtract_index_spaces(Context ctx,
-                                              IndexSpace left, IndexSpace right)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context subtract index space!");
-      return ctx->subtract_index_spaces(forest, left, right);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::destroy_index_space(Context ctx, IndexSpace handle,
-                                      const bool unordered)
-    //--------------------------------------------------------------------------
-    {
-      if (!handle.exists())
-        return;
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context destroy index space!");
-      ctx->destroy_index_space(handle, unordered);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::destroy_index_partition(Context ctx, IndexPartition handle,
-                                          const bool unordered)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context destroy index partition!");
-      ctx->destroy_index_partition(handle, unordered);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_equal_partition(Context ctx, 
-                                                   IndexSpace parent,
-                                                   IndexSpace color_space,
-                                                   size_t granularity,
-                                                   Color color)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context create equal partition!");
-      return ctx->create_equal_partition(forest, parent, color_space,
-                                         granularity, color);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_partition_by_union(Context ctx, 
-                                                      IndexSpace parent,
-                                                      IndexPartition handle1,
-                                                      IndexPartition handle2,
-                                                      IndexSpace color_space,
-                                                      PartitionKind kind,
-                                                      Color color)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context create partition by union!");
-      IndexPartition result = 
-        ctx->create_partition_by_union(forest, parent, handle1, handle2,
-                                       color_space, kind, color);
-      if (verify_disjointness && ((kind == DISJOINT_KIND) || 
-            (kind == DISJOINT_COMPLETE_KIND) || 
-            (kind == DISJOINT_INCOMPLETE_KIND)) && !forest->is_disjoint(result))
-        REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
-                            "Disjointness test failure for create partition "
-                            "by union in task %s (UID %lld)",
-                            ctx->get_task_name(), ctx->get_unique_id())
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_partition_by_intersection(Context ctx, 
-                                                      IndexSpace parent,
-                                                      IndexPartition handle1,
-                                                      IndexPartition handle2,
-                                                      IndexSpace color_space,
-                                                      PartitionKind kind,
-                                                      Color color)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context create partition by intersection!");
-      IndexPartition result = 
-        ctx->create_partition_by_intersection(forest, parent, handle1,
-                                              handle2, color_space,
-                                              kind, color);
-      if (verify_disjointness && ((kind == DISJOINT_KIND) ||
-            (kind == DISJOINT_COMPLETE_KIND) ||
-            (kind == DISJOINT_INCOMPLETE_KIND)) && !forest->is_disjoint(result))
-        REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
-                            "Disjointness test failure for create partition "
-                            "by intersection in task %s (UID %lld)",
-                            ctx->get_task_name(), ctx->get_unique_id())
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_partition_by_intersection(Context ctx, 
-                                                      IndexSpace parent,
-                                                      IndexPartition partition,
-                                                      PartitionKind kind,
-                                                      Color color, 
-                                                      bool dominates)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context create partition by intersection!");
-      IndexPartition result = 
-        ctx->create_partition_by_intersection(forest, parent, partition,
-                                              kind, color, dominates);
-      if (verify_disjointness && ((kind == DISJOINT_KIND) ||
-            (kind == DISJOINT_COMPLETE_KIND) ||
-            (kind == DISJOINT_INCOMPLETE_KIND)) && !forest->is_disjoint(result))
-        REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
-                            "Disjointness test failure for create partition "
-                            "by intersection in task %s (UID %lld)",
-                            ctx->get_task_name(), ctx->get_unique_id())
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_partition_by_difference(Context ctx, 
-                                                      IndexSpace parent,
-                                                      IndexPartition handle1,
-                                                      IndexPartition handle2,
-                                                      IndexSpace color_space,
-                                                      PartitionKind kind,
-                                                      Color color)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context create difference partition!");
-      IndexPartition result = 
-        ctx->create_partition_by_difference(forest, parent, handle1, 
-                                            handle2, color_space,
-                                            kind, color);
-      if (verify_disjointness && ((kind == DISJOINT_KIND) ||
-            (kind == DISJOINT_COMPLETE_KIND) ||
-            (kind == DISJOINT_INCOMPLETE_KIND)) && !forest->is_disjoint(result))
-        REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
-                            "Disjointness test failure for create partition "
-                            "by difference in task %s (UID %lld)",
-                            ctx->get_task_name(), ctx->get_unique_id())
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    Color Runtime::create_cross_product_partitions(Context ctx,
-                                                  IndexPartition handle1,
-                                                  IndexPartition handle2,
-                                   std::map<IndexSpace,IndexPartition> &handles,
-                                                 PartitionKind kind,Color color)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context create cross product partition!");
-      Color result = 
-        ctx->create_cross_product_partitions(forest, handle1, handle2, 
-                                             handles, kind, color);
-      if (verify_disjointness && 
-          ((kind == DISJOINT_KIND) || (kind == DISJOINT_COMPLETE_KIND) ||
-           (kind == DISJOINT_INCOMPLETE_KIND)))
-      {
-        Domain color_space = get_index_partition_color_space(handle1);
-        // This code will only work if the color space has type coord_t
-        switch (color_space.get_dim())
-        {
-#define DIMFUNC(DIM) \
-          case DIM: \
-            { \
-              TypeTag type_tag = NT_TemplateHelper::encode_tag<DIM,coord_t>(); \
-              assert(handle1.get_type_tag() == type_tag); \
-              break; \
-            }
-          LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
-          default:
-            assert(false);
-        }
-        for (Domain::DomainPointIterator itr(color_space); itr; itr++)
-        {
-          IndexSpace subspace;
-          switch (color_space.get_dim())
-          {
-#define DIMFUNC(DIM) \
-            case DIM: \
-              { \
-                const Point<DIM,coord_t> p(itr.p); \
-                subspace = get_index_subspace(handle1, &p, sizeof(p)); \
-                break; \
-              }
-            LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
-            default:
-              assert(false);
-          }
-          IndexPartition part = get_index_partition(subspace, result);
-          if (!forest->is_disjoint(part))
-            REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
-                                "Disjointness test failure for create cross "
-                                "product partitions in task %s (UID %lld)",
-                                ctx->get_task_name(), ctx->get_unique_id())
-        }
-      }
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::create_association(Context ctx, 
-                                     LogicalRegion domain,
-                                     LogicalRegion domain_parent,
-                                     FieldID domain_fid,
-                                     IndexSpace range,
-                                     MapperID id, MappingTagID tag)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy create association!");
-      ctx->create_association(domain, domain_parent, domain_fid, range, id,tag);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_restricted_partition(Context ctx,
-                                                      IndexSpace parent,
-                                                      IndexSpace color_space,
-                                                      const void *transform,
-                                                      size_t transform_size,
-                                                      const void *extent,
-                                                      size_t extent_size,
-                                                      PartitionKind part_kind,
-                                                      Color color)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context create restricted partition!");
-      IndexPartition result =
-        ctx->create_restricted_partition(forest, parent, color_space,
-                                         transform, transform_size,
-                                         extent, extent_size,
-                                         part_kind, color);
-      if (verify_disjointness && ((part_kind == DISJOINT_KIND) ||
-           (part_kind == DISJOINT_COMPLETE_KIND) ||
-           (part_kind == DISJOINT_INCOMPLETE_KIND)) && 
-          !forest->is_disjoint(result))
-        REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
-                            "Disjointness test failure for create restricted "
-                            "partition in task %s (UID %lld)",
-                            ctx->get_task_name(), ctx->get_unique_id())
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_partition_by_domain(Context ctx,
-                                                     IndexSpace parent,
-                                                     const FutureMap &domains,
-                                                     IndexSpace color_space,
-                                                     bool perform_intersections,
-                                                     PartitionKind part_kind,
-                                                     Color color)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context create partition by domain!");
-      IndexPartition result = ctx->create_partition_by_domain(forest, parent,
-              domains, color_space, perform_intersections, part_kind, color);
-      if (verify_disjointness && ((part_kind == DISJOINT_KIND) ||
-           (part_kind == DISJOINT_COMPLETE_KIND) ||
-           (part_kind == DISJOINT_INCOMPLETE_KIND)) && 
-          !forest->is_disjoint(result))
-        REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
-                            "Disjointness test failure for create partition "
-                            "by domains in task %s (UID %lld)",
-                            ctx->get_task_name(), ctx->get_unique_id())
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_partition_by_field(Context ctx,
-                                                      LogicalRegion handle,
-                                                      LogicalRegion parent_priv,
-                                                      FieldID fid,
-                                                      IndexSpace color_space,
-                                                      Color color,
-                                                      MapperID id, 
-                                                      MappingTagID tag,
-                                                      PartitionKind part_kind)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context partition by field!");
-      return ctx->create_partition_by_field(forest, handle, parent_priv, fid,
-                                      color_space, color, id, tag, part_kind);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_partition_by_image(Context ctx,
-                                                    IndexSpace handle,
-                                                    LogicalPartition projection,
-                                                    LogicalRegion parent,
-                                                    FieldID fid,
-                                                    IndexSpace color_space,
-                                                    PartitionKind part_kind,
-                                                    Color color,
-                                                    MapperID id, 
-                                                    MappingTagID tag)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context partition by image!");
-      IndexPartition result = 
-        ctx->create_partition_by_image(forest, handle, projection, parent,
-                                       fid, color_space, part_kind, 
-                                       color, id, tag);
-      if (verify_disjointness && ((part_kind == DISJOINT_KIND) ||
-           (part_kind == DISJOINT_COMPLETE_KIND) ||
-           (part_kind == DISJOINT_INCOMPLETE_KIND)) && 
-          !forest->is_disjoint(result))
-        REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
-                            "Disjointness test failure for create partition "
-                            "by image in task %s (UID %lld)",
-                            ctx->get_task_name(), ctx->get_unique_id())
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_partition_by_image_range(Context ctx,
-                                                    IndexSpace handle,
-                                                    LogicalPartition projection,
-                                                    LogicalRegion parent,
-                                                    FieldID fid,
-                                                    IndexSpace color_space,
-                                                    PartitionKind part_kind,
-                                                    Color color,
-                                                    MapperID id, 
-                                                    MappingTagID tag)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context partition by image range!");
-      IndexPartition result = 
-        ctx->create_partition_by_image_range(forest, handle, projection, 
-                                  parent, fid, color_space, part_kind, 
-                                  color, id, tag);
-      if (verify_disjointness && ((part_kind == DISJOINT_KIND) ||
-           (part_kind == DISJOINT_COMPLETE_KIND) ||
-           (part_kind == DISJOINT_INCOMPLETE_KIND)) && 
-          !forest->is_disjoint(result))
-        REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
-                            "Disjointness test failure for create partition "
-                            "by image range in task %s (UID %lld)",
-                            ctx->get_task_name(), ctx->get_unique_id())
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_partition_by_preimage(Context ctx,
-                                                    IndexPartition projection,
-                                                    LogicalRegion handle,
-                                                    LogicalRegion parent,
-                                                    FieldID fid,
-                                                    IndexSpace color_space,
-                                                    PartitionKind part_kind,
-                                                    Color color,
-                                                    MapperID id, 
-                                                    MappingTagID tag)
-    //--------------------------------------------------------------------------
-    { 
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context partition by preimage!");
-      IndexPartition result = 
-        ctx->create_partition_by_preimage(forest, projection, handle,
-                              parent, fid, color_space, part_kind, 
-                              color, id, tag);
-      if (verify_disjointness && ((part_kind == DISJOINT_KIND) ||
-           (part_kind == DISJOINT_COMPLETE_KIND) ||
-           (part_kind == DISJOINT_INCOMPLETE_KIND)) && 
-          !forest->is_disjoint(result))
-        REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
-                            "Disjointness test failure for create partition "
-                            "by preimage in task %s (UID %lld)",
-                            ctx->get_task_name(), ctx->get_unique_id())
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_partition_by_preimage_range(Context ctx,
-                                                    IndexPartition projection,
-                                                    LogicalRegion handle,
-                                                    LogicalRegion parent,
-                                                    FieldID fid,
-                                                    IndexSpace color_space,
-                                                    PartitionKind part_kind,
-                                                    Color color, MapperID id,
-                                                    MappingTagID tag)
-    //--------------------------------------------------------------------------
-    { 
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context partition by preimage range!");
-      IndexPartition result = 
-        ctx->create_partition_by_preimage_range(forest, projection, handle,
-                                    parent, fid, color_space, part_kind, 
-                                    color, id, tag);
-      if (verify_disjointness && ((part_kind == DISJOINT_KIND) || 
-           (part_kind == DISJOINT_COMPLETE_KIND) ||
-           (part_kind == DISJOINT_INCOMPLETE_KIND)) && 
-          !forest->is_disjoint(result))
-        REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
-                            "Disjointness test failure for create partition "
-                            "by preimage range in task %s (UID %lld)",
-                            ctx->get_task_name(), ctx->get_unique_id())
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_pending_partition(Context ctx, 
-                                                     IndexSpace parent, 
-                                                     IndexSpace color_space,
-                                                     PartitionKind part_kind,
-                                                     Color color)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context create pending partition!");
-      return ctx->create_pending_partition(forest, parent, color_space,
-                                           part_kind, color);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace Runtime::create_index_space_union(Context ctx, 
-                                                 IndexPartition parent,
-                                                 const void *realm_color, 
-                                                 TypeTag type_tag,
-                                         const std::vector<IndexSpace> &handles)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context create index space union!");
-      return ctx->create_index_space_union(forest, parent, realm_color, 
-                                           type_tag, handles);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace Runtime::create_index_space_union(Context ctx,
-                                                 IndexPartition parent,
-                                                 const void *realm_color,
-                                                 TypeTag type_tag,
-                                                 IndexPartition handle)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context create index space union!");
-      return ctx->create_index_space_union(forest, parent, realm_color, 
-                                           type_tag, handle);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace Runtime::create_index_space_intersection(Context ctx,
-                                                        IndexPartition parent,
-                                                        const void *realm_color,
-                                                        TypeTag type_tag,
-                                         const std::vector<IndexSpace> &handles)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context create index space intersection!");
-      return ctx->create_index_space_intersection(forest, parent, realm_color,
-                                                  type_tag, handles); 
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace Runtime::create_index_space_intersection(Context ctx,
-                                                        IndexPartition parent,
-                                                        const void *realm_color,
-                                                        TypeTag type_tag,
-                                                        IndexPartition handle)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context create index space intersection!");
-      return ctx->create_index_space_intersection(forest, parent, realm_color,
-                                                  type_tag, handle);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace Runtime::create_index_space_difference(Context ctx,
-                                                      IndexPartition parent,
-                                                      const void *realm_color,
-                                                      TypeTag type_tag,
-                                                      IndexSpace initial,
-                                         const std::vector<IndexSpace> &handles)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context create index space difference!");
-      return ctx->create_index_space_difference(forest, parent, realm_color,
-                                                type_tag, initial, handles);
     }
 
     //--------------------------------------------------------------------------
@@ -14887,6 +14354,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_remote_task_profiling_response(Processor target,
+                                                      Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_REMOTE_TASK_PROFILING_RESPONSE, 
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_index_space_node(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -16399,6 +15876,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       TaskOp::process_remote_replay(this, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_remote_task_profiling_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      SingleTask::process_remote_profiling_response(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -18684,33 +18168,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace Runtime::find_or_create_index_slice_space(const Domain &dom)
-    //--------------------------------------------------------------------------
-    {
-      switch (dom.get_dim())
-      {
-#define DIMFUNC(DIM) \
-        case DIM: \
-          { \
-            DomainT<DIM,coord_t> is = dom; \
-            return find_or_create_index_slice_space(dom, &is, \
-                NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
-          }
-        LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
-        default:
-          assert(false);
-      }
-      return IndexSpace::NO_SPACE;
-    } 
-
-    //--------------------------------------------------------------------------
-    IndexSpace Runtime::find_or_create_index_slice_space(const Domain &dom,
-                                                         const void *realm_is,
+    IndexSpace Runtime::find_or_create_index_slice_space(const Domain &domain,
                                                          TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
-      const std::pair<Domain,TypeTag> key(dom, type_tag);
+#ifdef DEBUG_LEGION
+      assert(type_tag != 0);
+#endif
+      const std::pair<Domain,TypeTag> key(domain, type_tag);
       {
         AutoLock is_lock(is_slice_lock,1,false/*exclusive*/);
         std::map<std::pair<Domain,TypeTag>,IndexSpace>::const_iterator finder =
@@ -18718,10 +18183,10 @@ namespace Legion {
         if (finder != index_slice_spaces.end())
           return finder->second;
       }
-      IndexSpace result(get_unique_index_space_id(),
-                        get_unique_index_tree_id(), type_tag);
-      DistributedID did = get_available_distributed_id();
-      forest->create_index_space(result, realm_is, did);
+      const IndexSpace result(get_unique_index_space_id(),
+                              get_unique_index_tree_id(), type_tag);
+      const DistributedID did = get_available_distributed_id();
+      forest->create_index_space(result, &domain, did);
       if (legion_spy_enabled)
         LegionSpy::log_top_index_space(result.id);
       // Overwrite and leak for now, don't care too much as this 
@@ -18729,7 +18194,7 @@ namespace Legion {
       AutoLock is_lock(is_slice_lock);
       index_slice_spaces[key] = result;
       return result;
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void Runtime::increment_outstanding_top_level_tasks(void)
@@ -19105,6 +18570,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    CreationOp* Runtime::get_available_creation_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return get_available(creation_op_lock, available_creation_ops);
+    }
+
+    //--------------------------------------------------------------------------
     DeletionOp* Runtime::get_available_deletion_op(void)
     //--------------------------------------------------------------------------
     {
@@ -19400,6 +18872,14 @@ namespace Legion {
     {
       AutoLock f_lock(frame_op_lock);
       release_operation<false>(available_frame_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_creation_op(CreationOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock d_lock(creation_op_lock);
+      release_operation<false>(available_creation_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -20318,6 +19798,8 @@ namespace Legion {
           return "Fence Op";
         case FRAME_OP_ALLOC:
           return "Frame Op";
+        case CREATION_OP_ALLOC:
+          return "Creation Op";
         case DELETION_OP_ALLOC:
           return "Deletion Op";
         case CLOSE_OP_ALLOC:
@@ -21039,7 +20521,9 @@ namespace Legion {
         .add_option_bool("-lg:replay_on_cpus",
                          config.replay_on_cpus, !filter)
         .add_option_bool("-lg:disjointness",
-                         config.verify_disjointness, !filter)
+                         config.verify_partitions, !filter)
+        .add_option_bool("-lg:partcheck",
+                         config.verify_partitions, !filter)
         .add_option_int("-lg:window", config.initial_task_window_size, !filter)
         .add_option_int("-lg:hysteresis", 
                         config.initial_task_window_hysteresis, !filter)
@@ -21082,7 +20566,7 @@ namespace Legion {
         .add_option_bool("-hl:unsafe_mapper",config.unsafe_mapper, !filter)
         .add_option_bool("-hl:safe_mapper",config.safe_mapper, !filter)
         .add_option_bool("-hl:inorder",config.program_order_execution, !filter)
-        .add_option_bool("-hl:disjointness",config.verify_disjointness, !filter)
+        .add_option_bool("-hl:disjointness",config.verify_partitions, !filter)
         .add_option_int("-hl:window", config.initial_task_window_size, !filter)
         .add_option_int("-hl:hysteresis", 
                         config.initial_task_window_hysteresis, !filter)
@@ -21141,10 +20625,6 @@ namespace Legion {
         REPORT_LEGION_WARNING(LEGION_WARNING_REGION_TREE_STATE_LOGGING,
             "Region tree state logging is disabled.  To enable region "
             "tree state logging compile in debug mode.")
-      if (config.verify_disjointness)
-        REPORT_LEGION_WARNING(LEGION_WARNING_DISJOINTNESS_VERIFICATION,
-            "Disjointness verification for partition creation is disabled. "
-            "To enable dynamic disjointness testing compile in debug mode.")
 #endif
       if (config.initial_task_window_hysteresis > 100)
         REPORT_LEGION_ERROR(ERROR_LEGION_CONFIGURATION,
@@ -21449,6 +20929,29 @@ namespace Legion {
         sleep(5);
       }
 #endif
+      if (config.verify_partitions && (config.num_profiling_nodes > 0))
+      {
+        // Give a massive warning about profiling with partition checks enabled
+        for (int i = 0; i < 2; i++)
+          fprintf(stderr,"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+        for (int i = 0; i < 4; i++)
+          fprintf(stderr,"!WARNING WARNING WARNING WARNING WARNING WARNING!\n");
+        for (int i = 0; i < 2; i++)
+          fprintf(stderr,"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+        fprintf(stderr,"!!! YOU ARE PROFILING WITH PARTITION CHECKS ON!!!\n");
+        fprintf(stderr,"!!! SERIOUS PERFORMANCE DEGRADATION WILL OCCUR!!!\n");
+        fprintf(stderr,"!!! DO NOT USE -lg:partcheck WITH PROFILING   !!!\n");
+        for (int i = 0; i < 2; i++)
+          fprintf(stderr,"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+        for (int i = 0; i < 4; i++)
+          fprintf(stderr,"!WARNING WARNING WARNING WARNING WARNING WARNING!\n");
+        for (int i = 0; i < 2; i++)
+          fprintf(stderr,"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+        fprintf(stderr,"\n");
+        fprintf(stderr,"SLEEPING FOR 5 SECONDS SO YOU READ THIS WARNING...\n");
+        fflush(stderr);
+        sleep(5);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -22959,6 +22462,11 @@ namespace Legion {
             ReductionManager::handle_defer_manager(args, runtime);
             break;
           }
+        case LG_DEFER_VERIFY_PARTITION_TASK_ID:
+          {
+            InnerContext::handle_partition_verification(args);
+            break;
+          }
         case LG_YIELD_TASK_ID:
           break; // nothing to do here
         case LG_RETRY_SHUTDOWN_TASK_ID:
@@ -23003,10 +22511,10 @@ namespace Legion {
       {
         // If we got a NULL let's assume they meant the profiler
         // this mainly happens with messages that cross nodes
-        runtime->profiler->handle_profiling_response(base, response);
+        runtime->profiler->handle_profiling_response(base,response,args,arglen);
       }
       else
-        base->handler->handle_profiling_response(base, response);
+        base->handler->handle_profiling_response(base, response, args, arglen);
     }
 
     //--------------------------------------------------------------------------

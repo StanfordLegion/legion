@@ -116,9 +116,9 @@ namespace Legion {
       bool is_recording(void) const { return state == PHYSICAL_RECORD; }
       bool is_replaying(void) const { return state == PHYSICAL_REPLAY; }
     public:
-      void clear_blocking_call(void) { blocking_call_observed = false; }
-      void record_blocking_call(void);
-      bool has_blocking_call(void) const { return blocking_call_observed; }
+      inline void clear_blocking_call(void) { blocking_call_observed = false; }
+      inline void record_blocking_call(void) { blocking_call_observed = true; }
+      inline bool has_blocking_call(void) const {return blocking_call_observed;}
       void invalidate_trace_cache(Operation *invalidator);
 #ifdef LEGION_SPY
     public:
@@ -390,8 +390,8 @@ namespace Legion {
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual void trigger_dependence_analysis(void);
-      virtual void pack_remote_operation(Serializer &rez, 
-                                         AddressSpaceID target) const;
+      virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
+                                         std::set<RtEvent> &applied) const;
     };
 
     /**
@@ -441,8 +441,8 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
-      virtual void pack_remote_operation(Serializer &rez,
-                                         AddressSpaceID target) const;
+      virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
+                                         std::set<RtEvent> &applied) const;
     protected:
       PhysicalTemplate *current_template;
     };
@@ -461,7 +461,8 @@ namespace Legion {
       PhysicalTrace& operator=(const PhysicalTrace &rhs);
     public:
       void clear_cached_template(void) { current_template = NULL; }
-      void check_template_preconditions(TraceReplayOp *op);
+      void check_template_preconditions(TraceReplayOp *op,
+                                        std::set<RtEvent> &applied_events);
     public:
       PhysicalTemplate* get_current_template(void) { return current_template; }
       bool has_any_templates(void) const { return templates.size() > 0; }
@@ -493,6 +494,7 @@ namespace Legion {
       PhysicalTemplate* current_template;
       LegionVector<PhysicalTemplate*>::aligned templates;
       unsigned nonreplayable_count;
+      unsigned new_template_count;
     private:
       ApEvent previous_template_completion;
       ApEvent execution_fence_event;
@@ -531,6 +533,9 @@ namespace Legion {
       RegionTreeForest * const forest;
     protected:
       ViewSet conditions;
+      // Need to hold view references if we're going to be dumping
+      // this trace even past the end of execution
+      const bool view_references;
     };
 
     /**
@@ -543,8 +548,8 @@ namespace Legion {
     public:
       void make_ready(bool postcondition);
     public:
-      bool require(Operation *op);
-      void ensure(Operation *op);
+      bool require(Operation *op, std::set<RtEvent> &applied_events);
+      void ensure(Operation *op, std::set<RtEvent> &applied_events);
     private:
       bool cached;
       // The following containers are populated only when the 'cached' is true.
@@ -647,8 +652,10 @@ namespace Legion {
       void prepare_parallel_replay(const std::vector<unsigned> &gen);
       void push_complete_replays(void);
     public:
-      bool check_preconditions(TraceReplayOp *op);
-      void apply_postcondition(TraceSummaryOp *op);
+      bool check_preconditions(TraceReplayOp *op,
+                               std::set<RtEvent> &applied_events);
+      void apply_postcondition(TraceSummaryOp *op,
+                               std::set<RtEvent> &applied_events);
     public:
       void register_operation(Operation *op);
       void execute_all(void);
@@ -782,11 +789,10 @@ namespace Legion {
       static void handle_replay_slice(const void *args);
       static void handle_delete_template(const void *args);
     public:
-      void create_recording_done(void)
-        { recording_done = Runtime::create_rt_user_event(); }
       RtEvent get_recording_done(void) const
         { return recording_done; }
       void trigger_recording_done(void);
+      virtual RtEvent get_collect_event(void) const { return recording_done; }
     private:
       TraceLocalID find_trace_local_id(Memoizable *memo);
       unsigned find_memo_entry(Memoizable *memo);

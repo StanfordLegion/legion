@@ -88,6 +88,82 @@ namespace Legion {
   }
 
   template<> __CUDA_HD__ inline
+  void SumReduction<int8_t>::apply<true>(LHS &lhs, RHS rhs)
+  {
+    lhs += rhs;
+  }
+
+  template<> __CUDA_HD__ inline
+  void SumReduction<int8_t>::apply<false>(LHS &lhs, RHS rhs)
+  {
+#ifdef __CUDA_ARCH__
+#define CASE(F, IDX)                                                       \
+      case IDX : {                                                         \
+        int *target = (int *)(ptr-sizeof(int8_t)*IDX);                     \
+        union { int as_int; char4 as_char; } oldval, newval;               \
+        newval.as_int = *target;                                           \
+        do {                                                               \
+          oldval.as_int = newval.as_int;                                   \
+          newval.as_char.F += rhs;                                         \
+          newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
+        } while (oldval.as_int != newval.as_int);                          \
+        break;                                                             \
+      }                                                                    \
+
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&lhs;
+    switch (((unsigned long long)ptr) % 4) {
+      CASE(x, 0)
+      CASE(y, 1)
+      CASE(z, 2)
+      CASE(w, 3)
+      default :{ assert(false); break; }
+    }
+#undef CASE
+#else
+    __sync_fetch_and_add(&lhs, rhs);
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void SumReduction<int8_t>::fold<true>(RHS &rhs1, RHS rhs2)
+  {
+    rhs1 += rhs2;
+  }
+
+  template<> __CUDA_HD__ inline
+  void SumReduction<int8_t>::fold<false>(RHS &rhs1, RHS rhs2)
+  {
+#ifdef __CUDA_ARCH__
+#define CASE(F, IDX)                                                       \
+      case IDX : {                                                         \
+        int *target = (int *)(ptr-sizeof(int8_t)*IDX);                     \
+        union { int as_int; char4 as_char; } oldval, newval;               \
+        newval.as_int = *target;                                           \
+        do {                                                               \
+          oldval.as_int = newval.as_int;                                   \
+          newval.as_char.F += rhs2;                                        \
+          newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
+        } while (oldval.as_int != newval.as_int);                          \
+        break;                                                             \
+      }                                                                    \
+
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&rhs1;
+    switch ((((unsigned long long)ptr) % 4) == 0) {
+      CASE(x, 0)
+      CASE(y, 1)
+      CASE(z, 2)
+      CASE(w, 3)
+      default :{ assert(false); break; }
+    }
+#undef CASE
+#else
+    __sync_fetch_and_add(&rhs1, rhs2);
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
   void SumReduction<int16_t>::apply<true>(LHS &lhs, RHS rhs)
   {
     lhs += rhs;
@@ -238,6 +314,82 @@ namespace Legion {
       newval.as_signed += rhs2;
       newval.as_unsigned = atomicCAS(target, oldval.as_unsigned, newval.as_unsigned);
     } while (oldval.as_signed != newval.as_signed);
+#else
+    __sync_fetch_and_add(&rhs1, rhs2);
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void SumReduction<uint8_t>::apply<true>(LHS &lhs, RHS rhs)
+  {
+    lhs += rhs;
+  }
+
+  template<> __CUDA_HD__ inline
+  void SumReduction<uint8_t>::apply<false>(LHS &lhs, RHS rhs)
+  {
+#ifdef __CUDA_ARCH__
+#define CASE(F, IDX)                                                       \
+      case IDX : {                                                         \
+        int *target = (int *)(ptr-sizeof(uint8_t)*IDX);                    \
+        union { int as_int; uchar4 as_char; } oldval, newval;              \
+        newval.as_int = *target;                                           \
+        do {                                                               \
+          oldval.as_int = newval.as_int;                                   \
+          newval.as_char.F += rhs;                                         \
+          newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
+        } while (oldval.as_int != newval.as_int);                          \
+        break;                                                             \
+      }                                                                    \
+
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&lhs;
+    switch (((unsigned long long)ptr) % 4) {
+      CASE(x, 0)
+      CASE(y, 1)
+      CASE(z, 2)
+      CASE(w, 3)
+      default :{ assert(false); break; }
+    }
+#undef CASE
+#else
+    __sync_fetch_and_add(&lhs, rhs);
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void SumReduction<uint8_t>::fold<true>(RHS &rhs1, RHS rhs2)
+  {
+    rhs1 += rhs2;
+  }
+
+  template<> __CUDA_HD__ inline
+  void SumReduction<uint8_t>::fold<false>(RHS &rhs1, RHS rhs2)
+  {
+#ifdef __CUDA_ARCH__
+#define CASE(F, IDX)                                                       \
+      case IDX : {                                                         \
+        int *target = (int *)(ptr-sizeof(uint8_t)*IDX);                    \
+        union { int as_int; uchar4 as_char; } oldval, newval;              \
+        newval.as_int = *target;                                           \
+        do {                                                               \
+          oldval.as_int = newval.as_int;                                   \
+          newval.as_char.F += rhs2;                                        \
+          newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
+        } while (oldval.as_int != newval.as_int);                          \
+        break;                                                             \
+      }                                                                    \
+
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&rhs1;
+    switch ((((unsigned long long)ptr) % 4) == 0) {
+      CASE(x, 0)
+      CASE(y, 1)
+      CASE(z, 2)
+      CASE(w, 3)
+      default :{ assert(false); break; }
+    }
+#undef CASE
 #else
     __sync_fetch_and_add(&rhs1, rhs2);
 #endif
@@ -786,6 +938,82 @@ namespace Legion {
 #endif // LEGION_REDOP_COMPLEX
 
   template<> __CUDA_HD__ inline
+  void DiffReduction<int8_t>::apply<true>(LHS &lhs, RHS rhs)
+  {
+    lhs -= rhs;
+  }
+
+  template<> __CUDA_HD__ inline
+  void DiffReduction<int8_t>::apply<false>(LHS &lhs, RHS rhs)
+  {
+#ifdef __CUDA_ARCH__
+#define CASE(F, IDX)                                                       \
+      case IDX : {                                                         \
+        int *target = (int *)(ptr-sizeof(int8_t)*IDX);                     \
+        union { int as_int; char4 as_char; } oldval, newval;               \
+        newval.as_int = *target;                                           \
+        do {                                                               \
+          oldval.as_int = newval.as_int;                                   \
+          newval.as_char.F -= rhs;                                         \
+          newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
+        } while (oldval.as_int != newval.as_int);                          \
+        break;                                                             \
+      }                                                                    \
+
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&lhs;
+    switch (((unsigned long long)ptr) % 4) {
+      CASE(x, 0)
+      CASE(y, 1)
+      CASE(z, 2)
+      CASE(w, 3)
+      default :{ assert(false); break; }
+    }
+#undef CASE
+#else
+    __sync_fetch_and_sub(&lhs, rhs);
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void DiffReduction<int8_t>::fold<true>(RHS &rhs1, RHS rhs2)
+  {
+    rhs1 += rhs2;
+  }
+
+  template<> __CUDA_HD__ inline
+  void DiffReduction<int8_t>::fold<false>(RHS &rhs1, RHS rhs2)
+  {
+#ifdef __CUDA_ARCH__
+#define CASE(F, IDX)                                                       \
+      case IDX : {                                                         \
+        int *target = (int *)(ptr-sizeof(int8_t)*IDX);                     \
+        union { int as_int; char4 as_char; } oldval, newval;               \
+        newval.as_int = *target;                                           \
+        do {                                                               \
+          oldval.as_int = newval.as_int;                                   \
+          newval.as_char.F += rhs2;                                        \
+          newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
+        } while (oldval.as_int != newval.as_int);                          \
+        break;                                                             \
+      }                                                                    \
+
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&rhs1;
+    switch ((((unsigned long long)ptr) % 4) == 0) {
+      CASE(x, 0)
+      CASE(y, 1)
+      CASE(z, 2)
+      CASE(w, 3)
+      default :{ assert(false); break; }
+    }
+#undef CASE
+#else
+    __sync_fetch_and_add(&rhs1, rhs2);
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
   void DiffReduction<int16_t>::apply<true>(LHS &lhs, RHS rhs)
   {
     lhs -= rhs;
@@ -936,6 +1164,82 @@ namespace Legion {
       newval.as_signed += rhs2;
       newval.as_unsigned = atomicCAS(target, oldval.as_unsigned, newval.as_unsigned);
     } while (oldval.as_signed != newval.as_signed);
+#else
+    __sync_fetch_and_add(&rhs1, rhs2);
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void DiffReduction<uint8_t>::apply<true>(LHS &lhs, RHS rhs)
+  {
+    lhs -= rhs;
+  }
+
+  template<> __CUDA_HD__ inline
+  void DiffReduction<uint8_t>::apply<false>(LHS &lhs, RHS rhs)
+  {
+#ifdef __CUDA_ARCH__
+#define CASE(F, IDX)                                                       \
+      case IDX : {                                                         \
+        int *target = (int *)(ptr-sizeof(uint8_t)*IDX);                    \
+        union { int as_int; uchar4 as_char; } oldval, newval;              \
+        newval.as_int = *target;                                           \
+        do {                                                               \
+          oldval.as_int = newval.as_int;                                   \
+          newval.as_char.F -= rhs;                                         \
+          newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
+        } while (oldval.as_int != newval.as_int);                          \
+        break;                                                             \
+      }                                                                    \
+
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&lhs;
+    switch (((unsigned long long)ptr) % 4) {
+      CASE(x, 0)
+      CASE(y, 1)
+      CASE(z, 2)
+      CASE(w, 3)
+      default :{ assert(false); break; }
+    }
+#undef CASE
+#else
+    __sync_fetch_and_sub(&lhs, rhs);
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void DiffReduction<uint8_t>::fold<true>(RHS &rhs1, RHS rhs2)
+  {
+    rhs1 += rhs2;
+  }
+
+  template<> __CUDA_HD__ inline
+  void DiffReduction<uint8_t>::fold<false>(RHS &rhs1, RHS rhs2)
+  {
+#ifdef __CUDA_ARCH__
+#define CASE(F, IDX)                                                       \
+      case IDX : {                                                         \
+        int *target = (int *)(ptr-sizeof(uint8_t)*IDX);                    \
+        union { int as_int; uchar4 as_char; } oldval, newval;              \
+        newval.as_int = *target;                                           \
+        do {                                                               \
+          oldval.as_int = newval.as_int;                                   \
+          newval.as_char.F += rhs2;                                        \
+          newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
+        } while (oldval.as_int != newval.as_int);                          \
+        break;                                                             \
+      }                                                                    \
+
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&rhs1;
+    switch ((((unsigned long long)ptr) % 4) == 0) {
+      CASE(x, 0)
+      CASE(y, 1)
+      CASE(z, 2)
+      CASE(w, 3)
+      default :{ assert(false); break; }
+    }
+#undef CASE
 #else
     __sync_fetch_and_add(&rhs1, rhs2);
 #endif
@@ -1475,6 +1779,92 @@ namespace Legion {
   }
 
   template<> __CUDA_HD__ inline
+  void ProdReduction<int8_t>::apply<true>(LHS &lhs, RHS rhs)
+  {
+    lhs *= rhs;
+  }
+
+  template<> __CUDA_HD__ inline
+  void ProdReduction<int8_t>::apply<false>(LHS &lhs, RHS rhs)
+  {
+#ifdef __CUDA_ARCH__
+#define CASE(F, IDX)                                                       \
+      case IDX : {                                                         \
+        int *target = (int *)(ptr-sizeof(int8_t)*IDX);                     \
+        union { int as_int; char4 as_char; } oldval, newval;               \
+        newval.as_int = *target;                                           \
+        do {                                                               \
+          oldval.as_int = newval.as_int;                                   \
+          newval.as_char.F *= rhs;                                         \
+          newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
+        } while (oldval.as_int != newval.as_int);                          \
+        break;                                                             \
+      }                                                                    \
+
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&lhs;
+    switch (((unsigned long long)ptr) % 4) {
+      CASE(x, 0)
+      CASE(y, 1)
+      CASE(z, 2)
+      CASE(w, 3)
+      default :{ assert(false); break; }
+    }
+#undef CASE
+#else
+    volatile int8_t *target = (volatile int8_t*)&lhs;
+    int8_t oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval * rhs;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void ProdReduction<int8_t>::fold<true>(RHS &rhs1, RHS rhs2)
+  {
+    rhs1 *= rhs2;
+  }
+
+  template<> __CUDA_HD__ inline
+  void ProdReduction<int8_t>::fold<false>(RHS &rhs1, RHS rhs2)
+  {
+#ifdef __CUDA_ARCH__
+#define CASE(F, IDX)                                                       \
+      case IDX : {                                                         \
+        int *target = (int *)(ptr-sizeof(int8_t)*IDX);                     \
+        union { int as_int; char4 as_char; } oldval, newval;               \
+        newval.as_int = *target;                                           \
+        do {                                                               \
+          oldval.as_int = newval.as_int;                                   \
+          newval.as_char.F *= rhs2;                                        \
+          newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
+        } while (oldval.as_int != newval.as_int);                          \
+        break;                                                             \
+      }                                                                    \
+
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&rhs1;
+    switch ((((unsigned long long)ptr) % 4) == 0) {
+      CASE(x, 0)
+      CASE(y, 1)
+      CASE(z, 2)
+      CASE(w, 3)
+      default :{ assert(false); break; }
+    }
+#undef CASE
+#else
+    volatile int8_t *target = (volatile int8_t*)&rhs1;
+    int8_t oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval * rhs2;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
   void ProdReduction<int16_t>::apply<true>(LHS &lhs, RHS rhs)
   {
     lhs *= rhs;
@@ -1665,6 +2055,92 @@ namespace Legion {
 #else
     volatile long long *target = (volatile long long *)&rhs1;
     long long oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval * rhs2;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void ProdReduction<uint8_t>::apply<true>(LHS &lhs, RHS rhs)
+  {
+    lhs *= rhs;
+  }
+
+  template<> __CUDA_HD__ inline
+  void ProdReduction<uint8_t>::apply<false>(LHS &lhs, RHS rhs)
+  {
+#ifdef __CUDA_ARCH__
+#define CASE(F, IDX)                                                       \
+      case IDX : {                                                         \
+        int *target = (int *)(ptr-sizeof(uint8_t)*IDX);                    \
+        union { int as_int; uchar4 as_char; } oldval, newval;              \
+        newval.as_int = *target;                                           \
+        do {                                                               \
+          oldval.as_int = newval.as_int;                                   \
+          newval.as_char.F *= rhs;                                         \
+          newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
+        } while (oldval.as_int != newval.as_int);                          \
+        break;                                                             \
+      }                                                                    \
+
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&lhs;
+    switch (((unsigned long long)ptr) % 4) {
+      CASE(x, 0)
+      CASE(y, 1)
+      CASE(z, 2)
+      CASE(w, 3)
+      default :{ assert(false); break; }
+    }
+#undef CASE
+#else
+    volatile uint8_t *target = (volatile uint8_t*)&lhs;
+    uint8_t oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval * rhs;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void ProdReduction<uint8_t>::fold<true>(RHS &rhs1, RHS rhs2)
+  {
+    rhs1 *= rhs2;
+  }
+
+  template<> __CUDA_HD__ inline
+  void ProdReduction<uint8_t>::fold<false>(RHS &rhs1, RHS rhs2)
+  {
+#ifdef __CUDA_ARCH__
+#define CASE(F, IDX)                                                       \
+      case IDX : {                                                         \
+        int *target = (int *)(ptr-sizeof(uint8_t)*IDX);                    \
+        union { int as_int; uchar4 as_char; } oldval, newval;              \
+        newval.as_int = *target;                                           \
+        do {                                                               \
+          oldval.as_int = newval.as_int;                                   \
+          newval.as_char.F *= rhs2;                                        \
+          newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
+        } while (oldval.as_int != newval.as_int);                          \
+        break;                                                             \
+      }                                                                    \
+
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&rhs1;
+    switch ((((unsigned long long)ptr) % 4) == 0) {
+      CASE(x, 0)
+      CASE(y, 1)
+      CASE(z, 2)
+      CASE(w, 3)
+      default :{ assert(false); break; }
+    }
+#undef CASE
+#else
+    volatile uint8_t *target = (volatile uint8_t*)&rhs1;
+    uint8_t oldval, newval;
     do {
       oldval = *target;
       newval = oldval * rhs2;
@@ -2187,6 +2663,92 @@ namespace Legion {
 #endif // LEGION_REDOP_COMPLEX
 
   template<> __CUDA_HD__ inline
+  void DivReduction<int8_t>::apply<true>(LHS &lhs, RHS rhs)
+  {
+    lhs /= rhs;
+  }
+
+  template<> __CUDA_HD__ inline
+  void DivReduction<int8_t>::apply<false>(LHS &lhs, RHS rhs)
+  {
+#ifdef __CUDA_ARCH__
+#define CASE(F, IDX)                                                       \
+      case IDX : {                                                         \
+        int *target = (int *)(ptr-sizeof(int8_t)*IDX);                     \
+        union { int as_int; char4 as_char; } oldval, newval;               \
+        newval.as_int = *target;                                           \
+        do {                                                               \
+          oldval.as_int = newval.as_int;                                   \
+          newval.as_char.F /= rhs;                                         \
+          newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
+        } while (oldval.as_int != newval.as_int);                          \
+        break;                                                             \
+      }                                                                    \
+
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&lhs;
+    switch (((unsigned long long)ptr) % 4) {
+      CASE(x, 0)
+      CASE(y, 1)
+      CASE(z, 2)
+      CASE(w, 3)
+      default :{ assert(false); break; }
+    }
+#undef CASE
+#else
+    volatile int8_t *target = (volatile int8_t*)&lhs;
+    int8_t oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval / rhs;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void DivReduction<int8_t>::fold<true>(RHS &rhs1, RHS rhs2)
+  {
+    rhs1 *= rhs2;
+  }
+
+  template<> __CUDA_HD__ inline
+  void DivReduction<int8_t>::fold<false>(RHS &rhs1, RHS rhs2)
+  {
+#ifdef __CUDA_ARCH__
+#define CASE(F, IDX)                                                       \
+      case IDX : {                                                         \
+        int *target = (int *)(ptr-sizeof(int8_t)*IDX);                     \
+        union { int as_int; char4 as_char; } oldval, newval;               \
+        newval.as_int = *target;                                           \
+        do {                                                               \
+          oldval.as_int = newval.as_int;                                   \
+          newval.as_char.F *= rhs2;                                        \
+          newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
+        } while (oldval.as_int != newval.as_int);                          \
+        break;                                                             \
+      }                                                                    \
+
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&rhs1;
+    switch ((((unsigned long long)ptr) % 4) == 0) {
+      CASE(x, 0)
+      CASE(y, 1)
+      CASE(z, 2)
+      CASE(w, 3)
+      default :{ assert(false); break; }
+    }
+#undef CASE
+#else
+    volatile int8_t *target = (volatile int8_t*)&rhs1;
+    int8_t oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval * rhs2;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
   void DivReduction<int16_t>::apply<true>(LHS &lhs, RHS rhs)
   {
     lhs /= rhs;
@@ -2377,6 +2939,92 @@ namespace Legion {
 #else
     volatile long long *target = (volatile long long *)&rhs1;
     long long oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval * rhs2;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void DivReduction<uint8_t>::apply<true>(LHS &lhs, RHS rhs)
+  {
+    lhs /= rhs;
+  }
+
+  template<> __CUDA_HD__ inline
+  void DivReduction<uint8_t>::apply<false>(LHS &lhs, RHS rhs)
+  {
+#ifdef __CUDA_ARCH__
+#define CASE(F, IDX)                                                       \
+      case IDX : {                                                         \
+        int *target = (int *)(ptr-sizeof(uint8_t)*IDX);                    \
+        union { int as_int; uchar4 as_char; } oldval, newval;              \
+        newval.as_int = *target;                                           \
+        do {                                                               \
+          oldval.as_int = newval.as_int;                                   \
+          newval.as_char.F /= rhs;                                         \
+          newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
+        } while (oldval.as_int != newval.as_int);                          \
+        break;                                                             \
+      }                                                                    \
+
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&lhs;
+    switch (((unsigned long long)ptr) % 4) {
+      CASE(x, 0)
+      CASE(y, 1)
+      CASE(z, 2)
+      CASE(w, 3)
+      default :{ assert(false); break; }
+    }
+#undef CASE
+#else
+    volatile uint8_t *target = (volatile uint8_t*)&lhs;
+    uint8_t oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval / rhs;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void DivReduction<uint8_t>::fold<true>(RHS &rhs1, RHS rhs2)
+  {
+    rhs1 *= rhs2;
+  }
+
+  template<> __CUDA_HD__ inline
+  void DivReduction<uint8_t>::fold<false>(RHS &rhs1, RHS rhs2)
+  {
+#ifdef __CUDA_ARCH__
+#define CASE(F, IDX)                                                       \
+      case IDX : {                                                         \
+        int *target = (int *)(ptr-sizeof(uint8_t)*IDX);                    \
+        union { int as_int; uchar4 as_char; } oldval, newval;              \
+        newval.as_int = *target;                                           \
+        do {                                                               \
+          oldval.as_int = newval.as_int;                                   \
+          newval.as_char.F *= rhs2;                                        \
+          newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
+        } while (oldval.as_int != newval.as_int);                          \
+        break;                                                             \
+      }                                                                    \
+
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&rhs1;
+    switch ((((unsigned long long)ptr) % 4) == 0) {
+      CASE(x, 0)
+      CASE(y, 1)
+      CASE(z, 2)
+      CASE(w, 3)
+      default :{ assert(false); break; }
+    }
+#undef CASE
+#else
+    volatile uint8_t *target = (volatile uint8_t*)&rhs1;
+    uint8_t oldval, newval;
     do {
       oldval = *target;
       newval = oldval * rhs2;
@@ -2962,6 +3610,99 @@ namespace Legion {
   }
 
   template<> __CUDA_HD__ inline
+  void MaxReduction<int8_t>::apply<true>(LHS &lhs, RHS rhs)
+  {
+    if (rhs > lhs)
+      lhs = rhs;
+  }
+
+  template<> __CUDA_HD__ inline
+  void MaxReduction<int8_t>::apply<false>(LHS &lhs, RHS rhs)
+  {
+#ifdef __CUDA_ARCH__
+#define CASE(F, IDX)                                                       \
+      case IDX : {                                                         \
+        int *target = (int *)(ptr-sizeof(int8_t)*IDX);                     \
+        union { int as_int; char4 as_char; } oldval, newval;               \
+        newval.as_int = *target;                                           \
+        do {                                                               \
+          oldval.as_int = newval.as_int;                                   \
+          newval.as_char.F = __MAX__(oldval.as_char.F, rhs);               \
+          if (newval.as_char.F == oldval.as_char.F)                        \
+            break;                                                         \
+          newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
+        } while (oldval.as_int != newval.as_int);                          \
+        break;                                                             \
+      }                                                                    \
+
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&lhs;
+    switch (((unsigned long long)ptr) % 4) {
+      CASE(x, 0)
+      CASE(y, 1)
+      CASE(z, 2)
+      CASE(w, 3)
+      default :{ assert(false); break; }
+    }
+#undef CASE
+#else
+    volatile int8_t *target = (volatile int8_t*)&lhs;
+    int8_t oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval * rhs;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void MaxReduction<int8_t>::fold<true>(RHS &rhs1, RHS rhs2)
+  {
+    if (rhs2 > rhs1)
+      rhs1 = rhs2;
+  }
+
+  template<> __CUDA_HD__ inline
+  void MaxReduction<int8_t>::fold<false>(RHS &rhs1, RHS rhs2)
+  {
+#ifdef __CUDA_ARCH__
+#define CASE(F, IDX)                                                       \
+      case IDX : {                                                         \
+        int *target = (int *)(ptr-sizeof(int8_t)*IDX);                     \
+        union { int as_int; char4 as_char; } oldval, newval;               \
+        newval.as_int = *target;                                           \
+        do {                                                               \
+          oldval.as_int = newval.as_int;                                   \
+          newval.as_char.F = __MAX__(oldval.as_char.F, rhs2);              \
+          if (newval.as_char.F == oldval.as_char.F)                        \
+            break;                                                         \
+          newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
+        } while (oldval.as_int != newval.as_int);                          \
+        break;                                                             \
+      }                                                                    \
+
+
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&rhs1;
+    switch ((((unsigned long long)ptr) % 4) == 0) {
+      CASE(x, 0)
+      CASE(y, 1)
+      CASE(z, 2)
+      CASE(w, 3)
+      default :{ assert(false); break; }
+    }
+#undef CASE
+#else
+    volatile int8_t *target = (volatile int8_t*)&rhs1;
+    int8_t oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval * rhs2;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
   void MaxReduction<int16_t>::apply<true>(LHS &lhs, RHS rhs)
   {
     if (rhs > lhs)
@@ -3189,6 +3930,99 @@ namespace Legion {
       newval = __MAX__(oldval, rhs2);
       if (newval == oldval)
         break;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void MaxReduction<uint8_t>::apply<true>(LHS &lhs, RHS rhs)
+  {
+    if (rhs > lhs)
+      lhs = rhs;
+  }
+
+  template<> __CUDA_HD__ inline
+  void MaxReduction<uint8_t>::apply<false>(LHS &lhs, RHS rhs)
+  {
+#ifdef __CUDA_ARCH__
+#define CASE(F, IDX)                                                       \
+      case IDX : {                                                         \
+        int *target = (int *)(ptr-sizeof(uint8_t)*IDX);                    \
+        union { int as_int; uchar4 as_char; } oldval, newval;              \
+        newval.as_int = *target;                                           \
+        do {                                                               \
+          oldval.as_int = newval.as_int;                                   \
+          newval.as_char.F = __MAX__(oldval.as_char.F, rhs);               \
+          if (newval.as_char.F == oldval.as_char.F)                        \
+            break;                                                         \
+          newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
+        } while (oldval.as_int != newval.as_int);                          \
+        break;                                                             \
+      }                                                                    \
+
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&lhs;
+    switch (((unsigned long long)ptr) % 4) {
+      CASE(x, 0)
+      CASE(y, 1)
+      CASE(z, 2)
+      CASE(w, 3)
+      default :{ assert(false); break; }
+    }
+#undef CASE
+#else
+    volatile uint8_t *target = (volatile uint8_t*)&lhs;
+    uint8_t oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval * rhs;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void MaxReduction<uint8_t>::fold<true>(RHS &rhs1, RHS rhs2)
+  {
+    if (rhs2 > rhs1)
+      rhs1 = rhs2;
+  }
+
+  template<> __CUDA_HD__ inline
+  void MaxReduction<uint8_t>::fold<false>(RHS &rhs1, RHS rhs2)
+  {
+#ifdef __CUDA_ARCH__
+#define CASE(F, IDX)                                                       \
+      case IDX : {                                                         \
+        int *target = (int *)(ptr-sizeof(uint8_t)*IDX);                    \
+        union { int as_int; uchar4 as_char; } oldval, newval;              \
+        newval.as_int = *target;                                           \
+        do {                                                               \
+          oldval.as_int = newval.as_int;                                   \
+          newval.as_char.F = __MAX__(oldval.as_char.F, rhs2);              \
+          if (newval.as_char.F == oldval.as_char.F)                        \
+            break;                                                         \
+          newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
+        } while (oldval.as_int != newval.as_int);                          \
+        break;                                                             \
+      }                                                                    \
+
+
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&rhs1;
+    switch ((((unsigned long long)ptr) % 4) == 0) {
+      CASE(x, 0)
+      CASE(y, 1)
+      CASE(z, 2)
+      CASE(w, 3)
+      default :{ assert(false); break; }
+    }
+#undef CASE
+#else
+    volatile uint8_t *target = (volatile uint8_t*)&rhs1;
+    uint8_t oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval * rhs2;
     } while (!__sync_bool_compare_and_swap(target, oldval, newval));
 #endif
   }
@@ -3721,6 +4555,99 @@ namespace Legion {
   }
 
   template<> __CUDA_HD__ inline
+  void MinReduction<int8_t>::apply<true>(LHS &lhs, RHS rhs)
+  {
+    if (rhs < lhs)
+      lhs = rhs;
+  }
+
+  template<> __CUDA_HD__ inline
+  void MinReduction<int8_t>::apply<false>(LHS &lhs, RHS rhs)
+  {
+#ifdef __CUDA_ARCH__
+#define CASE(F, IDX)                                                       \
+      case IDX : {                                                         \
+        int *target = (int *)(ptr-sizeof(int8_t)*IDX);                     \
+        union { int as_int; char4 as_char; } oldval, newval;               \
+        newval.as_int = *target;                                           \
+        do {                                                               \
+          oldval.as_int = newval.as_int;                                   \
+          newval.as_char.F = __MIN__(oldval.as_char.F, rhs);               \
+          if (newval.as_char.F == oldval.as_char.F)                        \
+            break;                                                         \
+          newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
+        } while (oldval.as_int != newval.as_int);                          \
+        break;                                                             \
+      }                                                                    \
+
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&lhs;
+    switch (((unsigned long long)ptr) % 4) {
+      CASE(x, 0)
+      CASE(y, 1)
+      CASE(z, 2)
+      CASE(w, 3)
+      default :{ assert(false); break; }
+    }
+#undef CASE
+#else
+    volatile int8_t *target = (volatile int8_t*)&lhs;
+    int8_t oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval * rhs;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void MinReduction<int8_t>::fold<true>(RHS &rhs1, RHS rhs2)
+  {
+    if (rhs2 < rhs1)
+      rhs1 = rhs2;
+  }
+
+  template<> __CUDA_HD__ inline
+  void MinReduction<int8_t>::fold<false>(RHS &rhs1, RHS rhs2)
+  {
+#ifdef __CUDA_ARCH__
+#define CASE(F, IDX)                                                       \
+      case IDX : {                                                         \
+        int *target = (int *)(ptr-sizeof(int8_t)*IDX);                     \
+        union { int as_int; char4 as_char; } oldval, newval;               \
+        newval.as_int = *target;                                           \
+        do {                                                               \
+          oldval.as_int = newval.as_int;                                   \
+          newval.as_char.F = __MIN__(oldval.as_char.F, rhs2);              \
+          if (newval.as_char.F == oldval.as_char.F)                        \
+            break;                                                         \
+          newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
+        } while (oldval.as_int != newval.as_int);                          \
+        break;                                                             \
+      }                                                                    \
+
+
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&rhs1;
+    switch ((((unsigned long long)ptr) % 4) == 0) {
+      CASE(x, 0)
+      CASE(y, 1)
+      CASE(z, 2)
+      CASE(w, 3)
+      default :{ assert(false); break; }
+    }
+#undef CASE
+#else
+    volatile int8_t *target = (volatile int8_t*)&rhs1;
+    int8_t oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval * rhs2;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
   void MinReduction<int16_t>::apply<true>(LHS &lhs, RHS rhs)
   {
     if (rhs < lhs)
@@ -3946,6 +4873,99 @@ namespace Legion {
     do {
       oldval = *target;
       newval = __MIN__(oldval, rhs2);
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void MinReduction<uint8_t>::apply<true>(LHS &lhs, RHS rhs)
+  {
+    if (rhs < lhs)
+      lhs = rhs;
+  }
+
+  template<> __CUDA_HD__ inline
+  void MinReduction<uint8_t>::apply<false>(LHS &lhs, RHS rhs)
+  {
+#ifdef __CUDA_ARCH__
+#define CASE(F, IDX)                                                       \
+      case IDX : {                                                         \
+        int *target = (int *)(ptr-sizeof(uint8_t)*IDX);                    \
+        union { int as_int; uchar4 as_char; } oldval, newval;              \
+        newval.as_int = *target;                                           \
+        do {                                                               \
+          oldval.as_int = newval.as_int;                                   \
+          newval.as_char.F = __MIN__(oldval.as_char.F, rhs);               \
+          if (newval.as_char.F == oldval.as_char.F)                        \
+            break;                                                         \
+          newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
+        } while (oldval.as_int != newval.as_int);                          \
+        break;                                                             \
+      }                                                                    \
+
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&lhs;
+    switch (((unsigned long long)ptr) % 4) {
+      CASE(x, 0)
+      CASE(y, 1)
+      CASE(z, 2)
+      CASE(w, 3)
+      default :{ assert(false); break; }
+    }
+#undef CASE
+#else
+    volatile uint8_t *target = (volatile uint8_t*)&lhs;
+    uint8_t oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval * rhs;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void MinReduction<uint8_t>::fold<true>(RHS &rhs1, RHS rhs2)
+  {
+    if (rhs2 < rhs1)
+      rhs1 = rhs2;
+  }
+
+  template<> __CUDA_HD__ inline
+  void MinReduction<uint8_t>::fold<false>(RHS &rhs1, RHS rhs2)
+  {
+#ifdef __CUDA_ARCH__
+#define CASE(F, IDX)                                                       \
+      case IDX : {                                                         \
+        int *target = (int *)(ptr-sizeof(uint8_t)*IDX);                    \
+        union { int as_int; uchar4 as_char; } oldval, newval;              \
+        newval.as_int = *target;                                           \
+        do {                                                               \
+          oldval.as_int = newval.as_int;                                   \
+          newval.as_char.F = __MIN__(oldval.as_char.F, rhs2);              \
+          if (newval.as_char.F == oldval.as_char.F)                        \
+            break;                                                         \
+          newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
+        } while (oldval.as_int != newval.as_int);                          \
+        break;                                                             \
+      }                                                                    \
+
+
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&rhs1;
+    switch ((((unsigned long long)ptr) % 4) == 0) {
+      CASE(x, 0)
+      CASE(y, 1)
+      CASE(z, 2)
+      CASE(w, 3)
+      default :{ assert(false); break; }
+    }
+#undef CASE
+#else
+    volatile uint8_t *target = (volatile uint8_t*)&rhs1;
+    uint8_t oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval * rhs2;
     } while (!__sync_bool_compare_and_swap(target, oldval, newval));
 #endif
   }
@@ -4403,6 +5423,1774 @@ namespace Legion {
       if (newval.as_float == oldval.as_float)
         break;
     } while (!__sync_bool_compare_and_swap(target, oldval.as_int, newval.as_int));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void OrReduction<int8_t>::apply<true>(LHS &lhs, RHS rhs)
+  {
+    lhs |= rhs;
+  }
+
+  template<> __CUDA_HD__ inline
+  void OrReduction<int8_t>::apply<false>(LHS &lhs, RHS rhs)
+  {
+#ifdef __CUDA_ARCH__
+#define CASE(F, IDX)                                                       \
+      case IDX : {                                                         \
+        int *target = (int *)(ptr-sizeof(int8_t)*IDX);                     \
+        union { int as_int; char4 as_char; } oldval, newval;               \
+        newval.as_int = *target;                                           \
+        do {                                                               \
+          oldval.as_int = newval.as_int;                                   \
+          newval.as_char.F |= rhs;                                         \
+          newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
+        } while (oldval.as_int != newval.as_int);                          \
+        break;                                                             \
+      }                                                                    \
+
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&lhs;
+    switch (((unsigned long long)ptr) % 4) {
+      CASE(x, 0)
+      CASE(y, 1)
+      CASE(z, 2)
+      CASE(w, 3)
+      default :{ assert(false); break; }
+    }
+#undef CASE
+#else
+    volatile int8_t *target = (volatile int8_t*)&lhs;
+    int8_t oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval | rhs;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void OrReduction<int8_t>::fold<true>(RHS &rhs1, RHS rhs2)
+  {
+    rhs1 |= rhs2;
+  }
+
+  template<> __CUDA_HD__ inline
+  void OrReduction<int8_t>::fold<false>(RHS &rhs1, RHS rhs2)
+  {
+#ifdef __CUDA_ARCH__
+#define CASE(F, IDX)                                                       \
+      case IDX : {                                                         \
+        int *target = (int *)(ptr-sizeof(int8_t)*IDX);                     \
+        union { int as_int; char4 as_char; } oldval, newval;               \
+        newval.as_int = *target;                                           \
+        do {                                                               \
+          oldval.as_int = newval.as_int;                                   \
+          newval.as_char.F |= rhs2;                                        \
+          newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
+        } while (oldval.as_int != newval.as_int);                          \
+        break;                                                             \
+      }                                                                    \
+
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&rhs1;
+    switch ((((unsigned long long)ptr) % 4) == 0) {
+      CASE(x, 0)
+      CASE(y, 1)
+      CASE(z, 2)
+      CASE(w, 3)
+      default :{ assert(false); break; }
+    }
+#undef CASE
+#else
+    volatile int8_t *target = (volatile int8_t*)&rhs1;
+    int8_t oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval | rhs2;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void OrReduction<int16_t>::apply<true>(LHS &lhs, RHS rhs)
+  {
+    lhs |= rhs;
+  }
+
+  template<> __CUDA_HD__ inline
+  void OrReduction<int16_t>::apply<false>(LHS &lhs, RHS rhs)
+  {
+#ifdef __CUDA_ARCH__
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&lhs;
+    if ((((unsigned long long)ptr) % 4) == 0) {
+      // Aligned case
+      int *target = (int *)ptr;
+      union { int as_int; short2 as_short; } oldval, newval;
+      newval.as_int = *target;
+      do {
+        oldval.as_int = newval.as_int;
+        newval.as_short.x |= rhs;
+        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
+      } while (oldval.as_int != newval.as_int);
+    } else {
+      // Unaligned case
+      int *target = (int *)(ptr-sizeof(short));
+      union { int as_int; short2 as_short; } oldval, newval;
+      newval.as_int = *target;
+      do {
+        oldval.as_int = newval.as_int;
+        newval.as_short.y |= rhs;
+        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
+      } while (oldval.as_int != newval.as_int);
+    }
+#else
+    volatile short *target = (volatile short*)&lhs;
+    short oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval | rhs;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void OrReduction<int16_t>::fold<true>(RHS &rhs1, RHS rhs2)
+  {
+    rhs1 |= rhs2;
+  }
+
+  template<> __CUDA_HD__ inline
+  void OrReduction<int16_t>::fold<false>(RHS &rhs1, RHS rhs2)
+  {
+#ifdef __CUDA_ARCH__
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&rhs1;
+    if ((((unsigned long long)ptr) % 4) == 0) {
+      // Aligned case
+      int *target = (int *)ptr;
+      union { int as_int; short2 as_short; } oldval, newval;
+      newval.as_int = *target;
+      do {
+        oldval.as_int = newval.as_int;
+        newval.as_short.x |= rhs2;
+        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
+      } while (oldval.as_int != newval.as_int);
+    } else {
+      // Unaligned case
+      int *target = (int *)(ptr-sizeof(short));
+      union { int as_int; short2 as_short; } oldval, newval;
+      newval.as_int = *target;
+      do {
+        oldval.as_int = newval.as_int;
+        newval.as_short.y |= rhs2;
+        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
+      } while (oldval.as_int != newval.as_int);
+    }
+#else
+    volatile short *target = (volatile short*)&rhs1;
+    short oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval | rhs2;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void OrReduction<int32_t>::apply<true>(LHS &lhs, RHS rhs)
+  {
+    lhs |= rhs;
+  }
+
+  template<> __CUDA_HD__ inline
+  void OrReduction<int32_t>::apply<false>(LHS &lhs, RHS rhs)
+  {
+#ifdef __CUDA_ARCH__
+    int *target = (int *)&lhs;
+    int oldval, newval;
+    newval = *target;
+    do {
+      oldval = newval;
+      newval |= rhs;
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
+#else
+    volatile int *target = (int*)&lhs;
+    int oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval | rhs;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void OrReduction<int32_t>::fold<true>(RHS &rhs1, RHS rhs2)
+  {
+    rhs1 |= rhs2;
+  }
+
+  template<> __CUDA_HD__ inline
+  void OrReduction<int32_t>::fold<false>(RHS &rhs1, RHS rhs2)
+  {
+#ifdef __CUDA_ARCH__
+    int *target = (int *)&rhs1;
+    int oldval, newval;
+    newval = *target;
+    do {
+      oldval = newval;
+      newval |= rhs2;
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
+#else
+    volatile int *target = (int*)&rhs1;
+    int oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval | rhs2;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void OrReduction<int64_t>::apply<true>(LHS &lhs, RHS rhs)
+  {
+    lhs |= rhs;
+  }
+
+  template<> __CUDA_HD__ inline
+  void OrReduction<int64_t>::apply<false>(LHS &lhs, RHS rhs)
+  {
+#ifdef __CUDA_ARCH__
+    unsigned long long *target = (unsigned long long *)&lhs;
+    union { long long as_signed; unsigned long long as_unsigned; } oldval, newval;
+    newval.as_unsigned = *target;
+    do {
+      oldval.as_signed = newval.as_signed;
+      newval.as_signed |= rhs;
+      newval.as_unsigned = atomicCAS(target, oldval.as_unsigned, newval.as_unsigned);
+    } while (oldval.as_signed != newval.as_signed);
+#else
+    volatile long long *target = (volatile long long *)&lhs;
+    long long oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval | rhs;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void OrReduction<int64_t>::fold<true>(RHS &rhs1, RHS rhs2)
+  {
+    rhs1 |= rhs2;
+  }
+
+  template<> __CUDA_HD__ inline
+  void OrReduction<int64_t>::fold<false>(RHS &rhs1, RHS rhs2)
+  {
+#ifdef __CUDA_ARCH__
+    unsigned long long *target = (unsigned long long *)&rhs1;
+    union { long long as_signed; unsigned long long as_unsigned; } oldval, newval;
+    newval.as_unsigned = *target;
+    do {
+      oldval.as_signed = newval.as_signed;
+      newval.as_signed |= rhs2;
+      newval.as_unsigned = atomicCAS(target, oldval.as_unsigned, newval.as_unsigned);
+    } while (oldval.as_signed != newval.as_signed);
+#else
+    volatile long long *target = (volatile long long *)&rhs1;
+    long long oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval | rhs2;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void OrReduction<uint8_t>::apply<true>(LHS &lhs, RHS rhs)
+  {
+    lhs |= rhs;
+  }
+
+  template<> __CUDA_HD__ inline
+  void OrReduction<uint8_t>::apply<false>(LHS &lhs, RHS rhs)
+  {
+#ifdef __CUDA_ARCH__
+#define CASE(F, IDX)                                                       \
+      case IDX : {                                                         \
+        int *target = (int *)(ptr-sizeof(uint8_t)*IDX);                    \
+        union { int as_int; uchar4 as_char; } oldval, newval;              \
+        newval.as_int = *target;                                           \
+        do {                                                               \
+          oldval.as_int = newval.as_int;                                   \
+          newval.as_char.F |= rhs;                                         \
+          newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
+        } while (oldval.as_int != newval.as_int);                          \
+        break;                                                             \
+      }                                                                    \
+
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&lhs;
+    switch (((unsigned long long)ptr) % 4) {
+      CASE(x, 0)
+      CASE(y, 1)
+      CASE(z, 2)
+      CASE(w, 3)
+      default :{ assert(false); break; }
+    }
+#undef CASE
+#else
+    volatile uint8_t *target = (volatile uint8_t*)&lhs;
+    uint8_t oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval | rhs;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void OrReduction<uint8_t>::fold<true>(RHS &rhs1, RHS rhs2)
+  {
+    rhs1 |= rhs2;
+  }
+
+  template<> __CUDA_HD__ inline
+  void OrReduction<uint8_t>::fold<false>(RHS &rhs1, RHS rhs2)
+  {
+#ifdef __CUDA_ARCH__
+#define CASE(F, IDX)                                                       \
+      case IDX : {                                                         \
+        int *target = (int *)(ptr-sizeof(uint8_t)*IDX);                    \
+        union { int as_int; uchar4 as_char; } oldval, newval;              \
+        newval.as_int = *target;                                           \
+        do {                                                               \
+          oldval.as_int = newval.as_int;                                   \
+          newval.as_char.F |= rhs2;                                        \
+          newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
+        } while (oldval.as_int != newval.as_int);                          \
+        break;                                                             \
+      }                                                                    \
+
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&rhs1;
+    switch ((((unsigned long long)ptr) % 4) == 0) {
+      CASE(x, 0)
+      CASE(y, 1)
+      CASE(z, 2)
+      CASE(w, 3)
+      default :{ assert(false); break; }
+    }
+#undef CASE
+#else
+    volatile uint8_t *target = (volatile uint8_t*)&rhs1;
+    uint8_t oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval | rhs2;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void OrReduction<uint16_t>::apply<true>(LHS &lhs, RHS rhs)
+  {
+    lhs |= rhs;
+  }
+
+  template<> __CUDA_HD__ inline 
+  void OrReduction<uint16_t>::apply<false>(LHS &lhs, RHS rhs)
+  {
+#ifdef __CUDA_ARCH__
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&lhs;
+    if ((((unsigned long long)ptr) % 4) == 0) {
+      // Aligned case
+      int *target = (int *)ptr;
+      union { int as_int; ushort2 as_short; } oldval, newval;
+      newval.as_int = *target;
+      do {
+        oldval.as_int = newval.as_int;
+        newval.as_short.x |= rhs;
+        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
+      } while (oldval.as_int != newval.as_int);
+    } else {
+      // Unaligned case
+      int *target = (int *)(ptr-sizeof(unsigned short));
+      union { int as_int; ushort2 as_short; } oldval, newval;
+      newval.as_int = *target;
+      do {
+        oldval.as_int = newval.as_int;
+        newval.as_short.y |= rhs;
+        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
+      } while (oldval.as_int != newval.as_int);
+    }
+#else
+    volatile unsigned short *target = (volatile unsigned short*)&lhs;
+    unsigned short oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval | rhs;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void OrReduction<uint16_t>::fold<true>(RHS &rhs1, RHS rhs2)
+  {
+    rhs1 |= rhs2;
+  }
+
+  template<> __CUDA_HD__ inline
+  void OrReduction<uint16_t>::fold<false>(RHS &rhs1, RHS rhs2)
+  {
+#ifdef __CUDA_ARCH__
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&rhs1;
+    if ((((unsigned long long)ptr) % 4) == 0) {
+      // Aligned case
+      int *target = (int *)ptr;
+      union { int as_int; ushort2 as_short; } oldval, newval;
+      newval.as_int = *target;
+      do {
+        oldval.as_int = newval.as_int;
+        newval.as_short.x |= rhs2;
+        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
+      } while (oldval.as_int != newval.as_int);
+    } else {
+      // Unaligned case
+      int *target = (int *)(ptr-sizeof(unsigned short));
+      union { int as_int; ushort2 as_short; } oldval, newval;
+      newval.as_int = *target;
+      do {
+        oldval.as_int = newval.as_int;
+        newval.as_short.y |= rhs2;
+        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
+      } while (oldval.as_int != newval.as_int);
+    }
+#else
+    volatile unsigned short *target = (volatile unsigned short*)&rhs1;
+    unsigned short oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval | rhs2;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void OrReduction<uint32_t>::apply<true>(LHS &lhs, RHS rhs)
+  {
+    lhs |= rhs;
+  }
+
+  template<> __CUDA_HD__ inline
+  void OrReduction<uint32_t>::apply<false>(LHS &lhs, RHS rhs)
+  {
+#ifdef __CUDA_ARCH__
+    unsigned *target = (unsigned *)&lhs;
+    unsigned oldval, newval;
+    newval = *target;
+    do {
+      oldval = newval;
+      newval |= rhs;
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
+#else
+    volatile unsigned *target = (volatile unsigned *)&lhs;
+    unsigned oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval | rhs;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void OrReduction<uint32_t>::fold<true>(RHS &rhs1, RHS rhs2)
+  {
+    rhs1 |= rhs2;
+  }
+
+  template<> __CUDA_HD__ inline
+  void OrReduction<uint32_t>::fold<false>(RHS &rhs1, RHS rhs2)
+  {
+#ifdef __CUDA_ARCH__
+    unsigned *target = (unsigned *)&rhs1;
+    unsigned oldval, newval;
+    newval = *target;
+    do {
+      oldval = newval;
+      newval |= rhs2;
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
+#else
+    volatile unsigned *target = (volatile unsigned *)&rhs1;
+    unsigned oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval | rhs2;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void OrReduction<uint64_t>::apply<true>(LHS &lhs, RHS rhs)
+  {
+    lhs |= rhs;
+  }
+
+  template<> __CUDA_HD__ inline
+  void OrReduction<uint64_t>::apply<false>(LHS &lhs, RHS rhs)
+  {
+#ifdef __CUDA_ARCH__
+    unsigned long long *target = (unsigned long long *)&lhs;
+    unsigned long long oldval, newval;
+    newval = *target;
+    do {
+      oldval = newval;
+      newval |= rhs;
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
+#else
+    volatile unsigned long long *target = (volatile unsigned long long *)&lhs;
+    unsigned long long oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval | rhs;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void OrReduction<uint64_t>::fold<true>(RHS &rhs1, RHS rhs2)
+  {
+    rhs1 |= rhs2;
+  }
+
+  template<> __CUDA_HD__ inline
+  void OrReduction<uint64_t>::fold<false>(RHS &rhs1, RHS rhs2)
+  {
+#ifdef __CUDA_ARCH__
+    unsigned long long *target = (unsigned long long *)&rhs1;
+    unsigned long long oldval, newval;
+    newval = *target;
+    do {
+      oldval = newval;
+      newval |= rhs2;
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
+#else
+    volatile unsigned long long *target = (volatile unsigned long long *)&rhs1;
+    unsigned long long oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval | rhs2;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void AndReduction<int8_t>::apply<true>(LHS &lhs, RHS rhs)
+  {
+    lhs &= rhs;
+  }
+
+  template<> __CUDA_HD__ inline
+  void AndReduction<int8_t>::apply<false>(LHS &lhs, RHS rhs)
+  {
+#ifdef __CUDA_ARCH__
+#define CASE(F, IDX)                                                       \
+      case IDX : {                                                         \
+        int *target = (int *)(ptr-sizeof(int8_t)*IDX);                     \
+        union { int as_int; char4 as_char; } oldval, newval;               \
+        newval.as_int = *target;                                           \
+        do {                                                               \
+          oldval.as_int = newval.as_int;                                   \
+          newval.as_char.F &= rhs;                                         \
+          newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
+        } while (oldval.as_int != newval.as_int);                          \
+        break;                                                             \
+      }                                                                    \
+
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&lhs;
+    switch (((unsigned long long)ptr) % 4) {
+      CASE(x, 0)
+      CASE(y, 1)
+      CASE(z, 2)
+      CASE(w, 3)
+      default :{ assert(false); break; }
+    }
+#undef CASE
+#else
+    volatile int8_t *target = (volatile int8_t*)&lhs;
+    int8_t oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval & rhs;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void AndReduction<int8_t>::fold<true>(RHS &rhs1, RHS rhs2)
+  {
+    rhs1 &= rhs2;
+  }
+
+  template<> __CUDA_HD__ inline
+  void AndReduction<int8_t>::fold<false>(RHS &rhs1, RHS rhs2)
+  {
+#ifdef __CUDA_ARCH__
+#define CASE(F, IDX)                                                       \
+      case IDX : {                                                         \
+        int *target = (int *)(ptr-sizeof(int8_t)*IDX);                     \
+        union { int as_int; char4 as_char; } oldval, newval;               \
+        newval.as_int = *target;                                           \
+        do {                                                               \
+          oldval.as_int = newval.as_int;                                   \
+          newval.as_char.F &= rhs2;                                        \
+          newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
+        } while (oldval.as_int != newval.as_int);                          \
+        break;                                                             \
+      }                                                                    \
+
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&rhs1;
+    switch ((((unsigned long long)ptr) % 4) == 0) {
+      CASE(x, 0)
+      CASE(y, 1)
+      CASE(z, 2)
+      CASE(w, 3)
+      default :{ assert(false); break; }
+    }
+#undef CASE
+#else
+    volatile int8_t *target = (volatile int8_t*)&rhs1;
+    int8_t oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval & rhs2;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void AndReduction<int16_t>::apply<true>(LHS &lhs, RHS rhs)
+  {
+    lhs &= rhs;
+  }
+
+  template<> __CUDA_HD__ inline
+  void AndReduction<int16_t>::apply<false>(LHS &lhs, RHS rhs)
+  {
+#ifdef __CUDA_ARCH__
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&lhs;
+    if ((((unsigned long long)ptr) % 4) == 0) {
+      // Aligned case
+      int *target = (int *)ptr;
+      union { int as_int; short2 as_short; } oldval, newval;
+      newval.as_int = *target;
+      do {
+        oldval.as_int = newval.as_int;
+        newval.as_short.x &= rhs;
+        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
+      } while (oldval.as_int != newval.as_int);
+    } else {
+      // Unaligned case
+      int *target = (int *)(ptr-sizeof(short));
+      union { int as_int; short2 as_short; } oldval, newval;
+      newval.as_int = *target;
+      do {
+        oldval.as_int = newval.as_int;
+        newval.as_short.y &= rhs;
+        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
+      } while (oldval.as_int != newval.as_int);
+    }
+#else
+    volatile short *target = (volatile short*)&lhs;
+    short oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval & rhs;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void AndReduction<int16_t>::fold<true>(RHS &rhs1, RHS rhs2)
+  {
+    rhs1 &= rhs2;
+  }
+
+  template<> __CUDA_HD__ inline
+  void AndReduction<int16_t>::fold<false>(RHS &rhs1, RHS rhs2)
+  {
+#ifdef __CUDA_ARCH__
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&rhs1;
+    if ((((unsigned long long)ptr) % 4) == 0) {
+      // Aligned case
+      int *target = (int *)ptr;
+      union { int as_int; short2 as_short; } oldval, newval;
+      newval.as_int = *target;
+      do {
+        oldval.as_int = newval.as_int;
+        newval.as_short.x &= rhs2;
+        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
+      } while (oldval.as_int != newval.as_int);
+    } else {
+      // Unaligned case
+      int *target = (int *)(ptr-sizeof(short));
+      union { int as_int; short2 as_short; } oldval, newval;
+      newval.as_int = *target;
+      do {
+        oldval.as_int = newval.as_int;
+        newval.as_short.y &= rhs2;
+        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
+      } while (oldval.as_int != newval.as_int);
+    }
+#else
+    volatile short *target = (volatile short*)&rhs1;
+    short oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval & rhs2;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void AndReduction<int32_t>::apply<true>(LHS &lhs, RHS rhs)
+  {
+    lhs &= rhs;
+  }
+
+  template<> __CUDA_HD__ inline
+  void AndReduction<int32_t>::apply<false>(LHS &lhs, RHS rhs)
+  {
+#ifdef __CUDA_ARCH__
+    int *target = (int *)&lhs;
+    int oldval, newval;
+    newval = *target;
+    do {
+      oldval = newval;
+      newval &= rhs;
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
+#else
+    volatile int *target = (int*)&lhs;
+    int oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval & rhs;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void AndReduction<int32_t>::fold<true>(RHS &rhs1, RHS rhs2)
+  {
+    rhs1 &= rhs2;
+  }
+
+  template<> __CUDA_HD__ inline
+  void AndReduction<int32_t>::fold<false>(RHS &rhs1, RHS rhs2)
+  {
+#ifdef __CUDA_ARCH__
+    int *target = (int *)&rhs1;
+    int oldval, newval;
+    newval = *target;
+    do {
+      oldval = newval;
+      newval &= rhs2;
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
+#else
+    volatile int *target = (int*)&rhs1;
+    int oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval & rhs2;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void AndReduction<int64_t>::apply<true>(LHS &lhs, RHS rhs)
+  {
+    lhs &= rhs;
+  }
+
+  template<> __CUDA_HD__ inline
+  void AndReduction<int64_t>::apply<false>(LHS &lhs, RHS rhs)
+  {
+#ifdef __CUDA_ARCH__
+    unsigned long long *target = (unsigned long long *)&lhs;
+    union { long long as_signed; unsigned long long as_unsigned; } oldval, newval;
+    newval.as_unsigned = *target;
+    do {
+      oldval.as_signed = newval.as_signed;
+      newval.as_signed &= rhs;
+      newval.as_unsigned = atomicCAS(target, oldval.as_unsigned, newval.as_unsigned);
+    } while (oldval.as_signed != newval.as_signed);
+#else
+    volatile long long *target = (volatile long long *)&lhs;
+    long long oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval & rhs;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void AndReduction<int64_t>::fold<true>(RHS &rhs1, RHS rhs2)
+  {
+    rhs1 &= rhs2;
+  }
+
+  template<> __CUDA_HD__ inline
+  void AndReduction<int64_t>::fold<false>(RHS &rhs1, RHS rhs2)
+  {
+#ifdef __CUDA_ARCH__
+    unsigned long long *target = (unsigned long long *)&rhs1;
+    union { long long as_signed; unsigned long long as_unsigned; } oldval, newval;
+    newval.as_unsigned = *target;
+    do {
+      oldval.as_signed = newval.as_signed;
+      newval.as_signed &= rhs2;
+      newval.as_unsigned = atomicCAS(target, oldval.as_unsigned, newval.as_unsigned);
+    } while (oldval.as_signed != newval.as_signed);
+#else
+    volatile long long *target = (volatile long long *)&rhs1;
+    long long oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval & rhs2;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void AndReduction<uint8_t>::apply<true>(LHS &lhs, RHS rhs)
+  {
+    lhs &= rhs;
+  }
+
+  template<> __CUDA_HD__ inline
+  void AndReduction<uint8_t>::apply<false>(LHS &lhs, RHS rhs)
+  {
+#ifdef __CUDA_ARCH__
+#define CASE(F, IDX)                                                       \
+      case IDX : {                                                         \
+        int *target = (int *)(ptr-sizeof(uint8_t)*IDX);                    \
+        union { int as_int; uchar4 as_char; } oldval, newval;              \
+        newval.as_int = *target;                                           \
+        do {                                                               \
+          oldval.as_int = newval.as_int;                                   \
+          newval.as_char.F &= rhs;                                         \
+          newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
+        } while (oldval.as_int != newval.as_int);                          \
+        break;                                                             \
+      }                                                                    \
+
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&lhs;
+    switch (((unsigned long long)ptr) % 4) {
+      CASE(x, 0)
+      CASE(y, 1)
+      CASE(z, 2)
+      CASE(w, 3)
+      default :{ assert(false); break; }
+    }
+#undef CASE
+#else
+    volatile uint8_t *target = (volatile uint8_t*)&lhs;
+    uint8_t oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval & rhs;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void AndReduction<uint8_t>::fold<true>(RHS &rhs1, RHS rhs2)
+  {
+    rhs1 &= rhs2;
+  }
+
+  template<> __CUDA_HD__ inline
+  void AndReduction<uint8_t>::fold<false>(RHS &rhs1, RHS rhs2)
+  {
+#ifdef __CUDA_ARCH__
+#define CASE(F, IDX)                                                       \
+      case IDX : {                                                         \
+        int *target = (int *)(ptr-sizeof(uint8_t)*IDX);                    \
+        union { int as_int; uchar4 as_char; } oldval, newval;              \
+        newval.as_int = *target;                                           \
+        do {                                                               \
+          oldval.as_int = newval.as_int;                                   \
+          newval.as_char.F &= rhs2;                                        \
+          newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
+        } while (oldval.as_int != newval.as_int);                          \
+        break;                                                             \
+      }                                                                    \
+
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&rhs1;
+    switch ((((unsigned long long)ptr) % 4) == 0) {
+      CASE(x, 0)
+      CASE(y, 1)
+      CASE(z, 2)
+      CASE(w, 3)
+      default :{ assert(false); break; }
+    }
+#undef CASE
+#else
+    volatile uint8_t *target = (volatile uint8_t*)&rhs1;
+    uint8_t oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval & rhs2;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void AndReduction<uint16_t>::apply<true>(LHS &lhs, RHS rhs)
+  {
+    lhs &= rhs;
+  }
+
+  template<> __CUDA_HD__ inline 
+  void AndReduction<uint16_t>::apply<false>(LHS &lhs, RHS rhs)
+  {
+#ifdef __CUDA_ARCH__
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&lhs;
+    if ((((unsigned long long)ptr) % 4) == 0) {
+      // Aligned case
+      int *target = (int *)ptr;
+      union { int as_int; ushort2 as_short; } oldval, newval;
+      newval.as_int = *target;
+      do {
+        oldval.as_int = newval.as_int;
+        newval.as_short.x &= rhs;
+        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
+      } while (oldval.as_int != newval.as_int);
+    } else {
+      // Unaligned case
+      int *target = (int *)(ptr-sizeof(unsigned short));
+      union { int as_int; ushort2 as_short; } oldval, newval;
+      newval.as_int = *target;
+      do {
+        oldval.as_int = newval.as_int;
+        newval.as_short.y &= rhs;
+        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
+      } while (oldval.as_int != newval.as_int);
+    }
+#else
+    volatile unsigned short *target = (volatile unsigned short*)&lhs;
+    unsigned short oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval & rhs;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void AndReduction<uint16_t>::fold<true>(RHS &rhs1, RHS rhs2)
+  {
+    rhs1 &= rhs2;
+  }
+
+  template<> __CUDA_HD__ inline
+  void AndReduction<uint16_t>::fold<false>(RHS &rhs1, RHS rhs2)
+  {
+#ifdef __CUDA_ARCH__
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&rhs1;
+    if ((((unsigned long long)ptr) % 4) == 0) {
+      // Aligned case
+      int *target = (int *)ptr;
+      union { int as_int; ushort2 as_short; } oldval, newval;
+      newval.as_int = *target;
+      do {
+        oldval.as_int = newval.as_int;
+        newval.as_short.x &= rhs2;
+        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
+      } while (oldval.as_int != newval.as_int);
+    } else {
+      // Unaligned case
+      int *target = (int *)(ptr-sizeof(unsigned short));
+      union { int as_int; ushort2 as_short; } oldval, newval;
+      newval.as_int = *target;
+      do {
+        oldval.as_int = newval.as_int;
+        newval.as_short.y &= rhs2;
+        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
+      } while (oldval.as_int != newval.as_int);
+    }
+#else
+    volatile unsigned short *target = (volatile unsigned short*)&rhs1;
+    unsigned short oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval & rhs2;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void AndReduction<uint32_t>::apply<true>(LHS &lhs, RHS rhs)
+  {
+    lhs &= rhs;
+  }
+
+  template<> __CUDA_HD__ inline
+  void AndReduction<uint32_t>::apply<false>(LHS &lhs, RHS rhs)
+  {
+#ifdef __CUDA_ARCH__
+    unsigned *target = (unsigned *)&lhs;
+    unsigned oldval, newval;
+    newval = *target;
+    do {
+      oldval = newval;
+      newval &= rhs;
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
+#else
+    volatile unsigned *target = (volatile unsigned *)&lhs;
+    unsigned oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval & rhs;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void AndReduction<uint32_t>::fold<true>(RHS &rhs1, RHS rhs2)
+  {
+    rhs1 &= rhs2;
+  }
+
+  template<> __CUDA_HD__ inline
+  void AndReduction<uint32_t>::fold<false>(RHS &rhs1, RHS rhs2)
+  {
+#ifdef __CUDA_ARCH__
+    unsigned *target = (unsigned *)&rhs1;
+    unsigned oldval, newval;
+    newval = *target;
+    do {
+      oldval = newval;
+      newval &= rhs2;
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
+#else
+    volatile unsigned *target = (volatile unsigned *)&rhs1;
+    unsigned oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval & rhs2;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void AndReduction<uint64_t>::apply<true>(LHS &lhs, RHS rhs)
+  {
+    lhs &= rhs;
+  }
+
+  template<> __CUDA_HD__ inline
+  void AndReduction<uint64_t>::apply<false>(LHS &lhs, RHS rhs)
+  {
+#ifdef __CUDA_ARCH__
+    unsigned long long *target = (unsigned long long *)&lhs;
+    unsigned long long oldval, newval;
+    newval = *target;
+    do {
+      oldval = newval;
+      newval &= rhs;
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
+#else
+    volatile unsigned long long *target = (volatile unsigned long long *)&lhs;
+    unsigned long long oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval & rhs;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void AndReduction<uint64_t>::fold<true>(RHS &rhs1, RHS rhs2)
+  {
+    rhs1 &= rhs2;
+  }
+
+  template<> __CUDA_HD__ inline
+  void AndReduction<uint64_t>::fold<false>(RHS &rhs1, RHS rhs2)
+  {
+#ifdef __CUDA_ARCH__
+    unsigned long long *target = (unsigned long long *)&rhs1;
+    unsigned long long oldval, newval;
+    newval = *target;
+    do {
+      oldval = newval;
+      newval &= rhs2;
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
+#else
+    volatile unsigned long long *target = (volatile unsigned long long *)&rhs1;
+    unsigned long long oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval & rhs2;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void XorReduction<bool>::apply<true>(LHS &lhs, RHS rhs)
+  {
+    lhs = lhs ^ rhs;
+  }
+
+  template<> __CUDA_HD__ inline
+  void XorReduction<bool>::apply<false>(LHS &lhs, RHS rhs)
+  {
+#ifdef __CUDA_ARCH__
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&lhs;
+    const unsigned offset = ((unsigned long long)ptr) % 4;
+    int *target = (int *)(ptr - offset);
+    union { int as_int; bool as_bool[4]; } oldval, newval;
+    newval.as_int = *target;
+    do {
+      oldval.as_int = newval.as_int;
+      newval.as_bool[offset] = newval.as_bool[offset] ^ rhs;
+      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
+    } while (oldval.as_bool[offset] != newval.as_bool[offset]);
+#else
+    // No atomic logical operations so use compare and swap
+    volatile int8_t *target = (volatile int8_t *)&lhs;
+    union { int8_t as_int; bool as_bool; } oldval, newval;
+    do {
+      oldval.as_int = *target;
+      newval.as_bool = oldval.as_bool ^ rhs;
+    } while (!__sync_bool_compare_and_swap(target, oldval.as_int, newval.as_int));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void XorReduction<bool>::fold<true>(RHS &rhs1, RHS rhs2)
+  {
+    rhs1 = rhs1 ^ rhs2;
+  }
+
+  template<> __CUDA_HD__ inline
+  void XorReduction<bool>::fold<false>(RHS &rhs1, RHS rhs2)
+  {
+#ifdef __CUDA_ARCH__
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&rhs1;
+    const unsigned offset = ((unsigned long long)ptr) % 4;
+    int *target = (int *)(ptr - offset);
+    union { int as_int; bool as_bool[4]; } oldval, newval;
+    newval.as_int = *target;
+    do {
+      oldval.as_int = newval.as_int;
+      newval.as_bool[offset] = newval.as_bool[offset] ^ rhs2;
+      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
+    } while (oldval.as_bool[offset] != newval.as_bool[offset]);
+#else
+    // No atomic logical operations so use compare and swap
+    volatile int8_t *target = (volatile int8_t *)&rhs1;
+    union { int8_t as_int; bool as_bool; } oldval, newval;
+    do {
+      oldval.as_int = *target;
+      newval.as_bool = oldval.as_bool ^ rhs2;
+    } while (!__sync_bool_compare_and_swap(target, oldval.as_int, newval.as_int));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void XorReduction<int8_t>::apply<true>(LHS &lhs, RHS rhs)
+  {
+    lhs ^= rhs;
+  }
+
+  template<> __CUDA_HD__ inline
+  void XorReduction<int8_t>::apply<false>(LHS &lhs, RHS rhs)
+  {
+#ifdef __CUDA_ARCH__
+#define CASE(F, IDX)                                                       \
+      case IDX : {                                                         \
+        int *target = (int *)(ptr-sizeof(int8_t)*IDX);                     \
+        union { int as_int; char4 as_char; } oldval, newval;               \
+        newval.as_int = *target;                                           \
+        do {                                                               \
+          oldval.as_int = newval.as_int;                                   \
+          newval.as_char.F ^= rhs;                                         \
+          newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
+        } while (oldval.as_int != newval.as_int);                          \
+        break;                                                             \
+      }                                                                    \
+
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&lhs;
+    switch (((unsigned long long)ptr) % 4) {
+      CASE(x, 0)
+      CASE(y, 1)
+      CASE(z, 2)
+      CASE(w, 3)
+      default :{ assert(false); break; }
+    }
+#undef CASE
+#else
+    volatile int8_t *target = (volatile int8_t*)&lhs;
+    int8_t oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval ^ rhs;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void XorReduction<int8_t>::fold<true>(RHS &rhs1, RHS rhs2)
+  {
+    rhs1 ^= rhs2;
+  }
+
+  template<> __CUDA_HD__ inline
+  void XorReduction<int8_t>::fold<false>(RHS &rhs1, RHS rhs2)
+  {
+#ifdef __CUDA_ARCH__
+#define CASE(F, IDX)                                                       \
+      case IDX : {                                                         \
+        int *target = (int *)(ptr-sizeof(int8_t)*IDX);                     \
+        union { int as_int; char4 as_char; } oldval, newval;               \
+        newval.as_int = *target;                                           \
+        do {                                                               \
+          oldval.as_int = newval.as_int;                                   \
+          newval.as_char.F ^= rhs2;                                        \
+          newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
+        } while (oldval.as_int != newval.as_int);                          \
+        break;                                                             \
+      }                                                                    \
+
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&rhs1;
+    switch ((((unsigned long long)ptr) % 4) == 0) {
+      CASE(x, 0)
+      CASE(y, 1)
+      CASE(z, 2)
+      CASE(w, 3)
+      default :{ assert(false); break; }
+    }
+#undef CASE
+#else
+    volatile int8_t *target = (volatile int8_t*)&rhs1;
+    int8_t oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval ^ rhs2;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void XorReduction<int16_t>::apply<true>(LHS &lhs, RHS rhs)
+  {
+    lhs ^= rhs;
+  }
+
+  template<> __CUDA_HD__ inline
+  void XorReduction<int16_t>::apply<false>(LHS &lhs, RHS rhs)
+  {
+#ifdef __CUDA_ARCH__
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&lhs;
+    if ((((unsigned long long)ptr) % 4) == 0) {
+      // Aligned case
+      int *target = (int *)ptr;
+      union { int as_int; short2 as_short; } oldval, newval;
+      newval.as_int = *target;
+      do {
+        oldval.as_int = newval.as_int;
+        newval.as_short.x ^= rhs;
+        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
+      } while (oldval.as_int != newval.as_int);
+    } else {
+      // Unaligned case
+      int *target = (int *)(ptr-sizeof(short));
+      union { int as_int; short2 as_short; } oldval, newval;
+      newval.as_int = *target;
+      do {
+        oldval.as_int = newval.as_int;
+        newval.as_short.y ^= rhs;
+        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
+      } while (oldval.as_int != newval.as_int);
+    }
+#else
+    volatile short *target = (volatile short*)&lhs;
+    short oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval ^ rhs;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void XorReduction<int16_t>::fold<true>(RHS &rhs1, RHS rhs2)
+  {
+    rhs1 ^= rhs2;
+  }
+
+  template<> __CUDA_HD__ inline
+  void XorReduction<int16_t>::fold<false>(RHS &rhs1, RHS rhs2)
+  {
+#ifdef __CUDA_ARCH__
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&rhs1;
+    if ((((unsigned long long)ptr) % 4) == 0) {
+      // Aligned case
+      int *target = (int *)ptr;
+      union { int as_int; short2 as_short; } oldval, newval;
+      newval.as_int = *target;
+      do {
+        oldval.as_int = newval.as_int;
+        newval.as_short.x ^= rhs2;
+        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
+      } while (oldval.as_int != newval.as_int);
+    } else {
+      // Unaligned case
+      int *target = (int *)(ptr-sizeof(short));
+      union { int as_int; short2 as_short; } oldval, newval;
+      newval.as_int = *target;
+      do {
+        oldval.as_int = newval.as_int;
+        newval.as_short.y ^= rhs2;
+        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
+      } while (oldval.as_int != newval.as_int);
+    }
+#else
+    volatile short *target = (volatile short*)&rhs1;
+    short oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval ^ rhs2;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void XorReduction<int32_t>::apply<true>(LHS &lhs, RHS rhs)
+  {
+    lhs ^= rhs;
+  }
+
+  template<> __CUDA_HD__ inline
+  void XorReduction<int32_t>::apply<false>(LHS &lhs, RHS rhs)
+  {
+#ifdef __CUDA_ARCH__
+    int *target = (int *)&lhs;
+    int oldval, newval;
+    newval = *target;
+    do {
+      oldval = newval;
+      newval ^= rhs;
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
+#else
+    volatile int *target = (int*)&lhs;
+    int oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval ^ rhs;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void XorReduction<int32_t>::fold<true>(RHS &rhs1, RHS rhs2)
+  {
+    rhs1 ^= rhs2;
+  }
+
+  template<> __CUDA_HD__ inline
+  void XorReduction<int32_t>::fold<false>(RHS &rhs1, RHS rhs2)
+  {
+#ifdef __CUDA_ARCH__
+    int *target = (int *)&rhs1;
+    int oldval, newval;
+    newval = *target;
+    do {
+      oldval = newval;
+      newval ^= rhs2;
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
+#else
+    volatile int *target = (int*)&rhs1;
+    int oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval ^ rhs2;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void XorReduction<int64_t>::apply<true>(LHS &lhs, RHS rhs)
+  {
+    lhs ^= rhs;
+  }
+
+  template<> __CUDA_HD__ inline
+  void XorReduction<int64_t>::apply<false>(LHS &lhs, RHS rhs)
+  {
+#ifdef __CUDA_ARCH__
+    unsigned long long *target = (unsigned long long *)&lhs;
+    union { long long as_signed; unsigned long long as_unsigned; } oldval, newval;
+    newval.as_unsigned = *target;
+    do {
+      oldval.as_signed = newval.as_signed;
+      newval.as_signed ^= rhs;
+      newval.as_unsigned = atomicCAS(target, oldval.as_unsigned, newval.as_unsigned);
+    } while (oldval.as_signed != newval.as_signed);
+#else
+    volatile long long *target = (volatile long long *)&lhs;
+    long long oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval ^ rhs;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void XorReduction<int64_t>::fold<true>(RHS &rhs1, RHS rhs2)
+  {
+    rhs1 ^= rhs2;
+  }
+
+  template<> __CUDA_HD__ inline
+  void XorReduction<int64_t>::fold<false>(RHS &rhs1, RHS rhs2)
+  {
+#ifdef __CUDA_ARCH__
+    unsigned long long *target = (unsigned long long *)&rhs1;
+    union { long long as_signed; unsigned long long as_unsigned; } oldval, newval;
+    newval.as_unsigned = *target;
+    do {
+      oldval.as_signed = newval.as_signed;
+      newval.as_signed ^= rhs2;
+      newval.as_unsigned = atomicCAS(target, oldval.as_unsigned, newval.as_unsigned);
+    } while (oldval.as_signed != newval.as_signed);
+#else
+    volatile long long *target = (volatile long long *)&rhs1;
+    long long oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval ^ rhs2;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void XorReduction<uint8_t>::apply<true>(LHS &lhs, RHS rhs)
+  {
+    lhs ^= rhs;
+  }
+
+  template<> __CUDA_HD__ inline
+  void XorReduction<uint8_t>::apply<false>(LHS &lhs, RHS rhs)
+  {
+#ifdef __CUDA_ARCH__
+#define CASE(F, IDX)                                                       \
+      case IDX : {                                                         \
+        int *target = (int *)(ptr-sizeof(uint8_t)*IDX);                    \
+        union { int as_int; uchar4 as_char; } oldval, newval;              \
+        newval.as_int = *target;                                           \
+        do {                                                               \
+          oldval.as_int = newval.as_int;                                   \
+          newval.as_char.F ^= rhs;                                         \
+          newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
+        } while (oldval.as_int != newval.as_int);                          \
+        break;                                                             \
+      }                                                                    \
+
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&lhs;
+    switch ((((unsigned long long)ptr) % 4) == 0) {
+      CASE(x, 0)
+      CASE(y, 1)
+      CASE(z, 2)
+      CASE(w, 3)
+      default :{ assert(false); break; }
+    }
+#undef CASE
+#else
+    volatile uint8_t *target = (volatile uint8_t*)&lhs;
+    uint8_t oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval ^ rhs;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void XorReduction<uint8_t>::fold<true>(RHS &rhs1, RHS rhs2)
+  {
+    rhs1 ^= rhs2;
+  }
+
+  template<> __CUDA_HD__ inline
+  void XorReduction<uint8_t>::fold<false>(RHS &rhs1, RHS rhs2)
+  {
+#ifdef __CUDA_ARCH__
+#define CASE(F, IDX)                                                       \
+      case IDX : {                                                         \
+        int *target = (int *)(ptr-sizeof(uint8_t)*IDX);                    \
+        union { int as_int; uchar4 as_char; } oldval, newval;              \
+        newval.as_int = *target;                                           \
+        do {                                                               \
+          oldval.as_int = newval.as_int;                                   \
+          newval.as_char.F ^= rhs2;                                        \
+          newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
+        } while (oldval.as_int != newval.as_int);                          \
+        break;                                                             \
+      }                                                                    \
+
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&rhs1;
+    switch ((((unsigned long long)ptr) % 4) == 0) {
+      CASE(x, 0)
+      CASE(y, 1)
+      CASE(z, 2)
+      CASE(w, 3)
+      default :{ assert(false); break; }
+    }
+#undef CASE
+#else
+    volatile uint8_t *target = (volatile uint8_t*)&rhs1;
+    uint8_t oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval ^ rhs2;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void XorReduction<uint16_t>::apply<true>(LHS &lhs, RHS rhs)
+  {
+    lhs ^= rhs;
+  }
+
+  template<> __CUDA_HD__ inline 
+  void XorReduction<uint16_t>::apply<false>(LHS &lhs, RHS rhs)
+  {
+#ifdef __CUDA_ARCH__
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&lhs;
+    if ((((unsigned long long)ptr) % 4) == 0) {
+      // Aligned case
+      int *target = (int *)ptr;
+      union { int as_int; ushort2 as_short; } oldval, newval;
+      newval.as_int = *target;
+      do {
+        oldval.as_int = newval.as_int;
+        newval.as_short.x ^= rhs;
+        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
+      } while (oldval.as_int != newval.as_int);
+    } else {
+      // Unaligned case
+      int *target = (int *)(ptr-sizeof(unsigned short));
+      union { int as_int; ushort2 as_short; } oldval, newval;
+      newval.as_int = *target;
+      do {
+        oldval.as_int = newval.as_int;
+        newval.as_short.y ^= rhs;
+        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
+      } while (oldval.as_int != newval.as_int);
+    }
+#else
+    volatile unsigned short *target = (volatile unsigned short*)&lhs;
+    unsigned short oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval ^ rhs;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void XorReduction<uint16_t>::fold<true>(RHS &rhs1, RHS rhs2)
+  {
+    rhs1 ^= rhs2;
+  }
+
+  template<> __CUDA_HD__ inline
+  void XorReduction<uint16_t>::fold<false>(RHS &rhs1, RHS rhs2)
+  {
+#ifdef __CUDA_ARCH__
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&rhs1;
+    if ((((unsigned long long)ptr) % 4) == 0) {
+      // Aligned case
+      int *target = (int *)ptr;
+      union { int as_int; ushort2 as_short; } oldval, newval;
+      newval.as_int = *target;
+      do {
+        oldval.as_int = newval.as_int;
+        newval.as_short.x ^= rhs2;
+        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
+      } while (oldval.as_int != newval.as_int);
+    } else {
+      // Unaligned case
+      int *target = (int *)(ptr-sizeof(unsigned short));
+      union { int as_int; ushort2 as_short; } oldval, newval;
+      newval.as_int = *target;
+      do {
+        oldval.as_int = newval.as_int;
+        newval.as_short.y ^= rhs2;
+        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
+      } while (oldval.as_int != newval.as_int);
+    }
+#else
+    volatile unsigned short *target = (volatile unsigned short*)&rhs1;
+    unsigned short oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval ^ rhs2;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void XorReduction<uint32_t>::apply<true>(LHS &lhs, RHS rhs)
+  {
+    lhs ^= rhs;
+  }
+
+  template<> __CUDA_HD__ inline
+  void XorReduction<uint32_t>::apply<false>(LHS &lhs, RHS rhs)
+  {
+#ifdef __CUDA_ARCH__
+    unsigned *target = (unsigned *)&lhs;
+    unsigned oldval, newval;
+    newval = *target;
+    do {
+      oldval = newval;
+      newval ^= rhs;
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
+#else
+    volatile unsigned *target = (volatile unsigned *)&lhs;
+    unsigned oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval ^ rhs;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void XorReduction<uint32_t>::fold<true>(RHS &rhs1, RHS rhs2)
+  {
+    rhs1 ^= rhs2;
+  }
+
+  template<> __CUDA_HD__ inline
+  void XorReduction<uint32_t>::fold<false>(RHS &rhs1, RHS rhs2)
+  {
+#ifdef __CUDA_ARCH__
+    unsigned *target = (unsigned *)&rhs1;
+    unsigned oldval, newval;
+    newval = *target;
+    do {
+      oldval = newval;
+      newval ^= rhs2;
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
+#else
+    volatile unsigned *target = (volatile unsigned *)&rhs1;
+    unsigned oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval ^ rhs2;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void XorReduction<uint64_t>::apply<true>(LHS &lhs, RHS rhs)
+  {
+    lhs ^= rhs;
+  }
+
+  template<> __CUDA_HD__ inline
+  void XorReduction<uint64_t>::apply<false>(LHS &lhs, RHS rhs)
+  {
+#ifdef __CUDA_ARCH__
+    unsigned long long *target = (unsigned long long *)&lhs;
+    unsigned long long oldval, newval;
+    newval = *target;
+    do {
+      oldval = newval;
+      newval ^= rhs;
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
+#else
+    volatile unsigned long long *target = (volatile unsigned long long *)&lhs;
+    unsigned long long oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval ^ rhs;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void XorReduction<uint64_t>::fold<true>(RHS &rhs1, RHS rhs2)
+  {
+    rhs1 ^= rhs2;
+  }
+
+  template<> __CUDA_HD__ inline
+  void XorReduction<uint64_t>::fold<false>(RHS &rhs1, RHS rhs2)
+  {
+#ifdef __CUDA_ARCH__
+    unsigned long long *target = (unsigned long long *)&rhs1;
+    unsigned long long oldval, newval;
+    newval = *target;
+    do {
+      oldval = newval;
+      newval ^= rhs2;
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
+#else
+    volatile unsigned long long *target = (volatile unsigned long long *)&rhs1;
+    unsigned long long oldval, newval;
+    do {
+      oldval = *target;
+      newval = oldval ^ rhs2;
+    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
 #endif
   }
 
