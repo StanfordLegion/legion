@@ -5946,6 +5946,13 @@ namespace Legion {
       }
       else if (replayed)
       {
+        if (has_blocking_call)
+          REPORT_LEGION_ERROR(ERROR_INVALID_PHYSICAL_TRACING,
+            "Physical tracing violation! Trace %d in task %s (UID %lld) "
+            "encountered a blocking API call that was unseen when it was "
+            "recorded. It is required that traces do not change their "
+            "behavior.", local_trace->get_trace_id(),
+            parent_ctx->get_task_name(), parent_ctx->get_unique_id())
         // Do our arrival on the mapping fence
         Runtime::phase_barrier_arrive(mapping_fence_barrier, 1/*count*/);
         complete_mapping(mapping_fence_barrier);

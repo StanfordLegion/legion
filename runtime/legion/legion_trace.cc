@@ -6370,12 +6370,11 @@ namespace Legion {
     void ShardedPhysicalTemplate::trigger_recording_done(void)
     //--------------------------------------------------------------------------
     {
-      if (recording_barrier.exists())
-      {
-        Runtime::phase_barrier_arrive(recording_barrier, 1/*count*/);
-        Runtime::trigger_event(recording_done, recording_barrier);
-        recording_barrier = RtBarrier::NO_RT_BARRIER;
-      }
+#ifdef DEBUG_LEGION
+      assert(!recording_barrier.has_triggered());
+#endif
+      Runtime::phase_barrier_arrive(recording_barrier, 1/*count*/);
+      Runtime::trigger_event(recording_done, recording_barrier);
     }
 
     //--------------------------------------------------------------------------
