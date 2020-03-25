@@ -126,8 +126,6 @@ local node_is_side_effect_free = {
   [ast.typed.expr.DetachHDF5]                 = always_false,
   [ast.typed.expr.AllocateScratchFields]      = always_false,
   [ast.typed.expr.Condition]                  = always_false,
-  [ast.typed.expr.Unary]                      = always_false,
-  [ast.typed.expr.Binary]                     = always_false,
   [ast.typed.expr.Deref]                      = always_false,
   [ast.typed.expr.ImportIspace]               = always_false,
   [ast.typed.expr.ImportRegion]               = always_false,
@@ -158,6 +156,8 @@ local node_is_side_effect_free = {
   [ast.typed.expr.Advance]                    = always_true,
   [ast.typed.expr.WithScratchFields]          = always_true,
   [ast.typed.expr.RegionRoot]                 = always_true,
+  [ast.typed.expr.Unary]                      = always_true,
+  [ast.typed.expr.Binary]                     = always_true,
   [ast.typed.expr.AddressOf]                  = always_true,
   [ast.typed.expr.Future]                     = always_true,
   [ast.typed.expr.FutureGetResult]            = always_true,
@@ -174,11 +174,17 @@ local node_is_side_effect_free = {
     return {not node.reduce_op, node}
   end,
 
-  [ast.typed.stat.If]                         = always_false,
+  -- Currently we can only support unpredicated conditionals inside of
+  -- a predicated statement.
+  [ast.typed.stat.If] = function(cx, node)
+    return {not std.is_future(std.as_read(node.cond.expr_type)), node}
+  end,
+  [ast.typed.stat.While] = function(cx, node)
+    return {not std.is_future(std.as_read(node.cond.expr_type)), node}
+  end,
+
   [ast.typed.stat.Elseif]                     = always_false,
-  [ast.typed.stat.While]                      = always_false,
   [ast.typed.stat.MustEpoch]                  = always_false,
-  [ast.typed.stat.VarUnpack]                  = always_false,
   [ast.typed.stat.Return]                     = always_false,
   [ast.typed.stat.Break]                      = always_false,
   [ast.typed.stat.Reduce]                     = always_false,
@@ -194,6 +200,7 @@ local node_is_side_effect_free = {
   [ast.typed.stat.Repeat]                     = always_true,
   [ast.typed.stat.Block]                      = always_true,
   [ast.typed.stat.Var]                        = always_true,
+  [ast.typed.stat.VarUnpack]                  = always_true,
   [ast.typed.stat.Assignment]                 = always_true,
   [ast.typed.stat.Expr]                       = always_true,
 
@@ -310,7 +317,6 @@ function optimize_predicate.stat_if(cx, node)
 
   local result, result_node = unpack(analyze_is_side_effect_free(cx, node.then_block))
   if not result then
-    result_node:printpretty(true)
     report_fail(result_node, "cannot predicate if statement: body is not side-effect free")
     return node
   end

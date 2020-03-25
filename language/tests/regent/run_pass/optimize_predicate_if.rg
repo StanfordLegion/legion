@@ -51,6 +51,7 @@ task main()
 
   -- Basic control flow, variables, assignment, simple expressions are all ok.
   var z = 123
+  var t = true
   __demand(__predicate)
   if condition1() then
     do
@@ -59,7 +60,12 @@ task main()
         var y = body2(x)
       end
       z = body2(x) + 10
-      z = z + 200
+      if t then
+        z = z + 200
+      end
+      while not t do
+        z = z + 3000
+      end
     end
 
     for i = 0, 2 do
