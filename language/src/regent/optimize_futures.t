@@ -42,18 +42,21 @@ function context:new_stat_scope()
     var_flows = self.var_flows,
     var_futures = self.var_futures,
     var_symbols = self.var_symbols,
-    cond = self.cond,
+    conds = self.conds,
     spills = terralib.newlist(),
   }
   return setmetatable(cx, context)
 end
 
 function context:new_local_scope(cond)
+  local conds = terralib.newlist()
+  conds:insertall(self.conds)
+  conds:insert(cond)
   local cx = {
     var_flows = self.var_flows,
     var_futures = self.var_futures,
     var_symbols = self.var_symbols,
-    cond = cond,
+    conds = conds,
     spills = terralib.newlist(),
   }
   return setmetatable(cx, context)
@@ -64,7 +67,7 @@ function context:new_task_scope()
     var_flows = {},
     var_futures = {},
     var_symbols = {},
-    cond = flow_empty(),
+    conds = terralib.newlist(),
   }
   return setmetatable(cx, context)
 end
@@ -284,6 +287,8 @@ function analyze_var_flow.stat_elseif(cx, node)
 end
 
 function analyze_var_flow.stat_while(cx, node)
+  local cond = analyze_var_flow.expr(cx, node.cond)
+  local cx = cx:new_local_scope(cond)
   analyze_var_flow.block(cx, node.block)
 end
 
@@ -334,7 +339,9 @@ function analyze_var_flow.stat_assignment(cx, node)
   flow_value_into(cx, lhs, rhs)
 
   -- Make sure any dominating conditions flow into this assignment.
-  flow_value_into(cx, lhs, cx.cond)
+  for _, cond in pairs(cx.conds) do
+    flow_value_into(cx, lhs, cond)
+  end
 end
 
 function analyze_var_flow.stat_reduce(cx, node)
@@ -343,7 +350,9 @@ function analyze_var_flow.stat_reduce(cx, node)
   flow_value_into(cx, lhs, rhs)
 
   -- Make sure any dominating conditions flow into this assignment.
-  flow_value_into(cx, lhs, cx.cond)
+  for _, cond in pairs(cx.conds) do
+    flow_value_into(cx, lhs, cond)
+  end
 end
 
 function analyze_var_flow.stat(cx, node)
