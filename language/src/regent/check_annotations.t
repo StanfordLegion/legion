@@ -199,7 +199,7 @@ local node_allow_annotations = {
   -- Statements:
   [ast.typed.stat.If]        = allow({"predicate"}),
   [ast.typed.stat.Elseif]    = deny_all,
-  [ast.typed.stat.While]     = allow({"spmd", "trace"}),
+  [ast.typed.stat.While]     = allow({"predicate", "spmd", "trace"}),
   [ast.typed.stat.ForNum]    = allow(permitted_for_num_annotations),
   [ast.typed.stat.ForList]   = allow_if_task({"index_launch", "openmp", "spmd", "trace", "vectorize"}, "cuda"),
   [ast.typed.stat.Repeat]    = allow({"spmd", "trace"}),

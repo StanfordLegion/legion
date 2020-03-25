@@ -299,23 +299,131 @@ function optimize_predicate.stat_if(cx, node)
     return node
   end
 
-  -- After future pass cond is always wrapped in FutureGetResult
+  -- After optimize_futures cond is always wrapped in FutureGetResult
   assert(node.cond:is(ast.typed.expr.FutureGetResult))
   local cond = node.cond.value
 
-  assert(node.cond.value:is(ast.typed.expr.ID)) -- should be handled by normalizer
+  assert(cond:is(ast.typed.expr.ID)) -- should be handled by normalizer
 
   local then_cx = cx:new_local_scope(cond)
 
   return ast.typed.stat.Block {
     block = predicate_block(then_cx, node.then_block),
-    span = node.span,
     annotations = ast.default_annotations(),
+    span = node.span,
+  }
+end
+
+function optimize_predicate.stat_while(cx, node)
+  local report_fail = report.info
+  if node.annotations.predicate:is(ast.annotation.Demand) then
+    report_fail = report.error
+  end
+
+  if not node.cond:is(ast.typed.expr.FutureGetResult) then
+    report_fail(node, "cannot predicate while loop: condition is not a future")
+    return node
+  end
+
+  local result, result_node = unpack(analyze_is_side_effect_free(cx, node.block))
+  if not result then
+    report_fail(result_node, "cannot predicate while loop: body is not side-effect free")
+    return node
+  end
+
+  -- After optimize_futures cond is always wrapped in FutureGetResult
+  assert(node.cond:is(ast.typed.expr.FutureGetResult))
+  local cond = node.cond.value
+  local cond_type = cond.value:gettype()
+
+  assert(cond:is(ast.typed.expr.ID)) -- should be handled by normalizer
+
+  local body_cx = cx:new_local_scope(cond)
+  local body = predicate_block(body_cx, node.block)
+
+  local conds = terralib.newlist()
+  conds:insert(cond.value)
+  conds:insertall(
+    data.range(0, std.config["predicate-unroll"]):map(
+      function(i)
+        return std.newsymbol(cond_type, "__predicate_cond_unroll_" .. tostring(i))
+      end))
+
+  local setup = terralib.newlist()
+  for i = 2, #conds do
+    setup:insert(
+      ast.typed.stat.Var {
+        symbol = conds[i],
+        type = cond_type,
+        value = cond,
+        annotations = ast.default_annotations(),
+        span = node.span,
+      }
+    )
+  end
+
+  local update = terralib.newlist()
+  for i = #conds, 2, -1 do
+    update:insert(
+      ast.typed.stat.Assignment {
+        lhs = ast.typed.expr.ID {
+          value = conds[i],
+          expr_type = std.rawref(&cond_type),
+          annotations = ast.default_annotations(),
+          span = node.span,
+        },
+        rhs = ast.typed.expr.ID {
+          value = conds[i-1],
+          expr_type = std.rawref(&cond_type),
+          annotations = ast.default_annotations(),
+          span = node.span,
+        },
+        metadata = false,
+        annotations = ast.default_annotations(),
+        span = node.span,
+      })
+  end
+
+  local new_body_block = terralib.newlist()
+  new_body_block:insertall(body.stats)
+  new_body_block:insertall(update)
+
+  local new_block = terralib.newlist()
+  new_block:insertall(setup)
+  new_block:insert(
+    ast.typed.stat.While {
+      cond = ast.typed.expr.FutureGetResult {
+        value = ast.typed.expr.ID {
+          value = conds[#conds],
+          expr_type = std.rawref(&cond_type),
+          annotations = ast.default_annotations(),
+          span = node.span,
+        },
+        expr_type = cond_type.result_type,
+        annotations = ast.default_annotations(),
+        span = node.span,
+      },
+      block = ast.typed.Block {
+        stats = new_body_block,
+        span = node.span,
+      },
+      annotations = ast.default_annotations(),
+      span = node.span,
+    })
+
+  return ast.typed.stat.Block {
+    block = ast.typed.Block {
+      stats = new_block,
+      span = node.span,
+    },
+    annotations = ast.default_annotations(),
+    span = node.span,
   }
 end
 
 local optimize_predicate_stat_table = {
   [ast.typed.stat.If]     = optimize_predicate.stat_if,
+  [ast.typed.stat.While]  = optimize_predicate.stat_while,
   [ast.typed.stat]        = do_nothing
 }
 
