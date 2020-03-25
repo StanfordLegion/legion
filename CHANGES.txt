@@ -11,6 +11,8 @@ Version 20.03.0 (March ??, 2020)
         mark partitions as such
     - Added support for setting mapper ID and tag via
         `t:set_mapper_id()` and `t:set_mapping_tag_id()`
+    - Initial support for predicated execution of `if` and `while`
+        statements
     - Fixed several bugs, memory leaks and improved compile times
   * Realm
     - Introduction of experimental MPI-based network layer, enabled with
