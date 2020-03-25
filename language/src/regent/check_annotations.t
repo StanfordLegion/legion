@@ -197,7 +197,7 @@ local node_allow_annotations = {
   [ast.typed.expr.FutureGetResult]            = unreachable,
 
   -- Statements:
-  [ast.typed.stat.If]        = deny_all,
+  [ast.typed.stat.If]        = allow({"predicate"}),
   [ast.typed.stat.Elseif]    = deny_all,
   [ast.typed.stat.While]     = allow({"spmd", "trace"}),
   [ast.typed.stat.ForNum]    = allow(permitted_for_num_annotations),

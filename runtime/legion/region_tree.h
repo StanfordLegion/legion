@@ -1831,9 +1831,9 @@ namespace Legion {
       void remove_child(const LegionColor c);
       size_t get_num_children(void) const;
     public:
-      bool are_disjoint(const LegionColor c1, const LegionColor c2); 
+      bool are_disjoint(LegionColor c1, LegionColor c2); 
       void record_disjointness(bool disjoint, 
-                               const LegionColor c1, const LegionColor c2);
+                               LegionColor c1, LegionColor c2);
       LegionColor generate_color(void);
       void record_remote_child(IndexPartition pid, LegionColor part_color);
     public:
@@ -2775,11 +2775,11 @@ namespace Legion {
       void get_subspace_preconditions(std::set<ApEvent> &preconditions);
     public:
       bool is_disjoint(bool from_app = false);
-      bool are_disjoint(const LegionColor c1, const LegionColor c2,
+      bool are_disjoint(LegionColor c1, LegionColor c2,
                         bool force_compute = false);
       void record_disjointness(bool disjoint,
-                               const LegionColor c1, const LegionColor c2);
-      bool is_complete(bool from_app = false);
+                               LegionColor c1, LegionColor c2);
+      bool is_complete(bool from_app = false, bool false_if_not_ready = false);
       IndexSpaceExpression* get_union_expression(bool check_complete=true);
       void record_remote_disjoint_ready(RtUserEvent ready);
       void record_remote_disjoint_result(const bool disjoint_result);

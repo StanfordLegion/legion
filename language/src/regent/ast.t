@@ -39,7 +39,7 @@ ast.annotation:leaf("Unroll", {"value"}, true)
 -- Annotation: Sets
 ast.annotation:leaf("Set", {"cuda", "external", "idempotent", "index_launch",
                             "inline", "inner", "leaf", "openmp", "optimize",
-                            "parallel", "replicable", "spmd", "trace",
+                            "parallel", "predicate", "replicable", "spmd", "trace",
                             "vectorize"},
                     false, true)
 
@@ -56,6 +56,7 @@ function ast.default_annotations()
     openmp = allow,
     optimize = allow,
     parallel = allow,
+    predicate = allow,
     replicable = allow,
     spmd = allow,
     trace = allow,
@@ -412,7 +413,7 @@ ast.typed.expr:leaf("ID", {"value"})
 ast.typed.expr:leaf("FieldAccess", {"value", "field_name"})
 ast.typed.expr:leaf("IndexAccess", {"value", "index"})
 ast.typed.expr:leaf("MethodCall", {"value", "method_name", "args"})
-ast.typed.expr:leaf("Call", {"fn", "args", "conditions", "replicable"})
+ast.typed.expr:leaf("Call", {"fn", "args", "conditions", "predicate", "predicate_else_value", "replicable"})
 ast.typed.expr:leaf("Cast", {"fn", "arg"})
 ast.typed.expr:leaf("Ctor", {"fields", "named"})
 ast.typed.expr:leaf("CtorListField", {"value"})
@@ -576,6 +577,38 @@ function ast.mapreduce_expr_postorder(map_fn, reduce_fn, node, init)
   return ast.mapreduce_node_postorder(
     function(node)
       if node:is(ast.typed.expr) then
+        return map_fn(node)
+      end
+      return init
+    end,
+    reduce_fn, node, init, is_expr_node)
+end
+
+function ast.traverse_expr_stat_postorder(fn, node)
+  ast.traverse_node_postorder(
+    function(node)
+      if node:is(ast.typed.expr) or node:is(ast.typed.stat) then
+        fn(node)
+      end
+    end,
+    node, is_expr_node)
+end
+
+function ast.map_expr_stat_postorder(fn, node)
+  return ast.map_node_postorder(
+    function(node)
+      if node:is(ast.typed.expr) or node:is(ast.typed.stat) then
+        return fn(node)
+      end
+      return node
+    end,
+    node, is_expr_node)
+end
+
+function ast.mapreduce_expr_stat_postorder(map_fn, reduce_fn, node, init)
+  return ast.mapreduce_node_postorder(
+    function(node)
+      if node:is(ast.typed.expr) or node:is(ast.typed.stat) then
         return map_fn(node)
       end
       return init
