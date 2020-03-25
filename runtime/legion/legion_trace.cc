@@ -185,23 +185,6 @@ namespace Legion {
 #endif
 
     //--------------------------------------------------------------------------
-    void LegionTrace::record_blocking_call(void)
-    //--------------------------------------------------------------------------
-    {
-      blocking_call_observed = true;
-      if (physical_trace == NULL)
-        return;
-      PhysicalTemplate *tpl = physical_trace->get_current_template();
-      if (tpl != NULL)
-        tpl->trigger_recording_done();
-      if (is_replaying())
-        REPORT_LEGION_ERROR(ERROR_INVALID_PHYSICAL_TRACING,
-            "Physical tracing violation! The trace has a blocking API call "
-            "that was unseen when it was recorded. Please make sure that "
-            "the trace does not change its behavior.");
-    }
-
-    //--------------------------------------------------------------------------
     void LegionTrace::invalidate_trace_cache(Operation *invalidator)
     //--------------------------------------------------------------------------
     {
@@ -1411,6 +1394,13 @@ namespace Legion {
       }
       else if (replayed)
       {
+        if (has_blocking_call)
+          REPORT_LEGION_ERROR(ERROR_INVALID_PHYSICAL_TRACING,
+            "Physical tracing violation! Trace %d in task %s (UID %lld) "
+            "encountered a blocking API call that was unseen when it was "
+            "recorded. It is required that traces do not change their "
+            "behavior.", local_trace->get_trace_id(),
+            parent_ctx->get_task_name(), parent_ctx->get_unique_id())
         complete_mapping();
         need_completion_trigger = false;
         if (!template_completion.has_triggered())
@@ -4325,8 +4315,10 @@ namespace Legion {
     void PhysicalTemplate::trigger_recording_done(void)
     //--------------------------------------------------------------------------
     {
-      if (!recording_done.has_triggered())
-        Runtime::trigger_event(recording_done);
+#ifdef DEBUG_LEGION
+      assert(!recording_done.has_triggered());
+#endif
+      Runtime::trigger_event(recording_done);
     }
 
     //--------------------------------------------------------------------------

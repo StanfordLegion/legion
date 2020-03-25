@@ -117,9 +117,9 @@ namespace Legion {
       bool is_recording(void) const { return state == PHYSICAL_RECORD; }
       bool is_replaying(void) const { return state == PHYSICAL_REPLAY; }
     public:
-      void clear_blocking_call(void) { blocking_call_observed = false; }
-      void record_blocking_call(void);
-      bool has_blocking_call(void) const { return blocking_call_observed; }
+      inline void clear_blocking_call(void) { blocking_call_observed = false; }
+      inline void record_blocking_call(void) { blocking_call_observed = true; }
+      inline bool has_blocking_call(void) const {return blocking_call_observed;}
       void invalidate_trace_cache(Operation *invalidator);
 #ifdef LEGION_SPY
     public:

@@ -11216,6 +11216,8 @@ namespace Legion {
     void FuturePredOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
+      // Mark that we completed mapping this operation
+      complete_mapping();
       // See if we have a value
       bool valid;
       bool value = future.impl->get_boolean_value(valid);
@@ -11229,8 +11231,11 @@ namespace Legion {
         runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
                                          future.impl->subscribe_internal());
       }
-      // Mark that we completed mapping this operation
-      complete_mapping();
+#ifdef LEGION_SPY
+      // Still have to do this call to let Legion Spy know we're done
+      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
+                                      ApEvent::NO_AP_EVENT);
+#endif
     } 
 
     /////////////////////////////////////////////////////////////
@@ -11343,6 +11348,7 @@ namespace Legion {
     void NotPredOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
+      complete_mapping();
       if (pred_op != NULL)
       {
         bool prev_value;
@@ -11354,7 +11360,11 @@ namespace Legion {
         // Now we can remove the reference we added
         pred_op->remove_predicate_reference();
       }
-      complete_mapping();
+#ifdef LEGION_SPY
+      // Still have to do this call to let Legion Spy know we're done
+      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
+                                      ApEvent::NO_AP_EVENT);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -11483,6 +11493,7 @@ namespace Legion {
     void AndPredOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
+      complete_mapping();
       // Hold the lock when doing this to prevent 
       // any triggers from interfering with the analysis
       bool need_resolve = false;
@@ -11516,7 +11527,11 @@ namespace Legion {
       for (std::vector<PredicateOp*>::const_iterator it = previous.begin();
             it != previous.end(); it++)
         (*it)->remove_predicate_reference();
-      complete_mapping();
+#ifdef LEGION_SPY
+      // Still have to do this call to let Legion Spy know we're done
+      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
+                                      ApEvent::NO_AP_EVENT);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -11658,6 +11673,7 @@ namespace Legion {
     void OrPredOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
+      complete_mapping();
       // Hold the lock when doing this to prevent 
       // any triggers from interfering with the analysis
       bool need_resolve = false;
@@ -11691,7 +11707,11 @@ namespace Legion {
       for (std::vector<PredicateOp*>::const_iterator it = previous.begin();
             it != previous.end(); it++)
         (*it)->remove_predicate_reference();
-      complete_mapping();
+#ifdef LEGION_SPY
+      // Still have to do this call to let Legion Spy know we're done
+      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
+                                      ApEvent::NO_AP_EVENT);
+#endif
     }
 
     //--------------------------------------------------------------------------
