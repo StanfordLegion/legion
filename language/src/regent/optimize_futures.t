@@ -39,6 +39,7 @@ end
 
 function context:new_stat_scope()
   local cx = {
+    local_symbols = self.local_symbols,
     var_flows = self.var_flows,
     var_futures = self.var_futures,
     var_symbols = self.var_symbols,
@@ -53,6 +54,7 @@ function context:new_local_scope(cond)
   conds:insertall(self.conds)
   conds:insert(cond)
   local cx = {
+    local_symbols = self.local_symbols:copy(),
     var_flows = self.var_flows,
     var_futures = self.var_futures,
     var_symbols = self.var_symbols,
@@ -64,6 +66,7 @@ end
 
 function context:new_task_scope()
   local cx = {
+    local_symbols = data.newmap(),
     var_flows = {},
     var_futures = {},
     var_symbols = {},
@@ -330,6 +333,7 @@ end
 
 function analyze_var_flow.stat_var(cx, node)
   local value = node.value and analyze_var_flow.expr(cx, node.value) or flow_empty()
+  cx.local_symbols[node.symbol] = #cx.conds
   flow_value_into_var(cx, node.symbol, value)
 end
 
@@ -343,8 +347,11 @@ function analyze_var_flow.stat_assignment(cx, node)
   local lhs_type = std.as_read(node.lhs.expr_type)
   if not (std.is_list(lhs_type) or std.is_phase_barrier(lhs_type) or std.is_dynamic_collective(lhs_type)) then
     -- Make sure any dominating conditions flow into this assignment.
-    for _, cond in pairs(cx.conds) do
-      flow_value_into(cx, lhs, cond)
+    local lhs_symbol = node.lhs:is(ast.typed.expr.ID) and node.lhs.value
+    for i, cond in pairs(cx.conds) do
+      if not cx.local_symbols[lhs_symbol] or i > cx.local_symbols[lhs_symbol] then
+        flow_value_into(cx, lhs, cond)
+      end
     end
   end
 end
@@ -359,8 +366,11 @@ function analyze_var_flow.stat_reduce(cx, node)
   local lhs_type = std.as_read(node.lhs.expr_type)
   if not (std.is_list(lhs_type) or std.is_phase_barrier(lhs_type) or std.is_dynamic_collective(lhs_type)) then
     -- Make sure any dominating conditions flow into this assignment.
-    for _, cond in pairs(cx.conds) do
-      flow_value_into(cx, lhs, cond)
+    local lhs_symbol = node.lhs:is(ast.typed.expr.ID) and node.lhs.value
+    for i, cond in pairs(cx.conds) do
+      if not cx.local_symbols[lhs_symbol] or i > cx.local_symbols[lhs_symbol] then
+        flow_value_into(cx, lhs, cond)
+      end
     end
   end
 end
