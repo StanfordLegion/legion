@@ -1258,7 +1258,7 @@ task toplevel()
   var time_copy = time
 
   -- Main Simulation Loop
-  __demand(__spmd, __trace)
+  __demand(__spmd, __predicate, __trace)
   while continue_simulation(warmup, cycle, cstop, time, tstop) do
     -- if warmup and cycle > 0 then
     --   wait_for(dthydro)
