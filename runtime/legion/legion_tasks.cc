@@ -4501,6 +4501,10 @@ namespace Legion {
                                            LG_THROUGHPUT_WORK_PRIORITY);
           wait_for.insert(done);
         }
+        // If we're replaying this for for a trace then don't even
+        // bother asking the mapper about when to map this
+        else if (is_replaying())
+          slice->enqueue_ready_operation();
         // Figure out whether this task is local or remote
         else if (!runtime->is_local(slice->target_proc))
         {
@@ -5062,6 +5066,10 @@ namespace Legion {
         runtime->issue_runtime_meta_task(trigger_args, 
                                          LG_THROUGHPUT_WORK_PRIORITY);
       }
+      // If we're replaying this for for a trace then don't even
+      // bother asking the mapper about when to map this
+      else if (is_replaying())
+        enqueue_ready_operation();
       // Figure out whether this task is local or remote
       else if (!runtime->is_local(target_proc))
       {
