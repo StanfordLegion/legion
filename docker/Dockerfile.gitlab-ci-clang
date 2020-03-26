@@ -8,7 +8,7 @@ ENV DEBIAN_FRONTEND noninteractive
 
 RUN dpkg --add-architecture i386 && \
     apt-get update -qq && \
-    apt-get install -qq software-properties-common wget && \
+    apt-get install -qq apt-transport-https ca-certificates software-properties-common wget && \
     add-apt-repository ppa:ubuntu-toolchain-r/test -y && \
     add-apt-repository ppa:pypy/ppa -y && \
     wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add - && \
