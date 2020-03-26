@@ -338,8 +338,10 @@ function analyze_var_flow.stat_assignment(cx, node)
   local rhs = analyze_var_flow.expr(cx, node.rhs)
   flow_value_into(cx, lhs, rhs)
 
-  -- FIXME: This breaks some tests, like Pennant.
-  if std.config["predicate"] then
+  -- Hack: SCR breaks if certain values are futures, for now just make
+  -- sure we don't do this for certain types.
+  local lhs_type = std.as_read(node.lhs.expr_type)
+  if not (std.is_list(lhs_type) or std.is_phase_barrier(lhs_type) or std.is_dynamic_collective(lhs_type)) then
     -- Make sure any dominating conditions flow into this assignment.
     for _, cond in pairs(cx.conds) do
       flow_value_into(cx, lhs, cond)
@@ -352,8 +354,10 @@ function analyze_var_flow.stat_reduce(cx, node)
   local rhs = analyze_var_flow.expr(cx, node.rhs)
   flow_value_into(cx, lhs, rhs)
 
-  -- FIXME: This breaks some tests, like Pennant.
-  if std.config["predicate"] then
+  -- Hack: SCR breaks if certain values are futures, for now just make
+  -- sure we don't do this for certain types.
+  local lhs_type = std.as_read(node.lhs.expr_type)
+  if not (std.is_list(lhs_type) or std.is_phase_barrier(lhs_type) or std.is_dynamic_collective(lhs_type)) then
     -- Make sure any dominating conditions flow into this assignment.
     for _, cond in pairs(cx.conds) do
       flow_value_into(cx, lhs, cond)
