@@ -73,17 +73,17 @@ legion_cxx_tests = [
 ]
 
 legion_fortran_tests = [
-    ['tutorial/fortran/00_hello_world', []],
-    ['tutorial/fortran/01_tasks_and_futures', []],
-    ['tutorial/fortran/02_index_tasks', []],
-    ['tutorial/fortran/03_physical_regions', []],
-    ['tutorial/fortran/04_privileges_accessor', []],
-    ['tutorial/fortran/05_privileges_raw_ptr', []],
-    ['tutorial/fortran/06_partitioning', []],
-    ['tutorial/fortran/07_partitiong_fortran_task', []],
-    ['tutorial/fortran/08_multiple_partitions', []],
-    ['tutorial/fortran/09_region_2d', []],
-    ['tutorial/fortran/10_attach_array', []],
+    ['tutorial/fortran/00_hello_world/hello_world', []],
+    ['tutorial/fortran/01_tasks_and_futures/tasks_and_futures', []],
+    ['tutorial/fortran/02_index_tasks/index_tasks', []],
+    ['tutorial/fortran/03_physical_regions/physical_regions', []],
+    ['tutorial/fortran/04_privileges_accessor/privileges_accessor', []],
+    ['tutorial/fortran/05_privileges_raw_ptr/privileges_raw_ptr', []],
+    ['tutorial/fortran/06_partitioning/partitioning', []],
+    ['tutorial/fortran/07_partitioning_fortran_task/partitioning_fortran_task', []],
+    ['tutorial/fortran/08_multiple_partitions/multiple_partitions', []],
+    ['tutorial/fortran/09_region_2d/region_2d', []],
+    ['tutorial/fortran/10_attach_array/attach_array', []],
 ]
 
 if platform.system() != 'Darwin':
@@ -296,6 +296,12 @@ def run_test_legion_hdf_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_co
     if env['USE_CUDA'] == '1':
         flags.extend(['-ll:gpu', '1'])
     run_cxx(legion_hdf_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count, timelimit)
+
+def run_test_legion_fortran(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
+    flags = ['-logfile', 'out_%.log']
+    if env['USE_CUDA'] == '1':
+        flags.extend(['-ll:gpu', '1'])
+    run_cxx(legion_fortran_tests, flags, launcher, root_dir, bin_dir, env, thread_count, timelimit)
 
 def run_test_fuzzer(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     env = dict(list(env.items()) + [('WARN_AS_ERROR', '0')])
@@ -601,7 +607,7 @@ def check_test_legion_cxx(root_dir):
     # These are the tests we ACTUALLY have coverage for.
     tests = legion_cxx_tests + legion_network_cxx_tests + \
             legion_openmp_cxx_tests + legion_python_cxx_tests + \
-            legion_hdf_cxx_tests
+            legion_hdf_cxx_tests + legion_fortan_tests
     actual_tests = set()
     for test_file, test_flags in tests:
         actual_tests.add(os.path.dirname(test_file))
@@ -623,7 +629,8 @@ def check_test_legion_cxx(root_dir):
         raise Exception('There are tests that are NOT in the test suite')
 
 def build_cmake(root_dir, tmp_dir, env, thread_count,
-                test_regent, test_legion_cxx, test_external, test_perf, test_ctest):
+                test_regent, test_legion_cxx,
+                test_external, test_perf, test_ctest):
     build_dir = os.path.join(tmp_dir, 'build')
     install_dir = os.path.join(tmp_dir, 'install')
     os.mkdir(build_dir)
@@ -639,6 +646,7 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
     cmdline.append('-DBUILD_SHARED_LIBS=%s' % ('ON' if env['USE_PYTHON'] == '1' else 'OFF'))
     cmdline.append('-DLegion_USE_LLVM=%s' % ('ON' if env['USE_LLVM'] == '1' else 'OFF'))
     cmdline.append('-DLegion_USE_HDF5=%s' % ('ON' if env['USE_HDF'] == '1' else 'OFF'))
+    cmdline.append('-DLegion_USE_Fortran=%s' % ('ON' if env['LEGION_USE_FORTRAN'] == '1' else 'OFF'))
     if 'LEGION_WARNINGS_FATAL' in env:
         cmdline.append('-DLegion_WARNINGS_FATAL=%s' % ('ON' if env['LEGION_WARNINGS_FATAL'] == '1' else 'OFF'))
     if test_ctest:
@@ -678,6 +686,8 @@ def build_make_clean(root_dir, env, thread_count, test_legion_cxx, test_perf,
     # built separately.
     if test_legion_cxx or test_perf or test_external or test_private:
         clean_cxx(legion_cxx_tests, root_dir, env, thread_count)
+    if test_legion_cxx and env['LEGION_USE_FORTRAN'] == '1':
+        clean_cxx(legion_fortran_tests, root_dir, env, thread_count)
 
 def option_enabled(option, options, var_prefix='', default=True):
     if options is not None: return option in options
@@ -711,7 +721,7 @@ class Stage(object):
 def report_mode(debug, max_dim, launcher,
                 test_regent, test_legion_cxx, test_fuzzer, test_realm,
                 test_external, test_private, test_perf, test_ctest, networks,
-                use_cuda, use_openmp, use_python, use_llvm, use_hdf, use_spy, use_prof,
+                use_cuda, use_openmp, use_python, use_llvm, use_hdf, use_fortran, use_spy, use_prof,
                 use_gcov, use_cmake, use_rdir):
     print()
     print('#'*60)
@@ -740,6 +750,7 @@ def report_mode(debug, max_dim, launcher,
     print('###   * Python:     %s' % use_python)
     print('###   * LLVM:       %s' % use_llvm)
     print('###   * HDF5:       %s' % use_hdf)
+    print('###   * Fortran:    %s' % use_fortran)
     print('###   * Spy:        %s' % use_spy)
     print('###   * Prof:       %s' % use_prof)
     print('###   * Gcov:       %s' % use_gcov)
@@ -785,13 +796,14 @@ def run_tests(test_modules=None,
     test_ctest = module_enabled('ctest', False)
 
     # Determine which features to build with.
-    def feature_enabled(feature, default=True):
-        return option_enabled(feature, use_features, 'USE_', default)
+    def feature_enabled(feature, default=True, prefix='USE_'):
+        return option_enabled(feature, use_features, prefix, default)
     use_cuda = feature_enabled('cuda', False)
     use_openmp = feature_enabled('openmp', False)
     use_python = feature_enabled('python', False)
     use_llvm = feature_enabled('llvm', False)
     use_hdf = feature_enabled('hdf', False)
+    use_fortran = feature_enabled('fortran', prefix='LEGION_USE_')
     use_spy = feature_enabled('spy', False)
     use_prof = feature_enabled('prof', False)
     use_gcov = feature_enabled('gcov', False)
@@ -827,7 +839,7 @@ def run_tests(test_modules=None,
                 test_regent, test_legion_cxx, test_fuzzer, test_realm,
                 test_external, test_private, test_perf, test_ctest,
                 networks,
-                use_cuda, use_openmp, use_python, use_llvm, use_hdf, use_spy, use_prof,
+                use_cuda, use_openmp, use_python, use_llvm, use_hdf, use_fortran, use_spy, use_prof,
                 use_gcov, use_cmake, use_rdir)
 
     tmp_dir = tempfile.mkdtemp(dir=root_dir)
@@ -849,6 +861,8 @@ def run_tests(test_modules=None,
         ('USE_LLVM', '1' if use_llvm else '0'),
         ('USE_HDF', '1' if use_hdf else '0'),
         ('TEST_HDF', '1' if use_hdf else '0'),
+        ('LEGION_USE_FORTRAN', '1' if use_fortran else '0'),
+        ('TEST_FORTRAN', '1' if use_fortran else '0'),
         ('USE_SPY', '1' if use_spy else '0'),
         ('TEST_SPY', '1' if use_spy else '0'),
         ('USE_PROF', '1' if use_prof else '0'),
@@ -990,7 +1004,7 @@ def driver():
     parser.add_argument(
         '--use', dest='use_features', action=ExtendAction,
         choices=MultipleChoiceList('gasnet', 'cuda', 'openmp',
-                                   'python', 'llvm', 'hdf', 'spy', 'prof',
+                                   'python', 'llvm', 'hdf', 'fortran', 'spy', 'prof',
                                    'gcov', 'cmake', 'rdir'),
         type=lambda s: s.split(','),
         default=None,
