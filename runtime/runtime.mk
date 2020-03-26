@@ -15,6 +15,7 @@
 #
 
 CC_FLAGS ?=
+FC_FLAGS ?=
 LD_FLAGS ?=
 SO_FLAGS ?=
 INC_FLAGS ?=
@@ -33,6 +34,7 @@ CPPFLAGS ?=
 LDLIBS ?=
 LDFLAGS ?=
 CC_FLAGS += $(CXXFLAGS) $(CPPFLAGS)
+FC_FLAGS += $(FFLAGS)
 SO_FLAGS += $(LDLIBS)
 LD_FLAGS += $(LDFLAGS)
 
@@ -41,6 +43,7 @@ BOUNDS_CHECKS ?= 0
 ifeq ($(shell uname -s),Darwin)
 DARWIN = 1
 CC_FLAGS += -DDARWIN
+FC_FLAGS += -DDARWIN
 ifeq ($(strip $(USE_OPENMP)),1)
 $(warning "Some versions of Clang on Mac OSX do not support OpenMP")
 endif
@@ -57,6 +60,7 @@ SLIB_LEGION     := liblegion.a
 SLIB_REALM      := librealm.a
 else
 CC_FLAGS	+= -fPIC
+FC_FLAGS	+= -fPIC
 NVCC_FLAGS	+= -Xcompiler -fPIC
 SLIB_LEGION     := liblegion.so
 SLIB_REALM      := librealm.so
@@ -137,7 +141,7 @@ endif
 # Customization specific to Cray programming environment
 ifneq (${CRAYPE_VERSION},)
 CXX=CC
-F90=ftn
+FC=ftn
 # Cray's magic wrappers automatically provide LAPACK goodness?
 LAPACK_LIBS ?=
 LEGION_LD_FLAGS += ${CRAY_UGNI_POST_LINK_OPTS}
@@ -153,8 +157,10 @@ ifneq (${MARCH},)
   # instead of -march. Unclear if this is true in general for PPC.
   ifeq ($(findstring ppc64le,$(shell uname -p)),ppc64le)
     CC_FLAGS += -mcpu=${MARCH} -maltivec -mabi=altivec -mvsx
+    FC_FLAGS += -mcpu=${MARCH} -maltivec -mabi=altivec -mvsx
   else
     CC_FLAGS += -march=${MARCH}
+    FC_FLAGS += -march=${MARCH}
   endif
 endif
 
@@ -187,6 +193,7 @@ ifeq ($(strip $(USE_HWLOC)),1)
     $(error HWLOC variable is not defined, aborting build)
   endif
   CC_FLAGS        += -DREALM_USE_HWLOC
+  FC_FLAGS	  += -DREALM_USE_HWLOC
   INC_FLAGS   += -I$(HWLOC)/include
   LEGION_LD_FLAGS += -L$(HWLOC)/lib -lhwloc
 endif
@@ -200,6 +207,7 @@ ifeq ($(strip $(USE_PAPI)),1)
     endif
   endif
   CC_FLAGS        += -DREALM_USE_PAPI
+  FC_FLAGS	  += -DREALM_USE_PAPI
   INC_FLAGS   += -I$(PAPI_ROOT)/include
   LEGION_LD_FLAGS += -L$(PAPI_ROOT)/lib -lpapi
 endif
@@ -330,6 +338,7 @@ ifeq ($(strip $(USE_DLMOPEN)),1)
   endif
 
   CC_FLAGS += -DREALM_USE_DLMOPEN
+  FC_FLAGS += -DREALM_USE_DLMPOPN
 endif
 
 # Flags for Realm
@@ -357,6 +366,7 @@ REALM_CC_FLAGS        += -DREALM_USE_CUDA
 LEGION_CC_FLAGS       += -DLEGION_USE_CUDA
 # provide this for backward-compatibility in applications
 CC_FLAGS              += -DUSE_CUDA
+FC_FLAGS	      += -DUSE_CUDA
 USE_CUDART_HIJACK ?= 1
 ifeq ($(strip $(USE_CUDART_HIJACK)),1)
 REALM_CC_FLAGS        += -DREALM_USE_CUDART_HIJACK
@@ -530,12 +540,15 @@ ifeq ($(strip $(USE_HDF)), 1)
   LEGION_CC_FLAGS     += -DLEGION_USE_HDF5
   # provide this for backward-compatibility in applications
   CC_FLAGS            += -DUSE_HDF
+  FC_FLAGS	      += -DUSE_HDF
   LEGION_LD_FLAGS      += -l$(HDF_LIBNAME)
   ifdef HDF_ROOT
        CC_FLAGS    += -I$(HDF_ROOT)/include
+       FC_FLAGS    += -J$(HDF_ROOT)/include
        LD_FLAGS    += -L$(HDF_ROOT)/lib
   else
     CC_FLAGS      += -I/usr/include/hdf5/serial
+    FC_FLAGS	  += -J/usr/include/hdf5/serial
   endif
 endif
 
@@ -546,7 +559,7 @@ ifeq ($(strip $(USE_MPI)),1)
   ifeq ($(filter-out $(SKIP_MACHINES),$(shell uname -n)),$(shell uname -n))
     CC		:= mpicc
     CXX		:= mpicxx
-    F90		:= mpif90
+    FC		:= mpif90
     # Summit/Summitdev are strange and link this automatically (but still uses mpicxx).
     # FIXME: Unfortunately you can't match against the Summit hostname right now...
     ifneq ($(findstring ppc64le,$(shell uname -p)),ppc64le)
@@ -568,10 +581,12 @@ endif
 
 ifeq ($(strip $(DEBUG)),1)
 CC_FLAGS	+= -O0 -ggdb #-ggdb -Wall
+FC_FLAGS	+= -O0 -ggdb
 REALM_CC_FLAGS	+= -DDEBUG_REALM
 LEGION_CC_FLAGS	+= -DDEBUG_LEGION
 else
 CC_FLAGS	+= -O2 -fno-strict-aliasing #-ggdb
+FC_FLAGS	+= -O2 -fno-strict-aliasing
 endif
 
 # DEBUG_TSAN=1 enables thread sanitizer (data race) checks
@@ -601,8 +616,10 @@ REALM_CC_FLAGS	+= -DCOMPILE_TIME_MIN_LEVEL=$(OUTPUT_LEVEL)
 
 # demand warning-free compilation
 CC_FLAGS        += -Wall -Wno-strict-overflow
+FC_FLAGS	+= -Wall -Wno-strict-overflow
 ifeq ($(strip $(WARN_AS_ERROR)),1)
 CC_FLAGS        += -Werror
+FC_FLAGS	+= -Werror
 endif
 
 REALM_SRC	?=
@@ -856,7 +873,6 @@ endif
 ifeq ($(strip $(LEGION_USE_FORTRAN)),1)
 LEGION_FORTRAN_OBJS := $(LEGION_FORTRAN_SRC:.f90=.f90.o)
 GEN_FORTRAN_OBJS := $(GEN_FORTRAN_SRC:.f90=.f90.o)
-FC_FLAGS := $(CC_FLAGS)
 FC_FLAGS += -cpp
 LD_FLAGS += -lgfortran
 else
@@ -970,16 +986,16 @@ $(GPU_RUNTIME_OBJS): %.cu.o : %.cu $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEAD
 
 ifeq ($(strip $(LEGION_USE_FORTRAN)),1)
 $(LG_RT_DIR)/legion/legion_f_types.f90.o : $(LG_RT_DIR)/legion/legion_f_types.f90 $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
-	$(F90) -J$(LG_RT_DIR) -o $@ -c $< $(FC_FLAGS) $(INC_FLAGS)
+	$(FC) -J$(LG_RT_DIR) -o $@ -c $< $(FC_FLAGS) $(INC_FLAGS)
 	
 $(LG_RT_DIR)/legion/legion_f_c_interface.f90.o : $(LG_RT_DIR)/legion/legion_f_c_interface.f90 $(LG_RT_DIR)/legion/legion_f_types.f90.o $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
-	$(F90) -J$(LG_RT_DIR) -o $@ -c $< $(FC_FLAGS) $(INC_FLAGS)
+	$(FC) -J$(LG_RT_DIR) -o $@ -c $< $(FC_FLAGS) $(INC_FLAGS)
 	
 $(LG_RT_DIR)/legion/legion_f.f90.o : $(LG_RT_DIR)/legion/legion_f.f90 $(LG_RT_DIR)/legion/legion_f_c_interface.f90.o $(LG_RT_DIR)/legion/legion_f_types.f90.o $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
-	$(F90) -J$(LG_RT_DIR) -o $@ -c $< $(FC_FLAGS) $(INC_FLAGS)
+	$(FC) -J$(LG_RT_DIR) -o $@ -c $< $(FC_FLAGS) $(INC_FLAGS)
 
 $(GEN_FORTRAN_OBJS) : %.f90.o : %.f90 $(LEGION_FORTRAN_OBJS) $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
-	$(F90) -o $@ -c $< $(FC_FLAGS) $(INC_FLAGS)
+	$(FC) -o $@ -c $< $(FC_FLAGS) $(INC_FLAGS)
 endif
 
 # disable gmake's default rule for building % from %.o
