@@ -913,6 +913,8 @@ def run_tests(test_modules=None,
                     run_test_legion_python_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
                 if use_hdf:
                     run_test_legion_hdf_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
+                if use_fortran:
+                    run_test_legion_fortran(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
         if test_fuzzer:
             with Stage('fuzzer'):
                 run_test_fuzzer(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
