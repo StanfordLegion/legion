@@ -11158,7 +11158,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      PartitionKind verify_kind = COMPUTE_KIND;
+      // Partition by field is disjoint by construction
+      PartitionKind verify_kind = DISJOINT_KIND;
       if (runtime->verify_partitions)
         SWAP_PART_KINDS(verify_kind, part_kind)
       IndexSpace parent = handle.get_index_space();  
