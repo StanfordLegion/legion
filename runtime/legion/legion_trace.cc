@@ -5571,6 +5571,10 @@ namespace Legion {
           DeferTraceUpdateArgs args(*dargs, deferral);
           repl_ctx->runtime->issue_runtime_meta_task(args, 
                   LG_LATENCY_MESSAGE_PRIORITY, pre);
+#ifdef DEBUG_LEGION
+          // Keep the deserializer happy since we didn't use it
+          derez.advance_pointer(derez.get_remaining_bytes());
+#endif
         }
         return true;
       }
@@ -5617,6 +5621,10 @@ namespace Legion {
           DeferTraceUpdateArgs args(*dargs, deferral);
           repl_ctx->runtime->issue_runtime_meta_task(args, 
                   LG_LATENCY_MESSAGE_PRIORITY, pre);
+#ifdef DEBUG_LEGION
+          // Keep the deserializer happy since we didn't use it
+          derez.advance_pointer(derez.get_remaining_bytes());
+#endif
         }
         return true;
       }
@@ -5660,6 +5668,10 @@ namespace Legion {
           DeferTraceUpdateArgs args(*dargs, deferral);
           repl_ctx->runtime->issue_runtime_meta_task(args, 
                   LG_LATENCY_MESSAGE_PRIORITY, pre);
+#ifdef DEBUG_LEGION
+          // Keep the deserializer happy since we didn't use it
+          derez.advance_pointer(derez.get_remaining_bytes());
+#endif
         }
         return true;
       }
@@ -5707,6 +5719,10 @@ namespace Legion {
           DeferTraceUpdateArgs args(*dargs, deferral);
           repl_ctx->runtime->issue_runtime_meta_task(args, 
                   LG_LATENCY_MESSAGE_PRIORITY, pre);
+#ifdef DEBUG_LEGION
+          // Keep the deserializer happy since we didn't use it
+          derez.advance_pointer(derez.get_remaining_bytes());
+#endif
         }
         return true;
       }
