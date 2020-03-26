@@ -177,10 +177,10 @@ local node_is_side_effect_free = {
   -- Currently we can only support unpredicated conditionals inside of
   -- a predicated statement.
   [ast.typed.stat.If] = function(cx, node)
-    return {not std.is_future(std.as_read(node.cond.expr_type)), node}
+    return {not node.cond:is(ast.typed.expr.FutureGetResult), node}
   end,
   [ast.typed.stat.While] = function(cx, node)
-    return {not std.is_future(std.as_read(node.cond.expr_type)), node}
+    return {not node.cond:is(ast.typed.expr.FutureGetResult), node}
   end,
 
   [ast.typed.stat.Elseif]                     = always_false,
