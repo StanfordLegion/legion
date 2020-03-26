@@ -41,7 +41,7 @@ CC_FLAGS	?= -I/$(LG_RT_DIR)/legion
 NVCC_FLAGS	?=
 GASNET_FLAGS	?=
 LD_FLAGS	?=
-LEGION_WITH_FORTRAN	?= 1
+LEGION_USE_FORTRAN	?= 1
 
 ###########################################################################
 #

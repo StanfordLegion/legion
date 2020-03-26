@@ -853,7 +853,7 @@ GEN_GPU_OBJS	:=
 GPU_RUNTIME_OBJS:=
 endif
 
-ifeq ($(strip $(LEGION_WITH_FORTRAN)),1)
+ifeq ($(strip $(LEGION_USE_FORTRAN)),1)
 LEGION_FORTRAN_OBJS := $(LEGION_FORTRAN_SRC:.f90=.f90.o)
 GEN_FORTRAN_OBJS := $(GEN_FORTRAN_SRC:.f90=.f90.o)
 FC_FLAGS := $(CC_FLAGS)
@@ -968,7 +968,7 @@ $(GEN_GPU_OBJS) : %.cu.o : %.cu $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 $(GPU_RUNTIME_OBJS): %.cu.o : %.cu $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 	$(NVCC) -o $@ -c $< $(NVCC_FLAGS) $(INC_FLAGS)
 
-ifeq ($(strip $(LEGION_WITH_FORTRAN)),1)
+ifeq ($(strip $(LEGION_USE_FORTRAN)),1)
 $(LG_RT_DIR)/legion/legion_f_types.f90.o : $(LG_RT_DIR)/legion/legion_f_types.f90 $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 	$(F90) -J$(LG_RT_DIR) -o $@ -c $< $(FC_FLAGS) $(INC_FLAGS)
 	
