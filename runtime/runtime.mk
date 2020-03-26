@@ -721,8 +721,8 @@ LEGION_SRC 	+= $(LG_RT_DIR)/legion/legion.cc \
 LEGION_INST_SRC  += $(LG_RT_DIR)/legion/region_tree_tmpl.cc
 
 LEGION_FORTRAN_SRC += $(LG_RT_DIR)/legion/legion_f_types.f90 \
-					  $(LG_RT_DIR)/legion/legion_f_c_interface.f90 \
-					  $(LG_RT_DIR)/legion/legion_f.f90
+		    $(LG_RT_DIR)/legion/legion_f_c_interface.f90 \
+		    $(LG_RT_DIR)/legion/legion_f.f90
 
 # Header files for Legion installation
 INSTALL_HEADERS += legion.h \
@@ -858,9 +858,9 @@ LEGION_FORTRAN_OBJS := $(LEGION_FORTRAN_SRC:.f90=.f90.o)
 GEN_FORTRAN_OBJS := $(GEN_FORTRAN_SRC:.f90=.f90.o)
 FC_FLAGS := $(CC_FLAGS)
 FC_FLAGS += -cpp
-LD_FLAGS	+= -lgfortran
+LD_FLAGS += -lgfortran
 else
-LEGION_FORTRAN_OBJS	:=
+LEGION_FORTRAN_OBJS :=
 GEN_FORTRAN_OBJS :=
 endif
 

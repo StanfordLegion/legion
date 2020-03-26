@@ -51,7 +51,7 @@ legion_cxx_tests = [
     ['tutorial/06_privileges/privileges', []],
     ['tutorial/07_partitioning/partitioning', []],
     ['tutorial/08_multiple_partitions/multiple_partitions', []],
-    ['tutorial/09_custom_mapper/custom_mapper', []],
+    ['tutorial/09_custom_mapper/custom_mapper', []], 
 
     # Examples
     ['examples/circuit/circuit', []],
@@ -70,6 +70,20 @@ legion_cxx_tests = [
     # Tests
     ['test/rendering/rendering', ['-i', '2', '-n', '64', '-ll:cpu', '4']],
     ['test/legion_stl/test_stl', []],
+]
+
+legion_fortran_tests = [
+    ['tutorial/fortran/00_hello_world', []],
+    ['tutorial/fortran/01_tasks_and_futures', []],
+    ['tutorial/fortran/02_index_tasks', []],
+    ['tutorial/fortran/03_physical_regions', []],
+    ['tutorial/fortran/04_privileges_accessor', []],
+    ['tutorial/fortran/05_privileges_raw_ptr', []],
+    ['tutorial/fortran/06_partitioning', []],
+    ['tutorial/fortran/07_partitiong_fortran_task', []],
+    ['tutorial/fortran/08_multiple_partitions', []],
+    ['tutorial/fortran/09_region_2d', []],
+    ['tutorial/fortran/10_attach_array', []],
 ]
 
 if platform.system() != 'Darwin':
