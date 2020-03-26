@@ -99,7 +99,7 @@ CONDUIT ?= aries
 GPU_ARCH ?= pascal
 endif
 ifeq ($(findstring excalibur,$(shell uname -n)),excalibur)
-CONDUIT ?= aries
+CONDUIT ?=aries
 endif
 ifeq ($(findstring cori,$(shell uname -n)),cori)
 CONDUIT ?= aries
@@ -546,7 +546,7 @@ ifeq ($(strip $(USE_MPI)),1)
   ifeq ($(filter-out $(SKIP_MACHINES),$(shell uname -n)),$(shell uname -n))
     CC		:= mpicc
     CXX		:= mpicxx
-    F90         := mpif90
+    F90		:= mpif90
     # Summit/Summitdev are strange and link this automatically (but still uses mpicxx).
     # FIXME: Unfortunately you can't match against the Summit hostname right now...
     ifneq ($(findstring ppc64le,$(shell uname -p)),ppc64le)
@@ -720,6 +720,10 @@ LEGION_SRC 	+= $(LG_RT_DIR)/legion/legion.cc \
 # LEGION_INST_SRC will be compiled {MAX_DIM}^2 times in parallel
 LEGION_INST_SRC  += $(LG_RT_DIR)/legion/region_tree_tmpl.cc
 
+LEGION_FORTRAN_SRC += $(LG_RT_DIR)/legion/legion_f_types.f90 \
+					  $(LG_RT_DIR)/legion/legion_f_c_interface.f90 \
+					  $(LG_RT_DIR)/legion/legion_f.f90
+
 # Header files for Legion installation
 INSTALL_HEADERS += legion.h \
 		   realm.h \
@@ -849,6 +853,17 @@ GEN_GPU_OBJS	:=
 GPU_RUNTIME_OBJS:=
 endif
 
+ifeq ($(strip $(LEGION_WITH_FORTRAN)),1)
+LEGION_FORTRAN_OBJS := $(LEGION_FORTRAN_SRC:.f90=.f90.o)
+GEN_FORTRAN_OBJS := $(GEN_FORTRAN_SRC:.f90=.f90.o)
+FC_FLAGS := $(CC_FLAGS)
+FC_FLAGS += -cpp
+LD_FLAGS	+= -lgfortran
+else
+LEGION_FORTRAN_OBJS	:=
+GEN_FORTRAN_OBJS :=
+endif
+
 # Provide build rules unless the user asks us not to
 ifndef NO_BUILD_RULES
 # Provide an all unless the user asks us not to
@@ -886,12 +901,12 @@ install:
 endif
 
 # If we're using CUDA we have to link with nvcc
-$(OUTFILE) : $(GEN_OBJS) $(GEN_GPU_OBJS) $(SLIB_LEGION) $(SLIB_REALM)
+$(OUTFILE) : $(GEN_OBJS) $(GEN_GPU_OBJS) $(SLIB_LEGION) $(SLIB_REALM) $(GEN_FORTRAN_OBJS)
 	@echo "---> Linking objects into one binary: $(OUTFILE)"
-	$(CXX) -o $(OUTFILE) $(GEN_OBJS) $(GEN_GPU_OBJS) $(LD_FLAGS) $(LEGION_LIBS) $(LEGION_LD_FLAGS) $(GASNET_FLAGS)
+	$(CXX) -o $(OUTFILE) $(GEN_OBJS) $(GEN_GPU_OBJS) $(GEN_FORTRAN_OBJS) $(LD_FLAGS) $(LEGION_LIBS) $(LEGION_LD_FLAGS) $(GASNET_FLAGS)
 
 ifeq ($(strip $(SHARED_OBJECTS)),0)
-$(SLIB_LEGION) : $(LEGION_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(GPU_RUNTIME_OBJS)
+$(SLIB_LEGION) : $(LEGION_OBJS) $(LEGION_FORTRAN_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(GPU_RUNTIME_OBJS)
 	rm -f $@
 	$(AR) rcs $@ $^
 
@@ -901,15 +916,15 @@ $(SLIB_REALM) : $(REALM_OBJS) $(REALM_INST_OBJS)
 else ifeq ($(strip $(DARWIN)),1)
 # On Darwin we need to link liblegion.so against librealm.so because it complains 
 # about having an illegal dependence on thread-local storage if we don't
-$(SLIB_LEGION) : $(LEGION_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(GPU_RUNTIME_OBJS) $(SLIB_REALM)
+$(SLIB_LEGION) : $(LEGION_OBJS) $(LEGION_FORTRAN_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(GPU_RUNTIME_OBJS) $(SLIB_REALM)
 	rm -f $@
-	$(CXX) $(SO_FLAGS) -o $@ $(LEGION_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(GPU_RUNTIME_OBJS) -L. -lrealm
+	$(CXX) $(SO_FLAGS) -o $@ $(LEGION_OBJS) $(LEGION_FORTRAN_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(GPU_RUNTIME_OBJS) -L. -lrealm
 
 $(SLIB_REALM) : $(REALM_OBJS) $(REALM_INST_OBJS)
 	rm -f $@
 	$(CXX) $(SO_FLAGS) -o $@ $^
 else
-$(SLIB_LEGION) : $(LEGION_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(GPU_RUNTIME_OBJS)
+$(SLIB_LEGION) : $(LEGION_OBJS) $(LEGION_FORTRAN_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(GPU_RUNTIME_OBJS)
 	rm -f $@
 	$(CXX) $(SO_FLAGS) -o $@ $^
 
@@ -953,11 +968,25 @@ $(GEN_GPU_OBJS) : %.cu.o : %.cu $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 $(GPU_RUNTIME_OBJS): %.cu.o : %.cu $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 	$(NVCC) -o $@ -c $< $(NVCC_FLAGS) $(INC_FLAGS)
 
+ifeq ($(strip $(LEGION_WITH_FORTRAN)),1)
+$(LG_RT_DIR)/legion/legion_f_types.f90.o : $(LG_RT_DIR)/legion/legion_f_types.f90 $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
+	$(F90) -J$(LG_RT_DIR) -o $@ -c $< $(FC_FLAGS) $(INC_FLAGS)
+	
+$(LG_RT_DIR)/legion/legion_f_c_interface.f90.o : $(LG_RT_DIR)/legion/legion_f_c_interface.f90 $(LG_RT_DIR)/legion/legion_f_types.f90.o $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
+	$(F90) -J$(LG_RT_DIR) -o $@ -c $< $(FC_FLAGS) $(INC_FLAGS)
+	
+$(LG_RT_DIR)/legion/legion_f.f90.o : $(LG_RT_DIR)/legion/legion_f.f90 $(LG_RT_DIR)/legion/legion_f_c_interface.f90.o $(LG_RT_DIR)/legion/legion_f_types.f90.o $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
+	$(F90) -J$(LG_RT_DIR) -o $@ -c $< $(FC_FLAGS) $(INC_FLAGS)
+
+$(GEN_FORTRAN_OBJS) : %.f90.o : %.f90 $(LEGION_FORTRAN_OBJS) $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
+	$(F90) -o $@ -c $< $(FC_FLAGS) $(INC_FLAGS)
+endif
+
 # disable gmake's default rule for building % from %.o
 % : %.o
 
 clean::
-	$(RM) -f $(OUTFILE) $(SLIB_LEGION) $(SLIB_REALM) $(GEN_OBJS) $(GEN_GPU_OBJS) $(REALM_OBJS) $(REALM_INST_OBJS) $(LEGION_OBJS) $(LEGION_INST_OBJS) $(GPU_RUNTIME_OBJS) $(MAPPER_OBJS) $(ASM_OBJS) $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
+	$(RM) -f $(OUTFILE) $(SLIB_LEGION) $(SLIB_REALM) $(GEN_OBJS) $(GEN_GPU_OBJS) $(REALM_OBJS) $(REALM_INST_OBJS) $(LEGION_OBJS) $(LEGION_INST_OBJS) $(GPU_RUNTIME_OBJS) $(MAPPER_OBJS) $(ASM_OBJS) $(LEGION_FORTRAN_OBJS) $(LG_RT_DIR)/*mod $(GEN_FORTRAN_OBJS) *.mod $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 
 ifeq ($(strip $(USE_LLVM)),1)
 llvmjit_internal.cc.o : CC_FLAGS += $(LLVM_CXXFLAGS)
