@@ -241,7 +241,13 @@ end
 local function predicate_assignment(cx, node)
   local lhs_type = std.as_read(node.lhs.expr_type) -- FIXME: this is a write??
   local rhs_type = std.as_read(node.rhs.expr_type)
-  assert(std.is_future(lhs_type))
+
+  -- This is an assignment to a variable defined in the predication
+  -- scope, don't need to predicate it.
+  if not std.is_future(lhs_type) then
+    return node
+  end
+
   assert(std.is_future(rhs_type))
 
   -- If there's an existing call, reuse it.
