@@ -22,6 +22,7 @@ local ast = require("regent/ast")
 local data = require("common/data")
 local report = require("common/report")
 local std = require("regent/std")
+local task_helper = require("regent/task_helper")
 
 local optimize_predicate = {}
 
@@ -166,16 +167,24 @@ local node_is_side_effect_free = {
   [ast.typed.expr.Internal]                   = unreachable,
 
   -- Statements:
-  [ast.typed.stat.If]                         = always_false,
+  [ast.typed.stat.IndexLaunchList] = function(cx, node)
+    return {not node.reduce_op, node}
+  end,
+  [ast.typed.stat.IndexLaunchNum] = function(cx, node)
+    return {not node.reduce_op, node}
+  end,
+
+  -- Currently we can only support unpredicated conditionals inside of
+  -- a predicated statement.
+  [ast.typed.stat.If] = function(cx, node)
+    return {not node.cond:is(ast.typed.expr.FutureGetResult), node}
+  end,
+  [ast.typed.stat.While] = function(cx, node)
+    return {not node.cond:is(ast.typed.expr.FutureGetResult), node}
+  end,
+
   [ast.typed.stat.Elseif]                     = always_false,
-  [ast.typed.stat.While]                      = always_false,
-  [ast.typed.stat.ForNum]                     = always_false,
-  [ast.typed.stat.ForList]                    = always_false,
-  [ast.typed.stat.Repeat]                     = always_false,
   [ast.typed.stat.MustEpoch]                  = always_false,
-  [ast.typed.stat.IndexLaunchNum]             = always_false,
-  [ast.typed.stat.IndexLaunchList]            = always_false,
-  [ast.typed.stat.VarUnpack]                  = always_false,
   [ast.typed.stat.Return]                     = always_false,
   [ast.typed.stat.Break]                      = always_false,
   [ast.typed.stat.Reduce]                     = always_false,
@@ -186,12 +195,16 @@ local node_is_side_effect_free = {
   [ast.typed.stat.BeginTrace]                 = always_false,
   [ast.typed.stat.EndTrace]                   = always_false,
 
+  [ast.typed.stat.ForNum]                     = always_true,
+  [ast.typed.stat.ForList]                    = always_true,
+  [ast.typed.stat.Repeat]                     = always_true,
   [ast.typed.stat.Block]                      = always_true,
   [ast.typed.stat.Var]                        = always_true,
+  [ast.typed.stat.VarUnpack]                  = always_true,
+  [ast.typed.stat.Assignment]                 = always_true,
   [ast.typed.stat.Expr]                       = always_true,
 
   -- TODO: unimplemented
-  [ast.typed.stat.Assignment]                 = always_false,
 
   [ast.typed.stat.Internal]                   = unreachable,
   [ast.typed.stat.ForNumVectorized]           = unreachable,
@@ -217,18 +230,64 @@ local function predicate_call(cx, node)
   }
 end
 
-local function predicate_assign(cx, node)
-  assert(false, "unimplemented")
+local function predicate_index_launch(cx, node)
+  return node {
+    call = node.call {
+      predicate = cx.cond,
+    },
+  }
+end
+
+local function predicate_assignment(cx, node)
+  local lhs_type = std.as_read(node.lhs.expr_type) -- FIXME: this is a write??
+  local rhs_type = std.as_read(node.rhs.expr_type)
+  assert(std.is_future(lhs_type))
+  assert(std.is_future(rhs_type))
+
+  -- If there's an existing call, reuse it.
+  if node.rhs:is(ast.typed.expr.Call) then
+    return node {
+      rhs = node.rhs {
+        predicate_else_value = node.lhs,
+      }
+    }
+  end
+
+  -- Otherwise create a dummy task and run the result through it.
+  local value_type = rhs_type.result_type
+  local identity_task = task_helper.make_identity_task(value_type)
+  return node {
+    rhs = ast.typed.expr.Call {
+      fn = ast.typed.expr.Function {
+        value = identity_task,
+        expr_type = identity_task:get_type(),
+        annotations = ast.default_annotations(),
+        span = node.span,
+      },
+      args = terralib.newlist({
+        node.rhs,
+      }),
+      conditions = terralib.newlist(),
+      predicate = cx.cond,
+      predicate_else_value = node.lhs,
+      replicable = false,
+      expr_type = rhs_type,
+      annotations = ast.default_annotations(),
+      span = node.span,
+    },
+  }
 end
 
 local function do_nothing(cx, node) return node end
 
 local predicate_node_table = {
-  [ast.typed.expr.Call]   = predicate_call,
-  [ast.typed.expr]        = do_nothing,
+  [ast.typed.expr.Call]            = predicate_call,
+  [ast.typed.expr]                 = do_nothing,
 
-  [ast.typed.stat.Assignment] = predicate_assign,
-  [ast.typed.stat]            = do_nothing,
+  [ast.typed.stat.IndexLaunchNum]  = predicate_index_launch,
+  [ast.typed.stat.IndexLaunchList] = predicate_index_launch,
+  [ast.typed.stat.Assignment]      = predicate_assignment,
+  [ast.typed.stat]                 = do_nothing,
 }
 
 local predicate_node = ast.make_single_dispatch(
@@ -262,23 +321,131 @@ function optimize_predicate.stat_if(cx, node)
     return node
   end
 
-  -- After future pass cond is always wrapped in FutureGetResult
+  -- After optimize_futures cond is always wrapped in FutureGetResult
   assert(node.cond:is(ast.typed.expr.FutureGetResult))
   local cond = node.cond.value
 
-  assert(node.cond.value:is(ast.typed.expr.ID)) -- should be handled by normalizer
+  assert(cond:is(ast.typed.expr.ID)) -- should be handled by normalizer
 
   local then_cx = cx:new_local_scope(cond)
 
   return ast.typed.stat.Block {
     block = predicate_block(then_cx, node.then_block),
-    span = node.span,
     annotations = ast.default_annotations(),
+    span = node.span,
+  }
+end
+
+function optimize_predicate.stat_while(cx, node)
+  local report_fail = report.info
+  if node.annotations.predicate:is(ast.annotation.Demand) then
+    report_fail = report.error
+  end
+
+  if not node.cond:is(ast.typed.expr.FutureGetResult) then
+    report_fail(node, "cannot predicate while loop: condition is not a future")
+    return node
+  end
+
+  local result, result_node = unpack(analyze_is_side_effect_free(cx, node.block))
+  if not result then
+    report_fail(result_node, "cannot predicate while loop: body is not side-effect free")
+    return node
+  end
+
+  -- After optimize_futures cond is always wrapped in FutureGetResult
+  assert(node.cond:is(ast.typed.expr.FutureGetResult))
+  local cond = node.cond.value
+  local cond_type = cond.value:gettype()
+
+  assert(cond:is(ast.typed.expr.ID)) -- should be handled by normalizer
+
+  local body_cx = cx:new_local_scope(cond)
+  local body = predicate_block(body_cx, node.block)
+
+  local conds = terralib.newlist()
+  conds:insert(cond.value)
+  conds:insertall(
+    data.range(0, std.config["predicate-unroll"]):map(
+      function(i)
+        return std.newsymbol(cond_type, "__predicate_cond_unroll_" .. tostring(i))
+      end))
+
+  local setup = terralib.newlist()
+  for i = 2, #conds do
+    setup:insert(
+      ast.typed.stat.Var {
+        symbol = conds[i],
+        type = cond_type,
+        value = cond,
+        annotations = ast.default_annotations(),
+        span = node.span,
+      }
+    )
+  end
+
+  local update = terralib.newlist()
+  for i = #conds, 2, -1 do
+    update:insert(
+      ast.typed.stat.Assignment {
+        lhs = ast.typed.expr.ID {
+          value = conds[i],
+          expr_type = std.rawref(&cond_type),
+          annotations = ast.default_annotations(),
+          span = node.span,
+        },
+        rhs = ast.typed.expr.ID {
+          value = conds[i-1],
+          expr_type = std.rawref(&cond_type),
+          annotations = ast.default_annotations(),
+          span = node.span,
+        },
+        metadata = false,
+        annotations = ast.default_annotations(),
+        span = node.span,
+      })
+  end
+
+  local new_body_block = terralib.newlist()
+  new_body_block:insertall(body.stats)
+  new_body_block:insertall(update)
+
+  local new_block = terralib.newlist()
+  new_block:insertall(setup)
+  new_block:insert(
+    ast.typed.stat.While {
+      cond = ast.typed.expr.FutureGetResult {
+        value = ast.typed.expr.ID {
+          value = conds[#conds],
+          expr_type = std.rawref(&cond_type),
+          annotations = ast.default_annotations(),
+          span = node.span,
+        },
+        expr_type = cond_type.result_type,
+        annotations = ast.default_annotations(),
+        span = node.span,
+      },
+      block = ast.typed.Block {
+        stats = new_body_block,
+        span = node.span,
+      },
+      annotations = ast.default_annotations(),
+      span = node.span,
+    })
+
+  return ast.typed.stat.Block {
+    block = ast.typed.Block {
+      stats = new_block,
+      span = node.span,
+    },
+    annotations = ast.default_annotations(),
+    span = node.span,
   }
 end
 
 local optimize_predicate_stat_table = {
   [ast.typed.stat.If]     = optimize_predicate.stat_if,
+  [ast.typed.stat.While]  = optimize_predicate.stat_while,
   [ast.typed.stat]        = do_nothing
 }
 

@@ -5501,6 +5501,10 @@ class Operation(object):
 
     def set_predicate_result(self, result):
         self.predicate_result = result
+        # If we predicated this false then we don't expect
+        # to see any additional logging for it
+        if not result:
+            self.fully_logged = True
 
     def set_owner_shard(self, shard):
         assert self.owner_shard is None

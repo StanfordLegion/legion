@@ -19,7 +19,7 @@
 #include <stdio.h>
 #include "legion/legion_profiling.h"
 
-#ifdef USE_ZLIB
+#ifdef LEGION_USE_ZLIB
 #include <zlib.h>
 // lp_fopen expects filename to be a std::string
 #define lp_fopen(filename, mode)      gzopen(filename.c_str(),mode)
@@ -155,7 +155,7 @@ namespace Legion {
       void serialize(const LegionProfInstance::ProfTaskInfo&);
 #endif
     private:
-#ifdef USE_ZLIB
+#ifdef LEGION_USE_ZLIB
       gzFile f;
 #else
       FILE *f;

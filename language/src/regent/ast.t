@@ -500,10 +500,10 @@ ast.typed.stat:leaf("Repeat", {"block", "until_cond"})
 ast.typed.stat:leaf("MustEpoch", {"block"})
 ast.typed.stat:leaf("Block", {"block"})
 ast.typed.stat:leaf("IndexLaunchNum", {"symbol", "values", "preamble", "call",
-                                       "reduce_lhs", "reduce_op",
+                                       "reduce_lhs", "reduce_op", "reduce_task",
                                        "args_provably", "free_vars", "loop_vars"})
 ast.typed.stat:leaf("IndexLaunchList", {"symbol", "value", "preamble", "call",
-                                        "reduce_lhs", "reduce_op",
+                                        "reduce_lhs", "reduce_op", "reduce_task",
                                         "args_provably", "free_vars", "loop_vars"})
 ast:leaf("IndexLaunchArgsProvably", {"invariant", "projectable"})
 ast.typed.stat:leaf("Var", {"symbol", "type", "value"})

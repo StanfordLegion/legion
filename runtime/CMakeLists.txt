@@ -251,11 +251,15 @@ if(Legion_USE_CUDA)
 
   target_include_directories(RealmRuntime PRIVATE ${CUDA_INCLUDE_DIRS})
   target_link_libraries(RealmRuntime PRIVATE ${CUDA_CUDA_LIBRARY})
+  # for backwards compatibility in applications
+  target_compile_definitions(RealmRuntime INTERFACE USE_CUDA)
 endif()
 
 if(Legion_USE_HDF5)
   target_include_directories(RealmRuntime PRIVATE ${HDF5_INCLUDE_DIRS})
   target_link_libraries(RealmRuntime PRIVATE ${HDF5_LIBRARIES})
+  # for backwards compatibility in applications
+  target_compile_definitions(RealmRuntime INTERFACE USE_HDF)
 endif()
 
 if(Legion_USE_Python)

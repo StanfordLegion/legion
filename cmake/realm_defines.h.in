@@ -40,14 +40,10 @@
 #cmakedefine REALM_PYTHON_VERSION_MAJOR @REALM_PYTHON_VERSION_MAJOR@
 #endif
 
-#ifndef REALM_USE_CUDA
 #cmakedefine REALM_USE_CUDA
-#endif
+
 #ifndef REALM_USE_CUDART_HIJACK
 #cmakedefine REALM_USE_CUDART_HIJACK
-#endif
-#ifndef USE_CUDA
-#cmakedefine USE_CUDA
 #endif
 
 #cmakedefine REALM_USE_GASNET1
@@ -67,13 +63,9 @@
 #cmakedefine REALM_ALLOW_MISSING_LLVM_LIBS
 #endif
 
-#ifndef USE_HDF
-#cmakedefine USE_HDF
-#endif
+#cmakedefine REALM_USE_HDF5
 
-#ifndef USE_LIBDL
-#cmakedefine USE_LIBDL
-#endif
+#cmakedefine REALM_USE_LIBDL
 
 #ifndef __STDC_FORMAT_MACROS
 #cmakedefine __STDC_FORMAT_MACROS

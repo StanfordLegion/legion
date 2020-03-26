@@ -4862,7 +4862,7 @@ namespace Legion {
       Realm::ProfilingRequestSet requests;
       PhysicalInstance result;
 
-#ifdef USE_HDF
+#ifdef LEGION_USE_HDF5
       std::vector<PhysicalInstance::HDF5FieldInfo<DIM,T> >
 	field_infos(field_ids.size());
       for (size_t i = 0; i < field_ids.size(); i++)

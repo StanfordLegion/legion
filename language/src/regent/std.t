@@ -3139,6 +3139,7 @@ std.future = terralib.memoize(function(result_type)
     error("future expected a type as argument 1, got " .. tostring(result_type))
   end
   assert(not std.is_rawref(result_type))
+  assert(not std.is_future(result_type))
 
   local st = terralib.types.newstruct("future")
   st.entries = terralib.newlist({

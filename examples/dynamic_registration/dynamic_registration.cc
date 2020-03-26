@@ -197,7 +197,7 @@ void top_level_task(const Task *task,
 
   LayoutConstraintID soa_layout_id = runtime->register_layout(layout_registrar);
 
-#ifdef USE_LIBDL
+#ifdef REALM_USE_LIBDL
   // rely on dladdr/dlsym to make function pointers portable for global
   //  task registration
   bool global_taskreg = true;

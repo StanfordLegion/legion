@@ -214,7 +214,6 @@ if(Legion_USE_CUDA)
 
   # define variable for realm_defines.h
   set(REALM_USE_CUDA ON)
-  set(USE_CUDA ON) # for backwards compatibility
 
   option(Legion_HIJACK_CUDART "Hijack and rewrite application calls into the CUDA runtime" ON)
   if(Legion_HIJACK_CUDART)
@@ -300,8 +299,9 @@ option(Legion_USE_HDF5 "Enable support for HDF5" OFF)
 if(Legion_USE_HDF5)
   find_package(HDF5 REQUIRED COMPONENTS C)
 
-  # define variable for realm_defines.h
-  set(USE_HDF ON)
+  # define variable for both legion_defines.h and realm_defines.h
+  set(LEGION_USE_HDF5 ON)
+  set(REALM_USE_HDF5 ON)
 endif()
 
 #------------------------------------------------------------------------------#
@@ -310,7 +310,7 @@ endif()
 option(Legion_USE_LIBDL "Enable support for libdl" ON)
 if(Legion_USE_LIBDL)
   # define variable for realm_defines.h
-  set(USE_LIBDL ON)
+  set(REALM_USE_LIBDL ON)
 endif()
 
 #------------------------------------------------------------------------------#
@@ -331,7 +331,7 @@ option(Legion_USE_ZLIB "Enable support for zlib" ON)
 if(Legion_USE_ZLIB)
   find_package(ZLIB REQUIRED)
   # define variable for legion_defines.h
-  set(USE_ZLIB ON)
+  set(LEGION_USE_ZLIB ON)
 endif()
 
 #------------------------------------------------------------------------------#

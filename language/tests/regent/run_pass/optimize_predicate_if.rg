@@ -21,11 +21,14 @@ task condition1()
 end
 
 task condition2()
-  return true
+  return false
 end
 
-task body1()
-  return 1 + 1
+task body1(count : region(ispace(int1d), int))
+where reads writes(count) do
+  for x in count do
+    @x += 1
+  end
 end
 
 task body2(x : int)
@@ -33,20 +36,68 @@ task body2(x : int)
 end
 
 task main()
+  var count = region(ispace(int1d, 2), int)
+  var pcount = partition(equal, count, ispace(int1d, 2))
+  fill(count, 0)
+
+  regentlib.assert(count[0] == 0 and count[1] == 0, "test failed")
+
   __demand(__predicate)
   if condition1() then
-    body1()
+    body1(count)
   end
 
-  -- Blocks (without control flow) and variables are ok.
+  regentlib.assert(count[0] == 1 and count[1] == 1, "test failed")
+
+  -- Basic control flow, variables, assignment, simple expressions are all ok.
+  var z = 123
+  var t = true
   __demand(__predicate)
-  if condition2() then
+  if condition1() then
     do
       var x = 1
       do
         var y = body2(x)
       end
+      z = body2(x) + 10
+      if t then
+        z = z + 200
+      end
+      while not t do
+        z = z + 3000
+      end
+    end
+
+    for i = 0, 2 do
+      __demand(__index_launch)
+      for j = 0, 2 do
+        body1(pcount[j])
+      end
     end
   end
+  regentlib.assert(z == 212, "test failed")
+
+  regentlib.assert(count[0] == 3 and count[1] == 3, "test failed")
+
+  -- Make sure assignment doesn't take effect if the condition is false.
+  var w = 123
+  var u = 456
+  var v = 789 -- this variable is NOT assigned to the result of a task
+  __demand(__predicate)
+  if condition2() then
+    w = body2(10) + 10
+    u = body2(100)
+    v = 1000
+    body1(count)
+    __demand(__index_launch)
+    for j = 0, 2 do
+      body1(pcount[j])
+    end
+  end
+  regentlib.assert(w == 123, "test failed")
+  regentlib.assert(u == 456, "test failed")
+  regentlib.assert(v == 789, "test failed")
+
+  regentlib.assert(count[0] == 3 and count[1] == 3, "test failed")
 end
 regentlib.start(main)

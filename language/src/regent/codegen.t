@@ -3655,139 +3655,23 @@ function codegen.expr_call(cx, node)
   end
 end
 
-local lift_cast_to_futures = terralib.memoize(
-  function (arg_type, expr_type)
-    assert(terralib.types.istype(arg_type) and
-             terralib.types.istype(expr_type))
-    if std.is_future(arg_type) then
-      arg_type = arg_type.result_type
-    end
-    if std.is_future(expr_type) then
-      expr_type = expr_type.result_type
-    end
-
-    local name = data.newtuple(
-      "__cast_" .. tostring(arg_type) .. "_" .. tostring(expr_type))
-    local arg_symbol = std.newsymbol(arg_type, "arg")
-    local task = std.new_task(name)
-    local variant = task:make_variant("primary")
-    task:set_primary_variant(variant)
-    local node = ast.typed.top.Task {
-      name = name,
-      params = terralib.newlist({
-          ast.typed.top.TaskParam {
-            symbol = arg_symbol,
-            param_type = arg_type,
-            future = false,
-            annotations = ast.default_annotations(),
-            span = ast.trivial_span(),
-          },
-      }),
-      return_type = expr_type,
-      privileges = terralib.newlist(),
-      coherence_modes = data.newmap(),
-      flags = data.newmap(),
-      conditions = {},
-      constraints = terralib.newlist(),
-      body = ast.typed.Block {
-        stats = terralib.newlist({
-            ast.typed.stat.Return {
-              value = ast.typed.expr.Cast {
-                fn = ast.typed.expr.Function {
-                  value = expr_type,
-                  expr_type = terralib.types.functype(
-                    terralib.newlist({std.untyped}), expr_type, false),
-                  annotations = ast.default_annotations(),
-                  span = ast.trivial_span(),
-                },
-                arg = ast.typed.expr.ID {
-                  value = arg_symbol,
-                  expr_type = arg_type,
-                  annotations = ast.default_annotations(),
-                  span = ast.trivial_span(),
-                },
-                expr_type = expr_type,
-                annotations = ast.default_annotations(),
-                span = ast.trivial_span(),
-              },
-              annotations = ast.default_annotations(),
-              span = ast.trivial_span(),
-            },
-        }),
-        span = ast.trivial_span(),
-      },
-      config_options = ast.TaskConfigOptions {
-        leaf = true,
-        inner = false,
-        idempotent = true,
-        replicable = false,
-      },
-      region_divergence = false,
-      metadata = false,
-      prototype = task,
-      annotations = ast.default_annotations(),
-      span = ast.trivial_span(),
-    }
-    task:set_type(
-      terralib.types.functype(
-        node.params:map(function(param) return param.param_type end),
-        node.return_type,
-        false))
-    task:set_privileges(node.privileges)
-    task:set_conditions({})
-    task:set_param_constraints(node.constraints)
-    task:set_constraints({})
-    task:set_region_universe(data.newmap())
-    return codegen.entry(node)
-  end)
-
 function codegen.expr_cast(cx, node)
   local expr_type = std.as_read(node.expr_type)
-  if std.is_future(expr_type) then
-    local arg_type = std.as_read(node.arg.expr_type)
-    local task = lift_cast_to_futures(arg_type, expr_type)
+  assert(not std.is_future(expr_type)) -- This is handled in optimize_future now
 
-    -- Assuming the following assertion holds, it is safe to throw
-    -- away the result of this expression (i.e. the actions won't
-    -- actually do anything).
-    --
-    -- FIXME: It's probably better to have node.fn not be an
-    -- expression at all, since we always know it statically.
-    local fn = codegen.expr(cx, node.fn):read(cx)
-    assert(fn.value == expr_type.result_type)
+  local fn = codegen.expr(cx, node.fn):read(cx)
+  local arg = codegen.expr(cx, node.arg):read(cx, node.arg.expr_type)
 
-    local call = ast.typed.expr.Call {
-      fn = ast.typed.expr.Function {
-        value = task,
-        expr_type = task:get_type(),
-        annotations = ast.default_annotations(),
-        span = node.span,
-      },
-      args = terralib.newlist({node.arg}),
-      conditions = terralib.newlist(),
-      predicate = false,
-      predicate_else_value = false,
-      replicable = false,
-      expr_type = expr_type,
-      annotations = node.annotations,
-      span = node.span,
-    }
-    return codegen.expr(cx, call)
-  else
-    local fn = codegen.expr(cx, node.fn):read(cx)
-    local arg = codegen.expr(cx, node.arg):read(cx, node.arg.expr_type)
-
-    local actions = quote
-      [fn.actions];
-      [arg.actions];
-      [emit_debuginfo(node)]
-    end
-    local expr_type = std.as_read(node.expr_type)
-    return values.value(
-      node,
-      expr.once_only(actions, `([fn.value]([arg.value])), expr_type),
-      expr_type)
+  local actions = quote
+    [fn.actions];
+    [arg.actions];
+    [emit_debuginfo(node)]
   end
+  local expr_type = std.as_read(node.expr_type)
+  return values.value(
+    node,
+    expr.once_only(actions, `([fn.value]([arg.value])), expr_type),
+    expr_type)
 end
 
 function codegen.expr_ctor_list_field(cx, node)
@@ -7235,233 +7119,33 @@ function codegen.expr_with_scratch_fields(cx, node)
   return values.value(node, value, expr_type)
 end
 
-local lift_unary_op_to_futures = terralib.memoize(
-  function (op, rhs_type, expr_type)
-    assert(terralib.types.istype(rhs_type) and
-             terralib.types.istype(expr_type))
-    if std.is_future(rhs_type) then
-      rhs_type = rhs_type.result_type
-    end
-    if std.is_future(expr_type) then
-      expr_type = expr_type.result_type
-    end
-
-    local name = data.newtuple(
-      "__unary_" .. tostring(rhs_type) .. "_" .. tostring(op))
-    local rhs_symbol = std.newsymbol(rhs_type, "rhs")
-    local task = std.new_task(name)
-    local variant = task:make_variant("primary")
-    task:set_primary_variant(variant)
-    local node = ast.typed.top.Task {
-      name = name,
-      params = terralib.newlist({
-          ast.typed.top.TaskParam {
-            symbol = rhs_symbol,
-            param_type = rhs_type,
-            future = false,
-            annotations = ast.default_annotations(),
-            span = ast.trivial_span(),
-          },
-      }),
-      return_type = expr_type,
-      privileges = terralib.newlist(),
-      coherence_modes = data.newmap(),
-      flags = data.newmap(),
-      conditions = {},
-      constraints = terralib.newlist(),
-      body = ast.typed.Block {
-        stats = terralib.newlist({
-            ast.typed.stat.Return {
-              value = ast.typed.expr.Unary {
-                op = op,
-                rhs = ast.typed.expr.ID {
-                  value = rhs_symbol,
-                  expr_type = rhs_type,
-                  annotations = ast.default_annotations(),
-                  span = ast.trivial_span(),
-                },
-                expr_type = expr_type,
-                annotations = ast.default_annotations(),
-                span = ast.trivial_span(),
-              },
-              annotations = ast.default_annotations(),
-              span = ast.trivial_span(),
-            },
-        }),
-        span = ast.trivial_span(),
-      },
-      config_options = ast.TaskConfigOptions {
-        leaf = true,
-        inner = false,
-        idempotent = true,
-        replicable = false,
-      },
-      region_divergence = false,
-      metadata = false,
-      prototype = task,
-      annotations = ast.default_annotations(),
-      span = ast.trivial_span(),
-    }
-    task:set_type(
-      terralib.types.functype(
-        node.params:map(function(param) return param.param_type end),
-        node.return_type,
-        false))
-    task:set_privileges(node.privileges)
-    task:set_conditions({})
-    task:set_param_constraints(node.constraints)
-    task:set_constraints({})
-    task:set_region_universe(data.newmap())
-    return codegen.entry(node)
-  end)
-
-local lift_binary_op_to_futures = terralib.memoize(
-  function (op, lhs_type, rhs_type, expr_type)
-    assert(terralib.types.istype(lhs_type) and
-             terralib.types.istype(rhs_type) and
-             terralib.types.istype(expr_type))
-    if std.is_future(lhs_type) then
-      lhs_type = lhs_type.result_type
-    end
-    if std.is_future(rhs_type) then
-      rhs_type = rhs_type.result_type
-    end
-    if std.is_future(expr_type) then
-      expr_type = expr_type.result_type
-    end
-
-    local name = data.newtuple(
-      "__binary_" .. tostring(lhs_type) .. "_" ..
-        tostring(rhs_type) .. "_" .. tostring(op))
-    local lhs_symbol = std.newsymbol(lhs_type, "lhs")
-    local rhs_symbol = std.newsymbol(rhs_type, "rhs")
-    local task = std.new_task(name)
-    local variant = task:make_variant("primary")
-    task:set_primary_variant(variant)
-    local node = ast.typed.top.Task {
-      name = name,
-      params = terralib.newlist({
-         ast.typed.top.TaskParam {
-            symbol = lhs_symbol,
-            param_type = lhs_type,
-            future = false,
-            annotations = ast.default_annotations(),
-            span = ast.trivial_span(),
-         },
-         ast.typed.top.TaskParam {
-            symbol = rhs_symbol,
-            param_type = rhs_type,
-            future = false,
-            annotations = ast.default_annotations(),
-            span = ast.trivial_span(),
-         },
-      }),
-      return_type = expr_type,
-      privileges = terralib.newlist(),
-      coherence_modes = data.newmap(),
-      flags = data.newmap(),
-      conditions = {},
-      constraints = terralib.newlist(),
-      body = ast.typed.Block {
-        stats = terralib.newlist({
-            ast.typed.stat.Return {
-              value = ast.typed.expr.Binary {
-                op = op,
-                lhs = ast.typed.expr.ID {
-                  value = lhs_symbol,
-                  expr_type = lhs_type,
-                  annotations = ast.default_annotations(),
-                  span = ast.trivial_span(),
-                },
-                rhs = ast.typed.expr.ID {
-                  value = rhs_symbol,
-                  expr_type = rhs_type,
-                  annotations = ast.default_annotations(),
-                  span = ast.trivial_span(),
-                },
-                expr_type = expr_type,
-                annotations = ast.default_annotations(),
-                span = ast.trivial_span(),
-              },
-              annotations = ast.default_annotations(),
-              span = ast.trivial_span(),
-            },
-        }),
-        span = ast.trivial_span(),
-      },
-      config_options = ast.TaskConfigOptions {
-        leaf = true,
-        inner = false,
-        idempotent = true,
-        replicable = false,
-      },
-      region_divergence = false,
-      metadata = false,
-      prototype = task,
-      annotations = ast.default_annotations(),
-      span = ast.trivial_span(),
-    }
-    task:set_type(
-      terralib.types.functype(
-        node.params:map(function(param) return param.param_type end),
-        node.return_type,
-        false))
-    task:set_privileges(node.privileges)
-    task:set_conditions({})
-    task:set_param_constraints(node.constraints)
-    task:set_constraints({})
-    task:set_region_universe(data.newmap())
-    return codegen.entry(node)
-  end)
-
 function codegen.expr_unary(cx, node)
   local expr_type = std.as_read(node.expr_type)
-  if std.is_future(expr_type) then
-    local rhs_type = std.as_read(node.rhs.expr_type)
-    local task = lift_unary_op_to_futures(node.op, rhs_type, expr_type)
+  assert(not std.is_future(expr_type)) -- This is handled in optimize_future now
 
-    local call = ast.typed.expr.Call {
-      fn = ast.typed.expr.Function {
-        value = task,
-        expr_type = task:get_type(),
-        annotations = ast.default_annotations(),
-        span = node.span,
-      },
-      args = terralib.newlist({node.rhs}),
-      conditions = terralib.newlist(),
-      predicate = false,
-      predicate_else_value = false,
-      replicable = false,
-      expr_type = expr_type,
-      annotations = node.annotations,
-      span = node.span,
-    }
-    return codegen.expr(cx, call)
-  else
-    local rhs = codegen.expr(cx, node.rhs):read(cx, expr_type)
-    local actions = quote
-      [rhs.actions];
-      [emit_debuginfo(node)]
-    end
-    if std.as_read(node.rhs.expr_type):isarray() then
-      local result = terralib.newsymbol(expr_type, "result")
-      actions = quote
-        [actions];
-        var [result]
-        for i = 0, [expr_type.N] do
-          [result][i] = [std.quote_unary_op(node.op, `([rhs.value][i]))]
-        end
+  local rhs = codegen.expr(cx, node.rhs):read(cx, expr_type)
+  local actions = quote
+    [rhs.actions];
+    [emit_debuginfo(node)]
+  end
+  if std.as_read(node.rhs.expr_type):isarray() then
+    local result = terralib.newsymbol(expr_type, "result")
+    actions = quote
+      [actions];
+      var [result]
+      for i = 0, [expr_type.N] do
+        [result][i] = [std.quote_unary_op(node.op, `([rhs.value][i]))]
       end
-      return values.value(
-        node,
-        expr.just(actions, result),
-        expr_type)
-    else
-      return values.value(
-        node,
-        expr.once_only(actions, std.quote_unary_op(node.op, rhs.value), expr_type),
-        expr_type)
     end
+    return values.value(
+      node,
+      expr.just(actions, result),
+      expr_type)
+  else
+    return values.value(
+      node,
+      expr.once_only(actions, std.quote_unary_op(node.op, rhs.value), expr_type),
+      expr_type)
   end
 end
 
@@ -7545,29 +7229,6 @@ function codegen.expr_binary(cx, node)
       node,
       expr.once_only(actions, `(partition_type { impl = [lp] }), partition_type),
       partition_type)
-  elseif std.is_future(expr_type) then
-    local lhs_type = std.as_read(node.lhs.expr_type)
-    local rhs_type = std.as_read(node.rhs.expr_type)
-    local task = lift_binary_op_to_futures(
-      node.op, lhs_type, rhs_type, expr_type)
-
-    local call = ast.typed.expr.Call {
-      fn = ast.typed.expr.Function {
-        value = task,
-        expr_type = task:get_type(),
-        annotations = ast.default_annotations(),
-        span = node.span,
-      },
-      args = terralib.newlist({node.lhs, node.rhs}),
-      conditions = terralib.newlist(),
-      predicate = false,
-      predicate_else_value = false,
-      replicable = false,
-      expr_type = expr_type,
-      annotations = node.annotations,
-      span = node.span,
-    }
-    return codegen.expr(cx, call)
   elseif std.is_ispace(expr_type) then
     local ispace_op = nil
 
@@ -7603,6 +7264,7 @@ function codegen.expr_binary(cx, node)
       expr.just(actions, result),
       expr_type)
   else
+    assert(not std.is_future(expr_type)) -- This is handled in optimize_future now
     local lhs = codegen.expr(cx, node.lhs):read(cx, node.lhs.expr_type)
     local rhs = codegen.expr(cx, node.rhs):read(cx, node.rhs.expr_type)
     local actions = quote
@@ -9141,6 +8803,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
     function(condition)
       return codegen.expr_condition(cx, condition)
     end)
+  local predicate = node.call.predicate and codegen.expr(cx, node.call.predicate):read(cx)
 
   local symbol_type = node.symbol:gettype()
   local symbol = node.symbol:getsymbol()
@@ -9166,6 +8829,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
          return arg_actions
        end)];
     [conditions:map(function(condition) return condition.actions end)]
+    [predicate and predicate.actions]
   end
 
   local arg_types = terralib.newlist()
@@ -9310,6 +8974,18 @@ local function stat_index_launch_setup(cx, node, domain, actions)
     end
   end
 
+  -- Setup predicate.
+  local predicate_symbol = terralib.newsymbol(c.legion_predicate_t, "predicate")
+  local predicate_value
+  if predicate then
+    predicate_value = `c.legion_predicate_create([cx.runtime], [cx.context], [predicate.value].__result)
+  else
+    predicate_value = `c.legion_predicate_true()
+  end
+  local predicate_setup = quote
+    var [predicate_symbol] = [predicate_value]
+  end
+
   local argument_map = terralib.newsymbol(c.legion_argument_map_t, "argument_map")
   local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
   local launcher_setup = quote
@@ -9318,13 +8994,14 @@ local function stat_index_launch_setup(cx, node, domain, actions)
     var g_args : c.legion_task_argument_t
     g_args.args = nil
     g_args.arglen = 0
+    [predicate_setup]
     var mapper = [fn.value:has_mapper_id() or 0]
     var [tag] = [fn.value:has_mapping_tag_id() or 0]
     [codegen_hooks.gen_update_mapping_tag(tag, fn.value:has_mapping_tag_id(), cx.task)]
     var [launcher] = c.legion_index_launcher_create(
       [fn.value:get_task_id()],
       [domain], g_args, [argument_map],
-      c.legion_predicate_true(), false, [mapper], [tag])
+      [predicate_symbol], false, [mapper], [tag])
     do
       var it = c.legion_domain_point_iterator_create([domain])
       var args_uninitialized = true
@@ -9405,10 +9082,29 @@ local function stat_index_launch_setup(cx, node, domain, actions)
       }
     end
 
-    local reduce = ast.typed.stat.Reduce {
-      op = node.reduce_op,
+    assert(node.reduce_task) -- Set by optimize_futures
+
+    local reduce = ast.typed.stat.Assignment {
       lhs = node.reduce_lhs,
-      rhs = rhs,
+      rhs = ast.typed.expr.Call {
+        fn = ast.typed.expr.Function {
+          value = node.reduce_task,
+          expr_type = node.reduce_task:get_type(),
+          annotations = ast.default_annotations(),
+          span = node.span,
+        },
+        args = terralib.newlist({
+          node.reduce_lhs,
+          rhs,
+        }),
+        conditions = terralib.newlist(),
+        predicate = false,
+        predicate_else_value = false,
+        replicable = false,
+        expr_type = std.as_read(node.reduce_lhs.expr_type),
+        annotations = node.annotations,
+        span = node.span,
+      },
       metadata = false,
       annotations = node.annotations,
       span = node.span,
@@ -9436,6 +9132,13 @@ local function stat_index_launch_setup(cx, node, domain, actions)
   else
     launcher_cleanup = quote
       c.legion_argument_map_destroy([argument_map])
+    end
+  end
+
+  if predicate then
+    launcher_cleanup = quote
+      [launcher_cleanup]
+      c.legion_predicate_destroy([predicate_symbol])
     end
   end
 

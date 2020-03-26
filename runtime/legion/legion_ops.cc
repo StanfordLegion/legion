@@ -7694,6 +7694,11 @@ namespace Legion {
         default:
           assert(false);
       }
+#ifdef LEGION_SPY
+      // Still have to do this call to let Legion Spy know we're done
+      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
+                                      ApEvent::NO_AP_EVENT);
+#endif
       complete_operation();
     }
 
@@ -16298,7 +16303,7 @@ namespace Legion {
           }
         case EXTERNAL_HDF5_FILE:
           {
-#ifndef USE_HDF
+#ifndef LEGION_USE_HDF5
             REPORT_LEGION_ERROR(ERROR_ATTACH_HDF5,
                 "Invalid attach HDF5 file in parent task %s (UID %lld). "
                 "Legion must be built with HDF5 support to attach regions "
@@ -17448,6 +17453,11 @@ namespace Legion {
       }
       // Complete the future
       complete_execution();
+#ifdef LEGION_SPY
+      // Still have to do this call to let Legion Spy know we're done
+      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
+                                      ApEvent::NO_AP_EVENT);
+#endif
     }
 
     ///////////////////////////////////////////////////////////// 
@@ -17615,6 +17625,11 @@ namespace Legion {
       // Mark that we are done executing which will complete the future
       // as soon as this operation is complete
       complete_execution();
+#ifdef LEGION_SPY
+      // Still have to do this call to let Legion Spy know we're done
+      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
+                                      ApEvent::NO_AP_EVENT);
+#endif
     }
 
     ///////////////////////////////////////////////////////////// 

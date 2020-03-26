@@ -27,7 +27,7 @@ namespace Realm {
     Logger log_xd("xd");
 
       // TODO: currently we use dma_all_gpus to track the set of GPU* created
-#ifdef USE_CUDA
+#ifdef REALM_USE_CUDA
       std::vector<Cuda::GPU*> dma_all_gpus;
 #endif
       // we use a single queue for all xferDes
@@ -1824,7 +1824,7 @@ namespace Realm {
 	}
       }
 
-#ifdef USE_CUDA
+#ifdef REALM_USE_CUDA
       GPUXferDes::GPUXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
 				   const std::vector<XferDesPortInfo>& inputs_info,
 				   const std::vector<XferDesPortInfo>& outputs_info,
@@ -1947,7 +1947,7 @@ namespace Realm {
       }
 #endif
 
-#ifdef USE_HDF
+#ifdef REALM_USE_HDF5
       HDFXferDes::HDFXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
 				   const std::vector<XferDesPortInfo>& inputs_info,
 				   const std::vector<XferDesPortInfo>& outputs_info,
@@ -3150,7 +3150,7 @@ namespace Realm {
 	capacity.fetch_add(1);
       }
 
-#ifdef USE_CUDA
+#ifdef REALM_USE_CUDA
       GPUChannel::GPUChannel(Cuda::GPU* _src_gpu, long max_nr, XferDesKind _kind)
 	: Channel(_kind)
 	, capacity(max_nr)
@@ -3317,7 +3317,7 @@ namespace Realm {
       }
 #endif
 
-#ifdef USE_HDF
+#ifdef REALM_USE_HDF5
       HDFChannel::HDFChannel(long max_nr, XferDesKind _kind)
 	: Channel(_kind)
 	, capacity(max_nr)
@@ -3532,7 +3532,7 @@ namespace Realm {
         remote_write_channel = new RemoteWriteChannel(max_nr);
         return remote_write_channel;
       }
-#ifdef USE_CUDA
+#ifdef REALM_USE_CUDA
       GPUChannel* ChannelManager::create_gpu_to_fb_channel(long max_nr, Cuda::GPU* src_gpu) {
         gpu_to_fb_channels[src_gpu] = new GPUChannel(src_gpu, max_nr, XFER_GPU_TO_FB);
         return gpu_to_fb_channels[src_gpu];
@@ -3550,7 +3550,7 @@ namespace Realm {
         return gpu_peer_fb_channels[src_gpu];
       }
 #endif
-#ifdef USE_HDF
+#ifdef REALM_USE_HDF5
       HDFChannel* ChannelManager::create_hdf_read_channel(long max_nr) {
         assert(hdf_read_channel == NULL);
         hdf_read_channel = new HDFChannel(max_nr, XFER_HDF_READ);
@@ -3568,7 +3568,7 @@ namespace Realm {
 	return addr_split_channel;
       }
 
-#ifdef USE_CUDA
+#ifdef REALM_USE_CUDA
       void register_gpu_in_dma_systems(Cuda::GPU* gpu)
       {
         dma_all_gpus.push_back(gpu);
@@ -3690,11 +3690,11 @@ namespace Realm {
       {
         log_new_dma.info("XferDesQueue: start_workers");
         // num_memcpy_threads = 0;
-#ifdef USE_HDF
+#ifdef REALM_USE_HDF5
         // Need a dedicated thread for handling HDF requests
         // num_threads ++;
 #endif
-#ifdef USE_CUDA
+#ifdef REALM_USE_CUDA
         // num_threads ++;
 #endif
 	RuntimeImpl *r = get_runtime();
@@ -3736,7 +3736,7 @@ namespace Realm {
 	r->add_dma_channel(disk_write_channel);
 	r->add_dma_channel(file_read_channel);
 	r->add_dma_channel(file_write_channel);
-#ifdef USE_HDF
+#ifdef REALM_USE_HDF5
 	HDFChannel *hdf_read_channel = channel_manager->create_hdf_read_channel(max_nr);
 	HDFChannel *hdf_write_channel = channel_manager->create_hdf_write_channel(max_nr);
         channels.push_back(hdf_read_channel);
@@ -3749,7 +3749,7 @@ namespace Realm {
           channels.clear();
           count --;
         }
-#ifdef USE_CUDA
+#ifdef REALM_USE_CUDA
         std::vector<Cuda::GPU*>::iterator it;
         for (it = dma_all_gpus.begin(); it != dma_all_gpus.end(); it ++) {
 	  GPUChannel *gpu_to_fb_channel = channel_manager->create_gpu_to_fb_channel(max_nr, *it);
@@ -3878,10 +3878,10 @@ CREATE_MESSAGE_HANDLER(GASNetXferDes);
 CREATE_MESSAGE_HANDLER(RemoteWriteXferDes);
 CREATE_MESSAGE_HANDLER(DiskXferDes);
 CREATE_MESSAGE_HANDLER(FileXferDes);
-#ifdef USE_CUDA
+#ifdef REALM_USE_CUDA
 CREATE_MESSAGE_HANDLER(GPUXferDes);
 #endif
-#ifdef USE_HDF
+#ifdef REALM_USE_HDF5
 CREATE_MESSAGE_HANDLER(HDFXferDes);
 #endif
 
