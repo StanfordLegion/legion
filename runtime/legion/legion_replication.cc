@@ -442,7 +442,9 @@ namespace Legion {
 #endif
       // Before doing the normal thing we have to exchange broadcast/receive
       // the future result, can skip this though if we're part of a must epoch
-      if (must_epoch == NULL)
+      // We should also skip this if we were predicated false
+      if ((must_epoch == NULL) && 
+          ((speculation_state != RESOLVE_FALSE_STATE) || false_guard.exists()))
       {
         if (owner_shard == repl_ctx->owner_shard->shard_id)
         {
@@ -758,7 +760,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(reduction_collective != NULL);
 #endif
-        if (!deferred)
+        // Set the future if we actually ran the task or we speculated
+        if (!deferred && ((speculation_state != RESOLVE_FALSE_STATE) || 
+              false_guard.exists()))
         {
           // First time through so start the exchange
           if (deterministic_redop)
