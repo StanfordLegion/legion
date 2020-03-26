@@ -4179,6 +4179,11 @@ namespace Legion {
             assert(false); // should never get here
         }
       }
+#ifdef LEGION_SPY
+      // Still have to do this call to let Legion Spy know we're done
+      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
+                                      ApEvent::NO_AP_EVENT);
+#endif
       complete_execution();
     }
 
@@ -4317,6 +4322,11 @@ namespace Legion {
         all_reduce_collective->sync_result(result_buffer);
       // Tell the future about the final result which it will own
       result.impl->set_result(result_buffer, redop->sizeof_rhs, true/*own*/);
+#ifdef LEGION_SPY
+      // Still have to do this call to let Legion Spy know we're done
+      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
+                                      ApEvent::NO_AP_EVENT);
+#endif
       // Mark that we are done executing which will complete the future
       // as soon as this operation is complete
       complete_execution();
