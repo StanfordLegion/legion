@@ -17,8 +17,9 @@
 #include <cstdio>
 #include <cassert>
 #include <cstdlib>
+#define LEGION_ENABLE_C_BINDINGS
 #include "legion.h"
-#include "legion_c.h"
+#undef LEGION_ENABLE_C_BINDINGS
 using namespace Legion;
 
 enum TaskIDs {
