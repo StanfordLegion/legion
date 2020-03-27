@@ -803,7 +803,7 @@ def run_tests(test_modules=None,
     use_python = feature_enabled('python', False)
     use_llvm = feature_enabled('llvm', False)
     use_hdf = feature_enabled('hdf', False)
-    use_fortran = feature_enabled('fortran', prefix='LEGION_USE_')
+    use_fortran = feature_enabled('fortran', False, prefix='LEGION_USE_')
     use_spy = feature_enabled('spy', False)
     use_prof = feature_enabled('prof', False)
     use_gcov = feature_enabled('gcov', False)
