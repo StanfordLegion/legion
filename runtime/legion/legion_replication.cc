@@ -1914,7 +1914,7 @@ namespace Legion {
       if (!local_space.exists())
       {
         // If we have indirections then we still need to participate in those
-        if (!src_indirect_requirements.empty())
+        if (!src_indirect_requirements.empty() && couple_src_indirect_points)
         {
           LegionVector<IndirectRecord>::aligned empty_records;
           for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
@@ -1923,7 +1923,7 @@ namespace Legion {
             empty_records.clear();
           }
         }
-        if (!dst_indirect_requirements.empty())
+        if (!dst_indirect_requirements.empty() && couple_dst_indirect_points)
         {
           LegionVector<IndirectRecord>::aligned empty_records;
           for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
@@ -2009,6 +2009,12 @@ namespace Legion {
              LegionVector<IndirectRecord>::aligned &records, const bool sources)
     //--------------------------------------------------------------------------
     {
+      if (sources && !couple_src_indirect_points)
+        return CopyOp::exchange_indirect_records(index, local_done, trace_info,
+                                            instances, space, records, sources);
+      if (!sources && !couple_dst_indirect_points)
+        return CopyOp::exchange_indirect_records(index, local_done, trace_info,
+                                            instances, space, records, sources);
 #ifdef DEBUG_LEGION
       assert(local_done.exists());
       assert(index < indirection_barriers.size());
@@ -2140,14 +2146,14 @@ namespace Legion {
                           unsigned &next_indirection_index)
     //--------------------------------------------------------------------------
     { 
-      if (!src_indirect_requirements.empty())
+      if (!src_indirect_requirements.empty() && couple_src_indirect_points)
       {
         src_collectives.resize(src_indirect_requirements.size());
         for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
           src_collectives[idx] = 
             new IndirectRecordExchange(ctx, COLLECTIVE_LOC_80);
       }
-      if (!dst_indirect_requirements.empty())
+      if (!dst_indirect_requirements.empty() && couple_dst_indirect_points)
       {
         dst_collectives.resize(dst_indirect_requirements.size());
         for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
