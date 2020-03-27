@@ -544,11 +544,11 @@ ifeq ($(strip $(USE_HDF)), 1)
   LEGION_LD_FLAGS      += -l$(HDF_LIBNAME)
   ifdef HDF_ROOT
        CC_FLAGS    += -I$(HDF_ROOT)/include
-       FC_FLAGS    += -J$(HDF_ROOT)/include
+       FC_FLAGS    += -I$(HDF_ROOT)/include
        LD_FLAGS    += -L$(HDF_ROOT)/lib
   else
     CC_FLAGS      += -I/usr/include/hdf5/serial
-    FC_FLAGS	  += -J/usr/include/hdf5/serial
+    FC_FLAGS	  += -I/usr/include/hdf5/serial
   endif
 endif
 
