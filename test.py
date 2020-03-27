@@ -88,6 +88,11 @@ legion_openmp_cxx_tests = [
     ['examples/omp_saxpy/omp_saxpy', ['-ll:ocpu', '1']],
 ]
 
+legion_kokkos_cxx_tests = [
+    # Examples
+    ['examples/kokkos_saxpy/kokkos_saxpy', []],
+]
+
 legion_python_cxx_tests = [
     # Bindings
     ['bindings/python/legion_python', ['examples/domain.py', '-ll:py', '1', '-ll:cpu', '0']],
@@ -248,19 +253,33 @@ def run_test_legion_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count,
     flags = ['-logfile', 'out_%.log']
     if env['USE_CUDA'] == '1':
         flags.extend(['-ll:gpu', '1'])
+    if (env['USE_KOKKOS'] == '1') and (env['USE_OPENMP'] == '1'):
+        flags.extend(['-ll:ocpu', '1', '-ll:onuma', '0' ])
     run_cxx(legion_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count, timelimit)
 
 def run_test_legion_network_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     flags = ['-logfile', 'out_%.log']
     if env['USE_CUDA'] == '1':
         flags.extend(['-ll:gpu', '1'])
+    if (env['USE_KOKKOS'] == '1') and (env['USE_OPENMP'] == '1'):
+        flags.extend(['-ll:ocpu', '1', '-ll:onuma', '0' ])
     run_cxx(legion_network_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count, timelimit)
 
 def run_test_legion_openmp_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     flags = ['-logfile', 'out_%.log']
     if env['USE_CUDA'] == '1':
         flags.extend(['-ll:gpu', '1'])
+    if (env['USE_KOKKOS'] == '1') and (env['USE_OPENMP'] == '1'):
+        flags.extend(['-ll:ocpu', '1', '-ll:onuma', '0' ])
     run_cxx(legion_openmp_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count, timelimit)
+
+def run_test_legion_kokkos_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
+    flags = ['-logfile', 'out_%.log']
+    if env['USE_CUDA'] == '1':
+        flags.extend(['-ll:gpu', '1'])
+    if (env['USE_KOKKOS'] == '1') and (env['USE_OPENMP'] == '1'):
+        flags.extend(['-ll:ocpu', '1', '-ll:onuma', '0' ])
+    run_cxx(legion_kokkos_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count, timelimit)
 
 def run_test_legion_python_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     # Hack: legion_python currently requires the module name to come first
@@ -281,6 +300,8 @@ def run_test_legion_hdf_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_co
     flags = ['-logfile', 'out_%.log']
     if env['USE_CUDA'] == '1':
         flags.extend(['-ll:gpu', '1'])
+    if (env['USE_KOKKOS'] == '1') and (env['USE_OPENMP'] == '1'):
+        flags.extend(['-ll:ocpu', '1', '-ll:onuma', '0' ])
     run_cxx(legion_hdf_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count, timelimit)
 
 def run_test_fuzzer(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
@@ -587,7 +608,7 @@ def check_test_legion_cxx(root_dir):
     # These are the tests we ACTUALLY have coverage for.
     tests = legion_cxx_tests + legion_network_cxx_tests + \
             legion_openmp_cxx_tests + legion_python_cxx_tests + \
-            legion_hdf_cxx_tests
+            legion_hdf_cxx_tests + legion_kokkos_cxx_tests
     actual_tests = set()
     for test_file, test_flags in tests:
         actual_tests.add(os.path.dirname(test_file))
@@ -621,6 +642,8 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
     cmdline.append('-DLegion_MAX_DIM=%s' % env['MAX_DIM'])
     cmdline.append('-DLegion_NETWORKS=%s' % env['REALM_NETWORKS'])
     cmdline.append('-DLegion_USE_CUDA=%s' % ('ON' if env['USE_CUDA'] == '1' else 'OFF'))
+    cmdline.append('-DLegion_USE_OpenMP=%s' % ('ON' if env['USE_OPENMP'] == '1' else 'OFF'))
+    cmdline.append('-DLegion_USE_Kokkos=%s' % ('ON' if env['USE_KOKKOS'] == '1' else 'OFF'))
     cmdline.append('-DLegion_USE_Python=%s' % ('ON' if env['USE_PYTHON'] == '1' else 'OFF'))
     cmdline.append('-DBUILD_SHARED_LIBS=%s' % ('ON' if env['USE_PYTHON'] == '1' else 'OFF'))
     cmdline.append('-DLegion_USE_LLVM=%s' % ('ON' if env['USE_LLVM'] == '1' else 'OFF'))
@@ -697,7 +720,8 @@ class Stage(object):
 def report_mode(debug, max_dim, launcher,
                 test_regent, test_legion_cxx, test_fuzzer, test_realm,
                 test_external, test_private, test_perf, test_ctest, networks,
-                use_cuda, use_openmp, use_python, use_llvm, use_hdf, use_spy, use_prof,
+                use_cuda, use_openmp, use_kokkos, use_python, use_llvm,
+                use_hdf, use_spy, use_prof,
                 use_gcov, use_cmake, use_rdir):
     print()
     print('#'*60)
@@ -723,6 +747,7 @@ def report_mode(debug, max_dim, launcher,
     print('###   * Networks:   %s' % networks)
     print('###   * CUDA:       %s' % use_cuda)
     print('###   * OpenMP:     %s' % use_openmp)
+    print('###   * Kokkos:     %s' % use_kokkos)
     print('###   * Python:     %s' % use_python)
     print('###   * LLVM:       %s' % use_llvm)
     print('###   * HDF5:       %s' % use_hdf)
@@ -775,6 +800,7 @@ def run_tests(test_modules=None,
         return option_enabled(feature, use_features, 'USE_', default)
     use_cuda = feature_enabled('cuda', False)
     use_openmp = feature_enabled('openmp', False)
+    use_kokkos = feature_enabled('kokkos', False)
     use_python = feature_enabled('python', False)
     use_llvm = feature_enabled('llvm', False)
     use_hdf = feature_enabled('hdf', False)
@@ -783,6 +809,9 @@ def run_tests(test_modules=None,
     use_gcov = feature_enabled('gcov', False)
     use_cmake = feature_enabled('cmake', False)
     use_rdir = feature_enabled('rdir', True)
+
+    if use_kokkos and not use_cmake:
+        raise Exception('Kokkos support requires use of CMake')
 
     # Determine parameters for performance tests.
     if test_perf:
@@ -813,7 +842,8 @@ def run_tests(test_modules=None,
                 test_regent, test_legion_cxx, test_fuzzer, test_realm,
                 test_external, test_private, test_perf, test_ctest,
                 networks,
-                use_cuda, use_openmp, use_python, use_llvm, use_hdf, use_spy, use_prof,
+                use_cuda, use_openmp, use_kokkos, use_python, use_llvm,
+                use_hdf, use_spy, use_prof,
                 use_gcov, use_cmake, use_rdir)
 
     tmp_dir = tempfile.mkdtemp(dir=root_dir)
@@ -830,6 +860,8 @@ def run_tests(test_modules=None,
         ('TEST_CUDA', '1' if use_cuda else '0'),
         ('USE_OPENMP', '1' if use_openmp else '0'),
         ('TEST_OPENMP', '1' if use_openmp else '0'),
+        ('USE_KOKKOS', '1' if use_kokkos else '0'),
+        ('TEST_KOKKOS', '1' if use_kokkos else '0'),
         ('USE_PYTHON', '1' if use_python else '0'),
         ('TEST_PYTHON', '1' if use_python else '0'),
         ('USE_LLVM', '1' if use_llvm else '0'),
@@ -881,6 +913,8 @@ def run_tests(test_modules=None,
                     run_test_legion_network_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
                 if use_openmp:
                     run_test_legion_openmp_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
+                if use_kokkos:
+                    run_test_legion_kokkos_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
                 if use_python:
                     run_test_legion_python_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
                 if use_hdf:
@@ -975,7 +1009,7 @@ def driver():
         help='Maximum number of dimensions (also via MAX_DIM).')
     parser.add_argument(
         '--use', dest='use_features', action=ExtendAction,
-        choices=MultipleChoiceList('gasnet', 'cuda', 'openmp',
+        choices=MultipleChoiceList('gasnet', 'cuda', 'openmp', 'kokkos',
                                    'python', 'llvm', 'hdf', 'spy', 'prof',
                                    'gcov', 'cmake', 'rdir'),
         type=lambda s: s.split(','),
