@@ -11108,6 +11108,10 @@ namespace Legion {
               continue;
             src_views.insert(it->first, field_overlap);
           }
+#ifdef DEBUG_LEGION
+          if (src_views.empty()) // will only happen in error case
+            continue;
+#endif
           across_aggregator->record_updates(analysis.target_views[idx],
                             src_views, source_mask, overlap, analysis.redop, 
                             analysis.across_helpers[idx]);
@@ -11200,6 +11204,10 @@ namespace Legion {
         {
           const FieldMask &mask = 
             analysis.target_instances[idx].get_valid_fields(); 
+#ifdef DEBUG_LEGION
+          if (src_views.empty()) // will only happen in error case
+            continue;
+#endif
           across_aggregator->record_updates(analysis.target_views[idx], 
               src_views, mask, overlap, analysis.redop, NULL/*across*/);
         }
