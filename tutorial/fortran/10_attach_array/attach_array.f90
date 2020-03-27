@@ -19,7 +19,7 @@ contains
     type(legion_rect_2d_f_t) :: index_rect
     integer(kind=4), target :: x_value = 0
     integer(kind=8) :: i, j
-    logical :: all_passed = .true.
+    !logical :: all_passed = .true.
     
     type(FPoint2D) :: point_2d
     type(FFieldAccessor2D) :: accessor_x
@@ -113,14 +113,14 @@ contains
     input_lr = runtime%create_logical_region(ctx, is, input_fs)
     
     count = 0
-    do i = 1, num_elements
-      do j = 1, num_elements
+    do i = 1, 10
+      do j = 1, 10
         array(i, j) = count
         count = count + 1
       end do
     end do
     
-    print *, array, c_loc(array)
+    print *, array
     
     attach_launcher = FAttachLauncher(EXTERNAL_INSTANCE, input_lr, input_lr)
     call attach_launcher%attach_array_soa(0, c_loc(array), .true.)
