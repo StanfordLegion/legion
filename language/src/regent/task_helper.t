@@ -62,6 +62,7 @@ local function make_task(name, symbols, expr)
       idempotent = true,
       replicable = false,
     },
+    region_usage = false,
     region_divergence = false,
     metadata = false,
     prototype = task,
