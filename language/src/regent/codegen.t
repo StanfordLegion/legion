@@ -110,6 +110,7 @@ function context:new_local_scope(divergence, must_epoch, must_epoch_point, break
     privileges = self.privileges,
     constraints = self.constraints,
     orderings = self.orderings,
+    region_usage = self.region_usage,
     task = self.task,
     task_meta = self.task_meta,
     leaf = self.leaf,
@@ -131,7 +132,7 @@ function context:new_local_scope(divergence, must_epoch, must_epoch_point, break
   }, context)
 end
 
-function context:new_task_scope(expected_return_type, constraints, orderings, leaf,
+function context:new_task_scope(expected_return_type, constraints, orderings, region_usage, leaf,
                                 task_meta, task, ctx, runtime, result, bounds_checks)
   assert(expected_return_type and task and ctx and runtime and result)
   return setmetatable({
@@ -140,6 +141,7 @@ function context:new_task_scope(expected_return_type, constraints, orderings, le
     privileges = data.newmap(),
     constraints = constraints,
     orderings = orderings,
+    region_usage = region_usage,
     task = task,
     task_meta = task_meta,
     leaf = leaf,
@@ -4356,7 +4358,9 @@ function codegen.expr_region(cx, node)
     [tag_imported(cx, lr)]
   end
   local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
-  if not cx.variant:get_config_options().inner then
+  if not cx.variant:get_config_options().inner and
+    (not cx.region_usage or cx.region_usage[region_type])
+  then
     actions = quote
       [actions];
       var [tag] = 0
@@ -6884,7 +6888,9 @@ function codegen.expr_attach_hdf5(cx, node)
   local field_map_type = node.field_map and std.as_read(node.field_map.expr_type)
   local field_map = node.field_map and codegen.expr(cx, node.field_map):read(cx, field_map_type)
 
-  if not cx.variant:get_config_options().inner then
+  if not cx.variant:get_config_options().inner and
+    (not cx.region_usage or cx.region_usage[region_type])
+  then
     report.info(node, "WARNING: Attach invalidates region contents. DO NOT attempt to access region after using attach.")
   end
 
@@ -6953,7 +6959,9 @@ function codegen.expr_detach_hdf5(cx, node)
   local region_type = std.as_read(node.region.expr_type)
   local region = codegen.expr_region_root(cx, node.region):read(cx, region_type)
 
-  if not cx.variant:get_config_options().inner then
+  if not cx.variant:get_config_options().inner and
+    (not cx.region_usage or cx.region_usage[region_type])
+  then
     report.info(node, "WARNING: Detach invalidates region contents. DO NOT attempt to access region after using detach.")
   end
 
@@ -7562,7 +7570,9 @@ function codegen.expr_import_region(cx, node)
   end
 
   local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
-  if not cx.variant:get_config_options().inner then
+  if not cx.variant:get_config_options().inner and
+    (not cx.region_usage or cx.region_usage[region_type])
+  then
     actions = quote
       [actions];
       var [tag] = 0
@@ -9512,11 +9522,13 @@ local function find_region_roots_physical(cx, region_types)
   local roots = find_region_roots(cx, region_types)
   local result = terralib.newlist()
   for _, region_type in ipairs(roots) do
-    local physical_regions = cx:region(region_type).physical_regions
-    local privilege_field_paths = cx:region(region_type).privilege_field_paths
-    for _, field_paths in ipairs(privilege_field_paths) do
-      for _, field_path in ipairs(field_paths) do
-        result:insert(physical_regions[field_path:hash()])
+    if not cx.region_usage or cx.region_usage[region_type] then
+      local physical_regions = cx:region(region_type).physical_regions
+      local privilege_field_paths = cx:region(region_type).privilege_field_paths
+      for _, field_paths in ipairs(privilege_field_paths) do
+        for _, field_path in ipairs(field_paths) do
+          result:insert(physical_regions[field_path:hash()])
+        end
       end
     end
   end
@@ -10301,6 +10313,7 @@ function codegen.top_task(cx, node)
   local cx = cx:new_task_scope(return_type,
                                task:get_constraints(),
                                orderings,
+                               node.region_usage,
                                variant:get_config_options().leaf,
                                task, c_task, c_context, c_runtime, c_result, bounds_checks)
 
@@ -10445,9 +10458,11 @@ function codegen.top_task(cx, node)
         physical_regions_by_field_path[field_path:hash()] = physical_region
       end
 
-      if not variant:get_config_options().inner and
-         not variant:is_external() and
-         flag ~= std.no_access_flag then
+      if not cx.variant:get_config_options().inner and
+        (not cx.region_usage or cx.region_usage[region_type]) and
+        not variant:is_external() and
+        flag ~= std.no_access_flag
+      then
         local pr_actions, pr_base_pointers, pr_strides = unpack(data.zip(unpack(
           data.zip(field_paths, field_types):map(
             function(field)
@@ -10494,7 +10509,9 @@ function codegen.top_task(cx, node)
     task_setup:insertall(physical_region_actions)
 
     -- Force inner tasks to unmap all regions
-    if variant:get_config_options().inner then
+    if not cx.variant:get_config_options().inner and
+      (not cx.region_usage or cx.region_usage[region_type])
+    then
       local actions = quote
         c.legion_runtime_unmap_all_regions([cx.runtime], [cx.context])
       end

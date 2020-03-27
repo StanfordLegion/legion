@@ -4648,6 +4648,7 @@ function type_check.top_task(cx, node)
       idempotent = false,
       replicable = false,
     },
+    region_usage = false,
     region_divergence = false,
     metadata = false,
     prototype = prototype,
