@@ -1261,7 +1261,7 @@ namespace Legion {
     public:
       bool                            possible_src_indirect_out_of_range;
       bool                            possible_dst_indirect_out_of_range;
-      bool                            possible_dst_indirect_aliasing;
+      bool                            possible_dst_indirect_aliasing; 
     };
 
     /**
@@ -1318,6 +1318,8 @@ namespace Legion {
       std::vector<RtUserEvent>                           src_exchanged;
       std::vector<RtUserEvent>                           dst_exchanged;
       unsigned                                           points_committed;
+      bool                                          couple_src_indirect_points;
+      bool                                          couple_dst_indirect_points;
       bool                                               commit_request;
       std::set<RtEvent>                                  commit_preconditions;
     protected:

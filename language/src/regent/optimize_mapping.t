@@ -39,6 +39,7 @@ function context:new_task_scope(constraints, region_universe)
   local cx = {
     constraints = constraints,
     region_universe = region_universe,
+    task_global_usage = data.newmap(),
   }
   return setmetatable(cx, context)
 end
@@ -52,6 +53,35 @@ end
 local create = "create"
 local inline = "inline"
 local remote = "remote"
+
+local function usage_meet_polarity(a, b)
+  if not a then
+    return b
+  elseif not b then
+    return a
+  elseif a == b then
+    return a
+  else
+    -- This is safe because the Legion runtime knows how to map and
+    -- unmap appropriately for each API call... it's just inefficient
+    -- to do so. But if we reached this point then we are expecting to
+    -- use the region both inline and remotely, so this is the best we
+    -- can do (without rearranging the code).
+    return inline
+  end
+end
+
+function usage_meet(...)
+  local usage = data.newmap()
+  for _, a in pairs({...}) do
+    if a then
+      for region_type, polarity in a:items() do
+        usage[region_type] = usage_meet_polarity(usage[region_type], polarity)
+      end
+    end
+  end
+  return usage
+end
 
 local function uses(cx, region_type, polarity)
   -- In order for this to be sound, we need to unmap *all* regions
@@ -85,35 +115,16 @@ local function uses(cx, region_type, polarity)
       end
     end
   end
-  return usage
-end
 
-local function usage_meet_polarity(a, b)
-  if not a then
-    return b
-  elseif not b then
-    return a
-  elseif a == b then
-    return a
-  else
-    -- This is safe because the Legion runtime knows how to map and
-    -- unmap appropriately for each API call... it's just inefficient
-    -- to do so. But if we reached this point then we are expecting to
-    -- use the region both inline and remotely, so this is the best we
-    -- can do (without rearranging the code).
-    return inline
-  end
-end
+  -- We also need to track the global usage for the task, so that we
+  -- can know whether a region is used overall or not.
 
-local function usage_meet(...)
-  local usage = data.newmap()
-  for _, a in pairs({...}) do
-    if a then
-      for region_type, polarity in a:items() do
-        usage[region_type] = usage_meet_polarity(usage[region_type], polarity)
-      end
-    end
+  -- But DON'T do this for create, otherwise everything becomes inline
+  -- in the task (if it gets used elsewhere at all).
+  if polarity ~= create then
+    cx.task_global_usage = usage_meet(cx.task_global_usage, usage)
   end
+
   return usage
 end
 
@@ -618,7 +629,17 @@ function optimize_mapping.top_task(cx, node)
   local annotated_body = optimize_mapping.block(cx, node.body)
   local body = fixup_block(annotated_body, initial_usage, nil)
 
-  return node { body = body }
+  local region_usage = data.newmap()
+  for region_type, polarity in cx.task_global_usage:items() do
+    if polarity == inline then
+      region_usage[region_type] = true
+    end
+  end
+
+  return node {
+    body = body,
+    region_usage = region_usage,
+  }
 end
 
 function optimize_mapping.top(cx, node)
