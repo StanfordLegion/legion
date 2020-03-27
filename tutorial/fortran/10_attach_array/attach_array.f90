@@ -120,7 +120,7 @@ contains
       end do
     end do
     
-    print *, array
+    !print *, array
     
     attach_launcher = FAttachLauncher(EXTERNAL_INSTANCE, input_lr, input_lr)
     call attach_launcher%attach_array_soa(0, c_loc(array), .true.)
