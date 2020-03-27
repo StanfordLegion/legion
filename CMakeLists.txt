@@ -222,6 +222,21 @@ if(Legion_USE_CUDA)
 endif()
 
 #------------------------------------------------------------------------------#
+# Kokkos configuration
+#------------------------------------------------------------------------------#
+option(Legion_USE_Kokkos "Enable support for the Kokkos runtime" OFF)
+if(Legion_USE_Kokkos)
+  # the kokkos interop stuff uses target_link_options, which doesn't show up
+  #  until cmake 3.13
+  cmake_minimum_required(VERSION 3.13)
+
+  # cmake uses -DKokkos_DIR=.../lib/cmake to look in non-standard locations
+  find_package(Kokkos REQUIRED)
+
+  set(REALM_USE_KOKKOS ON)
+endif()
+
+#------------------------------------------------------------------------------#
 # network interface configuration
 #------------------------------------------------------------------------------#
 set(Legion_NETWORKS "" CACHE STRING "Network backend(s) to use")
@@ -453,6 +468,14 @@ if(Legion_ENABLE_TESTING)
   # if Legion_TEST_LAUNCHER is set, split the string into a list
   separate_arguments(Legion_TEST_LAUNCHER)
   separate_arguments(Legion_TEST_ARGS)
+  # if we are using kokkos and cuda, we must hardcode the use of 1 gpu right now
+  if(Legion_USE_Kokkos AND Legion_USE_CUDA)
+    list(APPEND Legion_TEST_ARGS -ll:gpu 1)
+  endif()
+  # similar restrictions for openmp
+  if(Legion_USE_Kokkos AND Legion_USE_OpenMP)
+    list(APPEND Legion_TEST_ARGS -ll:ocpu 1 -ll:onuma 0)
+  endif()
 endif()
 if(Legion_BUILD_ALL OR Legion_BUILD_APPS OR Legion_BUILD_BINDINGS OR Legion_BUILD_EXAMPLES OR Legion_BUILD_TUTORIAL OR Legion_BUILD_TESTS)
   # Make a namespaced alias so in-build examples can use it the same way as if

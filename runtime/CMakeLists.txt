@@ -77,7 +77,7 @@ if(Legion_USE_CUDA)
   )
   if(REALM_USE_CUDART_HIJACK)
     list(APPEND REALM_SRC
-      realm/cuda/cudart_hijack.h  realm/cuda/cudart_hijack.cc
+      realm/cuda/cudart_hijack.h
     )
   endif()
 endif()
@@ -242,6 +242,17 @@ endif()
 
 if(Legion_USE_CUDA)
   if(REALM_USE_CUDART_HIJACK)
+    add_library(realm_cudarthijack OBJECT
+      realm/cuda/cudart_hijack.cc
+      realm/cuda/cudart_hijack.h)
+    set_target_properties(realm_cudarthijack PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    target_include_directories(realm_cudarthijack PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}
+      ${PROJECT_BINARY_DIR}/runtime
+      ${CUDA_INCLUDE_DIRS})
+    target_link_libraries(RealmRuntime PRIVATE realm_cudarthijack)
+    install(TARGETS realm_cudarthijack EXPORT LegionTargets)
+    
     # filter anything referring to *cudart* out of the CUDA_LIBRARIES
     #  making sure our changes are visible to the scope above
     # so list(FILTER ...) doesn't exist until cmake 3.6 - do string regex instead
@@ -253,6 +264,60 @@ if(Legion_USE_CUDA)
   target_link_libraries(RealmRuntime PRIVATE ${CUDA_CUDA_LIBRARY})
   # for backwards compatibility in applications
   target_compile_definitions(RealmRuntime INTERFACE USE_CUDA)
+endif()
+
+# fetches a specified property list from the target, performs per-element
+#  replacement of the items in the list, and then write the list back to
+#  the target's property
+# importantly, this works on properies of imported targets...
+macro(edit_target_property tgtname propname pattern replacement)
+  get_property(has_prop TARGET ${tgtname} PROPERTY ${propname} SET)
+  if(has_prop)
+    get_property(prop_list TARGET ${tgtname} PROPERTY ${propname})
+    if(NOT "${replacement}" STREQUAL "")
+      list(TRANSFORM prop_list REPLACE ${pattern} ${replacement})
+    else()
+      list(FILTER prop_list EXCLUDE REGEX ${pattern})
+    endif()
+    set_property(TARGET ${tgtname} PROPERTY ${propname} "${prop_list}")
+  endif()
+endmacro()
+
+if(Legion_USE_Kokkos)
+  # realm/kokkos_interop.cc needs to be compiled like a kokkos application, so
+  #  get kokkos' compile options, include dirs - do this by creating a subtarget
+  #  that can import Kokkos::kokkoscore
+  add_library(realm_kokkosinterop OBJECT realm/kokkos_interop.cc)
+  set_target_properties(realm_kokkosinterop PROPERTIES POSITION_INDEPENDENT_CODE ON)
+  target_include_directories(realm_kokkosinterop PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${PROJECT_BINARY_DIR}/runtime)
+  target_link_libraries(realm_kokkosinterop PRIVATE Kokkos::kokkoscore)
+  # older cmakes (e.g. 3.13.0) don't export link requirements for
+  #  private dependencies, so we do it ourselves
+  set_target_properties(realm_kokkosinterop PROPERTIES
+    INTERFACE_LINK_LIBRARIES "\$<LINK_ONLY:Kokkos::kokkoscore>")
+  
+  if(Legion_USE_CUDA AND (CMAKE_CXX_COMPILER_ID STREQUAL "Clang"))
+    target_compile_options(realm_kokkosinterop PRIVATE "--cuda-path=${CUDA_TOOLKIT_ROOT_DIR}")
+  endif()
+
+  install(TARGETS realm_kokkosinterop EXPORT LegionTargets)
+  target_link_libraries(RealmRuntime PRIVATE realm_kokkosinterop)
+
+  # if Kokkos' CUDA target is enabled, and we're performing runtime hijack,
+  #  rewrite Kokkos' cudart dependency to be on Realm instead
+  if(Kokkos_ENABLE_CUDA AND Legion_HIJACK_CUDART)
+    edit_target_property(Kokkos::CUDA INTERFACE_LINK_LIBRARIES .*cudart.* realm_cudarthijack)
+  endif()
+
+  # similarly, if Kokkos' OpenMP target is enabled but we're using Realm's
+  #  OpenMP runtime implementation, remove anything mentioning openmp from
+  #  the exported link options (don't mess with compile options though)
+  if(Kokkos_ENABLE_OPENMP AND Legion_USE_OpenMP)
+    edit_target_property(Kokkos::kokkoscore INTERFACE_LINK_OPTIONS .*openmp.* "")
+    edit_target_property(Kokkos::kokkoscontainers INTERFACE_LINK_OPTIONS .*openmp.* "")
+  endif()
 endif()
 
 if(Legion_USE_HDF5)
