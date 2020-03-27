@@ -88,7 +88,7 @@ contains
     type(FLogicalRegion) :: logical_region
     type(FRegionRequirement) :: region_requirement
     type(FIndexSpace) :: index_space
-    type(FRect1D) :: rect_1d, subrect
+    type(FRect1D) :: rect_1d
     integer :: offset
     integer(kind=8) :: index_size
     type(c_ptr) :: raw_ptr_x, raw_ptr_y, raw_ptr_z
