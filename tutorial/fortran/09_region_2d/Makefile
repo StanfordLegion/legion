@@ -27,7 +27,7 @@ USE_HDF         ?= 0		# Include HDF5 support (requires HDF5)
 ALT_MAPPERS     ?= 0		# Include alternative mappers (not recommended)
 
 # Put the binary file name here
-OUTFILE		?= region_2d
+OUTFILE		?= region_2d_fortran
 # List all the application source files here
 GEN_FORTRAN_SRC	?= region_2d.f90		# .f90 files
 GEN_GPU_SRC	?=				# .cu files

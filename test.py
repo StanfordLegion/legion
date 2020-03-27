@@ -73,17 +73,17 @@ legion_cxx_tests = [
 ]
 
 legion_fortran_tests = [
-    ['tutorial/fortran/00_hello_world/hello_world', []],
-    ['tutorial/fortran/01_tasks_and_futures/tasks_and_futures', []],
-    ['tutorial/fortran/02_index_tasks/index_tasks', []],
-    ['tutorial/fortran/03_physical_regions/physical_regions', []],
-    ['tutorial/fortran/04_privileges_accessor/privileges_accessor', []],
-    ['tutorial/fortran/05_privileges_raw_ptr/privileges_raw_ptr', []],
-    ['tutorial/fortran/06_partitioning/partitioning', []],
-    ['tutorial/fortran/07_partitioning_fortran_task/partitioning_fortran_task', []],
-    ['tutorial/fortran/08_multiple_partitions/multiple_partitions', []],
-    ['tutorial/fortran/09_region_2d/region_2d', []],
-    ['tutorial/fortran/10_attach_array/attach_array', []],
+    ['tutorial/fortran/00_hello_world/hello_world_fortran', []],
+    ['tutorial/fortran/01_tasks_and_futures/tasks_and_futures_fortran', []],
+    ['tutorial/fortran/02_index_tasks/index_tasks_fortran', []],
+    ['tutorial/fortran/03_physical_regions/physical_regions_fortran', []],
+    ['tutorial/fortran/04_privileges_accessor/privileges_accessor_fortran', []],
+    ['tutorial/fortran/05_privileges_raw_ptr/privileges_raw_ptr_fortran', []],
+    ['tutorial/fortran/06_partitioning/partitioning_fortran', []],
+    ['tutorial/fortran/07_partitioning_fortran_task/partitioning_fortran_task_fortran', []],
+    ['tutorial/fortran/08_multiple_partitions/multiple_partitions_fortran', []],
+    ['tutorial/fortran/09_region_2d/region_2d_fortran', []],
+    ['tutorial/fortran/10_attach_array/attach_array_fortran', []],
 ]
 
 if platform.system() != 'Darwin':
