@@ -102,7 +102,7 @@ variables:
   HDF_HEADER: "hdf5/serial/hdf5.h"
   HDF_LIBNAME: "hdf5_serial"
 .fortran: &fortran
-  USE_FORTRAN: "1"
+  LEGION_USE_FORTRAN: "1"
 .llvm: &llvm
   USE_LLVM: "1"
 .cuda: &cuda
