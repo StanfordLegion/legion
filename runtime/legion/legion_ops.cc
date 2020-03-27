@@ -6215,6 +6215,8 @@ namespace Legion {
         possible_dst_indirect_aliasing = 
           launcher.possible_dst_indirect_aliasing;
       }
+      couple_src_indirect_points = launcher.couple_src_indirect_points;
+      couple_dst_indirect_points = launcher.couple_dst_indirect_points;
       grants = launcher.grants;
       // Register ourselves with all the grants
       for (unsigned idx = 0; idx < grants.size(); idx++)
@@ -6700,6 +6702,12 @@ namespace Legion {
              LegionVector<IndirectRecord>::aligned &records, const bool sources)
     //--------------------------------------------------------------------------
     {
+      if (sources && !couple_src_indirect_points)
+        return CopyOp::exchange_indirect_records(index, local_done, trace_info,
+                                                insts, space, records, sources);
+      if (!sources && !couple_dst_indirect_points)
+        return CopyOp::exchange_indirect_records(index, local_done, trace_info,
+                                                insts, space, records, sources);
 #ifdef DEBUG_LEGION
       assert(local_done.exists());
 #endif

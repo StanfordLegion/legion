@@ -1513,7 +1513,8 @@ namespace Legion {
         predicate(Predicate::TRUE_PRED), map_id(0), tag(0),
         static_dependences(NULL), possible_src_indirect_out_of_range(true),
         possible_dst_indirect_out_of_range(true),
-        possible_dst_indirect_aliasing(true), silence_warnings(false)
+        possible_dst_indirect_aliasing(true), couple_src_indirect_points(true),
+        couple_dst_indirect_points(true), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1526,7 +1527,8 @@ namespace Legion {
         map_id(mid),tag(t), static_dependences(NULL),
         possible_src_indirect_out_of_range(true),
         possible_dst_indirect_out_of_range(true),
-        possible_dst_indirect_aliasing(true), silence_warnings(false)
+        possible_dst_indirect_aliasing(true), couple_src_indirect_points(true),
+        couple_dst_indirect_points(true), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1539,7 +1541,8 @@ namespace Legion {
         map_id(mid), tag(t), static_dependences(NULL), 
         possible_src_indirect_out_of_range(true),
         possible_dst_indirect_out_of_range(true),
-        possible_dst_indirect_aliasing(true), silence_warnings(false)
+        possible_dst_indirect_aliasing(true), couple_src_indirect_points(true),
+        couple_dst_indirect_points(true), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
