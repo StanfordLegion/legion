@@ -82,7 +82,6 @@ legion_fortran_tests = [
     ['tutorial/fortran/06_partitioning/partitioning_fortran', []],
     ['tutorial/fortran/08_multiple_partitions/multiple_partitions_fortran', []],
     ['tutorial/fortran/09_region_2d/region_2d_fortran', []],
-    ['tutorial/fortran/10_attach_array/attach_array_fortran', []],
 ]
 
 if platform.system() != 'Darwin':
