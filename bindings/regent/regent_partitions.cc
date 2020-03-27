@@ -85,7 +85,7 @@ create_cross_product(Runtime *runtime,
                      Context ctx,
                      IndexPartition lhs,
                      IndexPartition rhs,
-                     Color rhs_color /* = -1 */,
+                     Color rhs_color /* = AUTO_GENERATE_ID */,
                      bool consistent_ids /* = true */,
                      std::map<IndexSpace, Color> *chosen_colors /* = NULL */,
                      const std::set<DomainPoint> *lhs_filter /* = NULL */,
@@ -174,9 +174,9 @@ create_cross_product_multi(Runtime *runtime,
   if (rest != end) {
     Color desired_color = result_colors[level];
     Color color = create_cross_product(runtime, ctx, next, *rest, desired_color);
-    assert(color != Color(-1));
-    if (desired_color == Color(-1)) {
-      assert(result_colors[level] == Color(-1));
+    assert(color != Color(AUTO_GENERATE_ID));
+    if (desired_color == Color(AUTO_GENERATE_ID)) {
+      assert(result_colors[level] == Color(AUTO_GENERATE_ID));
       result_colors[level] = color;
     } else {
       assert(color == desired_color);
@@ -227,7 +227,7 @@ legion_terra_index_cross_product_create_multi(
   for (size_t i = 0; i < npartitions; i++) {
     partitions.push_back(CObjectWrapper::unwrap(partitions_[i]));
   }
-  std::vector<Color> colors(npartitions-1, Color(-1));
+  std::vector<Color> colors(npartitions-1, Color(AUTO_GENERATE_ID));
 
   assert(npartitions >= 2);
   create_cross_product_multi(runtime, ctx, npartitions,
@@ -330,7 +330,7 @@ legion_terra_index_cross_product_create_list(
   IndexPartition lhs_part = partition_from_list(runtime, ctx, lhs);
   IndexPartition rhs_part = partition_from_list(runtime, ctx, rhs);
 
-  Color sub_color = -1;
+  Color sub_color = AUTO_GENERATE_ID;
   if (lhs_part != IndexPartition::NO_PART && rhs_part != IndexPartition::NO_PART) {
     sub_color = create_cross_product(runtime, ctx, rhs_part, lhs_part);
   }
