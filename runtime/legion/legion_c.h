@@ -2472,6 +2472,12 @@ extern "C" {
                                legion_domain_point_t point);
 
   /**
+   * @see Legion::FutureMap::get_future_map_domain
+   */
+  legion_domain_t
+  legion_future_map_get_domain(legion_future_map_t handle);
+
+  /**
    * @return Caller takes ownership of return value
    *
    * @see Legion::Runtime::reduce_future_map
@@ -2494,7 +2500,7 @@ extern "C" {
                               legion_domain_t domain,
                               legion_domain_point_t *points,
                               legion_future_t *futures,
-                              size_t num_futures);
+                              size_t num_futures); 
 
   // -----------------------------------------------------------------------
   // Deferred Buffer Operations

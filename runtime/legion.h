@@ -1367,6 +1367,8 @@ namespace Legion {
        */
       void wait_all_results(bool silence_warnings = false,
                             const char *warning_string = NULL); 
+    public:
+      const Domain& get_future_map_domain(void) const;
     }; 
 
 

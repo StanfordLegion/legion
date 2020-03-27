@@ -2919,6 +2919,14 @@ legion_future_map_get_future(legion_future_map_t fm_,
   return CObjectWrapper::wrap(new Future(fm->get_future(dp)));
 }
 
+legion_domain_t
+legion_future_map_get_domain(legion_future_map_t fm_)
+{
+  FutureMap *fm = CObjectWrapper::unwrap(fm_);
+  const Domain &domain = fm->get_future_map_domain();
+  return CObjectWrapper::wrap(domain);
+}
+
 legion_future_t
 legion_future_map_reduce(legion_runtime_t runtime_,
                          legion_context_t ctx_,

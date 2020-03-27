@@ -2240,6 +2240,16 @@ namespace Legion {
         impl->wait_all_results(silence_warnings, warning_string);
     }
 
+    //--------------------------------------------------------------------------
+    const Domain& FutureMap::get_future_map_domain(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (impl == NULL)
+        return Domain::NO_DOMAIN;
+      else
+        return impl->future_map_domain;
+    }
+
     /////////////////////////////////////////////////////////////
     // Physical Region 
     /////////////////////////////////////////////////////////////
