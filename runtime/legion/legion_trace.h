@@ -908,7 +908,7 @@ namespace Legion {
       std::map<unsigned,unsigned> frontiers;
     protected:
       RtUserEvent recording_done;
-    private:
+    protected:
       RtUserEvent replay_ready;
       RtEvent     replay_done;
 #ifdef LEGION_SPY
