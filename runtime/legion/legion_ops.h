@@ -1318,8 +1318,8 @@ namespace Legion {
       std::vector<RtUserEvent>                           src_exchanged;
       std::vector<RtUserEvent>                           dst_exchanged;
       unsigned                                           points_committed;
-      bool                                          couple_src_indirect_points;
-      bool                                          couple_dst_indirect_points;
+      bool                                       collective_src_indirect_points;
+      bool                                       collective_dst_indirect_points;
       bool                                               commit_request;
       std::set<RtEvent>                                  commit_preconditions;
     protected:
