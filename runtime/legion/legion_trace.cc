@@ -2282,6 +2282,10 @@ namespace Legion {
                            Runtime *runtime, ApEvent completion, bool recurrent)
     //--------------------------------------------------------------------------
     {
+      // We have to make sure that the previous trace replay is done before
+      // we start changing these data structures for the next replay
+      if (replay_done.exists() && !replay_done.has_triggered())
+        replay_done.wait();
       fence_completion = completion;
       if (recurrent)
         for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
