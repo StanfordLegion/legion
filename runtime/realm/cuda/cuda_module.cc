@@ -1484,12 +1484,27 @@ namespace Realm {
       // push the CUDA context for this GPU onto this thread
       gpu_proc->gpu->push_context();
 
+      assert(ThreadLocal::current_gpu_stream == 0);
+      GPUStream *s = gpu_proc->gpu->get_next_task_stream();
+      ThreadLocal::current_gpu_stream = s;
+      assert(!ThreadLocal::created_gpu_streams);
+
       // internal tasks aren't allowed to wait on events, so any cuda synch
       //  calls inside the call must be blocking
       gpu_proc->block_on_synchronize = true;
 
       // execute the internal task, whatever it is
       T::execute_internal_task(task);
+
+      // if the user could have put work on any other streams then make our
+      // stream wait on those streams as well
+      // TODO: update this so that it works when GPU tasks suspend
+      if(ThreadLocal::created_gpu_streams)
+      {
+        s->wait_on_streams(*ThreadLocal::created_gpu_streams);
+        delete ThreadLocal::created_gpu_streams;
+        ThreadLocal::created_gpu_streams = 0;
+      }
 
       // we didn't use streams here, so synchronize the whole context
       CHECK_CU( cuCtxSynchronize() );
@@ -1500,6 +1515,8 @@ namespace Realm {
 
       assert(ThreadLocal::current_gpu_proc == gpu_proc);
       ThreadLocal::current_gpu_proc = 0;
+      assert(ThreadLocal::current_gpu_stream == s);
+      ThreadLocal::current_gpu_stream = 0;
     }
 
 
@@ -2780,31 +2797,36 @@ namespace Realm {
       // before we do anything, make sure there's a CUDA driver and GPUs to talk to
       std::vector<GPUInfo *> infos;
       {
+	int num_devices;
 	CUresult ret = cuInit(0);
-	if(ret != CUDA_SUCCESS) {
+	if(ret == CUDA_ERROR_NO_DEVICE) {
+	  // continue on so that we recognize things like -ll:gpu, but there
+	  //  are no devices to be found
+	  num_devices = 0;
+	  log_gpu.info() << "cuInit reports no devices found";
+	} else if(ret != CUDA_SUCCESS) {
 	  log_gpu.warning() << "cuInit(0) returned " << ret << " - module not loaded";
 	  return 0;
-	}
+	} else {
+	  CHECK_CU( cuDeviceGetCount(&num_devices) );
+	  for(int i = 0; i < num_devices; i++) {
+	    GPUInfo *info = new GPUInfo;
 
-	int num_devices;
-	CHECK_CU( cuDeviceGetCount(&num_devices) );
-	for(int i = 0; i < num_devices; i++) {
-	  GPUInfo *info = new GPUInfo;
+	    info->index = i;
+	    CHECK_CU( cuDeviceGet(&info->device, i) );
+	    CHECK_CU( cuDeviceGetName(info->name, GPUInfo::MAX_NAME_LEN, info->device) );
+	    CHECK_CU( cuDeviceGetAttribute(&info->compute_major,
+					   CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, info->device) );
+	    CHECK_CU( cuDeviceGetAttribute(&info->compute_minor,
+					   CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, info->device) );
+	    CHECK_CU( cuDeviceTotalMem(&info->total_mem, info->device) );
 
-	  info->index = i;
-	  CHECK_CU( cuDeviceGet(&info->device, i) );
-	  CHECK_CU( cuDeviceGetName(info->name, GPUInfo::MAX_NAME_LEN, info->device) );
-          CHECK_CU( cuDeviceGetAttribute(&info->compute_major,
-                         CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, info->device) );
-          CHECK_CU( cuDeviceGetAttribute(&info->compute_minor,
-                         CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, info->device) );
-	  CHECK_CU( cuDeviceTotalMem(&info->total_mem, info->device) );
+	    log_gpu.info() << "GPU #" << i << ": " << info->name << " ("
+			   << info->compute_major << '.' << info->compute_minor
+			   << ") " << (info->total_mem >> 20) << " MB";
 
-	  log_gpu.info() << "GPU #" << i << ": " << info->name << " ("
-			 << info->compute_major << '.' << info->compute_minor
-			 << ") " << (info->total_mem >> 20) << " MB";
-
-	  infos.push_back(info);
+	    infos.push_back(info);
+	  }
 	}
 
 	if(infos.empty()) {

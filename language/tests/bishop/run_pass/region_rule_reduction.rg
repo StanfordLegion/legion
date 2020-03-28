@@ -54,6 +54,8 @@ end
 task toplevel()
   var r1 = region(ispace(ptr, 10), int)
   var r2 = region(ispace(ptr, 10), int)
+  fill(r1, 0)
+  fill(r2, 0)
   for e in r2 do
     @e = 0
   end

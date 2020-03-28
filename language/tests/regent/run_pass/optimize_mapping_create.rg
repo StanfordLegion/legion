@@ -12,6 +12,9 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- runs-with:
+-- [["-finner", "0"], ["-finner", "1"]]
+
 import "regent"
 
 -- This tests a bug in mapping optimization where a reigon which is

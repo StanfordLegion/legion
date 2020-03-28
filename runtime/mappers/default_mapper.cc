@@ -913,16 +913,21 @@ namespace Legion {
                         const Task &task, std::vector<Processor::Kind> &ranking)
     //--------------------------------------------------------------------------
     {
-      // Default mapper is ignorant about task IDs so just do whatever
-      // GPU > OMP > procset > cpu > IO > Python
+      // Default mapper is ignorant about task IDs so just do whatever:
+      // 1) GPU > OMP > procset > cpu > IO > Python  (default)
+      // 2) OMP > procset > cpu > IO > Python > GPU  (with PREFER_CPU_VARIANT)
       // It is up to the caller to filter out processor kinds that aren't
       // suitable for a given task
-      if (local_gpus.size() > 0) ranking.push_back(Processor::TOC_PROC);
+      bool prefer_cpu = ((task.tag & PREFER_CPU_VARIANT) != 0);
+      if ((local_gpus.size() > 0) && !prefer_cpu)
+       ranking.push_back(Processor::TOC_PROC);
       if (local_omps.size() > 0) ranking.push_back(Processor::OMP_PROC);
       if (local_procsets.size() > 0) ranking.push_back(Processor::PROC_SET);
       ranking.push_back(Processor::LOC_PROC);
       if (local_ios.size() > 0) ranking.push_back(Processor::IO_PROC);
       if (local_pys.size() > 0) ranking.push_back(Processor::PY_PROC);
+      if ((local_gpus.size() > 0) && prefer_cpu)
+       ranking.push_back(Processor::TOC_PROC);
     }
 
     //--------------------------------------------------------------------------

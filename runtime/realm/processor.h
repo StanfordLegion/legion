@@ -128,7 +128,44 @@ namespace Realm {
 				  const void *reason_data, size_t reason_size) const;
 
       static const char* get_kind_name(Kind kind);
+
+#ifdef REALM_USE_KOKKOS
+      // Kokkos execution policies will accept an "execution instance" to
+      //  capture task parallelism - provide those here
+      class KokkosExecInstance;
+
+      KokkosExecInstance kokkos_work_space(void) const;
+#endif
     };
+
+#if defined(REALM_USE_KOKKOS) && (REALM_CXX_STANDARD >= 11)
+    // Kokkos defines this but we can't use it :(
+    template <typename T>
+    class is_kokkos_execution_space {
+      typedef char yes;
+      typedef long no;
+
+      template <typename C> static yes check(typename C::execution_space*) ;
+      template <typename C> static no  check(...);
+    public:
+      static constexpr bool value = sizeof(check<T>(0)) == sizeof(yes);
+    };
+
+    class Processor::KokkosExecInstance {
+    public:
+      KokkosExecInstance(Processor _p);
+
+      // template-fu will type-check a coercion to any Kokkos execution
+      //  space type - runtime will verify a valid type was requested
+      template <typename exec_space,
+	        typename std::enable_if<is_kokkos_execution_space<exec_space>::value,
+	                                int>::type = 0>
+      operator exec_space() const;
+
+    protected:
+      Processor p;
+    };
+#endif
 
     inline std::ostream& operator<<(std::ostream& os, Processor p) { return os << std::hex << p.id << std::dec; }
 	

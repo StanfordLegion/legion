@@ -46,6 +46,8 @@
 #cmakedefine REALM_USE_CUDART_HIJACK
 #endif
 
+#cmakedefine REALM_USE_KOKKOS
+
 #cmakedefine REALM_USE_GASNET1
 
 #cmakedefine GASNET_CONDUIT_MPI

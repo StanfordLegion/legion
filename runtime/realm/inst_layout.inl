@@ -801,9 +801,11 @@ namespace Realm {
     assert(base != 0);
     base += alp->offset + it->second.rel_offset + subfield_offset;
     strides = alp->strides;
+#if defined(REALM_ACCESSOR_DEBUG) || defined(REALM_USE_KOKKOS)
+    bounds = alp->bounds;
+#endif
 #ifdef REALM_ACCESSOR_DEBUG
     dbg_inst = inst;
-    dbg_bounds = alp->bounds;
 #endif
   }
 
@@ -843,9 +845,11 @@ namespace Realm {
       base += alp->offset + it->second.rel_offset + subfield_offset;
       strides = alp->strides;
     }
+#if defined(REALM_ACCESSOR_DEBUG) || defined(REALM_USE_KOKKOS)
+    bounds = subrect;  // stay inside the subrect we were given
+#endif
 #ifdef REALM_ACCESSOR_DEBUG
     dbg_inst = inst;
-    dbg_bounds = subrect;  // stay inside the subrect we were given
 #endif
   }
 
@@ -902,10 +906,13 @@ namespace Realm {
       for(int j = 0; j < N2; j++)
 	strides[i] += alp->strides[j] * transform.rows[j][i];
     }
+#if defined(REALM_ACCESSOR_DEBUG) || defined(REALM_USE_KOKKOS)
+    // can't determine bounds here...
+    for(int i = 0; i < N; i++)
+      bounds.lo[i] = bounds.hi[i] = 0;
+#endif
 #ifdef REALM_ACCESSOR_DEBUG
     dbg_inst = inst;
-    // bounds are not inferrable here!
-    dbg_bounds = Rect<N,T>();
 #endif
   }
 
@@ -982,9 +989,11 @@ namespace Realm {
 	  strides[i] += alp->strides[j] * transform.rows[j][i];
       }
     }
+#if defined(REALM_ACCESSOR_DEBUG) || defined(REALM_USE_KOKKOS)
+    bounds = subrect;  // stay inside the subrect we were given
+#endif
 #ifdef REALM_ACCESSOR_DEBUG
     dbg_inst = inst;
-    dbg_bounds = subrect;  // stay inside the subrect we were given
 #endif
   }
 
@@ -1207,14 +1216,64 @@ namespace Realm {
     return reinterpret_cast<FT *>(rawptr);
   }
 
+#ifdef REALM_PROVIDE_ACCESSOR_TO_KOKKOS_VIEW_CONVERSION
+  // helper to add the right number of *'s after a T in a type
+  template <typename FT, int N>
+  struct Pointerify {
+    typedef typename Pointerify<FT, N-1>::ptrtype *ptrtype;
+  };
+
+  template <typename FT>
+  struct Pointerify<FT, 0> {
+    typedef FT ptrtype;
+  };
+
+  // some compilers like to try to reason about concrete types in template
+  //  before it's instantiated, so here's a little wrapper that forces a
+  //  dependence on a second type T2 (e.g. a parameter to the calling
+  //  template) to defer the analysis (hopefully after T has been properly
+  //  defined)
+  template <typename T, typename T2>
+  struct DeferType {
+    typedef T type;
+  };
+
+  // conversion to Kokkos unmanaged views
+  template <typename FT, int N, typename T>
+  template <typename ... Args>
+  inline AffineAccessor<FT,N,T>::operator Kokkos::View<Args...>() const
+  {
+    typename DeferType<Kokkos::LayoutStride, FT>::type kls;
+    for(int i = 0; i < N; i++) {
+      kls.dimension[i] = bounds.hi[i] + 1;
+      kls.stride[i] = strides[i] / sizeof(FT);
+      assert((size_t(kls.stride[i]) * sizeof(FT)) == size_t(strides[i]));
+    }
+    typedef typename Pointerify<FT, N>::ptrtype ptrtype;
+    ptrtype baseptr = reinterpret_cast<ptrtype>(base);
+    typedef Kokkos::View<typename Kokkos::View<Args...>::data_type,
+			 Kokkos::LayoutStride,
+			 typename Kokkos::View<Args...>::memory_space,
+			 Kokkos::MemoryTraits<Kokkos_Unmanaged> > unmanaged_view;
+    // verify our Kokkos_Unmanaged enum was right
+    static_assert(unmanaged_view::traits::is_managed == 0,
+		  "incorrect value for Kokkos_Unmanaged!");
+
+    unmanaged_view v(baseptr, kls);
+    return v;
+  }
+#endif
+
   template <typename FT, int N, typename T>
   inline std::ostream& operator<<(std::ostream& os, const AffineAccessor<FT,N,T>& a)
   {
     os << "AffineAccessor{ base=" << std::hex << a.base << std::dec << " strides=" << a.strides;
 #ifdef REALM_ACCESSOR_DEBUG
     os << " inst=" << a.dbg_inst;
-    os << " bounds=" << a.dbg_bounds;
-    os << "->[" << std::hex << a.ptr(a.dbg_bounds.lo) << "," << a.ptr(a.dbg_bounds.hi)+1 << std::dec << "]";
+#endif
+#if defined(REALM_ACCESSOR_DEBUG) || defined(REALM_USE_KOKKOS)
+    os << " bounds=" << a.bounds;
+    os << "->[" << std::hex << a.ptr(a.bounds.lo) << "," << a.ptr(a.bounds.hi)+1 << std::dec << "]";
 #endif
     os << " }";
     return os;

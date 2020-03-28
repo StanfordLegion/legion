@@ -1798,6 +1798,12 @@ namespace Legion {
       // Whether the destination indirection can lead to aliasing 
       // in the destination instances requiring synchronization
       bool                            possible_dst_indirect_aliasing;
+      // Whether the individual point copies should operate collectively
+      // together in the case of indirect copies (e.g. allow indirections
+      // to refer to instances from other points). These settings have
+      // no effect in the case of copies without indirections.
+      bool                            collective_src_indirect_points;
+      bool                            collective_dst_indirect_points;
     public:
       bool                            silence_warnings;
     };

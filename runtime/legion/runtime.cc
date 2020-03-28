@@ -3700,6 +3700,12 @@ namespace Legion {
           for (TreeInstances::const_iterator it = 
                 cit->second.begin(); it != cit->second.end(); it++)
           {
+            // We only need to check this on the owner node instances and 
+            // in fact it's only safe for us to do it on the owner node
+            // instance because we only are guaranteed to have references
+            // to the owner node objects
+            if (!it->first->is_owner())
+              continue;
             it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
             to_check.push_back(it->first);
           }
