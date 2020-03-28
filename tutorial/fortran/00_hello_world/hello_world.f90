@@ -20,12 +20,11 @@ contains
     type(FTask) :: task
     type(FPhysicalRegionList) :: pr_list
     
-    Print *, "Hello World!"
-    
     call legion_task_prolog(tdata, tdatalen, userdata, userlen, p, &
                             task, pr_list, &
                             ctx, runtime)
 
+    Print *, "Hello World!"
     
     call legion_task_epilog(runtime, ctx)
   end subroutine hello_world_task
