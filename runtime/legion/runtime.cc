@@ -765,7 +765,7 @@ namespace Legion {
     {
       // If we are not the owner, remove our gc reference
       if (!is_owner())
-        send_remote_gc_decrement(owner_space, RtEvent::NO_RT_EVENT, mutator);
+        send_remote_gc_decrement(owner_space, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -1172,7 +1172,7 @@ namespace Legion {
     {
       // If we are not the owner, remove our gc reference
       if (!is_owner())
-        send_remote_gc_decrement(owner_space, RtEvent::NO_RT_EVENT, mutator);
+        send_remote_gc_decrement(owner_space, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -4610,7 +4610,8 @@ namespace Legion {
             // Add our local reference
             manager->add_base_valid_ref(NEVER_GC_REF, &local_mutator);
             const RtEvent reference_effects = local_mutator.get_done_event();
-            manager->send_remote_valid_decrement(owner_space,reference_effects);
+            manager->send_remote_valid_decrement(owner_space, NULL,
+                                                 reference_effects);
             if (reference_effects.exists())
               mutator.record_reference_mutation_effect(reference_effects);
             // Then record it
@@ -5146,7 +5147,8 @@ namespace Legion {
           LocalReferenceMutator local_mutator;
           manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
           const RtEvent reference_effects = local_mutator.get_done_event();
-          manager->send_remote_valid_decrement(source, reference_effects);
+          manager->send_remote_valid_decrement(source, NULL,
+                                               reference_effects);
           if (reference_effects.exists())
             mutator.record_reference_mutation_effect(reference_effects);
         }
@@ -5447,7 +5449,7 @@ namespace Legion {
         LocalReferenceMutator local_mutator;
         manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
         const RtEvent reference_effects = local_mutator.get_done_event();
-        manager->send_remote_valid_decrement(source, reference_effects);  
+        manager->send_remote_valid_decrement(source, NULL, reference_effects);
         if (reference_effects.exists())
           preconditions.insert(reference_effects);
       }
@@ -9057,7 +9059,7 @@ namespace Legion {
       if (is_owner())
         runtime->unregister_layout(layout_id);
       else
-        send_remote_gc_decrement(owner_space, RtEvent::NO_RT_EVENT, mutator);
+        send_remote_gc_decrement(owner_space, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -22408,9 +22410,10 @@ namespace Legion {
             EquivalenceSet::handle_deferred_response(args, runtime);
             break;
           }
-        case LG_DEFER_REMOTE_DECREMENT_TASK_ID:
+        case LG_DEFER_REMOTE_REF_UPDATE_TASK_ID:
           {
-            DistributedCollectable::handle_defer_remote_decrement(args);
+            DistributedCollectable::handle_defer_remote_reference_update(
+                                                            runtime, args);
             break;
           }
         case LG_COPY_FILL_AGGREGATION_TASK_ID:

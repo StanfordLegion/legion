@@ -7803,9 +7803,9 @@ namespace Legion {
       if (ready_event.exists() && !ready_event.has_triggered())
         ready_event.wait();
       if (inst_view != NULL)
-        inst_view->send_remote_valid_decrement(previous, applied);
+        inst_view->send_remote_valid_decrement(previous, NULL, applied);
       if (registration_view != NULL)
-        registration_view->send_remote_valid_decrement(previous, applied);
+        registration_view->send_remote_valid_decrement(previous, NULL, applied);
     }
 
     /////////////////////////////////////////////////////////////

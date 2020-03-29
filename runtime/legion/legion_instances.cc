@@ -689,7 +689,7 @@ namespace Legion {
       if (memory_manager != NULL)
         memory_manager->deactivate_instance(this);
       if (!is_owner())
-        send_remote_gc_decrement(owner_space, RtEvent::NO_RT_EVENT, mutator);
+        send_remote_gc_decrement(owner_space, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -747,7 +747,7 @@ namespace Legion {
       if (memory_manager != NULL)
         memory_manager->invalidate_instance(this);
       if (!is_owner())
-        send_remote_valid_decrement(owner_space, RtEvent::NO_RT_EVENT, mutator);
+        send_remote_valid_decrement(owner_space, mutator);
     }
 
     //--------------------------------------------------------------------------
