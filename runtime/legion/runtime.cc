@@ -20228,7 +20228,8 @@ namespace Legion {
         if (finder != pending_collectables.end())
         {
 #ifdef DEBUG_LEGION
-          assert(finder->second.first == dc);
+          assert((finder->second.first == dc) || 
+                 (finder->second.first == NULL));
 #endif
           to_trigger = finder->second.second;
           pending_collectables.erase(finder);
@@ -20371,14 +20372,14 @@ namespace Legion {
         std::map<DistributedID,
           std::pair<DistributedCollectable*,RtUserEvent> >::iterator finder =
             pending_collectables.find(did);
-#ifdef DEBUG_LEGION
-        assert(finder != pending_collectables.end());
-        assert(finder->second.first == NULL);
-#endif
-        to_trigger = finder->second.second;
-        pending_collectables.erase(finder);
+        if (finder != pending_collectables.end())
+        {
+          to_trigger = finder->second.second;
+          pending_collectables.erase(finder);
+        }
       }
-      Runtime::trigger_event(to_trigger);
+      if (to_trigger.exists())
+        Runtime::trigger_event(to_trigger);
     }
 
     //--------------------------------------------------------------------------
