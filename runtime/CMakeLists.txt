@@ -242,16 +242,24 @@ endif()
 
 if(Legion_USE_CUDA)
   if(REALM_USE_CUDART_HIJACK)
-    add_library(realm_cudarthijack OBJECT
-      realm/cuda/cudart_hijack.cc
-      realm/cuda/cudart_hijack.h)
-    set_target_properties(realm_cudarthijack PROPERTIES POSITION_INDEPENDENT_CODE ON)
-    target_include_directories(realm_cudarthijack PRIVATE
-      ${CMAKE_CURRENT_SOURCE_DIR}
-      ${PROJECT_BINARY_DIR}/runtime
-      ${CUDA_INCLUDE_DIRS})
-    target_link_libraries(RealmRuntime PRIVATE realm_cudarthijack)
-    install(TARGETS realm_cudarthijack EXPORT LegionTargets)
+    if(Legion_USE_Kokkos)
+      # we need kokkos to depend on the hijack without creating a circular
+      #  dependency, so put it in an object library - this works only on newer
+      #  cmakes, but we already need cmake 3.13 for Kokkos, so this is ok
+      add_library(realm_cudarthijack OBJECT
+	realm/cuda/cudart_hijack.cc
+	realm/cuda/cudart_hijack.h)
+      set_target_properties(realm_cudarthijack PROPERTIES POSITION_INDEPENDENT_CODE ON)
+      target_include_directories(realm_cudarthijack PRIVATE
+	${CMAKE_CURRENT_SOURCE_DIR}
+	${PROJECT_BINARY_DIR}/runtime
+	${CUDA_INCLUDE_DIRS})
+      target_link_libraries(RealmRuntime PRIVATE realm_cudarthijack)
+      install(TARGETS realm_cudarthijack EXPORT LegionTargets)
+    else()
+      # without Kokkos interop, we can just add the hijack directly
+      target_sources(RealmRuntime PRIVATE realm/cuda/cudart_hijack.cc)
+    endif()
     
     # filter anything referring to *cudart* out of the CUDA_LIBRARIES
     #  making sure our changes are visible to the scope above
