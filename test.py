@@ -664,6 +664,8 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
     cmdline.append('-DLegion_MAX_DIM=%s' % env['MAX_DIM'])
     cmdline.append('-DLegion_NETWORKS=%s' % env['REALM_NETWORKS'])
     cmdline.append('-DLegion_USE_CUDA=%s' % ('ON' if env['USE_CUDA'] == '1' else 'OFF'))
+    if 'GPU_ARCH' in env:
+        cmdline.append('-DLegion_CUDA_ARCH=%s' % env['GPU_ARCH'])
     cmdline.append('-DLegion_USE_OpenMP=%s' % ('ON' if env['USE_OPENMP'] == '1' else 'OFF'))
     cmdline.append('-DLegion_USE_Kokkos=%s' % ('ON' if env['USE_KOKKOS'] == '1' else 'OFF'))
     cmdline.append('-DLegion_USE_Python=%s' % ('ON' if env['USE_PYTHON'] == '1' else 'OFF'))

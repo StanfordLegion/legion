@@ -318,6 +318,7 @@ before_script:
 .cuda_p100: &cuda_p100
   CUDA: "/usr/local/cuda"
   USE_CUDA: "1"
+  GPU_ARCH: "60"
   # cmake needs to know where to find libcuda.so
   CUDA_LIB_PATH: "/usr/local/nvidia/lib64"
   KOKKOS_CUDA_ARCH: "PASCAL60"
