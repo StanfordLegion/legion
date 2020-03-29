@@ -3982,6 +3982,17 @@ namespace Legion {
           // No need to increment the number of outstanding profiling
           // requests here since it was already done when we invoked
           // the mapper (see SingleTask::invoke_mapper)
+          // The exeception is for origin-mapped remote tasks on which
+          // we're going to need to send a message back to the owner
+          if (is_remote() && is_origin_mapped())
+          {
+#ifdef DEBUG_LEGION
+            assert(outstanding_profiling_requests == 0);
+            assert(!profiling_reported.exists());
+#endif
+            outstanding_profiling_requests = 1;
+            profiling_reported = Runtime::create_rt_user_event();
+          }
         }
       }
       if (runtime->legion_spy_enabled)
@@ -4083,6 +4094,9 @@ namespace Legion {
                                        const void *orig, size_t orig_length)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(profiling_reported.exists());
+#endif
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id); 
       const OpProfilingResponse *task_prof = 
@@ -4110,58 +4124,57 @@ namespace Legion {
           
         }
         runtime->send_remote_task_profiling_response(orig_proc, rez);
-        return;
       }
-#ifdef DEBUG_LEGION
-      assert(profiling_reported.exists());
-#endif
-      // Check to see if we are done mapping, if not then we need to defer
-      // this until we are done mapping so we know how many
-      if (!mapped_event.has_triggered())
+      else
       {
-        // Take the lock and see if we lost the race
-        AutoLock o_lock(op_lock);
+        // Check to see if we are done mapping, if not then we need to defer
+        // this until we are done mapping so we know how many
         if (!mapped_event.has_triggered())
         {
-          // Save this profiling response for later until we know the
-          // full count of profiling responses
-          profiling_info.resize(profiling_info.size() + 1);
-          SingleProfilingInfo &info = profiling_info.back();
-          info.task_response = task_prof->task; 
-          info.region_requirement_index = task_prof->src;
-          info.fill_response = task_prof->fill;
-          info.buffer_size = orig_length;
-          info.buffer = malloc(orig_length);
-          memcpy(info.buffer, orig, orig_length);
-          if (info.task_response)
+          // Take the lock and see if we lost the race
+          AutoLock o_lock(op_lock);
+          if (!mapped_event.has_triggered())
           {
-            // If we had an overhead tracker 
-            // see if this is the callback for the task
-            if (execution_context->overhead_tracker != NULL)
-              // This is the callback for the task itself
-              info.profiling_responses.attach_overhead(
-                  execution_context->overhead_tracker);
+            // Save this profiling response for later until we know the
+            // full count of profiling responses
+            profiling_info.resize(profiling_info.size() + 1);
+            SingleProfilingInfo &info = profiling_info.back();
+            info.task_response = task_prof->task; 
+            info.region_requirement_index = task_prof->src;
+            info.fill_response = task_prof->fill;
+            info.buffer_size = orig_length;
+            info.buffer = malloc(orig_length);
+            memcpy(info.buffer, orig, orig_length);
+            if (info.task_response)
+            {
+              // If we had an overhead tracker 
+              // see if this is the callback for the task
+              if (execution_context->overhead_tracker != NULL)
+                // This is the callback for the task itself
+                info.profiling_responses.attach_overhead(
+                    execution_context->overhead_tracker);
+            }
+            return;
           }
-          return;
         }
+        // If we get here then we can handle the response now
+        Mapping::Mapper::TaskProfilingInfo info;
+        info.profiling_responses.attach_realm_profiling_response(response);
+        info.task_response = task_prof->task; 
+        info.region_requirement_index = task_prof->src;
+        info.total_reports = outstanding_profiling_requests;
+        info.fill_response = task_prof->fill;
+        if (info.task_response)
+        {
+          // If we had an overhead tracker 
+          // see if this is the callback for the task
+          if (execution_context->overhead_tracker != NULL)
+            // This is the callback for the task itself
+            info.profiling_responses.attach_overhead(
+                execution_context->overhead_tracker);
+        }
+        mapper->invoke_task_report_profiling(this, &info);
       }
-      // If we get here then we can handle the response now
-      Mapping::Mapper::TaskProfilingInfo info;
-      info.profiling_responses.attach_realm_profiling_response(response);
-      info.task_response = task_prof->task; 
-      info.region_requirement_index = task_prof->src;
-      info.total_reports = outstanding_profiling_requests;
-      info.fill_response = task_prof->fill;
-      if (info.task_response)
-      {
-        // If we had an overhead tracker 
-        // see if this is the callback for the task
-        if (execution_context->overhead_tracker != NULL)
-          // This is the callback for the task itself
-          info.profiling_responses.attach_overhead(
-              execution_context->overhead_tracker);
-      }
-      mapper->invoke_task_report_profiling(this, &info);
       const int count = __sync_add_and_fetch(&outstanding_profiling_reported,1);
 #ifdef DEBUG_LEGION
       assert(count <= outstanding_profiling_requests);
