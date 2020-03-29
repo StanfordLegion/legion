@@ -277,8 +277,8 @@ namespace Legion {
       for (std::map<PhysicalManager*,std::pair<unsigned,bool> >::iterator it = 
             acquired_instances.begin(); it != acquired_instances.end(); it++)
       {
-        if (it->first->remove_base_valid_ref(MAPPING_ACQUIRE_REF, this, 
-                                             it->second.first))
+        if (it->first->remove_base_valid_ref(MAPPING_ACQUIRE_REF, 
+                                             NULL/*mutator*/, it->second.first))
           delete it->first;
       }
       acquired_instances.clear();
