@@ -1398,19 +1398,28 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DistributedCollectable::send_remote_valid_increment(
-               AddressSpaceID target, ReferenceMutator *mutator, unsigned count)
+                               AddressSpaceID target, ReferenceMutator *mutator,
+                               RtEvent precondition, unsigned count)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(count != 0);
       assert(registered_with_runtime);
 #endif
-      int signed_count = count;
-      RtUserEvent done_event = RtUserEvent::NO_RT_USER_EVENT;
+      RtUserEvent done_event;
       if (mutator != NULL)
       {
         done_event = Runtime::create_rt_user_event();
         mutator->record_reference_mutation_effect(done_event);
+      }
+      const int signed_count = count;
+      if (precondition.exists() && !precondition.has_triggered())
+      {
+        DeferRemoteReferenceUpdateArgs args(this, target, done_event,
+                                            signed_count, true/*valid*/);
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_MESSAGE_PRIORITY,
+                                         precondition);
+        return;
       }
       Serializer rez;
       {
@@ -1425,47 +1434,64 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DistributedCollectable::send_remote_valid_decrement(
-                                    AddressSpaceID target, RtEvent precondition,
-                                    ReferenceMutator *mutator, unsigned count)
+                               AddressSpaceID target, ReferenceMutator *mutator,
+                               RtEvent precondition, unsigned count)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(count != 0);
       assert(registered_with_runtime);
 #endif
+      RtUserEvent done_event;
+      if (mutator != NULL)
+      {
+        done_event = Runtime::create_rt_user_event();
+        mutator->record_reference_mutation_effect(done_event);
+      }
+      const int signed_count = -(int(count));
       if (precondition.exists() && !precondition.has_triggered())
       {
-        DeferRemoteDecrementArgs args(this,target,mutator,count,true/*valid*/);
-        runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, 
+        DeferRemoteReferenceUpdateArgs args(this, target, done_event,
+                                            signed_count, true/*valid*/);
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_MESSAGE_PRIORITY,
                                          precondition);
         return;
       }
-      int signed_count = -(int(count));
       Serializer rez;
       {
         RezCheck z(rez);
         rez.serialize(did);
         rez.serialize(signed_count);
         rez.serialize<bool>(target == owner_space);
+        rez.serialize(done_event);
       }
       runtime->send_did_remote_valid_update(target, rez);
     }
 
     //--------------------------------------------------------------------------
     void DistributedCollectable::send_remote_gc_increment(
-               AddressSpaceID target, ReferenceMutator *mutator, unsigned count)
+                               AddressSpaceID target, ReferenceMutator *mutator,
+                               RtEvent precondition, unsigned count)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(count != 0);
       assert(registered_with_runtime);
 #endif
-      int signed_count = count;
-      RtUserEvent done_event = RtUserEvent::NO_RT_USER_EVENT;
+      RtUserEvent done_event;
       if (mutator != NULL)
       {
         done_event = Runtime::create_rt_user_event();
         mutator->record_reference_mutation_effect(done_event);
+      }
+      const int signed_count = count;
+      if (precondition.exists() && !precondition.has_triggered())
+      {
+        DeferRemoteReferenceUpdateArgs args(this, target, done_event,
+                                            signed_count, false/*valid*/);
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_MESSAGE_PRIORITY,
+                                         precondition);
+        return;
       }
       Serializer rez;
       {
@@ -1480,28 +1506,36 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DistributedCollectable::send_remote_gc_decrement(
-                                    AddressSpaceID target, RtEvent precondition,
-                                    ReferenceMutator *mutator, unsigned count)
+                               AddressSpaceID target, ReferenceMutator *mutator,
+                               RtEvent precondition, unsigned count)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(count != 0);
       assert(registered_with_runtime);
 #endif
+      RtUserEvent done_event;
+      if (mutator != NULL)
+      {
+        done_event = Runtime::create_rt_user_event();
+        mutator->record_reference_mutation_effect(done_event);
+      }
+      const int signed_count = -(int(count));
       if (precondition.exists() && !precondition.has_triggered())
       {
-        DeferRemoteDecrementArgs args(this,target,mutator,count,false/*valid*/);
-        runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, 
+        DeferRemoteReferenceUpdateArgs args(this, target, done_event,
+                                            signed_count, false/*valid*/);
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_MESSAGE_PRIORITY,
                                          precondition);
         return;
       }
-      int signed_count = -(int(count));
       Serializer rez;
       {
         RezCheck z(rez);
         rez.serialize(did);
         rez.serialize(signed_count);
         rez.serialize<bool>(target == owner_space);
+        rez.serialize(done_event);
       }
       runtime->send_did_remote_gc_update(target, rez);
     }
@@ -1600,6 +1634,8 @@ namespace Legion {
       derez.deserialize(count);
       bool is_owner;
       derez.deserialize(is_owner);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
       DistributedCollectable *target = NULL;
       if (!is_owner)
       {
@@ -1610,25 +1646,29 @@ namespace Legion {
       }
       else
         target = runtime->find_distributed_collectable(did);
-      if (count > 0)
+      if (done_event.exists())
       {
         std::set<RtEvent> mutator_events;
         WrapperReferenceMutator mutator(mutator_events);
-        target->add_base_valid_ref(REMOTE_DID_REF, &mutator, unsigned(count));
-        RtUserEvent done_event;
-        derez.deserialize(done_event);
-        if (done_event.exists())
-        {
-          if (!mutator_events.empty())
-            Runtime::trigger_event(done_event, 
-                Runtime::merge_events(mutator_events));
-          else
-            Runtime::trigger_event(done_event);
-        }
+        if (count > 0)
+          target->add_base_valid_ref(REMOTE_DID_REF, &mutator, unsigned(count));
+        else if (target->remove_base_valid_ref(REMOTE_DID_REF, &mutator, 
+                                               unsigned(-count)))
+          delete target;
+        if (!mutator_events.empty())
+          Runtime::trigger_event(done_event, 
+              Runtime::merge_events(mutator_events));
+        else
+          Runtime::trigger_event(done_event);
       }
-      else if (target->remove_base_valid_ref(REMOTE_DID_REF, NULL,
-                                             unsigned(-count)))
-        delete target;
+      else
+      {
+        if (count > 0)
+          target->add_base_valid_ref(REMOTE_DID_REF, NULL, unsigned(count));
+        else if(target->remove_base_valid_ref(REMOTE_DID_REF, NULL, 
+                                              unsigned(-count)))
+          delete target;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1643,6 +1683,8 @@ namespace Legion {
       derez.deserialize(count);
       bool is_owner;
       derez.deserialize(is_owner);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
       DistributedCollectable *target = NULL;
       if (!is_owner)
       {
@@ -1653,40 +1695,51 @@ namespace Legion {
       }
       else
         target = runtime->find_distributed_collectable(did);
-      if (count > 0)
+      if (done_event.exists())
       {
         std::set<RtEvent> mutator_events;
         WrapperReferenceMutator mutator(mutator_events);
-        target->add_base_gc_ref(REMOTE_DID_REF, &mutator, unsigned(count));
-        RtUserEvent done_event;
-        derez.deserialize(done_event);
-        if (done_event.exists())
-        {
-          if (!mutator_events.empty())
-            Runtime::trigger_event(done_event,
-                Runtime::merge_events(mutator_events));
-          else
-            Runtime::trigger_event(done_event);
-        }
+        if (count > 0)
+          target->add_base_gc_ref(REMOTE_DID_REF, &mutator, unsigned(count));
+        else if (target->remove_base_gc_ref(REMOTE_DID_REF, &mutator, 
+                                            unsigned(-count)))
+          delete target;
+        if (!mutator_events.empty())
+          Runtime::trigger_event(done_event, 
+              Runtime::merge_events(mutator_events));
+        else
+          Runtime::trigger_event(done_event);
       }
-      else if (target->remove_base_gc_ref(REMOTE_DID_REF, NULL,
-                                          unsigned(-count)))
-        delete target;
+      else
+      {
+        if (count > 0)
+          target->add_base_gc_ref(REMOTE_DID_REF, NULL, unsigned(count));
+        else if(target->remove_base_gc_ref(REMOTE_DID_REF, NULL, 
+                                           unsigned(-count)))
+          delete target;
+      }
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void DistributedCollectable::handle_defer_remote_decrement(
-                                                               const void *args)
+    /*static*/ void 
+      DistributedCollectable::handle_defer_remote_reference_update(
+                                             Runtime *runtime, const void *args)
     //--------------------------------------------------------------------------
     {
-      const DeferRemoteDecrementArgs *dargs = 
-        (const DeferRemoteDecrementArgs*)args;
+      const DeferRemoteReferenceUpdateArgs *dargs = 
+        (const DeferRemoteReferenceUpdateArgs*)args;
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(dargs->did);
+        rez.serialize(dargs->count);
+        rez.serialize<bool>(dargs->owner);
+        rez.serialize(dargs->done_event);
+      }
       if (dargs->valid)
-        dargs->dc->send_remote_valid_decrement(dargs->target, 
-            RtEvent::NO_RT_EVENT, dargs->mutator, dargs->count);
+        runtime->send_did_remote_valid_update(dargs->target, rez);
       else
-        dargs->dc->send_remote_gc_decrement(dargs->target,
-            RtEvent::NO_RT_EVENT, dargs->mutator, dargs->count);
+        runtime->send_did_remote_gc_update(dargs->target, rez);
     }
 
     //--------------------------------------------------------------------------

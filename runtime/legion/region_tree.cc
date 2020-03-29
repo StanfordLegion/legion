@@ -6638,7 +6638,7 @@ namespace Legion {
         derez.deserialize(handle);
         IndexSpaceNode *result = get_node(handle);
         // Remove the reference that we have from when this was packed
-        result->send_remote_gc_decrement(source, RtEvent::NO_RT_EVENT);
+        result->send_remote_gc_decrement(source);
         return result;
       }
       bool is_local;
@@ -7725,7 +7725,7 @@ namespace Legion {
     {
       // If we're not the owner, we add a valid reference to the owner
       if (!is_owner())
-        send_remote_valid_increment(owner_space, mutator);
+        send_remote_valid_increment(owner_space, mutator, initialized);
     }
 
     //--------------------------------------------------------------------------
@@ -7741,7 +7741,7 @@ namespace Legion {
     void IndexSpaceNode::DestructionFunctor::apply(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-      node->send_remote_gc_decrement(target, RtEvent::NO_RT_EVENT, mutator);
+      node->send_remote_gc_decrement(target, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -7771,7 +7771,7 @@ namespace Legion {
             delete (*it);
       }
       else // Remove the valid reference that we have on the owner
-        send_remote_valid_decrement(owner_space, RtEvent::NO_RT_EVENT, mutator);
+        send_remote_valid_decrement(owner_space, mutator);
       // Traverse upwards for any parent operations
       std::vector<IndexSpaceOperation*> parents;
       {
@@ -8901,14 +8901,14 @@ namespace Legion {
     {
       // If we're not the owner, we add a valid reference to the owner
       if (!is_owner())
-        send_remote_valid_increment(owner_space, mutator);
+        send_remote_valid_increment(owner_space, mutator, initialized);
     }
 
     //--------------------------------------------------------------------------
     void IndexPartNode::DestructionFunctor::apply(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-      node->send_remote_gc_decrement(target, RtEvent::NO_RT_EVENT, mutator);
+      node->send_remote_gc_decrement(target, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -8964,7 +8964,7 @@ namespace Legion {
             delete (*it);
       }
       else // Remove the valid reference that we have on the owner
-        send_remote_valid_decrement(owner_space, RtEvent::NO_RT_EVENT, mutator);
+        send_remote_valid_decrement(owner_space, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -10403,14 +10403,14 @@ namespace Legion {
     {
       // If we're not the owner, we add a valid reference to the owner
       if (!is_owner())
-        send_remote_valid_increment(owner_space, mutator);
+        send_remote_valid_increment(owner_space, mutator, initialized);
     }
 
     //--------------------------------------------------------------------------
     void FieldSpaceNode::DestructionFunctor::apply(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-      node->send_remote_gc_decrement(target, RtEvent::NO_RT_EVENT, mutator);
+      node->send_remote_gc_decrement(target, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -10427,7 +10427,7 @@ namespace Legion {
         }
       }
       else // Remove the valid reference that we have on the owner
-        send_remote_valid_decrement(owner_space, RtEvent::NO_RT_EVENT, mutator);
+        send_remote_valid_decrement(owner_space, mutator);
     }
 
     //--------------------------------------------------------------------------

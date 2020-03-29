@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2020 Kitware, Inc.
+# Copyright 2019 Kitware, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,41 +15,21 @@
 #------------------------------------------------------------------------------#
 
 cmake_minimum_required(VERSION 3.1)
+project(LegionExample_kokkos_saxpy)
 
+# Only search if were building stand-alone and not as part of Legion
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_subdirectory(attach_file)
-add_subdirectory(circuit)
-add_subdirectory(dynamic_registration)
-add_subdirectory(ghost)
-add_subdirectory(ghost_pull)
-add_subdirectory(realm_saxpy)
-add_subdirectory(realm_stencil)
-add_subdirectory(spmd_cgsolver)
-add_subdirectory(virtual_map)
-add_subdirectory(attach_2darray_c_fortran_layout)
-add_subdirectory(attach_array_daxpy)
-add_subdirectory(implicit_top_task)
+add_executable(kokkos_saxpy kokkos_saxpy.cc)
 
-if(Legion_MPI_INTEROP)
-  add_subdirectory(mpi_interop)
-  add_subdirectory(mpi_with_ctrl_repl)
+target_link_libraries(kokkos_saxpy Kokkos::kokkoscore)
+target_link_libraries(kokkos_saxpy Legion::Legion)
+if(Legion_USE_CUDA AND (CMAKE_CXX_COMPILER_ID STREQUAL "Clang"))
+  target_compile_options(kokkos_saxpy PRIVATE --cuda-path=${CUDA_TOOLKIT_ROOT_DIR})
 endif()
 
-if(Legion_USE_CUDA)
-  add_subdirectory(thrust_interop)
-endif()
-
-if(Legion_USE_Python)
-  add_subdirectory(python_interop)
-endif()
-
-if(Legion_USE_OpenMP)
-  add_subdirectory(omp_saxpy)
-endif()
-
-if(Legion_USE_Kokkos)
-  add_subdirectory(kokkos_saxpy)
+if(Legion_ENABLE_TESTING)
+  add_test(NAME kokkos_saxpy COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:kokkos_saxpy> ${Legion_TEST_ARGS})
 endif()

@@ -36,6 +36,10 @@
 // create xd message and update bytes read/write messages
 #include "realm/transfer/channel.h"
 
+#ifdef REALM_USE_KOKKOS
+#include "realm/kokkos_interop.h"
+#endif
+
 #include <unistd.h>
 #include <signal.h>
 
@@ -1713,6 +1717,11 @@ namespace Realm {
 	  it != nodes[Network::my_node_id].processors.end();
 	  ++it)
 	(*it)->start_threads();
+
+#ifdef REALM_USE_KOKKOS
+      // now that the threads are started up, we can spin up the kokkos runtime
+      KokkosInterop::kokkos_initialize(nodes[Network::my_node_id].processors);
+#endif
     }
 
   template <typename T>
@@ -2091,6 +2100,11 @@ namespace Realm {
       //  things that try to run during teardown
       shutdown_in_progress.store(true);
       
+#ifdef REALM_USE_KOKKOS
+      // finalize the kokkos runtime
+      KokkosInterop::kokkos_finalize(nodes[Network::my_node_id].processors);
+#endif
+
       // Shutdown all the threads
 
       // threads that cause inter-node communication have to stop first

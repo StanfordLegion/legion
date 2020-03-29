@@ -179,14 +179,14 @@ namespace Legion {
         Runtime::trigger_event(applied_event, precondition);
         // Send back a response to the source removing the remote valid ref
         if (inst_view->is_logical_owner())
-          inst_view->send_remote_valid_decrement(source, precondition);
+          inst_view->send_remote_valid_decrement(source, NULL, precondition);
       }
       else
       {
         Runtime::trigger_event(applied_event);
         // Send back a response to the source removing the remote valid ref
         if (inst_view->is_logical_owner())
-          inst_view->send_remote_valid_decrement(source, RtEvent::NO_RT_EVENT);
+          inst_view->send_remote_valid_decrement(source);
       }
     }
 
@@ -417,14 +417,14 @@ namespace Legion {
         Runtime::trigger_event(applied_event, precondition);
         // Send back a response to the source removing the remote valid ref
         if (inst_view->is_logical_owner())
-          inst_view->send_remote_valid_decrement(source, precondition);
+          inst_view->send_remote_valid_decrement(source, NULL, precondition);
       }
       else
       {
         Runtime::trigger_event(applied_event);
         // Send back a response to the source removing the remote valid ref
         if (inst_view->is_logical_owner())
-          inst_view->send_remote_valid_decrement(source, RtEvent::NO_RT_EVENT);
+          inst_view->send_remote_valid_decrement(source);
       }
     }
 
@@ -3173,7 +3173,7 @@ namespace Legion {
       // If we're the logical owner but not the original owner
       // then we remove the gc reference that we added
       if (is_logical_owner() && !is_owner())
-        send_remote_gc_decrement(owner_space, RtEvent::NO_RT_EVENT, mutator);
+        send_remote_gc_decrement(owner_space, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -3198,7 +3198,7 @@ namespace Legion {
         // we have a resource reference on the manager so no need to check
         manager->remove_nested_valid_ref(did, mutator);
       else
-        send_remote_valid_decrement(logical_owner,RtEvent::NO_RT_EVENT,mutator);
+        send_remote_valid_decrement(logical_owner, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -3944,7 +3944,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!is_owner())
-        send_remote_gc_decrement(owner_space, RtEvent::NO_RT_EVENT, mutator);
+        send_remote_gc_decrement(owner_space, mutator);
     }
     
     //--------------------------------------------------------------------------
@@ -4106,7 +4106,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!is_owner())
-        send_remote_gc_decrement(owner_space, RtEvent::NO_RT_EVENT, mutator);
+        send_remote_gc_decrement(owner_space, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -5207,7 +5207,7 @@ namespace Legion {
       // If we're the logical owner but not the original owner
       // then we remove the gc reference that we added
       if (is_logical_owner() && !is_owner())
-        send_remote_gc_decrement(owner_space, RtEvent::NO_RT_EVENT, mutator);
+        send_remote_gc_decrement(owner_space, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -5232,7 +5232,7 @@ namespace Legion {
         // we have a resource reference on the manager so no need to check
         manager->remove_nested_valid_ref(did, mutator);
       else
-        send_remote_valid_decrement(logical_owner,RtEvent::NO_RT_EVENT,mutator);
+        send_remote_valid_decrement(logical_owner, mutator);
     }
 
     //--------------------------------------------------------------------------
