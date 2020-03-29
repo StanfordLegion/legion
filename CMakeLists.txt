@@ -196,6 +196,8 @@ set(BINDINGS_DEFAULT_MODULE "" CACHE STRING "module to load by default in Python
 #------------------------------------------------------------------------------#
 option(Legion_USE_CUDA "Enable support for the CUDA runtime" OFF)
 if(Legion_USE_CUDA)
+  set(Legion_CUDA_ARCH "" CACHE STRING "Comma-separated list of CUDA architectures to build for (e.g. 60,70)")
+
   if(NOT BUILD_SHARED_LIBS)
     set(CUDA_USE_STATIC_CUDA_RUNTIME ON)
   else()
@@ -211,6 +213,7 @@ if(Legion_USE_CUDA)
 
   # define variable for legion_defines.h
   set(LEGION_USE_CUDA ON)
+  set(LEGION_GPU_REDUCTIONS ON)
 
   # define variable for realm_defines.h
   set(REALM_USE_CUDA ON)

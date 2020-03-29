@@ -42,6 +42,8 @@
 #cmakedefine LEGION_USE_CUDA
 #endif
 
+#cmakedefine LEGION_GPU_REDUCTIONS
+
 #cmakedefine LEGION_USE_ZLIB
 
 #ifndef LEGION_REDOP_COMPLEX
