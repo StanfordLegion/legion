@@ -3007,6 +3007,8 @@ namespace Legion {
       DistributedCollectable* weak_find_distributed_collectable(
                                                            DistributedID did);
       bool find_pending_collectable_location(DistributedID did,void *&location);
+      void record_pending_distributed_collectable(DistributedID did);
+      void revoke_pending_distributed_collectable(DistributedID did);
     public:
       LogicalView* find_or_request_logical_view(DistributedID did,
                                                 RtEvent &ready);

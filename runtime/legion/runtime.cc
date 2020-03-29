@@ -20264,17 +20264,11 @@ namespace Legion {
                                                               DistributedID did)
     //--------------------------------------------------------------------------
     {
-      const DistributedID to_find = LEGION_DISTRIBUTED_ID_FILTER(did);
-      AutoLock d_lock(distributed_collectable_lock,1,false/*exclusive*/);
-      std::map<DistributedID,DistributedCollectable*>::const_iterator finder = 
-        dist_collectables.find(to_find);
-#ifdef DEBUG_LEGION
-      if (finder == dist_collectables.end())
-        log_run.error("Unable to find distributed collectable %llx "
-                    "with type %lld", did, LEGION_DISTRIBUTED_HELP_DECODE(did));
-      assert(finder != dist_collectables.end());
-#endif
-      return finder->second;
+      RtEvent wait_on;
+      DistributedCollectable *dc = find_distributed_collectable(did, wait_on);
+      if (wait_on.exists() && !wait_on.has_triggered())
+        wait_on.wait();
+      return dc;
     }
 
     //--------------------------------------------------------------------------
@@ -20282,26 +20276,38 @@ namespace Legion {
                                               DistributedID did, RtEvent &ready)
     //--------------------------------------------------------------------------
     {
+      bool found = false;
       const DistributedID to_find = LEGION_DISTRIBUTED_ID_FILTER(did);
-      AutoLock d_lock(distributed_collectable_lock,1,false/*exclusive*/);
-      std::map<DistributedID,DistributedCollectable*>::const_iterator finder = 
-        dist_collectables.find(to_find);
-      if (finder == dist_collectables.end())
       {
-        // Check to see if it is in the pending set too
-        std::map<DistributedID,
-          std::pair<DistributedCollectable*,RtUserEvent> >::const_iterator
-            pending_finder = pending_collectables.find(to_find);
-        if (pending_finder != pending_collectables.end())
+        AutoLock d_lock(distributed_collectable_lock,1,false/*exclusive*/);
+        std::map<DistributedID,DistributedCollectable*>::const_iterator finder =
+          dist_collectables.find(to_find);
+        if (finder == dist_collectables.end())
         {
-          ready = pending_finder->second.second;
-          return pending_finder->second.first;
+          // Check to see if it is in the pending set too
+          std::map<DistributedID,
+            std::pair<DistributedCollectable*,RtUserEvent> >::const_iterator
+              pending_finder = pending_collectables.find(to_find);
+          if (pending_finder != pending_collectables.end())
+          {
+            found = true;
+            ready = pending_finder->second.second;
+            if (pending_finder->second.first != NULL)
+              return pending_finder->second.first;
+          }
         }
+        else
+          return finder->second;
       }
-#ifdef DEBUG_LEGION
-      if (finder == dist_collectables.end())
+      if (!found)
         log_run.error("Unable to find distributed collectable %llx "
                     "with type %lld", did, LEGION_DISTRIBUTED_HELP_DECODE(did));
+      // Wait for it to be ready
+      ready.wait();
+      AutoLock d_lock(distributed_collectable_lock,1,false/*exclusive*/);
+      std::map<DistributedID,DistributedCollectable*>::const_iterator finder =
+          dist_collectables.find(to_find);
+#ifdef DEBUG_LEGION
       assert(finder != dist_collectables.end());
 #endif
       return finder->second;
@@ -20339,6 +20345,40 @@ namespace Legion {
         return true;
       }
       return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::record_pending_distributed_collectable(DistributedID did)
+    //--------------------------------------------------------------------------
+    {
+      const RtUserEvent registered = Runtime::create_rt_user_event();
+      AutoLock d_lock(distributed_collectable_lock);
+#ifdef DEBUG_LEGION
+      assert(dist_collectables.find(did) == dist_collectables.end());
+      assert(pending_collectables.find(did) == pending_collectables.end());
+#endif
+      pending_collectables[did] = 
+        std::pair<DistributedCollectable*,RtUserEvent>(NULL, registered);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::revoke_pending_distributed_collectable(DistributedID did)
+    //--------------------------------------------------------------------------
+    {
+      RtUserEvent to_trigger;
+      {
+        AutoLock d_lock(distributed_collectable_lock);
+        std::map<DistributedID,
+          std::pair<DistributedCollectable*,RtUserEvent> >::iterator finder =
+            pending_collectables.find(did);
+#ifdef DEBUG_LEGION
+        assert(finder != pending_collectables.end());
+        assert(finder->second.first == NULL);
+#endif
+        to_trigger = finder->second.second;
+        pending_collectables.erase(finder);
+      }
+      Runtime::trigger_event(to_trigger);
     }
 
     //--------------------------------------------------------------------------

@@ -9390,6 +9390,7 @@ namespace Legion {
         {
           const ISBroadcast value = collective.first->get_value(false);
           runtime->forest->revoke_pending_index_space(value.space_id);
+          runtime->revoke_pending_distributed_collectable(value.did);
           runtime->free_distributed_id(value.did);
         }
         else
@@ -9410,6 +9411,7 @@ namespace Legion {
         {
           const IPBroadcast value = collective.first->get_value(false);
           runtime->forest->revoke_pending_partition(value.pid);
+          runtime->revoke_pending_distributed_collectable(value.did);
           runtime->free_distributed_id(value.did);
         }
         else
@@ -9430,6 +9432,7 @@ namespace Legion {
         {
           const FSBroadcast value = collective.first->get_value(false);
           runtime->forest->revoke_pending_field_space(value.space_id);
+          runtime->revoke_pending_distributed_collectable(value.did);
           runtime->free_distributed_id(value.did);
         }
         else
@@ -9818,6 +9821,7 @@ namespace Legion {
         else
           Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
+        runtime->revoke_pending_distributed_collectable(value.did);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)",
                         handle.id, get_task_name(), get_unique_id());
@@ -9874,15 +9878,16 @@ namespace Legion {
         if (owner_shard->shard_id == index_space_allocator_shard)
         {
           const IndexSpaceID space_id = runtime->get_unique_index_space_id(); 
+          const DistributedID did = runtime->get_available_distributed_id();
           // We're the owner, so make it locally and then broadcast it
           runtime->forest->record_pending_index_space(space_id);
+          runtime->record_pending_distributed_collectable(did);
           // Do our arrival on this generation, should be the last one
           ValueBroadcast<ISBroadcast> *collective = 
             new ValueBroadcast<ISBroadcast>(this, COLLECTIVE_LOC_3);
           collective->broadcast(ISBroadcast(space_id,
                 runtime->get_unique_index_tree_id(),
-                runtime->get_unique_index_space_expr_id(), 
-                runtime->get_available_distributed_id(), double_next));
+                runtime->get_unique_index_space_expr_id(), did, double_next));
           pending_index_spaces.push_back(
               std::pair<ValueBroadcast<ISBroadcast>*,bool>(collective, true));
         }
@@ -9938,6 +9943,7 @@ namespace Legion {
         else
           Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
+        runtime->revoke_pending_distributed_collectable(value.did);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)",
                         handle.id, get_task_name(), get_unique_id());
@@ -10034,6 +10040,7 @@ namespace Legion {
         else
           Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
+        runtime->revoke_pending_distributed_collectable(value.did);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)",
                         handle.id, get_task_name(), get_unique_id());
@@ -10127,6 +10134,7 @@ namespace Legion {
         else
           Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
+        runtime->revoke_pending_distributed_collectable(value.did);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)",
                         handle.id, get_task_name(), get_unique_id());
@@ -10211,6 +10219,7 @@ namespace Legion {
         else
           Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
+        runtime->revoke_pending_distributed_collectable(value.did);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)",
                         handle.id, get_task_name(), get_unique_id());
@@ -10375,13 +10384,14 @@ namespace Legion {
         if (owner_shard->shard_id == index_partition_allocator_shard)
         {
           const IndexPartitionID pid = runtime->get_unique_index_partition_id();
+          const DistributedID did = runtime->get_available_distributed_id();
           // We're the owner, so make it locally and then broadcast it
           runtime->forest->record_pending_partition(pid);
+          runtime->record_pending_distributed_collectable(did);
           // Do our arrival on this generation, should be the last one
           ValueBroadcast<IPBroadcast> *collective = 
             new ValueBroadcast<IPBroadcast>(this, COLLECTIVE_LOC_7);
-          collective->broadcast(IPBroadcast(pid,
-                runtime->get_available_distributed_id(), double_next));
+          collective->broadcast(IPBroadcast(pid, did, double_next));
           pending_index_partitions.push_back(
               std::pair<ValueBroadcast<IPBroadcast>*,ShardID>(collective, 
                                         index_partition_allocator_shard));
@@ -10445,6 +10455,7 @@ namespace Legion {
         // Signal that we're done our creation
         Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/, safe_event);
         runtime->forest->revoke_pending_partition(value.pid);
+        runtime->revoke_pending_distributed_collectable(value.did);
       }
       else
       {
@@ -11984,6 +11995,7 @@ namespace Legion {
         else
           Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/); 
         runtime->forest->revoke_pending_field_space(value.space_id);
+        runtime->revoke_pending_distributed_collectable(value.did);
 #ifdef DEBUG_LEGION
         log_field.debug("Creating field space %x in task %s (ID %lld)", 
                         space.id, get_task_name(), get_unique_id());
@@ -12039,13 +12051,14 @@ namespace Legion {
         if (owner_shard->shard_id == field_space_allocator_shard)
         {
           const FieldSpaceID space = runtime->get_unique_field_space_id();
+          const DistributedID did = runtime->get_available_distributed_id();
           // We're the owner, so make it locally and then broadcast it
           runtime->forest->record_pending_field_space(space);
+          runtime->record_pending_distributed_collectable(did);
           // Do our arrival on this generation, should be the last one
           ValueBroadcast<FSBroadcast> *collective = 
             new ValueBroadcast<FSBroadcast>(this, COLLECTIVE_LOC_31);
-          collective->broadcast(FSBroadcast(space, 
-                runtime->get_available_distributed_id(), double_next));
+          collective->broadcast(FSBroadcast(space, did, double_next));
           pending_field_spaces.push_back(
               std::pair<ValueBroadcast<FSBroadcast>*,bool>(collective, true));
         }
