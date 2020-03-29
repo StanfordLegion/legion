@@ -4433,7 +4433,7 @@ namespace Legion {
     {
       if (target == owner)
         return;
-      view->send_remote_gc_decrement(target, RtEvent::NO_RT_EVENT, mutator); 
+      view->send_remote_gc_decrement(target, mutator); 
     }
     
     //--------------------------------------------------------------------------
@@ -4461,7 +4461,7 @@ namespace Legion {
             delete (*it);
       }
       else
-        send_remote_valid_decrement(owner_space, RtEvent::NO_RT_EVENT, mutator);
+        send_remote_valid_decrement(owner_space, mutator);
     }
 
     //--------------------------------------------------------------------------
