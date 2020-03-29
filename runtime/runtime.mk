@@ -392,8 +392,7 @@ LEGION_LD_FLAGS	+= -L$(CUDA)/lib64 -L$(CUDA)/lib64/stubs -lcudart -lcuda -Xlinke
 endif
 endif
 # Add support for Legion GPU reductions
-CC_FLAGS	+= -DLEGION_GPU_REDUCTIONS
-NVCC_FLAGS	+= -DLEGION_GPU_REDUCTIONS
+LEGION_CC_FLAGS	+= -DLEGION_GPU_REDUCTIONS
 # Convert CXXFLAGS and CPPFLAGS to NVCC_FLAGS
 # Need to detect whether nvcc supports them directly or to use -Xcompiler
 NVCC_FLAGS	+= $(shell for FLAG in $(CXXFLAGS); do \
