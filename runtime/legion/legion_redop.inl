@@ -150,7 +150,7 @@ namespace Legion {
 
     // GPU atomics need 4 byte alignment
     char *ptr = (char*)&rhs1;
-    switch ((((unsigned long long)ptr) % 4) == 0) {
+    switch (((unsigned long long)ptr) % 4) {
       CASE(x, 0)
       CASE(y, 1)
       CASE(z, 2)
@@ -382,7 +382,7 @@ namespace Legion {
 
     // GPU atomics need 4 byte alignment
     char *ptr = (char*)&rhs1;
-    switch ((((unsigned long long)ptr) % 4) == 0) {
+    switch (((unsigned long long)ptr) % 4) {
       CASE(x, 0)
       CASE(y, 1)
       CASE(z, 2)
@@ -1000,7 +1000,7 @@ namespace Legion {
 
     // GPU atomics need 4 byte alignment
     char *ptr = (char*)&rhs1;
-    switch ((((unsigned long long)ptr) % 4) == 0) {
+    switch (((unsigned long long)ptr) % 4) {
       CASE(x, 0)
       CASE(y, 1)
       CASE(z, 2)
@@ -1232,7 +1232,7 @@ namespace Legion {
 
     // GPU atomics need 4 byte alignment
     char *ptr = (char*)&rhs1;
-    switch ((((unsigned long long)ptr) % 4) == 0) {
+    switch (((unsigned long long)ptr) % 4) {
       CASE(x, 0)
       CASE(y, 1)
       CASE(z, 2)
@@ -1846,7 +1846,7 @@ namespace Legion {
 
     // GPU atomics need 4 byte alignment
     char *ptr = (char*)&rhs1;
-    switch ((((unsigned long long)ptr) % 4) == 0) {
+    switch (((unsigned long long)ptr) % 4) {
       CASE(x, 0)
       CASE(y, 1)
       CASE(z, 2)
@@ -2130,7 +2130,7 @@ namespace Legion {
 
     // GPU atomics need 4 byte alignment
     char *ptr = (char*)&rhs1;
-    switch ((((unsigned long long)ptr) % 4) == 0) {
+    switch (((unsigned long long)ptr) % 4) {
       CASE(x, 0)
       CASE(y, 1)
       CASE(z, 2)
@@ -2730,7 +2730,7 @@ namespace Legion {
 
     // GPU atomics need 4 byte alignment
     char *ptr = (char*)&rhs1;
-    switch ((((unsigned long long)ptr) % 4) == 0) {
+    switch (((unsigned long long)ptr) % 4) {
       CASE(x, 0)
       CASE(y, 1)
       CASE(z, 2)
@@ -3014,7 +3014,7 @@ namespace Legion {
 
     // GPU atomics need 4 byte alignment
     char *ptr = (char*)&rhs1;
-    switch ((((unsigned long long)ptr) % 4) == 0) {
+    switch (((unsigned long long)ptr) % 4) {
       CASE(x, 0)
       CASE(y, 1)
       CASE(z, 2)
@@ -3684,7 +3684,7 @@ namespace Legion {
 
     // GPU atomics need 4 byte alignment
     char *ptr = (char*)&rhs1;
-    switch ((((unsigned long long)ptr) % 4) == 0) {
+    switch (((unsigned long long)ptr) % 4) {
       CASE(x, 0)
       CASE(y, 1)
       CASE(z, 2)
@@ -4009,7 +4009,7 @@ namespace Legion {
 
     // GPU atomics need 4 byte alignment
     char *ptr = (char*)&rhs1;
-    switch ((((unsigned long long)ptr) % 4) == 0) {
+    switch (((unsigned long long)ptr) % 4) {
       CASE(x, 0)
       CASE(y, 1)
       CASE(z, 2)
@@ -4629,7 +4629,7 @@ namespace Legion {
 
     // GPU atomics need 4 byte alignment
     char *ptr = (char*)&rhs1;
-    switch ((((unsigned long long)ptr) % 4) == 0) {
+    switch (((unsigned long long)ptr) % 4) {
       CASE(x, 0)
       CASE(y, 1)
       CASE(z, 2)
@@ -4952,7 +4952,7 @@ namespace Legion {
 
     // GPU atomics need 4 byte alignment
     char *ptr = (char*)&rhs1;
-    switch ((((unsigned long long)ptr) % 4) == 0) {
+    switch (((unsigned long long)ptr) % 4) {
       CASE(x, 0)
       CASE(y, 1)
       CASE(z, 2)
@@ -5494,7 +5494,7 @@ namespace Legion {
 
     // GPU atomics need 4 byte alignment
     char *ptr = (char*)&rhs1;
-    switch ((((unsigned long long)ptr) % 4) == 0) {
+    switch (((unsigned long long)ptr) % 4) {
       CASE(x, 0)
       CASE(y, 1)
       CASE(z, 2)
@@ -5778,7 +5778,7 @@ namespace Legion {
 
     // GPU atomics need 4 byte alignment
     char *ptr = (char*)&rhs1;
-    switch ((((unsigned long long)ptr) % 4) == 0) {
+    switch (((unsigned long long)ptr) % 4) {
       CASE(x, 0)
       CASE(y, 1)
       CASE(z, 2)
@@ -6062,7 +6062,7 @@ namespace Legion {
 
     // GPU atomics need 4 byte alignment
     char *ptr = (char*)&rhs1;
-    switch ((((unsigned long long)ptr) % 4) == 0) {
+    switch (((unsigned long long)ptr) % 4) {
       CASE(x, 0)
       CASE(y, 1)
       CASE(z, 2)
@@ -6346,7 +6346,7 @@ namespace Legion {
 
     // GPU atomics need 4 byte alignment
     char *ptr = (char*)&rhs1;
-    switch ((((unsigned long long)ptr) % 4) == 0) {
+    switch (((unsigned long long)ptr) % 4) {
       CASE(x, 0)
       CASE(y, 1)
       CASE(z, 2)
@@ -6694,7 +6694,7 @@ namespace Legion {
 
     // GPU atomics need 4 byte alignment
     char *ptr = (char*)&rhs1;
-    switch ((((unsigned long long)ptr) % 4) == 0) {
+    switch (((unsigned long long)ptr) % 4) {
       CASE(x, 0)
       CASE(y, 1)
       CASE(z, 2)
@@ -6935,7 +6935,7 @@ namespace Legion {
 
     // GPU atomics need 4 byte alignment
     char *ptr = (char*)&lhs;
-    switch ((((unsigned long long)ptr) % 4) == 0) {
+    switch (((unsigned long long)ptr) % 4) {
       CASE(x, 0)
       CASE(y, 1)
       CASE(z, 2)
@@ -6978,7 +6978,7 @@ namespace Legion {
 
     // GPU atomics need 4 byte alignment
     char *ptr = (char*)&rhs1;
-    switch ((((unsigned long long)ptr) % 4) == 0) {
+    switch (((unsigned long long)ptr) % 4) {
       CASE(x, 0)
       CASE(y, 1)
       CASE(z, 2)
