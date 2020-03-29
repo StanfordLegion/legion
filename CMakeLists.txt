@@ -376,6 +376,9 @@ set(ENABLE_LEGION_TLS ${Legion_ENABLE_TLS})
 option(Legion_WARNINGS_FATAL "Make all runtime warnings fatal" OFF)
 set(LEGION_WARNINGS_FATAL ${Legion_WARNINGS_FATAL})
 
+option(Legion_SPY "Enable detailed logging for Legion Spy" OFF)
+set(LEGION_SPY ${Legion_SPY})
+
 #------------------------------------------------------------------------------#
 # Runtime library targets
 #------------------------------------------------------------------------------#

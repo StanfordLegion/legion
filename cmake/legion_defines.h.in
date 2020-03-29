@@ -58,3 +58,4 @@
 
 #cmakedefine LEGION_USE_HDF5
 
+#cmakedefine LEGION_SPY
