@@ -10536,6 +10536,14 @@ namespace Legion {
           if (next->remove_base_resource_ref(RUNTIME_REF))
             delete (next);
         }
+        // We can also delete all of our reduction operators
+        ReductionOpTable &redop_table = get_reduction_table(true/*safe*/);
+        while (!redop_table.empty())
+        {
+          ReductionOpTable::iterator it = redop_table.begin();
+          delete it->second;
+          redop_table.erase(it);
+        }
       }
       for (std::map<Memory,MemoryManager*>::const_iterator it =
             memory_managers.begin(); it != memory_managers.end(); it++)
