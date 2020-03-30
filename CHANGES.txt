@@ -15,6 +15,11 @@ Version 20.03.0 (March ??, 2020)
         statements
     - Fixed several bugs, memory leaks and improved compile times
   * Realm
+    - Support for Kokkos parallel launch constructs in Realm (and therefore
+        Legion) tasks.  Currently supported Kokkos execution spaces
+	are: Serial, OpenMP, CUDA.  Application data remains in logical
+	regions, but accessors can be converted to Kokkos (unmanaged) Views
+	if needed.  See the `kokkos_interop` example
     - Introduction of experimental MPI-based network layer, enabled with
         `REALM_NETWORKS=mpi` (make) or `-DRealm_NETWORKS=mpi` (cmake).
 	Use `REALM_NETWORKS=gasnet1` (or USE_GASNET=1, which still works)
