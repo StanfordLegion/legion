@@ -74,8 +74,7 @@ for dim in range(1, 9):
 assert _max_dim is not None, 'Unable to detect LEGION_MAX_DIM'
 
 # Can't seem to pull this out of the header, so reproduce it here.
-import struct
-AUTO_GENERATE_ID = 2 ** (struct.Struct('i').size * 8 - 1) - 1
+AUTO_GENERATE_ID = 2 ** (ffi.sizeof('int') * 8 - 1) - 1
 
 # Note: don't use __file__ here, it may return either .py or .pyc and cause
 # non-deterministic failures.
