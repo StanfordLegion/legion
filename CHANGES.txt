@@ -34,6 +34,10 @@ Version 20.03.0 (March ??, 2020)
 	over busy GPUs, and `-cuda:minavailmem M` which skips GPUs with less
 	than M device memory available
     - Reduction in memory usage of Realm internal data structures
+  * Legion Prof
+    - Instance layout constraints related to dimension ordering
+        and field alignnment
+    - Menu option for viewing ready state of operations
 
 Version 19.12.0 (December 31, 2019)
   * Build
