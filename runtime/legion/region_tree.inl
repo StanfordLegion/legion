@@ -137,7 +137,6 @@ namespace Legion {
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
 #ifdef LEGION_SPY
-                                 FieldSpace handle,
                                  RegionTreeID src_tree_id,
                                  RegionTreeID dst_tree_id,
 #endif
@@ -220,7 +219,7 @@ namespace Legion {
       {
         trace_info.record_issue_copy(result, this, src_fields, dst_fields,
 #ifdef LEGION_SPY
-                                     handle, src_tree_id, dst_tree_id,
+                                     src_tree_id, dst_tree_id,
 #endif
                                      precondition, redop, reduction_fold,
                                      tracing_srcs, tracing_dsts);
@@ -236,7 +235,7 @@ namespace Legion {
 #ifdef LEGION_SPY
       assert(trace_info.op != NULL);
       LegionSpy::log_copy_events(trace_info.op->get_unique_op_id(), 
-          expr_id, handle, src_tree_id, dst_tree_id, precondition, result);
+          expr_id, src_tree_id, dst_tree_id, precondition, result);
       for (unsigned idx = 0; idx < src_fields.size(); idx++)
         LegionSpy::log_copy_field(result, src_fields[idx].field_id,
                                   src_fields[idx].inst_event,
@@ -258,6 +257,10 @@ namespace Legion {
                                             IndirectRecord>::aligned &records,
                                      std::vector<void*> &indirects,
                                      std::vector<unsigned> &indirect_indexes,
+#ifdef LEGION_SPY
+                                     unsigned unique_indirections_identifier,
+                                     const ApEvent indirect_inst_event,
+#endif
                                      const bool possible_out_of_range,
                                      const bool possible_aliasing)
     //--------------------------------------------------------------------------
@@ -292,6 +295,14 @@ namespace Legion {
         NT_TemplateHelper::demux<UnstructuredIndirectionHelper<DIM,T> >(
             indirect_type, &helper);
         indirections[offset+index] = helper.result;
+#ifdef LEGION_SPY
+        LegionSpy::log_indirect_instance(unique_indirections_identifier,
+            offset+index, indirect_inst_event, indirect_field);
+        for (std::set<IndirectRecord*>::const_iterator rit = 
+              it->elements.begin(); rit != it->elements.end(); rit++)
+          LegionSpy::log_indirect_group(unique_indirections_identifier,
+            offset+index, (*rit)->instance_event, (*rit)->index_space.get_id());
+#endif
       }
       // For each field find it's indirection and record it
 #ifdef DEBUG_LEGION
@@ -343,6 +354,9 @@ namespace Legion {
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
                                  const std::vector<void*> &indirects,
+#ifdef LEGION_SPY
+                                 unsigned unique_indirections_identifier,
+#endif
                                  ApEvent precondition, PredEvent pred_guard)
     //--------------------------------------------------------------------------
     {
@@ -405,18 +419,16 @@ namespace Legion {
 #endif
 #ifdef LEGION_SPY
       assert(trace_info.op != NULL);
-#if 0
-      LegionSpy::log_copy_events(trace_info.op->get_unique_op_id(), 
-          expr_id, handle, src_tree_id, dst_tree_id, precondition, result);
+      LegionSpy::log_indirect_events(trace_info.op->get_unique_op_id(), 
+         expr_id, unique_indirections_identifier, precondition, result);
       for (unsigned idx = 0; idx < src_fields.size(); idx++)
-        LegionSpy::log_copy_field(result, src_fields[idx].field_id,
-                                  src_fields[idx].inst_event,
-                                  dst_fields[idx].field_id,
-                                  dst_fields[idx].inst_event, redop);
-#else
-      // TODO: Legion Spy for indirect copies
-      assert(false);
-#endif
+        LegionSpy::log_indirect_field(result, src_fields[idx].field_id,
+                                      src_fields[idx].inst_event,
+                                      src_fields[idx].indirect_index,
+                                      dst_fields[idx].field_id,
+                                      dst_fields[idx].inst_event, 
+                                      dst_fields[idx].indirect_index,
+                                      dst_fields[idx].redop_id);
 #endif
       return result;
     }
@@ -910,7 +922,6 @@ namespace Legion {
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
 #ifdef LEGION_SPY
-                                 FieldSpace handle, 
                                  RegionTreeID src_tree_id,
                                  RegionTreeID dst_tree_id,
 #endif
@@ -926,7 +937,7 @@ namespace Legion {
         return issue_copy_internal(context, local_space, trace_info, 
             dst_fields, src_fields,
 #ifdef LEGION_SPY
-            handle, src_tree_id, dst_tree_id,
+            src_tree_id, dst_tree_id,
 #endif
             Runtime::merge_events(&trace_info, precondition, space_ready),
             pred_guard, redop, reduction_fold, tracing_srcs, tracing_dsts);
@@ -934,7 +945,7 @@ namespace Legion {
         return issue_copy_internal(context, local_space, trace_info, 
                 dst_fields, src_fields, 
 #ifdef LEGION_SPY
-                handle, src_tree_id, dst_tree_id,
+                src_tree_id, dst_tree_id,
 #endif
                 space_ready, pred_guard, redop, reduction_fold,
                 tracing_srcs, tracing_dsts);
@@ -942,7 +953,7 @@ namespace Legion {
         return issue_copy_internal(context, local_space, trace_info, 
                 dst_fields, src_fields, 
 #ifdef LEGION_SPY
-                handle, src_tree_id, dst_tree_id,
+                src_tree_id, dst_tree_id,
 #endif
                 precondition, pred_guard, redop, reduction_fold,
                 tracing_srcs, tracing_dsts);
@@ -960,6 +971,10 @@ namespace Legion {
                                             IndirectRecord>::aligned &records,
                                      std::vector<void*> &indirections,
                                      std::vector<unsigned> &indirect_indexes,
+#ifdef LEGION_SPY
+                                     unsigned unique_indirections_identifier,
+                                     const ApEvent indirect_event,
+#endif
                                      const bool possible_out_of_range,
                                      const bool possible_aliasing)
     //--------------------------------------------------------------------------
@@ -967,6 +982,9 @@ namespace Legion {
       construct_indirections_internal<DIM,T>(field_indexes, indirect_field,
                                  indirect_type, is_range, indirect_instance, 
                                  records, indirections, indirect_indexes,
+#ifdef LEGION_SPY
+                                 unique_indirections_identifier, indirect_event,
+#endif
                                  possible_out_of_range, possible_aliasing);
     }
 
@@ -986,6 +1004,9 @@ namespace Legion {
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
                                  const std::vector<void*> &indirects,
+#ifdef LEGION_SPY
+                                 unsigned unique_indirections_identifier,
+#endif
                                  ApEvent precondition, PredEvent pred_guard)
     //--------------------------------------------------------------------------
     {
@@ -994,15 +1015,24 @@ namespace Legion {
       if (space_ready.exists() && precondition.exists())
         return issue_indirect_internal(context, local_space, trace_info, 
             dst_fields, src_fields, indirects,
+#ifdef LEGION_SPY
+            unique_indirections_identifier,
+#endif
             Runtime::merge_events(&trace_info, precondition, space_ready),
             pred_guard);
       else if (space_ready.exists())
         return issue_indirect_internal(context, local_space, trace_info, 
                                        dst_fields, src_fields, indirects, 
+#ifdef LEGION_SPY
+                                       unique_indirections_identifier,
+#endif
                                        space_ready, pred_guard);
       else
         return issue_indirect_internal(context, local_space, trace_info, 
                                        dst_fields, src_fields, indirects,
+#ifdef LEGION_SPY
+                                       unique_indirections_identifier,
+#endif
                                        precondition, pred_guard);
     }
 
@@ -4366,7 +4396,6 @@ namespace Legion {
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
 #ifdef LEGION_SPY
-                                 FieldSpace handle,
                                  RegionTreeID src_tree_id,
                                  RegionTreeID dst_tree_id,
 #endif
@@ -4382,7 +4411,7 @@ namespace Legion {
         return issue_copy_internal(context, local_space, trace_info, dst_fields,
             src_fields,
 #ifdef LEGION_SPY
-            handle, src_tree_id, dst_tree_id,
+            src_tree_id, dst_tree_id,
 #endif
             Runtime::merge_events(&trace_info, space_ready, precondition),
             pred_guard, redop, reduction_fold, tracing_srcs, tracing_dsts);
@@ -4390,7 +4419,7 @@ namespace Legion {
         return issue_copy_internal(context, local_space, trace_info, 
                 dst_fields, src_fields, 
 #ifdef LEGION_SPY
-                handle, src_tree_id, dst_tree_id,
+                src_tree_id, dst_tree_id,
 #endif
                 space_ready, pred_guard, redop, reduction_fold,
                 tracing_srcs, tracing_dsts);
@@ -4398,7 +4427,7 @@ namespace Legion {
         return issue_copy_internal(context, local_space, trace_info, 
                 dst_fields, src_fields, 
 #ifdef LEGION_SPY
-                handle, src_tree_id, dst_tree_id,
+                src_tree_id, dst_tree_id,
 #endif
                 precondition, pred_guard, redop, reduction_fold,
                 tracing_srcs, tracing_dsts);
@@ -4416,6 +4445,10 @@ namespace Legion {
                                             IndirectRecord>::aligned &records,
                                      std::vector<void*> &indirections,
                                      std::vector<unsigned> &indirect_indexes,
+#ifdef LEGION_SPY
+                                     unsigned unique_indirections_identifier,
+                                     const ApEvent indirect_event,
+#endif
                                      const bool possible_out_of_range,
                                      const bool possible_aliasing)
     //--------------------------------------------------------------------------
@@ -4423,6 +4456,9 @@ namespace Legion {
       construct_indirections_internal<DIM,T>(field_indexes, indirect_field,
                                  indirect_type, is_range, indirect_instance,
                                  records, indirections, indirect_indexes,
+#ifdef LEGION_SPY
+                                 unique_indirections_identifier, indirect_event,
+#endif
                                  possible_out_of_range, possible_aliasing);
     }
 
@@ -4442,6 +4478,9 @@ namespace Legion {
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
                                  const std::vector<void*> &indirects,
+#ifdef LEGION_SPY
+                                 unsigned unique_indirections_identifier,
+#endif
                                  ApEvent precondition, PredEvent pred_guard)
     //--------------------------------------------------------------------------
     {
@@ -4450,15 +4489,24 @@ namespace Legion {
       if (space_ready.exists() && precondition.exists())
         return issue_indirect_internal(context, local_space, trace_info, 
             dst_fields, src_fields, indirects,
+#ifdef LEGION_SPY
+            unique_indirections_identifier,
+#endif
             Runtime::merge_events(&trace_info, precondition, space_ready),
             pred_guard);
       else if (space_ready.exists())
         return issue_indirect_internal(context, local_space, trace_info, 
                                        dst_fields, src_fields, indirects, 
+#ifdef LEGION_SPY
+                                       unique_indirections_identifier,
+#endif
                                        space_ready, pred_guard);
       else
         return issue_indirect_internal(context, local_space, trace_info, 
                                        dst_fields, src_fields, indirects,
+#ifdef LEGION_SPY
+                                       unique_indirections_identifier,
+#endif
                                        precondition, pred_guard);
     }
 

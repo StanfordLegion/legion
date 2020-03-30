@@ -10054,6 +10054,9 @@ namespace Legion {
                         ((unique == 0) ? runtime_stride : unique)),
         unique_constraint_id((unique == 0) ? runtime_stride : unique),
         unique_is_expr_id((unique == 0) ? runtime_stride : unique),
+#ifdef LEGION_SPY
+        unique_indirections_id((unique == 0) ? runtime_stride : unique),
+#endif
         unique_task_id(get_current_static_task_id()+unique),
         unique_mapper_id(get_current_static_mapper_id()+unique),
         unique_trace_id(get_current_static_trace_id()+unique),
@@ -19574,6 +19577,21 @@ namespace Legion {
 #endif
       return result;
     }
+
+#ifdef LEGION_SPY
+    //--------------------------------------------------------------------------
+    unsigned Runtime::get_unique_indirections_id(void)
+    //--------------------------------------------------------------------------
+    {
+      unsigned result = __sync_fetch_and_add(&unique_indirections_id,
+                                             runtime_stride);
+#ifdef DEBUG_LEGION
+      // check for overflow
+      assert(result <= unique_indirections_id);
+#endif
+      return result;
+    }
+#endif
 
     //--------------------------------------------------------------------------
     LegionErrorType Runtime::verify_requirement(
