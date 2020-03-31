@@ -1045,7 +1045,6 @@ namespace Legion {
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
 #ifdef LEGION_SPY
-                             FieldSpace handle,
                              RegionTreeID src_tree_id,
                              RegionTreeID dst_tree_id,
 #endif
