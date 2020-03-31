@@ -2117,6 +2117,12 @@ extern "C" {
   legion_field_allocator_destroy(legion_field_allocator_t handle);
 
   /**
+   * This will give the value of the macro AUTO_GENERATE_ID
+   */
+  legion_field_id_t
+  legion_auto_generate_field_id(void);
+
+  /**
    * @see Legion::FieldAllocator::allocate_field()
    */
   legion_field_id_t

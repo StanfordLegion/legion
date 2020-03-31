@@ -2495,6 +2495,12 @@ legion_field_allocator_destroy(legion_field_allocator_t handle_)
 }
 
 legion_field_id_t
+legion_auto_generate_field_id(void)
+{
+  return AUTO_GENERATE_ID;
+}
+
+legion_field_id_t
 legion_field_allocator_allocate_field(legion_field_allocator_t allocator_,
                                       size_t field_size,
                                       legion_field_id_t desired_fieldid)
