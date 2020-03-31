@@ -740,6 +740,15 @@ function specialize.expr_raw_fields(cx, node, allow_lists)
   }
 end
 
+function specialize.expr_raw_future(cx, node, allow_lists)
+  return ast.specialized.expr.RawFuture {
+    value_type = node.value_type_expr(cx.env:env()),
+    value = specialize.expr(cx, node.value),
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
 function specialize.expr_raw_physical(cx, node, allow_lists)
   return ast.specialized.expr.RawPhysical {
     region = specialize.expr_region_root(cx, node.region),
@@ -1332,6 +1341,9 @@ function specialize.expr(cx, node, allow_lists)
 
   elseif node:is(ast.unspecialized.expr.RawFields) then
     return specialize.expr_raw_fields(cx, node, allow_lists)
+
+  elseif node:is(ast.unspecialized.expr.RawFuture) then
+    return specialize.expr_raw_future(cx, node, allow_lists)
 
   elseif node:is(ast.unspecialized.expr.RawPhysical) then
     return specialize.expr_raw_physical(cx, node, allow_lists)

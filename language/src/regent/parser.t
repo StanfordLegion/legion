@@ -557,6 +557,19 @@ function parser.expr_prefix(p)
       span = ast.span(start, p),
     }
 
+  elseif p:nextif("__future") then
+    p:expect("(")
+    local value_type_expr = p:luaexpr()
+    p:expect(",")
+    local value = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.RawFuture {
+      value_type_expr = value_type_expr,
+      value = value,
+      annotations = ast.default_annotations(),
+      span = ast.span(start, p),
+    }
+
   elseif p:nextif("__physical") then
     p:expect("(")
     local region = p:expr_region_root()
