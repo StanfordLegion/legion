@@ -3,12 +3,12 @@
  * Public-facing definitions of variables configured at build time
  */
 
-// ******************** IMPORTANT **************************
-//
-// This file is PURE C, **NOT** C++. Keep any C++-isms in
-// legion_types.h, or elsewhere.
-//
-// ******************** IMPORTANT **************************
+/********************** IMPORTANT **************************
+ *
+ * This file is PURE C, **NOT** C++. Keep any C++-isms in
+ * legion_types.h, or elsewhere.
+ *
+ ******************** IMPORTANT ****************************/
 
 #ifndef DEBUG_LEGION
 #cmakedefine DEBUG_LEGION
@@ -42,6 +42,8 @@
 #cmakedefine LEGION_USE_CUDA
 #endif
 
+#cmakedefine LEGION_GPU_REDUCTIONS
+
 #cmakedefine LEGION_USE_ZLIB
 
 #ifndef LEGION_REDOP_COMPLEX
@@ -58,3 +60,4 @@
 
 #cmakedefine LEGION_USE_HDF5
 
+#cmakedefine LEGION_SPY

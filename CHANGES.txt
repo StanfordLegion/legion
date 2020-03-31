@@ -14,7 +14,18 @@ Version 20.03.0 (March ??, 2020)
     - Initial support for predicated execution of `if` and `while`
         statements
     - Fixed several bugs, memory leaks and improved compile times
+  * Legion
+    - Introduction of Fortran bindings for Legion
+    - Support for creating deferred index spaces from future values
+    - Support for construction of partitions from a map of domains or
+      from a future map
+    - Support for reducing a future map to a single future asynchronously
   * Realm
+    - Support for Kokkos parallel launch constructs in Realm (and therefore
+        Legion) tasks.  Currently supported Kokkos execution spaces
+	are: Serial, OpenMP, CUDA.  Application data remains in logical
+	regions, but accessors can be converted to Kokkos (unmanaged) Views
+	if needed.  See the `kokkos_interop` example
     - Introduction of experimental MPI-based network layer, enabled with
         `REALM_NETWORKS=mpi` (make) or `-DRealm_NETWORKS=mpi` (cmake).
 	Use `REALM_NETWORKS=gasnet1` (or USE_GASNET=1, which still works)
@@ -29,6 +40,15 @@ Version 20.03.0 (March ??, 2020)
 	over busy GPUs, and `-cuda:minavailmem M` which skips GPUs with less
 	than M device memory available
     - Reduction in memory usage of Realm internal data structures
+  * Tools
+    - There is a now a generic launcher script for running Python code
+        with Legion that will execute an aribtrary Python program in the 
+        top-level task of a Legion program. This script mirrors the interface
+        to CPython as closely as possible. 
+    - Legion Spy now supports verification and rendering of indirection copies
+    - Legion Prof supports Instance layout constraints related to dimension 
+        ordering and field alignnment
+    - Legion Prof contains a menu option for viewing ready state of operations
 
 Version 19.12.0 (December 31, 2019)
   * Build

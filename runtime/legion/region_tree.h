@@ -49,12 +49,15 @@ namespace Legion {
     struct IndirectRecord {
     public:
       IndirectRecord(void) { }
-      IndirectRecord(const FieldMask &m, PhysicalInstance i,
-                     ApEvent e, const Domain &d)
-        : fields(m), inst(i), ready_event(e), domain(d) { }
+      IndirectRecord(const FieldMask &m, PhysicalManager *p,
+                     IndexSpace handle, ApEvent e, const Domain &d);
     public:
       FieldMask fields;
       PhysicalInstance inst;
+#ifdef LEGION_SPY
+      ApEvent instance_event;
+      IndexSpace index_space;
+#endif
       ApEvent ready_event;
       Domain domain;
     };
@@ -1070,7 +1073,6 @@ namespace Legion {
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
 #ifdef LEGION_SPY
-                           FieldSpace handle,
                            RegionTreeID src_tree_id,
                            RegionTreeID dst_tree_id,
 #endif
@@ -1089,6 +1091,10 @@ namespace Legion {
                                   IndirectRecord>::aligned &records,
                            std::vector<void*> &indirections,
                            std::vector<unsigned> &indirect_indexes,
+#ifdef LEGION_SPY
+                           unsigned unique_indirections_identifier,
+                           const ApEvent indirect_inst_event,
+#endif
                            const bool possible_out_of_range,
                            const bool possible_aliasing) = 0;
       virtual void destroy_indirections(std::vector<void*> &indirections) = 0;
@@ -1096,6 +1102,9 @@ namespace Legion {
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
                            const std::vector<void*> &indirects,
+#ifdef LEGION_SPY
+                           unsigned unique_indirections_identifier,
+#endif
                            ApEvent precondition, PredEvent pred_guard) = 0;
       virtual Realm::InstanceLayoutGeneric* create_layout(
                            const LayoutConstraintSet &constraints,
@@ -1143,7 +1152,6 @@ namespace Legion {
                                const std::vector<CopySrcDstField> &dst_fields,
                                const std::vector<CopySrcDstField> &src_fields,
 #ifdef LEGION_SPY
-                               FieldSpace handle,
                                RegionTreeID src_tree_id,
                                RegionTreeID dst_tree_id,
 #endif
@@ -1162,6 +1170,10 @@ namespace Legion {
                                       IndirectRecord>::aligned &records,
                                std::vector<void*> &indirections,
                                std::vector<unsigned> &indirect_indexes,
+#ifdef LEGION_SPY
+                               unsigned unique_indirections_identifier,
+                               const ApEvent indirect_inst_event,
+#endif
                                const bool possible_out_of_range,
                                const bool possible_aliasing);
       template<int DIM, typename T>
@@ -1174,6 +1186,9 @@ namespace Legion {
                                const std::vector<CopySrcDstField> &dst_fields,
                                const std::vector<CopySrcDstField> &src_fields,
                                const std::vector<void*> &indirects,
+#ifdef LEGION_SPY
+                               unsigned unique_indirections_identifier,
+#endif
                                ApEvent precondition, PredEvent pred_guard);
       template<int DIM, typename T>
       inline Realm::InstanceLayoutGeneric* create_layout_internal(
@@ -1335,7 +1350,6 @@ namespace Legion {
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
 #ifdef LEGION_SPY
-                           FieldSpace handle,
                            RegionTreeID src_tree_id,
                            RegionTreeID dst_tree_id,
 #endif
@@ -1354,6 +1368,10 @@ namespace Legion {
                                   IndirectRecord>::aligned &records,
                            std::vector<void*> &indirections,
                            std::vector<unsigned> &indirect_indexes,
+#ifdef LEGION_SPY
+                           unsigned unique_indirections_identifier,
+                           const ApEvent indirect_inst_event,
+#endif
                            const bool possible_out_of_range,
                            const bool possible_aliasing);
       virtual void destroy_indirections(std::vector<void*> &indirections);
@@ -1361,6 +1379,9 @@ namespace Legion {
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
                            const std::vector<void*> &indirects,
+#ifdef LEGION_SPY
+                           unsigned unique_indirections_identifier,
+#endif
                            ApEvent precondition, PredEvent pred_guard);
       virtual Realm::InstanceLayoutGeneric* create_layout(
                            const LayoutConstraintSet &constraints,
@@ -2319,7 +2340,6 @@ namespace Legion {
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
 #ifdef LEGION_SPY
-                           FieldSpace handle,
                            RegionTreeID src_tree_id,
                            RegionTreeID dst_tree_id,
 #endif
@@ -2338,6 +2358,10 @@ namespace Legion {
                                   IndirectRecord>::aligned &records,
                            std::vector<void*> &indirections,
                            std::vector<unsigned> &indirect_indexes,
+#ifdef LEGION_SPY
+                           unsigned unique_indirections_identifier,
+                           const ApEvent indirect_inst_event,
+#endif
                            const bool possible_out_of_range,
                            const bool possible_aliasing);
       virtual void destroy_indirections(std::vector<void*> &indirections);
@@ -2345,6 +2369,9 @@ namespace Legion {
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
                            const std::vector<void*> &indirects,
+#ifdef LEGION_SPY
+                           unsigned unique_indirections_identifier,
+#endif
                            ApEvent precondition, PredEvent pred_guard);
       virtual Realm::InstanceLayoutGeneric* create_layout(
                            const LayoutConstraintSet &constraints,

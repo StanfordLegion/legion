@@ -780,16 +780,26 @@ namespace Realm {
       // count is the value before the decrement, so it was 1, it's now 0
       bool last_trigger = (count_left == 1);
 
-      // trigger on the last input event, unless we did an early poison propagation
-      if(last_trigger && (ignore_faults || (faults_observed.load() == 0))) {
-	event_impl->trigger(finish_gen, Network::my_node_id, false /*!poisoned*/);
-      }
+      if(last_trigger) {
+	// if we dynamically allocated space for a wide merger, give that
+	//  storage back - the chance that this particular event will have
+	//  another wide merge isn't particularly high
+	if(max_preconditions > MAX_INLINE_PRECONDITIONS) {
+	  delete[] preconditions;
+	  preconditions = inline_preconditions;
+	  max_preconditions = MAX_INLINE_PRECONDITIONS;
+	}
 
-      // if the event was triggered early due to poison, its insertion on 
-      //  the free list is delayed until we know that the event merger is
-      //  inactive (i.e. when last_trigger is true)
-      if(last_trigger)
+	// trigger on the last input event, unless we did an early poison propagation
+	if(ignore_faults || (faults_observed.load() == 0))
+	  event_impl->trigger(finish_gen, Network::my_node_id,
+			      false /*!poisoned*/);
+
+	// if the event was triggered early due to poison, its insertion on
+	//  the free list is delayed until we know that the event merger is
+	//  inactive (i.e. when last_trigger is true)
 	event_impl->perform_delayed_free_list_insertion();
+      }
     }
 
 

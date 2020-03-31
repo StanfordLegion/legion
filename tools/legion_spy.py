@@ -2294,6 +2294,12 @@ class IndexExpr(object):
                 diff = one - two
                 assert len(one) == len(two) and len(diff) == 0
 
+    def get_index_space(self):
+        if self.kind == INDEX_SPACE_EXPR:
+            return self.base
+        else:
+            return None
+
     def add_union_expr(self, union_expr):
         if self.kind != UNION_EXPR:
             assert self.kind is None
@@ -2411,6 +2417,9 @@ class IndexSpace(object):
         self.parent = parent
         self.color = color
         self.parent.add_child(self)
+
+    def get_index_space(self):
+        return self
 
     def update_depth(self, parent_depth):
         self.depth = parent_depth + 1
@@ -3232,6 +3241,20 @@ class LogicalRegion(object):
             if not state.perform_copy_across_verification(op, redop, 
                   perform_checks, src_depth, src_field, src_req, src_inst,
                   dst_depth, dst_field, dst_req, dst_inst, dst_versions[point]):
+                return False
+        return True
+
+    def perform_indirect_copy_verification(self, op, redop, perform_checks, copies,
+                                           point_set, depth, field, req, inst, versions):
+        # Recurse up the tree until we get to the root
+        if self.parent:
+            return self.parent.parent.perform_indirect_copy_verification(op, redop,
+                    perform_checks, copies, point_set, depth, field, req, inst, versions)
+        # Do the actual work
+        for point in point_set.iterator():
+            state = self.get_verification_state(depth, field, point)
+            if not state.perform_indirect_copy_verification(op, redop, perform_checks,
+                    copies, depth, field, req, inst, versions):
                 return False
         return True
 
@@ -4407,6 +4430,9 @@ class DataflowTraverser(object):
         return self.failed_analysis or self.verified(eq_key)
 
     def visit_copy(self, copy, eq_key):
+        # We should never traverse through indirection copies here
+        if copy.indirections is not None:
+            return False
         # Check to see if this is a reduction copy or not
         if 0 in copy.redops:
             # Normal copy
@@ -5074,6 +5100,36 @@ class EquivalenceSet(object):
         dst_inst.add_verification_copy_user(dst_depth, dst_field, self.point,
                               copy, dst_req.index, False, redop, dst_version)
 
+    def perform_indirect_copy_verification(self, op, redop, perform_checks,
+                                copies, depth, field, req, inst, versions):
+        preconditions = inst.find_verification_copy_dependences(depth,
+                field, self.point, op, req.index, req.is_read_only(),
+                redop if req.is_reduce() else 0, versions)
+        if perform_checks:
+            # First check that all the copies have the appropriate dependences
+            for copy in copies:
+                bad = check_preconditions(preconditions, copy)
+                if bad is not None:
+                    print("ERROR: Missing indirect precondition for "+str(copy)+
+                          " on field "+str(field)+" for "+str(op)+" on "+str(bad))
+                    if op.state.eq_graph_on_error:
+                        op.state.dump_eq_graph((self.point, self.field, self.tree))
+                    if op.state.assert_on_error:
+                        assert False
+                    return False
+        else:
+            # We're not verifying, so just do the analysis to register this copy
+            for copy in copies:
+                for pre in preconditions:
+                    pre.physical_outgoing.add(copy)
+                    copy.physical_incoming.add(pre)
+        # Then we can register all the copies as users of the instance
+        for copy in copies:
+            inst.add_verification_copy_user(depth, field, self.point, copy, req.index,
+                    req.is_read_only(), 0 if req.is_read_only() else redop, versions)
+        return True
+
+
 class Requirement(object):
     __slots__ = ['state', 'index', 'is_reg', 'index_node', 'field_space', 'tid',
                  'logical_node', 'priv', 'coher', 'redop', 'fields', 'parent',
@@ -5232,6 +5288,7 @@ class Operation(object):
     __slots__ = ['state', 'uid', 'kind', 'context', 'name', 'reqs', 'mappings', 
                  'fully_logged', 'incoming', 'outgoing', 'logical_incoming', 
                  'logical_outgoing', 'physical_incoming', 'physical_outgoing', 
+                 'copy_kind', 'collective_src', 'collective_dst', 'collective_copies', 
                  'eq_incoming', 'eq_outgoing', 'eq_privileges',
                  'start_event', 'finish_event', 'inter_close_ops', 'inlined',
                  'summary_op', 'task', 'task_id', 'predicate', 'predicate_result',
@@ -5278,6 +5335,11 @@ class Operation(object):
         self.task_id = -1
         self.index_owner = None
         self.inlined = False
+        # Only valid for copies
+        self.copy_kind = None
+        self.collective_src = None
+        self.collective_dst = None
+        self.collective_copies = None
         # Only valid for index operations 
         self.points = None
         self.launch_rect = None
@@ -5793,6 +5855,57 @@ class Operation(object):
             return copy
         return None
 
+    def find_verification_indirection_copy(self, src_field, src_inst, src_req,
+                                           dst_field, dst_inst, dst_req,
+                                           src_idx_field, src_idx_inst, src_idx_req,
+                                           dst_idx_field, dst_idx_inst, dst_idx_req, redop):
+        if not self.realm_copies:
+            return None
+        for copy in self.realm_copies:
+            if copy.indirections is None:
+                continue 
+            if src_field not in copy.src_fields:
+                continue
+            index = copy.src_fields.index(src_field)
+            if src_idx_req is not None:
+                if copy.srcs[index] is not None:
+                    continue
+                src_index = copy.src_indirections[index] 
+                if not copy.indirections.has_group_instance(src_index,
+                            src_inst, src_req.logical_node.index_space):
+                    continue
+                if copy.index_expr.get_index_space() is not \
+                        src_idx_req.logical_node.index_space:
+                    continue
+                if not copy.indirections.has_indirect_instance(src_index,
+                                            src_idx_inst, src_idx_field):
+                    continue
+            else:
+                if src_inst is not copy.srcs[index]:
+                    continue
+            if dst_field is not copy.dst_fields[index]:
+                continue
+            if dst_idx_req is not None:
+                if copy.dsts[index] is not None:
+                    continue
+                dst_index = copy.dst_indirections[index]
+                if not copy.indirections.has_group_instance(dst_index,
+                            dst_inst, dst_req.logical_node.index_space):
+                    continue
+                if copy.index_expr.get_index_space() is not \
+                        dst_idx_req.logical_node.index_space:
+                    continue
+                if not copy.indirections.has_indirect_instance(dst_index,
+                                            dst_idx_inst, dst_idx_field):
+                    continue
+            else:
+                if dst_inst is not copy.dsts[index]:
+                    continue
+            if redop != copy.redops[index]:
+                continue
+            return copy
+        return None
+
     def find_or_create_copy(self, req, field, src, dst):
         # Run through our copies and see if we can find one that matches
         if self.realm_copies:
@@ -5813,7 +5926,7 @@ class Operation(object):
             self.realm_copies = list()
         # If we get here we have to make our copy
         copy = self.state.create_copy(self)
-        copy.set_tree_properties(None, req.field_space, req.tid, req.tid)
+        copy.set_tree_properties(None, req.tid, req.tid)
         copy.add_field(field.fid, src, field.fid, dst, src.redop)
         self.realm_copies.append(copy)
         return copy
@@ -5838,9 +5951,96 @@ class Operation(object):
             self.realm_copies = list()
         # If we get here we have to make our own copy
         copy = self.state.create_copy(self)
-        copy.set_tree_properties(None, dst_req.field_space,
-                                 src_req.tid, dst_req.tid)
+        copy.set_tree_properties(None, src_req.tid, dst_req.tid)
         copy.add_field(src_field.fid, src_inst, dst_field.fid, dst_inst, redop)
+        self.realm_copies.append(copy)
+        return copy
+
+    def find_or_create_indirection_copy(self, src_field, src_inst, src_req,
+                                        dst_field, dst_inst, dst_req,
+                                        src_idx_field, src_idx_inst, src_idx_req,
+                                        dst_idx_field, dst_idx_inst, dst_idx_req, redop):
+        assert src_idx_field is not None or dst_idx_field is not None
+        if self.realm_copies:
+            for copy in self.realm_copies:
+                if copy.indirections is None:
+                    continue 
+                if src_field not in copy.src_fields:
+                    continue
+                index = copy.src_fields.index(src_field)
+                if src_idx_req is not None:
+                    if copy.srcs[index] is not None:
+                        continue
+                    src_index = copy.src_indirections[index] 
+                    if not copy.indirections.has_group_instance(src_index,
+                                src_inst, src_req.logical_node.index_space):
+                        continue
+                    if copy.index_expr.get_index_space() is not \
+                            src_idx_req.logical_node.index_space:
+                        continue
+                    if not copy.indirections.has_indirect_instance(src_index,
+                                                src_idx_inst, src_idx_field):
+                        continue
+                else:
+                    if src_inst is not copy.srcs[index]:
+                        continue
+                if dst_field is not copy.dst_fields[index]:
+                    continue
+                if dst_idx_req is not None:
+                    if copy.dsts[index] is not None:
+                        continue
+                    dst_index = copy.dst_indirections[index]
+                    if not copy.indirections.has_group_instance(dst_index,
+                                dst_inst, dst_req.logical_node.index_space):
+                        continue
+                    if copy.index_expr.get_index_space() is not \
+                            dst_idx_req.logical_node.index_space:
+                        continue
+                    if not copy.indirections.has_indirect_instance(dst_index,
+                                                dst_idx_inst, dst_idx_field):
+                        continue
+                else:
+                    if dst_inst is not copy.dsts[index]:
+                        continue
+                if redop != copy.redops[index]:
+                    continue
+                return copy
+        else:
+            self.realm_copies = list()
+        # If we get here we have to make our own copy
+        copy = self.state.create_copy(self)       
+        # Only need to fill in indirections here with local instances
+        # If there are collective things we'll update them later when
+        # we exchange the copies between the points of the index owner
+        index_expr = None
+        if src_idx_req is not None:
+            index_expr = src_idx_req.logical_node.index_space
+        else:
+            index_expr = dst_idx_req.logical_node.index_space
+        indirections = self.state.create_indirections()
+        index = 0
+        if src_idx_req is not None:
+            indirections.add_indirect_instance(index, src_idx_inst, src_idx_field.fid)
+            indirections.add_group_instance(index, src_inst, 
+                            src_req.logical_node.index_space)
+            src_index = index
+            src = None
+            index += 1
+        else:
+            src_index = -1
+            src = src_inst
+        if dst_idx_req is not None:
+            indirections.add_indirect_instance(index, dst_idx_inst, dst_idx_field.fid)
+            indirections.add_group_instance(index, dst_inst,
+                            dst_req.logical_node.index_space)
+            dst_index = index
+            dst = None
+        else:
+            dst_index = -1
+            dst = dst_inst
+        copy.set_indirection_properties(index_expr, indirections)
+        copy.add_indirect_field(src_field.fid, src, src_index, 
+                            dst_field.fid, dst, dst_index, redop) 
         self.realm_copies.append(copy)
         return copy
 
@@ -6539,6 +6739,372 @@ class Operation(object):
                 dst_req.redop = copy_redop
         return True
 
+    def find_collective_copies(self, copy_index, perform_checks, src_field, 
+                               dst_field, src_idx_field, dst_idx_field, redop):
+        assert self.kind == COPY_OP_KIND
+        assert self.points is not None
+        assert self.copy_kind is not None and self.copy_kind > 0
+        key = (copy_index,src_field.fid,dst_field.fid,
+                src_idx_field.fid if src_idx_field is not None else None,
+                dst_idx_field.fid if dst_idx_field is not None else None, redop)
+        if self.collective_copies is not None:
+            if key in self.collective_copies:
+                return self.collective_copies[key]
+        else:
+            self.collective_copies = dict()
+        copies = set()
+        if self.copy_kind == 1:
+            assert src_idx_field is not None
+            assert dst_idx_field is None
+            assert len(self.reqs) % 3 == 0
+            num_copies = len(self.reqs) // 3
+            src_index = copy_index
+            dst_index = copy_index + num_copies
+            idx_index = copy_index + 2*num_copies
+            for point in itervalues(self.points):
+                src_mappings = point.find_mapping(src_index)
+                dst_mappings = point.find_mapping(dst_index)
+                idx_mappings = point.find_mapping(idx_index)
+                if perform_checks:
+                    copy = point.find_verification_indirection_copy(src_field,
+                            src_mappings[src_field.fid], point.reqs[src_index],
+                            dst_field, dst_mappings[dst_field.fid], point.reqs[dst_index], 
+                            src_idx_field, idx_mappings[src_idx_field.fid], 
+                            point.reqs[idx_index], None, None, None, redop)
+                else:
+                    copy = point.find_or_create_indirection_copy(src_field,
+                            src_mappings[src_field.fid], point.reqs[src_index],
+                            dst_field, dst_mappings[dst_field.fid], point.reqs[dst_index], 
+                            src_idx_field, idx_mappings[src_idx_field.fid], 
+                            point.reqs[idx_index], None, None, None, redop)
+                if copy is not None:
+                    copies.add(copy)
+        elif self.copy_kind == 2:
+            assert src_idx_field is None
+            assert dst_idx_field is not None
+            assert len(self.reqs) % 3 == 0
+            num_copies = len(self.reqs) // 3
+            src_index = copy_index
+            dst_index = copy_index + num_copies
+            idx_index = copy_index + 2*num_copies
+            for point in itervalues(self.points):
+                src_mappings = point.find_mapping(src_index)
+                dst_mappings = point.find_mapping(dst_index)
+                idx_mappings = point.find_mapping(idx_index)
+                if perform_checks:
+                    copy = point.find_verification_indirection_copy(src_field,
+                            src_mappings[src_field.fid], point.reqs[src_index],
+                            dst_field, dst_mappings[dst_field.fid], point.reqs[dst_index], 
+                            None, None, None, dst_idx_field,
+                            idx_mappings[dst_idx_field.fid], point.reqs[idx_index], redop)
+                else:
+                    copy = point.find_or_create_indirection_copy(src_field,
+                            src_mappings[src_field.fid], point.reqs[src_index],
+                            dst_field, dst_mappings[dst_field.fid], point.reqs[dst_index], 
+                            None, None, None, dst_idx_field,
+                            idx_mappings[dst_idx_field.fid], point.reqs[idx_index], redop)
+                if copy is not None:
+                    copies.add(copy)
+        elif self.copy_kind == 3:
+            assert src_idx_field is not None
+            assert dst_idx_field is not None
+            assert len(self.reqs) % 4 == 0
+            num_copies = len(self.reqs) // 4
+            src_index = copy_index
+            dst_index = copy_index + num_copies
+            src_idx_index = copy_index + 2*num_copies
+            dst_idx_index = copy_idnex + 3*num_copies
+            for point in itervalues(self.points):
+                src_mappings = point.find_mapping(src_index)
+                dst_mappings = point.find_mapping(dst_index)
+                src_idx_mappings = point.find_mapping(src_idx_index)
+                dst_idx_mappings = point.find_mapping(dst_idx_index)
+                if perform_checks:
+                    copy = point.find_verification_indirection_copy(src_field,
+                            src_mappings[src_field.fid], point.reqs[src_index],
+                            dst_field, dst_mappings[dst_field.fid], point.reqs[dst_index], 
+                            src_idx_field, src_idx_mappings[src_idx_field.fid],
+                            point.reqs[src_idx_index], dst_idx_field,
+                            dst_idx_mappings[dst_idx_field.fid], 
+                            point.reqs[dst_idx_index], redop)
+                else:
+                    copy = point.find_or_create_indirection_copy(src_field,
+                            src_mappings[src_field.fid], point.reqs[src_index],
+                            dst_field, dst_mappings[dst_field.fid], point.reqs[dst_index], 
+                            src_idx_field, src_idx_mappings[src_idx_field.fid],
+                            point.reqs[src_idx_index], dst_idx_field,
+                            dst_idx_mappings[dst_idx_field.fid], 
+                            point.reqs[dst_idx_index], redop)
+                if copy is not None:
+                    copies.add(copy)
+        else:
+            assert False
+        # If we're constructing these copies then we need to do indirection exchanges
+        if not perform_checks:
+            for c1 in copies:
+                for c2 in copies:
+                    if c1 is c2:
+                        continue
+                    c1.indirections.exchange(c2.indirections)
+        self.collective_copies[key] = copies
+        return copies
+
+    def verify_gather_scatter_requirements(self, copy_idx, gather, src_idx, src_req, 
+                                dst_idx, dst_req, idx_idx, idx_req, perform_checks):
+        # If this was predicated there might not be any mappings
+        if not self.mappings:
+            return True
+        src_points = src_req.logical_node.get_point_set()
+        dst_points = dst_req.logical_node.get_point_set()
+        idx_points = idx_req.logical_node.get_point_set()
+        # Get the mappings
+        src_mappings = self.find_mapping(src_req.index)
+        dst_mappings = self.find_mapping(dst_req.index)
+        idx_mappings = self.find_mapping(idx_req.index)
+        assert self.context
+        src_depth = self.context.find_enclosing_context_depth(src_req, src_mappings) 
+        dst_depth = self.context.find_enclosing_context_depth(dst_req, dst_mappings)
+        idx_depth = self.context.find_enclosing_context_depth(idx_req, idx_mappings)
+        assert len(src_req.fields) == len(dst_req.fields)
+        assert len(idx_req.fields) == 1
+        idx_field = idx_req.fields[0] 
+        idx_inst = idx_mappings[idx_field.fid]
+        assert not idx_inst.is_virtual()
+        # We just need to verify this region requirement one time
+        idx_versions = dict()
+        if not idx_req.logical_node.perform_physical_verification(
+                idx_depth, idx_field, self, idx_req, idx_inst,
+                perform_checks, False, None, idx_versions):
+            return False
+        idx_copies = set()
+        for fidx in xrange(len(src_req.fields)):
+            src_field = src_req.fields[fidx]
+            dst_field = dst_req.fields[fidx]
+            assert src_field.fid in src_mappings
+            assert dst_field.fid in dst_mappings
+            src_inst = src_mappings[src_field.fid]
+            dst_inst = dst_mappings[dst_field.fid]
+            assert not src_inst.is_virtual()
+            assert not dst_inst.is_virtual()
+            is_reduce = dst_req.is_reduce()
+            # Switch this to read-write privileges and then switch it back 
+            # after we are done. The runtime does this too so that its 
+            # analysis is correct
+            copy_redop = 0
+            if is_reduce:
+                copy_redop = dst_req.redop
+                dst_req.redop = 0
+                dst_req.priv = READ_WRITE
+            # Record the source version numbers
+            src_versions = dict()
+            if not src_req.logical_node.perform_physical_verification(
+                      src_depth, src_field, self, src_req, src_inst, 
+                      perform_checks, False, None, src_versions):
+                return False
+            # Record the destination version numbers
+            dst_versions = dict()
+            if not dst_req.logical_node.perform_physical_verification(
+                      dst_depth, dst_field, self, dst_req, dst_inst,
+                      perform_checks, False, None, dst_versions):
+                return False
+            if gather:
+                local_copies = set()
+                if perform_checks:
+                    copy = self.find_verification_indirection_copy(src_field,
+                            src_inst, src_req, dst_field, dst_inst, dst_req,
+                            idx_field, idx_inst, idx_req, None, None, None, copy_redop)
+                    if copy is None:
+                        print("ERROR: Missing indirect copy operation from field "+
+                            str(src_field)+" to field "+str(dst_field)+" with indirect "+
+                            "field "+str(idx_field)+" for gather "+str(self))
+                        if self.state.assert_on_error:
+                            assert False
+                        return False
+                else:
+                    copy = self.find_or_create_indirection_copy(src_field,
+                            src_inst, src_req, dst_field, dst_inst, dst_req,
+                            idx_field, idx_inst, idx_req, None, None, None, copy_redop)
+                local_copies.add(copy)
+                if self.index_owner is not None and self.index_owner.collective_src:
+                    global_copies = self.index_owner.find_collective_copies(copy_idx, 
+                        perform_checks, src_field, dst_field, idx_field, None, copy_redop)
+                    assert copy in global_copies
+                else:
+                    global_copies = local_copies 
+                if not src_req.logical_node.perform_indirect_copy_verification(self,
+                        copy_redop, perform_checks, global_copies, src_points, 
+                        src_depth, src_field, src_req, src_inst, src_versions):
+                    return False
+                if not dst_req.logical_node.perform_indirect_copy_verification(self,
+                        copy_redop, perform_checks, local_copies, dst_points,
+                        dst_depth, dst_field, dst_req, dst_inst, dst_versions):
+                    return False
+            else:
+                local_copies = set()
+                if perform_checks:
+                    copy = self.find_verification_indirection_copy(src_field,
+                            src_inst, src_req, dst_field, dst_inst, dst_req,
+                            None, None, None, idx_field, idx_inst, idx_req, copy_redop)
+                    if copy is None:
+                        print("ERROR: Missing indirect copy operation from field "+
+                            str(src_field)+" to field "+str(dst_field)+" with indirect "+
+                            "field "+str(idx_field)+" for scatter "+str(self))
+                        if self.state.assert_on_error:
+                            assert False
+                        return False
+                else:
+                    copy = self.find_or_create_indirection_copy(src_field,
+                            src_inst, src_req, dst_field, dst_inst, dst_req,
+                            idx_field, idx_inst, idx_req, None, None, None, copy_redop)
+                local_copies.add(copy)
+                if self.index_owner is not None and self.index_owner.collective_dst:
+                    global_copies = self.index_owner.find_collective_copies(copy_idx,
+                        perform_checks, src_field, dst_field, None, idx_field, copy_redop)
+                    assert copy in global_copies
+                else:
+                    global_copies = local_copies 
+                if not src_req.logical_node.perform_indirect_copy_verification(self,
+                        copy_redop, perform_checks, local_copies, src_points,
+                        src_depth, src_field, src_req, src_inst, src_versions):
+                    return False
+                if not dst_req.logical_node.perform_indirect_copy_verification(self,
+                        copy_redop, perform_checks, global_copies, dst_point,
+                        dst_depth, dst_field, dst_req, dst_inst, dst_versions):
+                    return False
+            for copy in local_copies:
+                idx_copies.add(copy)
+            # Restore these when we are done
+            if is_reduce:
+                dst_req.priv = REDUCE
+                dst_req.redop = copy_redop
+        if not idx_req.logical_node.perform_indirect_copy_verification(self,
+                copy_redop, perform_checks, idx_copies, idx_points,
+                idx_depth, idx_field, idx_req, idx_inst, idx_versions):
+            return False
+        return True
+
+    def verify_indirect_requirements(self, copy_idx, src_idx, src_req, dst_idx, dst_req,
+                    src_idx_idx, src_idx_req, dst_idx_idx, dst_idx_req, perform_checks):
+        # If this was predicated there might not be any mappings
+        if not self.mappings:
+            return True
+        src_idx_points = src_idx_req.logical_node.get_point_set()
+        dst_idx_points = dst_idx_req.logical_node.get_point_set()
+        # There should always be the same points in both sets
+        assert (src_idx_points - dst_idx_points).empty()
+        assert (dst_idx_points - src_idx_points).empty()
+        # Get the mappings
+        src_mappings = self.find_mapping(src_req.index)
+        dst_mappings = self.find_mapping(dst_req.index)
+        src_idx_mappings = self.find_mapping(src_idx_req.index)
+        dst_idx_mappings = self.find_mapping(dst_idx_req.index)
+        assert self.context
+        src_depth = self.context.find_enclosing_context_depth(src_req, src_mappings) 
+        dst_depth = self.context.find_enclosing_context_depth(dst_req, dst_mappings)
+        src_idx_depth = self.context.find_enclosing_context_depth(src_idx_req, src_idx_mappings)
+        dst_idx_depth = self.context.find_enclosing_context_depth(dst_idx_req, dst_idx_mappings)
+        assert len(src_req.fields) == len(dst_req.fields)
+        assert len(src_idx_req.fields) == 1
+        assert len(dst_idx_req.fields) == 1
+        src_idx_field = src_idx_req.fields[0] 
+        src_idx_inst = src_idx_mappings[src_idx_field.fid]
+        assert not src_idx_inst.is_virtual()
+        dst_idx_field = dst_idx_req.fields[0] 
+        dst_idx_inst = dst_idx_mappings[dst_idx_field.fid]
+        assert not dst_idx_inst.is_virtual()
+        # We just need to verify these region requirements one time
+        src_idx_versions = dict()
+        if not src_idx_req.logical_node.perform_physical_verification(
+                src_idx_depth, src_idx_field, self, src_idx_req, src_idx_inst,
+                perform_checks, False, None, src_idx_versions):
+            return False
+        dst_idx_versions = dict()
+        if not dst_idx_req.logical_node.perform_physical_verification(
+                dst_idx_depth, dst_idx_field, self, dst_idx_req, dst_idx_inst,
+                perform_checks, False, None, dst_idx_versions):
+            return False
+        idx_copies = set()
+        for fidx in xrange(len(src_req.fields)):
+            src_field = src_req.fields[fidx]
+            dst_field = dst_req.fields[fidx]
+            assert src_field.fid in src_mappings
+            assert dst_field.fid in dst_mappings
+            src_inst = src_mappings[src_field.fid]
+            dst_inst = dst_mappings[dst_field.fid]
+            assert not src_inst.is_virtual()
+            assert not dst_inst.is_virtual()
+            is_reduce = dst_req.is_reduce()
+            # Switch this to read-write privileges and then switch it back 
+            # after we are done. The runtime does this too so that its 
+            # analysis is correct
+            copy_redop = 0
+            if is_reduce:
+                copy_redop = dst_req.redop
+                dst_req.redop = 0
+                dst_req.priv = READ_WRITE
+            src_versions = dict()
+            if not src_req.logical_node.perform_physical_verification(
+                      src_depth, src_field, self, src_req, src_inst, 
+                      perform_checks, False, None, src_versions):
+                return False
+            dst_versions = dict()
+            if not dst_req.logical_node.perform_physical_verification(
+                      dst_depth, dst_field, self, dst_req, dst_inst,
+                      perform_checks, False, None, dst_versions):
+                return False
+            local_copies = set()
+            if perform_checks:
+                copy = self.find_verification_indirection_copy(src_field,
+                        src_inst, src_req, dst_field, dst_inst, dst_req,
+                        src_idx_field, src_idx_inst, src_idx_req, 
+                        dst_idx_field, dst_idx_inst, dst_idx_req, copy_redop)
+                if copy is None:
+                    print("ERROR: Missing indirect copy operation from field "+
+                        str(src_field)+" to field "+str(dst_field)+" with indirect "+
+                        "fields "+str(src_idx_field)+" and "+str(dst_idx_field)+
+                        " for full indirection "+str(self))
+                    if self.state.assert_on_error:
+                        assert False
+                    return False
+            else:
+                copy = self.find_or_create_indirection_copy(src_field,
+                        src_inst, src_req, dst_field, dst_inst, dst_req,
+                        src_idx_field, src_idx_inst, src_idx_req, 
+                        dst_idx_field, dst_idx_inst, dst_idx_req, copy_redop)
+            local_copies.add(copy)
+            if self.collective_src or self.collective_dst:
+                global_copies = self.index_owner.find_collective_copies(copy_idx,
+                                            perform_checks, src_field, dst_field, 
+                                            src_idx_field, dst_idx_field, copy_redop)
+                assert copy in global_copies
+            else:
+                global_copies = local_copies
+            if not src_req.logical_node.perform_indirect_copy_verification(self,
+                    copy_redop, perform_checks, 
+                    global_copies if self.collective_src else local_copies, 
+                    src_points, src_depth, src_field, src_req, src_inst, src_versions):
+                return False
+            if not dst_req.logical_node.perform_indirect_copy_verification(self,
+                    copy_redop, perform_checks, 
+                    global_copies if self.collective_dst else local_copies,
+                    dst_points, dst_depth, dst_field, dst_req, dst_inst, dst_versions):
+                return False
+            for copy in local_copies:
+                idx_copies.add(copy)
+            # Restore these when we are done
+            if is_reduce:
+                dst_req.priv = REDUCE
+                dst_req.redop = copy_redop
+        if not src_idx_req.logical_node.perform_indirect_copy_verification(self,
+                copy_redop, perform_checks, idx_copies, src_idx_points,
+                src_idx_depth, src_idx_field, src_idx_req, src_idx_inst, src_idx_versions):
+            return False
+        if not dst_idx_req.logical_node.perform_indirect_copy_verification(self,
+                copy_redop, perform_checks, idx_copies, dst_idx_points,
+                dst_idx_depth, dst_idx_field, dst_idx_req, dst_idx_inst, dst_idx_versions):
+            return False
+        return True
+
     def verify_fill_requirement(self, index, req, perform_checks):
         assert self.context
         mappings = self.find_mapping(index)
@@ -6656,10 +7222,12 @@ class Operation(object):
                 if not point.op.perform_op_physical_verification(perform_checks):
                     return False
             return True
-        elif self.points: # Handle other index space operations too
-            for point in sorted(itervalues(self.points), key=lambda x: x.uid):
-                if not point.perform_op_physical_verification(perform_checks):
-                    return False
+        # Handle other index space operations too
+        elif self.is_index_op(): 
+            if self.points:
+                for point in sorted(itervalues(self.points), key=lambda x: x.uid):
+                    if not point.perform_op_physical_verification(perform_checks):
+                        return False
             return True
         if perform_checks:
             print((prefix+"Performing physical verification analysis "+
@@ -6669,43 +7237,49 @@ class Operation(object):
                          "for %s (UID %d)...") % (str(self),self.uid))
         # Handle special cases
         if self.kind == COPY_OP_KIND:
-            # Check to see if this is an index copy
-            if self.is_index_op():
-                if self.points is not None:
-                    for point in itervalues(self.points):
-                        if not point.perform_op_physical_verification(perform_checks): 
-                            return False
-                return True
             # Compute our version numbers first
             if perform_checks:
                 self.compute_current_version_numbers()
             num_reqs = len(self.reqs)
-            assert num_reqs % 2 == 0
-            num_copies = num_reqs // 2
-            for idx in xrange(num_copies):
-                if not self.verify_copy_requirements(idx, self.reqs[idx],
-                        idx+num_copies, self.reqs[idx+num_copies], perform_checks):
-                    return False
+            copy_kind = self.copy_kind if self.index_owner is None \
+                    else self.index_owner.copy_kind
+            assert copy_kind is not None
+            if copy_kind == 0:
+                # Normal region-to-region copy
+                assert num_reqs % 2 == 0
+                num_copies = num_reqs // 2
+                for idx in xrange(num_copies):
+                    if not self.verify_copy_requirements(idx, self.reqs[idx],
+                            idx+num_copies, self.reqs[idx+num_copies], perform_checks):
+                        return False
+            elif copy_kind == 1 or copy_kind == 2:
+                # Gather or scatter copy
+                assert num_reqs % 3 == 0
+                num_copies = num_reqs // 3
+                for idx in xrange(num_copies):
+                    if not self.verify_gather_scatter_requirements(idx, copy_kind == 1,
+                            idx, self.reqs[idx], idx+num_copies, self.reqs[idx+num_copies],
+                            idx+2*num_copies, self.reqs[idx+2*num_copies], perform_checks):
+                        return False
+            elif copy_kind == 3:
+                # Full indirection copy
+                assert num_reqs % 4 == 0
+                num_copies = num_reqs // 4
+                for idx in xrange(num_copies):
+                    if not self.verify_indirection_requirements(idx, idx, self.reqs[idx],
+                            idx+num_copies, self.reqs[idx+num_copies],
+                            idx+2*num_copies, self.reqs[idx+2*num_copies],
+                            idx+3*num_copies, self.reqs[idx+3*num_copies], perform_checks):
+                        return False
+            else:
+                assert False # Should never get here
         elif self.kind == FILL_OP_KIND:
-            # Check to see if this is an index fill
-            if self.is_index_op():
-                if self.points is not None:
-                    for point in itervalues(self.points):
-                        if not point.perform_op_physical_verification(perform_checks):
-                            return False
-                return True
             # Compute our version numbers first
             if perform_checks:
                 self.compute_current_version_numbers()
             for index,req in iteritems(self.reqs):
                 if not self.verify_fill_requirement(index, req, perform_checks):
                     return False
-        elif self.kind == DEP_PART_OP_KIND and self.points:
-            # Index partition operation
-            for point in itervalues(self.points):
-                if not point.perform_op_physical_verification(perform_checks):
-                    return False
-            return True
         elif self.kind == DELETION_OP_KIND:
             # Skip deletions, they only impact logical analysis
             pass
@@ -8642,7 +9216,7 @@ class RealmBase(object):
                  'start_event', 'finish_event', 'physical_incoming', 'physical_outgoing', 
                  'eq_incoming', 'eq_outgoing', 'eq_privileges', 'generation', 
                  'event_context', 'version_numbers', 'across_version_numbers', 
-                 'cluster_name']
+                 'indirections', 'cluster_name']
     def __init__(self, state, realm_num):
         self.state = state
         self.realm_num = realm_num
@@ -8660,6 +9234,7 @@ class RealmBase(object):
         self.event_context = None
         self.version_numbers = None
         self.across_version_numbers = None
+        self.indirections = None
         self.cluster_name = None # always none
 
     def is_realm_operation(self):
@@ -8720,6 +9295,9 @@ class RealmBase(object):
             self.across_version_numbers[eq_key] = version
 
     def check_for_spurious_updates(self, fields, tree, versions):
+        # Indirection copies are never spurious so we do not check this currently
+        if self.indirections is not None:
+            return True
         if versions is None:
             print('ERROR: '+str(self.creator)+' generated spurious '+str(self)) 
             if self.state.assert_on_error:
@@ -8795,10 +9373,74 @@ class RealmBase(object):
                 printer.println(src.node_name+' -> '+self.node_name+
                         ' [style=solid,color=black,penwidth=2];')
 
+class Indirections(object):
+    __slots__ = ['uid', 'state', 'instances', 'groups']
+    def __init__(self, uid, state):
+        self.uid = uid
+        self.state = state
+        self.groups = list()
+        self.instances = list()
+
+    def add_indirect_instance(self, index, inst, fid):
+        while len(self.instances) <= index:
+            self.instances.append(None)
+        field = inst.field_space.get_field(fid)
+        self.instances[index] = (inst,field) 
+
+    def add_group_instance(self, index, inst, index_space):
+        while len(self.groups) <= index:
+            self.groups.append(list())
+        self.groups[index].append((inst,index_space))
+
+    def get_indirect_instance(self, index):
+        return self.instances[index][0]
+
+    def get_indirect_field(self, index):
+        return self.instances[index][1]
+
+    def get_group_field(self, index, fid):
+        return self.groups[index][0][0].field_space.get_field(fid)
+
+    def get_group_size(self, index):
+        return len(self.groups[index])
+
+    def get_group_instance(self, index, offset):
+        group = self.groups[index]
+        if offset >= len(group):
+            return None
+        return group[offset][0]
+
+    def has_indirect_instance(self, index, inst, field):
+        if index >= len(self.instances):
+            return False
+        pair = self.instances[index]
+        if inst is not pair[0]:
+            return False
+        if field is not pair[1]:
+            return False
+        return True
+
+    def has_group_instance(self, index, inst, index_space):
+        if index >= len(self.groups):
+            return False
+        for instance,space in self.groups[index]:
+            if inst is not instance:
+                continue
+            if index_space is not space:
+                continue
+            return True
+        return False
+
+    def exchange(self, other):
+        for index in xrange(len(self.groups)):
+            group = self.groups[index]
+            pair = group[0]
+            other.add_group_instance(index, pair[0], pair[1])
+
 class RealmCopy(RealmBase):
     __slots__ = ['start_event', 'finish_event', 'src_fields', 'dst_fields', 
-                 'srcs', 'dsts', 'src_tree_id', 'dst_tree_id', 'redops', 
-                 'across', 'node_name']
+                 'srcs', 'dsts', 'src_tree_id', 'dst_tree_id', 'src_indirections',
+                 'dst_indirections', 'redops', 'across', 'node_name']
     def __init__(self, state, finish, realm_num):
         RealmBase.__init__(self, state, realm_num)
         self.finish_event = finish
@@ -8810,12 +9452,34 @@ class RealmCopy(RealmBase):
         self.dsts = list()
         self.src_tree_id = None
         self.dst_tree_id = None
+        self.src_indirections = None
+        self.dst_indirections = None
         self.redops = list()
         self.across = None
         self.node_name = 'realm_copy_'+str(realm_num)
 
     def __str__(self):
-        return "Realm Copy ("+str(self.realm_num)+")"
+        if self.indirections:
+            has_src = False
+            for index in self.src_indirections:
+                if index is not None:
+                    has_src = True
+                    break
+            has_dst = False
+            for index in self.dst_indirections:
+                if index is not None:
+                    has_dst = True
+                    break
+            assert has_src or has_dst
+            if has_src:
+                if has_dst:
+                    return "Indirect Copy ("+str(self.realm_num)+")"
+                else:
+                    return "Gather Copy ("+str(self.realm_num)+")"
+            else:
+                return "Scatter Copy ("+str(self.realm_num)+")"
+        else:
+            return "Realm Copy ("+str(self.realm_num)+")"
 
     __repr__ = __str__
 
@@ -8829,11 +9493,16 @@ class RealmCopy(RealmBase):
         self.creator = creator
         self.creator.add_realm_copy(self) 
 
-    def set_tree_properties(self, index_expr, field_space, src_tid, dst_tid):
+    def set_tree_properties(self, index_expr, src_tid, dst_tid):
         self.index_expr = index_expr
-        self.field_space = field_space
         self.src_tree_id = src_tid
         self.dst_tree_id = dst_tid
+
+    def set_indirection_properties(self, index_expr, indirections):
+        self.index_expr = index_expr
+        self.src_indirections = list()
+        self.dst_indirections = list()
+        self.indirections = indirections
 
     def is_across(self):
         if self.across is not None:
@@ -8855,7 +9524,6 @@ class RealmCopy(RealmBase):
         self.creator = new_creator
 
     def add_field(self, src_fid, src, dst_fid, dst, redop):
-        assert self.field_space is not None
         # Always get the fields from the source and destination regions
         # which is especially important for handling cross-region copies
         src_field = src.field_space.get_field(src_fid)
@@ -8864,6 +9532,34 @@ class RealmCopy(RealmBase):
         self.dst_fields.append(dst_field)
         self.srcs.append(src)
         self.dsts.append(dst)
+        self.redops.append(redop)
+
+    def add_indirect_field(self, src_fid, src, src_index, dst_fid, dst, dst_index, redop):
+        assert self.indirections is not None
+        if src_index >= 0:
+            assert src is None
+            src_field = self.indirections.get_group_field(src_index, src_fid)
+            self.src_fields.append(src_field)
+            self.srcs.append(None)
+            self.src_indirections.append(src_index)
+        else:
+            assert src is not None
+            src_field = src.field_space.get_field(src_fid)
+            self.src_fields.append(src_field)
+            self.srcs.append(src)
+            self.src_indirections.append(None)
+        if dst_index >= 0:
+            assert dst is None
+            dst_field = self.indirections.get_group_field(dst_index, dst_fid)
+            self.dst_fields.append(dst_field)
+            self.dsts.append(None)
+            self.dst_indirections.append(dst_index)
+        else:
+            assert dst is not None
+            dst_field = dst.field_space.get_field(dst_fid)
+            self.dst_fields.append(dst_field)
+            self.dsts.append(dst)
+            self.dst_indirections.append(None)
         self.redops.append(redop)
 
     def find_src_inst(self, src_field):
@@ -8878,49 +9574,151 @@ class RealmCopy(RealmBase):
             if self.index_expr:
                 # This is the case where the runtime told us what
                 # the name of the index space was for the copy
-                label = "Realm Copy ("+str(self.realm_num)+") of "+\
-                            self.index_expr.point_space_graphviz_string()
+                point_set = self.index_expr.get_point_set()
+                label = str(self)+" of "+ point_set.point_space_graphviz_string()
             else:
                 # This is the case where we had to generate the 
                 # copy from our own information
                 point_set = self.get_point_set()
                 assert point_set
-                label = "Realm Copy ("+str(self.realm_num)+") of "+\
-                            point_set.point_space_graphviz_string()
+                label = str(self)+" of "+point_set.point_space_graphviz_string()
         else:
-            label = "Realm Copy ("+str(self.realm_num)+")"
+            label = str(self)
         if self.creator is not None:
             label += " generated by "+self.creator.html_safe_name
             if self.creator.kind == SINGLE_TASK_KIND:
                 label += " (UID: " + str(self.creator.uid) + ")"
-        lines = [[{ "label" : label, "colspan" : 3 }]]
-        if self.state.detailed_graphs:
+        if self.indirections is not None:
+            num_columns = 3
             num_fields = len(self.src_fields)
-            first_field = True
+            has_src_indirect = False
             for fidx in xrange(num_fields):
-                src_field = self.src_fields[fidx]
-                dst_field = self.dst_fields[fidx]
-                src_inst = self.srcs[fidx]
-                dst_inst = self.dsts[fidx]
-                redop = self.redops[fidx]
-                line = []
-                if src_field == dst_field:
-                    if redop != 0:
-                        line.append(str(src_field)+' Redop='+str(redop))
+                if self.src_indirections[fidx] is not None:
+                    has_src_indirect = True
+                    num_columns += 1
+                    break 
+            has_dst_indirect = False
+            for fidx in xrange(num_fields):
+                if self.dst_indirections[fidx] is not None:
+                    has_dst_indirect = True
+                    num_columns += 1
+                    break
+            lines = [[{ "label" : label, "colspan" : num_columns}]]
+            if self.state.detailed_graphs:
+                first_field = True
+                for fidx in xrange(num_fields):
+                    src_field = self.src_fields[fidx]
+                    dst_field = self.dst_fields[fidx]
+                    src_inst = self.srcs[fidx]
+                    dst_inst = self.dsts[fidx]
+                    src_index = self.src_indirections[fidx]
+                    dst_index = self.dst_indirections[fidx]
+                    redop = self.redops[fidx]
+                    line = []
+                    # Do the field labels first
+                    line.append(str(src_field))
+                    local_rows = 1
+                    if has_src_indirect:
+                        assert src_index is not None
+                        line.append('Src Indirect: '+
+                                str(self.indirections.get_indirect_field(src_index)))
+                        local_rows = max(local_rows, 
+                                self.indirections.get_group_size(src_index))
+                    if has_dst_indirect:
+                        assert dst_index is not None
+                        line.append('Dst Indirect: '+
+                                str(self.indirections.get_indirect_field(dst_index)))
+                        local_rows = max(local_rows, 
+                                self.indirections.get_group_size(dst_index))
+                    line.append(str(dst_field))
+                    if first_field:
+                        # Count how many rows there are for each field
+                        num_rows = num_fields
+                        for idx in xrange(num_fields):
+                            src_index = self.src_indirections[fidx]
+                            count = 1
+                            if src_index is not None:
+                                size = self.indirections.get_group_size(src_index) 
+                                if size > count:
+                                    count = size
+                            dst_index = self.dst_indirections[fidx]
+                            if dst_index is not None:
+                                size = self.indirections.get_group_size(dst_index)
+                                if size > count:
+                                    count = size
+                            num_rows += count
+                        line.insert(0, {"label" : "Fields",
+                                        "rowspan" : num_rows})
+                        first_field = False
+                    lines.append(line)
+                    # Now we do the rows for all the instances
+                    for row in xrange(local_rows):
+                        line = []
+                        if has_src_indirect:
+                            idx_inst = self.indirections.get_group_instance(src_index, row) 
+                            if idx_inst is not None:
+                                line.append(str(idx_inst))
+                            else:
+                                line.append('^')
+                            if row == 0:
+                                line.append(str(
+                                    self.indirections.get_indirect_instance(src_index)))
+                            else:
+                                line.append('^')
+                        else:
+                            if row == 0:
+                                line.append(str(src_inst))
+                            else:
+                                line.append('^')
+                        if has_dst_indirect:
+                            idx_inst = self.indirections.get_group_instance(dst_index, row)
+                            if idx_inst is not None:
+                                line.append(str(idx_inst))
+                            else:
+                                line.append('^')
+                            if row == 0:
+                                line.append(str(
+                                    self.indirections.get_indirect_instance(dst_index)))
+                            else:
+                                line.append('^')
+                        else:
+                            if row == 0:
+                                line.append(str(dst_inst))
+                            else:
+                                line.append('^')
+                        lines.append(line)
+        else:
+            lines = [[{ "label" : label, "colspan" : 3 }]]
+            if self.state.detailed_graphs:
+                num_fields = len(self.src_fields)
+                first_field = True
+                for fidx in xrange(num_fields):
+                    src_field = self.src_fields[fidx]
+                    dst_field = self.dst_fields[fidx]
+                    src_inst = self.srcs[fidx]
+                    dst_inst = self.dsts[fidx]
+                    redop = self.redops[fidx]
+                    line = []
+                    if src_field == dst_field:
+                        if redop != 0:
+                            line.append(str(src_field)+' Redop='+str(redop))
+                        else:
+                            line.append(str(src_field))
                     else:
-                        line.append(str(src_field))
-                else:
-                    if redop != 0:
-                        line.append(str(src_field)+':'+str(dst_field)+' Redop='+str(redop))
-                    else:
-                        line.append(str(src_field)+':'+str(dst_field))
-                line.append(str(src_inst)+':'+str(dst_inst))
-                if first_field:
-                    line.insert(0, {"label" : "Fields",
-                                    "rowspan" : num_fields})
-                    first_field = False
-                lines.append(line)
-        color = 'darkgoldenrod1'
+                        if redop != 0:
+                            line.append(str(src_field)+':'+str(dst_field)+' Redop='+str(redop))
+                        else:
+                            line.append(str(src_field)+':'+str(dst_field))
+                    line.append(str(src_inst)+':'+str(dst_inst))
+                    if first_field:
+                        line.insert(0, {"label" : "Fields",
+                                        "rowspan" : num_fields})
+                        first_field = False
+                    lines.append(line)
+        if self.indirections is not None:
+            color = 'darkorange'
+        else:
+            color = 'darkgoldenrod1'
         for redop in self.redops:
             if redop != 0:
                 color = 'tomato'
@@ -9597,7 +10395,8 @@ fence_pat                = re.compile(
 trace_pat                = re.compile(
     prefix+"Trace Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 copy_op_pat              = re.compile(
-    prefix+"Copy Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+    prefix+"Copy Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<kind>[0-9]+) "+ 
+           "(?P<src>[0-1]) (?P<dst>[0-1])")
 fill_op_pat              = re.compile(
     prefix+"Fill Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 acquire_op_pat           = re.compile(
@@ -9751,12 +10550,25 @@ pred_event_trig_pat     = re.compile(
 operation_event_pat     = re.compile(
     prefix+"Operation Events (?P<uid>[0-9]+) (?P<id1>[0-9a-f]+) (?P<id2>[0-9a-f]+)")
 realm_copy_pat          = re.compile(
-    prefix+"Copy Events (?P<uid>[0-9]+) (?P<ispace>[0-9]+) (?P<fspace>[0-9]+) "+
+    prefix+"Copy Events (?P<uid>[0-9]+) (?P<ispace>[0-9]+) "+
            "(?P<src_tid>[0-9]+) (?P<dst_tid>[0-9]+) "+
            "(?P<preid>[0-9a-f]+) (?P<postid>[0-9a-f]+)")
 realm_copy_field_pat    = re.compile(
     prefix+"Copy Field (?P<id>[0-9a-f]+) (?P<srcfid>[0-9]+) "+
            "(?P<srcid>[0-9a-f]+) (?P<dstfid>[0-9]+) (?P<dstid>[0-9a-f]+) (?P<redop>[0-9]+)")
+indirect_copy_pat       = re.compile(
+    prefix+"Indirect Events (?P<uid>[0-9]+) (?P<ispace>[0-9]+) (?P<indirect>[0-9]+) "+
+           "(?P<preid>[0-9a-f]+) (?P<postid>[0-9a-f]+)")
+indirect_field_pat      = re.compile(
+    prefix+"Indirect Field (?P<id>[0-9a-f]+) (?P<srcfid>[0-9]+) (?P<srcid>[0-9a-f]+) "+
+           "(?P<srcidx>-?[0-9]+) (?P<dstfid>[0-9]+) (?P<dstid>[0-9a-f]+) "+
+           "(?P<dstidx>-?[0-9]+) (?P<redop>[0-9]+)")
+indirect_inst_pat       = re.compile(
+    prefix+"Indirect Instance (?P<indirect>[0-9]+) (?P<index>[0-9]+) "+
+           "(?P<inst>[0-9a-f]+) (?P<fid>[0-9]+)")
+indirect_group_pat      = re.compile(
+    prefix+"Indirect Group (?P<indirect>[0-9]+) (?P<index>[0-9]+) "+
+           "(?P<inst>[0-9a-f]+) (?P<ispace>[0-9]+)")
 realm_fill_pat          = re.compile(
     prefix+"Fill Events (?P<uid>[0-9]+) (?P<ispace>[0-9]+) (?P<fspace>[0-9]+) "+
            "(?P<tid>[0-9]+) (?P<preid>[0-9a-f]+) (?P<postid>[0-9a-f]+) (?P<fill_uid>[0-9]+)")
@@ -9836,10 +10648,9 @@ def parse_legion_spy_line(line, state):
         op = state.get_operation(int(m.group('uid')))
         copy.set_creator(op)
         index_expr = state.get_index_expr(int(m.group('ispace')))
-        field_space = state.get_field_space(int(m.group('fspace')))
         src_tree_id = int(m.group('src_tid'))
         dst_tree_id = int(m.group('dst_tid'))
-        copy.set_tree_properties(index_expr, field_space, src_tree_id, dst_tree_id)
+        copy.set_tree_properties(index_expr, src_tree_id, dst_tree_id)
         return True
     m = realm_copy_field_pat.match(line)
     if m is not None:
@@ -9849,6 +10660,42 @@ def parse_legion_spy_line(line, state):
         dst = state.get_instance(int(m.group('dstid'),16))
         copy.add_field(int(m.group('srcfid')), src, 
                        int(m.group('dstfid')), dst, int(m.group('redop')))
+        return True
+    m = indirect_copy_pat.match(line)
+    if m is not None:
+        e1 = state.get_event(int(m.group('preid'),16))
+        e2 = state.get_event(int(m.group('postid'),16))
+        copy = state.get_realm_copy(e2)
+        copy.set_start(e1)
+        op = state.get_operation(int(m.group('uid')))
+        copy.set_creator(op)
+        index_expr = state.get_index_expr(int(m.group('ispace')))
+        indirections = state.get_indirections(int(m.group('indirect')))
+        copy.set_indirection_properties(index_expr, indirections)
+        return True
+    m = indirect_field_pat.match(line)
+    if m is not None:
+        e = state.get_event(int(m.group('id'),16))
+        copy = state.get_realm_copy(e)
+        src_index = int(m.group('srcidx'))
+        dst_index = int(m.group('dstidx'))
+        src = None if src_index >= 0 else state.get_instance(int(m.group('srcid'),16))
+        dst = None if dst_index >= 0 else state.get_instance(int(m.group('dstid'),16))
+        copy.add_indirect_field(int(m.group('srcfid')), src, src_index, 
+            int(m.group('dstfid')), dst, dst_index, int(m.group('redop')))
+        return True
+    m = indirect_inst_pat.match(line)
+    if m is not None:
+        indirections = state.get_indirections(int(m.group('indirect')))
+        inst = state.get_instance(int(m.group('inst'),16))
+        indirections.add_indirect_instance(int(m.group('index')), inst, int(m.group('fid')))
+        return True
+    m = indirect_group_pat.match(line)
+    if m is not None:
+        indirections = state.get_indirections(int(m.group('indirect')))
+        inst = state.get_instance(int(m.group('inst'),16))
+        index_space = state.get_index_space(int(m.group('ispace')))
+        indirections.add_group_instance(int(m.group('index')), inst, index_space)
         return True
     m = realm_fill_pat.match(line)
     if m is not None:
@@ -10213,6 +11060,13 @@ def parse_legion_spy_line(line, state):
         op.set_name("Copy Op "+m.group('uid'))
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
+        op.copy_kind = int(m.group('kind'))
+        collective_src = int(m.group('src'))
+        op.collective_src = True if collective_src == 1 and \
+                (op.copy_kind == 1 or op.copy_kind == 3) else False
+        collective_dst = int(m.group('dst'))
+        op.collective_dst = True if collective_dst == 1 and \
+                (op.copy_kind == 2 or op.copy_kind == 3) else False
         return True
     m = fill_op_pat.match(line)
     if m is not None:
@@ -10617,10 +11471,11 @@ class State(object):
                  'index_partitions', 'field_spaces', 'regions', 'partitions', 'top_spaces', 
                  'trees', 'ops', 'unique_ops', 'tasks', 'task_names', 'variants', 
                  'projection_functions', 'has_mapping_deps', 'instances', 'events', 
-                 'copies', 'fills', 'depparts', 'no_event', 'slice_index', 'slice_slice', 
-                 'point_slice', 'point_point', 'futures', 'next_generation', 
-                 'next_realm_num', 'detailed_graphs',  'assert_on_error', 'assert_on_warning', 
-                 'eq_graph_on_error', 'config', 'detailed_logging', 'replicants']
+                 'copies', 'fills', 'depparts', 'indirections', 'no_event', 'slice_index', 
+                 'slice_slice', 'point_slice', 'point_point', 'futures', 'next_generation', 
+                 'next_realm_num', 'next_indirections_num', 'detailed_graphs',  
+                 'assert_on_error', 'assert_on_warning', 'eq_graph_on_error', 'config', 
+                 'detailed_logging', 'replicants']
     def __init__(self, temp_dir, verbose, details, assert_on_error, 
                  assert_on_warning, eq_graph_on_error):
         self.temp_dir = temp_dir
@@ -10663,6 +11518,7 @@ class State(object):
         self.fills = dict()
         self.depparts = dict()
         self.no_event = Event(self, EventHandle(0))
+        self.indirections = dict()
         # For parsing only
         self.slice_index = dict()
         self.slice_slice = dict()
@@ -10673,6 +11529,7 @@ class State(object):
         # For physical traversals
         self.next_generation = 1
         self.next_realm_num = 1
+        self.next_indirections_num = 1
 
     def set_config(self, detailed):
         self.config = True
@@ -11632,6 +12489,13 @@ class State(object):
     def get_no_event(self):
         return self.no_event
 
+    def get_indirections(self, uid):
+        if uid in self.indirections:
+            return self.indirections[uid]
+        result = Indirections(uid, self)
+        self.indirections[uid] = result
+        return result
+
     def get_realm_copy(self, event):
         assert event.exists()
         if event in self.copies:
@@ -11664,6 +12528,12 @@ class State(object):
         self.copies[self.next_realm_num] = result
         self.next_realm_num += 1
         result.set_creator(creator)
+        return result
+
+    def create_indirections(self):
+        result = Indirections(self, self.next_indirections_num)
+        self.indirections[self.next_indirections_num] = result
+        self.next_indirections_num += 1
         return result
 
     def create_fill(self, creator):

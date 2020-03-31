@@ -202,7 +202,6 @@ endforeach()
 
 find_package(Threads REQUIRED)
 add_library(RealmRuntime ${REALM_SRC})
-target_compile_definitions(RealmRuntime PUBLIC REALM_USE_CMAKE)
 target_compile_options(RealmRuntime PRIVATE ${CXX_BUILD_WARNING_FLAGS})
 if(Legion_USE_LIBDL)
   target_link_libraries(RealmRuntime PRIVATE ${CMAKE_DL_LIBS})
@@ -419,6 +418,12 @@ if(Legion_REDOP_COMPLEX)
   list(APPEND LEGION_SRC mathtypes/complex.h)
 endif()
 
+if(Legion_USE_CUDA)
+  list(APPEND LEGION_CUDA_SRC
+    legion/legion_redop.cu
+  )
+endif()
+
 # generate per-dimension object files for deppart stuff
 foreach(N1 RANGE 1 ${LEGION_MAX_DIM})
   # echo -e is not portable, so use perl and try to limit the escape
@@ -439,8 +444,42 @@ foreach(N1 RANGE 1 ${LEGION_MAX_DIM})
     list(APPEND LEGION_SRC region_tree_${N1}_${N2}.cc)
   endforeach()
 endforeach()
+              
+# Legion Fortran
+if(Legion_USE_Fortran)
+  list(APPEND LEGION_FORTRAN_SRC
+    legion/legion_f_types.f90
+    legion/legion_f_c_interface.f90
+    legion/legion_f.f90              
+  )
+endif()               
 
-add_library(LegionRuntime ${MAPPER_SRC} ${LEGION_SRC})
+add_library(LegionRuntime ${MAPPER_SRC} ${LEGION_SRC} ${LEGION_FORTRAN_SRC})
+if(Legion_USE_CUDA)
+  if("${Legion_CUDA_ARCH}" STREQUAL "")
+    set(CUDA_GENCODE "")
+  else()
+    string(REPLACE "," ";" CUDA_GENCODE "${Legion_CUDA_ARCH}")
+    string(REGEX REPLACE "([0-9]+)" "-gencode arch=compute_\\1,code=sm_\\1" CUDA_GENCODE "${CUDA_GENCODE}")
+  endif()
+  # starting with NVCC 10.2, we can error out on all warnings
+  if(Legion_BUILD_WARN_AS_ERROR AND CUDA_VERSION VERSION_GREATER "10.1")
+    set(CUDA_WARNINGS "-Werror all-warnings")
+  else()
+    set(CUDA_WARNINGS "")
+  endif()
+  cuda_compile(LEGION_CUDA_OBJS ${LEGION_CUDA_SRC} OPTIONS
+    -Xcudafe "--diag_suppress=boolean_controlling_expr_is_constant"
+    ${CUDA_WARNINGS}
+    ${CUDA_GENCODE}
+    -I ${CMAKE_CURRENT_SOURCE_DIR}
+    -I ${PROJECT_BINARY_DIR}/runtime
+    -Xcompiler -fPIC
+    DEBUG -g
+    RELEASE -O2
+    RELWITHDEBINFO -g -O2)
+  target_sources(LegionRuntime PRIVATE ${LEGION_CUDA_OBJS})
+endif()
 target_link_libraries(LegionRuntime PUBLIC RealmRuntime)
 if(Legion_USE_ZLIB)
   target_link_libraries(LegionRuntime PRIVATE ZLIB::ZLIB)
@@ -448,7 +487,6 @@ endif()
 set_target_properties(LegionRuntime PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(LegionRuntime PROPERTIES OUTPUT_NAME "legion${INSTALL_SUFFIX}")
 set_target_properties(LegionRuntime PROPERTIES SOVERSION ${SOVERSION})
-target_compile_definitions(LegionRuntime PUBLIC LEGION_USE_CMAKE)
 target_compile_options(LegionRuntime PRIVATE ${CXX_BUILD_WARNING_FLAGS})
 
 target_include_directories(LegionRuntime

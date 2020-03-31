@@ -3949,8 +3949,12 @@ namespace Legion {
       index_domain = Domain(index_point, index_point);
       sharding_space = launcher.sharding_space;
       if (runtime->legion_spy_enabled)
+      {
+        const unsigned copy_kind = (src_indirect_requirements.empty() ? 0 : 1) +
+          (dst_indirect_requirements.empty() ? 0 : 2);
         LegionSpy::log_copy_operation(parent_ctx->get_unique_id(),
-                                      unique_op_id);
+                                      unique_op_id, copy_kind, false, false);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5093,7 +5097,7 @@ namespace Legion {
         {
           const InstanceRef &ref = insts[idx];
           records.push_back(IndirectRecord(ref.get_valid_fields(),
-                ref.get_manager()->get_instance(), ref.get_ready_event(), dom));
+                ref.get_manager(), space, ref.get_ready_event(), dom));
         }
       }
       else
@@ -5105,13 +5109,13 @@ namespace Legion {
           if (inst_ready.exists() && !inst_ready.has_triggered())
           {
             records.push_back(IndirectRecord(ref.get_valid_fields(),
-                  ref.get_manager()->get_instance(), 
+                  ref.get_manager(), space,
                   Runtime::merge_events(&trace_info, domain_ready, inst_ready),
                   dom));
           }
           else
             records.push_back(IndirectRecord(ref.get_valid_fields(),
-                  ref.get_manager()->get_instance(), domain_ready, dom));
+                  ref.get_manager(), space, domain_ready, dom));
         }
       }
       return local_done;
@@ -5673,7 +5677,7 @@ namespace Legion {
     void CopyOp::replay_analysis(void)
     //--------------------------------------------------------------------------
     {
-      if (runtime->legion_spy_enabled)
+      if (runtime->legion_spy_enabled && !need_prepipeline_stage)
         log_copy_requirements();
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);
@@ -6254,8 +6258,12 @@ namespace Legion {
       tag = launcher.tag; 
       if (runtime->legion_spy_enabled)
       {
+        const unsigned copy_kind = (src_indirect_requirements.empty() ? 0 : 1) +
+          (dst_indirect_requirements.empty() ? 0 : 2);
         LegionSpy::log_copy_operation(parent_ctx->get_unique_id(),
-                                      unique_op_id);
+                                      unique_op_id, copy_kind,
+                                      collective_src_indirect_points,
+                                      collective_dst_indirect_points);
         runtime->forest->log_launch_space(launch_space->handle, unique_op_id);
       }
     }
@@ -6763,15 +6771,13 @@ namespace Legion {
               const ApEvent inst_ready = ref.get_ready_event();
               if (inst_ready.exists() && !inst_ready.has_triggered())
                 src_records[index].push_back(IndirectRecord(
-                      ref.get_valid_fields(),
-                      ref.get_manager()->get_instance(), 
+                      ref.get_valid_fields(), ref.get_manager(), space,
                       Runtime::merge_events(&trace_info, domain_ready,
                         inst_ready), dom));
               else
                 src_records[index].push_back(IndirectRecord(
-                      ref.get_valid_fields(),
-                      ref.get_manager()->get_instance(), 
-                      domain_ready, dom));
+                      ref.get_valid_fields(), ref.get_manager(), 
+                      space, domain_ready, dom));
             }
           }
           else
@@ -6780,9 +6786,8 @@ namespace Legion {
             {
               const InstanceRef &ref = insts[idx];
               src_records[index].push_back(IndirectRecord(
-                    ref.get_valid_fields(),
-                    ref.get_manager()->get_instance(), 
-                    ref.get_ready_event(), dom));
+                    ref.get_valid_fields(), ref.get_manager(), 
+                    space, ref.get_ready_event(), dom));
             }
           }
           src_exchange_events[index].insert(local_done);
@@ -6803,15 +6808,13 @@ namespace Legion {
               const ApEvent inst_ready = ref.get_ready_event();
               if (inst_ready.exists() && !inst_ready.has_triggered())
                 dst_records[index].push_back(IndirectRecord(
-                      ref.get_valid_fields(),
-                      ref.get_manager()->get_instance(), 
+                      ref.get_valid_fields(), ref.get_manager(), space,
                       Runtime::merge_events(&trace_info, domain_ready,
                         inst_ready), dom));
               else
                 dst_records[index].push_back(IndirectRecord(
-                      ref.get_valid_fields(),
-                      ref.get_manager()->get_instance(), 
-                      domain_ready, dom));
+                      ref.get_valid_fields(), ref.get_manager(), 
+                      space, domain_ready, dom));
             }
           }
           else
@@ -6820,9 +6823,8 @@ namespace Legion {
             {
               const InstanceRef &ref = insts[idx];
               dst_records[index].push_back(IndirectRecord(
-                    ref.get_valid_fields(),
-                    ref.get_manager()->get_instance(), 
-                    ref.get_ready_event(), dom));
+                    ref.get_valid_fields(), ref.get_manager(), 
+                    space, ref.get_ready_event(), dom));
             }
           }
           dst_exchange_events[index].insert(local_done);
@@ -15664,7 +15666,7 @@ namespace Legion {
     void FillOp::replay_analysis(void)
     //--------------------------------------------------------------------------
     {
-      if (runtime->legion_spy_enabled)
+      if (runtime->legion_spy_enabled && !need_prepipeline_stage)
         log_fill_requirement();
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);

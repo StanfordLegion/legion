@@ -59,7 +59,7 @@ terra create_logical_partition(runtime : c.legion_runtime_t,
                                lr : c.legion_logical_region_t,
                                cs : c.legion_index_space_t)
   var ip = c.legion_index_partition_create_equal(runtime, context,
-    lr.index_space, cs, 1, -1)
+    lr.index_space, cs, 1, c.AUTO_GENERATE_ID)
   return c.legion_logical_partition_create(runtime, context, lr, ip)
 end
 

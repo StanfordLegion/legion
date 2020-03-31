@@ -156,7 +156,6 @@ namespace Legion {
                            const std::vector<CopySrcDstField>& src_fields,
                            const std::vector<CopySrcDstField>& dst_fields,
 #ifdef LEGION_SPY
-                           FieldSpace handle,
                            RegionTreeID src_tree_id,
                            RegionTreeID dst_tree_id,
 #endif
@@ -268,7 +267,6 @@ namespace Legion {
                            const std::vector<CopySrcDstField>& src_fields,
                            const std::vector<CopySrcDstField>& dst_fields,
 #ifdef LEGION_SPY
-                           FieldSpace handle,
                            RegionTreeID src_tree_id,
                            RegionTreeID dst_tree_id,
 #endif
@@ -463,7 +461,6 @@ namespace Legion {
                           const std::vector<CopySrcDstField>& src_fields,
                           const std::vector<CopySrcDstField>& dst_fields,
 #ifdef LEGION_SPY
-                          FieldSpace handle,
                           RegionTreeID src_tree_id,
                           RegionTreeID dst_tree_id,
 #endif
@@ -483,7 +480,7 @@ namespace Legion {
           rec->record_issue_copy(memo, index, dst_index,
                                  result, expr, src_fields, dst_fields,
 #ifdef LEGION_SPY
-                                 handle, src_tree_id, dst_tree_id,
+                                 src_tree_id, dst_tree_id,
 #endif
                                  precondition, redop, reduction_fold,
                                  *tracing_srcs, *tracing_dsts, *applied);

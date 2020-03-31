@@ -7629,3 +7629,39 @@ legion_context_consensus_match(legion_runtime_t runtime_,
   return CObjectWrapper::wrap(new Future(f));
 }
 
+legion_physical_region_t
+legion_get_physical_region_by_id(
+    legion_physical_region_t *regionptr, 
+    int id, 
+    int num_regions)
+{
+  assert(id < num_regions);
+  return regionptr[id];
+}
+
+legion_index_space_t
+legion_logical_region_get_index_space(legion_logical_region_t lr_)
+{
+  LogicalRegion lr = CObjectWrapper::unwrap(lr_);
+  return CObjectWrapper::wrap(lr.get_index_space());
+}
+
+void
+legion_task_cxx_to_c(
+  const Task *task,
+  const std::vector<PhysicalRegion> *regions,
+  Context ctx, 
+  Runtime *runtime,
+  legion_task_t *taskptr,
+  const legion_physical_region_t **regionptr,
+  unsigned * num_regions_ptr,
+  legion_context_t * ctxptr,
+  legion_runtime_t * runtimeptr)
+{
+  CContext *cctx = new CContext(ctx, *regions);
+  *taskptr = CObjectWrapper::wrap_const(task);
+  *regionptr = cctx->regions();
+  *num_regions_ptr = cctx->num_regions();
+  *ctxptr = CObjectWrapper::wrap(cctx);
+  *runtimeptr = CObjectWrapper::wrap(runtime);
+}

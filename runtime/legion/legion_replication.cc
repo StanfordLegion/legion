@@ -2041,15 +2041,13 @@ namespace Legion {
               const ApEvent inst_ready = ref.get_ready_event();
               if (inst_ready.exists() && !inst_ready.has_triggered())
                 src_records[index].push_back(IndirectRecord(
-                      ref.get_valid_fields(),
-                      ref.get_manager()->get_instance(), 
+                      ref.get_valid_fields(), ref.get_manager(), space,
                       Runtime::merge_events(&trace_info, domain_ready,
                         inst_ready), dom));
               else
                 src_records[index].push_back(IndirectRecord(
-                      ref.get_valid_fields(),
-                      ref.get_manager()->get_instance(), 
-                      domain_ready, dom));
+                      ref.get_valid_fields(), ref.get_manager(),
+                      space, domain_ready, dom));
             }
           }
           else
@@ -2058,9 +2056,8 @@ namespace Legion {
             {
               const InstanceRef &ref = instances[idx];
               src_records[index].push_back(IndirectRecord(
-                    ref.get_valid_fields(),
-                    ref.get_manager()->get_instance(), 
-                    ref.get_ready_event(), dom));
+                    ref.get_valid_fields(), ref.get_manager(),
+                    space, ref.get_ready_event(), dom));
             }
           }
           src_exchange_events[index].insert(local_done);
@@ -2085,15 +2082,13 @@ namespace Legion {
               const ApEvent inst_ready = ref.get_ready_event();
               if (inst_ready.exists() && !inst_ready.has_triggered())
                 dst_records[index].push_back(IndirectRecord(
-                      ref.get_valid_fields(),
-                      ref.get_manager()->get_instance(), 
+                      ref.get_valid_fields(), ref.get_manager(), space,
                       Runtime::merge_events(&trace_info, domain_ready,
                         inst_ready), dom));
               else
                 dst_records[index].push_back(IndirectRecord(
-                      ref.get_valid_fields(),
-                      ref.get_manager()->get_instance(), 
-                      domain_ready, dom));
+                      ref.get_valid_fields(), ref.get_manager(),
+                      space, domain_ready, dom));
             }
           }
           else
@@ -2102,9 +2097,8 @@ namespace Legion {
             {
               const InstanceRef &ref = instances[idx];
               dst_records[index].push_back(IndirectRecord(
-                    ref.get_valid_fields(),
-                    ref.get_manager()->get_instance(), 
-                    ref.get_ready_event(), dom));
+                    ref.get_valid_fields(), ref.get_manager(),
+                    space, ref.get_ready_event(), dom));
             }
           }
           dst_exchange_events[index].insert(local_done);

@@ -426,21 +426,24 @@ namespace Legion {
   inline bool AffineTransform<M,N,T>::is_identity(void) const
   //----------------------------------------------------------------------------
   {
-    if (M != N)
+    if (M == N)
+    {
+      for (int i = 0; i < M; i++)
+        for (int j = 0; j < N; j++)
+          if (i == j) {
+            if (transform[i][j] != 1)
+              return false;
+          } else {
+            if (transform[i][j] != 0)
+              return false;
+          }
+      for (int i = 0; i < M; i++)
+        if (offset[i] != 0)
+          return false;
+      return true;
+    }
+    else
       return false;
-    for (int i = 0; i < M; i++)
-      for (int j = 0; j < N; j++)
-        if (i == j) {
-          if (transform[i][j] != 1)
-            return false;
-        } else {
-          if (transform[i][j] != 0)
-            return false;
-        }
-    for (int i = 0; i < M; i++)
-      if (offset[i] != 0)
-        return false;
-    return true;
   }
 
   //----------------------------------------------------------------------------
@@ -517,26 +520,29 @@ namespace Legion {
   inline bool ScaleTransform<M,N,T>::is_identity(void) const
   //----------------------------------------------------------------------------
   {
-    if (M != N)
-      return false;
-    for (int i = 0; i < M; i++)
-      for (int j = 0; j < N; j++)
-        if (i == j) {
-          if (transform[i][j] != 1)
-            return false;
-        } else {
-          if (transform[i][j] != 0)
-            return false;
-        }
-    for (int i = 0; i < M; i++)
-      if (extent.lo[i] != 0)
+    if (M == N)
+    {
+      for (int i = 0; i < M; i++)
+        for (int j = 0; j < N; j++)
+          if (i == j) {
+            if (transform[i][j] != 1)
+              return false;
+          } else {
+            if (transform[i][j] != 0)
+              return false;
+          }
+      for (int i = 0; i < M; i++)
+        if (extent.lo[i] != 0)
+          return false;
+      if (extent.lo != extent.hi)
         return false;
-    if (extent.lo != extent.hi)
+      for (int i = 0; i < M; i++)
+        if (divisor[i] != 1)
+          return false;
+      return true;
+    }
+    else
       return false;
-    for (int i = 0; i < M; i++)
-      if (divisor[i] != 1)
-        return false;
-    return true;
   }
 
 #if __cplusplus < 201103L

@@ -1318,7 +1318,6 @@ namespace Legion {
       source_manager->compute_copy_offsets(copy_mask, src_fields);
       return copy_expression->issue_copy(trace_info, dst_fields, src_fields,
 #ifdef LEGION_SPY
-                                         field_space_node->handle,
                                          source_manager->tree_id, tree_id,
 #endif
                                          precondition, predicate_guard,
@@ -2094,7 +2093,6 @@ namespace Legion {
       source_manager->compute_copy_offsets(copy_mask, src_fields);
       return copy_expression->issue_copy(trace_info, dst_fields, src_fields,
 #ifdef LEGION_SPY
-                                         field_space_node->handle,
                                          source_manager->tree_id, tree_id,
 #endif
                                          precondition, predicate_guard,

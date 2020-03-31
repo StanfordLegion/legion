@@ -582,10 +582,15 @@ namespace Legion {
       }
 
       static inline void log_copy_operation(UniqueID context,
-                                            UniqueID unique_id)
+                                            UniqueID unique_id,
+                                            unsigned copy_kind,
+                                            bool couple_src_indirect,
+                                            bool couple_dst_indirect)
       {
-        log_spy.print("Copy Operation %llu %llu",
-		      context, unique_id);
+        log_spy.print("Copy Operation %llu %llu %u %d %d",
+		      context, unique_id, copy_kind,
+                      couple_src_indirect ? 1 : 0,
+                      couple_dst_indirect ? 1 : 0);
       }
 
       static inline void log_acquire_operation(UniqueID context,
@@ -1479,13 +1484,12 @@ namespace Legion {
 
       static inline void log_copy_events(UniqueID op_unique_id,
                                          IndexSpaceExprID expr_id,
-                                         FieldSpace handle,
                                          RegionTreeID src_tree_id,
                                          RegionTreeID dst_tree_id,
                                          LgEvent pre, LgEvent post)
       {
-        log_spy.print("Copy Events %llu %lld %d %d %d " IDFMT " " IDFMT,
-                      op_unique_id, expr_id, handle.get_id(), src_tree_id,
+        log_spy.print("Copy Events %llu %lld %d %d " IDFMT " " IDFMT,
+                      op_unique_id, expr_id, src_tree_id,
                       dst_tree_id, pre.id, post.id);
       }
 
@@ -1495,6 +1499,39 @@ namespace Legion {
       {
         log_spy.print("Copy Field " IDFMT " %d " IDFMT " %d " IDFMT " %d",
                   post.id, src_fid, src_event.id, dst_fid, dst_event.id, redop);
+      }
+
+      static inline void log_indirect_events(UniqueID op_unique_id,
+                                             IndexSpaceExprID expr_id,
+                                             unsigned indirection_id,
+                                             LgEvent pre, LgEvent post)
+      {
+        log_spy.print("Indirect Events %llu %lld %d " IDFMT " " IDFMT,
+              op_unique_id, expr_id, indirection_id, pre.id, post.id);
+      }
+
+      static inline void log_indirect_field(LgEvent post, FieldID src_fid,
+                                        ApEvent src_event, int src_indirect,
+                                        FieldID dst_fid, ApEvent dst_event, 
+                                        int dst_indirect, ReductionOpID redop)
+      {
+        log_spy.print("Indirect Field " IDFMT " %d " IDFMT " %d %d " IDFMT
+                       " %d %d", post.id, src_fid, src_event.id, src_indirect,
+                       dst_fid, dst_event.id, dst_indirect, redop);
+      }
+
+      static inline void log_indirect_instance(unsigned indirection_id,
+                        unsigned index, ApEvent inst_event, FieldID fid)
+      {
+        log_spy.print("Indirect Instance %u %u " IDFMT " %d",
+                      indirection_id, index, inst_event.id, fid);
+      }
+
+      static inline void log_indirect_group(unsigned indirection_id,
+                        unsigned index, ApEvent inst_event, IDType index_space)
+      {
+        log_spy.print("Indirect Group %u %u " IDFMT " %llu",
+          indirection_id, index, inst_event.id, index_space);
       }
 
       static inline void log_fill_events(UniqueID op_unique_id,

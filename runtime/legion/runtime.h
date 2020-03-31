@@ -3222,6 +3222,9 @@ namespace Legion {
       LayoutConstraintID get_unique_constraint_id(void);
       IndexSpaceExprID   get_unique_index_space_expr_id(void);
       ReplicationID      get_unique_replication_id(void);
+#ifdef LEGION_SPY
+      unsigned           get_unique_indirections_id(void);
+#endif
     public:
       // Verify that a region requirement is valid
       LegionErrorType verify_requirement(const RegionRequirement &req,
@@ -3348,6 +3351,9 @@ namespace Legion {
       unsigned unique_constraint_id;
       unsigned unique_is_expr_id;
       unsigned unique_control_replication_id;
+#ifdef LEGION_SPY
+      unsigned unique_indirections_id;
+#endif
       unsigned unique_task_id;
       unsigned unique_mapper_id;
       unsigned unique_trace_id;

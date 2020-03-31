@@ -34,6 +34,25 @@ namespace Legion {
 
     LEGION_EXTERN_LOGGER_DECLARATIONS
 
+#ifdef LEGION_SPY
+    //--------------------------------------------------------------------------
+    IndirectRecord::IndirectRecord(const FieldMask &m, PhysicalManager *p,
+                                   IndexSpace s, ApEvent e, const Domain &d)
+      : fields(m),inst(p->get_instance()),instance_event(p->get_unique_event()),
+        index_space(s), ready_event(e), domain(d)
+    //--------------------------------------------------------------------------
+    {
+    }
+#else
+    //--------------------------------------------------------------------------
+    IndirectRecord::IndirectRecord(const FieldMask &m, PhysicalManager *p,
+                                   IndexSpace s, ApEvent e, const Domain &d)
+      : fields(m), inst(p->get_instance()), ready_event(e), domain(d)
+    //--------------------------------------------------------------------------
+    {
+    }
+#endif
+
     /////////////////////////////////////////////////////////////
     // Region Tree Forest 
     /////////////////////////////////////////////////////////////
@@ -2454,7 +2473,6 @@ namespace Legion {
                   dst_targets[idx].get_valid_fields());
             return intersect->issue_copy(trace_info, dst_fields, src_fields,
 #ifdef LEGION_SPY
-                                         dst_req.region.get_field_space(), 
                                          src_req.region.get_tree_id(),
                                          dst_req.region.get_tree_id(),
 #endif
@@ -2466,7 +2484,6 @@ namespace Legion {
           else
             return intersect->issue_copy(trace_info, dst_fields, src_fields,
 #ifdef LEGION_SPY
-                                         dst_req.region.get_field_space(), 
                                          src_req.region.get_tree_id(),
                                          dst_req.region.get_tree_id(),
 #endif
@@ -2487,7 +2504,6 @@ namespace Legion {
                   dst_targets[idx].get_valid_fields());
             return dst_expr->issue_copy(trace_info, dst_fields, src_fields,
 #ifdef LEGION_SPY
-                                        dst_req.region.get_field_space(), 
                                         src_req.region.get_tree_id(),
                                         dst_req.region.get_tree_id(),
 #endif
@@ -2499,7 +2515,6 @@ namespace Legion {
           else
             return dst_expr->issue_copy(trace_info, dst_fields, src_fields,
 #ifdef LEGION_SPY
-                                        dst_req.region.get_field_space(), 
                                         src_req.region.get_tree_id(),
                                         dst_req.region.get_tree_id(),
 #endif
@@ -2611,10 +2626,16 @@ namespace Legion {
       // indirection indexes for each of the source fields
       std::vector<void*> indirections;
       std::vector<unsigned> indirection_indexes;
+#ifdef LEGION_SPY
+      const unsigned indirect_id = runtime->get_unique_indirections_id();
+#endif
       copy_expr->construct_indirections(src_indexes, idx_field, 
                src_req.region.get_index_space().get_type_tag(), 
                gather_is_range, idx_target.get_manager()->get_instance(),
                src_records, indirections, indirection_indexes,
+#ifdef LEGION_SPY
+               indirect_id, idx_target.get_manager()->get_unique_event(),
+#endif
                possible_src_out_of_range, false/*possible aliasing*/);
 #ifdef DEBUG_LEGION
       assert(indirection_indexes.size() == src_req.instance_fields.size());
@@ -2681,8 +2702,11 @@ namespace Legion {
       if (!copy_preconditions.empty())
         copy_pre = Runtime::merge_events(&trace_info, copy_preconditions);
       const ApEvent copy_post = 
-        copy_expr->issue_indirect(trace_info, dst_fields, src_fields,
-                                  indirections, copy_pre, pred_guard);
+        copy_expr->issue_indirect(trace_info,dst_fields,src_fields,indirections,
+#ifdef LEGION_SPY
+                                  indirect_id,
+#endif
+                                  copy_pre, pred_guard);
       if (!trace_info.recording)
         // If we're not recording then destroy our indirections
         // Otherwise the trace took ownership of them
@@ -2734,10 +2758,16 @@ namespace Legion {
       // indirection indexes for each of the source fields
       std::vector<void*> indirections;
       std::vector<unsigned> indirection_indexes;
+#ifdef LEGION_SPY
+      const unsigned indirect_id = runtime->get_unique_indirections_id();
+#endif
       copy_expr->construct_indirections(dst_indexes, idx_field, 
                dst_req.region.get_index_space().get_type_tag(), 
                scatter_is_range, idx_target.get_manager()->get_instance(),
                dst_records, indirections, indirection_indexes,
+#ifdef LEGION_SPY
+               indirect_id, idx_target.get_manager()->get_unique_event(),
+#endif
                possible_dst_out_of_range, possible_dst_aliasing);
 #ifdef DEBUG_LEGION
       assert(indirection_indexes.size() == dst_req.instance_fields.size());
@@ -2804,8 +2834,11 @@ namespace Legion {
       if (!copy_preconditions.empty())
         copy_pre = Runtime::merge_events(&trace_info, copy_preconditions);
       const ApEvent copy_post = 
-        copy_expr->issue_indirect(trace_info, dst_fields, src_fields,
-                                  indirections, copy_pre, pred_guard);
+        copy_expr->issue_indirect(trace_info,dst_fields,src_fields,indirections,
+#ifdef LEGION_SPY
+                                  indirect_id,
+#endif
+                                  copy_pre, pred_guard);
       if (!trace_info.recording)
         // If we're not recording then destroy our indirections
         // Otherwise the trace took ownership of them
@@ -2864,10 +2897,16 @@ namespace Legion {
       // indirection indexes for each of the source fields
       std::vector<void*> indirections;
       std::vector<unsigned> src_indirection_indexes;
+#ifdef LEGION_SPY
+      const unsigned indirect_id = runtime->get_unique_indirections_id();
+#endif
       copy_expr->construct_indirections(src_indexes, src_idx_field,
                src_req.region.get_index_space().get_type_tag(),
                both_are_range, src_idx_target.get_manager()->get_instance(),
                src_records, indirections, src_indirection_indexes,
+#ifdef LEGION_SPY
+               indirect_id, src_idx_target.get_manager()->get_unique_event(),
+#endif
                possible_src_out_of_range, false/*possible aliasing*/);
 #ifdef DEBUG_LEGION
       assert(src_indirection_indexes.size() == src_req.instance_fields.size());
@@ -2877,6 +2916,9 @@ namespace Legion {
                dst_req.region.get_index_space().get_type_tag(),
                both_are_range, dst_idx_target.get_manager()->get_instance(),
                dst_records, indirections, dst_indirection_indexes,
+#ifdef LEGION_SPY
+               indirect_id, dst_idx_target.get_manager()->get_unique_event(),
+#endif
                possible_dst_out_of_range, possible_dst_aliasing);
 #ifdef DEBUG_LEGION
       assert(dst_indirection_indexes.size() == dst_req.instance_fields.size());
@@ -2931,8 +2973,11 @@ namespace Legion {
       if (!copy_preconditions.empty())
         copy_pre = Runtime::merge_events(&trace_info, copy_preconditions);
       const ApEvent copy_post = 
-        copy_expr->issue_indirect(trace_info, dst_fields, src_fields,
-                                  indirections, copy_pre, pred_guard);
+        copy_expr->issue_indirect(trace_info,dst_fields,src_fields,indirections,
+#ifdef LEGION_SPY
+                                  indirect_id,
+#endif
+                                  copy_pre, pred_guard);
       if (!trace_info.recording)
         // If we're not recording then destroy our indirections
         // Otherwise the trace took ownership of them
