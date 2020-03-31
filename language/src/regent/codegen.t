@@ -3748,17 +3748,21 @@ end
 
 function codegen.expr_raw_future(cx, node)
   local value = codegen.expr(cx, node.value):read(cx, node.value.expr_type)
-  local future_type = std.future(node.expr_type)
+
+  local future_type = node.expr_type
+  if not std.is_future(future_type) then
+    future_type = std.future(node.expr_type)
+  end
 
   local future_value = values.value(
     node,
     expr.once_only(quote end,
-      `([std.future(node.expr_type)] {__result = [value.value]} ),
+      `([future_type] {__result = [value.value]} ),
       future_type),
     future_type)
 
   if std.is_future(node.expr_type) then
-    return value
+    return future_value
   else
     return codegen.expr(
      cx,

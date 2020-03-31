@@ -735,8 +735,8 @@ end
 function optimize_futures.expr_raw_future(cx, node)
   local value = concretize(cx, optimize_futures.expr(cx, node.value))
   return node {
-    value = value,
-    --expr_type = std.future(node.expr_type),
+    value = node.value,
+    expr_type = std.future(node.expr_type),
   }
 end
 
