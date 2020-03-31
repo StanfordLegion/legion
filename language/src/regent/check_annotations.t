@@ -135,6 +135,7 @@ local node_allow_annotations = {
   [ast.typed.expr.CtorRecField]               = deny_all,
   [ast.typed.expr.RawContext]                 = deny_all,
   [ast.typed.expr.RawFields]                  = deny_all,
+  [ast.typed.expr.RawFuture]                  = deny_all,
   [ast.typed.expr.RawPhysical]                = deny_all,
   [ast.typed.expr.RawRuntime]                 = deny_all,
   [ast.typed.expr.RawTask]                    = deny_all,

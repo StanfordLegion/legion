@@ -1238,6 +1238,22 @@ function type_check.expr_raw_fields(cx, node)
   }
 end
 
+function type_check.expr_raw_future(cx, node)
+  local value = type_check.expr(cx, node.value)
+  local expr_type = std.as_read(value.expr_type)
+
+  if expr_type ~= std.c.legion_future_t then
+    report.error(node, "type mismatch in argument 2: expected legion_future_t but got " .. tostring(value_type))
+  end
+
+  return ast.typed.expr.RawFuture {
+    value = value,
+    expr_type = node.return_type,
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
 function type_check.expr_raw_physical(cx, node)
   local region = type_check.expr_region_root(cx, node.region)
   local region_type = std.check_read(cx, region.region)
@@ -3799,6 +3815,7 @@ local type_check_expr_node = {
   [ast.specialized.expr.Ctor]                       = type_check.expr_ctor,
   [ast.specialized.expr.RawContext]                 = type_check.expr_raw_context,
   [ast.specialized.expr.RawFields]                  = type_check.expr_raw_fields,
+  [ast.specialized.expr.RawFuture]                  = type_check.expr_raw_future,
   [ast.specialized.expr.RawPhysical]                = type_check.expr_raw_physical,
   [ast.specialized.expr.RawRuntime]                 = type_check.expr_raw_runtime,
   [ast.specialized.expr.RawTask]                    = type_check.expr_raw_task,

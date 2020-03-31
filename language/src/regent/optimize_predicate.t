@@ -141,6 +141,7 @@ local node_is_side_effect_free = {
   [ast.typed.expr.CtorListField]              = always_true,
   [ast.typed.expr.CtorRecField]               = always_true,
   [ast.typed.expr.RawFields]                  = always_true,
+  [ast.typed.expr.RawFuture]                  = always_true,
   [ast.typed.expr.RawTask]                    = always_true,
   [ast.typed.expr.RawValue]                   = always_true,
   [ast.typed.expr.Isnull]                     = always_true,

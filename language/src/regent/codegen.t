@@ -3746,6 +3746,36 @@ function codegen.expr_raw_fields(cx, node)
     expr_type)
 end
 
+function codegen.expr_raw_future(cx, node)
+  local value = codegen.expr(cx, node.value):read(cx, node.value.expr_type)
+  local future_type = std.future(node.expr_type)
+
+  local future_value = values.value(
+    node,
+    expr.once_only(quote end,
+      `([std.future(node.expr_type)] {__result = [value.value]} ),
+      future_type),
+    future_type)
+
+  if std.is_future(node.expr_type) then
+    return value
+  else
+    return codegen.expr(
+     cx,
+     ast.typed.expr.FutureGetResult {
+       value = ast.typed.expr.Internal {
+         value = future_value,
+	 expr_type = future_type,
+	 annotations = node.annotations,
+	 span = node.span,
+       },
+     expr_type = node.expr_type,
+     annotations = node.annotations,
+     span = node.span,
+     })
+  end
+end
+
 function codegen.expr_raw_physical(cx, node)
   local region = codegen.expr_region_root(cx, node.region):read(cx)
   local region_type = std.as_read(node.region.expr_type)
@@ -7785,6 +7815,9 @@ function codegen.expr(cx, node)
 
   elseif node:is(ast.typed.expr.RawFields) then
     return codegen.expr_raw_fields(cx, node)
+
+  elseif node:is(ast.typed.expr.RawFuture) then
+    return codegen.expr_raw_future(cx, node)
 
   elseif node:is(ast.typed.expr.RawPhysical) then
     return codegen.expr_raw_physical(cx, node)

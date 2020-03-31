@@ -361,6 +361,7 @@ local normalize_expr_table = {
 
   [ast.specialized.expr.RawContext]                 = pass_through_expr,
   [ast.specialized.expr.RawFields]                  = expr_raw_fields,
+  [ast.specialized.expr.RawFuture]                  = pass_through_expr,
   [ast.specialized.expr.RawPhysical]                = expr_raw_physical,
   [ast.specialized.expr.RawRuntime]                 = pass_through_expr,
   [ast.specialized.expr.RawTask]                    = pass_through_expr,

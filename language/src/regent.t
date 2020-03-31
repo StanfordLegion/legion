@@ -63,6 +63,7 @@ local language = {
     "__external",
     "__fence",
     "__fields",
+    "__future",
     "__forbid",
     "__idempotent",
     "__import_ispace",
