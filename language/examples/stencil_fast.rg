@@ -331,6 +331,8 @@ terra get_base_and_stride(rect : c.legion_rect_2d_t,
   regentlib.assert(subrect.hi.x[0] == rect.hi.x[0] and subrect.hi.x[1] == rect.hi.x[1], "subrect not equal to rect")
   regentlib.assert(offsets[0].offset == terralib.sizeof(DTYPE), "stride does not match expected value")
 
+  c.legion_accessor_array_2d_destroy(accessor)
+
   return { base = base_pointer, stride = offsets[1].offset }
 end
 
