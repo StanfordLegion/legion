@@ -1,7 +1,7 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
-Version 20.03.0 (March ??, 2020)
+Version 20.03.0 (March 31, 2020)
   * Regent
     - Behavior change: `__fields` and `__physical` now both require
         explicit field names, i.e., `__fields(r.{x, y})` rather than
