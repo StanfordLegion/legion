@@ -3,12 +3,12 @@
  * Public-facing definitions of variables configured at build time
  */
 
-// ******************** IMPORTANT **************************
-//
-// This file is PURE C, **NOT** C++. Keep any C++-isms in
-// legion_types.h, or elsewhere.
-//
-// ******************** IMPORTANT **************************
+/********************** IMPORTANT **************************
+ *
+ * This file is PURE C, **NOT** C++. Keep any C++-isms in
+ * legion_types.h, or elsewhere.
+ *
+ ******************** IMPORTANT ****************************/
 
 #ifndef DEBUG_LEGION
 #cmakedefine DEBUG_LEGION

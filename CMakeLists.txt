@@ -348,6 +348,15 @@ if(Legion_USE_ZLIB)
   # define variable for legion_defines.h
   set(LEGION_USE_ZLIB ON)
 endif()
+                                                                                          
+#------------------------------------------------------------------------------#
+# Fortran configuration
+#------------------------------------------------------------------------------#
+option(Legion_USE_Fortran "Enable support for Fortran" OFF)
+if(Legion_USE_Fortran)
+  enable_language(Fortran)
+  set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -cpp")
+endif()
 
 #------------------------------------------------------------------------------#
 # Miscelaneous other options

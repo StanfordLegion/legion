@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2020 Los Alamos National Security, LLC
+# Copyright 2017 Kitware, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,21 +15,15 @@
 #------------------------------------------------------------------------------#
 
 cmake_minimum_required(VERSION 3.1)
+project(LegionExample_07_partitioning_fortran_task)
 
+# Only search if were building stand-alone and not as part of Legion
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_subdirectory(00_hello_world)
-add_subdirectory(01_tasks_and_futures)
-add_subdirectory(02_index_tasks)
-add_subdirectory(03_global_vars)
-add_subdirectory(04_logical_regions)
-add_subdirectory(05_physical_regions)
-add_subdirectory(06_privileges)
-add_subdirectory(07_partitioning)
-add_subdirectory(08_multiple_partitions)
-add_subdirectory(09_custom_mapper)
-if(Legion_USE_Fortran)
-  add_subdirectory(fortran)
+add_executable(partitioning_fortran_task_fortran partitioning.cc daxpy_task_f.f90)
+target_link_libraries(partitioning_fortran_task_fortran Legion::Legion)
+if(Legion_ENABLE_TESTING)
+  add_test(NAME partitioning_fortran_task_fortran COMMAND $<TARGET_FILE:partitioning_fortran_task_fortran>) 
 endif()

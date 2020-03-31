@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2020 Los Alamos National Security, LLC
+# Copyright 2019 Los Alamos National Security, LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -23,13 +23,11 @@ endif()
 add_subdirectory(00_hello_world)
 add_subdirectory(01_tasks_and_futures)
 add_subdirectory(02_index_tasks)
-add_subdirectory(03_global_vars)
-add_subdirectory(04_logical_regions)
-add_subdirectory(05_physical_regions)
-add_subdirectory(06_privileges)
-add_subdirectory(07_partitioning)
+add_subdirectory(03_physical_regions)
+add_subdirectory(04_privileges_accessor)
+add_subdirectory(05_privileges_raw_ptr)
+add_subdirectory(06_partitioning)
+add_subdirectory(07_partitioning_fortran_task)
 add_subdirectory(08_multiple_partitions)
-add_subdirectory(09_custom_mapper)
-if(Legion_USE_Fortran)
-  add_subdirectory(fortran)
-endif()
+add_subdirectory(09_region_2d)
+add_subdirectory(10_attach_array)

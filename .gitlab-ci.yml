@@ -13,25 +13,35 @@ variables:
 # Local variables (included on a case-by-case basis in each job):
 .gcc48: &gcc48
   CXX: "g++-4.8"
+  F90: "gfortran-4.8"
 .gcc49: &gcc49
   CXX: "g++-4.9"
+  F90: "gfortran-4.9"
 .gcc5: &gcc5
   CXX: "g++-5"
+  F90: "gfortran-5"
 .gcc6: &gcc6
   CXX: "g++-6"
+  F90: "gfortran-6"
 .gcc7: &gcc7
   CXX: "g++-7"
+  F90: "gfortran-7"
 .gcc8: &gcc8
   CXX: "g++-8"
+  F90: "gfortran-8"
 
 .clang35: &clang35
   CXX: "clang++-3.5"
+  F90: "gfortran-5"
 .clang38: &clang38
   CXX: "clang++-3.8"
+  F90: "gfortran-5"
 .clang7: &clang7
   CXX: "clang++-7"
+  F90: "gfortran-5"
 .clang8: &clang8
   CXX: "clang++-8"
+  F90: "gfortran-5"
 
 .terra35: &terra35
   LLVM_CONFIG: "llvm-config-3.5"
@@ -91,6 +101,8 @@ variables:
   USE_HDF: "1"
   HDF_HEADER: "hdf5/serial/hdf5.h"
   HDF_LIBNAME: "hdf5_serial"
+.fortran: &fortran
+  LEGION_USE_FORTRAN: "1"
 .llvm: &llvm
   USE_LLVM: "1"
 .cuda: &cuda
@@ -392,10 +404,10 @@ before_script:
 # Linux with GCC 4.9
 # * Basic configurations
 #   * Release
-gcc49_cxx98_release_legion:
+gcc49_cxx98_release_legion_fortran:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *release, *cxx98_normal, *legion]
+    <<: [*gcc49, *terra38, *release, *cxx98_normal, *legion, *fortran]
 gcc49_cxx98_release_llvm_cmake_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
@@ -572,10 +584,10 @@ gcc49_cxx11_debug_external:
 # Linux with Clang 3.8
 # * Basic configurations
 #   * Release
-clang38_cxx98_release_legion:
+clang38_cxx98_release_legion_fortran:
   <<: [*linux, *image_clang, *tests]
   variables:
-    <<: [*clang38, *terra38, *release, *cxx98_normal, *legion]
+    <<: [*clang38, *terra38, *release, *cxx98_normal, *legion, *fortran]
 clang38_cxx98_release_llvm_cmake_regent:
   <<: [*linux_compute, *image_clang, *tests]
   variables:

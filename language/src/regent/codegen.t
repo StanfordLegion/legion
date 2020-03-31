@@ -4671,7 +4671,8 @@ function codegen.expr_partition_by_restriction(cx, node)
       [region.value].impl.index_space,
       [colors.value].impl,
       [transform.value], [extent.value],
-      [partition_kind(node.disjointness, node.completeness)], -1)
+      [partition_kind(node.disjointness, node.completeness)],
+      c.AUTO_GENERATE_ID)
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [region.value].impl, [ip])
   end
@@ -7039,7 +7040,7 @@ function codegen.expr_allocate_scratch_fields(cx, node)
          local field_type = cx:region_or_list(region_type):field_type(field_path)
          return quote
            [field_ids][i] = c.legion_field_allocator_allocate_local_field(
-             fsa, terralib.sizeof(field_type), [uint64](-1))
+             fsa, terralib.sizeof(field_type), c.AUTO_GENERATE_ID)
            c.legion_field_id_attach_name(
              [cx.runtime], [field_space], [field_ids][i], field_name, false)
          end
@@ -7197,7 +7198,7 @@ function codegen.expr_binary(cx, node)
           [cx.runtime], [cx.context],
           is, [rhs.value].impl.index_partition,
           [(partition_type:is_disjoint() and c.DISJOINT_KIND) or c.COMPUTE_KIND],
-          -1, false)
+          c.AUTO_GENERATE_ID, false)
         var [lp] = c.legion_logical_partition_create_by_tree(
           [cx.runtime], [cx.context],
           [ip], [lhs.value].impl.field_space, [lhs.value].impl.tree_id)
@@ -7226,7 +7227,7 @@ function codegen.expr_binary(cx, node)
           is, [lhs.value].impl.index_partition, [rhs.value].impl.index_partition,
           colors,
           [(partition_type:is_disjoint() and c.DISJOINT_KIND) or c.COMPUTE_KIND],
-          -1)
+          c.AUTO_GENERATE_ID)
         var [lp] = c.legion_logical_partition_create_by_tree(
           [cx.runtime], [cx.context],
           [ip], [lhs.value].impl.field_space, [lhs.value].impl.tree_id)

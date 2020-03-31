@@ -32,6 +32,25 @@ do
   end
 end
 
+-- Helpers for zero/min/max values of various types.
+
+local function zero(value_type) return terralib.cast(value_type, 0) end
+local function one(value_type) return terralib.cast(value_type, 1) end
+local function min_value(value_type)
+  if type(rawget(value_type, "min")) == "function" then
+    return value_type:min()
+  else
+    return terralib.cast(value_type, -math.huge)
+  end
+end
+local function max_value(value_type)
+  if type(rawget(value_type, "max")) == "function" then
+    return value_type:max()
+  else
+    return terralib.cast(value_type, math.huge)
+  end
+end
+
 -- #####################################
 -- ## Legion Bindings
 -- #################
@@ -63,7 +82,7 @@ base.c = c
 -- Hack: Terra's parser isn't smart enough to read the value of
 -- AUTO_GENERATE_ID, so just force it here so we don't have to
 -- hard-code its value elsewhere in the compiler.
-c.AUTO_GENERATE_ID = -1
+c.AUTO_GENERATE_ID = max_value(int32)
 
 local max_dim = c.LEGION_MAX_DIM
 base.max_dim = max_dim
@@ -283,22 +302,6 @@ end
 --  * "reads_writes" is a physical privilege (not a normal privilege),
 --    and is the top of the physical privilege lattice
 
-local function zero(value_type) return terralib.cast(value_type, 0) end
-local function one(value_type) return terralib.cast(value_type, 1) end
-local function min_value(value_type)
-  if type(rawget(value_type, "min")) == "function" then
-    return value_type:min()
-  else
-    return terralib.cast(value_type, -math.huge)
-  end
-end
-local function max_value(value_type)
-  if type(rawget(value_type, "max")) == "function" then
-    return value_type:max()
-  else
-    return terralib.cast(value_type, math.huge)
-  end
-end
 local function lift(fn)
   return function(value_type)
     if value_type:isarray() then
