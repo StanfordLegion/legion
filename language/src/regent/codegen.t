@@ -3747,7 +3747,6 @@ function codegen.expr_raw_fields(cx, node)
 end
 
 function codegen.expr_raw_future(cx, node)
-
   local value = codegen.expr(cx, node.value):read(cx, node.value.expr_type)
 
   local future_type = node.expr_type
