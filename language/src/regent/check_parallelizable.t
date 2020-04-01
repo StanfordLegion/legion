@@ -433,8 +433,14 @@ function analyze_access.expr_id(cx, node, new_privilege, field_path)
 end
 
 function analyze_access.expr_field_access(cx, node, privilege, field_path)
-  local field_path = field_path or node.expr_type.field_path
-  return analyze_access.expr(cx, node.value, privilege, field_path)
+  if std.is_ref(node.expr_type) then
+    local field_path = field_path or node.expr_type.field_path
+    return analyze_access.expr(cx, node.value, privilege, field_path)
+  else
+    local private, center =
+      analyze_access.expr(cx, node.value, privilege, field_path)
+    return private, false
+  end
 end
 
 function analyze_access.expr_deref(cx, node, privilege, field_path)
