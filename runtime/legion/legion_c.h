@@ -83,7 +83,6 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_accessor_array_##DIM##d_t);
   LEGION_FOREACH_N(NEW_ACCESSOR_ARRAY_TYPE)
 #undef NEW_ACCESSOR_ARRAY_TYPE
-  NEW_OPAQUE_TYPE(legion_index_iterator_t);
   NEW_OPAQUE_TYPE(legion_task_t);
   NEW_OPAQUE_TYPE(legion_copy_t);
   NEW_OPAQUE_TYPE(legion_fill_t);
@@ -4179,44 +4178,6 @@ extern "C" {
   legion_accessor_array_##DIM##d_destroy(legion_accessor_array_##DIM##d_t handle);
   LEGION_FOREACH_N(DESTROY_ARRAY)
 #undef DESTROY_ARRAY
-
-  /**
-   * @return Caller takes ownership of return value.
-   *
-   * @see Legion::IndexIterator::IndexIterator()
-   */
-  legion_index_iterator_t
-  legion_index_iterator_create(legion_runtime_t runtime,
-                               legion_context_t context,
-                               legion_index_space_t handle);
-
-  /**
-   * @param handle Caller must have ownership of parameter `handle`.
-   *
-   * @see Legion::IndexIterator::~IndexIterator()
-   */
-  void
-  legion_index_iterator_destroy(legion_index_iterator_t handle);
-
-  /**
-   * @see Legion::IndexIterator::has_next()
-   */
-  bool
-  legion_index_iterator_has_next(legion_index_iterator_t handle);
-
-  /**
-   * @see Legion::IndexIterator::next()
-   */
-  legion_ptr_t
-  legion_index_iterator_next(legion_index_iterator_t handle);
-
-  /**
-   * @see Legion::IndexIterator::next_span()
-   */
-  legion_ptr_t
-  legion_index_iterator_next_span(legion_index_iterator_t handle,
-                                  size_t *act_count,
-                                  size_t req_count /* = -1 */);
 
   // -----------------------------------------------------------------------
   // Mappable Operations

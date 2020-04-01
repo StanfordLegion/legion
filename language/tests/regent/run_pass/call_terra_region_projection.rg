@@ -48,18 +48,21 @@ terra edit(runtime : c.legion_runtime_t,
 
   var r_logical = c.legion_physical_region_get_logical_region(
     r_physical[0])
-  var r_iterator = c.legion_index_iterator_create(
-    runtime, ctx, r_logical.index_space)
+  var r_iterator = c.legion_rect_in_domain_iterator_create_1d(
+    c.legion_index_space_get_domain(runtime, r_logical.index_space))
   var sum : int64 = 0
-  while c.legion_index_iterator_has_next(r_iterator) do
-    var p = c.legion_index_iterator_next(r_iterator)
-    cstdio.printf("attempting to read r at pointer %d\n", p.value)
-    var x : int64 = 9999999
-    c.legion_accessor_array_1d_read(r, p, &x, sizeof(int64))
-    cstdio.printf("  value is %lld\n", x)
-    sum = sum + x
+  while c.legion_rect_in_domain_iterator_valid_1d(r_iterator) do
+    var rect = c.legion_rect_in_domain_iterator_get_rect_1d(r_iterator)
+    c.legion_rect_in_domain_iterator_step_1d(r_iterator)
+    for idx = rect.lo.x[0], rect.hi.x[0] + 1 do
+      cstdio.printf("attempting to read r at pointer %d\n", idx)
+      var x : int64 = 9999999
+      c.legion_accessor_array_1d_read(r, c.legion_ptr_t { value = idx }, &x, sizeof(int64))
+      cstdio.printf("  value is %lld\n", x)
+      sum = sum + x
+    end
   end
-  c.legion_index_iterator_destroy(r_iterator)
+  c.legion_rect_in_domain_iterator_destroy_1d(r_iterator)
 
   c.legion_accessor_array_1d_destroy(r)
   c.legion_accessor_array_1d_destroy(s_a)
