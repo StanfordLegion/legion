@@ -308,8 +308,8 @@ namespace Realm {
 	XferDesID peer_guid;
 	int peer_port_idx;
 	int indirect_port_idx;
-	uint64_t local_bytes_total;
-	atomic<uint64_t> local_bytes_cons, remote_bytes_total;
+	size_t local_bytes_total;
+	atomic<size_t> local_bytes_cons, remote_bytes_total;
 	SequenceAssembler seq_local, seq_remote;
 	// used to free up intermediate input buffers as soon as all data
 	//  has been read (rather than waiting for overall transfer chain
