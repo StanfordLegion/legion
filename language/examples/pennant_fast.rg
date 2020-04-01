@@ -1508,16 +1508,18 @@ where reads writes(rz_all, rp_all, rs_all) do
   return colorings
 end
 
-terra get_raw_span(runtime : c.legion_runtime_t, ctx : c.legion_context_t,
+terra get_raw_span(runtime : c.legion_runtime_t,
                    r : c.legion_logical_region_t)
-  var it = c.legion_index_iterator_create(runtime, ctx, r.index_space)
-  while c.legion_index_iterator_has_next(it) do
-    var count : c.size_t = 0
-    var start = c.legion_index_iterator_next_span(it, &count, -1)
-    regentlib.assert(not c.legion_index_iterator_has_next(it), "multiple spans")
+  var it = c.legion_rect_in_domain_iterator_create_1d(c.legion_index_space_get_domain(runtime, r.index_space))
+  while c.legion_rect_in_domain_iterator_valid_1d(it) do
+    var rect = c.legion_rect_in_domain_iterator_get_rect_1d(it)
+    c.legion_rect_in_domain_iterator_step_1d(it)
+    regentlib.assert(not c.legion_rect_in_domain_iterator_valid_1d(it), "multiple spans")
 
-    return span { start = start.value, stop = start.value + count, internal = false }
+    c.legion_rect_in_domain_iterator_destroy_1d(it)
+    return span { start = rect.lo.x[0], stop = rect.hi.x[0] + 1, internal = false }
   end
+  c.legion_rect_in_domain_iterator_destroy_1d(it)
   return span { start = 0, stop = 0, internal = false }
 end
 
@@ -1554,19 +1556,19 @@ do
   for i = 0, conf.npieces do
     for j = 0, conf.nspans_zones do
       var z = unsafe_cast(ptr(span, rz_spans), i*conf.nspans_zones + j)
-      @z = get_raw_span(__runtime(), __context(), __raw(rz_spans_x[i][j]))
+      @z = get_raw_span(__runtime(), __raw(rz_spans_x[i][j]))
     end
     for j = 0, conf.nspans_zones do
       var s = unsafe_cast(ptr(span, rs_spans), i*conf.nspans_zones + j)
-      @s = get_raw_span(__runtime(), __context(), __raw(rs_spans_x[i][j]))
+      @s = get_raw_span(__runtime(), __raw(rs_spans_x[i][j]))
     end
     for j = 0, conf.nspans_points do
       var p = unsafe_cast(ptr(span, rp_spans_private), i*conf.nspans_points + j)
-      @p = get_raw_span(__runtime(), __context(), __raw(rp_spans_private_x[i][j]))
+      @p = get_raw_span(__runtime(), __raw(rp_spans_private_x[i][j]))
     end
     for j = 0, conf.nspans_points do
       var p = unsafe_cast(ptr(span, rp_spans_shared), i*conf.nspans_points + j)
-      @p = get_raw_span(__runtime(), __context(), __raw(rp_spans_shared_x[i][j]))
+      @p = get_raw_span(__runtime(), __raw(rp_spans_shared_x[i][j]))
     end
   end
   end

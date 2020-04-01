@@ -5567,53 +5567,6 @@ legion_accessor_array_##DIM##d_ref_point(legion_accessor_array_##DIM##d_t handle
 LEGION_FOREACH_N(REF_POINT)
 #undef REF_POINT
 
-legion_index_iterator_t
-legion_index_iterator_create(legion_runtime_t runtime_,
-                             legion_context_t ctx_,
-                             legion_index_space_t handle_)
-{
-  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
-  IndexSpace handle = CObjectWrapper::unwrap(handle_);
-
-  IndexIterator *iterator = new IndexIterator(runtime, ctx, handle);
-  return CObjectWrapper::wrap(iterator);
-}
-
-void
-legion_index_iterator_destroy(legion_index_iterator_t handle_)
-{
-  IndexIterator *handle = CObjectWrapper::unwrap(handle_);
-
-  delete handle;
-}
-
-bool
-legion_index_iterator_has_next(legion_index_iterator_t handle_)
-{
-  IndexIterator *handle = CObjectWrapper::unwrap(handle_);
-
-  return handle->has_next();
-}
-
-legion_ptr_t
-legion_index_iterator_next(legion_index_iterator_t handle_)
-{
-  IndexIterator *handle = CObjectWrapper::unwrap(handle_);
-
-  return CObjectWrapper::wrap(handle->next());
-}
-
-legion_ptr_t
-legion_index_iterator_next_span(legion_index_iterator_t handle_,
-                                size_t *act_count,
-                                size_t req_count)
-{
-  IndexIterator *handle = CObjectWrapper::unwrap(handle_);
-
-  return CObjectWrapper::wrap(handle->next_span(*act_count, req_count));
-}
-
 //------------------------------------------------------------------------
 // Mappable Operations
 //------------------------------------------------------------------------

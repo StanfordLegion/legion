@@ -6281,6 +6281,16 @@ namespace Legion {
       return result;
     }
 
+#ifdef LEGION_MALLOC_INSTANCES
+    //--------------------------------------------------------------------------
+    uintptr_t Runtime::allocate_deferred_instance(Memory memory, size_t size,
+                                                  bool free)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->allocate_deferred_instance(memory, size, free);
+    }
+#endif
+
     //--------------------------------------------------------------------------
     /*static*/ int Runtime::start(int argc, char **argv, bool background)
     //--------------------------------------------------------------------------

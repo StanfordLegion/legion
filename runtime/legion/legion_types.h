@@ -377,6 +377,8 @@ namespace Legion {
       LG_DEFER_INSTANCE_MANAGER_TASK_ID,
       LG_DEFER_REDUCTION_MANAGER_TASK_ID,
       LG_DEFER_VERIFY_PARTITION_TASK_ID,
+      LG_MALLOC_INSTANCE_TASK_ID,
+      LG_FREE_INSTANCE_TASK_ID,
       LG_DEFER_CONSENSUS_MATCH_TASK_ID,
       LG_YIELD_TASK_ID,
       LG_DEFER_TRACE_UPDATE_TASK_ID,
@@ -509,6 +511,8 @@ namespace Legion {
         "Defer Instance Manager Registration",                    \
         "Defer Reduction Manager Registration",                   \
         "Defer Verify Partition",                                 \
+        "Malloc Instance",                                        \
+        "Free Instance",                                          \
         "Defer Consensus Match",                                  \
         "Yield",                                                  \
         "Defer Trace Update",                                     \
@@ -1613,6 +1617,9 @@ namespace Legion {
                                       Legion::Runtime *&rt) = 0;
       virtual void end_task(const void *result, 
                             size_t result_size, bool owned, 
+#ifdef LEGION_MALLOC_INSTANCES
+                            uintptr_t allocation = 0,
+#endif
           Realm::RegionInstance inst = Realm::RegionInstance::NO_INST) = 0;
       // This is safe because we see in legion_context.h that
       // TaskContext implements this interface and no one else

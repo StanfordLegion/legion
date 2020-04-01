@@ -931,6 +931,32 @@ namespace Legion {
         std::map<std::pair<MapperID,Processor>,GCPriority> mapper_priorities;
         // For tracking external instances and whether they can be used
       };
+#ifdef LEGION_MALLOC_INSTANCES
+    public:
+      struct MallocInstanceArgs : public LgTaskArgs<MallocInstanceArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_MALLOC_INSTANCE_TASK_ID;
+      public:
+        MallocInstanceArgs(MemoryManager *m, size_t s, uintptr_t *p)
+          : LgTaskArgs<MallocInstanceArgs>(implicit_provenance), 
+            manager(m), size(s), ptr(p) { }
+      public:
+        MemoryManager *const manager;
+        const size_t size;
+        uintptr_t *ptr;
+      };
+      struct FreeInstanceArgs : public LgTaskArgs<FreeInstanceArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_FREE_INSTANCE_TASK_ID;
+      public:
+        FreeInstanceArgs(MemoryManager *m, uintptr_t p)
+          : LgTaskArgs<FreeInstanceArgs>(implicit_provenance), 
+            manager(m), ptr(p) { }
+      public:
+        MemoryManager *const manager;
+        const uintptr_t ptr;
+      };
+#endif
     public:
       MemoryManager(Memory mem, Runtime *rt);
       MemoryManager(const MemoryManager &rhs);
@@ -1037,6 +1063,17 @@ namespace Legion {
                                     InstanceState state, bool larger_only); 
       RtEvent attach_external_instance(PhysicalManager *manager);
       RtEvent detach_external_instance(PhysicalManager *manager);
+#ifdef LEGION_MALLOC_INSTANCES
+    public:
+      uintptr_t allocate_legion_instance(size_t footprint, 
+                                         bool needs_defer = true);
+      void record_legion_instance(PhysicalManager *manager, uintptr_t ptr);
+      void free_legion_instance(PhysicalManager *manager, RtEvent deferred);
+      void free_legion_instance(RtEvent deferred, uintptr_t ptr, 
+                                bool needs_defer = true);
+      static void handle_malloc_instance(const void *args);
+      static void handle_free_instance(const void *args);
+#endif
     public:
       // The memory that we are managing
       const Memory memory;
@@ -1062,6 +1099,14 @@ namespace Legion {
       // Keep track of outstanding requuests for allocations which 
       // will be tried in the order that they arrive
       std::deque<RtUserEvent> pending_allocation_attempts;
+#ifdef LEGION_MALLOC_INSTANCES
+      std::map<PhysicalManager*,uintptr_t> legion_instances;
+      std::map<uintptr_t,size_t> allocations;
+      std::map<RtEvent,uintptr_t> pending_collectables;
+#ifdef LEGION_USE_CUDA
+      Processor local_gpu;
+#endif
+#endif
     };
 
     /**
@@ -2364,6 +2409,9 @@ namespace Legion {
       // Memory manager functions
       MemoryManager* find_memory_manager(Memory mem);
       AddressSpaceID find_address_space(Memory handle) const;
+#ifdef LEGION_MALLOC_INSTANCES
+      uintptr_t allocate_deferred_instance(Memory memory,size_t size,bool free);
+#endif
     public:
       // Messaging functions
       MessageManager* find_messenger(AddressSpaceID sid);

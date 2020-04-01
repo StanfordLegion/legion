@@ -5580,13 +5580,31 @@ namespace Legion {
                        "a non-zero amount with the -ll:zsize flag");
         assert(false);
       }
-      const Realm::Memory memory = finder.first();
+      const Memory memory = finder.first();
       const Realm::Point<1,coord_t> zero(0);
-      Realm::IndexSpace<1,coord_t> is = Realm::Rect<1,coord_t>(zero, zero);
+      Realm::IndexSpace<1,coord_t> bounds = Realm::Rect<1,coord_t>(zero, zero);
       const std::vector<size_t> field_sizes(1,sizeof(T));
+      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
+      int dim_order[1];
+      dim_order[0] = 0;
+      Realm::InstanceLayoutGeneric *layout = 
+        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
+            constraints, dim_order);
       Realm::ProfilingRequestSet no_requests; 
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(instance,
-                    memory, is, field_sizes, 0/*blocing factor*/, no_requests));
+#ifdef LEGION_MALLOC_INSTANCES
+      // Ask Legion to malloc this instance for us
+      Runtime *runtime = Runtime::get_runtime();
+      const size_t footprint = bounds.bounds.volume() * sizeof(T);
+      allocation = runtime->allocate_deferred_instance(memory, footprint);
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
+            instance, memory, allocation, layout, no_requests));
+#else
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
+            instance, memory, layout, no_requests));
+#endif
+      // Note we do not destroy this eagerly because we know this value is
+      // going to be returned as the future value and Legion will free it
+      // once it reads the value internally
       if (wait_on.exists())
         wait_on.wait();
 #ifdef DEBUG_LEGION
@@ -5656,8 +5674,13 @@ namespace Legion {
     inline void DeferredValue<T>::finalize(InternalContext ctx) const
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_MALLOC_INSTANCES
+      ctx->end_task(accessor.ptr(Point<1,coord_t>(0)), sizeof(T),
+                    false/*owner*/, allocation, instance);
+#else
       ctx->end_task(accessor.ptr(Point<1,coord_t>(0)), sizeof(T),
                     false/*owner*/, instance);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -5694,16 +5717,20 @@ namespace Legion {
       inline DeferredBuffer(void);
       inline DeferredBuffer(Memory::Kind kind, 
                             const Domain &bounds,
-                            const FT *initial_value = NULL);
+                            const FT *initial_value = NULL,
+                            bool fortran_order_dims = false);
       inline DeferredBuffer(Memory::Kind kind, 
                             IndexSpace bounds,
-                            const FT *initial_value = NULL);
+                            const FT *initial_value = NULL,
+                            bool fortran_order_dims = false);
       inline DeferredBuffer(const Rect<N,T> &bounds, 
                             Memory::Kind kind,
-                            const FT *initial_value = NULL);
+                            const FT *initial_value = NULL,
+                            bool fortran_order_dims = false);
       inline DeferredBuffer(IndexSpaceT<N,T> bounds, 
                             Memory::Kind kind,
-                            const FT *initial_value = NULL);
+                            const FT *initial_value = NULL,
+                            bool fortran_order_dims = false);
     public:
       __CUDA_HD__
       inline FT read(const Point<N,T> &p) const;
@@ -5727,16 +5754,20 @@ namespace Legion {
       inline DeferredBuffer(void);
       inline DeferredBuffer(Memory::Kind kind, 
                             const Domain &bounds,
-                            const FT *initial_value = NULL);
+                            const FT *initial_value = NULL,
+                            bool fortran_order_dims = false);
       inline DeferredBuffer(Memory::Kind kind, 
                             IndexSpace bounds,
-                            const FT *initial_value = NULL);
+                            const FT *initial_value = NULL,
+                            bool fortran_order_dims = false);
       inline DeferredBuffer(const Rect<N,T> &bounds, 
                             Memory::Kind kind,
-                            const FT *initial_value = NULL);
+                            const FT *initial_value = NULL,
+                            bool fortran_order_dims = false);
       inline DeferredBuffer(IndexSpaceT<N,T> bounds, 
                             Memory::Kind kind,
-                            const FT *initial_value = NULL);
+                            const FT *initial_value = NULL,
+                            bool fortran_order_dims = false);
     public:
       __CUDA_HD__
       inline FT read(const Point<N,T> &p) const;
@@ -5786,7 +5817,8 @@ namespace Legion {
             CB
 #endif
            >::DeferredBuffer(Memory::Kind kind, const Domain &space,
-                             const FT *initial_value/* = NULL*/)
+                             const FT *initial_value/* = NULL*/,
+                             bool fortran_order_dims/* = false*/)
     //--------------------------------------------------------------------------
     {
       // Construct an instance of the right size in the corresponding memory
@@ -5806,12 +5838,36 @@ namespace Legion {
                 kind);
         assert(false);
       }
-      const Realm::Memory memory = finder.first();
+      const Memory memory = finder.first();
       const DomainT<N,T> bounds = space;
       const std::vector<size_t> field_sizes(1,sizeof(FT));
+      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
+      int dim_order[N];
+      if (fortran_order_dims)
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = i;
+      }
+      else
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = N - (i+1);
+      }
+      Realm::InstanceLayoutGeneric *layout = 
+        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
+            constraints, dim_order);
       Realm::ProfilingRequestSet no_requests; 
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(instance,
-                  memory, bounds, field_sizes, 0/*blocing factor*/, no_requests));
+#ifdef LEGION_MALLOC_INSTANCES
+      // Ask Legion to malloc this instance for us
+      Runtime *runtime = Runtime::get_runtime();
+      const size_t footprint = bounds.bounds.volume() * sizeof(FT);
+      uintptr_t ptr = runtime->allocate_deferred_instance(memory, footprint);
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
+            instance, memory, ptr, layout, no_requests)); 
+#else
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
+            instance, memory, layout, no_requests));
+#endif
       if (initial_value != NULL)
       {
         std::vector<Realm::CopySrcDstField> dsts(1);
@@ -5847,7 +5903,8 @@ namespace Legion {
             CB
 #endif
            >::DeferredBuffer(Memory::Kind kind, const IndexSpace space,
-                             const FT *initial_value/* = NULL*/)
+                             const FT *initial_value/* = NULL*/,
+                             bool fortran_order_dims/* = false*/)
     //--------------------------------------------------------------------------
     {
       // Construct an instance of the right size in the corresponding memory
@@ -5867,14 +5924,37 @@ namespace Legion {
                 kind);
         assert(false);
       }
-      const Realm::Memory memory = finder.first();
+      const Memory memory = finder.first();
       Runtime *runtime = Runtime::get_runtime();
       const DomainT<N,T> bounds = 
         runtime->get_index_space_domain<N,T>(IndexSpaceT<N,T>(space));
       const std::vector<size_t> field_sizes(1,sizeof(FT));
+      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
+      int dim_order[N];
+      if (fortran_order_dims)
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = i;
+      }
+      else
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = N - (i+1);
+      }
+      Realm::InstanceLayoutGeneric *layout = 
+        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
+            constraints, dim_order);
       Realm::ProfilingRequestSet no_requests; 
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(instance,
-                memory, bounds, field_sizes, 0/*blocing factor*/, no_requests));
+#ifdef LEGION_MALLOC_INSTANCES
+      // Ask Legion to malloc this instance for us
+      const size_t footprint = bounds.bounds.volume() * sizeof(FT);
+      uintptr_t ptr = runtime->allocate_deferred_instance(memory, footprint);
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
+            instance, memory, ptr, layout, no_requests));
+#else
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
+            instance, memory, layout, no_requests));
+#endif
       if (initial_value != NULL)
       {
         std::vector<Realm::CopySrcDstField> dsts(1);
@@ -5910,7 +5990,8 @@ namespace Legion {
             CB
 #endif
            >::DeferredBuffer(const Rect<N,T> &rect, Memory::Kind kind,
-                             const FT *initial_value /*= NULL*/)
+                             const FT *initial_value /*= NULL*/,
+                             bool fortran_order_dims /*= false*/)
     //--------------------------------------------------------------------------
     {
       // Construct an instance of the right size in the corresponding memory
@@ -5930,12 +6011,36 @@ namespace Legion {
                 kind);
         assert(false);
       }
-      const Realm::Memory memory = finder.first();
+      const Memory memory = finder.first();
       const DomainT<N,T> bounds(rect);
       const std::vector<size_t> field_sizes(1,sizeof(FT));
+      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
+      int dim_order[N];
+      if (fortran_order_dims)
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = i;
+      }
+      else
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = N - (i+1);
+      }
+      Realm::InstanceLayoutGeneric *layout = 
+        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
+            constraints, dim_order);
       Realm::ProfilingRequestSet no_requests; 
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(instance,
-                memory, bounds, field_sizes, 0/*blocing factor*/, no_requests));
+#ifdef LEGION_MALLOC_INSTANCES
+      // Ask Legion to malloc this instance for us
+      Runtime *runtime = Runtime::get_runtime();
+      const size_t footprint = bounds.bounds.volume() * sizeof(FT);
+      uintptr_t ptr = runtime->allocate_deferred_instance(memory, footprint);
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
+            instance, memory, ptr, layout, no_requests));
+#else
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
+            instance, memory, layout, no_requests));
+#endif
       if (initial_value != NULL)
       {
         std::vector<Realm::CopySrcDstField> dsts(1);
@@ -5971,7 +6076,8 @@ namespace Legion {
             CB
 #endif
            >::DeferredBuffer(const IndexSpaceT<N,T> space, Memory::Kind kind,
-                             const FT *initial_value/* = NULL*/)
+                             const FT *initial_value/* = NULL*/,
+                             bool fortran_order_dims/* = false*/)
     //--------------------------------------------------------------------------
     {
       // Construct an instance of the right size in the corresponding memory
@@ -5995,9 +6101,32 @@ namespace Legion {
       Runtime *runtime = Runtime::get_runtime();
       const DomainT<N,T> bounds = runtime->get_index_space_domain<N,T>(space);
       const std::vector<size_t> field_sizes(1,sizeof(FT));
+      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
+      int dim_order[N];
+      if (fortran_order_dims)
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = i;
+      }
+      else
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = N - (i+1);
+      }
+      Realm::InstanceLayoutGeneric *layout = 
+        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
+            constraints, dim_order);
       Realm::ProfilingRequestSet no_requests; 
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(instance,
-                memory, bounds, field_sizes, 0/*blocing factor*/, no_requests));
+#ifdef LEGION_MALLOC_INSTANCES
+      // Ask Legion to malloc this instance for us
+      const size_t footprint = bounds.bounds.volume() * sizeof(FT);
+      uintptr_t ptr = runtime->allocate_deferred_instance(memory, footprint);
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
+            instance, memory, ptr, layout, no_requests));
+#else
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
+            instance, memory, layout, no_requests));
+#endif
       if (initial_value != NULL)
       {
         std::vector<Realm::CopySrcDstField> dsts(1);
@@ -6159,7 +6288,8 @@ namespace Legion {
             true
 #endif
            >::DeferredBuffer(Memory::Kind kind, const Domain &space,
-                             const FT *initial_value/* = NULL*/)
+                             const FT *initial_value/* = NULL*/,
+                             const bool fortran_order_dims/* = false*/)
     //--------------------------------------------------------------------------
     {
       // Construct an instance of the right size in the corresponding memory
@@ -6179,12 +6309,36 @@ namespace Legion {
                 kind);
         assert(false);
       }
-      const Realm::Memory memory = finder.first();
+      const Memory memory = finder.first();
       bounds = space;
       const std::vector<size_t> field_sizes(1,sizeof(FT));
+      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
+      int dim_order[N];
+      if (fortran_order_dims)
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = i;
+      }
+      else
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = N - (i+1);
+      }
+      Realm::InstanceLayoutGeneric *layout = 
+        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
+            constraints, dim_order);
       Realm::ProfilingRequestSet no_requests; 
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(instance,
-                  memory, bounds, field_sizes, 0/*blocing factor*/, no_requests));
+#ifdef LEGION_MALLOC_INSTANCES
+      // Ask Legion to malloc this instance for us
+      Runtime *runtime = Runtime::get_runtime();
+      const size_t footprint = bounds.bounds.volume() * sizeof(FT);
+      uintptr_t ptr = runtime->allocate_deferred_instance(memory, footprint);
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
+            instance, memory, ptr, layout, no_requests));
+#else
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
+            instance, memory, layout, no_requests));
+#endif
       if (initial_value != NULL)
       {
         std::vector<Realm::CopySrcDstField> dsts(1);
@@ -6220,7 +6374,8 @@ namespace Legion {
             true
 #endif
            >::DeferredBuffer(Memory::Kind kind, const IndexSpace space,
-                             const FT *initial_value/* = NULL*/)
+                             const FT *initial_value/* = NULL*/,
+                             const bool fortran_order_dims/* = false*/)
     //--------------------------------------------------------------------------
     {
       // Construct an instance of the right size in the corresponding memory
@@ -6240,13 +6395,36 @@ namespace Legion {
                 kind);
         assert(false);
       }
-      const Realm::Memory memory = finder.first();
+      const Memory memory = finder.first();
       Runtime *runtime = Runtime::get_runtime();
       bounds = runtime->get_index_space_domain<N,T>(IndexSpaceT<N,T>(space));
       const std::vector<size_t> field_sizes(1,sizeof(FT));
+      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
+      int dim_order[N];
+      if (fortran_order_dims)
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = i;
+      }
+      else
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = N - (i+1);
+      }
+      Realm::InstanceLayoutGeneric *layout = 
+        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
+            constraints, dim_order);
       Realm::ProfilingRequestSet no_requests; 
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(instance,
-                memory, bounds, field_sizes, 0/*blocing factor*/, no_requests));
+#ifdef LEGION_MALLOC_INSTANCES
+      // Ask Legion to malloc this instance for us
+      const size_t footprint = bounds.bounds.volume() * sizeof(FT);
+      uintptr_t ptr = runtime->allocate_deferred_instance(memory, footprint);
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
+            instance, memory, ptr, layout, no_requests));
+#else
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
+            instance, memory, layout, no_requests));
+#endif
       if (initial_value != NULL)
       {
         std::vector<Realm::CopySrcDstField> dsts(1);
@@ -6282,7 +6460,8 @@ namespace Legion {
             true
 #endif
            >::DeferredBuffer(const Rect<N,T> &rect, Memory::Kind kind,
-                             const FT *initial_value /*= NULL*/)
+                             const FT *initial_value /*= NULL*/,
+                             const bool fortran_order_dims/* = false*/)
     //--------------------------------------------------------------------------
     {
       // Construct an instance of the right size in the corresponding memory
@@ -6302,12 +6481,36 @@ namespace Legion {
                 kind);
         assert(false);
       }
-      const Realm::Memory memory = finder.first();
+      const Memory memory = finder.first();
       bounds = DomainT<N,T>(rect);
       const std::vector<size_t> field_sizes(1,sizeof(FT));
+      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
+      int dim_order[N];
+      if (fortran_order_dims)
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = i;
+      }
+      else
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = N - (i+1);
+      }
+      Realm::InstanceLayoutGeneric *layout = 
+        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
+            constraints, dim_order);
       Realm::ProfilingRequestSet no_requests; 
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(instance,
-                memory, bounds, field_sizes, 0/*blocing factor*/, no_requests));
+#ifdef LEGION_MALLOC_INSTANCES
+      // Ask Legion to malloc this instance for us
+      Runtime *runtime = Runtime::get_runtime();
+      const size_t footprint = bounds.bounds.volume() * sizeof(FT);
+      uintptr_t ptr = runtime->allocate_deferred_instance(memory, footprint);
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
+            instance, memory, ptr, layout, no_requests));
+#else
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
+            instance, memory, layout, no_requests));
+#endif
       if (initial_value != NULL)
       {
         std::vector<Realm::CopySrcDstField> dsts(1);
@@ -6343,7 +6546,8 @@ namespace Legion {
             true
 #endif
            >::DeferredBuffer(const IndexSpaceT<N,T> space, Memory::Kind kind,
-                             const FT *initial_value/* = NULL*/)
+                             const FT *initial_value/* = NULL*/,
+                             const bool fortran_order_dims/* = false*/)
     //--------------------------------------------------------------------------
     {
       // Construct an instance of the right size in the corresponding memory
@@ -6363,13 +6567,36 @@ namespace Legion {
                 kind);
         assert(false);
       }
-      const Realm::Memory memory = finder.first();
+      const Memory memory = finder.first();
       Runtime *runtime = Runtime::get_runtime();
       bounds = runtime->get_index_space_domain<N,T>(space);
       const std::vector<size_t> field_sizes(1,sizeof(FT));
+      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
+      int dim_order[N];
+      if (fortran_order_dims)
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = i;
+      }
+      else
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = N - (i+1);
+      }
+      Realm::InstanceLayoutGeneric *layout = 
+        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
+            constraints, dim_order);
       Realm::ProfilingRequestSet no_requests; 
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(instance,
-                memory, bounds, field_sizes, 0/*blocing factor*/, no_requests));
+#ifdef LEGION_MALLOC_INSTANCES
+      // Ask Legion to malloc this instance for us
+      const size_t footprint = bounds.bounds.volume() * sizeof(FT);
+      uintptr_t ptr = runtime->allocate_deferred_instance(memory, footprint);
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
+            instance, memory, ptr, layout, no_requests));
+#else
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
+            instance, memory, layout, no_requests));
+#endif
       if (initial_value != NULL)
       {
         std::vector<Realm::CopySrcDstField> dsts(1);

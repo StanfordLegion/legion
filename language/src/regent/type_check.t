@@ -4464,7 +4464,6 @@ local opaque_types = {
   [std.c.legion_attach_launcher_t]             = true,
   [std.c.legion_must_epoch_launcher_t]         = true,
   [std.c.legion_physical_region_t]             = true,
-  [std.c.legion_index_iterator_t]              = true,
   [std.c.legion_task_t]                        = true,
   [std.c.legion_inline_t]                      = true,
   [std.c.legion_mappable_t]                    = true,

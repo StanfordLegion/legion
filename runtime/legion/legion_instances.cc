@@ -1027,6 +1027,10 @@ namespace Legion {
         instance.destroy(serdez_fields, deferred_event);
       else
         instance.destroy(deferred_event);
+#ifdef LEGION_MALLOC_INSTANCES
+      if (!is_external_instance())
+        memory_manager->free_legion_instance(this, deferred_event);
+#endif
 #endif
       // Notify any contexts of our deletion
       // Grab a copy of this in case we get any removal calls
@@ -1065,6 +1069,10 @@ namespace Legion {
         instance.destroy(serdez_fields);
       else
         instance.destroy();
+#ifdef LEGION_MALLOC_INSTANCES
+      if (!is_external_instance())
+        memory_manager->free_legion_instance(this, RtEvent::NO_RT_EVENT);
+#endif
 #endif
     }
 
@@ -2257,16 +2265,19 @@ namespace Legion {
       // Add a profiling request to see if the instance is actually allocated
       // Make it very high priority so we get the response quickly
       ProfilingResponseBase base(this);
+#ifndef LEGION_MALLOC_INSTANCES
       Realm::ProfilingRequest &req = requests.add_request(
           runtime->find_utility_group(), LG_LEGION_PROFILING_ID,
           &base, sizeof(base), LG_RESOURCE_PRIORITY);
       req.add_measurement<Realm::ProfilingMeasurements::InstanceAllocResult>();
       // Create a user event to wait on for the result of the profiling response
       profiling_ready = Runtime::create_rt_user_event();
+#endif
 #ifdef DEBUG_LEGION
       assert(!instance.exists()); // shouldn't exist before this
 #endif
       ApEvent ready;
+#ifndef LEGION_MALLOC_INSTANCES
       if (runtime->profiler != NULL)
       {
         runtime->profiler->add_inst_request(requests, creator_id);
@@ -2285,7 +2296,19 @@ namespace Legion {
                   memory_manager->memory, inst_layout, requests));
       // Wait for the profiling response
       if (!profiling_ready.has_triggered())
-        profiling_ready.wait(); 
+        profiling_ready.wait();
+#else
+      uintptr_t base_ptr = 0;
+      if (instance_footprint > 0)
+      {
+        base_ptr = 
+          memory_manager->allocate_legion_instance(instance_footprint);
+        if (base_ptr == 0)
+          return NULL;
+      }
+      ready = ApEvent(PhysicalInstance::create_external(instance,
+            memory_manager->memory, base_ptr, inst_layout, requests));
+#endif
       // If we couldn't make it then we are done
       if (!instance.exists())
         return NULL;
@@ -2416,6 +2439,9 @@ namespace Legion {
         default:
           assert(false); // illegal specialized case
       }
+#ifdef LEGION_MALLOC_INSTANCES
+      memory_manager->record_legion_instance(result, base_ptr); 
+#endif
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif

@@ -365,7 +365,12 @@ namespace Legion {
       virtual void add_to_prepipeline_queue(Operation *op) = 0;
       virtual void add_to_dependence_queue(Operation *op, bool unordered) = 0;
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
-          const void *result, size_t size, PhysicalInstance instance) = 0;
+                                          const void *result, size_t size, 
+#ifdef LEGION_MALLOC_INSTANCES
+                                          uintptr_t allocation = 0,
+#endif
+                                          PhysicalInstance instance = 
+                                            PhysicalInstance::NO_INST) = 0;
       virtual void register_executing_child(Operation *op) = 0;
       virtual void register_child_executed(Operation *op) = 0;
       virtual void register_child_complete(Operation *op) = 0;
@@ -437,6 +442,9 @@ namespace Legion {
       virtual const std::vector<PhysicalRegion>& begin_task(
                                                    Legion::Runtime *&runtime);
       virtual void end_task(const void *res, size_t res_size, bool owned,
+#ifdef LEGION_MALLOC_INSTANCES
+                    uintptr_t allocation = 0,
+#endif
                     PhysicalInstance inst = PhysicalInstance::NO_INST) = 0;
       virtual void post_end_task(const void *res, 
                                  size_t res_size, bool owned) = 0;
@@ -726,9 +734,15 @@ namespace Legion {
       };
       struct PostTaskArgs {
       public:
-        PostTaskArgs(TaskContext *ctx, size_t idx, const void *r, 
-                     size_t s, PhysicalInstance i, RtEvent w)
+        PostTaskArgs(TaskContext *ctx, size_t idx, const void *r, size_t s,
+#ifdef LEGION_MALLOC_INSTANCES
+                     uintptr_t alloc,
+#endif
+                     PhysicalInstance i, RtEvent w)
           : context(ctx), index(idx), result(r), size(s), 
+#ifdef LEGION_MALLOC_INSTANCES
+            allocation(alloc),
+#endif
             instance(i), wait_on(w) { }
       public:
         inline bool operator<(const PostTaskArgs &rhs) const
@@ -738,6 +752,9 @@ namespace Legion {
         size_t index;
         const void *result;
         size_t size;
+#ifdef LEGION_MALLOC_INSTANCES
+        uintptr_t allocation;
+#endif
         PhysicalInstance instance;
         RtEvent wait_on;
       };
@@ -1092,7 +1109,12 @@ namespace Legion {
       virtual void add_to_dependence_queue(Operation *op, bool unordered); 
       void process_dependence_stage(void);
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
-          const void *result, size_t size, PhysicalInstance instance);
+                                          const void *result, size_t size, 
+#ifdef LEGION_MALLOC_INSTANCES
+                                          uintptr_t allocation = 0,
+#endif
+                                          PhysicalInstance instance =
+                                            PhysicalInstance::NO_INST);
       bool process_post_end_tasks(void);
       virtual void register_executing_child(Operation *op);
       virtual void register_child_executed(Operation *op);
@@ -1173,6 +1195,9 @@ namespace Legion {
       virtual const std::vector<PhysicalRegion>& begin_task(
                                                     Legion::Runtime *&runtime);
       virtual void end_task(const void *res, size_t res_size, bool owned,
+#ifdef LEGION_MALLOC_INSTANCES
+                            uintptr_t allocation = 0,
+#endif
                             PhysicalInstance inst = PhysicalInstance::NO_INST);
       virtual void post_end_task(const void *res, size_t res_size, bool owned);
     public:
@@ -2333,7 +2358,12 @@ namespace Legion {
       virtual void add_to_prepipeline_queue(Operation *op);
       virtual void add_to_dependence_queue(Operation *op, bool unordered);
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
-          const void *result, size_t size, PhysicalInstance instance);
+                                          const void *result, size_t size, 
+#ifdef LEGION_MALLOC_INSTANCES
+                                          uintptr_t allocation = 0,
+#endif
+                                          PhysicalInstance instance =
+                                            PhysicalInstance::NO_INST);
       virtual void register_executing_child(Operation *op);
       virtual void register_child_executed(Operation *op);
       virtual void register_child_complete(Operation *op);
@@ -2397,6 +2427,9 @@ namespace Legion {
                                                      AddressSpaceID source);
     public:
       virtual void end_task(const void *res, size_t res_size, bool owned,
+#ifdef LEGION_MALLOC_INSTANCES
+                            uintptr_t allocation = 0,
+#endif
                             PhysicalInstance inst = PhysicalInstance::NO_INST);
       virtual void post_end_task(const void *res, size_t res_size, bool owned);
     public:
@@ -2695,7 +2728,12 @@ namespace Legion {
       virtual void add_to_prepipeline_queue(Operation *op);
       virtual void add_to_dependence_queue(Operation *op, bool unordered);
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
-          const void *result, size_t size, PhysicalInstance instance);
+                                          const void *result, size_t size, 
+#ifdef LEGION_MALLOC_INSTANCES
+                                          uintptr_t allocation = 0,
+#endif
+                                          PhysicalInstance instance =
+                                            PhysicalInstance::NO_INST);
       virtual void register_executing_child(Operation *op);
       virtual void register_child_executed(Operation *op);
       virtual void register_child_complete(Operation *op);
@@ -2762,6 +2800,9 @@ namespace Legion {
       virtual const std::vector<PhysicalRegion>& begin_task(
                                                     Legion::Runtime *&runtime);
       virtual void end_task(const void *res, size_t res_size, bool owned,
+#ifdef LEGION_MALLOC_INSTANCES
+                            uintptr_t allocation = 0,
+#endif
                             PhysicalInstance inst = PhysicalInstance::NO_INST);
       virtual void post_end_task(const void *res, size_t res_size, bool owned);
     public:

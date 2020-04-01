@@ -309,6 +309,10 @@ function optimize_predicate.stat_if(cx, node)
     report_fail = report.error
   end
 
+  if node.annotations.predicate:is(ast.annotation.Forbid) then
+    return node
+  end
+
   if not node.cond:is(ast.typed.expr.FutureGetResult) then
     report_fail(node, "cannot predicate if statement: condition is not a future")
     return node
@@ -346,6 +350,10 @@ function optimize_predicate.stat_while(cx, node)
   local report_fail = report.info
   if node.annotations.predicate:is(ast.annotation.Demand) then
     report_fail = report.error
+  end
+
+  if node.annotations.predicate:is(ast.annotation.Forbid) then
+    return node
   end
 
   if not node.cond:is(ast.typed.expr.FutureGetResult) then

@@ -2461,6 +2461,9 @@ namespace Legion {
     protected:
       Realm::RegionInstance instance;
       Realm::AffineAccessor<T,1,coord_t> accessor;
+#ifdef LEGION_MALLOC_INSTANCES
+      uintptr_t allocation;
+#endif
     };
 
     /**
@@ -2496,7 +2499,10 @@ namespace Legion {
      * initialization value for the buffer. Users must guarantee that no
      * instances of the DeferredBuffer object live past the end of the
      * execution of a task. The user must also guarantee that DefferedBuffer
-     * objects are not returned as the result of the task.
+     * objects are not returned as the result of the task. The user can
+     * control the layout of dimensions with the 'fortran_order_dims'
+     * parameter. The default is C order dimensions (e.g. last changing
+     * fastest), but can be switched to fortran order (e.g. first fastest).
      */
     template<typename T, int DIM, typename COORD_T = coord_t, 
 #ifdef BOUNDS_CHECKS
@@ -2509,16 +2515,20 @@ namespace Legion {
       DeferredBuffer(void);
       DeferredBuffer(Memory::Kind kind, 
                      const Domain &bounds,
-                     const T *initial_value = NULL);
+                     const T *initial_value = NULL,
+                     bool fortran_order_dims = false);
       DeferredBuffer(Memory::Kind kind, 
                      IndexSpace bounds,
-                     const T *initial_value = NULL);
+                     const T *initial_value = NULL,
+                     bool fortran_order_dims = false);
       DeferredBuffer(const Rect<DIM,COORD_T> &bounds, 
                      Memory::Kind kind,
-                     const T *initial_value = NULL);
+                     const T *initial_value = NULL,
+                     bool fortran_order_dims = false);
       DeferredBuffer(IndexSpaceT<DIM,COORD_T> bounds, 
                      Memory::Kind kind,
-                     const T *initial_value = NULL);
+                     const T *initial_value = NULL,
+                     bool fortran_order_dims = false);
     public:
       __CUDA_HD__
       inline T read(const Point<DIM,COORD_T> &p) const;
@@ -8043,6 +8053,14 @@ namespace Legion {
       friend class LegionTaskWrapper;
       friend class LegionSerialization;
       Future from_value(const void *value, size_t value_size, bool owned);
+#ifdef LEGION_MALLOC_INSTANCES
+      template<typename T>
+      friend class DeferredValue;
+      template<typename T, int DIM, typename COORD_T, bool CHECK_BOUNDS>
+      friend class DeferredBuffer;
+      uintptr_t allocate_deferred_instance(Memory memory, size_t size, 
+                                           bool free = true);
+#endif
     public:
       // This method is hidden down here and not publicly documented because
       // users shouldn't really need it for anything, however there are some
