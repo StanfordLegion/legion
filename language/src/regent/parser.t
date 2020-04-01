@@ -561,11 +561,11 @@ function parser.expr_prefix(p)
     p:expect("(")
     local return_type_expr = p:luaexpr()
     p:expect(",")
-    local value = p:expr()
+    local value_type = p:expr()
     p:expect(")")
     return ast.unspecialized.expr.RawFuture {
       return_type_expr = return_type_expr,
-      value = value,
+      value_type = value_type,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }

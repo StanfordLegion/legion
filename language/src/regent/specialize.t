@@ -743,7 +743,7 @@ end
 function specialize.expr_raw_future(cx, node, allow_lists)
   return ast.specialized.expr.RawFuture {
     return_type = node.return_type_expr(cx.env:env()),
-    value = specialize.expr(cx, node.value),
+    value = specialize.expr(cx, node.value_type),
     annotations = node.annotations,
     span = node.span,
   }

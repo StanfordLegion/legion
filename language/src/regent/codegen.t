@@ -3747,6 +3747,7 @@ function codegen.expr_raw_fields(cx, node)
 end
 
 function codegen.expr_raw_future(cx, node)
+
   local value = codegen.expr(cx, node.value):read(cx, node.value.expr_type)
 
   local future_type = node.expr_type
@@ -3765,17 +3766,17 @@ function codegen.expr_raw_future(cx, node)
     return future_value
   else
     return codegen.expr(
-     cx,
-     ast.typed.expr.FutureGetResult {
-       value = ast.typed.expr.Internal {
-         value = future_value,
-	 expr_type = future_type,
-	 annotations = node.annotations,
-	 span = node.span,
-       },
-     expr_type = node.expr_type,
-     annotations = node.annotations,
-     span = node.span,
+      cx,
+      ast.typed.expr.FutureGetResult {
+        value = ast.typed.expr.Internal {
+          value = future_value,
+          expr_type = future_type,
+          annotations = node.annotations,
+          span = node.span,
+        },
+        expr_type = node.expr_type,
+        annotations = node.annotations,
+        span = node.span,
      })
   end
 end
