@@ -466,10 +466,13 @@ end
 local function analyze_noninterference_self(
     cx, task, arg, partition_type, mapping, loop_vars)
   local region_type = std.as_read(arg.expr_type)
-  if partition_type and partition_type:is_disjoint() and
-    analyze_index_noninterference_self(arg.index, cx, loop_vars)
-  then
-    return true
+  if partition_type and partition_type:is_disjoint() then
+    local index =
+      (arg:is(ast.typed.expr.Projection) and arg.region.index) or arg.index
+    if analyze_index_noninterference_self(index, cx, loop_vars)
+    then
+      return true
+    end
   end
 
   local param_region_type = mapping[arg]
@@ -1074,14 +1077,8 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
       local arg_type = std.as_read(arg.expr_type)
       -- XXX: This will break again if arg isn't unique for each argument,
       --      which can happen when de-duplicating AST nodes.
-      do
-        local arg = arg
-        if arg:is(ast.typed.expr.Projection) then
-          arg = arg.region
-        end
-        assert(mapping[arg] == nil)
-        mapping[arg] = param_types[i]
-      end
+      assert(mapping[arg] == nil)
+      mapping[arg] = param_types[i]
       -- Tests for conformance to index launch requirements.
       if std.is_region(arg_type) then
         if analyze_is_projectable(loop_cx, arg) then
@@ -1134,10 +1131,6 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
         end
 
         do
-          local arg = arg
-          if arg:is(ast.typed.expr.Projection) then
-            arg = arg.region
-          end
           local passed = analyze_noninterference_self(
             loop_cx, task, arg, partition_type, mapping, loop_vars)
           if not passed then
