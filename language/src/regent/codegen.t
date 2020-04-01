@@ -8290,13 +8290,9 @@ function codegen.stat_for_list(cx, node)
   end
 
   if openmp and not cx.leaf then
-    if std.config["openmp"] == 1 then
+    if std.config["openmp"] ~= 0 then
       report.error(node,
         "OpenMP code generation failed since the OpenMP loop is in a non-leaf task")
-    elseif std.config["openmp"]  ~= 0 then
-      report.warn(node,
-        "ignoring pragma since the OpenMP loop is in a non-leaf task")
-      openmp = false
     end
   end
 
