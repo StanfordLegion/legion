@@ -98,6 +98,17 @@ task main()
   regentlib.assert(u == 456, "test failed")
   regentlib.assert(v == 789, "test failed")
 
+  -- Nested conditions are ok but right now we will only predicate the
+  -- innermost one.
+  if condition1() then
+    __demand(__predicate)
+    if condition2() then
+      v = 2000
+    end
+  end
+
+  regentlib.assert(v == 789, "test failed")
+
   regentlib.assert(count[0] == 3 and count[1] == 3, "test failed")
 end
 regentlib.start(main)
