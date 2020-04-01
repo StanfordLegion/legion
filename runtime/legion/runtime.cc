@@ -22606,7 +22606,7 @@ namespace Legion {
             "total=%d total_bytes=%ld diff=%d diff_bytes=%lld",
             get_allocation_name(it->first), address_space,
             it->second.total_allocations, it->second.total_bytes,
-            it->second.diff_allocations, it->second.diff_bytes);
+            it->second.diff_allocations, (long long int)it->second.diff_bytes);
         it->second.diff_allocations = 0;
         it->second.diff_bytes = 0;
       }
