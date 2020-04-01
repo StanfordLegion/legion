@@ -8290,6 +8290,14 @@ function codegen.stat_for_list(cx, node)
     end
   end
 
+  if openmp and not cx.leaf then
+    report.warn(node,
+      "ignoring pragma at " .. node.span.source ..
+      ":" .. tostring(node.span.start.line) .. " since the loop is in a non-leaf task")
+    openmp = false
+  end
+
+
   -- Code generation for the loop body
   local block = node.block
 
