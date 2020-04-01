@@ -35,6 +35,13 @@
 
 #include <unistd.h> // sleep for warnings
 
+#ifdef LEGION_MALLOC_INSTANCES
+#include <sys/mman.h>
+#ifdef LEGION_USE_CUDA
+#include <cuda.h>
+#endif
+#endif
+
 #define REPORT_DUMMY_CONTEXT(message)                        \
   REPORT_LEGION_ERROR(ERROR_DUMMY_CONTEXT_OPERATION,  message)
 
@@ -3660,6 +3667,24 @@ namespace Legion {
         capacity(m.capacity()), remaining_capacity(capacity), runtime(rt)
     //--------------------------------------------------------------------------
     {
+#if defined(LEGION_USE_CUDA) && defined(LEGION_MALLOC_INSTANCES)
+      if (memory.kind() == Memory::GPU_FB_MEM)
+      {
+        Machine::ProcessorQuery finder(runtime->machine);
+        finder.best_affinity_to(memory);
+        finder.only_kind(Processor::TOC_PROC);
+        assert(finder.count() > 0);
+        local_gpu = finder.first();
+      }
+      else if (memory.kind() == Memory::Z_COPY_MEM)
+      {
+        Machine::ProcessorQuery finder(runtime->machine);
+        finder.has_affinity_to(memory);
+        finder.only_kind(Processor::TOC_PROC);
+        assert(finder.count() > 0);
+        local_gpu = finder.first();
+      }
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3748,6 +3773,9 @@ namespace Legion {
               it->second.deferred_collect = deferred_collect;
               to_delete[it->first] = deferred_collect;
               it->first->add_base_resource_ref(MEMORY_MANAGER_REF);   
+#ifdef LEGION_MALLOC_INSTANCES
+              pending_collectables[deferred_collect] = 0; 
+#endif
             }
             else // reference flows out since we're deleting this
             {
@@ -3798,6 +3826,14 @@ namespace Legion {
           else
             it->first->force_deletion();
         }
+#ifdef LEGION_MALLOC_INSTANCES
+      for (std::map<RtEvent,uintptr_t>::const_iterator it = 
+            pending_collectables.begin(); it != 
+            pending_collectables.end(); it++)
+        if (it->second > 0)
+          free_legion_instance(it->first, it->second);
+      pending_collectables.clear();
+#endif
     }
     
     //--------------------------------------------------------------------------
@@ -3869,6 +3905,9 @@ namespace Legion {
     {
       bool perform_deletion = false;
       bool remove_reference = false;
+#ifdef LEGION_MALLOC_INSTANCES
+      std::pair<RtEvent,uintptr_t> to_free(RtEvent::NO_RT_EVENT, 0);
+#endif
       {
         AutoLock m_lock(manager_lock);
         std::map<RegionTreeID,TreeInstances>::iterator tree_finder = 
@@ -3894,6 +3933,15 @@ namespace Legion {
           assert(info.deferred_collect.exists());
 #endif
           Runtime::trigger_event(info.deferred_collect);
+#ifdef LEGION_MALLOC_INSTANCES
+          std::map<RtEvent,uintptr_t>::iterator free_finder = 
+            pending_collectables.find(info.deferred_collect);
+          if (free_finder != pending_collectables.end())
+          {
+            to_free = *free_finder;
+            pending_collectables.erase(free_finder); 
+          }
+#endif
           // Now we can delete our entry because it has been deleted
           tree_finder->second.erase(finder);
           if (tree_finder->second.empty())
@@ -3927,6 +3975,10 @@ namespace Legion {
         if (manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
           delete manager;
       }
+#ifdef LEGION_MALLOC_INSTANCES
+      if (to_free.second > 0)
+        free_legion_instance(to_free.first, to_free.second);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -4464,8 +4516,8 @@ namespace Legion {
           if (it->second.current_state != COLLECTABLE_STATE)
           {
 #ifdef DEBUG_LEGION
-          // We might have lost a race with adding NEVER_GC_REF
-          // after release the manager lock if we hit this assertion
+            // We might have lost a race with adding NEVER_GC_REF
+            // after release the manager lock if we hit this assertion
             if (it->second.min_priority == GC_NEVER_PRIORITY)
               assert(it->second.current_state == VALID_STATE);
 #endif
@@ -4482,6 +4534,9 @@ namespace Legion {
             it->second.deferred_collect = deferred_collect;
             to_release[it->first] = std::pair<RtEvent,bool>(
                                       deferred_collect, remove_valid_ref);
+#ifdef LEGION_MALLOC_INSTANCES
+            pending_collectables[deferred_collect] = 0; 
+#endif
           }
           else
           {
@@ -6016,6 +6071,9 @@ namespace Legion {
                 // Update the state information
                 it->second.current_state = PENDING_COLLECTED_STATE;
                 it->second.deferred_collect = deferred_collect;
+#ifdef LEGION_MALLOC_INSTANCES
+                pending_collectables[deferred_collect] = 0; 
+#endif
                 total_deleted += inst_size;
                 if (total_deleted >= needed_size)
                 {
@@ -6093,6 +6151,9 @@ namespace Legion {
           finder->second.deferred_collect = Runtime::create_rt_user_event();
           deferred_collect = finder->second.deferred_collect;
           manager->add_base_resource_ref(MEMORY_MANAGER_REF);
+#ifdef LEGION_MALLOC_INSTANCES
+          pending_collectables[deferred_collect] = 0; 
+#endif
         }
         else // Reference will flow out
         {
@@ -6108,6 +6169,236 @@ namespace Legion {
       // No conditions on being done with this now
       return RtEvent::NO_RT_EVENT;
     }
+
+#ifdef LEGION_MALLOC_INSTANCES
+    //--------------------------------------------------------------------------
+    uintptr_t MemoryManager::allocate_legion_instance(size_t footprint,
+                                                      bool needs_deferral)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner);
+      assert(footprint > 0);
+#endif
+      uintptr_t result = 0;
+      switch (memory.kind())
+      {
+        case SYSTEM_MEM:
+        case SOCKET_MEM:
+          {
+            void *ptr = NULL;
+            if (posix_memalign(&ptr, 32/*alignment*/, footprint))
+              result = 0;
+            else
+              result = (uintptr_t)ptr;
+            break;
+          }
+        case REGDMA_MEM:
+          {
+            void *ptr = NULL;
+            if (posix_memalign(&ptr, 32/*alignment*/, footprint))
+              result = 0;
+            else
+              result = (uintptr_t)ptr;
+            mlock((void*)result, footprint);
+            break;
+          }
+#ifdef LEGION_USE_CUDA
+        case Z_COPY_MEM:
+        case GPU_FB_MEM:
+          {
+            if (needs_deferral)
+            {
+              MallocInstanceArgs args(this, footprint, &result);
+              const RtEvent wait_on = runtime->issue_runtime_meta_task(args,
+                  LG_LATENCY_WORK_PRIORITY, RtEvent::NO_RT_EVENT, local_gpu);
+              if (wait_on.exists() && !wait_on.has_triggered())
+                wait_on.wait();
+              return result;
+            }
+            else
+            {
+              // Use the driver API here to avoid the CUDA hijack
+              if (memory.kind() == Memory::GPU_FB_MEM)
+              {
+                CUdeviceptr ptr;
+                if (cuMemAlloc(&ptr, footprint) != CUDA_SUCCESS)
+                  result = 0;
+                else
+                  result = (uintptr_t)ptr;
+              }
+              else
+              {
+                void *ptr = NULL;
+                if (cuMemAllocHost(&ptr, footprint) != CUDA_SUCCESS)
+                  result = 0;
+                else
+                  result = (uintptr_t)ptr;
+              }
+            }
+            break;
+          }
+#endif
+        default:
+          REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
+              "Unsupported memory kind for LEGION_MALLOC_INSTANCES %d",
+              memory.kind())
+      }
+      if (result > 0)
+      {
+        AutoLock m_lock(manager_lock);
+#ifdef DEBUG_LEGION
+        assert(allocations.find(result) == allocations.end());
+#endif
+        allocations[result] = footprint;
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::record_legion_instance(PhysicalManager *man,uintptr_t p)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner);
+#endif
+      AutoLock m_lock(manager_lock);
+#ifdef DEBUG_LEGION
+      assert(legion_instances.find(man) == legion_instances.end());
+#endif
+      legion_instances[man] = p;
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::free_legion_instance(PhysicalManager *man,RtEvent defer)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner);
+#endif
+      uintptr_t ptr;
+      {
+        AutoLock m_lock(manager_lock);
+        std::map<PhysicalManager*,uintptr_t>::iterator finder = 
+          legion_instances.find(man);
+#ifdef DEBUG_LEGION
+        assert(finder != legion_instances.end());
+#endif
+        ptr = finder->second;
+        legion_instances.erase(finder);
+      }
+      free_legion_instance(defer, ptr);
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::free_legion_instance(RtEvent defer, uintptr_t ptr,
+                                             bool needs_defer)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner);
+#endif
+      if (ptr == 0)
+        return;
+      size_t size;
+      {
+        AutoLock m_lock(manager_lock);
+        if (defer.exists() && !defer.has_triggered())
+        {
+          std::map<RtEvent,uintptr_t>::iterator finder = 
+            pending_collectables.find(defer);
+          if (finder == pending_collectables.end())
+          {
+            FreeInstanceArgs args(this, ptr);
+#ifdef LEGION_USE_CUDA
+            if (local_gpu.exists())
+              runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY, 
+                                               defer, local_gpu);
+            else
+              runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY, defer);
+#else
+            runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY, defer);
+#endif
+          }
+          else
+            finder->second = ptr;
+          return;
+        }
+        std::map<uintptr_t,size_t>::iterator finder = allocations.find(ptr);
+#ifdef DEBUG_LEGION
+        assert(finder != allocations.end());
+#endif
+        size = finder->second;
+        allocations.erase(finder);
+      }
+      switch (memory.kind())
+      {
+        case SYSTEM_MEM:
+        case SOCKET_MEM:
+          {
+            free((void*)ptr);
+            break;
+          }
+        case REGDMA_MEM:
+          {
+            munlock((void*)ptr, size);
+            free((void*)ptr);
+            break;
+          }
+#ifdef LEGION_USE_CUDA
+        case Z_COPY_MEM:
+        case GPU_FB_MEM:
+          {
+            if (needs_defer)
+            {
+              // Put the allocation back in for when we go to look
+              // for it on the second pass
+              {
+                AutoLock m_lock(manager_lock);
+#ifdef DEBUG_LEGION
+                assert(allocations.find(ptr) == allocations.end());
+#endif
+                allocations[ptr] = size;
+              }
+              FreeInstanceArgs args(this, ptr);
+              runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY, 
+                                               defer, local_gpu);
+            }
+            else
+            {
+              if (memory.kind() == Memory::GPU_FB_MEM)
+                cuMemFree((CUdeviceptr)ptr);
+              else
+                cuMemFreeHost((void*)ptr);
+            }
+            break;
+          }
+#endif
+        default:
+          REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
+              "Unsupported memory kind for LEGION_MALLOC_INSTANCES %d",
+              memory.kind())
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void MemoryManager::handle_malloc_instance(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const MallocInstanceArgs *margs = (const MallocInstanceArgs*)args;
+      *(margs->ptr) = margs->manager->allocate_legion_instance(margs->size, 
+                                                     false/*nneds defer*/);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void MemoryManager::handle_free_instance(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const FreeInstanceArgs *fargs = (const FreeInstanceArgs*)args;
+      fargs->manager->free_legion_instance(RtEvent::NO_RT_EVENT, fargs->ptr, 
+                                                      false/*needs defer*/);
+    }
+#endif
 
     /////////////////////////////////////////////////////////////
     // Virtual Channel 
@@ -13963,6 +14254,24 @@ namespace Legion {
       return result;
     }
 
+#ifdef LEGION_MALLOC_INSTANCES
+    //--------------------------------------------------------------------------
+    uintptr_t Runtime::allocate_deferred_instance(Memory memory, size_t size,
+                                                  bool free)
+    //--------------------------------------------------------------------------
+    {
+      MemoryManager *manager = find_memory_manager(memory);
+      // Note that we don't need to defer this because this call had to 
+      // come from an application processor where we can do the call
+      // to allocate directly (e.g. CUDA contexts are already here)
+      uintptr_t result = manager->allocate_legion_instance(size,false/*defer*/);
+      if (free)
+        manager->free_legion_instance(
+            RtEvent(Processor::get_current_finish_event()), result, false);
+      return result;
+    }
+#endif
+
     //--------------------------------------------------------------------------
     MessageManager* Runtime::find_messenger(AddressSpaceID sid)
     //--------------------------------------------------------------------------
@@ -21202,15 +21511,41 @@ namespace Legion {
               it->first.register_task(LG_LEGION_PROFILING_ID, rt_profiling_task,
                 no_requests, &it->second, sizeof(it->second))));
       }
-#ifdef LEGION_GPU_REDUCTIONS
+#if defined(LEGION_GPU_REDUCTIONS) || \
+      (defined(LEGION_MALLOC_INSTANCES) && defined(LEGION_USE_CUDA))
       std::set<Processor> gpu_procs;
       for (std::set<Processor>::const_iterator it = 
             local_procs.begin(); it != local_procs.end(); it++)
         if (it->kind() == Processor::TOC_PROC)
           gpu_procs.insert(*it);
+#endif
+#ifdef LEGION_GPU_REDUCTIONS
       register_builtin_gpu_reduction_tasks(gpu_procs, registered_events); 
 #endif
-
+#if defined(LEGION_MALLOC_INSTANCES) && defined(LEGION_USE_CUDA)
+#ifdef LEGION_SEPARATE_META_TASKS
+      // Only need to register two task IDs here
+      for (std::set<Processor>::const_iterator it = 
+            gpu_procs.begin(); it != gpu_procs.end(); it++)
+      {
+        registered_events.insert(RtEvent(
+              it->register_task(LG_TASK_ID + LG_MALLOC_INSTANCE_TASK_ID,
+                lg_task, no_requests, &processor_mapping[*it], 
+                sizeof(processor_mapping[*it]))));
+        registered_events.insert(RtEvent(
+              it->register_task(LG_TASK_ID + LG_FREE_INSTANCE_TASK_ID,
+                lg_task, no_requests, &processor_mapping[*it], 
+                sizeof(processor_mapping[*it]))));
+      }
+#else
+      for (std::set<Processor>::const_iterator it = 
+            gpu_procs.begin(); it != gpu_procs.end(); it++)
+        registered_events.insert(RtEvent(
+              it->register_task(LG_TASK_ID, lg_task,
+                no_requests, &processor_mapping[*it], 
+                sizeof(processor_mapping[*it]))));
+#endif
+#endif
       // Lastly do any other registrations we might have
       const ReductionOpTable& red_table = get_reduction_table(true/*safe*/);
       for(ReductionOpTable::const_iterator it = red_table.begin();
@@ -21905,10 +22240,12 @@ namespace Legion {
       Runtime *runtime = *((Runtime**)userdata);
 #ifdef DEBUG_LEGION
       assert(userlen == sizeof(Runtime**));
+#if !defined(LEGION_MALLOC_INSTANCES) && !defined(LEGION_USE_CUDA)
       // Meta-tasks can run on application processors only when there
       // are no utility processors for us to use
       if (!runtime->local_utils.empty())
         assert(implicit_context == NULL); // this better hold
+#endif
 #endif
       implicit_runtime = runtime;
       // We immediately bump the priority of all meta-tasks once they start
@@ -22502,6 +22839,18 @@ namespace Legion {
             InnerContext::handle_partition_verification(args);
             break;
           }
+#ifdef LEGION_MALLOC_INSTANCES
+        case LG_MALLOC_INSTANCE_TASK_ID:
+          {
+            MemoryManager::handle_malloc_instance(args);
+            break;
+          }
+        case LG_FREE_INSTANCE_TASK_ID:
+          {
+            MemoryManager::handle_free_instance(args);
+            break;
+          }
+#endif
         case LG_YIELD_TASK_ID:
           break; // nothing to do here
         case LG_RETRY_SHUTDOWN_TASK_ID:
