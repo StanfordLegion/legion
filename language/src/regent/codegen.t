@@ -8285,16 +8285,19 @@ function codegen.stat_for_list(cx, node)
     local available, error_message = openmphelper.check_openmp_available()
     if std.config["openmp"] ~= 0 and not available then
       report.warn(node,
-        "ignoring pragma at " .. node.span.source ..
-        ":" .. tostring(node.span.start.line) .. " since " .. error_message)
+        "ignoring pragma since " .. error_message)
     end
   end
 
   if openmp and not cx.leaf then
-    report.warn(node,
-      "ignoring pragma at " .. node.span.source ..
-      ":" .. tostring(node.span.start.line) .. " since the loop is in a non-leaf task")
-    openmp = false
+    if std.config["openmp"] == 1 then
+      report.error(node,
+        "OpenMP code generation failed since the OpenMP loop is in a non-leaf task")
+    elseif std.config["openmp"]  ~= 0 then
+      report.warn(node,
+        "ignoring pragma since the OpenMP loop is in a non-leaf task")
+      openmp = false
+    end
   end
 
 
