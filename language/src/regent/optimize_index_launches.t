@@ -1074,8 +1074,14 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
       local arg_type = std.as_read(arg.expr_type)
       -- XXX: This will break again if arg isn't unique for each argument,
       --      which can happen when de-duplicating AST nodes.
-      assert(mapping[arg] == nil)
-      mapping[arg] = param_types[i]
+      do
+        local arg = arg
+        if arg:is(ast.typed.expr.Projection) then
+          arg = arg.region
+        end
+        assert(mapping[arg] == nil)
+        mapping[arg] = param_types[i]
+      end
       -- Tests for conformance to index launch requirements.
       if std.is_region(arg_type) then
         if analyze_is_projectable(loop_cx, arg) then
