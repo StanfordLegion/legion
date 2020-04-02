@@ -235,17 +235,21 @@ namespace Legion {
       if ((part_kind == COMPUTE_KIND) || (part_kind == COMPUTE_COMPLETE_KIND) ||
           (part_kind == COMPUTE_INCOMPLETE_KIND))
       {
-        IndexPartNode::DisjointnessArgs args(pid, NULL, true/*owner*/);
-        RtEvent disjointness_event = runtime->issue_runtime_meta_task(args,
-            LG_THROUGHPUT_DEFERRED_PRIORITY,
-            Runtime::protect_event(partition_ready));
+        RtUserEvent disjointness_event = Runtime::create_rt_user_event();
         // Use 1 if we know it's complete, 0 if it's not, 
         // otherwise -1 since we don't know
         const int complete = (part_kind == COMPUTE_COMPLETE_KIND) ? 1 :
                              (part_kind == COMPUTE_INCOMPLETE_KIND) ? 0 : -1;
-        create_node(pid, parent_node, color_node, partition_color,
-                    disjointness_event, complete, did, partition_ready, 
-                    partial_pending, RtEvent::NO_RT_EVENT, NULL, &applied);
+        IndexPartNode *node = create_node(pid, parent_node, color_node, 
+            partition_color, disjointness_event, complete, did, partition_ready,
+            partial_pending, RtEvent::NO_RT_EVENT, NULL, &applied);
+        IndexPartNode::DisjointnessArgs args(pid, NULL, true/*owner*/);
+        // Get a reference for the node to hold until disjointness is computed
+        node->add_base_resource_ref(APPLICATION_REF);
+        Runtime::trigger_event(disjointness_event,
+            runtime->issue_runtime_meta_task(args, 
+              LG_THROUGHPUT_DEFERRED_PRIORITY,
+              Runtime::protect_event(partition_ready)));
       }
       else
       {
@@ -475,20 +479,14 @@ namespace Legion {
           runtime->send_index_partition_notification(parent_owner, rez);
           parent_notified = notified_event;
         }
-        RtEvent disjointness_event;
+        RtUserEvent disjointness_event;
         if ((part_kind == COMPUTE_KIND) || (part_kind == COMPUTE_COMPLETE_KIND)
             || (part_kind == COMPUTE_INCOMPLETE_KIND))
         {
 #ifdef DEBUG_LEGION
           assert(part_result != NULL);
 #endif
-          IndexPartNode::DisjointnessArgs args(pid, part_result, true/*owner*/);
-          // Don't do the disjointness test until all the partition
-          // is ready and has been created on all the nodes
-          disjointness_event = runtime->issue_runtime_meta_task(args,
-              LG_THROUGHPUT_DEFERRED_PRIORITY,
-              Runtime::merge_events(creation_ready,
-                Runtime::protect_event(partition_ready)));
+          disjointness_event = Runtime::create_rt_user_event(); 
         }
 #ifdef DEBUG_LEGION
         else
@@ -530,6 +528,19 @@ namespace Legion {
                                   creation_ready, &mapping, &applied);
         }
         part_node->update_creation_set(mapping);
+        if (disjointness_event.exists())
+        {
+          IndexPartNode::DisjointnessArgs args(pid, part_result, true/*owner*/);
+          // Hold a reference on the node until disjointness is performed
+          part_node->add_base_resource_ref(APPLICATION_REF);
+          // Don't do the disjointness test until all the partition
+          // is ready and has been created on all the nodes
+          Runtime::trigger_event(disjointness_event,
+              runtime->issue_runtime_meta_task(args,
+                LG_THROUGHPUT_DEFERRED_PRIORITY,
+                Runtime::merge_events(creation_ready,
+                  Runtime::protect_event(partition_ready))));
+        }
         ctx->register_index_partition_creation(pid);
         if (!applied.empty())
         {
@@ -547,18 +558,14 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(partition_color != INVALID_COLOR);
 #endif
-        RtEvent disjointness_event;
+        RtUserEvent disjointness_event;
         if ((part_kind == COMPUTE_KIND) || (part_kind == COMPUTE_COMPLETE_KIND)
             || (part_kind == COMPUTE_INCOMPLETE_KIND))
         {
 #ifdef DEBUG_LEGION
           assert(part_result != NULL);
 #endif
-          IndexPartNode::DisjointnessArgs args(pid, part_result,false/*owner*/);
-          // We only need to wait for the creation to be ready 
-          // if we're not the owner
-          disjointness_event = runtime->issue_runtime_meta_task(args,
-              LG_THROUGHPUT_DEFERRED_PRIORITY, creation_ready);
+          disjointness_event = Runtime::create_rt_user_event(); 
         }
 #ifdef DEBUG_LEGION
         else
@@ -594,6 +601,17 @@ namespace Legion {
                                   creation_ready, &mapping, &applied);
         }
         part_node->update_creation_set(mapping);
+        if (disjointness_event.exists())
+        {
+          IndexPartNode::DisjointnessArgs args(pid, part_result,false/*owner*/);
+          // Hold a reference on the node until disjointness is performed
+          part_node->add_base_resource_ref(APPLICATION_REF);
+          // We only need to wait for the creation to be ready 
+          // if we're not the owner
+          Runtime::trigger_event(disjointness_event,
+              runtime->issue_runtime_meta_task(args,
+                LG_THROUGHPUT_DEFERRED_PRIORITY, creation_ready));
+        }
         ctx->register_index_partition_creation(pid);
         // We know the parent is notified or we wouldn't even have
         // been given our pid
@@ -9874,6 +9892,9 @@ namespace Legion {
       // We can now delete the collective
       if (dargs->disjointness_collective != NULL)
         delete dargs->disjointness_collective;
+      // Remove the reference on our node as well
+      if (node->remove_base_resource_ref(APPLICATION_REF))
+        delete node;
     }
 
     //--------------------------------------------------------------------------
