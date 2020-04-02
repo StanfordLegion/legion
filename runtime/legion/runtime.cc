@@ -7209,18 +7209,30 @@ namespace Legion {
               if (memory.kind() == Memory::GPU_FB_MEM)
               {
                 CUdeviceptr ptr;
-                if (cuMemAlloc(&ptr, footprint) != CUDA_SUCCESS)
-                  result = 0;
-                else
+                if (cuMemAlloc(&ptr, footprint) == CUDA_SUCCESS)
                   result = (uintptr_t)ptr;
+                else
+                  result = 0;
               }
               else
               {
                 void *ptr = NULL;
-                if (cuMemAllocHost(&ptr, footprint) != CUDA_SUCCESS)
-                  result = 0;
-                else
+                if (cuMemHostAlloc(&ptr, footprint, CU_MEMHOSTALLOC_PORTABLE |
+                      CU_MEMHOSTALLOC_DEVICEMAP) == CUDA_SUCCESS)
+                {
                   result = (uintptr_t)ptr;
+                  // Check that the device pointer is the same as the host
+                  CUdeviceptr gpuptr;
+                  if (cuMemHostGetDevicePointer(&gpuptr,ptr,0) == CUDA_SUCCESS)
+                  {
+                    if (ptr != (void*)gpuptr)
+                      result = 0;
+                  }
+                  else
+                    result = 0;
+                }
+                else
+                  result = 0;
               }
             }
             break;
