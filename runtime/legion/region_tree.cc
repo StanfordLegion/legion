@@ -203,6 +203,7 @@ namespace Legion {
         runtime->send_index_partition_notification(parent_owner, rez);
         parent_notified = notified_event;
       }
+      IndexPartNode *node = NULL;
       RtUserEvent disjointness_event;
       if ((part_kind == COMPUTE_KIND) || (part_kind == COMPUTE_COMPLETE_KIND) ||
           (part_kind == COMPUTE_INCOMPLETE_KIND))
@@ -212,7 +213,7 @@ namespace Legion {
         const int complete = (part_kind == COMPUTE_COMPLETE_KIND) ? 1 :
                              (part_kind == COMPUTE_INCOMPLETE_KIND) ? 0 : -1;
         disjointness_event = Runtime::create_rt_user_event();
-        create_node(pid, parent_node, color_node, partition_color,
+        node = create_node(pid, parent_node, color_node, partition_color,
                     disjointness_event, complete, did, partition_ready, 
                     partial_pending, RtEvent::NO_RT_EVENT, applied);
       }
@@ -227,8 +228,8 @@ namespace Legion {
                               (part_kind == ALIASED_COMPLETE_KIND)) ? 1 :
                              ((part_kind == DISJOINT_INCOMPLETE_KIND) ||
                               (part_kind == ALIASED_INCOMPLETE_KIND)) ? 0 : -1;
-        create_node(pid, parent_node, color_node, partition_color, disjoint,
-                    complete, did, partition_ready, partial_pending, 
+        node = create_node(pid, parent_node, color_node, partition_color, 
+                    disjoint, complete, did, partition_ready, partial_pending, 
                     RtEvent::NO_RT_EVENT, applied);
         if (runtime->legion_spy_enabled)
           LegionSpy::log_index_partition(parent.id, pid.id, disjoint,
@@ -245,6 +246,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(disjointness_event.exists());
 #endif
+        // Record a reference on this node to prevent it from being
+        // collected until the disjointness test is done
+        node->add_base_resource_ref(APPLICATION_REF);
         // Launch a task to compute the disjointness
         DisjointnessArgs args(pid, disjointness_event);
         runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
@@ -398,6 +402,9 @@ namespace Legion {
     {
       IndexPartNode *node = get_node(handle);
       node->compute_disjointness(ready_event);
+      // Remove the reference that we added when launching this task
+      if (node->remove_base_resource_ref(APPLICATION_REF))
+        delete node;
     }
 
     //--------------------------------------------------------------------------
