@@ -5595,7 +5595,8 @@ namespace Legion {
       // Ask Legion to malloc this instance for us
       Runtime *runtime = Runtime::get_runtime();
       const size_t footprint = bounds.bounds.volume() * sizeof(T);
-      allocation = runtime->allocate_deferred_instance(memory, footprint);
+      allocation = runtime->allocate_deferred_instance(memory, footprint, 
+                                                    false/*do not free*/);
       Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
             instance, memory, allocation, layout, no_requests));
 #else
