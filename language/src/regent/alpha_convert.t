@@ -236,6 +236,7 @@ local node_alpha_conversion = {
   [ast.specialized.expr.CtorRecField]               = pass_through,
   [ast.specialized.expr.RawContext]                 = pass_through,
   [ast.specialized.expr.RawFields]                  = pass_through,
+  [ast.specialized.expr.RawFuture]                  = pass_through,
   [ast.specialized.expr.RawPhysical]                = pass_through,
   [ast.specialized.expr.RawRuntime]                 = pass_through,
   [ast.specialized.expr.RawTask]                    = pass_through,

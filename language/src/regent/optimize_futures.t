@@ -178,6 +178,10 @@ function analyze_var_flow.expr_binary(cx, node)
     analyze_var_flow.expr(cx, node.rhs))
 end
 
+function analyze_var_flow.expr_raw_future(cx, noe)
+  return flow_future()
+end
+
 function analyze_var_flow.expr(cx, node)
   if node:is(ast.typed.expr.ID) then
     return analyze_var_flow.expr_id(cx, node)
@@ -265,6 +269,9 @@ function analyze_var_flow.expr(cx, node)
 
   elseif node:is(ast.typed.expr.AddressOf) then
     return flow_empty()
+
+  elseif node:is(ast.typed.expr.RawFuture) then
+    return analyze_var_flow.expr_raw_future(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node.node_type))
@@ -723,6 +730,14 @@ end
 function optimize_futures.expr_raw_fields(cx, node)
   local region = concretize(cx, optimize_futures.expr_region_root(cx, node.region))
   return node { region = region }
+end
+
+function optimize_futures.expr_raw_future(cx, node)
+  local value = concretize(cx, optimize_futures.expr(cx, node.value))
+  return node {
+    value = node.value,
+    expr_type = std.future(node.expr_type),
+  }
 end
 
 function optimize_futures.expr_raw_physical(cx, node)
@@ -1258,6 +1273,9 @@ function optimize_futures.expr(cx, node)
 
   elseif node:is(ast.typed.expr.RawFields) then
     return optimize_futures.expr_raw_fields(cx, node)
+
+  elseif node:is(ast.typed.expr.RawFuture) then
+    return optimize_futures.expr_raw_future(cx, node)
 
   elseif node:is(ast.typed.expr.RawPhysical) then
     return optimize_futures.expr_raw_physical(cx, node)

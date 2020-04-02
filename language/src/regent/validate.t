@@ -145,6 +145,7 @@ local node_vars_are_valid = {
   [ast.typed.expr.CtorRecField]               = continue,
   [ast.typed.expr.RawContext]                 = continue,
   [ast.typed.expr.RawFields]                  = continue,
+  [ast.typed.expr.RawFuture]                  = continue,
   [ast.typed.expr.RawPhysical]                = continue,
   [ast.typed.expr.RawRuntime]                 = continue,
   [ast.typed.expr.RawTask]                    = continue,

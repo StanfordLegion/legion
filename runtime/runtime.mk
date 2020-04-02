@@ -39,7 +39,6 @@ SO_FLAGS += $(LDLIBS)
 LD_FLAGS += $(LDFLAGS)
 
 USE_OPENMP ?= 0
-BOUNDS_CHECKS ?= 0
 ifeq ($(shell uname -s),Darwin)
 DARWIN = 1
 CC_FLAGS += -DDARWIN
@@ -180,12 +179,14 @@ USE_HALF ?= 0
 ifeq ($(strip $(USE_HALF)),1)
   CC_FLAGS += -DLEGION_REDOP_HALF
   NVCC_FLAGS += -DLEGION_REDOP_HALF
+  LEGION_CC_FLAGS += -DLEGION_REDOP_HALF
 endif
 
 USE_COMPLEX ?= 0
 ifeq ($(strip $(USE_COMPLEX)),1)
   CC_FLAGS += -DLEGION_REDOP_COMPLEX
   NVCC_FLAGS += -DLEGION_REDOP_COMPLEX
+  LEGION_CC_FLAGS += -DLEGION_REDOP_COMPLEX
 endif
 
 ifeq ($(strip $(USE_HWLOC)),1)
@@ -339,6 +340,12 @@ ifeq ($(strip $(USE_DLMOPEN)),1)
 
   CC_FLAGS += -DREALM_USE_DLMOPEN
   FC_FLAGS += -DREALM_USE_DLMPOPN
+endif
+
+USE_SPY ?= 0
+ifeq ($(strip $(USE_SPY)),1)
+  CC_FLAGS	+= -DLEGION_SPY
+  LEGION_CC_FLAGS += -DLEGION_SPY
 endif
 
 # Flags for Realm
@@ -588,6 +595,12 @@ CC_FLAGS	+= -O2 -fno-strict-aliasing #-ggdb
 FC_FLAGS	+= -O2 -fno-strict-aliasing
 endif
 
+BOUNDS_CHECKS ?= 0
+ifeq ($(strip $(BOUNDS_CHECKS)),1)
+CC_FLAGS	+= -DBOUNDS_CHECKS
+LEGION_CC_FLAGS	+= -DBOUNDS_CHECKS
+endif
+
 # DEBUG_TSAN=1 enables thread sanitizer (data race) checks
 ifeq ($(strip $(DEBUG_TSAN)),1)
 CC_FLAGS        += -fsanitize=thread -g -DTSAN_ENABLED
@@ -596,12 +609,14 @@ endif
 
 # Set maximum number of dimensions
 ifneq ($(strip ${MAX_DIM}),)
+CC_FLAGS	+= -DLEGION_MAX_DIM=$(MAX_DIM)
 REALM_CC_FLAGS	+= -DREALM_MAX_DIM=$(MAX_DIM)
 LEGION_CC_FLAGS	+= -DLEGION_MAX_DIM=$(MAX_DIM)
 endif
 
 # Set maximum number of fields
 ifneq ($(strip ${MAX_FIELDS}),)
+CC_FLAGS	+= -DLEGION_MAX_FIELDS=$(MAX_FIELDS)
 LEGION_CC_FLAGS	+= -DLEGION_MAX_FIELDS=$(MAX_FIELDS)
 endif
 

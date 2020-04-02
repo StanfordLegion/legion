@@ -389,6 +389,10 @@ function pretty.expr_raw_fields(cx, node)
   return join({"__fields(", pretty.expr_region_root(cx, node.region), ")"})
 end
 
+function pretty.expr_raw_future(cx, node)
+  return join({"__future(", pretty.expr(cx, node.value), ")"})
+end
+
 function pretty.expr_raw_physical(cx, node)
   return join({"__physical(", pretty.expr_region_root(cx, node.region), ")"})
 end
@@ -803,6 +807,9 @@ function pretty.expr(cx, node)
 
   elseif node:is(ast.typed.expr.RawFields) then
     return pretty.expr_raw_fields(cx, node)
+
+  elseif node:is(ast.typed.expr.RawFuture) then
+    return pretty.expr_raw_future(cx, node)
 
   elseif node:is(ast.typed.expr.RawPhysical) then
     return pretty.expr_raw_physical(cx, node)

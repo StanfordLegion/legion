@@ -270,6 +270,7 @@ local copy_propagate_expr_table = {
   [ast.typed.expr.Isnull]                     = copy_propagate.expr_is_null,
 
   [ast.typed.expr.RawFields]                  = copy_propagate.pass_through_expr,
+  [ast.typed.expr.RawFuture]                  = copy_propagate.pass_through_expr,
   [ast.typed.expr.RawPhysical]                = copy_propagate.pass_through_expr,
   [ast.typed.expr.RawRuntime]                 = copy_propagate.pass_through_expr,
   [ast.typed.expr.RawTask]                    = copy_propagate.pass_through_expr,
