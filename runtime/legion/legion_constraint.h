@@ -233,7 +233,7 @@ namespace Legion {
       virtual OrderingConstraint* as_ordering_constraint(void) = 0;
       virtual SplittingConstraint* as_splitting_constraint(void) = 0;
       virtual DimensionConstraint* as_dimension_constraint(void) = 0;
-      virtual AlignmentConstraint* as_alignement_constraint(void) = 0;
+      virtual AlignmentConstraint* as_alignment_constraint(void) = 0;
       virtual OffsetConstraint* as_offset_constraint(void) = 0;
       virtual PointerConstraint* as_pointer_constraint(void) = 0;
     public:
@@ -250,7 +250,7 @@ namespace Legion {
       virtual const DimensionConstraint* 
         as_dimension_constraint(void) const = 0;
       virtual const AlignmentConstraint* 
-        as_alignement_constraint(void) const = 0;
+        as_alignment_constraint(void) const = 0;
       virtual const OffsetConstraint* 
         as_offset_constraint(void) const = 0;
       virtual const PointerConstraint* 
@@ -285,7 +285,7 @@ namespace Legion {
       virtual DimensionConstraint* as_dimension_constraint(void)
       { return (T::constraint_kind == DIMENSION_CONSTRAINT) ?
                 reinterpret_cast<DimensionConstraint*>(this) : NULL; }
-      virtual AlignmentConstraint* as_alignement_constraint(void)
+      virtual AlignmentConstraint* as_alignment_constraint(void)
       { return (T::constraint_kind == ALIGNMENT_CONSTRAINT) ?
                 reinterpret_cast<AlignmentConstraint*>(this) : NULL; }
       virtual OffsetConstraint* as_offset_constraint(void)
@@ -313,7 +313,7 @@ namespace Legion {
       virtual const DimensionConstraint* as_dimension_constraint(void) const
       { return (T::constraint_kind == DIMENSION_CONSTRAINT) ?
                 reinterpret_cast<const DimensionConstraint*>(this) : NULL; }
-      virtual const AlignmentConstraint* as_alignement_constraint(void) const
+      virtual const AlignmentConstraint* as_alignment_constraint(void) const
       { return (T::constraint_kind == ALIGNMENT_CONSTRAINT) ?
                 reinterpret_cast<const AlignmentConstraint*>(this) : NULL; }
       virtual const OffsetConstraint* as_offset_constraint(void) const
