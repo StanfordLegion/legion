@@ -32,11 +32,11 @@ GEN_SRC		:= 				# .cc files
 GEN_GPU_SRC	:=				# .cu files
 
 # You can modify these variables, some will be appended to by the runtime makefile
-INC_FLAGS	:=
+INC_FLAGS	?=
 CC_FLAGS	?=
-NVCC_FLAGS	:=
-GASNET_FLAGS	:=
-LD_FLAGS	:=
+NVCC_FLAGS	?=
+GASNET_FLAGS	?=
+LD_FLAGS	?=
 
 CXX ?= g++
 
@@ -97,7 +97,7 @@ clean :
 scatter.o : CC_FLAGS += -std=c++11
 
 $(TESTS) : % : %.o librealm.a
-	$(CXX) -o $@ $< $(EXTRAOBJS_$*) -L. -lrealm $(LEGION_LD_FLAGS)
+	$(CXX) -o $@ $< $(EXTRAOBJS_$*) -L. -lrealm $(LEGION_LD_FLAGS) $(LD_FLAGS)
 
 $(REALM_LIB) : $(REALM_OBJS)
 	rm -f $(REALM_LIB)

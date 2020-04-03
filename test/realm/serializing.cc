@@ -336,19 +336,19 @@ int main(int argc, const char *argv[])
   std::vector<PODStruct> a2(1);
   a2[0] = PODStruct(3, 4);
   do_test("vector<PODStruct>", a2, (std::max(sizeof(size_t),
-					     __alignof__(PODStruct)) +
+					     REALM_ALIGNOF(PODStruct)) +
 				    a2.size() * sizeof(PODStruct)));
 
   std::vector<PODPacked> a3(1);
   a3[0] = PODPacked(3, 4);
   do_test("vector<PODPacked>", a3, (std::max(sizeof(size_t),
-					     __alignof__(double)) +
+					     REALM_ALIGNOF(double)) +
 				    12 /* not sizeof(PODPacked)*/));
 
   std::vector<PODPacked2> a4(1);
   a4[0] = PODPacked2(3, 4);
   do_test("vector<PODPacked2>", a4, (std::max(sizeof(size_t),
-					      __alignof__(double)) +
+					      REALM_ALIGNOF(double)) +
 				     9 /* not sizeof(PODPacked2)*/));
 
   std::list<int> b;
@@ -364,10 +364,15 @@ int main(int argc, const char *argv[])
   c[10] = 3.3;
   // in a 32-bit build, the size is "free" because it packs with the first
   //  int key
-  do_test("map<int,double>", c, (sizeof(size_t) +
-				 ((!c.empty() && (sizeof(size_t) ==
-						  sizeof(int))) ? -4 : 0) +
-				 c.size() * 16 /*alignment*/));
+  do_test("map<int,double>", c, (sizeof(size_t) -
+                                 (c.empty() ? 0 :
+                                              (REALM_ALIGNOF(double) -
+                                               std::max(REALM_ALIGNOF(size_t),
+                                                        REALM_ALIGNOF(int)))) +
+                                 c.size() * (std::max(sizeof(int),
+                                                      REALM_ALIGNOF(double)) +
+                                             sizeof(double))));
+
 
   std::vector<std::string> ss;
   ss.push_back("Hello");

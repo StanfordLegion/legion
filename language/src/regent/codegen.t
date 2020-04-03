@@ -6411,6 +6411,7 @@ local function expr_copy_setup_region(
     expr_copy_issue_phase_barriers(condition_values, condition_types, condition_kinds, launcher))
   actions:insert(quote
     c.legion_copy_launcher_execute([cx.runtime], [cx.context], [launcher])
+    c.legion_copy_launcher_destroy([launcher])
   end)
   return actions
 end
@@ -6733,6 +6734,7 @@ local function expr_acquire_setup_region(
   actions:insert(quote
     [expr_acquire_issue_phase_barriers(condition_values, condition_kinds, launcher)]
     c.legion_acquire_launcher_execute([cx.runtime], [cx.context], [launcher])
+    c.legion_acquire_launcher_destroy([launcher])
   end)
   return actions
 end
@@ -6857,6 +6859,7 @@ local function expr_release_setup_region(
   actions:insert(quote
     [expr_release_issue_phase_barriers(condition_values, condition_kinds, launcher)]
     c.legion_release_launcher_execute([cx.runtime], [cx.context], [launcher])
+    c.legion_release_launcher_destroy([launcher])
   end)
   return actions
 end
@@ -7029,6 +7032,7 @@ function codegen.expr_detach_hdf5(cx, node)
        function(pr)
          return quote
            c.legion_runtime_detach_hdf5([cx.runtime], [cx.context], [pr])
+           c.legion_physical_region_destroy([pr])
          end
        end)]
   end

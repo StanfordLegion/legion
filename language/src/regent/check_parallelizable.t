@@ -125,8 +125,7 @@ function loop_context.new_scope(task, loop, loop_var)
     reductions = data.newmap(),
     admissible = { true, nil },
     parallel = { true, nil },
-    -- True if the loop is the innermost loop that needs an index space iterator
-    innermost = needs_iterator,
+    innermost = true,
     outermost = false,
   }
   cx = setmetatable(cx, loop_context)
@@ -373,7 +372,7 @@ function context:pop_loop_context(node)
     -- When the task demands CUDA code generation, we only keep the innermost
     -- parallelizable for list loop.
     self:forall_context(function(cx_outer)
-      if cx_outer.needs_iterator then cx_outer:set_innermost(false) end
+      cx_outer:set_innermost(false)
       if cx_outer.loop_var then cx_outer:mark_inadmissible(node) end
       return false
     end)

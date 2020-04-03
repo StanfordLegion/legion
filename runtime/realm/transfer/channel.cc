@@ -241,7 +241,7 @@ namespace Realm {
 	  p.indirect_port_idx = ii.indirect_port_idx;
 	  p.local_bytes_total = 0;
 	  p.local_bytes_cons = 0;
-	  p.remote_bytes_total = uint64_t(-1);
+	  p.remote_bytes_total = size_t(-1);
 	  p.ib_offset = ii.ib_offset;
 	  p.ib_size = ii.ib_size;
 	  switch(ii.port_type) {
@@ -1503,7 +1503,7 @@ namespace Realm {
 	// do this before we add the span
 	if(pre_bytes_total != (size_t)-1) {
 	  // try to swap -1 for the given total
-	  uint64_t val = -1;
+	  size_t val = -1;
 	  if(!in_port->remote_bytes_total.compare_exchange(val, pre_bytes_total)) {
 	    // failure should only happen if we already had the same value
 	    assert(val == pre_bytes_total);
@@ -3087,9 +3087,9 @@ namespace Realm {
 	  // no serdez support
 	  assert((in_port->serdez_op == 0) && (out_port->serdez_op == 0));
 	  NodeID dst_node = ID(out_port->mem->me).memory_owner_node();
-	  uint64_t write_bytes_total = (req->xd->iteration_completed ?
-					  out_port->local_bytes_total :
-					  size_t(-1));
+	  size_t write_bytes_total = (req->xd->iteration_completed ?
+				        out_port->local_bytes_total :
+					size_t(-1));
 	  // send a request if there's data or if there's a next XD to update
 	  if((req->nbytes > 0) ||
 	     (out_port->peer_guid != XferDes::XFERDES_NO_GUID)) {
