@@ -2572,6 +2572,7 @@ namespace Realm {
 			   src_elem_size, redop->sizeof_rhs,
 			   rdma_sequence_id,
 			   make_copy);
+	  rdma_count += 1;
 	} else {
 	  // case 2: destination is directly accessible
 	  void *dst_ptr = dst_mem->get_direct_ptr(dst_info.base_offset,

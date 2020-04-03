@@ -84,6 +84,10 @@ variables:
   CC_FLAGS: "-std=c++98 -m32"
   LD_FLAGS: "-m32"
   MARCH: "i686"
+.cxx11_32bit_normal: &cxx11_32bit_normal
+  CC_FLAGS: "-std=c++11 -m32"
+  LD_FLAGS: "-m32 -latomic"
+  MARCH: "i686"
 
 .openmp: &openmp
   USE_OPENMP: "1"
@@ -576,6 +580,10 @@ gcc49_cxx98_32bit_debug_legion:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*gcc49, *terra38, *debug, *cxx98_32bit_normal, *legion]
+gcc49_cxx98_32bit_release_legion:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra38, *release, *cxx98_32bit_normal, *legion]
 # * External tests
 gcc49_cxx11_debug_external:
   <<: [*linux_compute, *image, *external_tests]
@@ -727,6 +735,10 @@ clang38_cxx98_32bit_debug_legion:
   <<: [*linux, *image_clang, *tests]
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_32bit_normal, *legion]
+clang38_cxx11_32bit_release_legion:
+  <<: [*linux, *image_clang, *tests]
+  variables:
+    <<: [*clang38, *terra38, *release, *cxx11_32bit_normal, *legion]
 # * External tests
 clang38_cxx11_debug_external:
   <<: [*linux_compute, *image_clang, *external_tests]
