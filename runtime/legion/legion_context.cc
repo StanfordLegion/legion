@@ -4048,12 +4048,13 @@ namespace Legion {
       {
         Domain color_space = runtime->get_index_partition_color_space(handle1);
         // This code will only work if the color space has type coord_t
+        TypeTag type_tag;
         switch (color_space.get_dim())
         {
 #define DIMFUNC(DIM) \
           case DIM: \
             { \
-              TypeTag type_tag = NT_TemplateHelper::encode_tag<DIM,coord_t>(); \
+              type_tag = NT_TemplateHelper::encode_tag<DIM,coord_t>(); \
               assert(handle1.get_type_tag() == type_tag); \
               break; \
             }
@@ -4071,7 +4072,7 @@ namespace Legion {
             case DIM: \
               { \
                 const Point<DIM,coord_t> p(itr.p); \
-                subspace = runtime->get_index_subspace(handle1, &p, sizeof(p));\
+                subspace = runtime->get_index_subspace(handle1, &p, type_tag); \
                 break; \
               }
             LEGION_FOREACH_N(DIMFUNC)
