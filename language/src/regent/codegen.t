@@ -6734,6 +6734,7 @@ local function expr_acquire_setup_region(
   actions:insert(quote
     [expr_acquire_issue_phase_barriers(condition_values, condition_kinds, launcher)]
     c.legion_acquire_launcher_execute([cx.runtime], [cx.context], [launcher])
+    c.legion_acquire_launcher_destroy([launcher])
   end)
   return actions
 end
@@ -6858,6 +6859,7 @@ local function expr_release_setup_region(
   actions:insert(quote
     [expr_release_issue_phase_barriers(condition_values, condition_kinds, launcher)]
     c.legion_release_launcher_execute([cx.runtime], [cx.context], [launcher])
+    c.legion_release_launcher_destroy([launcher])
   end)
   return actions
 end
