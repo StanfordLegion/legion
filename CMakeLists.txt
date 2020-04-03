@@ -377,7 +377,7 @@ set_property(CACHE Legion_MAX_FIELDS PROPERTY STRINGS 32 64 128 256 512 1024)
 mark_as_advanced(Legion_MAX_FIELDS)
 
 # define variable for legion_defines.h
-set(MAX_FIELDS ${Legion_MAX_FIELDS})
+set(LEGION_MAX_FIELDS ${Legion_MAX_FIELDS})
 
 option(Legion_ENABLE_TLS "Enable support for TLS storage of Legion context" OFF)
 mark_as_advanced(Legion_ENABLE_TLS)
