@@ -6029,7 +6029,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndividualTask::perform_inlining(void)
+    void IndividualTask::perform_inlining(TaskContext *enclosing)
     //--------------------------------------------------------------------------
     {
       // See if there is anything that we need to wait on before running
@@ -6053,9 +6053,9 @@ namespace Legion {
       // Merge together all the events for the start condition 
       ApEvent start_condition = Runtime::merge_events(NULL, wait_on_events);
       // Get the processor that we will be running on
-      Processor current = parent_ctx->get_executing_processor();
+      Processor current = enclosing->get_executing_processor();
       // Select the variant to use
-      VariantImpl *variant = parent_ctx->select_inline_variant(this);
+      VariantImpl *variant = enclosing->select_inline_variant(this);
       if (!runtime->unsafe_mapper)
       {
         MapperManager *mapper = runtime->find_mapper(current, map_id);
@@ -6063,11 +6063,7 @@ namespace Legion {
                                     "select_task_variant");
       }
       // Now make an inline context to use for the execution
-      InlineContext *inline_ctx = new InlineContext(runtime, parent_ctx, this);
-      // Save this for when we are done executing
-      TaskContext *enclosing = parent_ctx;
-      // Set the context to be the current inline context
-      // parent_ctx = inline_ctx;
+      InlineContext *inline_ctx = new InlineContext(runtime, enclosing, this);
       // See if we need to wait for anything
       if (start_condition.exists())
         start_condition.wait();
@@ -6635,7 +6631,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PointTask::perform_inlining(void)
+    void PointTask::perform_inlining(TaskContext *enclosing)
     //--------------------------------------------------------------------------
     {
       // Should never be called
@@ -7333,7 +7329,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardTask::perform_inlining(void)
+    void ShardTask::perform_inlining(TaskContext *enclosing)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -8750,7 +8746,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::perform_inlining(void)
+    void IndexTask::perform_inlining(TaskContext *enclosing)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDEX_PERFORM_INLINING_CALL);
@@ -8776,14 +8772,12 @@ namespace Legion {
       ApEvent start_condition = Runtime::merge_events(NULL, wait_on_events);
       // Enumerate all of the points of our index space and run
       // the task for each one of them either saving or reducing their futures
-      Processor current = parent_ctx->get_executing_processor();
+      Processor current = enclosing->get_executing_processor();
       // Select the variant to use
-      VariantImpl *variant = parent_ctx->select_inline_variant(this);
+      VariantImpl *variant = enclosing->select_inline_variant(this);
       // See if we need to wait for anything
       if (start_condition.exists())
         start_condition.wait();
-      // Save this for when things are being returned
-      TaskContext *enclosing = parent_ctx;
       // Make a copy of our region requirements
       std::vector<RegionRequirement> copy_requirements(regions.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
@@ -8824,8 +8818,6 @@ namespace Legion {
         }
         compute_point_region_requirements();
         InlineContext *inline_ctx = new InlineContext(runtime, enclosing, this);
-        // Save the inner context as the parent ctx
-        // parent_ctx = inline_ctx;
         variant->dispatch_inline(current, inline_ctx);
         // Return any created privilege state
         std::set<RtEvent> preconditions;
@@ -10201,7 +10193,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::perform_inlining(void)
+    void SliceTask::perform_inlining(TaskContext *enclosing)
     //--------------------------------------------------------------------------
     {
       // should never be called

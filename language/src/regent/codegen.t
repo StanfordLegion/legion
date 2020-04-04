@@ -9132,42 +9132,50 @@ local function stat_index_launch_setup(cx, node, domain, actions)
       span = node.span,
     }
 
+    local reduce
     if not std.is_future(rhs_type) then
-      rhs = ast.typed.expr.FutureGetResult {
-        value = rhs,
-        expr_type = rhs_type,
+      reduce = ast.typed.stat.Reduce {
+        lhs = node.reduce_lhs,
+        rhs = ast.typed.expr.FutureGetResult {
+          value = rhs,
+          expr_type = rhs_type,
+          annotations = node.annotations,
+          span = node.span,
+        },
+        op = node.reduce_op,
+        metadata = false,
+        annotations = node.annotations,
+        span = node.span,
+      }
+    else
+      assert(node.reduce_task) -- Set by optimize_futures
+
+      reduce = ast.typed.stat.Assignment {
+        lhs = node.reduce_lhs,
+        rhs = ast.typed.expr.Call {
+          fn = ast.typed.expr.Function {
+            value = node.reduce_task,
+            expr_type = node.reduce_task:get_type(),
+            annotations = ast.default_annotations(),
+            span = node.span,
+          },
+          args = terralib.newlist({
+            node.reduce_lhs,
+            rhs,
+          }),
+          conditions = terralib.newlist(),
+          predicate = false,
+          predicate_else_value = false,
+          replicable = false,
+          expr_type = std.as_read(node.reduce_lhs.expr_type),
+          annotations = node.annotations,
+          span = node.span,
+        },
+        metadata = false,
         annotations = node.annotations,
         span = node.span,
       }
     end
-
-    assert(node.reduce_task) -- Set by optimize_futures
-
-    local reduce = ast.typed.stat.Assignment {
-      lhs = node.reduce_lhs,
-      rhs = ast.typed.expr.Call {
-        fn = ast.typed.expr.Function {
-          value = node.reduce_task,
-          expr_type = node.reduce_task:get_type(),
-          annotations = ast.default_annotations(),
-          span = node.span,
-        },
-        args = terralib.newlist({
-          node.reduce_lhs,
-          rhs,
-        }),
-        conditions = terralib.newlist(),
-        predicate = false,
-        predicate_else_value = false,
-        replicable = false,
-        expr_type = std.as_read(node.reduce_lhs.expr_type),
-        annotations = node.annotations,
-        span = node.span,
-      },
-      metadata = false,
-      annotations = node.annotations,
-      span = node.span,
-    }
 
     launcher_execute = quote
       [launcher_execute]

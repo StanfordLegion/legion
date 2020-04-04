@@ -12,6 +12,9 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- runs-with:
+-- [["-ffuture", "1"], ["-ffuture", "0"]]
+
 import "regent"
 
 -- This tests the various loop optimizations supported by the

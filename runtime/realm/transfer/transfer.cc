@@ -1771,6 +1771,7 @@ namespace Realm {
       unsigned cword = (((output_count * element_size) << 8) +
 			(input_done ? 128 : 0) + // bit 7
 			(output_space_id + 1));
+      assert(cword != 0);
 
       XferPort &cp = output_ports[spaces.size()];
       if(cp.seq_remote.span_exists(cp.local_bytes_total,

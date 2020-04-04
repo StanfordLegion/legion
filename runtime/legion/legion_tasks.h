@@ -331,7 +331,7 @@ namespace Legion {
       virtual bool pack_task(Serializer &rez, AddressSpaceID target) = 0;
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events) = 0;
-      virtual void perform_inlining(void) = 0;
+      virtual void perform_inlining(TaskContext *enclosing) = 0;
     public:
       virtual void end_inline_task(const void *result, 
                                    size_t result_size, bool owned);
@@ -580,7 +580,7 @@ namespace Legion {
                                std::set<RtEvent> &ready_events) = 0; 
       virtual void pack_as_shard_task(Serializer &rez, 
                                       AddressSpaceID target) = 0;
-      virtual void perform_inlining(void) = 0;
+      virtual void perform_inlining(TaskContext *enclosing) = 0;
     public:
       virtual void handle_future(const void *res, 
                                  size_t res_size, bool owned) = 0; 
@@ -698,7 +698,7 @@ namespace Legion {
       virtual bool pack_task(Serializer &rez, AddressSpaceID target) = 0;
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events) = 0;
-      virtual void perform_inlining(void) = 0;
+      virtual void perform_inlining(TaskContext *enclosing) = 0;
     public:
       virtual SliceTask* clone_as_slice_task(IndexSpace is,
                       Processor p, bool recurse, bool stealable) = 0;
@@ -820,7 +820,7 @@ namespace Legion {
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events);
       virtual void pack_as_shard_task(Serializer &rez, AddressSpaceID target);
-      virtual void perform_inlining(void);
+      virtual void perform_inlining(TaskContext *enclosing);
       virtual bool is_top_level_task(void) const { return top_level_task; }
       virtual void end_inline_task(const void *result, 
                                    size_t result_size, bool owned);
@@ -909,7 +909,7 @@ namespace Legion {
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events);
       virtual void pack_as_shard_task(Serializer &rez, AddressSpaceID target);
-      virtual void perform_inlining(void);
+      virtual void perform_inlining(TaskContext *enclosing);
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                                        get_acquired_instances_ref(void);
     public:
@@ -1006,7 +1006,7 @@ namespace Legion {
                                std::set<RtEvent> &ready_events); 
       virtual void pack_as_shard_task(Serializer &rez, AddressSpaceID target);
       RtEvent unpack_shard_task(Deserializer &derez);
-      virtual void perform_inlining(void);
+      virtual void perform_inlining(TaskContext *enclosing);
     public:
       virtual void handle_future(const void *res, 
                                  size_t res_size, bool owned); 
@@ -1110,7 +1110,7 @@ namespace Legion {
       virtual bool pack_task(Serializer &rez, AddressSpaceID target);
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events);
-      virtual void perform_inlining(void);
+      virtual void perform_inlining(TaskContext *enclosing);
       virtual void end_inline_task(const void *result, 
                                    size_t result_size, bool owned);
       virtual VersionInfo& get_version_info(unsigned idx);
@@ -1258,7 +1258,7 @@ namespace Legion {
       virtual bool pack_task(Serializer &rez, AddressSpaceID target);
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events);
-      virtual void perform_inlining(void);
+      virtual void perform_inlining(TaskContext *enclosing);
     public:
       virtual SliceTask* clone_as_slice_task(IndexSpace is,
                   Processor p, bool recurse, bool stealable);

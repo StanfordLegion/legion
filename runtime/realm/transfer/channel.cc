@@ -467,11 +467,13 @@ namespace Realm {
 	    assert(amt == sizeof(unsigned));
 	    const void *srcptr = ocp.mem->get_direct_ptr(c_info.base_offset, amt);
 	    assert(srcptr != 0);
+
 	    unsigned cword;
 	    memcpy(&cword, srcptr, sizeof(unsigned));
 	    update_bytes_read(output_control.control_port_idx,
                               ocp.local_bytes_total, sizeof(unsigned));
 	    ocp.local_bytes_total += sizeof(unsigned);
+	    assert(cword != 0);
 	    output_control.remaining_count = cword >> 8;
 	    output_control.current_io_port = (cword & 0x7f) - 1;
 	    output_control.eos_received = (cword & 128) != 0;
@@ -745,6 +747,7 @@ namespace Realm {
 						    !input_data_done);
 
 	    size_t num_elems = dst_bytes / out_port->serdez_op->sizeof_field_type;
+	    if(num_elems == 0) break;
 	    assert((num_elems * out_port->serdez_op->sizeof_field_type) == dst_bytes);
 	    size_t max_src_bytes = num_elems * out_port->serdez_op->max_serialized_size;
 	    // if we have an input control, restrict the max number of
@@ -1178,7 +1181,8 @@ namespace Realm {
 	      if(!in_port->serdez_op && out_port->serdez_op) {
 		// ok to be over, due to the conservative nature of
 		//  deserialization reads
-		assert(rbc_snapshot >= pbt_snapshot);
+		assert((rbc_snapshot >= pbt_snapshot) ||
+		       (pbt_snapshot == size_t(-1)));
 	      } else {
 		// TODO: this check is now too aggressive because the previous
 		//  xd doesn't necessarily know when it's emitting its last

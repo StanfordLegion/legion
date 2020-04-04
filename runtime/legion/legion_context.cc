@@ -3050,6 +3050,186 @@ namespace Legion {
       end_task_wait();
     }
 
+    //--------------------------------------------------------------------------
+    Future TaskContext::predicate_task_false(const TaskLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      if (launcher.predicate_false_future.impl != NULL)
+        return launcher.predicate_false_future;
+      // Otherwise check to see if we have a value
+      FutureImpl *result = new FutureImpl(runtime, true/*register*/,
+        runtime->get_available_distributed_id(), 
+        runtime->address_space, ApEvent::NO_AP_EVENT);
+      if (launcher.predicate_false_result.get_size() > 0)
+        result->set_result(launcher.predicate_false_result.get_ptr(),
+                           launcher.predicate_false_result.get_size(),
+                           false/*own*/);
+      else
+      {
+        // We need to check to make sure that the task actually
+        // does expect to have a void return type
+        TaskImpl *impl = runtime->find_or_create_task_impl(launcher.task_id);
+        if (impl->returns_value())
+          REPORT_LEGION_ERROR(ERROR_PREDICATED_TASK_LAUNCH_FOR_TASK,
+            "Predicated task launch for task %s in parent "
+                        "task %s (UID %lld) has non-void return type "
+                        "but no default value for its future if the task "
+                        "predicate evaluates to false.  Please set either "
+                        "the 'predicate_false_result' or "
+                        "'predicate_false_future' fields of the "
+                        "TaskLauncher struct.", impl->get_name(), 
+                        get_task_name(), get_unique_id())
+        result->set_result(NULL, 0, false/*own*/);
+      }
+      return Future(result);
+    }
+
+    //--------------------------------------------------------------------------
+    FutureMap TaskContext::predicate_index_task_false(
+                                              const IndexTaskLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      Domain launch_domain = launcher.launch_domain;
+      if (!launch_domain.exists())
+        runtime->forest->find_launch_space_domain(launcher.launch_space,
+                                                  launch_domain);
+      FutureMapImpl *result = new FutureMapImpl(this, runtime, 
+          launch_domain, runtime->get_available_distributed_id(),
+          runtime->address_space, RtEvent::NO_RT_EVENT);
+      if (launcher.predicate_false_future.impl != NULL)
+      {
+        ApEvent ready_event = 
+          launcher.predicate_false_future.impl->get_ready_event(); 
+        if (ready_event.has_triggered())
+        {
+          const void *f_result = 
+            launcher.predicate_false_future.impl->get_untyped_result();
+          size_t f_result_size = 
+            launcher.predicate_false_future.impl->get_untyped_size();
+          for (Domain::DomainPointIterator itr(launcher.launch_domain); 
+                itr; itr++)
+          {
+            Future f = result->get_future(itr.p, true/*internal*/);
+            f.impl->set_result(f_result, f_result_size, false/*own*/);
+          }
+        }
+        else
+        {
+          // Otherwise launch a task to complete the future map,
+          // add the necessary references to prevent premature
+          // garbage collection by the runtime
+          result->add_base_gc_ref(DEFERRED_TASK_REF);
+          launcher.predicate_false_future.impl->add_base_gc_ref(
+                                              FUTURE_HANDLE_REF);
+          TaskOp::DeferredFutureMapSetArgs args(result,
+              launcher.predicate_false_future.impl, 
+              launcher.launch_domain, owner_task);
+          runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
+                                         Runtime::protect_event(ready_event));
+        }
+        return FutureMap(result);
+      }
+      if (launcher.predicate_false_result.get_size() == 0)
+      {
+        // Check to make sure the task actually does expect to
+        // have a void return type
+        TaskImpl *impl = runtime->find_or_create_task_impl(launcher.task_id);
+        if (impl->returns_value())
+          REPORT_LEGION_ERROR(ERROR_PREDICATED_INDEX_TASK_LAUNCH,
+            "Predicated index task launch for task %s "
+                        "in parent task %s (UID %lld) has non-void "
+                        "return type but no default value for its "
+                        "future if the task predicate evaluates to "
+                        "false.  Please set either the "
+                        "'predicate_false_result' or "
+                        "'predicate_false_future' fields of the "
+                        "IndexTaskLauncher struct.", impl->get_name(), 
+                        get_task_name(), get_unique_id())
+        // Just initialize all the futures
+        for (Domain::DomainPointIterator itr(launcher.launch_domain); 
+              itr; itr++)
+        {
+          Future f = result->get_future(itr.p, true/*internal*/);
+          f.impl->set_result(NULL, 0, false/*own*/);
+        }
+      }
+      else
+      {
+        const void *ptr = launcher.predicate_false_result.get_ptr();
+        size_t ptr_size = launcher.predicate_false_result.get_size();
+        for (Domain::DomainPointIterator itr(launcher.launch_domain); 
+              itr; itr++)
+        {
+          Future f = result->get_future(itr.p, true/*internal*/);
+          f.impl->set_result(ptr, ptr_size, false/*own*/);
+        }
+      }
+      return FutureMap(result);
+    }
+
+    //--------------------------------------------------------------------------
+    Future TaskContext::predicate_index_task_reduce_false(
+                                              const IndexTaskLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      if (launcher.predicate_false_future.impl != NULL)
+        return launcher.predicate_false_future;
+      // Otherwise check to see if we have a value
+      FutureImpl *result = new FutureImpl(runtime, true/*register*/, 
+        runtime->get_available_distributed_id(), 
+        runtime->address_space, ApEvent::NO_AP_EVENT);
+      if (launcher.predicate_false_result.get_size() > 0)
+        result->set_result(launcher.predicate_false_result.get_ptr(),
+                           launcher.predicate_false_result.get_size(),
+                           false/*own*/);
+      else
+      {
+        // We need to check to make sure that the task actually
+        // does expect to have a void return type
+        TaskImpl *impl = runtime->find_or_create_task_impl(launcher.task_id);
+        if (impl->returns_value())
+          REPORT_LEGION_ERROR(ERROR_PREDICATED_INDEX_TASK_LAUNCH,
+            "Predicated index task launch for task %s "
+                        "in parent task %s (UID %lld) has non-void "
+                        "return type but no default value for its "
+                        "future if the task predicate evaluates to "
+                        "false.  Please set either the "
+                        "'predicate_false_result' or "
+                        "'predicate_false_future' fields of the "
+                        "IndexTaskLauncher struct.", impl->get_name(), 
+                        get_task_name(), get_unique_id())
+        result->set_result(NULL, 0, false/*own*/);
+      }
+      return Future(result);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace TaskContext::find_index_launch_space(const Domain &domain)
+    //--------------------------------------------------------------------------
+    {
+      std::map<Domain,IndexSpace>::const_iterator finder =
+        index_launch_spaces.find(domain);
+      if (finder != index_launch_spaces.end())
+        return finder->second;
+      IndexSpace result;
+      switch (domain.get_dim())
+      {
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            result = TaskContext::create_index_space(domain, \
+              NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
+            break; \
+          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+        default:
+          assert(false);
+      }
+      index_launch_spaces[domain] = result;
+      return result;
+    }
+
     /////////////////////////////////////////////////////////////
     // Inner Context 
     /////////////////////////////////////////////////////////////
@@ -5366,36 +5546,7 @@ namespace Legion {
       AutoRuntimeCall call(this);
       // Quick out for predicate false
       if (launcher.predicate == Predicate::FALSE_PRED)
-      {
-        if (launcher.predicate_false_future.impl != NULL)
-          return launcher.predicate_false_future;
-        // Otherwise check to see if we have a value
-        FutureImpl *result = new FutureImpl(runtime, true/*register*/,
-          runtime->get_available_distributed_id(), 
-          runtime->address_space, ApEvent::NO_AP_EVENT);
-        if (launcher.predicate_false_result.get_size() > 0)
-          result->set_result(launcher.predicate_false_result.get_ptr(),
-                             launcher.predicate_false_result.get_size(),
-                             false/*own*/);
-        else
-        {
-          // We need to check to make sure that the task actually
-          // does expect to have a void return type
-          TaskImpl *impl = runtime->find_or_create_task_impl(launcher.task_id);
-          if (impl->returns_value())
-            REPORT_LEGION_ERROR(ERROR_PREDICATED_TASK_LAUNCH_FOR_TASK,
-              "Predicated task launch for task %s in parent "
-                          "task %s (UID %lld) has non-void return type "
-                          "but no default value for its future if the task "
-                          "predicate evaluates to false.  Please set either "
-                          "the 'predicate_false_result' or "
-                          "'predicate_false_future' fields of the "
-                          "TaskLauncher struct.", impl->get_name(), 
-                          get_task_name(), get_unique_id())
-          result->set_result(NULL, 0, false/*own*/);
-        }
-        return Future(result);
-      }
+        return predicate_task_false(launcher);
       IndividualTask *task = runtime->get_available_individual_task();
       Future result = task->initialize_task(this, launcher);
 #ifdef DEBUG_LEGION
@@ -5434,84 +5585,7 @@ namespace Legion {
       }
       // Quick out for predicate false
       if (launcher.predicate == Predicate::FALSE_PRED)
-      {
-        Domain launch_domain = launcher.launch_domain;
-        if (!launch_domain.exists())
-          runtime->forest->find_launch_space_domain(launcher.launch_space,
-                                                    launch_domain);
-        FutureMapImpl *result = new FutureMapImpl(this, runtime, 
-            launch_domain, runtime->get_available_distributed_id(),
-            runtime->address_space, RtEvent::NO_RT_EVENT);
-        if (launcher.predicate_false_future.impl != NULL)
-        {
-          ApEvent ready_event = 
-            launcher.predicate_false_future.impl->get_ready_event(); 
-          if (ready_event.has_triggered())
-          {
-            const void *f_result = 
-              launcher.predicate_false_future.impl->get_untyped_result();
-            size_t f_result_size = 
-              launcher.predicate_false_future.impl->get_untyped_size();
-            for (Domain::DomainPointIterator itr(launcher.launch_domain); 
-                  itr; itr++)
-            {
-              Future f = result->get_future(itr.p, true/*internal*/);
-              f.impl->set_result(f_result, f_result_size, false/*own*/);
-            }
-          }
-          else
-          {
-            // Otherwise launch a task to complete the future map,
-            // add the necessary references to prevent premature
-            // garbage collection by the runtime
-            result->add_base_gc_ref(DEFERRED_TASK_REF);
-            launcher.predicate_false_future.impl->add_base_gc_ref(
-                                                FUTURE_HANDLE_REF);
-            TaskOp::DeferredFutureMapSetArgs args(result,
-                launcher.predicate_false_future.impl, 
-                launcher.launch_domain, owner_task);
-            runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
-                                           Runtime::protect_event(ready_event));
-          }
-          return FutureMap(result);
-        }
-        if (launcher.predicate_false_result.get_size() == 0)
-        {
-          // Check to make sure the task actually does expect to
-          // have a void return type
-          TaskImpl *impl = runtime->find_or_create_task_impl(launcher.task_id);
-          if (impl->returns_value())
-            REPORT_LEGION_ERROR(ERROR_PREDICATED_INDEX_TASK_LAUNCH,
-              "Predicated index task launch for task %s "
-                          "in parent task %s (UID %lld) has non-void "
-                          "return type but no default value for its "
-                          "future if the task predicate evaluates to "
-                          "false.  Please set either the "
-                          "'predicate_false_result' or "
-                          "'predicate_false_future' fields of the "
-                          "IndexTaskLauncher struct.", impl->get_name(), 
-                          get_task_name(), get_unique_id())
-          // Just initialize all the futures
-          for (Domain::DomainPointIterator itr(launcher.launch_domain); 
-                itr; itr++)
-          {
-            Future f = result->get_future(itr.p, true/*internal*/);
-            f.impl->set_result(NULL, 0, false/*own*/);
-          }
-        }
-        else
-        {
-          const void *ptr = launcher.predicate_false_result.get_ptr();
-          size_t ptr_size = launcher.predicate_false_result.get_size();
-          for (Domain::DomainPointIterator itr(launcher.launch_domain); 
-                itr; itr++)
-          {
-            Future f = result->get_future(itr.p, true/*internal*/);
-            f.impl->set_result(ptr, ptr_size, false/*own*/);
-          }
-        }
-        return FutureMap(result);
-      } 
+        return predicate_index_task_false(launcher);
       IndexSpace launch_space = launcher.launch_space;
       if (!launch_space.exists())
         launch_space = find_index_launch_space(launcher.launch_domain);
@@ -5535,41 +5609,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (launcher.must_parallelism)
-        assert(false); // TODO: add support for this
-      AutoRuntimeCall call(this);
-      // Quick out for predicate false
-      if (launcher.predicate == Predicate::FALSE_PRED)
       {
-        if (launcher.predicate_false_future.impl != NULL)
-          return launcher.predicate_false_future;
-        // Otherwise check to see if we have a value
-        FutureImpl *result = new FutureImpl(runtime, true/*register*/, 
-          runtime->get_available_distributed_id(), 
-          runtime->address_space, ApEvent::NO_AP_EVENT);
-        if (launcher.predicate_false_result.get_size() > 0)
-          result->set_result(launcher.predicate_false_result.get_ptr(),
-                             launcher.predicate_false_result.get_size(),
-                             false/*own*/);
-        else
-        {
-          // We need to check to make sure that the task actually
-          // does expect to have a void return type
-          TaskImpl *impl = runtime->find_or_create_task_impl(launcher.task_id);
-          if (impl->returns_value())
-            REPORT_LEGION_ERROR(ERROR_PREDICATED_INDEX_TASK_LAUNCH,
-              "Predicated index task launch for task %s "
-                          "in parent task %s (UID %lld) has non-void "
-                          "return type but no default value for its "
-                          "future if the task predicate evaluates to "
-                          "false.  Please set either the "
-                          "'predicate_false_result' or "
-                          "'predicate_false_future' fields of the "
-                          "IndexTaskLauncher struct.", impl->get_name(), 
-                          get_task_name(), get_unique_id())
-          result->set_result(NULL, 0, false/*own*/);
-        }
-        return Future(result);
+        // Turn around and use a must epoch launcher
+        MustEpochLauncher epoch_launcher(launcher.map_id, launcher.tag);
+        epoch_launcher.add_index_task(launcher);
+        FutureMap result = execute_must_epoch(epoch_launcher);
+        return reduce_future_map(result, redop, deterministic);
       }
+      AutoRuntimeCall call(this);
       if (launcher.launch_domain.exists() &&
           (launcher.launch_domain.get_volume() == 0))
       {
@@ -5578,6 +5625,9 @@ namespace Legion {
                         get_task_name(), get_unique_id());
         return Future();
       }
+      // Quick out for predicate false
+      if (launcher.predicate == Predicate::FALSE_PRED)
+        return predicate_index_task_reduce_false(launcher);
       IndexSpace launch_space = launcher.launch_space;
       if (!launch_space.exists())
         launch_space = find_index_launch_space(launcher.launch_domain);
@@ -8878,7 +8928,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < physical_regions.size(); idx++)
         phy_regions_mapped[idx] = is_region_mapped(idx);
       // Inline the child task
-      child->perform_inlining();
+      child->perform_inlining(this);
       // Now see if the mapping state of any of our
       // originally mapped regions has changed
       std::set<ApEvent> wait_events;
@@ -9004,7 +9054,7 @@ namespace Legion {
                                   output.chosen_variant, true/*can fail*/);
       if (variant_impl == NULL)
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-          "Invalid mapper output from invoction of "
+                      "Invalid mapper output from invoction of "
                       "'select_task_variant' on mapper %s. Mapper selected "
                       "an invalidate variant ID %d for inlining of task %s "
                       "(UID %lld).", child_mapper->get_mapper_name(),
@@ -9083,34 +9133,7 @@ namespace Legion {
       }
       if (finder->second.empty())
         local_field_infos.erase(finder);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace InnerContext::find_index_launch_space(const Domain &domain)
-    //--------------------------------------------------------------------------
-    {
-      std::map<Domain,IndexSpace>::const_iterator finder =
-        index_launch_spaces.find(domain);
-      if (finder != index_launch_spaces.end())
-        return finder->second;
-      IndexSpace result;
-      switch (domain.get_dim())
-      {
-#define DIMFUNC(DIM) \
-        case DIM: \
-          { \
-            result = TaskContext::create_index_space(domain, \
-              NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
-            break; \
-          }
-        LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
-        default:
-          assert(false);
-      }
-      index_launch_spaces[domain] = result;
-      return result;
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void InnerContext::execute_task_launch(TaskOp *task, bool index,
@@ -15717,15 +15740,59 @@ namespace Legion {
     void LeafContext::inline_child_task(TaskOp *child)
     //--------------------------------------------------------------------------
     {
-      assert(false);
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_inline_task(child->get_unique_id());
+      child->perform_inlining(this);
     }
 
     //--------------------------------------------------------------------------
     VariantImpl* LeafContext::select_inline_variant(TaskOp *child) const
     //--------------------------------------------------------------------------
     {
-      assert(false);
-      return NULL;
+      Mapper::SelectVariantInput input;
+      Mapper::SelectVariantOutput output;
+      input.processor = executing_processor;
+      input.chosen_instances.resize(child->regions.size());
+      // Compute the parent indexes since we're going to need them
+      child->compute_parent_indexes();
+      // Find the instances for this child
+      for (unsigned idx = 0; idx < child->regions.size(); idx++)
+      {
+        // We can get access to physical_regions without the
+        // lock because we know we are running in the application
+        // thread in order to do this inlining
+        unsigned local_index = child->find_parent_index(idx); 
+#ifdef DEBUG_LEGION
+        assert(local_index <= physical_regions.size());
+        assert(physical_regions[local_index].is_mapped());
+#endif
+        InstanceSet instances;
+        physical_regions[local_index].impl->get_references(instances);
+        std::vector<MappingInstance> &mapping_instances = 
+          input.chosen_instances[idx];
+        mapping_instances.resize(instances.size());
+        for (unsigned idx2 = 0; idx2 < instances.size(); idx2++)
+        {
+          mapping_instances[idx2] = 
+            MappingInstance(instances[idx2].get_manager());
+        }
+      }
+      output.chosen_variant = 0;
+      // Always do this with the child mapper
+      MapperManager *child_mapper = runtime->find_mapper(executing_processor,
+                                                         child->map_id);
+      child_mapper->invoke_select_task_variant(child, &input, &output);
+      VariantImpl *variant_impl= runtime->find_variant_impl(child->task_id,
+                                  output.chosen_variant, true/*can fail*/);
+      if (variant_impl == NULL)
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Invalid mapper output from invoction of "
+                      "'select_task_variant' on mapper %s. Mapper selected "
+                      "an invalidate variant ID %d for inlining of task %s "
+                      "(UID %lld).", child_mapper->get_mapper_name(),
+                      output.chosen_variant, child->get_task_name(), 
+                      child->get_unique_id())
+      return variant_impl;
     }
 
     //--------------------------------------------------------------------------
@@ -16416,10 +16483,25 @@ namespace Legion {
     Future LeafContext::execute_task(const TaskLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_TASK_CALL,
-        "Illegal execute task call performed in leaf task %s "
-                     "(ID %lld)", get_task_name(), get_unique_id())
-      return Future();
+      if (launcher.enable_inlining)
+      {
+        if (launcher.predicate == Predicate::FALSE_PRED)
+          return predicate_task_false(launcher);
+
+        IndividualTask *task = runtime->get_available_individual_task(); 
+        InnerContext *parent = owner_task->get_context();
+        Future result = task->initialize_task(parent, launcher, false/*track*/);
+        inline_child_task(task);
+        task->deactivate();
+        return result;
+      }
+      else
+      {
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_TASK_CALL,
+          "Illegal execute task call performed in leaf task %s "
+                       "(ID %lld)", get_task_name(), get_unique_id())
+        return Future();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -16427,21 +16509,57 @@ namespace Legion {
                                               const IndexTaskLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,
-        "Illegal execute index space call performed in leaf "
-                     "task %s (ID %lld)", get_task_name(), get_unique_id())
-      return FutureMap();
+      if (!launcher.must_parallelism && launcher.enable_inlining)
+      {
+        if (launcher.predicate == Predicate::FALSE_PRED)
+          return predicate_index_task_false(launcher); 
+        IndexTask *task = runtime->get_available_index_task();
+        InnerContext *parent = owner_task->get_context();
+        IndexSpace launch_space = launcher.launch_space;
+        if (!launch_space.exists())
+          launch_space = find_index_launch_space(launcher.launch_domain);
+        FutureMap result = task->initialize_task(parent, launcher, 
+                                                 launch_space, false/*track*/);
+        inline_child_task(task);
+        task->deactivate();
+        return result;
+      }
+      else
+      {
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,
+          "Illegal execute index space call performed in leaf "
+                       "task %s (ID %lld)", get_task_name(), get_unique_id())
+        return FutureMap();
+      }
     }
 
     //--------------------------------------------------------------------------
-    Future LeafContext::execute_index_space(const IndexTaskLauncher &launcher,
+    Future LeafContext::execute_index_space(const IndexTaskLauncher &launcher, 
                                         ReductionOpID redop, bool deterministic)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,
-        "Illegal execute index space call performed in leaf "
-                     "task %s (ID %lld)", get_task_name(), get_unique_id())
-      return Future();
+      if (!launcher.must_parallelism && launcher.enable_inlining)
+      {
+        if (launcher.predicate == Predicate::FALSE_PRED)
+          return predicate_index_task_reduce_false(launcher);
+        IndexTask *task = runtime->get_available_index_task();
+        InnerContext *parent = owner_task->get_context();
+        IndexSpace launch_space = launcher.launch_space;
+        if (!launch_space.exists())
+          launch_space = find_index_launch_space(launcher.launch_domain);
+        Future result = task->initialize_task(parent, launcher, launch_space, 
+                                        redop, deterministic, false/*track*/);
+        inline_child_task(task);
+        task->deactivate();
+        return result;
+      }
+      else
+      {
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,
+          "Illegal execute index space call performed in leaf "
+                       "task %s (ID %lld)", get_task_name(), get_unique_id())
+        return Future();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -16632,39 +16750,100 @@ namespace Legion {
     Predicate LeafContext::create_predicate(const Future &f)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_ILLEGAL_PREDICATE_CREATION,
-        "Illegal predicate creation performed in leaf task %s "
-                     "(ID %lld)", get_task_name(), get_unique_id())
-      return Predicate();
+      if (f.impl == NULL)
+        return Predicate::FALSE_PRED;
+      // Always eagerly evaluate predicates in leaf contexts
+      bool valid = false;
+      const bool value = f.impl->get_boolean_value(valid);
+#ifdef DEBUG_LEGION
+      assert(valid); // all futures should be ready
+#endif
+      if (value)
+        return Predicate::TRUE_PRED;
+      else
+        return Predicate::FALSE_PRED;
     }
 
     //--------------------------------------------------------------------------
     Predicate LeafContext::predicate_not(const Predicate &p)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_ILLEGAL_NOT_PREDICATE_CREATION,
-        "Illegal NOT predicate creation in leaf task %s "
-                     "(ID %lld)", get_task_name(), get_unique_id())
-      return Predicate();
+      if (p == Predicate::TRUE_PRED)
+        return Predicate::FALSE_PRED;
+      else if (p == Predicate::FALSE_PRED)
+        return Predicate::TRUE_PRED;
+      else // should never get here, all predicates should be eagerly evaluated
+        assert(false);  
+      return Predicate::TRUE_PRED;
     }
     
     //--------------------------------------------------------------------------
     Predicate LeafContext::create_predicate(const PredicateLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_ILLEGAL_PREDICATE_CREATION,
-        "Illegal predicate creation performed in leaf task %s "
-                     "(ID %lld)", get_task_name(), get_unique_id())
-      return Predicate();
+      if (launcher.predicates.empty())
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_PREDICATE_CREATION,
+          "Illegal predicate creation performed on a "
+                      "set of empty previous predicates in task %s (ID %lld).",
+                      get_task_name(), get_unique_id())
+      else if (launcher.predicates.size() == 1)
+        return launcher.predicates[0];
+      if (launcher.and_op)
+      {
+        // Check for short circuit cases
+        for (std::vector<Predicate>::const_iterator it = 
+              launcher.predicates.begin(); it != 
+              launcher.predicates.end(); it++)
+        {
+          if ((*it) == Predicate::FALSE_PRED)
+            return Predicate::FALSE_PRED;
+          else if ((*it) == Predicate::TRUE_PRED)
+            continue;
+          else // should never get here, 
+            // all predicates should be eagerly evaluated
+            assert(false);
+        }
+        return Predicate::TRUE_PRED;
+      }
+      else
+      {
+        // Check for short circuit cases
+        for (std::vector<Predicate>::const_iterator it = 
+              launcher.predicates.begin(); it != 
+              launcher.predicates.end(); it++)
+        {
+          if ((*it) == Predicate::TRUE_PRED)
+            return Predicate::TRUE_PRED;
+          else if ((*it) == Predicate::FALSE_PRED)
+            continue;
+          else // should never get here, 
+            // all predicates should be eagerly evaluated
+            assert(false);
+        }
+        return Predicate::FALSE_PRED;
+      }
     }
 
     //--------------------------------------------------------------------------
     Future LeafContext::get_predicate_future(const Predicate &p)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_ILLEGAL_GET_PREDICATE_FUTURE,
-        "Illegal get predicate future performed in leaf task %s "
-                     "(ID %lld)", get_task_name(), get_unique_id())
+      if (p == Predicate::TRUE_PRED)
+      {
+        Future result = runtime->help_create_future(ApEvent::NO_AP_EVENT);
+        const bool value = true;
+        result.impl->set_result(&value, sizeof(value), false/*owned*/);
+        return result;
+      }
+      else if (p == Predicate::FALSE_PRED)
+      {
+        Future result = runtime->help_create_future(ApEvent::NO_AP_EVENT);
+        const bool value = false;
+        result.impl->set_result(&value, sizeof(value), false/*owned*/);
+        return result;
+      }
+      else // should never get here, all predicates should be eagerly evaluated
+        assert(false);
       return Future();
     }
 
