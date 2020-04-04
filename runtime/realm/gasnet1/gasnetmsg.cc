@@ -124,26 +124,32 @@ static bool is_registered(void *ptr)
   return false;
 }
 
-class IncomingMessageManager {
+class IncomingMessageManager : public BackgroundWorkItem {
 public:
-  IncomingMessageManager(int _nodes, Realm::CoreReservationSet& crs);
+  IncomingMessageManager(int _nodes, int _dedicated_threads,
+			 Realm::CoreReservationSet& crs);
   ~IncomingMessageManager(void);
 
   void add_incoming_message(int sender, IncomingMessage *msg);
 
-  void start_handler_threads(int count, size_t stack_size);
+  void start_handler_threads(size_t stack_size);
 
   void shutdown(void);
 
-  IncomingMessage *get_messages(int &sender, bool wait = true);
+  virtual void do_work(TimeLimit work_until);
 
   void handler_thread_loop(void);
 
 protected:
-  int nodes;
+  int get_messages(IncomingMessage *& head, IncomingMessage **& tail, bool wait);
+  void return_messages(int sender, IncomingMessage *head, IncomingMessage **tail);
+
+  int nodes, dedicated_threads, sleeper_count;
+  atomic<bool> bgwork_requested;
   int shutdown_flag;
   IncomingMessage **heads;
   IncomingMessage ***tails;
+  bool *in_handler;
   int *todo_list; // list of nodes with non-empty message lists
   int todo_oldest, todo_newest;
   Realm::Mutex mutex;
@@ -875,26 +881,39 @@ protected:
 static DetailedMessageTiming detailed_message_timing;
 #endif
 
-IncomingMessageManager::IncomingMessageManager(int _nodes, Realm::CoreReservationSet& crs)
-  : nodes(_nodes), shutdown_flag(0), condvar(mutex)
+IncomingMessageManager::IncomingMessageManager(int _nodes,
+					       int _dedicated_threads,
+					       Realm::CoreReservationSet& crs)
+  : BackgroundWorkItem("activemsg handler")
+  , nodes(_nodes), dedicated_threads(_dedicated_threads)
+  , sleeper_count(0)
+  , bgwork_requested(false)
+  , shutdown_flag(0), condvar(mutex)
 {
   heads = new IncomingMessage *[nodes];
   tails = new IncomingMessage **[nodes];
+  in_handler = new bool[nodes];
   for(int i = 0; i < nodes; i++) {
     heads[i] = 0;
     tails[i] = 0;
+    in_handler[i] = false;
   }
   todo_list = new int[nodes + 1];  // an extra entry to distinguish full from empty
   todo_oldest = todo_newest = 0;
 
-  core_rsrv = new Realm::CoreReservation("AM handlers", crs,
-					 Realm::CoreReservationParameters());
+  if(dedicated_threads > 0)
+    core_rsrv = new Realm::CoreReservation("AM handlers", crs,
+					   Realm::CoreReservationParameters());
+  else
+    core_rsrv = 0;
 }
 
 IncomingMessageManager::~IncomingMessageManager(void)
 {
+  delete core_rsrv;
   delete[] heads;
   delete[] tails;
+  delete[] in_handler;
   delete[] todo_list;
 }
 
@@ -913,24 +932,36 @@ void IncomingMessageManager::add_incoming_message(int sender, IncomingMessage *m
     // this starts a list, and the node needs to be added to the todo list
     heads[sender] = msg;
     tails[sender] = &(msg->next_msg);
-    todo_list[todo_newest] = sender;
-    todo_newest++;
-    if(todo_newest > nodes)
-      todo_newest = 0;
-    assert(todo_newest != todo_oldest);  // should never wrap around
-    condvar.broadcast();  // wake up any sleepers
+
+    // enqueue if this sender isn't currently being handled
+    if(!in_handler[sender]) {
+      bool was_empty = todo_oldest == todo_newest;
+
+      todo_list[todo_newest] = sender;
+      todo_newest++;
+      if(todo_newest > nodes)
+	todo_newest = 0;
+      assert(todo_newest != todo_oldest);  // should never wrap around
+      if(sleeper_count > 0)
+	condvar.broadcast();  // wake up any sleepers
+
+      if(was_empty && !bgwork_requested.load()) {
+	bgwork_requested.store(true);
+	make_active();
+      }
+    }
   }
   mutex.unlock();
 }
 
-void IncomingMessageManager::start_handler_threads(int count, size_t stack_size)
+void IncomingMessageManager::start_handler_threads(size_t stack_size)
 {
-  handler_threads.resize(count);
+  handler_threads.resize(dedicated_threads);
 
   Realm::ThreadLaunchParameters tlp;
   tlp.set_stack_size(stack_size);
 
-  for(int i = 0; i < count; i++)
+  for(int i = 0; i < dedicated_threads; i++)
     handler_threads[i] = Realm::Thread::create_kernel_thread<IncomingMessageManager, 
 							     &IncomingMessageManager::handler_thread_loop>(this,
 													   tlp,
@@ -939,6 +970,10 @@ void IncomingMessageManager::start_handler_threads(int count, size_t stack_size)
 
 void IncomingMessageManager::shutdown(void)
 {
+#ifdef DEBUG_REALM
+  shutdown_work_item();
+#endif
+
   mutex.lock();
   if(!shutdown_flag) {
     shutdown_flag = true;
@@ -955,42 +990,93 @@ void IncomingMessageManager::shutdown(void)
   handler_threads.clear();
 }
 
-IncomingMessage *IncomingMessageManager::get_messages(int &sender, bool wait)
+int IncomingMessageManager::get_messages(IncomingMessage *& head,
+					 IncomingMessage **& tail,
+					 bool wait)
 {
-  mutex.lock();
+  AutoLock<> al(mutex);
+
   while(todo_oldest == todo_newest) {
     // todo list is empty
     if(shutdown_flag || !wait)
-      break;
+      return -1;
+
 #ifdef DEBUG_INCOMING
     printf("incoming message list is empty - sleeping\n");
 #endif
+    sleeper_count += 1;
     condvar.wait();
+    sleeper_count -= 1;
   }
-  IncomingMessage *retval;
-  if(todo_oldest == todo_newest) {
-    // still empty
-    sender = -1;
-    retval = 0;
+
+  // pop the oldest entry off the todo list
+  int sender = todo_list[todo_oldest];
+  todo_oldest++;
+  if(todo_oldest > nodes)
+    todo_oldest = 0;
+  head = heads[sender];
+  tail = tails[sender];
+  heads[sender] = 0;
+  tails[sender] = 0;
+  in_handler[sender] = true;
 #ifdef DEBUG_INCOMING
-    printf("incoming message list is still empty!\n");
+  printf("handling incoming messages from %d\n", sender);
 #endif
+  // if there are other senders with messages waiting, we can request more
+  //  background workers right away
+  if((todo_oldest != todo_newest) && !bgwork_requested.load()) {
+    bgwork_requested.store(true);
+    make_active();
+  }
+
+  return sender;
+}
+
+void IncomingMessageManager::return_messages(int sender,
+					     IncomingMessage *head,
+					     IncomingMessage **tail)
+{
+  // TODO: if we're in out-of-order mode, we don't need to take the lock
+  //  if we're not actually putting anything back
+
+  AutoLock<> al(mutex);
+  in_handler[sender] = false;
+
+  bool enqueue_needed = false;
+  if(heads[sender] != 0) {
+    // list was non-empty
+    if(head != 0) {
+      // prepend on list
+      *tail = heads[sender];
+      heads[sender] = head;
+    }
+    // in in-order mode, we hadn't enqueued this sender, so do that now
+    enqueue_needed = true;
   } else {
-    // pop the oldest entry off the todo list
-    sender = todo_list[todo_oldest];
-    todo_oldest++;
-    if(todo_oldest > nodes)
-      todo_oldest = 0;
-    retval = heads[sender];
-    heads[sender] = 0;
-    tails[sender] = 0;
-#ifdef DEBUG_INCOMING
-    printf("handling incoming messages from %d\n", sender);
-#endif
+    if(head != 0) {
+      heads[sender] = head;
+      tails[sender] = tail;
+      enqueue_needed = true;
+    }
   }
-  mutex.unlock();
-  return retval;
-}    
+
+  if(enqueue_needed) {
+    bool was_empty = todo_oldest == todo_newest;
+
+    todo_list[todo_newest] = sender;
+    todo_newest++;
+    if(todo_newest > nodes)
+      todo_newest = 0;
+    assert(todo_newest != todo_oldest);  // should never wrap around
+    if(sleeper_count > 0)
+      condvar.broadcast();  // wake up any sleepers
+
+    if(was_empty && !bgwork_requested.load()) {
+      bgwork_requested.store(true);
+      make_active();
+    }
+  }
+}
 
 static IncomingMessageManager *incoming_message_manager = 0;
 
@@ -1073,12 +1159,18 @@ public:
 
   // returns true if the limit was reached before all messages could
   //  be sent (i.e. there's still more to send)
-  bool push_messages(int max_to_send = 0, bool wait = false)
+  bool push_messages(int max_to_send, bool wait, TimeLimit work_until)
   {
     int count = 0;
 
     bool still_more = true;
+    bool first_iteration = true;
     while(still_more && ((max_to_send == 0) || (count < max_to_send))) {
+      // don't check for timeout on the first try
+      if(!first_iteration && work_until.is_expired())
+	return still_more;
+      first_iteration = false;
+
       // attempt to get the mutex that covers the outbound queues - do not
       //  block
       if(!mutex.trylock()) break;
@@ -2169,10 +2261,16 @@ void OutgoingMessage::assign_srcdata_pointer(void *ptr)
   }
 }
 
-class EndpointManager {
+class EndpointManager : public BackgroundWorkItem {
 public:
-  EndpointManager(int num_endpoints, Realm::CoreReservationSet& crs)
-    : total_endpoints(num_endpoints), condvar(mutex)
+  EndpointManager(int num_endpoints, int num_dedicated_workers,
+		  Realm::CoreReservationSet& crs,
+		  bool _use_bgwork)
+    : BackgroundWorkItem("gasnet1 worker")
+    , total_endpoints(num_endpoints)
+    , dedicated_workers(num_dedicated_workers)
+    , condvar(mutex)
+    , bgworker_active(_use_bgwork)
   {
     endpoints = new ActiveMessageEndpoint*[num_endpoints];
     for (int i = 0; i < num_endpoints; i++)
@@ -2200,8 +2298,11 @@ public:
 
     // for worker threads
     shutdown_flag = false;
-    core_rsrv = new Realm::CoreReservation("EndpointManager workers", crs,
-					   Realm::CoreReservationParameters());
+    if(num_dedicated_workers > 0)
+      core_rsrv = new Realm::CoreReservation("EndpointManager workers", crs,
+					     Realm::CoreReservationParameters());
+    else
+      core_rsrv = 0;
   }
 
   ~EndpointManager(void)
@@ -2211,6 +2312,7 @@ public:
     fclose(msgtrace_file);
 #endif
 
+    delete core_rsrv;
     delete[] todo_list;
   }
 
@@ -2248,7 +2350,7 @@ public:
   }
 
   // returns whether any more messages remain
-  bool push_messages(int max_to_send = 0, bool wait = false)
+  bool push_messages(int max_to_send, bool wait, TimeLimit work_until)
   {
     while(true) {
       // get the next entry from the todo list, waiting if requested
@@ -2284,12 +2386,17 @@ public:
       mutex.unlock();
 
       //printf("sending messages to %d\n", target);
-      bool still_more = endpoints[target]->push_messages(max_to_send, wait);
+      bool still_more = endpoints[target]->push_messages(max_to_send, wait,
+							 work_until);
       //printf("done sending to %d - still more = %d\n", target, still_more);
 
       // if we didn't send them all, put this target back on the list
       if(still_more)
 	add_todo_entry(target);
+
+      // if time has elapsed, exit
+      if(work_until.is_expired())
+	return still_more;
 
       // we get stuck in this loop if a sender is waiting on an LMB flip, so make
       //  sure we do some polling inside the loop
@@ -2363,7 +2470,7 @@ public:
 	endpoints[i]->flush_outbound_messages();
 
     // step 2: wait until outbound queues are actually empty
-    while(push_messages(0))
+    while(push_messages(0, false/*!wait*/, TimeLimit()))
       CHECK_GASNET( gasnet_AMPoll() );
 
     // step 3: wait until we've handled every incoming message we expect
@@ -2392,19 +2499,22 @@ public:
     }
   }
   
-  void start_polling_threads(int count);
+  void start_polling_threads(void);
 
   void stop_threads(void);
 
+  virtual void do_work(TimeLimit work_until);
+
 protected:
-  // runs in a separeate thread
+  // runs in a separate thread
   void polling_worker_loop(void);
 
 private:
-  const int total_endpoints;
+  const int total_endpoints, dedicated_workers;
   ActiveMessageEndpoint **endpoints;
   Realm::Mutex mutex;
   Realm::CondVar condvar;
+  bool bgworker_active;
   int *todo_list;
   int todo_oldest, todo_newest;
   bool shutdown_flag;
@@ -2443,15 +2553,70 @@ static void handle_channel_close(gasnet_token_t token,
   endpoint_manager->handle_channel_close(src, count_lo, count_hi);
 }
 
+void IncomingMessageManager::do_work(TimeLimit work_until)
+{
+  // now that we've been called, our previous request for bgwork has been
+  //  granted and we will need another one if/when more work comes
+  // it's ok if this races with other threads that are adding/getting messages
+  //  because we'll do the request ourselves below in that case
+  bgwork_requested.store(false);
+
+  IncomingMessage *current_msg = 0;
+  IncomingMessage **current_tail = 0;
+  int sender = get_messages(current_msg, current_tail, false /*!wait*/);
+
+  // we're here because there was work to do, so an empty list is bad unless
+  //  there are also dedicated threads that might have grabbed it
+  if(sender == -1) {
+    assert(dedicated_threads > 0);
+    return;
+  }
+
+  // messages enqueued in response to incoming messages can never be stalled
+  ::ThreadLocal::always_allow_spilling = true;
+
+  while(current_msg) {
+    IncomingMessage *next_msg = current_msg->next_msg;
+#ifdef DETAILED_MESSAGE_TIMING
+    int timing_idx = detailed_message_timing.get_next_index(); // grab this while we still hold the lock
+    CurrentTime start_time;
+#endif
+    current_msg->run_handler();
+    endpoint_manager->count_handled_message(current_msg->get_peer());
+#ifdef DETAILED_MESSAGE_TIMING
+    detailed_message_timing.record(timing_idx,
+				   current_msg->get_peer(),
+				   current_msg->get_msgid(),
+				   -4, // 0xc - flagged as an incoming message,
+				   current_msg->get_msgsize(),
+				   count++, // how many messages we handle in a batch
+				   start_time, CurrentTime());
+#endif
+    delete current_msg;
+    current_msg = next_msg;
+
+    // do we need to stop early?
+    if(current_msg && work_until.is_expired())
+      break;
+  }
+
+  // messages enqueued in response to incoming messages can never be stalled
+  ::ThreadLocal::always_allow_spilling = false;
+
+  // put back whatever we had left, if anything - this'll requeue us if needed
+  return_messages(sender, current_msg, current_tail);
+}
+
 void IncomingMessageManager::handler_thread_loop(void)
 {
   // messages enqueued in response to incoming messages can never be stalled
   ::ThreadLocal::always_allow_spilling = true;
 
   while (true) {
-    int sender = -1;
-    IncomingMessage *current_msg = get_messages(sender);
-    if(!current_msg) {
+    IncomingMessage *current_msg = 0;
+    IncomingMessage **current_tail = 0;
+    int sender = get_messages(current_msg, current_tail, true /*wait*/);
+    if(sender == -1) {
 #ifdef DEBUG_INCOMING
       printf("received empty list - assuming shutdown!\n");
 #endif
@@ -2480,6 +2645,8 @@ void IncomingMessageManager::handler_thread_loop(void)
       delete current_msg;
       current_msg = next_msg;
     }
+    // we always handle all the messages, but still indicate we're done
+    return_messages(sender, 0, 0);
   }
 }
 
@@ -2629,7 +2796,10 @@ void gasnet_parse_command_line(std::vector<std::string>& cmdline)
 void init_endpoints(size_t gasnet_mem_size,
 		    size_t registered_mem_size,
 		    size_t registered_ib_mem_size,
-		    Realm::CoreReservationSet& crs)
+		    CoreReservationSet& crs,
+		    int num_worker_threads, int num_handler_threads,
+		    BackgroundWorkManager& bgwork,
+		    bool poll_use_bgwork, bool handler_use_bgwork)
 {
   size_t total_lmb_size = (gasnet_nodes() * 
 			   num_lmbs *
@@ -2721,28 +2891,30 @@ void init_endpoints(size_t gasnet_mem_size,
     srcdatapool = new SrcDataPool(srcdatapool_base, srcdatapool_size);
 #endif
 
-  endpoint_manager = new EndpointManager(gasnet_nodes(), crs);
+  endpoint_manager = new EndpointManager(gasnet_nodes(), num_worker_threads, crs,
+					 poll_use_bgwork);
+  if(poll_use_bgwork)
+    endpoint_manager->add_to_manager(&bgwork);
+
+  incoming_message_manager = new IncomingMessageManager(gasnet_nodes(),
+							num_handler_threads,
+							crs);
+  if(handler_use_bgwork)
+    incoming_message_manager->add_to_manager(&bgwork);
 
   init_deferred_frees();
 }
 
-// do a little bit of polling to try to move messages along, but return
-//  to the caller rather than spinning
-void do_some_polling(void)
+void EndpointManager::start_polling_threads(void)
 {
-  endpoint_manager->push_messages(max_msgs_to_send);
-
-  CHECK_GASNET( gasnet_AMPoll() );
-}
-
-void EndpointManager::start_polling_threads(int count)
-{
-  polling_threads.resize(count);
-  for(int i = 0; i < count; i++)
+  polling_threads.resize(dedicated_workers);
+  for(int i = 0; i < dedicated_workers; i++)
     polling_threads[i] = Realm::Thread::create_kernel_thread<EndpointManager, 
 							     &EndpointManager::polling_worker_loop>(this,
 												    Realm::ThreadLaunchParameters(),
 												    *core_rsrv);
+
+  make_active();
 }
 
 void EndpointManager::stop_threads(void)
@@ -2757,6 +2929,16 @@ void EndpointManager::stop_threads(void)
     delete (*it);
   }
   polling_threads.clear();
+
+  // make sure no background worker is still trying to do our work
+  {
+    AutoLock<> al(mutex);
+    while(bgworker_active)
+      condvar.wait();
+  }
+#ifdef DEBUG_REALM
+  shutdown_work_item();
+#endif
 
 #ifdef CHECK_OUTGOING_MESSAGES
   if(todo_oldest != todo_newest) {
@@ -2783,10 +2965,29 @@ void EndpointManager::stop_threads(void)
 #endif
 }
 
+void EndpointManager::do_work(TimeLimit work_until)
+{
+  push_messages(max_msgs_to_send, false /*!wait*/, work_until);
+
+  // poll if we're not out of time
+  if(!work_until.is_expired())
+    CHECK_GASNET( gasnet_AMPoll() );
+
+  // always re-activate ourselves unless we're shutting down
+  if(shutdown_flag) {
+    AutoLock<> al(mutex);
+    bgworker_active = false;
+    condvar.broadcast();
+  } else
+    make_active();
+}
+
 void EndpointManager::polling_worker_loop(void)
 {
   while(true) {
-    bool still_more = endpoint_manager->push_messages(max_msgs_to_send);
+    bool still_more = endpoint_manager->push_messages(max_msgs_to_send,
+						      false /*!wait*/,
+						      TimeLimit());
 
     // check for shutdown, but only if we've pushed all of our messages
     if(shutdown_flag && !still_more)
@@ -2807,16 +3008,14 @@ void EndpointManager::polling_worker_loop(void)
   }
 }
 
-void start_polling_threads(int count)
+void start_polling_threads(void)
 {
-  endpoint_manager->start_polling_threads(count);
+  endpoint_manager->start_polling_threads();
 }
 
-void start_handler_threads(int count, Realm::CoreReservationSet& crs, size_t stack_size)
+void start_handler_threads(size_t stack_size)
 {
-  incoming_message_manager = new IncomingMessageManager(gasnet_nodes(), crs);
-
-  incoming_message_manager->start_handler_threads(count, stack_size);
+  incoming_message_manager->start_handler_threads(stack_size);
 }
 
 void flush_activemsg_channels(void)

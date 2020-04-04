@@ -30,6 +30,7 @@
 #include "realm/realm_config.h"
 #include "realm/mutex.h"
 #include "realm/activemsg.h"
+#include "realm/bgwork.h"
 
     enum ActiveMessageIDs {
       FIRST_AVAILABLE = 140,
@@ -119,9 +120,12 @@ extern void gasnet_parse_command_line(std::vector<std::string>& cmdline);
 extern void init_endpoints(size_t gasnet_mem_size,
 			   size_t registered_mem_size,
 			   size_t registered_ib_mem_size,
-			   Realm::CoreReservationSet& crs);
-extern void start_polling_threads(int count);
-extern void start_handler_threads(int count, Realm::CoreReservationSet& crs, size_t stacksize);
+			   Realm::CoreReservationSet& crs,
+			   int num_polling_threads, int num_handler_thread,
+			   Realm::BackgroundWorkManager& bgwork,
+			   bool poll_use_bgwork, bool handler_use_bgwork);
+extern void start_polling_threads(void);
+extern void start_handler_threads(size_t stacksize);
 extern void flush_activemsg_channels(void);
 extern void stop_activemsg_threads(void);
 extern void report_activemsg_status(FILE *f);
@@ -129,10 +133,6 @@ extern void report_activemsg_status(FILE *f);
 // returns the largest payload that can be sent to a node (to a non-pinned
 //   address)
 extern size_t get_lmb_size(Realm::NodeID target_node);
-
-// do a little bit of polling to try to move messages along, but return
-//  to the caller rather than spinning
-extern void do_some_polling(void);
 
 /* Necessary base structure for all medium and long active messages */
 struct BaseMedium {

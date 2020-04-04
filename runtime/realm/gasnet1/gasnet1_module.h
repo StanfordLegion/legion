@@ -82,6 +82,7 @@ namespace Realm {
 							  size_t storage_size);
 
   protected:
+    bool active_msg_worker_bgwork, active_msg_handler_bgwork;
     int active_msg_worker_threads;
     int active_msg_handler_threads;
     size_t gasnet_mem_size, amsg_stack_size;
