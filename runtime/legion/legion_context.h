@@ -577,6 +577,13 @@ namespace Legion {
                                    void (*destructor)(void*));
     public:
       void yield(void);
+    protected:
+      Future predicate_task_false(const TaskLauncher &launcher);
+      FutureMap predicate_index_task_false(const IndexTaskLauncher &launcher);
+      Future predicate_index_task_reduce_false(const IndexTaskLauncher &launch);
+    public:
+      // Find an index space name for a concrete launch domain
+      IndexSpace find_index_launch_space(const Domain &domain);
     public:
       Runtime *const runtime;
       TaskOp *const owner_task;
@@ -628,6 +635,9 @@ namespace Legion {
     protected:
       // Field allocation data
       std::map<FieldSpace,FieldAllocatorImpl*> field_allocators;
+    protected:
+      // Our cached set of index spaces for immediate domains
+      std::map<Domain,IndexSpace> index_launch_spaces;
     protected:
       RtEvent pending_done;
       bool task_executed;
@@ -1130,10 +1140,7 @@ namespace Legion {
                                 std::vector<InstanceView*> &target_views);
       // I hate the container problem, same as previous except MaterializedView
       void convert_target_views(const InstanceSet &targets, 
-                                std::vector<MaterializedView*> &target_views);
-    public:
-      // Find an index space name for a concrete launch domain
-      IndexSpace find_index_launch_space(const Domain &domain);
+                                std::vector<MaterializedView*> &target_views); 
     protected:
       void execute_task_launch(TaskOp *task, bool index, 
                                LegionTrace *current_trace, 
@@ -1209,10 +1216,7 @@ namespace Legion {
       bool valid_wait_event;
       RtUserEvent window_wait;
       std::deque<ApEvent> frame_events;
-      RtEvent last_registration;
-    protected:
-      // Our cached set of index spaces for immediate domains
-      std::map<Domain,IndexSpace> index_launch_spaces;
+      RtEvent last_registration; 
     protected:
       // Number of sub-tasks ready to map
       unsigned outstanding_subtasks;
