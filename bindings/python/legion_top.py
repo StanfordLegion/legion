@@ -180,11 +180,20 @@ def run_path(filename, run_name=None):
     del module
 
 
-def import_global(module, check_depth=True):
+# This method will ensure that a module is globally imported across all 
+# Python processors in a Legion job before returning. It cannot be called
+# within an import statement though without creating a deadlock with 
+# Python's import locks. Alternatively, the user can set the 'block'
+# parameter to 'False' which will return a future for when the global
+# import is complete and the function will return a handle to a future
+# that the caller can use for checking when the global import is complete
+# The type of the future is an integer that will report the number of
+# failed imports. It is up to the caller to destroy the handle when done.
+def import_global(module, check_depth=True, block=True):
     try:
         # We should only be doing something for this if we're the top-level task
         if c.legion_task_get_depth(top_level.task[0]) > 0 and check_depth:
-            return
+            return None
     except AttributeError:
         raise RuntimeError('"import_global" must be called in a legion_python task')
     if isinstance(module,str):
@@ -225,11 +234,15 @@ def import_global(module, check_depth=True):
             top_level.context[0], launcher, c.LEGION_REDOP_SUM_INT32)
     c.legion_index_launcher_destroy(launcher)
     c.legion_argument_map_destroy(argmap)
-    result = struct.unpack_from('i',
-            ffi.buffer(c.legion_future_get_untyped_pointer(future),4))[0]
-    c.legion_future_destroy(future)
-    if result > 0:
-        raise ImportError('failed to globally import '+name+' on '+str(result)+' nodes')
+    if block:
+        result = struct.unpack_from('i',
+                ffi.buffer(c.legion_future_get_untyped_pointer(future),4))[0]
+        c.legion_future_destroy(future)
+        if result > 0:
+            raise ImportError('failed to globally import '+name+' on '+str(result)+' nodes')
+        return None
+    else:
+        return future
 
 
 # In general we discourage the use of this function, but some libraries are

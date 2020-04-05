@@ -3269,24 +3269,33 @@ static void *bytedup(const void *data, size_t datalen)
 
   Event CompQueueImpl::get_local_progress_event(void)
   {
-    // check for non-empty queue first and return NO_EVENT
-    if(resizable) {
-      AutoLock<> al(mutex);
-      if(cur_events > 0) {
-	assert(local_progress_event == 0);
-	return Event::NO_EVENT;
-      }
-    } else {
-      if(rd_ptr.load() < commit_ptr.load()) {
-	// can't check has_progress_events in a race-free way
-	return Event::NO_EVENT;
-      }
-    }
+    // non-resizable queues can observe a non-empty queue and return NO_EVENT
+    //  without taking the lock
+    if(!resizable && (rd_ptr.load() < commit_ptr.load()))
+      return Event::NO_EVENT;
 
-    // take lock and create event if needed
     {
       AutoLock<> al(mutex);
 
+      // now that we hold the lock, check emptiness consistent with progress
+      //  event information
+      if(resizable) {
+	if(cur_events > 0) {
+	  assert(local_progress_event == 0);
+	  return Event::NO_EVENT;
+	}
+      } else {
+	// before we recheck in the non-resizable case, set the
+	//  'has_progress_events' flag - this ensures that any pusher we don't
+	//  see when we recheck the commit pointer will see the flag and take the
+	//  log to handle the progress event we're about to make
+	has_progress_events.store(true);
+	// commit load has to be fenced to stay after the store above
+	if(rd_ptr.load() < commit_ptr.load_fenced())
+	  return Event::NO_EVENT;
+      }
+
+      // we appear to be empty - get or create the progress event
       if(local_progress_event) {
 	ID id(local_progress_event->me);
 	id.event_generation() = local_progress_event_gen;
@@ -3297,7 +3306,6 @@ static void *bytedup(const void *data, size_t datalen)
 	Event e = local_progress_event->current_event();
 	// TODO: we probably don't really need this field because it's always local
 	local_progress_event_gen = ID(e).event_generation();
-	has_progress_events.store(true);
 	return e;
       }
     }
@@ -3307,25 +3315,34 @@ static void *bytedup(const void *data, size_t datalen)
   {
     // if queue is non-empty, we'll just immediately trigger the event
     bool immediate_trigger = false;
-    if(resizable) {
-      AutoLock<> al(mutex);
-      if(cur_events > 0) {
-	assert(local_progress_event == 0);
-	immediate_trigger = true;
-      }
+
+    // non-resizable queues can check without even taking the lock
+    if(!resizable && (rd_ptr.load() < commit_ptr.load())) {
+      immediate_trigger = true;
     } else {
-      if(rd_ptr.load() < commit_ptr.load()) {
-	// can't check has_progress_events in a race-free way
-	immediate_trigger = true;
-      }
-    }
-
-    if(!immediate_trigger) {
       AutoLock<> al(mutex);
-      remote_progress_events.push_back(event);
-      has_progress_events.store(true);
+
+      // now that we hold the lock, check emptiness consistent with progress
+      //  event information
+      if(resizable) {
+	if(cur_events > 0)
+	  immediate_trigger = true;
+      } else {
+	// before we recheck in the non-resizable case, set the
+	//  'has_progress_events' flag - this ensures that any pusher we don't
+	//  see when we recheck the commit pointer will see the flag and take the
+	//  log to handle the remote progress event we're about to add
+	has_progress_events.store(true);
+	// commit load has to be fenced to stay after the store above
+	if(rd_ptr.load() < commit_ptr.load_fenced())
+	  immediate_trigger = true;
+      }
+
+      if(!immediate_trigger)
+	remote_progress_events.push_back(event);
     }
 
+    // lock is released, so we can trigger now if needed
     if(immediate_trigger) {
       // the event is remote, but we know it's a GenEventImpl, so trigger here
       GenEventImpl::trigger(event, false /*!poisoned*/);
@@ -3491,8 +3508,9 @@ static void *bytedup(const void *data, size_t datalen)
 	}
       }
 
-      // see if we need to do any triggering
-      if(has_progress_events.load()) {
+      // see if we need to do any triggering - fenced load to keep it after the
+      //  update of commit_ptr above
+      if(has_progress_events.load_fenced()) {
 	// take lock for this
 	AutoLock<> al(mutex);
 	local_trigger = local_progress_event;
