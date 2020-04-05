@@ -61,8 +61,13 @@ else
 CC_FLAGS	+= -fPIC
 FC_FLAGS	+= -fPIC
 NVCC_FLAGS	+= -Xcompiler -fPIC
+ifeq ($(shell uname -s),Darwin)
+SLIB_LEGION     := liblegion.dylib
+SLIB_REALM      := librealm.dylib
+else
 SLIB_LEGION     := liblegion.so
 SLIB_REALM      := librealm.so
+endif
 ifeq ($(strip $(DARWIN)),1)
 SO_FLAGS += -dynamiclib -single_module -undefined dynamic_lookup -fPIC
 else
