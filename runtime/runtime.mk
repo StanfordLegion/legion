@@ -839,6 +839,18 @@ endif
 ifeq ($(strip $(USE_COMPLEX)),1)
 INSTALL_HEADERS += mathtypes/complex.h
 endif
+ifeq ($(strip $(USE_PYTHON)),1)
+INSTALL_HEADERS += realm/python/python_source.h \
+		   realm/python/python_source.inl
+endif
+ifeq ($(strip $(USE_LLVM)),1)
+INSTALL_HEADERS += realm/llvm/llvmjit.h \
+		   realm/llvm/llvmjit.inl
+endif
+ifeq ($(strip $(USE_HDF)),1)
+INSTALL_HEADERS += realm/hdf5/hdf5_access.h \
+		   realm/hdf5/hdf5_access.inl
+endif
 
 # General shell commands
 SHELL	:= /bin/sh
@@ -912,6 +924,9 @@ install: $(OUTFILE)
 	@echo "Installing into $(PREFIX)..."
 	@mkdir -p $(PREFIX)/bin
 	@mkdir -p $(PREFIX)/include/realm
+	@mkdir -p $(PREFIX)/include/realm/hdf5
+	@mkdir -p $(PREFIX)/include/realm/llvm
+	@mkdir -p $(PREFIX)/include/realm/python
 	@mkdir -p $(PREFIX)/include/legion
 	@mkdir -p $(PREFIX)/include/mappers
 	@mkdir -p $(PREFIX)/include/mathtypes
