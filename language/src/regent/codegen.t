@@ -6571,8 +6571,13 @@ end
 
 local function expr_fill_setup_region(
     cx, dst_value, dst_type, dst_container_type, dst_fields,
-    value_value, value_type)
-  assert(std.is_region(dst_type))
+    value_value, value_type, index, domain, projection_functor)
+  if index then
+    assert(std.is_partition(dst_type))
+    assert(domain and projection_functor)
+  else
+    assert(std.is_region(dst_type))
+  end
   assert(std.type_supports_privileges(dst_container_type))
 
   local dst_all_fields = std.flatten_struct_fields(dst_type:fspace())
@@ -6607,13 +6612,23 @@ local function expr_fill_setup_region(
       fill_value = std.implicit_cast(
         value_field_type, dst_field_type, fill_value)
 
-      actions:insert(quote
-        var buffer : dst_field_type = [fill_value]
-        c.legion_runtime_fill_field(
-          [cx.runtime], [cx.context], [dst_value].impl, [dst_parent],
-          dst_field_id, &buffer, terralib.sizeof(dst_field_type),
-          c.legion_predicate_true())
-      end)
+      if index then
+        actions:insert(quote
+          var buffer : dst_field_type = [fill_value]
+          c.legion_runtime_index_fill_field_with_domain(
+            [cx.runtime], [cx.context], [domain], [dst_value].impl, [dst_parent],
+            dst_field_id, &buffer, [terralib.sizeof(dst_field_type)],
+            [projection_functor], c.legion_predicate_true(), 0, 0)
+        end)
+      else
+        actions:insert(quote
+          var buffer : dst_field_type = [fill_value]
+          c.legion_runtime_fill_field(
+            [cx.runtime], [cx.context], [dst_value].impl, [dst_parent],
+            dst_field_id, &buffer, terralib.sizeof(dst_field_type),
+            c.legion_predicate_true())
+        end)
+      end
     end
   end
   return actions
@@ -6636,7 +6651,7 @@ local function expr_fill_setup_list(
   else
     return expr_fill_setup_region(
       cx, dst_value, dst_type, dst_container_type, dst_fields,
-      value_value, value_type)
+      value_value, value_type, false)
   end
 end
 
@@ -9234,23 +9249,13 @@ local function stat_index_fill_setup(cx, node, domain, actions)
   local projection_functor =
     make_partition_projection_functor(cx, region, node.symbol)
 
-  local launcher_actions = fill.dst.fields:map(function(field_path)
-    local field_id = cx:region(region_type):field_id(field_path)
-    return quote
-      do
-        var value : value_type = [value.value]
-        c.legion_runtime_index_fill_field_with_domain([cx.runtime], [cx.context], [domain],
-          [partition_value.value].impl, [parent_region].impl, [field_id], [&opaque](&value), [sizeof(value_type)],
-          [projection_functor], c.legion_predicate_true(), 0, 0)
-      end
-    end
-  end)
-
   return quote
     [actions]
     [value.actions]
     [partition_value.actions]
-    [launcher_actions]
+    [expr_fill_setup_region(
+       cx, partition_value.value, partition_type, region_type, fill.dst.fields,
+       value.value, value_type, true, domain, projection_functor)]
   end
 end
 
