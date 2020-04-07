@@ -6436,14 +6436,22 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return Internal::Runtime::get_serdez_op(serdez_id);
-    }
+    } 
 
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::add_registration_callback(
+                                             RegistrationCallbackFnptr callback)
+    //--------------------------------------------------------------------------
+    {
+      Internal::Runtime::add_registration_callback(callback);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::perform_registration_callback(
                                 RegistrationCallbackFnptr callback, bool global)
     //--------------------------------------------------------------------------
     {
-      Internal::Runtime::add_registration_callback(callback, global);
+      Internal::Runtime::perform_dynamic_registration_callback(callback,global);
     }
 
     //--------------------------------------------------------------------------
@@ -6451,7 +6459,7 @@ namespace Legion {
                                             RegistrationCallbackFnptr callback)
     //--------------------------------------------------------------------------
     {
-      Internal::Runtime::add_registration_callback(callback, false/*global*/);
+      Internal::Runtime::add_registration_callback(callback);
     }
 
     //--------------------------------------------------------------------------
