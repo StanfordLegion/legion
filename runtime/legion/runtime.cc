@@ -21943,6 +21943,25 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::add_registration_callback(
+                                             RegistrationCallbackFnptr callback)
+    //--------------------------------------------------------------------------
+    {
+      if (!runtime_started)
+      {
+        std::vector<RegistrationCallbackFnptr> &registration_callbacks = 
+          get_pending_registration_callbacks();
+        registration_callbacks.push_back(callback);
+      }
+      else
+        REPORT_LEGION_ERROR(ERROR_STATIC_CALL_POST_RUNTIME_START, 
+                      "Illegal call to 'add_registration_callback' after "
+                      "the runtime has been started! Please use "
+                      "'perform_registration_callback' for registration "
+                      "calls to be done after the runtime has started.")
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::perform_dynamic_registration_callback(
                                 RegistrationCallbackFnptr callback, bool global)
     //--------------------------------------------------------------------------
     {
@@ -21964,17 +21983,11 @@ namespace Legion {
           // We should only have event to wait on in Legion tasks
           assert(implicit_context != NULL);
 #endif
-          // Assume this is an external thread, will still work for
-          // internal threads as well, will just force a new thread
           done_event.wait();
         }
       }
-      else
-      {
-        std::vector<RegistrationCallbackFnptr> &registration_callbacks = 
-          get_pending_registration_callbacks();
-        registration_callbacks.push_back(callback);
-      }
+      else // can safely ignore global as this call must be done everywhere
+        add_registration_callback(callback);
     }
 
     //--------------------------------------------------------------------------

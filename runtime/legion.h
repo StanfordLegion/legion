@@ -7546,13 +7546,24 @@ namespace Legion {
        * configure any other static runtime variables prior to beginning
        * the application.
        * @param callback function pointer to the callback function to be run
-       * @param global whether this function pointer needs to be invoked
-       *               on all nodes, or just the local node, this parameter
-       *               can only be set to 'true' when this method is called
-       *               inside of Legion tasks
        */
-      static void add_registration_callback(RegistrationCallbackFnptr callback,
-                                            bool global = false);
+      static void add_registration_callback(RegistrationCallbackFnptr callback);
+
+      /**
+       * This call allows applications to request a registration callback
+       * be performed after the runtime has started. The application can
+       * select whether this registration is performed locally (e.g. once
+       * on the local node) or globally across all nodes in the machine.
+       * Global registrations are only permitted if this call is invoked
+       * from inside of a Legion task. The method will not return until the
+       * registration has been performed on all the target address spaces.
+       * @param ctx enclosing task context
+       * @param global whether this registration needs to be performed
+       *               in all address spaces or just the local one
+       */
+      static void perform_registration_callback(
+                               RegistrationCallbackFnptr callback, bool global);
+
       /**
        * @deprecated
        * This call allows the application to register a callback function

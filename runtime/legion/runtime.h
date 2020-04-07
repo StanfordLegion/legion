@@ -3227,8 +3227,9 @@ namespace Legion {
                                            bool has_lock = false);
       static const SerdezRedopFns* get_serdez_redop_fns(ReductionOpID redop_id,
                                                         bool has_lock = false);
-      static void add_registration_callback(RegistrationCallbackFnptr callback, 
-                                            bool global);
+      static void add_registration_callback(RegistrationCallbackFnptr callback);
+      static void perform_dynamic_registration_callback(
+                               RegistrationCallbackFnptr callback, bool global);
       static ReductionOpTable& get_reduction_table(bool safe);
       static SerdezOpTable& get_serdez_table(bool safe);
       static SerdezRedopTable& get_serdez_redop_table(bool safe);
