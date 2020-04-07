@@ -21977,14 +21977,12 @@ namespace Legion {
                 "the runtime has been started with multiple runtime instances.")
         const RtEvent done_event = 
           the_runtime->perform_registration_callback(callback, global);
-        if (done_event.exists() && !done_event.has_triggered())
-        {
-#ifdef DEBUG_LEGION
-          // We should only have event to wait on in Legion tasks
-          assert(implicit_context != NULL);
-#endif
+        // Only do this wait if we got this call from inside of a Legion 
+        // task, if not we actually need to return right away to avoid 
+        // blocking the dlopen call that loads this dynamic object
+        if (done_event.exists() && !done_event.has_triggered() &&
+            (implicit_context != NULL))
           done_event.wait();
-        }
       }
       else // can safely ignore global as this call must be done everywhere
         add_registration_callback(callback);
