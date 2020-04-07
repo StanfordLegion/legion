@@ -1743,7 +1743,12 @@ namespace Legion {
       void initialize_mappers(void);
       void initialize_virtual_manager(void);
       void initialize_runtime(void);
-      void perform_registration_callback(RegistrationCallbackFnptr callback);
+      void send_registration_callback(AddressSpaceID space,
+                                      RegistrationCallbackFnptr callback, 
+                                      RtEvent done, std::set<RtEvent> &applied);
+      RtEvent perform_registration_callback(RegistrationCallbackFnptr callback,
+                    bool global, TaskContext *actual_context = NULL,
+                    RtUserEvent done_event = RtUserEvent::NO_RT_USER_EVENT);
       void startup_runtime(void);
       void finalize_runtime(void);
       ApEvent launch_mapper_task(Mapper *mapper, Processor proc, 
@@ -2338,6 +2343,7 @@ namespace Legion {
       void handle_task(Deserializer &derez);
       void handle_steal(Deserializer &derez);
       void handle_advertisement(Deserializer &derez);
+      void handle_registration_callback(Deserializer &derez);
       void handle_remote_task_replay(Deserializer &derez);
       void handle_remote_task_profiling_response(Deserializer &derez);
       void handle_index_space_node(Deserializer &derez, AddressSpaceID source);
@@ -3014,6 +3020,11 @@ namespace Legion {
       // This is only valid on node 0
       unsigned unique_library_serdez_id;
     protected:
+      mutable LocalLock callback_lock;
+      std::map<RegistrationCallbackFnptr,std::vector<
+        std::pair<TaskContext*,RtUserEvent> > > pending_global_callbacks;
+      unsigned remote_global_callbacks;
+    protected:
       mutable LocalLock redop_lock;
       mutable LocalLock serdez_lock;
     protected:
@@ -3216,7 +3227,8 @@ namespace Legion {
                                            bool has_lock = false);
       static const SerdezRedopFns* get_serdez_redop_fns(ReductionOpID redop_id,
                                                         bool has_lock = false);
-      static void add_registration_callback(RegistrationCallbackFnptr callback);
+      static void add_registration_callback(RegistrationCallbackFnptr callback, 
+                                            bool global);
       static ReductionOpTable& get_reduction_table(bool safe);
       static SerdezOpTable& get_serdez_table(bool safe);
       static SerdezRedopTable& get_serdez_redop_table(bool safe);

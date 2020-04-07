@@ -6985,6 +6985,11 @@ namespace Legion {
               runtime->handle_advertisement(derez);
               break;
             }
+          case SEND_REGISTRATION_CALLBACK:
+            {
+              runtime->handle_registration_callback(derez);
+              break;
+            }
           case SEND_REMOTE_TASK_REPLAY:
             {
               runtime->handle_remote_task_replay(derez);
@@ -10372,6 +10377,7 @@ namespace Legion {
         unique_library_task_id(LEGION_INITIAL_LIBRARY_ID_OFFSET),
         unique_library_redop_id(LEGION_INITIAL_LIBRARY_ID_OFFSET),
         unique_library_serdez_id(LEGION_INITIAL_LIBRARY_ID_OFFSET),
+        remote_global_callbacks(0),
         unique_distributed_id((unique == 0) ? runtime_stride : unique)
     //--------------------------------------------------------------------------
     {
@@ -11302,17 +11308,108 @@ namespace Legion {
         for (std::vector<RegistrationCallbackFnptr>::const_iterator it = 
               registration_callbacks.begin(); it !=
               registration_callbacks.end(); it++)
-          perform_registration_callback(*it);
+          perform_registration_callback(*it, false/*global*/);
         log_run.info("Finished execution of registration callbacks");
       }
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::perform_registration_callback(
-                                             RegistrationCallbackFnptr callback)
+    void Runtime::send_registration_callback(AddressSpaceID target,
+                                             RegistrationCallbackFnptr callback,
+                                             RtEvent global_done_event,
+                                             std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      (*callback)(machine, external, local_procs);
+      RtUserEvent done_event = Runtime::create_rt_user_event();
+      Serializer rez;
+      {
+        Realm::FunctionPointerImplementation impl((void (*)(void))callback);
+        Realm::DSOCodeTranslator translator;
+#ifdef DEBUG_LEGION
+        assert(translator.can_translate(
+              typeid(Realm::FunctionPointerImplementation),
+              typeid(Realm::DSOReferenceImplementation)));
+#endif
+        Realm::DSOReferenceImplementation *dso = 
+          static_cast<Realm::DSOReferenceImplementation*>(
+              translator.translate(&impl,
+                typeid(Realm::DSOReferenceImplementation)));
+        if (dso == NULL)
+          REPORT_LEGION_FATAL(LEGION_FATAL_CALLBACK_NOT_PORTABLE,
+              "Registration callback function pointer %p is not portable.", 
+              callback)
+        Realm::Serialization::DynamicBufferSerializer 
+                serializer(64/*initial size*/);
+        if (dso->serialize(serializer))
+            REPORT_LEGION_FATAL(LEGION_FATAL_CALLBACK_NOT_PORTABLE,
+              "Registration callback function pointer %p is not portable.", 
+              callback)
+        const size_t bytes = serializer.bytes_used();
+        rez.serialize<size_t>(bytes);
+        rez.serialize(serializer.get_buffer(), bytes);
+        delete dso;
+      }
+      rez.serialize(global_done_event);
+      rez.serialize(done_event);
+      find_messenger(target)->send_message(rez, SEND_REGISTRATION_CALLBACK,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+      applied_events.insert(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent Runtime::perform_registration_callback(
+                                RegistrationCallbackFnptr callback, bool global,
+                                TaskContext *ctx, RtUserEvent done_event)
+    //--------------------------------------------------------------------------
+    {
+      if (global)
+      {
+        if (ctx == NULL)
+          ctx = implicit_context;
+        // If we don't have a name for when this event registration is
+        // done then we need one now
+        if (!done_event.exists())
+          done_event = Runtime::create_rt_user_event();
+        // Check to see if there is a guard from a message for performing 
+        // callbacks being handled on remote nodes, if so we can't issue 
+        // this yet, just make an event and record that it needs to be done
+        {
+          AutoLock c_lock(callback_lock);
+          if (remote_global_callbacks > 0)
+          {
+            pending_global_callbacks[callback].push_back(
+                std::pair<TaskContext*,RtUserEvent>(ctx,done_event));
+            return done_event;
+          }
+          // if there are no remote callbacks we must have a context
+          else if (ctx == NULL)
+            REPORT_LEGION_ERROR(ERROR_EXTERNAL_GLOBAL_CALLBACK,
+              "Global registration callbacks are only permitted to be "
+              "performed inside of Legion tasks and not from external threads")
+        }
+        // Then ask the context to the do the global versions
+        std::set<RtEvent> preconditions;
+        RtBarrier to_arrive;
+        // Now we can do our local version of the callback
+        if (ctx->perform_global_registration_callbacks(callback, done_event, 
+                                                       preconditions,to_arrive))
+          (*callback)(machine, external, local_procs);
+#ifdef DEBUG_LEGION
+        assert(!to_arrive.exists()); // ignore until control replication
+#endif
+        if (!preconditions.empty())
+          Runtime::trigger_event(done_event,
+              Runtime::merge_events(preconditions));
+        else
+          Runtime::trigger_event(done_event);
+        return done_event;
+      }
+      else
+      {
+        // Do our local version of the callback
+        (*callback)(machine, external, local_procs);
+        return RtEvent::NO_RT_EVENT;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -16209,6 +16306,103 @@ namespace Legion {
       {
         it->second->process_advertisement(source, map_id);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_registration_callback(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      // Before we do anything tell the runtime that there is a remote
+      // global registration callback handler running
+      {
+        AutoLock c_lock(callback_lock);
+        remote_global_callbacks++;
+      }
+      size_t buffer_size;
+      derez.deserialize(buffer_size);
+      Realm::Serialization::FixedBufferDeserializer deserializer(
+          derez.get_current_pointer(), buffer_size);
+      Realm::CodeImplementation *dso = 
+        Realm::DSOReferenceImplementation::deserialize_new(deserializer); 
+#ifdef DEBUG_LEGION
+      assert(deserializer.bytes_left() == 0);
+#endif
+      derez.advance_pointer(buffer_size);
+      RtEvent global_done_event;
+      derez.deserialize(global_done_event);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+
+      Realm::DSOCodeTranslator translator;
+#ifdef DEBUG_LEGION
+      assert(translator.can_translate(
+            typeid(Realm::DSOReferenceImplementation),
+            typeid(Realm::FunctionPointerImplementation)));
+#endif
+      Realm::FunctionPointerImplementation *impl = 
+        static_cast<Realm::FunctionPointerImplementation*>(
+            translator.translate(dso, 
+              typeid(Realm::FunctionPointerImplementation)));
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+#endif
+      RegistrationCallbackFnptr fnptr = 
+        impl->get_impl<RegistrationCallbackFnptr>();
+      // Now that we've loaded everything and probably caused the remote
+      // shared object to be loaded, let's see what we can handle, at a 
+      // minimum we're going to handle ourselves no matter what
+      std::vector<std::pair<TaskContext*,RtUserEvent> > our_callbacks;
+      std::map<RegistrationCallbackFnptr,std::vector<
+        std::pair<TaskContext*,RtUserEvent> > > to_perform;
+      {
+        AutoLock c_lock(callback_lock);
+        std::map<RegistrationCallbackFnptr,std::vector<
+          std::pair<TaskContext*,RtUserEvent> > >::iterator finder = 
+            pending_global_callbacks.find(fnptr);
+#ifdef DEBUG_LEGION
+        // We better find it because we were global so any registrations
+        // of the same on a different node must also be global
+        assert(finder != pending_global_callbacks.end());
+        assert(!finder->second.empty());
+#endif
+        our_callbacks.swap(finder->second);
+        pending_global_callbacks.erase(finder);
+#ifdef DEBUG_LEGION
+        assert(remote_global_callbacks > 0);
+#endif
+        // If we're the last outstanding callback we can safely
+        // handle any remaining callbacks
+        if (--remote_global_callbacks == 0)
+          to_perform.swap(pending_global_callbacks);
+      }
+      // Handle ourselves first, if we're handling this remotely then
+      // that means that someone else has already done the broadcast
+      // so just do this like it is local
+      for (std::vector<std::pair<TaskContext*,RtUserEvent> >::const_iterator 
+            it = our_callbacks.begin(); it != our_callbacks.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        assert(it->first == NULL);
+        assert(it->second.exists());
+#endif
+        perform_registration_callback(fnptr, false/*global*/); 
+        // Signal that this is done when everyone is done
+        Runtime::trigger_event(it->second, global_done_event);
+      }
+      Runtime::trigger_event(done_event);
+      // Then handle any other pending callbacks
+      for (std::map<RegistrationCallbackFnptr,std::vector<
+            std::pair<TaskContext*,RtUserEvent> > >::const_iterator fit = 
+            to_perform.begin(); fit != to_perform.end(); fit++)
+      {
+        for (std::vector<std::pair<TaskContext*,RtUserEvent> >::const_iterator
+              it = fit->second.begin(); it != fit->second.end(); it++)
+          perform_registration_callback(fit->first, true/*global*/,
+              it->first, it->second);
+      }
+      // Delete our resources that we allocated
+      delete impl;
+      delete dso;
     }
 
     //--------------------------------------------------------------------------
@@ -21749,7 +21943,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::add_registration_callback(
-                                            RegistrationCallbackFnptr callback)
+                                RegistrationCallbackFnptr callback, bool global)
     //--------------------------------------------------------------------------
     {
       if (runtime_started)
@@ -21759,10 +21953,21 @@ namespace Legion {
           // If we're here this has to be an external thread
           runtime_started_event.external_wait();
         if (the_runtime->separate_runtime_instances)
-          REPORT_LEGION_FATAL(LEGION_FATAL_SEPARATE_RUNTIME_INSTANCES,
-              "Dynamic registration callbacks cannot be registered after "
-              "the runtime has been started with multiple runtime instances.")
-        the_runtime->perform_registration_callback(callback);
+            REPORT_LEGION_FATAL(LEGION_FATAL_SEPARATE_RUNTIME_INSTANCES,
+                "Dynamic registration callbacks cannot be registered after "
+                "the runtime has been started with multiple runtime instances.")
+        const RtEvent done_event = 
+          the_runtime->perform_registration_callback(callback, global);
+        if (done_event.exists() && !done_event.has_triggered())
+        {
+#ifdef DEBUG_LEGION
+          // We should only have event to wait on in Legion tasks
+          assert(implicit_context != NULL);
+#endif
+          // Assume this is an external thread, will still work for
+          // internal threads as well, will just force a new thread
+          done_event.wait();
+        }
       }
       else
       {

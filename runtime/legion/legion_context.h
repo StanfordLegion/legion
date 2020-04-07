@@ -89,6 +89,9 @@ namespace Legion {
       virtual VariantImpl* select_inline_variant(TaskOp *child) const = 0;
       virtual bool is_leaf_context(void) const;
       virtual bool is_inner_context(void) const;
+      virtual bool perform_global_registration_callbacks(
+                      RegistrationCallbackFnptr callback, RtEvent done_event,
+                      std::set<RtEvent> &preconditions, RtBarrier &to_arrive);
     public:
       // Interface to operations performed by a context
       virtual IndexSpace create_index_space(const Domain &bounds,

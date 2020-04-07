@@ -129,6 +129,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool TaskContext::perform_global_registration_callbacks(
+                  RegistrationCallbackFnptr callback, RtEvent global_done_event,
+                  std::set<RtEvent> &preconditions, RtBarrier &to_arrive)
+    //--------------------------------------------------------------------------
+    {
+      // Send messages to all the other nodes to perform it
+      std::set<RtEvent> ready_events;
+      for (AddressSpaceID space = 0; 
+            space < runtime->total_address_spaces; space++)
+      {
+        if (space == runtime->address_space)
+          continue;
+        runtime->send_registration_callback(space, callback, global_done_event,
+                                            preconditions);
+      }
+      // Always do it locally too
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
     IndexSpace TaskContext::create_index_space(const Domain &bounds, 
                                                TypeTag type_tag)
     //--------------------------------------------------------------------------

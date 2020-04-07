@@ -7546,8 +7546,13 @@ namespace Legion {
        * configure any other static runtime variables prior to beginning
        * the application.
        * @param callback function pointer to the callback function to be run
+       * @param global whether this function pointer needs to be invoked
+       *               on all nodes, or just the local node, this parameter
+       *               can only be set to 'true' when this method is called
+       *               inside of Legion tasks
        */
-      static void add_registration_callback(RegistrationCallbackFnptr callback);
+      static void add_registration_callback(RegistrationCallbackFnptr callback,
+                                            bool global = false);
       /**
        * @deprecated
        * This call allows the application to register a callback function

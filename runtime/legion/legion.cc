@@ -6394,10 +6394,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::add_registration_callback(
-                                            RegistrationCallbackFnptr callback)
+                                RegistrationCallbackFnptr callback, bool global)
     //--------------------------------------------------------------------------
     {
-      Internal::Runtime::add_registration_callback(callback);
+      Internal::Runtime::add_registration_callback(callback, global);
     }
 
     //--------------------------------------------------------------------------
@@ -6405,7 +6405,7 @@ namespace Legion {
                                             RegistrationCallbackFnptr callback)
     //--------------------------------------------------------------------------
     {
-      Internal::Runtime::add_registration_callback(callback);
+      Internal::Runtime::add_registration_callback(callback, false/*global*/);
     }
 
     //--------------------------------------------------------------------------
