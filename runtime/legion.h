@@ -1297,7 +1297,7 @@ namespace Legion {
         { return impl == f.impl; }
       inline bool operator<(const FutureMap &f) const
         { return impl < f.impl; }
-      inline Future operator[](const DomainPoint &point)
+      inline Future operator[](const DomainPoint &point) const
         { return get_future(point); }
       FutureMap& operator=(const FutureMap &f);
     public:
@@ -1312,7 +1312,7 @@ namespace Legion {
       template<typename T>
         inline T get_result(const DomainPoint &point,
                             bool silence_warnings = false,
-                            const char *warning_string = NULL);
+                            const char *warning_string = NULL) const;
       /**
        * Non-blocking call that will return a future that
        * will contain the value from the given index task
@@ -1320,7 +1320,7 @@ namespace Legion {
        * @param point the point task to wait for
        * @return a future for the index task point
        */
-      Future get_future(const DomainPoint &point);
+      Future get_future(const DomainPoint &point) const;
       /**
        * Blocking call that will return one the point
        * in the index space task has executed.
@@ -1330,7 +1330,7 @@ namespace Legion {
        */
       void get_void_result(const DomainPoint &point,
                            bool silence_warnings = false,
-                           const char *warning_string = NULL);
+                           const char *warning_string = NULL) const;
     public:
       /**
        * An older method for getting the result of
@@ -1340,7 +1340,7 @@ namespace Legion {
        * @return the return value of the index task point
        */
       template<typename RT, typename PT, unsigned DIM> 
-        inline RT get_result(const PT point[DIM]);
+        inline RT get_result(const PT point[DIM]) const;
       /**
        * An older method for getting a future corresponding
        * to a point in an index task launch.  This call is
@@ -1350,14 +1350,14 @@ namespace Legion {
        * @return a future for the point in the index task launch
        */
       template<typename PT, unsigned DIM>
-        inline Future get_future(const PT point[DIM]);
+        inline Future get_future(const PT point[DIM]) const;
       /**
        * An older method for performing a blocking wait
        * for a point in an index task launch.
        * @param point the point in the index task launch to wait for
        */
       template<typename PT, unsigned DIM>
-        inline void get_void_result(const PT point[DIM]);
+        inline void get_void_result(const PT point[DIM]) const;
     public:
       /**
        * Wait for all the tasks in the index space launch of
@@ -1366,7 +1366,7 @@ namespace Legion {
        * @param warning_string a string to be reported with any warnings
        */
       void wait_all_results(bool silence_warnings = false,
-                            const char *warning_string = NULL); 
+                            const char *warning_string = NULL) const; 
     public:
       const Domain& get_future_map_domain(void) const;
     }; 
@@ -7550,8 +7550,13 @@ namespace Legion {
        * configure any other static runtime variables prior to beginning
        * the application.
        * @param callback function pointer to the callback function to be run
+       * @param global whether this function pointer needs to be invoked
+       *               on all nodes, or just the local node, this parameter
+       *               can only be set to 'true' when this method is called
+       *               inside of Legion tasks
        */
-      static void add_registration_callback(RegistrationCallbackFnptr callback);
+      static void add_registration_callback(RegistrationCallbackFnptr callback,
+                                            bool global = false);
       /**
        * @deprecated
        * This call allows the application to register a callback function

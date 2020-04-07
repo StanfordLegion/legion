@@ -312,6 +312,7 @@ namespace Realm {
     assert(weights.size() == count);
     for(size_t i = 0; i < count; i++)
       total_weight += weights[i];
+    if(total_weight == 0) total_weight = 1;
 
     // dense case is easy(er)
     if(dense()) {

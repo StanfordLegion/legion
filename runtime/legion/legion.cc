@@ -2215,7 +2215,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future FutureMap::get_future(const DomainPoint &point)
+    Future FutureMap::get_future(const DomainPoint &point) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2227,7 +2227,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void FutureMap::get_void_result(const DomainPoint &point, 
                                     bool silence_warnings,
-                                    const char *warning_string)
+                                    const char *warning_string) const
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
@@ -2236,7 +2236,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void FutureMap::wait_all_results(bool silence_warnings,
-                                     const char *warning_string)
+                                     const char *warning_string) const
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
@@ -6440,10 +6440,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::add_registration_callback(
-                                            RegistrationCallbackFnptr callback)
+                                RegistrationCallbackFnptr callback, bool global)
     //--------------------------------------------------------------------------
     {
-      Internal::Runtime::add_registration_callback(callback);
+      Internal::Runtime::add_registration_callback(callback, global);
     }
 
     //--------------------------------------------------------------------------
@@ -6451,7 +6451,7 @@ namespace Legion {
                                             RegistrationCallbackFnptr callback)
     //--------------------------------------------------------------------------
     {
-      Internal::Runtime::add_registration_callback(callback);
+      Internal::Runtime::add_registration_callback(callback, false/*global*/);
     }
 
     //--------------------------------------------------------------------------

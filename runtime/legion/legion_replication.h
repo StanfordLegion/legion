@@ -2019,6 +2019,8 @@ namespace Legion {
         { return attach_reduce_barrier; }
       inline RtBarrier get_dependent_partition_barrier(void) const
         { return dependent_partition_barrier; }
+      inline RtBarrier get_callback_barrier(void) const
+        { return callback_barrier; }
 #ifdef DEBUG_LEGION_COLLECTIVES
       inline RtBarrier get_collective_check_barrier(void) const
         { return collective_check_barrier; }
@@ -2032,6 +2034,8 @@ namespace Legion {
         { return (*address_spaces)[sid]; }    
       inline bool is_first_local_shard(ShardTask *task) const
         { return (local_shards[0] == task); }
+      inline const std::set<AddressSpace>& get_unique_shard_spaces(void) const
+        { return unique_shard_spaces; }
     public:
       void set_shard_mapping(const std::vector<Processor> &shard_mapping);
       void set_address_spaces(const std::vector<AddressSpaceID> &spaces);
@@ -2156,6 +2160,7 @@ namespace Legion {
       ApBarrier attach_broadcast_barrier;
       ApBarrier attach_reduce_barrier;
       RtBarrier dependent_partition_barrier;
+      RtBarrier callback_barrier;
 #ifdef DEBUG_LEGION_COLLECTIVES
       RtBarrier collective_check_barrier;
       RtBarrier close_check_barrier;

@@ -8490,7 +8490,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<typename T>
     inline T FutureMap::get_result(const DomainPoint &dp, bool silence_warnings,
-                                   const char *warning_string)
+                                   const char *warning_string) const
     //--------------------------------------------------------------------------
     {
       Future f = get_future(dp);
@@ -8499,7 +8499,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename RT, typename PT, unsigned DIM>
-    inline RT FutureMap::get_result(const PT point[DIM])
+    inline RT FutureMap::get_result(const PT point[DIM]) const
     //--------------------------------------------------------------------------
     {
       LEGION_STATIC_ASSERT(DIM <= DomainPoint::MAX_POINT_DIM);
@@ -8513,7 +8513,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename PT, unsigned DIM>
-    inline Future FutureMap::get_future(const PT point[DIM])
+    inline Future FutureMap::get_future(const PT point[DIM]) const
     //--------------------------------------------------------------------------
     {
       LEGION_STATIC_ASSERT(DIM <= DomainPoint::MAX_POINT_DIM);
@@ -8526,7 +8526,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename PT, unsigned DIM>
-    inline void FutureMap::get_void_result(const PT point[DIM])
+    inline void FutureMap::get_void_result(const PT point[DIM]) const
     //--------------------------------------------------------------------------
     {
       LEGION_STATIC_ASSERT(DIM <= DomainPoint::MAX_POINT_DIM);

@@ -6617,6 +6617,8 @@ namespace Legion {
           ApBarrier(Realm::Barrier::create_barrier(total_shards));
         dependent_partition_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards));
+        callback_barrier = 
+          RtBarrier(Realm::Barrier::create_barrier(total_shards));
 #ifdef DEBUG_LEGION_COLLECTIVES
         collective_check_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards,
@@ -6675,6 +6677,7 @@ namespace Legion {
           attach_broadcast_barrier.destroy_barrier();
           attach_reduce_barrier.destroy_barrier();
           dependent_partition_barrier.destroy_barrier();
+          callback_barrier.destroy_barrier();
 #ifdef DEBUG_LEGION_COLLECTIVES
           collective_check_barrier.destroy_barrier();
           close_check_barrier.destroy_barrier();
@@ -6835,6 +6838,7 @@ namespace Legion {
           assert(attach_broadcast_barrier.exists());
           assert(attach_reduce_barrier.exists());
           assert(dependent_partition_barrier.exists());
+          assert(callback_barrier.exists());
           assert(shard_mapping.size() == total_shards);
 #endif
           rez.serialize(pending_partition_barrier);
@@ -6849,6 +6853,7 @@ namespace Legion {
           rez.serialize(attach_broadcast_barrier);
           rez.serialize(attach_reduce_barrier);
           rez.serialize(dependent_partition_barrier);
+          rez.serialize(callback_barrier);
 #ifdef DEBUG_LEGION_COLLECTIVES
           assert(collective_check_barrier.exists());
           rez.serialize(collective_check_barrier);
@@ -6899,6 +6904,7 @@ namespace Legion {
         derez.deserialize(attach_broadcast_barrier);
         derez.deserialize(attach_reduce_barrier);
         derez.deserialize(dependent_partition_barrier);
+        derez.deserialize(callback_barrier);
 #ifdef DEBUG_LEGION_COLLECTIVES
         derez.deserialize(collective_check_barrier);
         derez.deserialize(close_check_barrier);
