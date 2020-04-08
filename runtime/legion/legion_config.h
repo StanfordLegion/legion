@@ -1326,7 +1326,9 @@ typedef enum legion_dependence_type_t {
 
 enum {
   NAME_SEMANTIC_TAG = 0,
-  FIRST_AVAILABLE_SEMANTIC_TAG = 1,
+  SOURCE_FILE_TAG = 1,
+  SOURCE_LINE_TAG = 2,
+  FIRST_AVAILABLE_SEMANTIC_TAG = 3,
 };
 
 typedef enum legion_mappable_type_id_t {
