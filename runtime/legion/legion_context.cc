@@ -129,23 +129,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool TaskContext::perform_global_registration_callbacks(
-                  RegistrationCallbackFnptr callback, RtEvent global_done_event,
-                  std::set<RtEvent> &preconditions, RtBarrier &to_arrive)
+    void TaskContext::perform_global_registration_callbacks(
+                     Realm::DSOReferenceImplementation *dso, RtEvent local_done,
+                     RtEvent global_done, std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
       // Send messages to all the other nodes to perform it
-      std::set<RtEvent> ready_events;
       for (AddressSpaceID space = 0; 
             space < runtime->total_address_spaces; space++)
       {
         if (space == runtime->address_space)
           continue;
-        runtime->send_registration_callback(space, callback, global_done_event,
+        runtime->send_registration_callback(space, dso, global_done,
                                             preconditions);
       }
-      // Always do it locally too
-      return true;
     }
 
     //--------------------------------------------------------------------------
