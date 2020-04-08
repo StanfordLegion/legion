@@ -7777,15 +7777,17 @@ namespace Legion {
         args = arg_manager->get_allocation();
         memcpy(args, launcher.global_arg.get_ptr(), arglen);
       }
-      point_arguments = 
-        FutureMap(launcher.argument_map.impl->freeze(parent_ctx));
+      // Very important that these freezes occur before we initialize
+      // this operation because they can launch creation operations to
+      // make the future maps
+      point_arguments = launcher.argument_map.impl->freeze(parent_ctx);
       const size_t num_point_futures = launcher.point_futures.size();
       if (num_point_futures > 0)
       {
         point_futures.resize(num_point_futures);
         for (unsigned idx = 0; idx < num_point_futures; idx++)
           point_futures[idx] = 
-            FutureMap(launcher.point_futures[idx].impl->freeze(parent_ctx));
+            launcher.point_futures[idx].impl->freeze(parent_ctx);
       }
       map_id = launcher.map_id;
       tag = launcher.tag;
@@ -7863,15 +7865,17 @@ namespace Legion {
         args = arg_manager->get_allocation();
         memcpy(args, launcher.global_arg.get_ptr(), arglen);
       }
-      point_arguments = 
-        FutureMap(launcher.argument_map.impl->freeze(parent_ctx));
+      // Very important that these freezes occur before we initialize
+      // this operation because they can launch creation operations to
+      // make the future maps
+      point_arguments = launcher.argument_map.impl->freeze(parent_ctx);
       const size_t num_point_futures = launcher.point_futures.size();
       if (num_point_futures > 0)
       {
         point_futures.resize(num_point_futures);
         for (unsigned idx = 0; idx < num_point_futures; idx++)
           point_futures[idx] = 
-            FutureMap(launcher.point_futures[idx].impl->freeze(parent_ctx));
+            launcher.point_futures[idx].impl->freeze(parent_ctx);
       }
       map_id = launcher.map_id;
       tag = launcher.tag;
