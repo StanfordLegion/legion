@@ -4479,6 +4479,16 @@ local function compile_tasks_in_parallel()
 end
 
 function std.start(main_task, extra_setup_thunk)
+  if not std.is_task(main_task) then
+    report.error(
+        { span = ast.trivial_span() },
+        'invalid task to regentlib.start')
+  end
+  if #main_task:get_param_symbols() > 0 then
+    report.error(
+        { span = main_task.span },
+        'toplevel task must not have any parameter')
+  end
   if std.config["pretty"] then
     profile.print_summary()
     os.exit()
@@ -4547,6 +4557,16 @@ local function infer_filetype(filename)
 end
 
 function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flags)
+  if not std.is_task(main_task) then
+    report.error(
+        { span = ast.trivial_span() },
+        'invalid task to regentlib.saveobj')
+  end
+  if #main_task:get_param_symbols() > 0 then
+    report.error(
+        { span = main_task.span },
+        'toplevel task must not have any parameter')
+  end
   assert(std.is_task(main_task))
   filetype = filetype or infer_filetype(filename)
   assert(not link_flags or filetype == 'sharedlibrary' or filetype == 'executable',

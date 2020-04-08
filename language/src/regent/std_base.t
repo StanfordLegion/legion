@@ -1541,7 +1541,7 @@ end
 
 do
   local next_task_id = base.initial_regent_task_id
-  function base.new_task(name)
+  function base.new_task(name, span)
     if type(name) == "string" then
       name = data.newtuple(name)
     elseif data.is_tuple(name) then
@@ -1554,6 +1554,7 @@ do
     next_task_id = next_task_id + 1
     return setmetatable({
       name = name,
+      span = span,
       taskid = terralib.constant(c.legion_task_id_t, task_id),
       variants = terralib.newlist(),
       calling_convention = false,
