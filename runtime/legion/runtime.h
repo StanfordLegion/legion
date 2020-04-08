@@ -118,13 +118,14 @@ namespace Legion {
       bool remove_point(const DomainPoint &point);
       TaskArgument get_point(const DomainPoint &point);
     public:
-      FutureMapImpl* freeze(TaskContext *ctx);
+      FutureMap freeze(TaskContext *ctx);
       void unfreeze(void);
     public:
       Runtime *const runtime;
     private:
-      FutureMapImpl *future_map;
+      FutureMap future_map;
       std::map<DomainPoint,Future> arguments;
+      unsigned dependent_futures; // number of futures with producer ops
       bool equivalent; // argument and future_map the same
     };
 

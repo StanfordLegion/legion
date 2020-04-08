@@ -88,8 +88,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ArgumentMapImpl::ArgumentMapImpl(void)
-      : Collectable(), runtime(implicit_runtime),
-        future_map(NULL), equivalent(false)
+      : Collectable(), runtime(implicit_runtime), 
+        dependent_futures(0), equivalent(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -97,11 +97,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ArgumentMapImpl::ArgumentMapImpl(const FutureMap &rhs)
       : Collectable(), runtime(implicit_runtime),
-        future_map(rhs.impl), equivalent(false)
+        future_map(rhs), dependent_futures(0), equivalent(false)
     //--------------------------------------------------------------------------
     {
-      if (future_map != NULL)
-        future_map->add_base_gc_ref(FUTURE_HANDLE_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -117,9 +115,6 @@ namespace Legion {
     ArgumentMapImpl::~ArgumentMapImpl(void)
     //--------------------------------------------------------------------------
     {
-      if ((future_map != NULL) && 
-            future_map->remove_base_gc_ref(FUTURE_HANDLE_REF))
-        delete (future_map);
     }
 
     //--------------------------------------------------------------------------
@@ -135,7 +130,7 @@ namespace Legion {
     bool ArgumentMapImpl::has_point(const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
-      if (future_map != NULL)
+      if (future_map.impl != NULL)
         unfreeze();
       return (arguments.find(point) != arguments.end());
     }
@@ -146,7 +141,7 @@ namespace Legion {
                                 bool replace)
     //--------------------------------------------------------------------------
     {
-      if (future_map != NULL)
+      if (future_map.impl != NULL)
         unfreeze();
       std::map<DomainPoint,Future>::iterator finder = arguments.find(point);
       if (finder != arguments.end())
@@ -154,6 +149,13 @@ namespace Legion {
         // If it already exists and we're not replacing it then we're done
         if (!replace)
           return;
+        if (finder->second.impl->producer_op != NULL)
+        {
+#ifdef DEBUG_LEGION
+          assert(dependent_futures > 0);
+#endif
+          dependent_futures--;
+        }
         if (arg.get_size() > 0)
           finder->second = 
             Future::from_untyped_pointer(runtime->external,
@@ -171,12 +173,10 @@ namespace Legion {
           arguments[point] = Future();
       }
       // If we modified things then they are no longer equivalent
-      if (future_map != NULL)
+      if (future_map.impl != NULL)
       {
         equivalent = false;
-        if (future_map->remove_base_gc_ref(FUTURE_HANDLE_REF))
-          delete (future_map);
-        future_map = NULL;
+        future_map = FutureMap();
       }
     }
 
@@ -185,7 +185,7 @@ namespace Legion {
                                     const Future &f, bool replace)
     //--------------------------------------------------------------------------
     {
-      if (future_map != NULL)
+      if (future_map.impl != NULL)
         unfreeze();
       std::map<DomainPoint,Future>::iterator finder = arguments.find(point);
       if (finder != arguments.end())
@@ -193,17 +193,25 @@ namespace Legion {
         // If it already exists and we're not replacing it then we're done
         if (!replace)
           return;
+        if (finder->second.impl->producer_op != NULL)
+        {
+#ifdef DEBUG_LEGION
+          assert(dependent_futures > 0);
+#endif
+          dependent_futures--;
+        }
         finder->second = f; 
+        
       }
       else
         arguments[point] = f;
+      if (f.impl->producer_op != NULL)
+          dependent_futures++;
       // If we modified things then they are no longer equivalent
-      if (future_map != NULL)
+      if (future_map.impl != NULL)
       {
         equivalent = false;
-        if (future_map->remove_base_gc_ref(FUTURE_HANDLE_REF))
-          delete (future_map);
-        future_map = NULL;
+        future_map = FutureMap();
       }
     }
 
@@ -211,19 +219,24 @@ namespace Legion {
     bool ArgumentMapImpl::remove_point(const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
-      if (future_map != NULL)
+      if (future_map.impl != NULL)
         unfreeze();
       std::map<DomainPoint,Future>::iterator finder = arguments.find(point);
       if (finder != arguments.end())
       {
+        if (finder->second.impl->producer_op != NULL)
+        {
+#ifdef DEBUG_LEGION
+          assert(dependent_futures > 0);
+#endif
+          dependent_futures--;
+        }
         arguments.erase(finder);
         // If we modified things then they are no longer equivalent
-        if (future_map != NULL)
+        if (future_map.impl != NULL)
         {
           equivalent = false;
-          if (future_map->remove_base_gc_ref(FUTURE_HANDLE_REF))
-            delete (future_map);
-          future_map = NULL;
+          future_map = FutureMap();
         }
         return true;
       }
@@ -234,7 +247,7 @@ namespace Legion {
     TaskArgument ArgumentMapImpl::get_point(const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
-      if (future_map != NULL)
+      if (future_map.impl != NULL)
         unfreeze();
       std::map<DomainPoint,Future>::const_iterator finder=arguments.find(point);
       if ((finder == arguments.end()) || (finder->second.impl == NULL))
@@ -244,28 +257,38 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMapImpl* ArgumentMapImpl::freeze(TaskContext *ctx)
+    FutureMap ArgumentMapImpl::freeze(TaskContext *ctx)
     //--------------------------------------------------------------------------
     {
       // If we already have a future map then we are good
-      if (future_map != NULL)
+      if (future_map.impl != NULL)
         return future_map;
       // If we have no futures then we can return an empty map
       if (arguments.empty())
-        return NULL;
-      // Otherwise we have to make a future map and set all the futures
-      // We know that they are already completed 
-      DistributedID did = runtime->get_available_distributed_id();
-      future_map = new FutureMapImpl(ctx, runtime, did,
-          runtime->address_space, RtEvent::NO_RT_EVENT);
-      future_map->add_base_gc_ref(FUTURE_HANDLE_REF);
-      future_map->set_all_futures(arguments);
+        return FutureMap();
+      // See if we have any dependent future points, if we do then we need
+      // to launch an explicit creation operation to ensure we get the right
+      // mapping dependences for this future map
+      if (dependent_futures == 0)
+      {
+        // Otherwise we have to make a future map and set all the futures
+        // We know that they are already completed 
+        DistributedID did = runtime->get_available_distributed_id();
+        future_map = FutureMap(new FutureMapImpl(ctx, runtime, did,
+            runtime->address_space, RtEvent::NO_RT_EVENT));
+        future_map.impl->add_base_gc_ref(FUTURE_HANDLE_REF);
+        future_map.impl->set_all_futures(arguments);
+      }
+      else
+        future_map = ctx->construct_future_map(Domain::NO_DOMAIN,
+                                               arguments, true/*internal*/);
 #ifdef DEBUG_LEGION
       for (std::map<DomainPoint,Future>::const_iterator it = 
             arguments.begin(); it != arguments.end(); it++)
-        future_map->add_valid_point(it->first);
+        future_map.impl->add_valid_point(it->first);
 #endif
       equivalent = true; // mark that these are equivalent
+      dependent_futures = 0; // reset this for the next unpack 
       return future_map;
     }
 
@@ -274,13 +297,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(future_map != NULL);
+      assert(future_map.impl != NULL);
 #endif
       // If they are already equivalent then we're done
       if (equivalent)
         return;
       // Otherwise we need to make them equivalent
-      future_map->get_all_futures(arguments);
+      future_map.impl->get_all_futures(arguments);
+      // Count how many dependent futures we have
+#ifdef DEBUG_LEGION
+      assert(dependent_futures == 0);
+#endif
+      for (std::map<DomainPoint,Future>::const_iterator it = 
+            arguments.begin(); it != arguments.end(); it++)
+        if (it->second.impl->producer_op != NULL)
+          dependent_futures++;
       equivalent = true;
     }
 
