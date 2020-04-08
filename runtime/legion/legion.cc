@@ -26,6 +26,31 @@ namespace Legion {
       LEGION_EXTERN_LOGGER_DECLARATIONS
     };
 
+    // Make sure all the handle types are trivially copyable.
+#if __cplusplus >= 201103L
+    static_assert(std::is_trivially_copyable<IndexSpace>::value,
+                  "IndexSpace is not trivially copyable");
+    static_assert(std::is_trivially_copyable<IndexPartition>::value,
+                  "IndexPartition is not trivially copyable");
+    static_assert(std::is_trivially_copyable<FieldSpace>::value,
+                  "FieldSpace is not trivially copyable");
+    static_assert(std::is_trivially_copyable<LogicalRegion>::value,
+                  "LogicalRegion is not trivially copyable");
+    static_assert(std::is_trivially_copyable<LogicalPartition>::value,
+                  "LogicalPartition is not trivially copyable");
+#define DIMFUNC(DIM) \
+    static_assert(std::is_trivially_copyable<IndexSpaceT<DIM> >::value, \
+                  "IndexSpaceT is not trivially copyable"); \
+    static_assert(std::is_trivially_copyable<IndexPartitionT<DIM> >::value, \
+                  "IndexPartitionT is not trivially copyable"); \
+    static_assert(std::is_trivially_copyable<LogicalRegionT<DIM> >::value, \
+                  "LogicalRegionT is not trivially copyable"); \
+    static_assert(std::is_trivially_copyable<LogicalPartitionT<DIM> >::value, \
+                  "LogicalPartitionT is not trivially copyable");
+    LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+#endif
+
     const LogicalRegion LogicalRegion::NO_REGION = LogicalRegion();
     const LogicalPartition LogicalPartition::NO_PART = LogicalPartition();  
     const Domain Domain::NO_DOMAIN = Domain();
@@ -157,13 +182,6 @@ namespace Legion {
     {
     }
 
-    //--------------------------------------------------------------------------
-    IndexSpace::IndexSpace(const IndexSpace &rhs)
-      : id(rhs.id), tid(rhs.tid), type_tag(rhs.type_tag)
-    //--------------------------------------------------------------------------
-    {
-    }
-
     /////////////////////////////////////////////////////////////
     // IndexPartition 
     /////////////////////////////////////////////////////////////
@@ -181,13 +199,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexPartition::IndexPartition(void)
       : id(0), tid(0), type_tag(0)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition::IndexPartition(const IndexPartition &rhs)
-      : id(rhs.id), tid(rhs.tid), type_tag(rhs.type_tag)
     //--------------------------------------------------------------------------
     {
     }
@@ -212,13 +223,6 @@ namespace Legion {
     {
     }
     
-    //--------------------------------------------------------------------------
-    FieldSpace::FieldSpace(const FieldSpace &rhs)
-      : id(rhs.id)
-    //--------------------------------------------------------------------------
-    {
-    }
-
     /////////////////////////////////////////////////////////////
     // Logical Region  
     /////////////////////////////////////////////////////////////
@@ -239,14 +243,6 @@ namespace Legion {
     {
     }
 
-    //--------------------------------------------------------------------------
-    LogicalRegion::LogicalRegion(const LogicalRegion &rhs)
-      : tree_id(rhs.tree_id), index_space(rhs.index_space), 
-        field_space(rhs.field_space)
-    //--------------------------------------------------------------------------
-    {
-    }
-
     /////////////////////////////////////////////////////////////
     // Logical Partition 
     /////////////////////////////////////////////////////////////
@@ -263,14 +259,6 @@ namespace Legion {
     LogicalPartition::LogicalPartition(void)
       : tree_id(0), index_partition(IndexPartition::NO_PART), 
         field_space(FieldSpace::NO_SPACE)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    LogicalPartition::LogicalPartition(const LogicalPartition &rhs)
-      : tree_id(rhs.tree_id), index_partition(rhs.index_partition), 
-        field_space(rhs.field_space)
     //--------------------------------------------------------------------------
     {
     }
