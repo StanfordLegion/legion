@@ -1368,6 +1368,11 @@ namespace Legion {
       void wait_all_results(bool silence_warnings = false,
                             const char *warning_string = NULL) const; 
     public:
+      /**
+       * This method will return the domain of points that can be 
+       * used to index into this future map.
+       * @return domain of all points in the future map
+       */
       const Domain& get_future_map_domain(void) const;
     }; 
 
