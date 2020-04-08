@@ -8254,62 +8254,15 @@ function codegen.stat_for_list(cx, node)
       end
       ::[break_label]::
     end
-  -- or a rectangle
-  elseif std.is_rect_type(value_type) then
-    local index_type = value_type.index_type
-    local dim = index_type.dim
-    local indices = terralib.newlist()
-    for idx = 1, dim do
-      indices:insert(terralib.newsymbol(int64, "x" .. tostring(idx)))
-    end
-    local body
-    if dim == 1 then
-      body = quote
-        for [ indices[1] ] = [value.value].lo.__ptr,
-                             [value.value].hi.__ptr + 1
-        do
-          var [symbol] = [index_type]({ __ptr = [ indices[1] ] })
-          [cleanup_after(cx, codegen.block(cx, node.block))]
-        end
-      end
-    else
-      local fields = index_type.fields
-      body = quote
-        var [symbol] =
-          [index_type]({ __ptr = [index_type.base_type]{ [indices] } })
-        [cleanup_after(cx, codegen.block(cx, node.block))]
-      end
-      for idx = 1, dim do
-        body = quote
-          for [ indices[idx] ] = [value.value].lo.__ptr.[ fields[idx] ],
-                                 [value.value].hi.__ptr.[ fields[idx] ] + 1
-          do
-            [body]
-          end
-        end
-      end
-    end
-    return quote
-      [body]
-      ::[break_label]::
-    end
   end
 
-  local ispace_type, is
-  if std.is_ispace(value_type) then
-    ispace_type = value_type
-    is = `([value.value].impl)
-  elseif std.is_region(value_type) then
-    ispace_type = value_type:ispace()
-    assert(cx:has_ispace(ispace_type))
-    is = `([value.value].impl.index_space)
-  else
-    assert(false)
+  local index_type = node.symbol:gettype()
+  if std.is_bounded_type(index_type) then
+    index_type = index_type.index_type
   end
-  local index_type = ispace_type.index_type
 
   -- Retrieve dimension-specific handle types and functions from the C API
-  local dim = data.max(ispace_type.dim, 1)
+  local dim = data.max(index_type.dim, 1)
   local rect_type = c["legion_rect_" .. tostring(dim) .. "d_t"]
   local rect_it_type =
     c["legion_rect_in_domain_iterator_" .. tostring(dim) .. "d_t"]
@@ -8397,13 +8350,13 @@ function codegen.stat_for_list(cx, node)
   end
 
   local symbol_setup = nil
-  if ispace_type.dim == 0 then
+  if index_type.dim == 0 then
     symbol_setup = quote
       var [symbol] = [symbol.type]{
         __ptr = ptr { __ptr = c.legion_ptr_t { value = [ indices[1] ] } }
       }
     end
-  elseif ispace_type.dim == 1 then
+  elseif index_type.dim == 1 then
     symbol_setup = quote
       var [symbol] = [symbol.type]{ __ptr = [ indices[1] ] }
     end
@@ -8591,19 +8544,42 @@ function codegen.stat_for_list(cx, node)
     end  -- if openmp then
   end
 
-  return quote
-    [value.actions]
-    var [domain] = c.legion_index_space_get_domain([cx.runtime], [is])
-    var [rect_it] = [rect_it_create]([domain])
-    [preamble]
-    while [rect_it_valid]([rect_it]) do
-      var [rect] = [rect_it_get]([rect_it])
-      [body]
-      [rect_it_step]([rect_it])
+
+  if not std.is_rect_type(value_type) then
+    local is = nil
+    if std.is_ispace(value_type) then
+      is = `([value.value].impl)
+    elseif std.is_region(value_type) then
+      assert(cx:has_ispace(value_type:ispace()))
+      is = `([value.value].impl.index_space)
+    else
+      assert(false)
     end
-    ::[break_label]::
-    [rect_it_destroy]([rect_it])
-    [postamble]
+
+    return quote
+      [value.actions]
+      var [domain] = c.legion_index_space_get_domain([cx.runtime], [is])
+      var [rect_it] = [rect_it_create]([domain])
+      [preamble]
+      while [rect_it_valid]([rect_it]) do
+        var [rect] = [rect_it_get]([rect_it])
+        [body]
+        [rect_it_step]([rect_it])
+      end
+      ::[break_label]::
+      [rect_it_destroy]([rect_it])
+      [postamble]
+    end
+
+  else
+    return quote
+      [value.actions]
+      [preamble]
+      var [rect] = [value.value]
+      [body]
+      ::[break_label]::
+      [postamble]
+    end
   end
 end
 
