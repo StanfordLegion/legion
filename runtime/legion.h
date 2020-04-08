@@ -7554,9 +7554,8 @@ namespace Legion {
        * be performed after the runtime has started. The application can
        * select whether this registration is performed locally (e.g. once
        * on the local node) or globally across all nodes in the machine.
-       * Global registrations are only permitted if this call is invoked
-       * from inside of a Legion task. The method will not return until the
-       * registration has been performed on all the target address spaces.
+       * The method will not return until the registration has been performed 
+       * on all the target address spaces.
        * @param ctx enclosing task context
        * @param global whether this registration needs to be performed
        *               in all address spaces or just the local one
