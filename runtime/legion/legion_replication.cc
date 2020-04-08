@@ -6740,6 +6740,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ShardManager::create_callback_barrier(size_t arrival_count)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!callback_barrier.exists());
+      assert(owner_space == runtime->address_space);
+      assert(arrival_count == runtime->total_address_spaces);
+#endif
+      callback_barrier = 
+        RtBarrier(Realm::Barrier::create_barrier(arrival_count));
+    }
+
+    //--------------------------------------------------------------------------
     ShardTask* ShardManager::create_shard(ShardID id, Processor target)
     //--------------------------------------------------------------------------
     {

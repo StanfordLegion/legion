@@ -2039,6 +2039,7 @@ namespace Legion {
     public:
       void set_shard_mapping(const std::vector<Processor> &shard_mapping);
       void set_address_spaces(const std::vector<AddressSpaceID> &spaces);
+      void create_callback_barrier(size_t arrival_count);
       ShardTask* create_shard(ShardID id, Processor target);
       void extract_event_preconditions(const std::deque<InstanceSet> &insts);
       void launch(void);

@@ -3706,6 +3706,9 @@ namespace Legion {
           address_spaces[space * shards_per_address_space + idx] = space;
       }
       shard_manager->set_address_spaces(address_spaces);
+      // We also need to make the callback barrier here, but its easy here
+      // because we know that this has to contain all address spaces
+      shard_manager->create_callback_barrier(runtime->total_address_spaces);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_replication(implicit_top->get_unique_id(), repl_context,
                                    true/*control replication*/);
