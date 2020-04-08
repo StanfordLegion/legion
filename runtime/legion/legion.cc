@@ -27,7 +27,10 @@ namespace Legion {
     };
 
     // Make sure all the handle types are trivially copyable.
-#if __cplusplus >= 201103L
+
+    // Note: GCC 4.9 breaks even with C++11, so for now peg this on
+    // C++14 until we deprecate GCC 4.9 support.
+#if __cplusplus >= 201402L
     static_assert(std::is_trivially_copyable<IndexSpace>::value,
                   "IndexSpace is not trivially copyable");
     static_assert(std::is_trivially_copyable<IndexPartition>::value,
