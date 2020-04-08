@@ -1231,11 +1231,13 @@ function cudahelper.codegen_kernel_call(cx, kernel_id, count, args, shared_mem_s
   end
 
   return quote
-    var [grid], [block]
-    [launch_domain_init]
-    ExecutionAPI.cudaConfigureCall([grid], [block], shared_mem_size, nil)
-    [setupArguments]
-    ExecutionAPI.cudaLaunch([&int8](kernel_id))
+    if [count] > 0 then
+      var [grid], [block]
+      [launch_domain_init]
+      ExecutionAPI.cudaConfigureCall([grid], [block], shared_mem_size, nil)
+      [setupArguments]
+      ExecutionAPI.cudaLaunch([&int8](kernel_id))
+    end
   end
 end
 
