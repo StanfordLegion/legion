@@ -2056,11 +2056,10 @@ namespace Legion {
       void initialize_virtual_manager(void);
       void initialize_runtime(void);
       void send_registration_callback(AddressSpaceID space,
-                                      RegistrationCallbackFnptr callback, 
+                                      Realm::DSOReferenceImplementation *impl,
                                       RtEvent done, std::set<RtEvent> &applied);
-      RtEvent perform_registration_callback(RegistrationCallbackFnptr callback,
-                    bool global, TaskContext *actual_context = NULL,
-                    RtUserEvent done_event = RtUserEvent::NO_RT_USER_EVENT);
+      RtEvent perform_registration_callback(
+          RegistrationCallbackFnptr callback, bool global);
       void startup_runtime(void);
       void finalize_runtime(void);
       ApEvent launch_mapper_task(Mapper *mapper, Processor proc, 
@@ -3494,9 +3493,8 @@ namespace Legion {
       unsigned unique_library_serdez_id;
     protected:
       mutable LocalLock callback_lock;
-      std::map<RegistrationCallbackFnptr,std::vector<
-        std::pair<TaskContext*,RtUserEvent> > > pending_global_callbacks;
-      unsigned remote_global_callbacks;
+      std::map<RegistrationCallbackFnptr,RtEvent> local_callbacks_done;
+      std::map<RegistrationCallbackFnptr,RtEvent> global_callbacks_done;
     protected:
       mutable LocalLock redop_lock;
       mutable LocalLock serdez_lock;

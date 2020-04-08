@@ -90,9 +90,9 @@ namespace Legion {
       virtual VariantImpl* select_inline_variant(TaskOp *child) const = 0;
       virtual bool is_leaf_context(void) const;
       virtual bool is_inner_context(void) const;
-      virtual bool perform_global_registration_callbacks(
-                      RegistrationCallbackFnptr callback, RtEvent done_event,
-                      std::set<RtEvent> &preconditions, RtBarrier &to_arrive);
+      virtual void perform_global_registration_callbacks(
+                     Realm::DSOReferenceImplementation *dso, RtEvent local_done,
+                     RtEvent global_done, std::set<RtEvent> &preconditions);
       virtual void print_once(FILE *f, const char *message) const;
       virtual void log_once(Realm::LoggerMessage &message) const;
       virtual ShardID get_shard_id(void) const;
@@ -1532,9 +1532,9 @@ namespace Legion {
                           std::vector<IndexPartition> &parts,
                           std::set<RtEvent> &preconditions);
     public:
-      virtual bool perform_global_registration_callbacks(
-                      RegistrationCallbackFnptr callback, RtEvent done_event,
-                      std::set<RtEvent> &preconditions, RtBarrier &to_arrive);
+      virtual void perform_global_registration_callbacks(
+                     Realm::DSOReferenceImplementation *dso, RtEvent local_done,
+                     RtEvent global_done, std::set<RtEvent> &preconditions);
       virtual void print_once(FILE *f, const char *message) const;
       virtual void log_once(Realm::LoggerMessage &message) const;
       virtual ShardID get_shard_id(void) const;
@@ -1906,7 +1906,6 @@ namespace Legion {
       ApBarrier attach_broadcast_barrier;
       ApBarrier attach_reduce_barrier;
       RtBarrier dependent_partition_barrier;
-      RtBarrier callback_barrier;
 #ifdef DEBUG_LEGION_COLLECTIVES
     protected:
       RtBarrier collective_check_barrier;

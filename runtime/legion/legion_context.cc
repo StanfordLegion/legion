@@ -129,23 +129,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool TaskContext::perform_global_registration_callbacks(
-                  RegistrationCallbackFnptr callback, RtEvent global_done_event,
-                  std::set<RtEvent> &preconditions, RtBarrier &to_arrive)
+    void TaskContext::perform_global_registration_callbacks(
+                     Realm::DSOReferenceImplementation *dso, RtEvent local_done,
+                     RtEvent global_done, std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
       // Send messages to all the other nodes to perform it
-      std::set<RtEvent> ready_events;
       for (AddressSpaceID space = 0; 
             space < runtime->total_address_spaces; space++)
       {
         if (space == runtime->address_space)
           continue;
-        runtime->send_registration_callback(space, callback, global_done_event,
+        runtime->send_registration_callback(space, dso, global_done,
                                             preconditions);
       }
-      // Always do it locally too
-      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -9401,7 +9398,6 @@ namespace Legion {
       attach_broadcast_barrier = manager->get_attach_broadcast_barrier();
       attach_reduce_barrier = manager->get_attach_reduce_barrier();
       dependent_partition_barrier = manager->get_dependent_partition_barrier();
-      callback_barrier = manager->get_callback_barrier();
 #ifdef DEBUG_LEGION_COLLECTIVES
       collective_check_barrier = manager->get_collective_check_barrier();
       close_check_barrier = manager->get_close_check_barrier();
@@ -9541,32 +9537,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool ReplicateContext::perform_global_registration_callbacks(
-                  RegistrationCallbackFnptr callback, RtEvent global_done_event,
-                  std::set<RtEvent> &preconditions, RtBarrier &to_arrive)
+    void ReplicateContext::perform_global_registration_callbacks(
+                     Realm::DSOReferenceImplementation *dso, RtEvent local_done,
+                     RtEvent global_done, std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
-      // Save the callback barrier in the to_arrive and preconditions
-      to_arrive = callback_barrier;
-      preconditions.insert(callback_barrier);
-      advance_replicate_barrier(callback_barrier, total_shards);
-      if (!shard_manager->is_total_sharding())
-      {
-        // Have each shard run through all the address spaces they could own
-        // and see if they are handled by a shard
-        const std::set<AddressSpaceID> &unique_shard_spaces = 
-          shard_manager->get_unique_shard_spaces();
-        for (AddressSpaceID space = owner_shard->shard_id; 
-              space < runtime->total_address_spaces; space += total_shards)
-        {
-          if (unique_shard_spaces.find(space) != unique_shard_spaces.end())
-            continue;
-          runtime->send_registration_callback(space, callback, 
-                            global_done_event, preconditions);
-        }
-      }
-      // Only do the registration call if we are the first shard here
-      return shard_manager->is_first_local_shard(owner_shard);
+      shard_manager->perform_global_registration_callbacks(dso, local_done, 
+                                                global_done, preconditions);
     }
 
     //--------------------------------------------------------------------------

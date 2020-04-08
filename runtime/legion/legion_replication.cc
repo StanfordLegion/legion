@@ -6617,8 +6617,9 @@ namespace Legion {
           ApBarrier(Realm::Barrier::create_barrier(total_shards));
         dependent_partition_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards));
-        callback_barrier = 
-          RtBarrier(Realm::Barrier::create_barrier(total_shards));
+        // callback barrier can't be made until we know how many
+        // unique address spaces we'll actually have so see
+        // ShardManager::launch
 #ifdef DEBUG_LEGION_COLLECTIVES
         collective_check_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards,
@@ -6784,6 +6785,10 @@ namespace Legion {
         (*address_spaces)[(*it)->shard_id] = target;
       }
       local_shards.clear();
+      // Compute the unique shard spaces and make callback barrier
+      // which has as many arrivers as unique shard spaces
+      callback_barrier = 
+        RtBarrier(Realm::Barrier::create_barrier(shard_groups.size()));
       // Now either send the shards to the remote nodes or record them locally
       for (std::map<AddressSpaceID,std::vector<ShardTask*> >::const_iterator 
             it = shard_groups.begin(); it != shard_groups.end(); it++)
@@ -7991,6 +7996,70 @@ namespace Legion {
           create_instance_top_view(manager, source, request_context, 
                                    request_source, true/*handle now*/);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::perform_global_registration_callbacks(
+                     Realm::DSOReferenceImplementation *dso, RtEvent local_done,
+                     RtEvent global_done, std::set<RtEvent> &preconditions)
+    //--------------------------------------------------------------------------
+    {
+      // See if we're the first one to handle this DSO
+      const std::pair<std::string,std::string> 
+        key(dso->dso_name, dso->symbol_name);
+      {
+        AutoLock m_lock(manager_lock);
+        // Check to see if we've already handled this
+        std::set<std::pair<std::string,std::string> >::const_iterator finder =
+          unique_registration_callbacks.find(key);
+        if (finder != unique_registration_callbacks.end())
+          return;
+        unique_registration_callbacks.insert(key);
+        if (unique_shard_spaces.empty())
+          for (unsigned shard = 0; shard < total_shards; shard++)
+                unique_shard_spaces.insert((*address_spaces)[shard]);
+      }
+      // We're the first one so handle it
+      if (!is_total_sharding())
+      {
+        std::set<RtEvent> local_preconditions;
+        AddressSpaceID space = 0;
+        for (std::set<AddressSpaceID>::const_iterator it = 
+              unique_shard_spaces.begin(); it != 
+              unique_shard_spaces.end(); it++, space++)
+        {
+          if ((*it) == runtime->address_space)
+            break;
+        }
+#ifdef DEBUG_LEGION
+        assert(space < unique_shard_spaces.size());
+#endif
+        for ( ; space < runtime->total_address_spaces; 
+              space += unique_shard_spaces.size())
+        {
+          if (unique_shard_spaces.find(space) != unique_shard_spaces.end())
+            continue;
+          runtime->send_registration_callback(space, dso, global_done, 
+                                              local_preconditions);
+        }
+        if (!local_preconditions.empty())
+        {
+          local_preconditions.insert(local_done);
+          Runtime::phase_barrier_arrive(callback_barrier, 1/*count*/,
+                          Runtime::merge_events(local_preconditions));
+        }
+        else
+          Runtime::phase_barrier_arrive(callback_barrier,
+                                        1/*count*/, local_done);
+      }
+      else // there will be a callback on every node anyway
+        Runtime::phase_barrier_arrive(callback_barrier,1/*count*/,local_done);
+      preconditions.insert(callback_barrier);
+      Runtime::advance_barrier(callback_barrier);
+      if (!callback_barrier.exists())
+        REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
+            "Need support for refreshing exhausted callback phase "
+            "barrier generations.")
     }
 
     /////////////////////////////////////////////////////////////

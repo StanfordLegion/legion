@@ -2115,6 +2115,9 @@ namespace Legion {
                                     ReplicateContext *request_context,
                                     AddressSpaceID request_source,
                                     bool handle_now = false);
+      void perform_global_registration_callbacks(
+                     Realm::DSOReferenceImplementation *dso, RtEvent local_done,
+                     RtEvent global_done, std::set<RtEvent> &preconditions);
     public:
       Runtime *const runtime;
       const ReplicationID repl_id;
@@ -2170,6 +2173,8 @@ namespace Legion {
     protected:
       // A unique set of address spaces on which shards exist 
       std::set<AddressSpaceID> unique_shard_spaces;
+      std::set<std::pair<std::string,std::string> > 
+                               unique_registration_callbacks;
     };
 
   }; // namespace Internal
