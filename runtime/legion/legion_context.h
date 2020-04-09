@@ -94,8 +94,9 @@ namespace Legion {
                      RtEvent global_done, std::set<RtEvent> &preconditions);
     public:
       virtual VariantID register_variant(const TaskVariantRegistrar &registrar,
-            const void *user_data, size_t user_data_size, CodeDescriptor *desc, 
-            bool ret, VariantID vid, bool check_task_id);
+                                  const void *user_data, size_t user_data_size,
+                                  const CodeDescriptor &desc, bool ret, 
+                                  VariantID vid, bool check_task_id);
       virtual TraceID generate_dynamic_trace_id(void);
       virtual MapperID generate_dynamic_mapper_id(void);
       virtual ProjectionID generate_dynamic_projection_id(void);

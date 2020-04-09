@@ -148,7 +148,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     VariantID TaskContext::register_variant(
             const TaskVariantRegistrar &registrar, const void *user_data,
-            size_t user_data_size, CodeDescriptor *desc, bool ret,
+            size_t user_data_size, const CodeDescriptor &desc, bool ret,
             VariantID vid, bool check_task_id)
     //--------------------------------------------------------------------------
     {

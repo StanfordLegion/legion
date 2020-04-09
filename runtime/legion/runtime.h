@@ -1158,7 +1158,7 @@ namespace Legion {
       PendingVariantRegistration(VariantID vid, bool has_return,
                                  const TaskVariantRegistrar &registrar,
                                  const void *user_data, size_t user_data_size,
-                                 CodeDescriptor *realm_desc, 
+                                 const CodeDescriptor &realm_desc, 
                                  const char *task_name);
       PendingVariantRegistration(const PendingVariantRegistration &rhs);
       ~PendingVariantRegistration(void);
@@ -1173,7 +1173,7 @@ namespace Legion {
       TaskVariantRegistrar registrar;
       void *user_data;
       size_t user_data_size;
-      CodeDescriptor *realm_desc; 
+      CodeDescriptor realm_desc; 
       char *logical_task_name; // optional semantic info to attach to the task
     };
 
@@ -1264,7 +1264,7 @@ namespace Legion {
     public:
       VariantImpl(Runtime *runtime, VariantID vid, TaskImpl *owner, 
                   const TaskVariantRegistrar &registrar, bool ret_val, 
-                  CodeDescriptor *realm_desc,
+                  const CodeDescriptor &realm_desc,
                   const void *user_data = NULL, size_t user_data_size = 0);
       VariantImpl(const VariantImpl &rhs);
       ~VariantImpl(void);
@@ -1303,7 +1303,7 @@ namespace Legion {
       const bool has_return_value; // has a return value
     public:
       const CodeDescriptorID descriptor_id;
-      CodeDescriptor *const realm_descriptor;
+      CodeDescriptor realm_descriptor;
     private:
       ExecutionConstraintSet execution_constraints;
       TaskLayoutConstraintSet   layout_constraints;
@@ -2071,7 +2071,7 @@ namespace Legion {
       TaskID generate_library_task_ids(const char *name, size_t count);
       VariantID register_variant(const TaskVariantRegistrar &registrar,
                                  const void *user_data, size_t user_data_size,
-                                 CodeDescriptor *realm,
+                                 const CodeDescriptor &realm_desc,
                                  bool ret, VariantID vid = AUTO_GENERATE_ID,
                                  bool check_task_id = true,
                                  bool check_context = true,
@@ -3262,7 +3262,7 @@ namespace Legion {
       static VariantID preregister_variant(
                       const TaskVariantRegistrar &registrar,
                       const void *user_data, size_t user_data_size,
-                      CodeDescriptor *realm_desc, bool has_ret, 
+                      const CodeDescriptor &realm_desc, bool has_ret, 
                       const char *task_name,VariantID vid,bool check_id = true);
     public:
       static ReductionOpID& get_current_static_reduction_id(void);
