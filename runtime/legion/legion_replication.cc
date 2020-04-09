@@ -6568,8 +6568,9 @@ namespace Legion {
         local_execution_complete(0), remote_execution_complete(0),
         trigger_local_complete(0), trigger_remote_complete(0),
         trigger_local_commit(0), trigger_remote_commit(0), 
-        remote_constituents(0), local_future_result(NULL), 
-        local_future_size(0), local_future_set(false), startup_barrier(bar) 
+        remote_constituents(0), semantic_attach_counter(0), 
+        local_future_result(NULL), local_future_size(0), 
+        local_future_set(false), startup_barrier(bar) 
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -6616,6 +6617,8 @@ namespace Legion {
         attach_reduce_barrier = 
           ApBarrier(Realm::Barrier::create_barrier(total_shards));
         dependent_partition_barrier = 
+          RtBarrier(Realm::Barrier::create_barrier(total_shards));
+        semantic_attach_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards));
         // callback barrier can't be made until we know how many
         // unique address spaces we'll actually have so see
@@ -6678,6 +6681,7 @@ namespace Legion {
           attach_broadcast_barrier.destroy_barrier();
           attach_reduce_barrier.destroy_barrier();
           dependent_partition_barrier.destroy_barrier();
+          semantic_attach_barrier.destroy_barrier();
           callback_barrier.destroy_barrier();
 #ifdef DEBUG_LEGION_COLLECTIVES
           collective_check_barrier.destroy_barrier();
@@ -6856,6 +6860,7 @@ namespace Legion {
           assert(attach_broadcast_barrier.exists());
           assert(attach_reduce_barrier.exists());
           assert(dependent_partition_barrier.exists());
+          assert(semantic_attach_barrier.exists());
           assert(callback_barrier.exists());
           assert(shard_mapping.size() == total_shards);
 #endif
@@ -6871,6 +6876,7 @@ namespace Legion {
           rez.serialize(attach_broadcast_barrier);
           rez.serialize(attach_reduce_barrier);
           rez.serialize(dependent_partition_barrier);
+          rez.serialize(semantic_attach_barrier);
           rez.serialize(callback_barrier);
 #ifdef DEBUG_LEGION_COLLECTIVES
           assert(collective_check_barrier.exists());
@@ -6922,6 +6928,7 @@ namespace Legion {
         derez.deserialize(attach_broadcast_barrier);
         derez.deserialize(attach_reduce_barrier);
         derez.deserialize(dependent_partition_barrier);
+        derez.deserialize(semantic_attach_barrier);
         derez.deserialize(callback_barrier);
 #ifdef DEBUG_LEGION_COLLECTIVES
         derez.deserialize(collective_check_barrier);
@@ -8073,6 +8080,25 @@ namespace Legion {
         REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
             "Need support for refreshing exhausted callback phase "
             "barrier generations.")
+    }
+
+    //--------------------------------------------------------------------------
+    bool ShardManager::perform_semantic_attach(void)
+    //--------------------------------------------------------------------------
+    {
+      if (local_shards.size() == 1)
+        return true;
+      AutoLock m_lock(manager_lock);
+#ifdef DEBUG_LEGION
+      assert(semantic_attach_counter < local_shards.size());
+#endif
+      if (++semantic_attach_counter == local_shards.size())
+      {
+        semantic_attach_counter = 0;
+        return true;
+      }
+      else
+        return false;
     }
 
     /////////////////////////////////////////////////////////////

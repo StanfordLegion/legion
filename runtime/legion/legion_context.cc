@@ -9459,11 +9459,11 @@ namespace Legion {
         next_future_map_bar_index(0), index_space_allocator_shard(0), 
         index_partition_allocator_shard(0), field_space_allocator_shard(0), 
         field_allocator_shard(0), logical_region_allocator_shard(0), 
-        next_available_collective_index(0), trace_recording_collective_id(0),
-        summary_collective_id(0), next_physical_template_index(0), 
-        next_replicate_bar_index(0), next_trace_bar_index(0), 
-        next_summary_bar_index(0), unordered_ops_counter(0), 
-        unordered_ops_epoch(MIN_UNORDERED_OPS_EPOCH)
+        dynamic_id_allocator_shard(0), next_available_collective_index(0), 
+        trace_recording_collective_id(0), summary_collective_id(0), 
+        next_physical_template_index(0), next_replicate_bar_index(0), 
+        next_trace_bar_index(0), next_summary_bar_index(0), 
+        unordered_ops_counter(0), unordered_ops_epoch(MIN_UNORDERED_OPS_EPOCH)
     //--------------------------------------------------------------------------
     {
       // Get our allocation barriers
@@ -9479,6 +9479,7 @@ namespace Legion {
       attach_broadcast_barrier = manager->get_attach_broadcast_barrier();
       attach_reduce_barrier = manager->get_attach_reduce_barrier();
       dependent_partition_barrier = manager->get_dependent_partition_barrier();
+      semantic_attach_barrier = manager->get_semantic_attach_barrier();
 #ifdef DEBUG_LEGION_COLLECTIVES
       collective_check_barrier = manager->get_collective_check_barrier();
       close_check_barrier = manager->get_close_check_barrier();
@@ -9710,6 +9711,259 @@ namespace Legion {
               element_size, get_task_name(), get_unique_id())
       }
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    VariantID ReplicateContext::register_variant(
+                const TaskVariantRegistrar &registrar, const void *user_data,
+                size_t user_data_size, const CodeDescriptor &desc, bool ret,
+                VariantID vid, bool check_task_id)
+    //--------------------------------------------------------------------------
+    {
+      // If we're inside a registration callback we don't care
+      if (inside_registration_callback)
+        return TaskContext::register_variant(registrar, user_data, 
+            user_data_size, desc, ret, vid, check_task_id);
+      VariantID result;
+      if (owner_shard->shard_id == dynamic_id_allocator_shard)
+      {
+        ValueBroadcast<VariantID> collective(this, COLLECTIVE_LOC_17);
+        // Have this shard do the registration, and then broadcast the
+        // resulting variant to all the other shards
+        result = runtime->register_variant(registrar, user_data, 
+            user_data_size, desc, ret, vid, check_task_id);
+        collective.broadcast(result);
+      }
+      else
+      {
+        ValueBroadcast<VariantID> collective(this, dynamic_id_allocator_shard,
+                                             COLLECTIVE_LOC_17);
+        result = collective.get_value();
+      }
+      if (++dynamic_id_allocator_shard == total_shards)
+        dynamic_id_allocator_shard = 0;
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    TraceID ReplicateContext::generate_dynamic_trace_id(void)
+    //--------------------------------------------------------------------------
+    {
+      // If we're inside a registration callback we don't care
+      if (inside_registration_callback)
+        return TaskContext::generate_dynamic_trace_id();
+      // Otherwise have one shard make it and broadcast it to everyone else
+      TraceID result;
+      if (owner_shard->shard_id == dynamic_id_allocator_shard)
+      {
+        ValueBroadcast<TraceID> collective(this, COLLECTIVE_LOC_9);
+        result = runtime->generate_dynamic_trace_id(false/*check context*/);
+        collective.broadcast(result);
+      }
+      else
+      {
+        ValueBroadcast<TraceID> collective(this, dynamic_id_allocator_shard,
+                                           COLLECTIVE_LOC_9);
+        result = collective.get_value();
+      }
+      if (++dynamic_id_allocator_shard == total_shards)
+        dynamic_id_allocator_shard = 0;
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    MapperID ReplicateContext::generate_dynamic_mapper_id(void)
+    //--------------------------------------------------------------------------
+    {
+      // If we're inside a registration callback we don't care
+      if (inside_registration_callback)
+        return TaskContext::generate_dynamic_mapper_id();
+      // Otherwise have one shard make it and broadcast it to everyone else
+      MapperID result;
+      if (owner_shard->shard_id == dynamic_id_allocator_shard)
+      {
+        ValueBroadcast<MapperID> collective(this, COLLECTIVE_LOC_10);
+        result = runtime->generate_dynamic_mapper_id(false/*check context*/);
+        collective.broadcast(result);
+      }
+      else
+      {
+        ValueBroadcast<MapperID> collective(this, dynamic_id_allocator_shard,
+                                            COLLECTIVE_LOC_10);
+        result = collective.get_value();
+      }
+      if (++dynamic_id_allocator_shard == total_shards)
+        dynamic_id_allocator_shard = 0;
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    ProjectionID ReplicateContext::generate_dynamic_projection_id(void)
+    //--------------------------------------------------------------------------
+    {
+      // If we're inside a registration callback we don't care
+      if (inside_registration_callback)
+        return TaskContext::generate_dynamic_projection_id();
+      // Otherwise have one shard make it and broadcast it to everyone else
+      ProjectionID result;
+      if (owner_shard->shard_id == dynamic_id_allocator_shard)
+      {
+        ValueBroadcast<ProjectionID> collective(this, COLLECTIVE_LOC_11);
+        result = 
+          runtime->generate_dynamic_projection_id(false/*check context*/);
+        collective.broadcast(result);
+      }
+      else
+      {
+        ValueBroadcast<ProjectionID> collective(this,dynamic_id_allocator_shard,
+                                                COLLECTIVE_LOC_11);
+        result = collective.get_value();
+      }
+      if (++dynamic_id_allocator_shard == total_shards)
+        dynamic_id_allocator_shard = 0;
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    ShardingID ReplicateContext::generate_dynamic_sharding_id(void)
+    //--------------------------------------------------------------------------
+    {
+      // If we're inside a registration callback we don't care
+      if (inside_registration_callback)
+        return TaskContext::generate_dynamic_sharding_id();
+      // Otherwise have one shard make it and broadcast it to everyone else
+      ShardingID result;
+      if (owner_shard->shard_id == dynamic_id_allocator_shard)
+      {
+        ValueBroadcast<ShardingID> collective(this, COLLECTIVE_LOC_12);
+        result = runtime->generate_dynamic_sharding_id(false/*check context*/);
+        collective.broadcast(result);
+      }
+      else
+      {
+        ValueBroadcast<ShardingID> collective(this,dynamic_id_allocator_shard,
+                                              COLLECTIVE_LOC_12);
+        result = collective.get_value();
+      }
+      if (++dynamic_id_allocator_shard == total_shards)
+        dynamic_id_allocator_shard = 0;
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    TaskID ReplicateContext::generate_dynamic_task_id(void)
+    //--------------------------------------------------------------------------
+    {
+      // If we're inside a registration callback we don't care
+      if (inside_registration_callback)
+        return TaskContext::generate_dynamic_task_id();
+      // Otherwise have one shard make it and broadcast it to everyone else
+      TaskID result;
+      if (owner_shard->shard_id == dynamic_id_allocator_shard)
+      {
+        ValueBroadcast<TaskID> collective(this, COLLECTIVE_LOC_13);
+        result = runtime->generate_dynamic_task_id(false/*check context*/);
+        collective.broadcast(result);
+      }
+      else
+      {
+        ValueBroadcast<TaskID> collective(this, dynamic_id_allocator_shard,
+                                          COLLECTIVE_LOC_13);
+        result = collective.get_value();
+      }
+      if (++dynamic_id_allocator_shard == total_shards)
+        dynamic_id_allocator_shard = 0;
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    ReductionOpID ReplicateContext::generate_dynamic_reduction_id(void)
+    //--------------------------------------------------------------------------
+    {
+      // If we're inside a registration callback we don't care
+      if (inside_registration_callback)
+        return TaskContext::generate_dynamic_reduction_id();
+      // Otherwise have one shard make it and broadcast it to everyone else
+      ReductionOpID result;
+      if (owner_shard->shard_id == dynamic_id_allocator_shard)
+      {
+        ValueBroadcast<ReductionOpID> collective(this, COLLECTIVE_LOC_14);
+        result = runtime->generate_dynamic_reduction_id(false/*check context*/);
+        collective.broadcast(result);
+      }
+      else
+      {
+        ValueBroadcast<ReductionOpID> collective(this, 
+            dynamic_id_allocator_shard, COLLECTIVE_LOC_14);
+        result = collective.get_value();
+      }
+      if (++dynamic_id_allocator_shard == total_shards)
+        dynamic_id_allocator_shard = 0;
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    CustomSerdezID ReplicateContext::generate_dynamic_serdez_id(void)
+    //--------------------------------------------------------------------------
+    {
+      // If we're inside a registration callback we don't care
+      if (inside_registration_callback)
+        return TaskContext::generate_dynamic_serdez_id();
+      // Otherwise have one shard make it and broadcast it to everyone else
+      CustomSerdezID result;
+      if (owner_shard->shard_id == dynamic_id_allocator_shard)
+      {
+        ValueBroadcast<CustomSerdezID> collective(this, COLLECTIVE_LOC_16);
+        result = runtime->generate_dynamic_serdez_id(false/*check context*/);
+        collective.broadcast(result);
+      }
+      else
+      {
+        ValueBroadcast<CustomSerdezID> collective(this, 
+            dynamic_id_allocator_shard, COLLECTIVE_LOC_16);
+        result = collective.get_value();
+      }
+      if (++dynamic_id_allocator_shard == total_shards)
+        dynamic_id_allocator_shard = 0;
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ReplicateContext::perform_semantic_attach(bool &global)
+    //--------------------------------------------------------------------------
+    {
+      if (inside_registration_callback)
+        return TaskContext::perform_semantic_attach(global);
+      // Check to see if we can downgrade this to a local_only update
+      if (global && shard_manager->is_total_sharding())
+        global = false;
+      if (global)
+      {
+        // If we're still global then just have shard 0 do this for now
+        if (owner_shard->shard_id == 0)
+          return true;
+        post_semantic_attach();
+        return false;
+      }
+      else
+      {
+        // See if we're the local shard to perform the attach operation
+        if (shard_manager->perform_semantic_attach())
+          return true;
+        post_semantic_attach(); 
+        return false;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::post_semantic_attach(void)
+    //--------------------------------------------------------------------------
+    {
+      Runtime::phase_barrier_arrive(semantic_attach_barrier, 1/*count*/);
+      const RtEvent wait_on = semantic_attach_barrier;
+      advance_replicate_barrier(semantic_attach_barrier, total_shards);
+      if (wait_on.exists() && !wait_on.has_triggered())
+        wait_on.wait();
     }
 
     //--------------------------------------------------------------------------

@@ -1560,6 +1560,20 @@ namespace Legion {
       virtual Future consensus_match(const void *input, void *output,
                                      size_t num_elements, size_t element_size);
     public:
+      virtual VariantID register_variant(const TaskVariantRegistrar &registrar,
+                                  const void *user_data, size_t user_data_size,
+                                  const CodeDescriptor &desc, bool ret, 
+                                  VariantID vid, bool check_task_id);
+      virtual TraceID generate_dynamic_trace_id(void);
+      virtual MapperID generate_dynamic_mapper_id(void);
+      virtual ProjectionID generate_dynamic_projection_id(void);
+      virtual ShardingID generate_dynamic_sharding_id(void);
+      virtual TaskID generate_dynamic_task_id(void);
+      virtual ReductionOpID generate_dynamic_reduction_id(void);
+      virtual CustomSerdezID generate_dynamic_serdez_id(void);
+      virtual bool perform_semantic_attach(bool &global);
+      virtual void post_semantic_attach(void);
+    public:
       virtual InnerContext* find_parent_physical_context(unsigned index,
                                                   LogicalRegion handle);
       virtual void invalidate_region_tree_contexts(void);
@@ -1911,6 +1925,7 @@ namespace Legion {
       ShardID field_space_allocator_shard;
       ShardID field_allocator_shard;
       ShardID logical_region_allocator_shard;
+      ShardID dynamic_id_allocator_shard;
     protected:
       ApBarrier pending_partition_barrier;
       RtBarrier creation_barrier;
@@ -1924,6 +1939,7 @@ namespace Legion {
       ApBarrier attach_broadcast_barrier;
       ApBarrier attach_reduce_barrier;
       RtBarrier dependent_partition_barrier;
+      RtBarrier semantic_attach_barrier;
 #ifdef DEBUG_LEGION_COLLECTIVES
     protected:
       RtBarrier collective_check_barrier;

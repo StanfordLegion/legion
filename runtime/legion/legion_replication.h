@@ -2019,6 +2019,8 @@ namespace Legion {
         { return attach_reduce_barrier; }
       inline RtBarrier get_dependent_partition_barrier(void) const
         { return dependent_partition_barrier; }
+      inline RtBarrier get_semantic_attach_barrier(void) const
+        { return semantic_attach_barrier; }
       inline RtBarrier get_callback_barrier(void) const
         { return callback_barrier; }
 #ifdef DEBUG_LEGION_COLLECTIVES
@@ -2119,6 +2121,7 @@ namespace Legion {
       void perform_global_registration_callbacks(
                      Realm::DSOReferenceImplementation *dso, RtEvent local_done,
                      RtEvent global_done, std::set<RtEvent> &preconditions);
+      bool perform_semantic_attach(void);
     public:
       Runtime *const runtime;
       const ReplicationID repl_id;
@@ -2147,6 +2150,7 @@ namespace Legion {
       unsigned    trigger_local_complete, trigger_remote_complete;
       unsigned    trigger_local_commit,   trigger_remote_commit;
       unsigned    remote_constituents;
+      unsigned    semantic_attach_counter;
       void*       local_future_result; size_t local_future_size;
       bool        local_future_set;
       std::set<RtEvent> mapping_preconditions;
@@ -2164,6 +2168,7 @@ namespace Legion {
       ApBarrier attach_broadcast_barrier;
       ApBarrier attach_reduce_barrier;
       RtBarrier dependent_partition_barrier;
+      RtBarrier semantic_attach_barrier;
       RtBarrier callback_barrier;
 #ifdef DEBUG_LEGION_COLLECTIVES
       RtBarrier collective_check_barrier;
