@@ -9415,7 +9415,8 @@ namespace Legion {
     PendingVariantRegistration::PendingVariantRegistration(VariantID v,
                                   bool has_ret, const TaskVariantRegistrar &reg,
                                   const void *udata, size_t udata_size,
-                                  CodeDescriptor *realm, const char *task_name)
+                                  const CodeDescriptor &realm, 
+                                  const char *task_name)
       : vid(v), has_return(has_ret), registrar(reg), 
         realm_desc(realm), logical_task_name(NULL)
     //--------------------------------------------------------------------------
@@ -10034,7 +10035,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     VariantImpl::VariantImpl(Runtime *rt, VariantID v, TaskImpl *own, 
                            const TaskVariantRegistrar &registrar, bool ret,
-                           CodeDescriptor *realm,
+                           const CodeDescriptor &realm,
                            const void *udata /*=NULL*/, size_t udata_size/*=0*/)
       : vid(v), owner(own), runtime(rt), global(registrar.global_registration),
         has_return_value(ret), 
@@ -10066,8 +10067,8 @@ namespace Legion {
       // If a global registration was requested, but the code descriptor
       // provided does not have portable implementations, try to make one
       // (if it fails, we'll complain below)
-      if (global && !realm_descriptor->has_portable_implementations())
-	realm_descriptor->create_portable_implementation();
+      if (global && !realm_descriptor.has_portable_implementations())
+	realm_descriptor.create_portable_implementation();
       // Perform the registration, the normal case is not to have separate
       // runtime instances, but if we do have them, we only register on
       // the local processor
@@ -10084,7 +10085,7 @@ namespace Legion {
                      variant_name, vid, owner->get_name(false), owner->task_id)
           ready_event = ApEvent(Processor::register_task_by_kind(
                 Processor::LOC_PROC, false/*global*/, descriptor_id, 
-                *realm_descriptor, profiling_requests, user_data, user_data_size));
+                realm_descriptor, profiling_requests, user_data, user_data_size));
         }
         else if (proc_constraint.valid_kinds.size() > 1)
         {
@@ -10093,14 +10094,14 @@ namespace Legion {
                 proc_constraint.valid_kinds.begin(); it !=
                 proc_constraint.valid_kinds.end(); it++)
             ready_events.insert(ApEvent(Processor::register_task_by_kind(*it,
-                false/*global*/, descriptor_id, *realm_descriptor, 
+                false/*global*/, descriptor_id, realm_descriptor, 
                 profiling_requests, user_data, user_data_size)));
           ready_event = Runtime::merge_events(NULL, ready_events);
         }
         else
           ready_event = ApEvent(Processor::register_task_by_kind(
-                proc_constraint.valid_kinds[0], false/*global*/, descriptor_id, 
-                *realm_descriptor, profiling_requests, user_data, user_data_size));
+              proc_constraint.valid_kinds[0], false/*global*/, descriptor_id, 
+              realm_descriptor, profiling_requests, user_data, user_data_size));
       }
       else
       {
@@ -10118,7 +10119,7 @@ namespace Legion {
             continue;
           Realm::ProfilingRequestSet profiling_requests;
           ready_events.insert(ApEvent(Processor::register_task_by_kind(kind,
-                          false/*global*/, descriptor_id, *realm_descriptor, 
+                          false/*global*/, descriptor_id, realm_descriptor, 
                           profiling_requests, user_data, user_data_size)));
           handled_kinds.insert(kind);
         }
@@ -10130,7 +10131,7 @@ namespace Legion {
         runtime->profiler->register_task_variant(own->task_id, vid,
             variant_name);
       // Check that global registration has portable implementations
-      if (global && (!realm_descriptor->has_portable_implementations()))
+      if (global && (!realm_descriptor.has_portable_implementations()))
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_GLOBAL_VARIANT_REGISTRATION, 
              "Variant %s requested global registration without "
                          "a portable implementation.", variant_name)
@@ -10160,7 +10161,6 @@ namespace Legion {
     VariantImpl::~VariantImpl(void)
     //--------------------------------------------------------------------------
     {
-      delete realm_descriptor;
       if (user_data != NULL)
         free(user_data);
       if (variant_name != NULL)
@@ -10250,11 +10250,8 @@ namespace Legion {
     void VariantImpl::dispatch_inline(Processor current, InlineContext *ctx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(realm_descriptor != NULL);
-#endif
       const Realm::FunctionPointerImplementation *fp_impl = 
-        realm_descriptor->find_impl<Realm::FunctionPointerImplementation>();
+        realm_descriptor.find_impl<Realm::FunctionPointerImplementation>();
 #ifdef DEBUG_LEGION
       assert(fp_impl != NULL);
 #endif
@@ -10313,13 +10310,13 @@ namespace Legion {
             rez.serialize(has_return_value);
             // pack the code descriptors 
             Realm::Serialization::ByteCountSerializer counter;
-            realm_descriptor->serialize(counter, true/*portable*/);
+            realm_descriptor.serialize(counter, true/*portable*/);
             const size_t impl_size = counter.bytes_used();
             rez.serialize(impl_size);
             {
               Realm::Serialization::FixedBufferSerializer 
                 serializer(rez.reserve_bytes(impl_size), impl_size);
-              realm_descriptor->serialize(serializer, true/*portable*/);
+              realm_descriptor.serialize(serializer, true/*portable*/);
             }
             rez.serialize(user_data_size);
             if (user_data_size > 0)
@@ -10364,7 +10361,7 @@ namespace Legion {
       derez.deserialize(has_return);
       size_t impl_size;
       derez.deserialize(impl_size);
-      CodeDescriptor *realm_desc = new CodeDescriptor();
+      CodeDescriptor realm_desc;
       {
         // Realm's serializers assume properly aligned buffers, so
         // malloc a temporary buffer here and copy the data to ensure
@@ -10381,10 +10378,10 @@ namespace Legion {
 #ifndef NDEBUG
         bool ok =
 #endif
-                  realm_desc->deserialize(deserializer);
+                  realm_desc.deserialize(deserializer);
         assert(ok);
 #else
-        realm_desc->deserialize(deserializer);
+        realm_desc.deserialize(deserializer);
 #endif
         free(impl_buffer);
       }
@@ -16092,7 +16089,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     VariantID Runtime::register_variant(const TaskVariantRegistrar &registrar,
                                   const void *user_data, size_t user_data_size,
-                                  CodeDescriptor *realm_code_desc,
+                                  const CodeDescriptor &realm_code_desc,
                                   bool ret,VariantID vid /*= AUTO_GENERATE_ID*/,
                                   bool check_task_id /*= true*/,
                                   bool check_context /*= true*/,
@@ -16123,14 +16120,6 @@ namespace Legion {
                       "Error registering variant for task ID %d with "
                       "variant ID 0. Variant ID 0 is reserved for task "
                       "generators.", registrar.task_id)
-      if (!preregistered && !inside_registration_callback)
-        REPORT_LEGION_WARNING(LEGION_WARNING_NON_CALLBACK_REGISTRATION,
-            "Task variant %d of task %s (ID %d) was dynamically registered "
-            "outside of a registration callback invocation. In the near future "
-            "this will become an error in order to support task subprocesses. "
-            "Please use 'perform_registration_callback' to generate a callback "
-            "where it will be safe to perform dynamic registrations.", vid,
-            task_impl->initial_name, task_impl->task_id)
       // Make our variant and add it to the set of variants
       VariantImpl *impl = new VariantImpl(this, vid, task_impl, 
                                           registrar, ret, realm_code_desc,
@@ -25335,7 +25324,7 @@ namespace Legion {
     /*static*/ VariantID Runtime::preregister_variant(
                           const TaskVariantRegistrar &registrar,
                           const void *user_data, size_t user_data_size,
-                          CodeDescriptor *code_desc, bool has_ret, 
+                          const CodeDescriptor &code_desc, bool has_ret, 
                           const char *task_name, VariantID vid, bool check_id)
     //--------------------------------------------------------------------------
     {
