@@ -1955,7 +1955,7 @@ namespace Legion {
       void begin_static_trace(Context ctx, 
                               const std::set<RegionTreeID> *managed);
       void end_static_trace(Context ctx);
-      TraceID generate_dynamic_trace_id(void);
+      TraceID generate_dynamic_trace_id(bool check_context = true);
       TraceID generate_library_trace_ids(const char *name, size_t count);
       static TraceID& get_current_static_trace_id(void);
       static TraceID generate_static_trace_id(void);
@@ -1988,7 +1988,7 @@ namespace Legion {
       bool is_MPI_interop_configured(void);
     public:
       Mapping::MapperRuntime* get_mapper_runtime(void);
-      MapperID generate_dynamic_mapper_id(void);
+      MapperID generate_dynamic_mapper_id(bool check_context = true);
       MapperID generate_library_mapper_ids(const char *name, size_t count);
       static MapperID& get_current_static_mapper_id(void);
       static MapperID generate_static_mapper_id(void);
@@ -1999,7 +1999,7 @@ namespace Legion {
       static MapperManager* wrap_mapper(Runtime *runtime, Mapper *mapper,
                                         MapperID map_id, Processor proc);
     public:
-      ProjectionID generate_dynamic_projection_id(void);
+      ProjectionID generate_dynamic_projection_id(bool check_context = true);
       ProjectionID generate_library_projection_ids(const char *name,size_t cnt);
       static ProjectionID& get_current_static_projection_id(void);
       static ProjectionID generate_static_projection_id(void);
@@ -2064,23 +2064,24 @@ namespace Legion {
                                          const void *&result, size_t &size,
                                          bool can_fail, bool wait_until);
     public:
-      TaskID generate_dynamic_task_id(void);
+      TaskID generate_dynamic_task_id(bool check_context = true);
       TaskID generate_library_task_ids(const char *name, size_t count);
       VariantID register_variant(const TaskVariantRegistrar &registrar,
                                  const void *user_data, size_t user_data_size,
                                  CodeDescriptor *realm,
                                  bool ret, VariantID vid = AUTO_GENERATE_ID,
-                                 bool check_task_id = true);
+                                 bool check_task_id = true,
+                                 bool check_context = true);
       TaskImpl* find_or_create_task_impl(TaskID task_id);
       TaskImpl* find_task_impl(TaskID task_id);
       VariantImpl* find_variant_impl(TaskID task_id, VariantID variant_id,
                                      bool can_fail = false);
     public:
-      ReductionOpID generate_dynamic_reduction_id(void);
+      ReductionOpID generate_dynamic_reduction_id(bool check_context = true);
       ReductionOpID generate_library_reduction_ids(const char *name, 
                                                    size_t count);
     public:
-      CustomSerdezID generate_dynamic_serdez_id(void);
+      CustomSerdezID generate_dynamic_serdez_id(bool check_context = true);
       CustomSerdezID generate_library_serdez_ids(const char *name,size_t count);
     public:
       // Memory manager functions

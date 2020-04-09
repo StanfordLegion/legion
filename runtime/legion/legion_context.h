@@ -93,6 +93,17 @@ namespace Legion {
                      Realm::DSOReferenceImplementation *dso, RtEvent local_done,
                      RtEvent global_done, std::set<RtEvent> &preconditions);
     public:
+      virtual VariantID register_variant(const TaskVariantRegistrar &registrar,
+            const void *user_data, size_t user_data_size, CodeDescriptor *desc, 
+            bool ret, VariantID vid, bool check_task_id);
+      virtual TraceID generate_dynamic_trace_id(void);
+      virtual MapperID generate_dynamic_mapper_id(void);
+      virtual ProjectionID generate_dynamic_projection_id(void);
+      virtual TaskID generate_dynamic_task_id(void);
+      virtual ReductionOpID generate_dynamic_reduction_id(void);
+      virtual CustomSerdezID generate_dynamic_serdez_id(void);
+      virtual bool perform_semantic_attach(void);
+    public:
       // Interface to operations performed by a context
       virtual IndexSpace create_index_space(const Domain &bounds,
                                             TypeTag type_tag);

@@ -12902,9 +12902,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    TraceID Runtime::generate_dynamic_trace_id(void)
+    TraceID Runtime::generate_dynamic_trace_id(bool check_context/*= true*/)
     //--------------------------------------------------------------------------
     {
+      if (check_context && (implicit_context != NULL))
+        return implicit_context->generate_dynamic_trace_id();
       TraceID result = __sync_fetch_and_add(&unique_trace_id, runtime_stride);
       // Check for hitting the library limit
       if (result >= LEGION_INITIAL_LIBRARY_ID_OFFSET)
@@ -13328,9 +13330,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    MapperID Runtime::generate_dynamic_mapper_id(void)
+    MapperID Runtime::generate_dynamic_mapper_id(bool check_context/*= true*/)
     //--------------------------------------------------------------------------
     {
+      if (check_context && (implicit_context != NULL))
+        return implicit_context->generate_dynamic_mapper_id();
       MapperID result = __sync_fetch_and_add(&unique_mapper_id, runtime_stride);
       // Check for hitting the library limit
       if (result >= LEGION_INITIAL_LIBRARY_ID_OFFSET)
@@ -13563,9 +13567,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ProjectionID Runtime::generate_dynamic_projection_id(void)
+    ProjectionID Runtime::generate_dynamic_projection_id(
+                                                   bool check_context/*= true*/)
     //--------------------------------------------------------------------------
     {
+      if (check_context && (implicit_context != NULL))
+        return implicit_context->generate_dynamic_projection_id();
       ProjectionID result = 
         __sync_fetch_and_add(&unique_projection_id, runtime_stride);
       // Check for hitting the library limit
@@ -13785,6 +13792,9 @@ namespace Legion {
            const void *buffer, size_t size, bool is_mutable, bool send_to_owner)
     //--------------------------------------------------------------------------
     {
+      if ((implicit_context != NULL) && 
+          !implicit_context->perform_semantic_attach())
+        return;
       if ((tag == NAME_SEMANTIC_TAG) && legion_spy_enabled)
         LegionSpy::log_task_name(task_id, static_cast<const char*>(buffer));
       TaskImpl *impl = find_or_create_task_impl(task_id);
@@ -13799,6 +13809,9 @@ namespace Legion {
                                               bool is_mutable)
     //--------------------------------------------------------------------------
     {
+      if ((implicit_context != NULL) && 
+          !implicit_context->perform_semantic_attach())
+        return;
       forest->attach_semantic_information(handle, tag, address_space, 
                                           buffer, size, is_mutable);
     }
@@ -13810,6 +13823,9 @@ namespace Legion {
                                               bool is_mutable)
     //--------------------------------------------------------------------------
     {
+      if ((implicit_context != NULL) && 
+          !implicit_context->perform_semantic_attach())
+        return;
       forest->attach_semantic_information(handle, tag, address_space, 
                                           buffer, size, is_mutable);
     }
@@ -13821,6 +13837,9 @@ namespace Legion {
                                               bool is_mutable)
     //--------------------------------------------------------------------------
     {
+      if ((implicit_context != NULL) && 
+          !implicit_context->perform_semantic_attach())
+        return;
       forest->attach_semantic_information(handle, tag, address_space, 
                                           buffer, size, is_mutable);
     }
@@ -13832,6 +13851,9 @@ namespace Legion {
                                               bool is_mutable)
     //--------------------------------------------------------------------------
     {
+      if ((implicit_context != NULL) && 
+          !implicit_context->perform_semantic_attach())
+        return;
       forest->attach_semantic_information(handle, fid, tag, address_space, 
                                           buffer, size, is_mutable);
     }
@@ -13843,6 +13865,9 @@ namespace Legion {
                                               bool is_mutable)
     //--------------------------------------------------------------------------
     {
+      if ((implicit_context != NULL) && 
+          !implicit_context->perform_semantic_attach())
+        return;
       forest->attach_semantic_information(handle, tag, address_space, 
                                           buffer, size, is_mutable);
     }
@@ -13854,6 +13879,9 @@ namespace Legion {
                                               bool is_mutable)
     //--------------------------------------------------------------------------
     {
+      if ((implicit_context != NULL) && 
+          !implicit_context->perform_semantic_attach())
+        return;
       forest->attach_semantic_information(handle, tag, address_space, 
                                           buffer, size, is_mutable);
     }
@@ -13941,9 +13969,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    TaskID Runtime::generate_dynamic_task_id(void)
+    TaskID Runtime::generate_dynamic_task_id(bool check_context/*= true*/)
     //--------------------------------------------------------------------------
     {
+      if (check_context && (implicit_context != NULL))
+        return implicit_context->generate_dynamic_task_id();
       TaskID result = __sync_fetch_and_add(&unique_task_id, runtime_stride);
       // Check for hitting the library limit
       if (result >= LEGION_INITIAL_LIBRARY_ID_OFFSET)
@@ -14067,9 +14097,13 @@ namespace Legion {
                                   const void *user_data, size_t user_data_size,
                                   CodeDescriptor *realm_code_desc,
                                   bool ret,VariantID vid /*= AUTO_GENERATE_ID*/,
-                                  bool check_task_id /*= true*/)
+                                  bool check_task_id /*= true*/,
+                                  bool check_context /*= true*/)
     //--------------------------------------------------------------------------
     {
+      if (check_context && (implicit_context != NULL))
+        return implicit_context->register_variant(registrar, user_data,
+            user_data_size, realm_code_desc, ret, vid, check_task_id);
       // TODO: figure out a way to make this check safe with dynamic generation
 #if 0
       if (check_task_id && 
@@ -14080,7 +14114,7 @@ namespace Legion {
                       "See %s in legion_config.h.", 
                       registrar.task_id, LEGION_MAX_APPLICATION_TASK_ID, 
                       LEGION_MACRO_TO_STRING(LEGION_MAX_APPLICATION_TASK_ID))
-#endif
+#endif 
       // First find the task implementation
       TaskImpl *task_impl = find_or_create_task_impl(registrar.task_id);
       // See if we need to make a new variant ID
@@ -14163,9 +14197,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ReductionOpID Runtime::generate_dynamic_reduction_id(void)
+    ReductionOpID Runtime::generate_dynamic_reduction_id(
+                                                   bool check_context/*= true*/)
     //--------------------------------------------------------------------------
     {
+      if (check_context && (implicit_context != NULL))
+        return implicit_context->generate_dynamic_reduction_id();
       ReductionOpID result = 
         __sync_fetch_and_add(&unique_redop_id, runtime_stride);
       // Check for hitting the library limit
@@ -14287,9 +14324,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    CustomSerdezID Runtime::generate_dynamic_serdez_id(void)
+    CustomSerdezID Runtime::generate_dynamic_serdez_id(
+                                                   bool check_context/*= true*/)
     //--------------------------------------------------------------------------
     {
+      if (check_context && (implicit_context != NULL))
+        return implicit_context->generate_dynamic_serdez_id();
       CustomSerdezID result = 
         __sync_fetch_and_add(&unique_serdez_id, runtime_stride);
       // Check for hitting the library limit

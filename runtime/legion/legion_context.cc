@@ -146,6 +146,66 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    VariantID TaskContext::register_variant(
+            const TaskVariantRegistrar &registrar, const void *user_data,
+            size_t user_data_size, CodeDescriptor *desc, bool ret,
+            VariantID vid, bool check_task_id)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->register_variant(registrar, user_data, user_data_size,
+          desc, ret, vid, check_task_id, false/*check context*/);
+    }
+
+    //--------------------------------------------------------------------------
+    TraceID TaskContext::generate_dynamic_trace_id(void)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->generate_dynamic_trace_id(false/*check context*/);
+    }
+
+    //--------------------------------------------------------------------------
+    MapperID TaskContext::generate_dynamic_mapper_id(void)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->generate_dynamic_mapper_id(false/*check context*/);
+    }
+
+    //--------------------------------------------------------------------------
+    ProjectionID TaskContext::generate_dynamic_projection_id(void)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->generate_dynamic_projection_id(false/*check context*/);
+    }
+
+    //--------------------------------------------------------------------------
+    TaskID TaskContext::generate_dynamic_task_id(void)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->generate_dynamic_task_id(false/*check context*/);
+    }
+
+    //--------------------------------------------------------------------------
+    ReductionOpID TaskContext::generate_dynamic_reduction_id(void)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->generate_dynamic_reduction_id(false/*check context*/);
+    }
+
+    //--------------------------------------------------------------------------
+    CustomSerdezID TaskContext::generate_dynamic_serdez_id(void)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->generate_dynamic_serdez_id(false/*check context*/);
+    }
+
+    //--------------------------------------------------------------------------
+    bool TaskContext::perform_semantic_attach(void)
+    //--------------------------------------------------------------------------
+    {
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
     IndexSpace TaskContext::create_index_space(const Domain &bounds, 
                                                TypeTag type_tag)
     //--------------------------------------------------------------------------
