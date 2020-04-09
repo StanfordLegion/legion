@@ -8088,6 +8088,12 @@ namespace Legion {
         it->impl->register_dependence(this);
       if (predicate_false_future.impl != NULL)
         predicate_false_future.impl->register_dependence(this);
+      // Register mapping dependences on any future maps also
+      if (point_arguments.impl != NULL)
+        point_arguments.impl->register_dependence(this);
+      for (std::vector<FutureMap>::const_iterator it = 
+            point_futures.begin(); it != point_futures.end(); it++)
+        it->impl->register_dependence(this);
       // Also have to register any dependences on our predicate
       register_predicate_dependence();
     }

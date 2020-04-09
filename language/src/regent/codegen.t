@@ -4254,8 +4254,15 @@ function codegen.expr_ispace(cx, node)
     end
   end
 
+  local source_file = tostring(node.span.source)
+  local source_line = tostring(node.span.start.line)
+
   actions = quote
     [actions]
+    c.legion_index_space_attach_semantic_information(
+      [cx.runtime], [is], c.SOURCE_FILE_TAG, [source_file], [string.len(source_file)+1], false)
+    c.legion_index_space_attach_semantic_information(
+      [cx.runtime], [is], c.SOURCE_LINE_TAG, [source_line], [string.len(source_line)+1], false)
     var [i] = [ispace_type]{ impl = [is] }
     [bounds_actions]
   end
@@ -4325,8 +4332,15 @@ function codegen.expr_region(cx, node)
                      data.dict(data.zip(field_paths:map(data.hash), base_pointers)),
                      data.dict(data.zip(field_paths:map(data.hash), strides)))
 
+  local source_file = tostring(node.span.source)
+  local source_line = tostring(node.span.start.line)
+
   local fs_naming_actions = quote
     c.legion_field_space_attach_name([cx.runtime], [fs], [tostring(fspace_type)], false)
+    c.legion_field_space_attach_semantic_information(
+      [cx.runtime], [fs], c.SOURCE_FILE_TAG, [source_file], [string.len(source_file)+1], false)
+    c.legion_field_space_attach_semantic_information(
+      [cx.runtime], [fs], c.SOURCE_LINE_TAG, [source_line], [string.len(source_line)+1], false)
   end
   if fspace_type:isstruct() then
     fs_naming_actions = quote
@@ -4359,6 +4373,9 @@ function codegen.expr_region(cx, node)
     end
   end
 
+  local source_file = tostring(node.span.source)
+  local source_line = tostring(node.span.start.line)
+
   actions = quote
     [actions]
     var capacity = [ispace.value]
@@ -4388,6 +4405,10 @@ function codegen.expr_region(cx, node)
     [fs_naming_actions];
     c.legion_field_allocator_destroy(fsa)
     var [lr] = c.legion_logical_region_create([cx.runtime], [cx.context], [is], [fs], true)
+    c.legion_logical_region_attach_semantic_information(
+      [cx.runtime], [lr], c.SOURCE_FILE_TAG, [source_file], [string.len(source_file)+1], false)
+    c.legion_logical_region_attach_semantic_information(
+      [cx.runtime], [lr], c.SOURCE_LINE_TAG, [source_line], [string.len(source_line)+1], false)
     var [r] = [region_type]{ impl = [lr] }
     [tag_imported(cx, lr)]
   end
@@ -5048,6 +5069,9 @@ function codegen.expr_list_duplicate_partition(cx, node)
     cx:region(parent_region).field_id_array,
     cx:region(parent_region).fields_are_scratch)
 
+  local source_file = tostring(node.span.source)
+  local source_line = tostring(node.span.start.line)
+
   actions = quote
     [actions]
     var size = terralib.sizeof([expr_type.element_type]) * [indices.value].__size
@@ -5083,6 +5107,10 @@ function codegen.expr_list_duplicate_partition(cx, node)
       c.legion_logical_region_retrieve_name([cx.runtime], root, &name)
       std.assert(name ~= nil, "invalid name")
       c.legion_logical_region_attach_name([cx.runtime], new_root, name, false)
+      c.legion_logical_region_attach_semantic_information(
+        [cx.runtime], [r], c.SOURCE_FILE_TAG, [source_file], [string.len(source_file)+1], false)
+      c.legion_logical_region_attach_semantic_information(
+        [cx.runtime], [r], c.SOURCE_LINE_TAG, [source_line], [string.len(source_line)+1], false)
 
       [expr_type:data(result)][i] = [expr_type.element_type] { impl = r }
     end
