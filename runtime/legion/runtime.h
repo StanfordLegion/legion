@@ -2007,7 +2007,8 @@ namespace Legion {
                                        ProjectionFunctor *func,
                                        bool need_zero_check = true,
                                        bool silence_warnings = false,
-                                       const char *warning_string = NULL);
+                                       const char *warning_string = NULL,
+                                       bool preregistered = false);
       static void preregister_projection_functor(ProjectionID pid,
                                        ProjectionFunctor *func);
       ProjectionFunction* find_projection_function(ProjectionID pid);
@@ -2016,10 +2017,12 @@ namespace Legion {
                               ReductionOp *redop,
                               SerdezInitFnptr init_fnptr,
                               SerdezFoldFnptr fold_fnptr,
-                              bool permit_duplicates);
+                              bool permit_duplicates,
+                              bool preregistered);
       void register_serdez(CustomSerdezID serdez_id,
                            SerdezOp *serdez_op,
-                           bool permit_duplicates);
+                           bool permit_duplicates,
+                           bool preregistered);
       const ReductionOp* get_reduction(ReductionOpID redop_id);
       const SerdezOp* get_serdez(CustomSerdezID serdez_id);
       const SerdezRedopFns* get_serdez_redop(ReductionOpID redop_id);
@@ -2071,7 +2074,8 @@ namespace Legion {
                                  CodeDescriptor *realm,
                                  bool ret, VariantID vid = AUTO_GENERATE_ID,
                                  bool check_task_id = true,
-                                 bool check_context = true);
+                                 bool check_context = true,
+                                 bool preregistered = false);
       TaskImpl* find_or_create_task_impl(TaskID task_id);
       TaskImpl* find_task_impl(TaskID task_id);
       VariantImpl* find_variant_impl(TaskID task_id, VariantID variant_id,
