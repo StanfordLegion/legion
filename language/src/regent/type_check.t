@@ -896,6 +896,28 @@ function type_check.expr_call(cx, node)
     conditions:insertall(type_check.expr_condition(cx, condition))
   end
 
+  -- For macros, run macro expansion and type check the result.
+  if std.is_macro(fn.value) then
+    local quotes = data.mapi(
+      function(i, arg)
+        return std.newrquote(
+          ast.specialized.top.QuoteExpr {
+            expr = node.args[i],
+            expr_type = arg.expr_type,
+            annotations = node.annotations,
+            span = node.span,
+          })
+      end,
+      args)
+    local result = fn.value.fn(unpack(quotes))
+    if not (std.is_rquote(result) and ast.is_node(result:getast()) and
+              result:getast():is(ast.specialized.top.QuoteExpr))
+    then
+      report.error(node, "macro was expected to return an rexpr, but got " .. tostring(result))
+    end
+    return type_check.expr(cx, result:getast().expr)
+  end
+
   -- Determine the type of the function being called.
   local fn_type
   local def_type

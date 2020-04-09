@@ -400,7 +400,7 @@ ast.specialized.top:leaf("Task", {"name", "params", "return_type",
                                   "prototype"})
 ast.specialized.top:leaf("TaskParam", {"symbol", "future"})
 ast.specialized.top:leaf("Fspace", {"name", "fspace", "constraints"})
-ast.specialized.top:leaf("QuoteExpr", {"expr"})
+ast.specialized.top:leaf("QuoteExpr", {"expr", "expr_type"})
 ast.specialized.top:leaf("QuoteStat", {"block"})
 
 
