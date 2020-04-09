@@ -199,7 +199,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool TaskContext::perform_semantic_attach(void)
+    bool TaskContext::perform_semantic_attach(bool &global)
     //--------------------------------------------------------------------------
     {
       return true;

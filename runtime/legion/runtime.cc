@@ -13828,7 +13828,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if ((implicit_context != NULL) && 
-          !implicit_context->perform_semantic_attach())
+          !implicit_context->perform_semantic_attach(send_to_owner))
         return;
       if ((tag == NAME_SEMANTIC_TAG) && legion_spy_enabled)
         LegionSpy::log_task_name(task_id, static_cast<const char*>(buffer));
@@ -13844,11 +13844,12 @@ namespace Legion {
                                               bool is_mutable)
     //--------------------------------------------------------------------------
     {
+      bool global = true;
       if ((implicit_context != NULL) && 
-          !implicit_context->perform_semantic_attach())
+          !implicit_context->perform_semantic_attach(global))
         return;
       forest->attach_semantic_information(handle, tag, address_space, 
-                                          buffer, size, is_mutable);
+                                          buffer, size, is_mutable, !global);
     }
 
     //--------------------------------------------------------------------------
@@ -13858,11 +13859,12 @@ namespace Legion {
                                               bool is_mutable)
     //--------------------------------------------------------------------------
     {
+      bool global = true;
       if ((implicit_context != NULL) && 
-          !implicit_context->perform_semantic_attach())
+          !implicit_context->perform_semantic_attach(global))
         return;
       forest->attach_semantic_information(handle, tag, address_space, 
-                                          buffer, size, is_mutable);
+                                          buffer, size, is_mutable, !global);
     }
 
     //--------------------------------------------------------------------------
@@ -13872,11 +13874,12 @@ namespace Legion {
                                               bool is_mutable)
     //--------------------------------------------------------------------------
     {
+      bool global = true;
       if ((implicit_context != NULL) && 
-          !implicit_context->perform_semantic_attach())
+          !implicit_context->perform_semantic_attach(global))
         return;
       forest->attach_semantic_information(handle, tag, address_space, 
-                                          buffer, size, is_mutable);
+                                          buffer, size, is_mutable, !global);
     }
 
     //--------------------------------------------------------------------------
@@ -13886,11 +13889,12 @@ namespace Legion {
                                               bool is_mutable)
     //--------------------------------------------------------------------------
     {
+      bool global = true;
       if ((implicit_context != NULL) && 
-          !implicit_context->perform_semantic_attach())
+          !implicit_context->perform_semantic_attach(global))
         return;
       forest->attach_semantic_information(handle, fid, tag, address_space, 
-                                          buffer, size, is_mutable);
+                                          buffer, size, is_mutable, !global);
     }
 
     //--------------------------------------------------------------------------
@@ -13900,11 +13904,12 @@ namespace Legion {
                                               bool is_mutable)
     //--------------------------------------------------------------------------
     {
+      bool global = true;
       if ((implicit_context != NULL) && 
-          !implicit_context->perform_semantic_attach())
+          !implicit_context->perform_semantic_attach(global))
         return;
       forest->attach_semantic_information(handle, tag, address_space, 
-                                          buffer, size, is_mutable);
+                                          buffer, size, is_mutable, !global);
     }
 
     //--------------------------------------------------------------------------
@@ -13914,11 +13919,12 @@ namespace Legion {
                                               bool is_mutable)
     //--------------------------------------------------------------------------
     {
+      bool global = true;
       if ((implicit_context != NULL) && 
-          !implicit_context->perform_semantic_attach())
+          !implicit_context->perform_semantic_attach(global))
         return;
       forest->attach_semantic_information(handle, tag, address_space, 
-                                          buffer, size, is_mutable);
+                                          buffer, size, is_mutable, !global);
     }
 
     //--------------------------------------------------------------------------

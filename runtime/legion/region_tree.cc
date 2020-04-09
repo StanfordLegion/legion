@@ -5178,11 +5178,12 @@ namespace Legion {
                                                        AddressSpaceID source,
                                                        const void *buffer,
                                                        size_t size, 
-                                                       bool is_mutable)
+                                                       bool is_mutable,
+                                                       bool local_only)
     //--------------------------------------------------------------------------
     {
       get_node(handle)->attach_semantic_information(tag, source, buffer, 
-                                                    size, is_mutable);
+                                          size, is_mutable, local_only);
       if (runtime->legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
         LegionSpy::log_index_space_name(handle.id,
             reinterpret_cast<const char*>(buffer));
@@ -5197,11 +5198,12 @@ namespace Legion {
                                                        AddressSpaceID source,
                                                        const void *buffer,
                                                        size_t size,
-                                                       bool is_mutable)
+                                                       bool is_mutable,
+                                                       bool local_only)
     //--------------------------------------------------------------------------
     {
       get_node(handle)->attach_semantic_information(tag, source, buffer, 
-                                                    size, is_mutable);
+                                          size, is_mutable, local_only);
       if (runtime->legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
         LegionSpy::log_index_partition_name(handle.id,
             reinterpret_cast<const char*>(buffer));
@@ -5216,11 +5218,12 @@ namespace Legion {
                                                        AddressSpaceID source,
                                                        const void *buffer,
                                                        size_t size,
-                                                       bool is_mutable)
+                                                       bool is_mutable,
+                                                       bool local_only)
     //--------------------------------------------------------------------------
     {
       get_node(handle)->attach_semantic_information(tag, source, buffer, 
-                                                    size, is_mutable);
+                                          size, is_mutable, local_only);
       if (runtime->legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
         LegionSpy::log_field_space_name(handle.id,
             reinterpret_cast<const char*>(buffer));
@@ -5236,11 +5239,12 @@ namespace Legion {
                                                        AddressSpaceID src,
                                                        const void *buf,
                                                        size_t size,
-                                                       bool is_mutable)
+                                                       bool is_mutable,
+                                                       bool local_only)
     //--------------------------------------------------------------------------
     {
       get_node(handle)->attach_semantic_information(fid, tag, src, buf, 
-                                                    size, is_mutable);
+                                          size, is_mutable, local_only);
       if (runtime->legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
         LegionSpy::log_field_name(handle.id, fid,
             reinterpret_cast<const char*>(buf));
@@ -5255,11 +5259,12 @@ namespace Legion {
                                                        AddressSpaceID source,
                                                        const void *buffer,
                                                        size_t size,
-                                                       bool is_mutable)
+                                                       bool is_mutable,
+                                                       bool local_only)
     //--------------------------------------------------------------------------
     {
       get_node(handle)->attach_semantic_information(tag, source, buffer, 
-                                                    size, is_mutable);
+                                          size, is_mutable, local_only);
       if (runtime->legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
         LegionSpy::log_logical_region_name(handle.index_space.id,
             handle.field_space.id, handle.tree_id,
@@ -5276,11 +5281,12 @@ namespace Legion {
                                                        AddressSpaceID source,
                                                        const void *buffer,
                                                        size_t size,
-                                                       bool is_mutable)
+                                                       bool is_mutable,
+                                                       bool local_only)
     //--------------------------------------------------------------------------
     {
       get_node(handle)->attach_semantic_information(tag, source, buffer, 
-                                                    size, is_mutable);
+                                          size, is_mutable, local_only);
       if (runtime->legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
         LegionSpy::log_logical_partition_name(handle.index_partition.id,
             handle.field_space.id, handle.tree_id,
@@ -6835,7 +6841,9 @@ namespace Legion {
     void IndexTreeNode::attach_semantic_information(SemanticTag tag,
                                                     AddressSpaceID source,
                                                     const void *buffer, 
-                                                    size_t size,bool is_mutable)
+                                                    size_t size,
+                                                    bool is_mutable,
+                                                    bool local_only)
     //--------------------------------------------------------------------------
     {
       // Make a copy
@@ -6908,7 +6916,7 @@ namespace Legion {
         // If we are not the owner and the message 
         // didn't come from the owner, then send it 
         if ((owner_space != context->runtime->address_space) &&
-            (source != owner_space))
+            (source != owner_space) && !local_only)
         {
           send_semantic_info(owner_space, tag, buffer, size, is_mutable); 
         }
@@ -7335,8 +7343,8 @@ namespace Legion {
       derez.deserialize(is_mutable);
       RtUserEvent ready;
       derez.deserialize(ready);
-      forest->attach_semantic_information(handle, tag, source, 
-                                          buffer, size, is_mutable);
+      forest->attach_semantic_information(handle, tag, source, buffer, size, 
+                                          is_mutable, false/*local only*/);
       if (ready.exists())
         Runtime::trigger_event(ready);
     }
@@ -7804,8 +7812,8 @@ namespace Legion {
         derez.advance_pointer(buffer_size);
         bool is_mutable;
         derez.deserialize(is_mutable);
-        node->attach_semantic_information(tag, source, 
-                                          buffer, buffer_size, is_mutable);
+        node->attach_semantic_information(tag, source, buffer, buffer_size, 
+                                          is_mutable, false/*local only*/);
       }
     }
 
@@ -8494,8 +8502,8 @@ namespace Legion {
       derez.deserialize(is_mutable);
       RtUserEvent ready;
       derez.deserialize(ready);
-      forest->attach_semantic_information(handle, tag, source, 
-                                          buffer, size, is_mutable);
+      forest->attach_semantic_information(handle, tag, source, buffer, size, 
+                                          is_mutable, false/*local only*/);
       if (ready.exists())
         Runtime::trigger_event(ready);
     }
@@ -9465,8 +9473,8 @@ namespace Legion {
         derez.advance_pointer(buffer_size);
         bool is_mutable;
         derez.deserialize(is_mutable);
-        node->attach_semantic_information(tag, source,
-                                          buffer, buffer_size, is_mutable);
+        node->attach_semantic_information(tag, source, buffer, buffer_size, 
+                                          is_mutable, false/*local only*/);
       }
       size_t num_pending;
       derez.deserialize(num_pending);
@@ -9785,7 +9793,8 @@ namespace Legion {
                                                      AddressSpaceID source,
                                                      const void *buffer, 
                                                      size_t size, 
-                                                     bool is_mutable)
+                                                     bool is_mutable,
+                                                     bool local_only)
     //--------------------------------------------------------------------------
     {
       void *local = legion_malloc(SEMANTIC_INFO_ALLOC, size);
@@ -9856,7 +9865,7 @@ namespace Legion {
         // If we are not the owner and the message 
         // didn't come from the owner, then send it 
         if ((owner_space != context->runtime->address_space) &&
-            (source != owner_space))
+            (source != owner_space) && !local_only)
           send_semantic_info(owner_space, tag, buffer, size, is_mutable);
       }
       else
@@ -9869,7 +9878,8 @@ namespace Legion {
                                                      AddressSpaceID source,
                                                      const void *buffer,
                                                      size_t size, 
-                                                     bool is_mutable)
+                                                     bool is_mutable,
+                                                     bool local_only)
     //--------------------------------------------------------------------------
     {
       void *local = legion_malloc(SEMANTIC_INFO_ALLOC, size);
@@ -9944,7 +9954,7 @@ namespace Legion {
         // If we are not the owner and the message 
         // didn't come from the owner, then send it 
         if ((owner_space != context->runtime->address_space) &&
-            (source != owner_space))
+            (source != owner_space) && !local_only)
           send_semantic_field_info(owner_space, fid, tag, 
                                    buffer, size, is_mutable); 
       }
@@ -10360,8 +10370,8 @@ namespace Legion {
       derez.deserialize(is_mutable);
       RtUserEvent ready;
       derez.deserialize(ready);
-      forest->attach_semantic_information(handle, tag, source, 
-                                          buffer, size, is_mutable);
+      forest->attach_semantic_information(handle, tag, source, buffer, size, 
+                                          is_mutable, false/*local only*/);
       if (ready.exists())
         Runtime::trigger_event(ready);
     }
@@ -10386,8 +10396,8 @@ namespace Legion {
       derez.deserialize(is_mutable);
       RtUserEvent ready;
       derez.deserialize(ready);
-      forest->attach_semantic_information(handle, fid, tag, 
-                                          source, buffer, size, is_mutable);
+      forest->attach_semantic_information(handle, fid, tag, source, buffer, 
+                                    size, is_mutable, false/*local lonly*/);
       if (ready.exists())
         Runtime::trigger_event(ready);
     }
@@ -11765,8 +11775,8 @@ namespace Legion {
         derez.advance_pointer(buffer_size);
         bool is_mutable;
         derez.deserialize(is_mutable);
-        node->attach_semantic_information(tag, source, 
-                                          buffer, buffer_size, is_mutable);
+        node->attach_semantic_information(tag, source, buffer, buffer_size, 
+                                          is_mutable, false/*local only*/);
       }
       size_t num_field_semantic;
       derez.deserialize(num_field_semantic);
@@ -11782,8 +11792,8 @@ namespace Legion {
         derez.advance_pointer(buffer_size);
         bool is_mutable;
         derez.deserialize(is_mutable);
-        node->attach_semantic_information(fid, tag, source,
-                                          buffer, buffer_size, is_mutable);
+        node->attach_semantic_information(fid, tag, source, buffer, buffer_size,
+                                          is_mutable, false/*local only*/);
       }
     }
 
@@ -12078,7 +12088,8 @@ namespace Legion {
                                                      AddressSpaceID source,
                                                      const void *buffer,
                                                      size_t size,
-                                                     bool is_mutable)
+                                                     bool is_mutable,
+                                                     bool local_only)
     //--------------------------------------------------------------------------
     {
       // Make a copy
@@ -12149,7 +12160,7 @@ namespace Legion {
         // If we are not the owner and the message 
         // didn't come from the owner, then send it 
         if ((owner_space != context->runtime->address_space) &&
-            (source != owner_space))
+            (source != owner_space) && !local_only)
         {
           send_semantic_info(owner_space, tag, buffer, size, is_mutable); 
         }
@@ -15244,8 +15255,8 @@ namespace Legion {
           derez.advance_pointer(buffer_size);
           bool is_mutable;
           derez.deserialize(is_mutable);
-          node->attach_semantic_information(tag, source, 
-                                            buffer, buffer_size, is_mutable);
+          node->attach_semantic_information(tag, source, buffer, buffer_size,
+                                            is_mutable, false/*local only*/);
         }
       }
     } 
@@ -15439,8 +15450,8 @@ namespace Legion {
       derez.deserialize(is_mutable);
       RtUserEvent ready;
       derez.deserialize(ready);
-      forest->attach_semantic_information(handle, tag, source, 
-                                          buffer, size, is_mutable);
+      forest->attach_semantic_information(handle, tag, source, buffer, size, 
+                                          is_mutable, false/*local only*/);
       if (ready.exists())
         Runtime::trigger_event(ready);
     }
@@ -16533,8 +16544,8 @@ namespace Legion {
       derez.deserialize(is_mutable);
       RtUserEvent ready;
       derez.deserialize(ready);
-      forest->attach_semantic_information(handle, tag, source, 
-                                          buffer, size, is_mutable);
+      forest->attach_semantic_information(handle, tag, source, buffer, size, 
+                                          is_mutable, false/*local only*/);
       if (ready.exists())
         Runtime::trigger_event(ready);
     }

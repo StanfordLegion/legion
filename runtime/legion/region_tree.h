@@ -741,27 +741,27 @@ namespace Legion {
       void attach_semantic_information(IndexSpace handle, SemanticTag tag,
                                        AddressSpaceID source,
                                        const void *buffer, size_t size,
-                                       bool is_mutable);
+                                       bool is_mutable, bool local_only);
       void attach_semantic_information(IndexPartition handle, SemanticTag tag,
                                        AddressSpaceID source,
                                        const void *buffer, size_t size,
-                                       bool is_mutable);
+                                       bool is_mutable, bool local_only);
       void attach_semantic_information(FieldSpace handle, SemanticTag tag,
                                        AddressSpaceID source,
                                        const void *buffer, size_t size,
-                                       bool is_mutable);
+                                       bool is_mutable, bool local_only);
       void attach_semantic_information(FieldSpace handle, FieldID fid,
                                        SemanticTag tag, AddressSpaceID source,
                                        const void *buffer, size_t size,
-                                       bool is_mutable);
+                                       bool is_mutable, bool local_only);
       void attach_semantic_information(LogicalRegion handle, SemanticTag tag,
                                        AddressSpaceID source,
                                        const void *buffer, size_t size,
-                                       bool is_mutable);
+                                       bool is_mutable, bool local_only);
       void attach_semantic_information(LogicalPartition handle, SemanticTag tag,
                                        AddressSpaceID source,
                                        const void *buffer, size_t size,
-                                       bool is_mutable);
+                                       bool is_mutable, bool local_only);
     public:
       bool retrieve_semantic_information(IndexSpace handle, SemanticTag tag,
                                          const void *&result, size_t &size,
@@ -1594,7 +1594,7 @@ namespace Legion {
       virtual AddressSpaceID get_owner_space(void) const = 0;
     public:
       void attach_semantic_information(SemanticTag tag, AddressSpaceID source,
-                             const void *buffer, size_t size, bool is_mutable);
+           const void *buffer, size_t size, bool is_mutable, bool local_only);
       bool retrieve_semantic_information(SemanticTag tag,
                                          const void *&result, size_t &size,
                                          bool can_fail, bool wait_until);
@@ -2850,11 +2850,11 @@ namespace Legion {
       virtual void notify_invalid(ReferenceMutator *mutator);
     public:
       void attach_semantic_information(SemanticTag tag, AddressSpaceID source,
-                            const void *buffer, size_t size, bool is_mutable);
+            const void *buffer, size_t size, bool is_mutable, bool local_only);
       void attach_semantic_information(FieldID fid, SemanticTag tag,
                                        AddressSpaceID source,
                                        const void *buffer, size_t size,
-                                       bool is_mutable);
+                                       bool is_mutable, bool local_only);
       bool retrieve_semantic_information(SemanticTag tag,
              const void *&result, size_t &size, bool can_fail, bool wait_until);
       bool retrieve_semantic_information(FieldID fid, SemanticTag tag,
@@ -3073,7 +3073,7 @@ namespace Legion {
       }
     public:
       void attach_semantic_information(SemanticTag tag, AddressSpaceID source,
-                            const void *buffer, size_t size, bool is_mutable);
+            const void *buffer, size_t size, bool is_mutable, bool local_only);
       bool retrieve_semantic_information(SemanticTag tag,
            const void *&result, size_t &size, bool can_fail, bool wait_until);
       virtual void send_semantic_request(AddressSpaceID target, 
