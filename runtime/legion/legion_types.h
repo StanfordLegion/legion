@@ -1644,6 +1644,14 @@ namespace Legion {
     // the provenance of meta-task operations for profiling
     // purposes, this has no bearing on correctness
     extern __thread ::legion_unique_id_t implicit_provenance;
+    // Use this to track if we're inside of a registration 
+    // callback function which we know to be deduplicated
+    enum RegistrationCallbackMode {
+      NO_REGISTRATION_CALLBACK = 0,
+      LOCAL_REGISTRATION_CALLBACK = 1,
+      GLOBAL_REGISTRATION_CALLBACK = 2,
+    };
+    extern __thread unsigned inside_registration_callback;
     // Use this global variable to track if we're an
     // implicit top-level task that needs to do external waits
     extern __thread bool external_implicit_task;
@@ -2597,6 +2605,8 @@ namespace Legion {
       Internal::TaskContext *local_ctx = Internal::implicit_context; 
       // Save the task provenance information
       UniqueID local_provenance = Internal::implicit_provenance;
+      // Save whether we are in a registration callback
+      unsigned local_callback = Internal::inside_registration_callback;
       // Check to see if we have any local locks to notify
       if (Internal::local_lock_list != NULL)
       {
@@ -2633,6 +2643,8 @@ namespace Legion {
       Internal::implicit_context = local_ctx;
       // Write the provenance information back
       Internal::implicit_provenance = local_provenance;
+      // Write the registration callback information back
+      Internal::inside_registration_callback = local_callback;
 #ifdef DEBUG_LEGION_WAITS
       Internal::meta_task_id = local_meta_task_id;
       const long long stop = Realm::Clock::current_time_in_microseconds();

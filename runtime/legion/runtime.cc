@@ -72,6 +72,7 @@ namespace Legion {
     __thread Runtime *implicit_runtime = NULL;
     __thread AutoLock *local_lock_list = NULL;
     __thread UniqueID implicit_provenance = 0;
+    __thread unsigned inside_registration_callback = NO_REGISTRATION_CALLBACK;
     __thread bool external_implicit_task = false;
 #ifdef DEBUG_LEGION_WAITS
     __thread int meta_task_id = -1;
@@ -3964,6 +3965,14 @@ namespace Legion {
       if (check && (mid == 0))
         REPORT_LEGION_ERROR(ERROR_RESERVED_MAPPING_ID, 
                             "Invalid mapping ID. ID 0 is reserved.");
+      if (check && !inside_registration_callback)
+          REPORT_LEGION_WARNING(LEGION_WARNING_NON_CALLBACK_REGISTRATION,
+            "Mapper %s (ID %d) was dynamically registered outside of a "
+            "registration callback invocation. In the near future this will " 
+            "become an error in order to support task subprocesses. Please "
+            "use 'perform_registration_callback' to generate a callback "
+            "where it will be safe to perform dynamic registrations.", 
+            m->get_mapper_name(), mid)
       AutoLock m_lock(mapper_lock);
       std::map<MapperID,std::pair<MapperManager*,bool> >::iterator finder = 
         mappers.find(mid);
@@ -3988,6 +3997,14 @@ namespace Legion {
       // Don't do this if we are doing replay execution
       if (replay_execution)
         return;
+      if (!inside_registration_callback)
+          REPORT_LEGION_WARNING(LEGION_WARNING_NON_CALLBACK_REGISTRATION,
+            "Replacing default mapper with %s was dynamically performed "
+            "outside of a registration callback invocation. In the near "
+            "future this will become an error in order to support task "
+            "subprocesses. Please use 'perform_registration_callback' to "
+            "generate a callback where it will be safe to perform dynamic " 
+            "registrations.", m->get_mapper_name())
       AutoLock m_lock(mapper_lock);
       std::map<MapperID,std::pair<MapperManager*,bool> >::iterator finder = 
         mappers.find(0);
@@ -9468,7 +9485,8 @@ namespace Legion {
                           strlen(logical_task_name)+1, 
                           false/*mutable*/, false/*send to owner*/);
       runtime->register_variant(registrar, user_data, user_data_size,
-                    realm_desc, has_return, vid, false/*check task*/);
+                    realm_desc, has_return, vid, false/*check task*/,
+                    true/*check context*/, true/*preregistered*/);
     }
 
     /////////////////////////////////////////////////////////////
@@ -10386,8 +10404,11 @@ namespace Legion {
       registrar.execution_constraints.deserialize(derez);
       registrar.layout_constraints.deserialize(derez);
       // Ask the runtime to perform the registration 
+      // Can lie about preregistration since the user would already have
+      // gotten there error message on the owner node
       runtime->register_variant(registrar, user_data, user_data_size,
-              realm_desc, has_return, variant_id, false/*check task*/);
+              realm_desc, has_return, variant_id, false/*check task*/,
+              false/*check context*/, true/*preregistered*/);
       AddressSpaceID origin;
       derez.deserialize(origin);
       AddressSpaceID local;
@@ -12768,11 +12789,11 @@ namespace Legion {
       {
         it->second->set_runtime(external);
         register_projection_functor(it->first, it->second, true/*need check*/,
-                                    true/*was preregistered*/);
+                          true/*was preregistered*/, NULL, true/*pregistered*/);
       }
       register_projection_functor(0, 
           new IdentityProjectionFunctor(this->external), false/*need check*/,
-                                        true/*was preregistered*/);
+                        true/*was preregistered*/, NULL, true/*preregistered*/);
     }
 
     //--------------------------------------------------------------------------
@@ -12785,10 +12806,10 @@ namespace Legion {
             pending_sharding_functors.begin(); it !=
             pending_sharding_functors.end(); it++)
         register_sharding_functor(it->first, it->second, true/*zero check*/,
-                                  true/*was preregistered*/);
+                    true/*was preregistered*/, NULL, true/*preregistered*/);
       register_sharding_functor(0,
           new CyclicShardingFunctor(), false/*need check*/, 
-          true/*was preregistered*/);
+          true/*was preregistered*/, NULL, true/*preregistered*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13153,6 +13174,9 @@ namespace Legion {
                                 RegistrationCallbackFnptr callback, bool global)
     //--------------------------------------------------------------------------
     { 
+      if (inside_registration_callback)
+        REPORT_LEGION_ERROR(ERROR_NESTED_REGISTRATION_CALLBACKS,
+            "Nested registration callbacks are not permitted in Legion")
       if (global)
       {
         // No such thing as global registration if there's only one addres space
@@ -13209,7 +13233,12 @@ namespace Legion {
       // Do the local callback and record it now 
       if (local_perform.exists())
       {
+        if (global)
+          inside_registration_callback = GLOBAL_REGISTRATION_CALLBACK;
+        else
+          inside_registration_callback = LOCAL_REGISTRATION_CALLBACK;
         (*callback)(machine, external, local_procs);
+        inside_registration_callback = NO_REGISTRATION_CALLBACK;
         Runtime::trigger_event(local_perform);
         if (!global)
           return local_perform;
@@ -14617,9 +14646,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    TraceID Runtime::generate_dynamic_trace_id(void)
+    TraceID Runtime::generate_dynamic_trace_id(bool check_context/*= true*/)
     //--------------------------------------------------------------------------
     {
+      if (check_context && (implicit_context != NULL))
+        return implicit_context->generate_dynamic_trace_id();
       TraceID result = __sync_fetch_and_add(&unique_trace_id, runtime_stride);
       // Check for hitting the library limit
       if (result >= LEGION_INITIAL_LIBRARY_ID_OFFSET)
@@ -15061,9 +15092,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    MapperID Runtime::generate_dynamic_mapper_id(void)
+    MapperID Runtime::generate_dynamic_mapper_id(bool check_context/*= true*/)
     //--------------------------------------------------------------------------
     {
+      if (check_context && (implicit_context != NULL))
+        return implicit_context->generate_dynamic_mapper_id();
       MapperID result = __sync_fetch_and_add(&unique_mapper_id, runtime_stride);
       // Check for hitting the library limit
       if (result >= LEGION_INITIAL_LIBRARY_ID_OFFSET)
@@ -15296,9 +15329,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ProjectionID Runtime::generate_dynamic_projection_id(void)
+    ProjectionID Runtime::generate_dynamic_projection_id(
+                                                   bool check_context/*= true*/)
     //--------------------------------------------------------------------------
     {
+      if (check_context && (implicit_context != NULL))
+        return implicit_context->generate_dynamic_projection_id();
       ProjectionID result = 
         __sync_fetch_and_add(&unique_projection_id, runtime_stride);
       // Check for hitting the library limit
@@ -15445,13 +15481,22 @@ namespace Legion {
                                               ProjectionFunctor *functor,
                                               bool need_zero_check,
                                               bool silence_warnings,
-                                              const char *warning_string)
+                                              const char *warning_string,
+                                              bool preregistered)
     //--------------------------------------------------------------------------
     {
       if (need_zero_check && (pid == 0))
         REPORT_LEGION_ERROR(ERROR_RESERVED_PROJECTION_ID, 
                             "ProjectionID zero is reserved.\n");
-      if (!silence_warnings && (total_address_spaces > 1))
+      if (!preregistered && !inside_registration_callback && !silence_warnings)
+        REPORT_LEGION_WARNING(LEGION_WARNING_NON_CALLBACK_REGISTRATION,
+            "Projection functor %d was dynamically registered outside of a "
+            "registration callback invocation. In the near future this will "
+            "become an error in order to support task subprocesses. Please "
+            "use 'perform_registration_callback' to generate a callback where "
+            "it will be safe to perform dynamic registrations.", pid)
+      if (!silence_warnings && (total_address_spaces > 1) &&
+          (inside_registration_callback != GLOBAL_REGISTRATION_CALLBACK))
         REPORT_LEGION_WARNING(LEGION_WARNING_DYNAMIC_PROJECTION_REG,
                         "Projection functor %d is being dynamically "
                         "registered for a multi-node run with %d nodes. It is "
@@ -15512,15 +15557,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ShardingID Runtime::generate_dynamic_sharding_id(void)
+    ShardingID Runtime::generate_dynamic_sharding_id(bool check_context/*true*/)
     //--------------------------------------------------------------------------
     {
+      if (check_context && (implicit_context != NULL))
+        return implicit_context->generate_dynamic_sharding_id();
       ShardingID result = 
         __sync_fetch_and_add(&unique_sharding_id, runtime_stride);
-#ifdef DEBUG_LEGION
-      // Check for overflow
-      assert(result <= unique_sharding_id);
-#endif
+      // Check for hitting the library limit
+      if (result >= LEGION_INITIAL_LIBRARY_ID_OFFSET)
+        REPORT_LEGION_FATAL(LEGION_FATAL_EXCEEDED_LIBRARY_ID_OFFSET,
+            "Dynamic Shardinging IDs exceeded library ID offset %d",
+            LEGION_INITIAL_LIBRARY_ID_OFFSET)
       return result;
     }
 
@@ -15660,7 +15708,8 @@ namespace Legion {
                                             ShardingFunctor *functor,
                                             bool need_zero_check,
                                             bool silence_warnings,
-                                            const char *warning_string)
+                                            const char *warning_string,
+                                            bool preregistered)
     //--------------------------------------------------------------------------
     {
       if (sid == UINT_MAX)
@@ -15669,7 +15718,15 @@ namespace Legion {
       else if (need_zero_check && (sid == 0))
         REPORT_LEGION_ERROR(ERROR_RESERVED_SHARDING_ID,
                             "ERROR: ShardingID zero is reserved.")
-      if (!silence_warnings && (total_address_spaces > 1))
+      if (!preregistered && !inside_registration_callback && !silence_warnings)
+        REPORT_LEGION_WARNING(LEGION_WARNING_NON_CALLBACK_REGISTRATION,
+            "Sharding functor %d was dynamically registered outside of a "
+            "registration callback invocation. In the near future this will "
+            "become an error in order to support task subprocesses. Please "
+            "use 'perform_registration_callback' to generate a callback where "
+            "it will be safe to perform dynamic registrations.", sid)
+      if (!silence_warnings && (total_address_spaces > 1) &&
+          (inside_registration_callback != GLOBAL_REGISTRATION_CALLBACK))
         REPORT_LEGION_WARNING(LEGION_WARNING_DYNAMIC_SHARDING_REG,
                         "WARNING: Sharding functor %d is being dynamically "
                         "registered for a multi-node run with %d nodes. It is "
@@ -15732,6 +15789,9 @@ namespace Legion {
            const void *buffer, size_t size, bool is_mutable, bool send_to_owner)
     //--------------------------------------------------------------------------
     {
+      if ((implicit_context != NULL) && 
+          !implicit_context->perform_semantic_attach())
+        return;
       if ((tag == NAME_SEMANTIC_TAG) && legion_spy_enabled)
         LegionSpy::log_task_name(task_id, static_cast<const char*>(buffer));
       TaskImpl *impl = find_or_create_task_impl(task_id);
@@ -15746,6 +15806,9 @@ namespace Legion {
                                               bool is_mutable)
     //--------------------------------------------------------------------------
     {
+      if ((implicit_context != NULL) && 
+          !implicit_context->perform_semantic_attach())
+        return;
       forest->attach_semantic_information(handle, tag, address_space, 
                                           buffer, size, is_mutable);
     }
@@ -15757,6 +15820,9 @@ namespace Legion {
                                               bool is_mutable)
     //--------------------------------------------------------------------------
     {
+      if ((implicit_context != NULL) && 
+          !implicit_context->perform_semantic_attach())
+        return;
       forest->attach_semantic_information(handle, tag, address_space, 
                                           buffer, size, is_mutable);
     }
@@ -15768,6 +15834,9 @@ namespace Legion {
                                               bool is_mutable)
     //--------------------------------------------------------------------------
     {
+      if ((implicit_context != NULL) && 
+          !implicit_context->perform_semantic_attach())
+        return;
       forest->attach_semantic_information(handle, tag, address_space, 
                                           buffer, size, is_mutable);
     }
@@ -15779,6 +15848,9 @@ namespace Legion {
                                               bool is_mutable)
     //--------------------------------------------------------------------------
     {
+      if ((implicit_context != NULL) && 
+          !implicit_context->perform_semantic_attach())
+        return;
       forest->attach_semantic_information(handle, fid, tag, address_space, 
                                           buffer, size, is_mutable);
     }
@@ -15790,6 +15862,9 @@ namespace Legion {
                                               bool is_mutable)
     //--------------------------------------------------------------------------
     {
+      if ((implicit_context != NULL) && 
+          !implicit_context->perform_semantic_attach())
+        return;
       forest->attach_semantic_information(handle, tag, address_space, 
                                           buffer, size, is_mutable);
     }
@@ -15801,6 +15876,9 @@ namespace Legion {
                                               bool is_mutable)
     //--------------------------------------------------------------------------
     {
+      if ((implicit_context != NULL) && 
+          !implicit_context->perform_semantic_attach())
+        return;
       forest->attach_semantic_information(handle, tag, address_space, 
                                           buffer, size, is_mutable);
     }
@@ -15888,9 +15966,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    TaskID Runtime::generate_dynamic_task_id(void)
+    TaskID Runtime::generate_dynamic_task_id(bool check_context/*= true*/)
     //--------------------------------------------------------------------------
     {
+      if (check_context && (implicit_context != NULL))
+        return implicit_context->generate_dynamic_task_id();
       TaskID result = __sync_fetch_and_add(&unique_task_id, runtime_stride);
       // Check for hitting the library limit
       if (result >= LEGION_INITIAL_LIBRARY_ID_OFFSET)
@@ -16014,9 +16094,14 @@ namespace Legion {
                                   const void *user_data, size_t user_data_size,
                                   CodeDescriptor *realm_code_desc,
                                   bool ret,VariantID vid /*= AUTO_GENERATE_ID*/,
-                                  bool check_task_id /*= true*/)
+                                  bool check_task_id /*= true*/,
+                                  bool check_context /*= true*/,
+                                  bool preregistered /*= false*/)
     //--------------------------------------------------------------------------
     {
+      if (check_context && (implicit_context != NULL))
+        return implicit_context->register_variant(registrar, user_data,
+            user_data_size, realm_code_desc, ret, vid, check_task_id);
       // TODO: figure out a way to make this check safe with dynamic generation
 #if 0
       if (check_task_id && 
@@ -16027,7 +16112,7 @@ namespace Legion {
                       "See %s in legion_config.h.", 
                       registrar.task_id, LEGION_MAX_APPLICATION_TASK_ID, 
                       LEGION_MACRO_TO_STRING(LEGION_MAX_APPLICATION_TASK_ID))
-#endif
+#endif  
       // First find the task implementation
       TaskImpl *task_impl = find_or_create_task_impl(registrar.task_id);
       // See if we need to make a new variant ID
@@ -16038,6 +16123,14 @@ namespace Legion {
                       "Error registering variant for task ID %d with "
                       "variant ID 0. Variant ID 0 is reserved for task "
                       "generators.", registrar.task_id)
+      if (!preregistered && !inside_registration_callback)
+        REPORT_LEGION_WARNING(LEGION_WARNING_NON_CALLBACK_REGISTRATION,
+            "Task variant %d of task %s (ID %d) was dynamically registered "
+            "outside of a registration callback invocation. In the near future "
+            "this will become an error in order to support task subprocesses. "
+            "Please use 'perform_registration_callback' to generate a callback "
+            "where it will be safe to perform dynamic registrations.", vid,
+            task_impl->initial_name, task_impl->task_id)
       // Make our variant and add it to the set of variants
       VariantImpl *impl = new VariantImpl(this, vid, task_impl, 
                                           registrar, ret, realm_code_desc,
@@ -16110,9 +16203,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ReductionOpID Runtime::generate_dynamic_reduction_id(void)
+    ReductionOpID Runtime::generate_dynamic_reduction_id(
+                                                   bool check_context/*= true*/)
     //--------------------------------------------------------------------------
     {
+      if (check_context && (implicit_context != NULL))
+        return implicit_context->generate_dynamic_reduction_id();
       ReductionOpID result = 
         __sync_fetch_and_add(&unique_redop_id, runtime_stride);
       // Check for hitting the library limit
@@ -16234,9 +16330,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    CustomSerdezID Runtime::generate_dynamic_serdez_id(void)
+    CustomSerdezID Runtime::generate_dynamic_serdez_id(
+                                                   bool check_context/*= true*/)
     //--------------------------------------------------------------------------
     {
+      if (check_context && (implicit_context != NULL))
+        return implicit_context->generate_dynamic_serdez_id();
       CustomSerdezID result = 
         __sync_fetch_and_add(&unique_serdez_id, runtime_stride);
       // Check for hitting the library limit
@@ -18608,7 +18707,11 @@ namespace Legion {
       }
       // This is the signal that we need to do the callback
       if (!precondition.exists())
+      {
+        inside_registration_callback = GLOBAL_REGISTRATION_CALLBACK;
         (*callback)(machine, external, local_procs);
+        inside_registration_callback = NO_REGISTRATION_CALLBACK;
+      }
       Runtime::trigger_event(done_event, precondition);
       // Delete our resources that we allocated
       delete impl;
@@ -25031,7 +25134,7 @@ namespace Legion {
       }
       else
         the_runtime->register_reduction(redop_id, redop, init_fnptr,
-                                        fold_fnptr, permit_duplicates);
+              fold_fnptr, permit_duplicates, false/*preregistered*/);
     }
 
     //--------------------------------------------------------------------------
@@ -25039,9 +25142,17 @@ namespace Legion {
                                      ReductionOp *redop,
                                      SerdezInitFnptr init_fnptr,
                                      SerdezFoldFnptr fold_fnptr,
-                                     bool permit_duplicates)
+                                     bool permit_duplicates,
+                                     bool preregistered)
     //--------------------------------------------------------------------------
     {
+      if (!preregistered && !inside_registration_callback)
+        REPORT_LEGION_WARNING(LEGION_WARNING_NON_CALLBACK_REGISTRATION,
+            "Reduction operator %d was dynamically registered outside of a "
+            "registration callback invocation. In the near future this will "
+            "become an error in order to support task subprocesses. Please "
+            "use 'perform_registration_callback' to generate a callback where "
+            "it will be safe to perform dynamic registrations.", redop_id)
       // Dynamic registration so do it with realm too
       RealmRuntime realm = RealmRuntime::get_runtime();
       realm.register_reduction(redop_id, redop);
@@ -25051,10 +25162,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::register_serdez(CustomSerdezID serdez_id,
-                                  SerdezOp *serdez_op, bool permit_duplicates)
+    void Runtime::register_serdez(CustomSerdezID serdez_id, SerdezOp *serdez_op, 
+                                  bool permit_duplicates, bool preregistered)
     //--------------------------------------------------------------------------
     {
+      if (!preregistered && !inside_registration_callback)
+        REPORT_LEGION_WARNING(LEGION_WARNING_NON_CALLBACK_REGISTRATION,
+            "Custom serdez operator %d was dynamically registered outside of a "
+            "registration callback invocation. In the near future this will "
+            "become an error in order to support task subprocesses. Please "
+            "use 'perform_registration_callback' to generate a callback where "
+            "it will be safe to perform dynamic registrations.", serdez_id)
       // Dynamic registration so do it with realm too
       RealmRuntime realm = RealmRuntime::get_runtime();
       realm.register_custom_serdez(serdez_id, serdez_op);
@@ -25094,7 +25212,8 @@ namespace Legion {
         serdez_table[serdez_id] = serdez_op;
       }
       else
-        the_runtime->register_serdez(serdez_id, serdez_op, permit_duplicates);
+        the_runtime->register_serdez(serdez_id, serdez_op, 
+                                     permit_duplicates, false/*preregistered*/);
     }
 
     //--------------------------------------------------------------------------
