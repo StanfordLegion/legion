@@ -104,6 +104,7 @@ namespace Legion {
       virtual ReductionOpID generate_dynamic_reduction_id(void);
       virtual CustomSerdezID generate_dynamic_serdez_id(void);
       virtual bool perform_semantic_attach(bool &global);
+      virtual void post_semantic_attach(void);
     public:
       // Interface to operations performed by a context
       virtual IndexSpace create_index_space(const Domain &bounds,

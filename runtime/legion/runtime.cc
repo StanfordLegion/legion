@@ -13835,6 +13835,8 @@ namespace Legion {
       TaskImpl *impl = find_or_create_task_impl(task_id);
       impl->attach_semantic_information(tag, address_space, buffer, size, 
                                         is_mutable, send_to_owner);
+      if (implicit_context != NULL)
+        implicit_context->post_semantic_attach();
     }
 
     //--------------------------------------------------------------------------
@@ -13850,6 +13852,8 @@ namespace Legion {
         return;
       forest->attach_semantic_information(handle, tag, address_space, 
                                           buffer, size, is_mutable, !global);
+      if (implicit_context != NULL)
+        implicit_context->post_semantic_attach();
     }
 
     //--------------------------------------------------------------------------
@@ -13865,6 +13869,8 @@ namespace Legion {
         return;
       forest->attach_semantic_information(handle, tag, address_space, 
                                           buffer, size, is_mutable, !global);
+      if (implicit_context != NULL)
+        implicit_context->post_semantic_attach();
     }
 
     //--------------------------------------------------------------------------
@@ -13880,6 +13886,8 @@ namespace Legion {
         return;
       forest->attach_semantic_information(handle, tag, address_space, 
                                           buffer, size, is_mutable, !global);
+      if (implicit_context != NULL)
+        implicit_context->post_semantic_attach();
     }
 
     //--------------------------------------------------------------------------
@@ -13895,6 +13903,8 @@ namespace Legion {
         return;
       forest->attach_semantic_information(handle, fid, tag, address_space, 
                                           buffer, size, is_mutable, !global);
+      if (implicit_context != NULL)
+        implicit_context->post_semantic_attach();
     }
 
     //--------------------------------------------------------------------------
@@ -13910,6 +13920,8 @@ namespace Legion {
         return;
       forest->attach_semantic_information(handle, tag, address_space, 
                                           buffer, size, is_mutable, !global);
+      if (implicit_context != NULL)
+        implicit_context->post_semantic_attach();
     }
 
     //--------------------------------------------------------------------------
@@ -13925,6 +13937,8 @@ namespace Legion {
         return;
       forest->attach_semantic_information(handle, tag, address_space, 
                                           buffer, size, is_mutable, !global);
+      if (implicit_context != NULL)
+        implicit_context->post_semantic_attach();
     }
 
     //--------------------------------------------------------------------------
