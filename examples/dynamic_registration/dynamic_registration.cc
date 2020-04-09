@@ -56,15 +56,6 @@ enum FieldIDs {
   FID_DERIV,
 };
 
-#ifdef REALM_USE_LIBDL
-// rely on dladdr/dlsym to make function pointers portable for global
-//  task registration
-const bool global_taskreg = true;
-#else
-// function pointers will not be portable, so limit tasks to local node
-const bool global_taskreg = false;
-#endif
-
 // Forward declarations
 
 void init_field_task(const Task *task,
@@ -185,18 +176,35 @@ const char llvm_ir[] =
   ;
 #endif
 
-void registration_callback(Machine machine, Runtime *runtime,
-                           const std::set<Processor> &local_procs)
+void top_level_task(const Task *task,
+                    const std::vector<PhysicalRegion> &regions,
+                    Context ctx, Runtime *runtime)
 {
+  FieldSpace fs = runtime->create_field_space(ctx);
+  {
+    FieldAllocator allocator = 
+      runtime->create_field_allocator(ctx, fs);
+    allocator.allocate_field(sizeof(double),FID_VAL);
+    allocator.allocate_field(sizeof(double),FID_DERIV);
+  }
   // Make an SOA constraint and use it as the layout constraint for
   // all the different task variants that we are registering
-  LayoutConstraintRegistrar layout_registrar(FieldSpace::NO_SPACE, "SOA layout");
+  LayoutConstraintRegistrar layout_registrar(fs, "SOA layout");
   std::vector<DimensionKind> dim_order(2);
   dim_order[0] = DIM_X;
   dim_order[1] = DIM_F; // fields go last for SOA
   layout_registrar.add_constraint(OrderingConstraint(dim_order, false/*contig*/));
 
   LayoutConstraintID soa_layout_id = runtime->register_layout(layout_registrar);
+
+#ifdef REALM_USE_LIBDL
+  // rely on dladdr/dlsym to make function pointers portable for global
+  //  task registration
+  bool global_taskreg = true;
+#else
+  // function pointers will not be portable, so limit tasks to local node
+  const bool global_taskreg = false;
+#endif
 
   // Dynamically register some more tasks
   TaskVariantRegistrar init_registrar(INIT_FIELD_TASK_ID,
@@ -275,21 +283,6 @@ void registration_callback(Machine machine, Runtime *runtime,
 #ifdef REALM_USE_LLVM
   runtime->attach_name(WRAPPED_LLVM_TASK_ID, "wrapped llvm task");
 #endif
-}
-
-void top_level_task(const Task *task,
-                    const std::vector<PhysicalRegion> &regions,
-                    Context ctx, Runtime *runtime)
-{
-  FieldSpace fs = runtime->create_field_space(ctx);
-  {
-    FieldAllocator allocator = 
-      runtime->create_field_allocator(ctx, fs);
-    allocator.allocate_field(sizeof(double),FID_VAL);
-    allocator.allocate_field(sizeof(double),FID_DERIV);
-  } 
-
-  Runtime::perform_registration_callback(registration_callback, false/*global*/);
 
   {
     int val = 55;
