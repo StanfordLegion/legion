@@ -112,6 +112,7 @@ def regent(args, env={}, cwd=None, **kwargs):
           os.path.join(os.path.dirname(first_arg), '?.rg')]
           if first_arg is not None and os.path.exists(first_arg) else []) +
         [os.path.join(regent_dir, 'src', '?.t'),
+         os.path.join(regent_dir, 'src', '?.rg'),
          os.path.join(regent_dir, 'src', 'rdir', 'plugin', 'src', '?.t'),
          os.path.join(terra_dir, 'tests', 'lib', '?.t'),
          os.path.join(terra_dir, 'release', 'include', '?.t'),

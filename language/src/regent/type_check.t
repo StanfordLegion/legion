@@ -903,7 +903,7 @@ function type_check.expr_call(cx, node)
         return std.newrquote(
           ast.specialized.top.QuoteExpr {
             expr = node.args[i],
-            expr_type = arg.expr_type,
+            expr_type = arg_types[i],
             annotations = node.annotations,
             span = node.span,
           })
