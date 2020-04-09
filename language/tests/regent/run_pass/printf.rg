@@ -20,5 +20,8 @@ task main()
   var x : int32 = 1
   var y : uint64 = 1234
   printf.printf("Hello {} {} world!", x, y)
+  var z : float = 1.23
+  var w : double = 3.45
+  printf.printf("Floats: {} {}", z, w)
 end
 regentlib.start(main)

@@ -24,6 +24,8 @@ local format_string_mapping = {
   [int64] = "%lld",
   [uint32] = "%u",
   [uint64] = "%llu",
+  [float] = "%f",
+  [double] = "%f",
 }
 
 printf.printf = regentlib.macro(
