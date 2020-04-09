@@ -9934,9 +9934,17 @@ namespace Legion {
     {
       if (inside_registration_callback)
         return TaskContext::perform_semantic_attach(global);
+      // Before we do anything else here, we need to make sure that all
+      // the shards are done reading before we attempt to mutate the value
+      Runtime::phase_barrier_arrive(semantic_attach_barrier, 1/*count*/);
+      const RtEvent wait_on = semantic_attach_barrier;
+      advance_replicate_barrier(semantic_attach_barrier, total_shards);
       // Check to see if we can downgrade this to a local_only update
       if (global && shard_manager->is_total_sharding())
         global = false;
+      // Wait until all the reads of the semantic info are done 
+      if (wait_on.exists() && !wait_on.has_triggered())
+        wait_on.wait();
       if (global)
       {
         // If we're still global then just have shard 0 do this for now
