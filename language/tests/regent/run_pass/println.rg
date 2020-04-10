@@ -17,16 +17,18 @@ import "regent"
 local format = require("std/format")
 
 task main()
-  var x : int32 = 1
-  var y : uint64 = 1234
-  format.println("Hello {} {} world!", x, y)
+  var a : int8 = -1
+  var b : uint16 = 65535
+  var c : int32 = -12345678
+  var d : uint64 = 1234
+  format.println("Hello {} {} {} {} world!", a, b, c, d)
 
   var z : float = 1.23
   var w : double = 3.45
   format.println("Floats: {} {}", z, w)
 
-  format.println("Formatted: {x} {e}", y, 1.234)
-  format.println("Padding/Precision: {08x} {.15} {10.3e}", y, 1.234, 3.456)
+  format.println("Formatted: {x} {e}", d, 1.234)
+  format.println("Padding/Precision: {08x} {.15} {10.3e}", d, 1.234, 3.456)
 
   var s = "asdf"
   var t = [regentlib.string]("qwer")

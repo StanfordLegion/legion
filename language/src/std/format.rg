@@ -21,8 +21,12 @@ local std = require("regent/std")
 local format = {}
 
 local format_string_mapping = {
+  [int8]      = { [""] =   "d", x =   "x", allow_precision = false },
+  [int16]     = { [""] =   "d", x =   "x", allow_precision = false },
   [int32]     = { [""] =   "d", x =   "x", allow_precision = false },
   [int64]     = { [""] = "lld", x = "llx", allow_precision = false },
+  [uint8]     = { [""] =   "u", x =   "x", allow_precision = false },
+  [uint16]    = { [""] =   "u", x =   "x", allow_precision = false },
   [uint32]    = { [""] =   "u", x =   "x", allow_precision = false },
   [uint64]    = { [""] = "llu", x = "llx", allow_precision = false },
   [float]     = { [""] =   "f", e =   "e", allow_precision = true },
