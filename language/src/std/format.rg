@@ -53,6 +53,13 @@ local function format_value(value, value_type)
       format_args:insertall(elt_args)
     end
     format_str = format_str .. "}"
+  elseif std.is_rect_type(value_type) then
+    local index_type = value_type.index_type
+    local lo_format, lo_args = format_value(rexpr value.lo end, index_type)
+    local hi_format, hi_args = format_value(rexpr value.hi end, index_type)
+    format_str = "{lo=" .. lo_format .. ", hi=" .. hi_format .. "}"
+    format_args:insertall(lo_args)
+    format_args:insertall(hi_args)
   else
     format_str = format_string_mapping[value_type]
     if not format_str then

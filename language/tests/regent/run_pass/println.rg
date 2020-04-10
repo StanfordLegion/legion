@@ -41,6 +41,8 @@ task main()
     format.println("int2d(r) {}", x)
   end
 
+  format.println("rect2d {}", is.bounds)
+
   -- Regent's println *DOES NOT* follow C's printf codes, so this
   -- should just print the literal string.
   format.println("%d %f %s %%")
