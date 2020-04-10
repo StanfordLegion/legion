@@ -2368,7 +2368,7 @@ if is_script:
     def _cleanup():
         del _my.ctx
 
-    legion_top.top_level.cleanup_items.append(_cleanup)
+    legion_top.cleanup_items.append(_cleanup)
 
     # FIXME: Really this should be the number of control replicated shards at this level
     c.legion_runtime_enable_scheduler_lock()

@@ -106,7 +106,7 @@ static void python_main_callback(Machine machine, Runtime *runtime,
                                  const std::set<Processor> &local_procs)
 {
   // Get an ID for the top-level task, register it with the runtime
-  const TaskID top_task_id = runtime->generate_library_task_ids(unique_name, 2); 
+  const TaskID top_task_id = runtime->generate_library_task_ids(unique_name, 3); 
   runtime->set_top_level_task_id(top_task_id);
   // Register a variant for the top-level task
   {
@@ -132,9 +132,22 @@ static void python_main_callback(Machine machine, Runtime *runtime,
     runtime->register_task_variant(registrar, code_desc, NULL, 0, task_name, vid);
     runtime->attach_name(top_task_id+1, task_name, false/*mutable*/, true/*local only*/);
   }
+  // Register a variant for the cleanup task
+  {
+    const char *const task_name = "legion_python_cleanup";
+    TaskVariantRegistrar registrar(top_task_id+2, task_name, false/*global*/);
+    registrar.add_constraint(ProcessorConstraint(Processor::PY_PROC));
+    CodeDescriptor code_desc(Realm::Type::from_cpp_type<Processor::TaskFuncPtr>());
+    code_desc.add_implementation(
+        new Realm::PythonSourceImplementation("legion_top", task_name));
+    registrar.set_leaf(true);
+    runtime->register_task_variant(registrar, code_desc, NULL, 0, task_name, vid);
+    runtime->attach_name(top_task_id+2, task_name, false/*mutable*/, true/*local only*/);
+  }
   // Register our sharding function for any global import tasks
   const ShardingID sharding_id = runtime->generate_library_sharding_ids(unique_name, 1);
-  runtime->register_sharding_functor(sharding_id, new LegionPyShardingFunctor());
+  runtime->register_sharding_functor(sharding_id, 
+      new LegionPyShardingFunctor(), true/*silence_warnings*/);
   // Register our mapper for the top-level task
   const MapperID top_mapper_id = runtime->generate_library_mapper_ids(unique_name, 1);
   runtime->set_top_level_task_mapper_id(top_mapper_id);
@@ -303,7 +316,7 @@ void LegionPyMapper::select_task_options(const MapperContext    ctx,
   }
   else
   {
-    assert(task.task_id == (top_task_id + 1));
+    assert(task.task_id <= (top_task_id + 2));
     output.replicate = false;
   }
   assert(!local_pys.empty());
@@ -315,7 +328,7 @@ void LegionPyMapper::slice_task(const MapperContext      ctx,
                                 const SliceTaskInput&    input,
                                       SliceTaskOutput&   output)
 {
-  assert(task.task_id == (top_task_id + 1));
+  assert(task.task_id <= (top_task_id + 2));
   const Rect<1> bounds = input.domain; 
   const size_t num_points = bounds.volume();
   output.slices.reserve(num_points);
@@ -366,7 +379,7 @@ void LegionPyMapper::map_task(const MapperContext      ctx,
   }
   else
   {
-    assert(task.task_id == (top_task_id + 1));
+    assert(task.task_id <= (top_task_id + 2));
     assert(task.regions.empty());
     output.chosen_variant = vid;
   }
