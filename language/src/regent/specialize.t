@@ -557,19 +557,25 @@ end
 function specialize.expr_field_access(cx, node, allow_lists)
   local value = specialize.expr(cx, node.value)
 
-  local fields = data.flatmap(function(field_name)
-    return specialize.field_names(cx, field_name)
-  end, node.field_names)
+  assert(#node.field_names == 1)
+  local field_names = specialize.field_names(cx, node.field_names[1])
+
+  if type(field_names[1]) == "string" then
+    if #field_names > 1 then
+      report.error(expr, "multi-field access is not allowed")
+    end
+    field_names = field_names[1]
+  end
 
   if value:is(ast.specialized.expr.LuaTable) then
-    if #fields > 1 then
+    if type(field_names) ~= "string" then
       report.error(node, "unable to specialize multi-field access")
     end
-    return convert_lua_value(cx, node, value.value[fields[1]])
+    return convert_lua_value(cx, node, value.value[field_names])
   else
     return ast.specialized.expr.FieldAccess {
       value = value,
-      field_name = fields,
+      field_name = field_names,
       annotations = node.annotations,
       span = node.span,
     }

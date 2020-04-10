@@ -17,7 +17,6 @@
 --   printf.printf("Hello {} world!")
 --         ^
 
-
 import "regent"
 
 local printf = require("std/printf")
