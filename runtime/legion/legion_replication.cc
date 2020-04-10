@@ -8930,7 +8930,7 @@ namespace Legion {
         }
         current_stage = stage;
       }
-      rez.serialize(value);
+      rez.serialize(value, redop->sizeof_rhs);
     }
 
     //--------------------------------------------------------------------------
