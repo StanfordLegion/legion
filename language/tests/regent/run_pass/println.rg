@@ -26,6 +26,7 @@ task main()
   format.println("Floats: {} {}", z, w)
 
   format.println("Formatted: {x} {e}", y, 1.234)
+  format.println("Padding/Precision: {08x} {.15} {10.3e}", y, 1.234, 3.456)
 
   var s = "asdf"
   var t = [regentlib.string]("qwer")

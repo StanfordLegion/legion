@@ -21,13 +21,13 @@ local std = require("regent/std")
 local format = {}
 
 local format_string_mapping = {
-  [int32]     = { [false] =   "%d", x =   "%x" },
-  [int64]     = { [false] = "%lld", x = "%llx" },
-  [uint32]    = { [false] =   "%u", x =   "%x" },
-  [uint64]    = { [false] = "%llu", x = "%llx" },
-  [float]     = { [false] =   "%f", e =   "%e" },
-  [double]    = { [false] =   "%f", e =   "%e" },
-  [rawstring] = { [false] =   "%s" },
+  [int32]     = { [""] =   "d", x =   "x", allow_precision = false },
+  [int64]     = { [""] = "lld", x = "llx", allow_precision = false },
+  [uint32]    = { [""] =   "u", x =   "x", allow_precision = false },
+  [uint64]    = { [""] = "llu", x = "llx", allow_precision = false },
+  [float]     = { [""] =   "f", e =   "e", allow_precision = true },
+  [double]    = { [""] =   "f", e =   "e", allow_precision = true },
+  [rawstring] = { [""] =   "s",            allow_precision = false },
 }
 
 local function format_string(macro_name, node, value, value_type, modifiers)
@@ -35,11 +35,17 @@ local function format_string(macro_name, node, value, value_type, modifiers)
   if not format_str then
     report.error(value:getast().expr, macro_name .. " does not understand how to format a value of type " .. tostring(value_type))
   end
+  if string.len(modifiers.precision) > 0 and not format_str.allow_precision then
+    report.error(node, macro_name .. " does not support precision specifier on a value of type " .. tostring(value_type))
+  end
   format_str = format_str[modifiers.style]
   if not format_str then
     report.error(node, macro_name .. " does not support format style " .. modifiers.style .. " on a value of type " .. tostring(value_type))
   end
-  return format_str
+  if string.len(modifiers.precision) > 0 then
+    format_str = "." .. modifiers.precision  .. format_str
+  end
+  return "%" .. modifiers.padding .. format_str
 end
 
 local function format_value(macro_name, node, value, value_type, modifiers)
@@ -84,14 +90,14 @@ local function format_value(macro_name, node, value, value_type, modifiers)
 end
 
 local function parse_modifiers(macro_name, node, str)
-  if str == "x" then
-    return {style = "x"}
-  elseif str == "e" then
-    return {style = "e"}
-  elseif str ~= "" then
-    report.error(node, macro_name .. " does not support the format style " .. str)
+  local padding, point, precision, style = string.match(str, "^([0-9]*)([.]?)([0-9]*)([a-z]?)$")
+  if not (style == "x" or style == "e" or style == "") then
+    report.error(node, macro_name .. " does not support the format style " .. style)
   end
-  return {style = false}
+  if (string.len(point) > 0) ~= (string.len(precision) > 0) then
+    report.error(node, macro_name .. " expected precision following . in format string")
+  end
+  return {padding = padding, precision = precision, style = style}
 end
 
 local function sanitize(str)
@@ -114,7 +120,7 @@ local function format_arguments(macro_name, msg, args)
   local format_args = terralib.newlist()
 
   local function next_match()
-    return string.find(msg, "{[a-z]?}", last_pos)
+    return string.find(msg, "{[0-9]*[.]?[0-9]*[a-z]?}", last_pos)
   end
 
   local start, stop
