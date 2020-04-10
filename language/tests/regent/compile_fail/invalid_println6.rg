@@ -13,17 +13,15 @@
 -- limitations under the License.
 
 -- fails-with:
--- invalid_printf3.rg:27: printf does not understand how to format a value of type st
---   printf.printf("Hello {} world!", st { x = 1 })
+-- invalid_println6.rg:25: println does not support the format style a
+--   format.println("Hello {a} world!", 1.23)
 --         ^
 
 import "regent"
 
-local printf = require("std/printf")
-
-local struct st { x : int }
+local format = require("std/format")
 
 task main()
-  printf.printf("Hello {} world!", st { x = 1 })
+  format.println("Hello {a} world!", 1.23)
 end
 regentlib.start(main)

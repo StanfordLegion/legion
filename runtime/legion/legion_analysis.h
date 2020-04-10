@@ -1570,7 +1570,7 @@ namespace Legion {
                                      Runtime *rt, AddressSpaceID previous);
     public:
       const ReductionOpID redop;
-      ValidInstAnalysis *const target;
+      ValidInstAnalysis *const target_analysis;
     };
 
     /**
@@ -1611,7 +1611,7 @@ namespace Legion {
                                      Runtime *rt, AddressSpaceID previous);
     public:
       const FieldMaskSet<InstanceView> valid_instances;
-      InvalidInstAnalysis *const target;
+      InvalidInstAnalysis *const target_analysis;
     };
 
     /**
@@ -1730,7 +1730,7 @@ namespace Legion {
       static void handle_remote_acquires(Deserializer &derez, Runtime *rt,
                                          AddressSpaceID previous); 
     public:
-      AcquireAnalysis *const target;
+      AcquireAnalysis *const target_analysis;
     };
 
     /**
@@ -1770,7 +1770,7 @@ namespace Legion {
                                          AddressSpaceID previous);
     public:
       const ApEvent precondition;
-      ReleaseAnalysis *const target;
+      ReleaseAnalysis *const target_analysis;
       const PhysicalTraceInfo trace_info;
     public:
       // Can only safely be accessed when analysis is locked

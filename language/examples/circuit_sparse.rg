@@ -23,6 +23,8 @@
 
 import "regent"
 
+local format = require("std/format")
+
 local use_python_main = rawget(_G, "circuit_use_python_main") == true
 
 -- Compile and link circuit_mapper.cc
@@ -400,7 +402,7 @@ where
   reads writes(rw.{current, voltage})
 do
   if print_ts then
-    c.printf("t: %ld\n", c.legion_get_current_time_in_micros())
+    format.println("t: {}", c.legion_get_current_time_in_micros())
   end
   var dt : float = DELTAT
   var recip_dt : float = 1.0 / dt
@@ -521,7 +523,7 @@ do
     node.charge = 0.0
   end
   if print_ts then
-    c.printf("t: %ld\n", c.legion_get_current_time_in_micros())
+    format.println("t: {}", c.legion_get_current_time_in_micros())
   end
 end
 
@@ -535,28 +537,28 @@ where
   reads(rpn, rsn, rgn, rw)
 do
   for w in rw do
-    c.printf(" %.5g", w.current._0);
-    c.printf(" %.5g", w.current._1);
-    c.printf(" %.5g", w.current._2);
-    c.printf(" %.5g", w.current._3);
-    c.printf(" %.5g", w.current._4);
-    c.printf(" %.5g", w.current._5);
-    c.printf(" %.5g", w.current._6);
-    c.printf(" %.5g", w.current._7);
-    c.printf(" %.5g", w.current._8);
-    c.printf(" %.5g", w.current._9);
+    format.print(" {.5e}", w.current._0);
+    format.print(" {.5e}", w.current._1);
+    format.print(" {.5e}", w.current._2);
+    format.print(" {.5e}", w.current._3);
+    format.print(" {.5e}", w.current._4);
+    format.print(" {.5e}", w.current._5);
+    format.print(" {.5e}", w.current._6);
+    format.print(" {.5e}", w.current._7);
+    format.print(" {.5e}", w.current._8);
+    format.print(" {.5e}", w.current._9);
 
-    c.printf(" %.5g", w.voltage._0);
-    c.printf(" %.5g", w.voltage._1);
-    c.printf(" %.5g", w.voltage._2);
-    c.printf(" %.5g", w.voltage._3);
-    c.printf(" %.5g", w.voltage._4);
-    c.printf(" %.5g", w.voltage._5);
-    c.printf(" %.5g", w.voltage._6);
-    c.printf(" %.5g", w.voltage._7);
-    c.printf(" %.5g", w.voltage._8);
+    format.print(" {.5e}", w.voltage._0);
+    format.print(" {.5e}", w.voltage._1);
+    format.print(" {.5e}", w.voltage._2);
+    format.print(" {.5e}", w.voltage._3);
+    format.print(" {.5e}", w.voltage._4);
+    format.print(" {.5e}", w.voltage._5);
+    format.print(" {.5e}", w.voltage._6);
+    format.print(" {.5e}", w.voltage._7);
+    format.print(" {.5e}", w.voltage._8);
 
-    c.printf("\n");
+    format.println("");
   end
 end
 
@@ -638,7 +640,7 @@ task toplevel()
       "pieces should be evenly distributed to superpieces")
   conf.shared_nodes_per_piece =
     [int](ceil(conf.nodes_per_piece * conf.pct_shared_nodes / 100.0))
-  c.printf("circuit settings: loops=%d prune=%d pieces=%d (pieces/superpiece=%d) nodes/piece=%d (nodes/piece=%d) wires/piece=%d pct_in_piece=%d seed=%d\n",
+  format.println("circuit settings: loops={} prune={} pieces={} (pieces/superpiece={}) nodes/piece={} (nodes/piece={}) wires/piece={} pct_in_piece={} seed={}",
     conf.num_loops, conf.prune, conf.num_pieces, conf.pieces_per_superpiece, conf.nodes_per_piece,
     conf.shared_nodes_per_piece, conf.wires_per_piece, conf.pct_wire_in_piece, conf.random_seed)
 
@@ -654,11 +656,11 @@ task toplevel()
   do
     var node_size = [ terralib.sizeof(node) ]
     var wire_size = [ terralib.sizeof(wire(wild,wild,wild)) ]
-    c.printf("Circuit memory usage:\n")
-    c.printf("  Nodes : %10lld * %4d bytes = %12lld bytes\n", num_circuit_nodes, node_size, num_circuit_nodes * node_size)
-    c.printf("  Wires : %10lld * %4d bytes = %12lld bytes\n", num_circuit_wires, wire_size, num_circuit_wires * wire_size)
+    format.println("Circuit memory usage:")
+    format.println("  Nodes : {10} * {4} bytes = {12} bytes", num_circuit_nodes, node_size, num_circuit_nodes * node_size)
+    format.println("  Wires : {10} * {4} bytes = {12} bytes", num_circuit_wires, wire_size, num_circuit_wires * wire_size)
     var total = ((num_circuit_nodes * node_size) + (num_circuit_wires * wire_size))
-    c.printf("  Total                             %12lld bytes\n", total)
+    format.println("  Total                             {12} bytes", total)
   end
 
   var colorings = create_colorings(conf)
@@ -691,7 +693,7 @@ task toplevel()
     end
   end
 
-  c.printf("Starting main simulation loop\n")
+  format.println("Starting main simulation loop")
   var simulation_success = true
   var steps = conf.steps
   var prune = conf.prune
@@ -715,13 +717,13 @@ task toplevel()
   var ts_end = c.legion_get_current_time_in_micros()
 
   if simulation_success then
-    c.printf("SUCCESS!\n")
+    format.println("SUCCESS!")
   else
-    c.printf("FAILURE!\n")
+    format.println("FAILURE!")
   end
   do
     var sim_time = 1e-6 * (ts_end - ts_start)
-    c.printf("ELAPSED TIME = %7.3f s\n", sim_time)
+    format.println("ELAPSED TIME = {7.3} s", sim_time)
 
     -- Compute the floating point operations per second
     var num_circuit_nodes : uint64 = conf.num_pieces * conf.nodes_per_piece
@@ -737,9 +739,9 @@ task toplevel()
 
     -- Compute the number of gflops
     var gflops = (1e-9*operations)/sim_time
-    c.printf("GFLOPS = %7.3f GFLOPS\n", gflops)
+    format.println("GFLOPS = {7.3} GFLOPS", gflops)
   end
-  c.printf("simulation complete - destroying regions\n")
+  format.println("simulation complete - destroying regions")
 end
 
 else -- not use_python_main

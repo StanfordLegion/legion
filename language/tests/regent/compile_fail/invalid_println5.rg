@@ -12,24 +12,16 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- fails-with:
+-- invalid_println5.rg:25: println does not support format style x on a value of type double
+--   format.println("Hello {x} world!", 1.23)
+--         ^
+
 import "regent"
 
-local printf = require("std/printf")
+local format = require("std/format")
 
 task main()
-  var x : int32 = 1
-  var y : uint64 = 1234
-  printf.printf("Hello {} {} world!", x, y)
-
-  var z : float = 1.23
-  var w : double = 3.45
-  printf.printf("Floats: {} {}", z, w)
-
-  var i1 = int1d(1)
-  var i2 = int2d { 1, 2 }
-  var i3 = int3d { 1, 2, 3 }
-  printf.printf("int1d {}", i1)
-  printf.printf("int2d {}", i2)
-  printf.printf("int3d {}", i3)
+  format.println("Hello {x} world!", 1.23)
 end
 regentlib.start(main)
