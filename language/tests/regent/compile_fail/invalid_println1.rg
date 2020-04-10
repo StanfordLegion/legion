@@ -13,15 +13,15 @@
 -- limitations under the License.
 
 -- fails-with:
--- invalid_printf1.rg:25: printf received 0 arguments but format string has 1 interpolations
---   printf.printf("Hello {} world!")
+-- invalid_println1.rg:25: println received 0 arguments but format string has 1 interpolations
+--   format.println("Hello {} world!")
 --         ^
 
 import "regent"
 
-local printf = require("std/printf")
+local format = require("std/format")
 
 task main()
-  printf.printf("Hello {} world!")
+  format.println("Hello {} world!")
 end
 regentlib.start(main)

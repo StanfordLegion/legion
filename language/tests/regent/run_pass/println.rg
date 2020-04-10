@@ -12,16 +12,24 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- fails-with:
--- invalid_printf2.rg:25: printf received 2 arguments but format string has 1 interpolations
---   printf.printf("Hello {} world!", 1, 2)
---         ^
-
 import "regent"
 
-local printf = require("std/printf")
+local format = require("std/format")
 
 task main()
-  printf.printf("Hello {} world!", 1, 2)
+  var x : int32 = 1
+  var y : uint64 = 1234
+  format.println("Hello {} {} world!", x, y)
+
+  var z : float = 1.23
+  var w : double = 3.45
+  format.println("Floats: {} {}", z, w)
+
+  var i1 = int1d(1)
+  var i2 = int2d { 1, 2 }
+  var i3 = int3d { 1, 2, 3 }
+  format.println("int1d {}", i1)
+  format.println("int2d {}", i2)
+  format.println("int3d {}", i3)
 end
 regentlib.start(main)

@@ -18,7 +18,7 @@ local ast = require("regent/ast")
 local report = require("regent/report")
 local std = require("regent/std")
 
-local printf = {}
+local format = {}
 
 local format_string_mapping = {
   [int32] = "%d",
@@ -29,7 +29,7 @@ local format_string_mapping = {
   [double] = "%f",
 }
 
-printf.printf = regentlib.macro(
+format.println = regentlib.macro(
   function(msg, ...)
     local node = msg:getast()
 
@@ -37,7 +37,7 @@ printf.printf = regentlib.macro(
     if not (node.expr:is(ast.specialized.expr.Constant) and
               type(node.expr.value) == "string")
     then
-      report.error(node, "printf expected first argument to be a format string constant")
+      report.error(node, "println expected first argument to be a format string constant")
     end
     msg = node.expr.value
 
@@ -81,7 +81,7 @@ printf.printf = regentlib.macro(
             arg_format = elt_format
           end
         elseif not arg_format then
-          report.error(node, "printf does not understand how to format a value of type " .. tostring(arg_type))
+          report.error(node, "println does not understand how to format a value of type " .. tostring(arg_type))
         else
           format_args:insert(args[idx])
         end
@@ -94,10 +94,10 @@ printf.printf = regentlib.macro(
     format_str = format_str .. string.sub(msg, last_pos, -1) .. "\n"
 
     if idx-1 ~= #args then
-      report.error(node, "printf received " .. #args .. " arguments but format string has " .. (idx-1) .. " interpolations")
+      report.error(node, "println received " .. #args .. " arguments but format string has " .. (idx-1) .. " interpolations")
     end
 
     return rexpr regentlib.c.printf([format_str], [format_args]) end
   end)
 
-return printf
+return format
