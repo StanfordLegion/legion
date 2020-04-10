@@ -9967,6 +9967,8 @@ namespace Legion {
     void ReplicateContext::post_semantic_attach(void)
     //--------------------------------------------------------------------------
     {
+      if (inside_registration_callback)
+        return;
       Runtime::phase_barrier_arrive(semantic_attach_barrier, 1/*count*/);
       const RtEvent wait_on = semantic_attach_barrier;
       advance_replicate_barrier(semantic_attach_barrier, total_shards);
