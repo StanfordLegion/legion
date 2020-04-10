@@ -184,6 +184,14 @@ namespace Legion {
       IndexSpaceNode *color_node = get_node(color_space);
       if (partition_color == INVALID_COLOR)
         partition_color = parent_node->generate_color();
+      else if (partition_color >= LEGION_MAX_APPLICATION_COLOR)
+        REPORT_LEGION_ERROR(ERROR_EXCEEDED_MAX_APPLICATION_COLOR,
+            "User specified color %d for partition creation in task %d "
+            "(UID %lld) exceeded the maximum allowed value for an application "
+            "color %d specified in legion_config.h. Please change the value "
+            "of LEGION_MAX_APPLICATION_COLOR in legion_config.h to support "
+            "this use case.", partition_color, ctx->get_task_name(),
+            ctx->get_unique_id(), LEGION_MAX_APPLICATION_COLOR)
       // If we are making this partition on a different node than the
       // owner node of the parent index space then we have to tell that
       // owner node about the existence of this partition
@@ -7030,7 +7038,8 @@ namespace Legion {
         handle(h), parent(par), index_space_ready(ready), 
         realm_index_space_set(Runtime::create_rt_user_event()), 
         tight_index_space_set(Runtime::create_rt_user_event()),
-        tight_index_space(false)
+        tight_index_space(false), next_partition_color(
+            LEGION_MAX_APPLICATION_COLOR + ctx->runtime->get_start_color())
     //--------------------------------------------------------------------------
     {
       if (parent != NULL)
@@ -7580,30 +7589,8 @@ namespace Legion {
     LegionColor IndexSpaceNode::generate_color(void)
     //--------------------------------------------------------------------------
     {
-      AutoLock n_lock(node_lock);
-      LegionColor result;
-      if (!color_map.empty())
-      {
-        unsigned stride = context->runtime->get_color_modulus();
-        std::map<LegionColor,IndexPartNode*>::const_reverse_iterator rlast = 
-                                                        color_map.rbegin();
-        // We know all colors for index spaces are 0-D
-        LegionColor new_color =
-          (rlast->first + (stride - 1)) / stride * stride +
-          context->runtime->get_start_color();
-        if (new_color == rlast->first) 
-          new_color += stride;
-        result = new_color;
-      }
-      else
-        result = context->runtime->get_start_color();
-#ifdef DEBUG_LEGION
-      assert(color_map.find(result) == color_map.end());
-#endif
-      // We have to put ourselves in the map to be sound for other parallel
-      // allocations of colors which may come later
-      color_map[result] = NULL; /* just put in a NULL pointer for now */
-      return result;
+      return __sync_fetch_and_add(&next_partition_color, 
+                  context->runtime->get_color_modulus());
     }
 
     //--------------------------------------------------------------------------

@@ -195,6 +195,10 @@
 #ifndef LEGION_MAX_APPLICATION_SERDEZ_ID
 #define LEGION_MAX_APPLICATION_SERDEZ_ID      (1<<20)
 #endif
+// Maximum ID for an application color
+#ifndef LEGION_MAX_APPLICATION_COLOR
+#define LEGION_MAX_APPLICATION_COLOR          (1<<20)
+#endif
 // Default number of local fields per field space
 #ifndef DEFAULT_LOCAL_FIELDS // For backwards compatibility
 #ifndef LEGION_DEFAULT_LOCAL_FIELDS
@@ -1161,6 +1165,7 @@ typedef enum legion_error_t {
   ERROR_LEGION_CONFIGURATION = 568,
   ERROR_CREATION_FUTURE_TYPE_MISMATCH = 569,
   ERROR_CONFUSED_USER = 570,
+  ERROR_EXCEEDED_MAX_APPLICATION_COLOR = 571,
   
 
   LEGION_WARNING_FUTURE_NONLEAF = 1000,

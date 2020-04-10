@@ -1935,6 +1935,8 @@ namespace Legion {
       std::set<RegionNode*> logical_nodes;
       std::set<std::pair<LegionColor,LegionColor> > disjoint_subsets;
       std::set<std::pair<LegionColor,LegionColor> > aliased_subsets;
+      // The next available runtime color for this index space
+      LegionColor next_partition_color;
     };
 
     /**
