@@ -21,23 +21,35 @@ local std = require("regent/std")
 local format = {}
 
 local format_string_mapping = {
-  [int32] = "%d",
-  [int64] = "%lld",
-  [uint32] = "%u",
-  [uint64] = "%llu",
-  [float] = "%f",
-  [double] = "%f",
+  [int32]  = { [false] =   "%d", x =   "%x" },
+  [int64]  = { [false] = "%lld", x = "%llx" },
+  [uint32] = { [false] =   "%u", x =   "%x" },
+  [uint64] = { [false] = "%llu", x = "%llx" },
+  [float]  = { [false] =   "%f", e =   "%e" },
+  [double] = { [false] =   "%f", e =   "%e" },
 }
 
-local function format_value(value, value_type)
+local function format_string(macro_name, node, value, value_type, modifiers)
+  local format_str = format_string_mapping[value_type]
+  if not format_str then
+    report.error(value:getast().expr, macro_name .. " does not understand how to format a value of type " .. tostring(value_type))
+  end
+  format_str = format_str[modifiers.style]
+  if not format_str then
+    report.error(node, macro_name .. " does not support format style " .. modifiers.style .. " on a value of type " .. tostring(value_type))
+  end
+  return format_str
+end
+
+local function format_value(macro_name, node, value, value_type, modifiers)
   local format_str
   local format_args = terralib.newlist()
   if std.is_bounded_type(value_type) then
-    return format_value(value, value_type.index_type)
+    return format_value(macro_name, node, value, value_type.index_type, modifiers)
   elseif std.is_index_type(value_type)then
     local base_type = value_type.base_type
     if not value_type.fields then
-      return format_value(rexpr [base_type](value) end, base_type)
+      return format_value(macro_name, node, rexpr [base_type](value) end, base_type, modifiers)
     end
 
     assert(base_type:isstruct())
@@ -45,7 +57,7 @@ local function format_value(value, value_type)
 
     format_str = "{"
     for i, field_name in ipairs(value_type.fields) do
-      local elt_format, elt_args = format_value(rexpr value.[field_name] end, base_type)
+      local elt_format, elt_args = format_value(macro_name, node, rexpr value.[field_name] end, base_type, modifiers)
       format_str = format_str .. field_name .. "=" .. elt_format
       if i < value_type.dim then
         format_str = format_str .. ", "
@@ -55,20 +67,28 @@ local function format_value(value, value_type)
     format_str = format_str .. "}"
   elseif std.is_rect_type(value_type) then
     local index_type = value_type.index_type
-    local lo_format, lo_args = format_value(rexpr value.lo end, index_type)
-    local hi_format, hi_args = format_value(rexpr value.hi end, index_type)
+    local lo_format, lo_args = format_value(macro_name, node, rexpr value.lo end, index_type, modifiers)
+    local hi_format, hi_args = format_value(macro_name, node, rexpr value.hi end, index_type, modifiers)
     format_str = "{lo=" .. lo_format .. ", hi=" .. hi_format .. "}"
     format_args:insertall(lo_args)
     format_args:insertall(hi_args)
   else
-    format_str = format_string_mapping[value_type]
-    if not format_str then
-      report.error(node, "println does not understand how to format a value of type " .. tostring(value_type))
-    end
+    format_str = format_string(macro_name, node, value, value_type, modifiers)
     format_args:insert(value)
   end
 
   return format_str, format_args
+end
+
+local function parse_modifiers(macro_name, node, str)
+  if str == "x" then
+    return {style = "x"}
+  elseif str == "e" then
+    return {style = "e"}
+  elseif str ~= "" then
+    report.error(node, macro_name .. " does not support the format style " .. str)
+  end
+  return {style = false}
 end
 
 local function sanitize(str)
@@ -91,14 +111,15 @@ local function format_arguments(macro_name, msg, args)
   local format_args = terralib.newlist()
 
   local function next_match()
-    return string.find(msg, "{}", last_pos)
+    return string.find(msg, "{[a-z]?}", last_pos)
   end
 
   local start, stop
   start, stop = next_match()
   while start do
     if idx <= #args then
-      local arg_format, arg_args = format_value(args[idx], args[idx]:gettype())
+      local modifiers = parse_modifiers(macro_name, node, string.sub(msg, start+1, stop-1))
+      local arg_format, arg_args = format_value(macro_name, node, args[idx], args[idx]:gettype(), modifiers)
       format_str = format_str .. sanitize(string.sub(msg, last_pos, start-1)) .. arg_format
       format_args:insertall(arg_args)
     end
