@@ -8920,13 +8920,16 @@ namespace Legion {
         {
           std::map<int,std::vector<void*> >::iterator next = 
             future_values.begin();
-          for (std::vector<void*>::const_iterator it = 
-                next->second.begin(); it != next->second.end(); it++)
+          if (next->first == current_stage)
           {
-            redop->fold(value, *it, 1/*count*/, true/*exclusive*/);
-            free(*it);
+            for (std::vector<void*>::const_iterator it = 
+                  next->second.begin(); it != next->second.end(); it++)
+            {
+              redop->fold(value, *it, 1/*count*/, true/*exclusive*/);
+              free(*it);
+            }
+            future_values.erase(next);
           }
-          future_values.erase(next);
         }
         current_stage = stage;
       }
@@ -9033,10 +9036,13 @@ namespace Legion {
         {
           typename std::map<int,std::vector<typename REDOP::RHS> >::iterator 
             next = future_values.begin();
-          for (typename std::vector<typename REDOP::RHS>::const_iterator it = 
-                next->second.begin(); it != next->second.end(); it++)
-            REDOP::template fold<true/*exclusive*/>(value, *it);
-          future_values.erase(next);
+          if (next->first == current_stage)
+          {
+            for (typename std::vector<typename REDOP::RHS>::const_iterator it =
+                  next->second.begin(); it != next->second.end(); it++)
+              REDOP::template fold<true/*exclusive*/>(value, *it);
+            future_values.erase(next);
+          }
         }
         current_stage = stage;
       }
