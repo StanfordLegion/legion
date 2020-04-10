@@ -214,7 +214,7 @@ namespace Legion {
         partition_color = parent_node->generate_color();
       else if (partition_color >= LEGION_MAX_APPLICATION_COLOR)
         REPORT_LEGION_ERROR(ERROR_EXCEEDED_MAX_APPLICATION_COLOR,
-            "User specified color %lld for partition creation in task %d "
+            "User specified color %lld for partition creation in task %s "
             "(UID %lld) exceeded the maximum allowed value for an application "
             "color %d specified in legion_config.h. Please change the value "
             "of LEGION_MAX_APPLICATION_COLOR in legion_config.h to support "
