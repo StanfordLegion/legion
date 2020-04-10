@@ -27,6 +27,10 @@ task main()
 
   format.println("Formatted: {x} {e}", y, 1.234)
 
+  var s = "asdf"
+  var t = [regentlib.string]("qwer")
+  format.println("String: {} {}", s, t)
+
   var i1 = int1d(1)
   var i2 = int2d { 1, 2 }
   var i3 = int3d { 1, 2, 3 }

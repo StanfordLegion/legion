@@ -21,12 +21,13 @@ local std = require("regent/std")
 local format = {}
 
 local format_string_mapping = {
-  [int32]  = { [false] =   "%d", x =   "%x" },
-  [int64]  = { [false] = "%lld", x = "%llx" },
-  [uint32] = { [false] =   "%u", x =   "%x" },
-  [uint64] = { [false] = "%llu", x = "%llx" },
-  [float]  = { [false] =   "%f", e =   "%e" },
-  [double] = { [false] =   "%f", e =   "%e" },
+  [int32]     = { [false] =   "%d", x =   "%x" },
+  [int64]     = { [false] = "%lld", x = "%llx" },
+  [uint32]    = { [false] =   "%u", x =   "%x" },
+  [uint64]    = { [false] = "%llu", x = "%llx" },
+  [float]     = { [false] =   "%f", e =   "%e" },
+  [double]    = { [false] =   "%f", e =   "%e" },
+  [rawstring] = { [false] =   "%s" },
 }
 
 local function format_string(macro_name, node, value, value_type, modifiers)
@@ -72,6 +73,8 @@ local function format_value(macro_name, node, value, value_type, modifiers)
     format_str = "{lo=" .. lo_format .. ", hi=" .. hi_format .. "}"
     format_args:insertall(lo_args)
     format_args:insertall(hi_args)
+  elseif std.is_string(value_type) then
+    return format_value(macro_name, node, rexpr [rawstring](value) end, rawstring, modifiers)
   else
     format_str = format_string(macro_name, node, value, value_type, modifiers)
     format_args:insert(value)
