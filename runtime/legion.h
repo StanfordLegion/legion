@@ -8054,6 +8054,15 @@ namespace Legion {
       uintptr_t allocate_deferred_instance(Memory memory, size_t size, 
                                            bool free = true);
 #endif
+    public:
+      // This method is hidden down here and not publicly documented because
+      // users shouldn't really need it for anything, however there are some
+      // reasonable cases where it might be utilitized for things like doing
+      // file I/O or printf that people might want it for so we've got it
+      ShardID get_shard_id(Context ctx, bool I_know_what_I_am_doing = false);
+      // We'll also allow users to get the total number of shards in the context
+      // if they also ar willing to attest they know what they are doing
+      size_t get_num_shards(Context ctx, bool I_know_what_I_am_doing = false);
     private:
       friend class Mapper;
       Internal::Runtime *runtime;

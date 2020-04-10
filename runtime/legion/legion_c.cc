@@ -7544,6 +7544,28 @@ legion_mapper_runtime_acquire_instances(
   return runtime->acquire_instances(ctx, instances);
 }
 
+legion_shard_id_t
+legion_context_get_shard_id(legion_runtime_t runtime_,
+                            legion_context_t ctx_,
+                            bool I_know_what_I_am_doing)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+
+  return runtime->get_shard_id(ctx, I_know_what_I_am_doing);
+}
+
+size_t
+legion_context_get_num_shards(legion_runtime_t runtime_,
+                              legion_context_t ctx_,
+                              bool I_know_what_I_am_doing)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+
+  return runtime->get_num_shards(ctx, I_know_what_I_am_doing);
+}
+
 legion_physical_region_t
 legion_get_physical_region_by_id(
     legion_physical_region_t *regionptr, 

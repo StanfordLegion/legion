@@ -6565,6 +6565,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ShardID Runtime::get_shard_id(Context ctx, bool I_know_what_I_am_doing)
+    //--------------------------------------------------------------------------
+    {
+      if (!I_know_what_I_am_doing)
+        REPORT_LEGION_ERROR(ERROR_CONFUSED_USER, "User does not know what "
+            "they are doing asking for the shard ID in task %s (UID %lld)",
+            ctx->get_task_name(), ctx->get_unique_id())
+      return 0;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t Runtime::get_num_shards(Context ctx, bool I_know_what_I_am_doing)
+    //--------------------------------------------------------------------------
+    {
+      if (!I_know_what_I_am_doing)
+        REPORT_LEGION_ERROR(ERROR_CONFUSED_USER, "User does not know what they"
+            " are doing asking for the number of shards in task %s (UID %lld)",
+            ctx->get_task_name(), ctx->get_unique_id())
+      return 1;
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void Runtime::enable_profiling(void)
     //--------------------------------------------------------------------------
     {
