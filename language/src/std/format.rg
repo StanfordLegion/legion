@@ -140,7 +140,7 @@ local function format_arguments(macro_name, msg, args)
     last_pos = stop + 1
     start, stop = next_match()
   end
-  format_str = format_str .. sanitize(string.sub(msg, last_pos, -1)) .. "\n"
+  format_str = format_str .. sanitize(string.sub(msg, last_pos, -1))
 
   if idx-1 ~= #args then
     report.error(node, macro_name .. " received " .. #args .. " arguments but format string has " .. (idx-1) .. " interpolations")
@@ -149,7 +149,7 @@ local function format_arguments(macro_name, msg, args)
   return format_str, format_args
 end
 
-format.println = regentlib.macro(
+format.print = regentlib.macro(
   function(msg, ...)
     local args = terralib.newlist({...})
     local format_str, format_args = format_arguments("println", msg, args)
@@ -157,12 +157,44 @@ format.println = regentlib.macro(
     return rexpr regentlib.c.printf(format_str, format_args) end
   end)
 
-format.fprintln = regentlib.macro(
+format.println = regentlib.macro(
+  function(msg, ...)
+    local args = terralib.newlist({...})
+    local format_str, format_args = format_arguments("println", msg, args)
+
+    return rexpr regentlib.c.printf([format_str .. "\n"], format_args) end
+  end)
+
+format.fprint = regentlib.macro(
   function(stream, msg, ...)
     local args = terralib.newlist({...})
     local format_str, format_args = format_arguments("fprintln", msg, args)
 
     return rexpr regentlib.c.fprintf(stream, format_str, format_args) end
+  end)
+
+format.fprintln = regentlib.macro(
+  function(stream, msg, ...)
+    local args = terralib.newlist({...})
+    local format_str, format_args = format_arguments("fprintln", msg, args)
+
+    return rexpr regentlib.c.fprintf(stream, [format_str .. "\n"], format_args) end
+  end)
+
+format.snprint = regentlib.macro(
+  function(s, n, msg, ...)
+    local args = terralib.newlist({...})
+    local format_str, format_args = format_arguments("fprintln", msg, args)
+
+    return rexpr regentlib.c.snprintf(s, n, format_str, format_args) end
+  end)
+
+format.snprintln = regentlib.macro(
+  function(s, n, msg, ...)
+    local args = terralib.newlist({...})
+    local format_str, format_args = format_arguments("fprintln", msg, args)
+
+    return rexpr regentlib.c.snprintf(s, n, [format_str .. "\n"], format_args) end
   end)
 
 return format

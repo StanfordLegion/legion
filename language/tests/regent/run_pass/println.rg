@@ -55,5 +55,14 @@ task main()
   -- Regent's println *DOES NOT* follow C's printf codes, so this
   -- should just print the literal string.
   format.println("%d %f %s %%")
+
+  format.print("a")
+  format.print("b")
+  format.println("c")
+
+  var size = format.snprint([rawstring](0), 0, "{} {}", 123, 456)
+  var buffer = [rawstring](regentlib.c.malloc(size+1))
+  format.snprint(buffer, size+1, "{} {}", 123, 456)
+  format.println("{}", buffer)
 end
 regentlib.start(main)
