@@ -92,7 +92,8 @@ local function convert_lua_value(cx, node, value, allow_lists)
     terralib.isoverloadedfunction(value) or
     terralib.ismacro(value) or
     terralib.types.istype(value) or
-    std.is_task(value) or std.is_math_fn(value)
+    std.is_task(value) or std.is_math_fn(value) or
+    std.is_macro(value)
   then
     return ast.specialized.expr.Function {
       value = value,
@@ -622,6 +623,7 @@ function specialize.expr_call(cx, node, allow_lists)
     terralib.ismacro(fn.value) or
     std.is_task(fn.value) or
     std.is_math_fn(fn.value) or
+    std.is_macro(fn.value) or
     type(fn.value) == "cdata"
   then
     if not std.is_task(fn.value) and #node.conditions > 0 then
@@ -2184,6 +2186,7 @@ function specialize.top_quote_expr(cx, node)
   local cx = cx:new_local_scope(true)
   return std.newrquote(ast.specialized.top.QuoteExpr {
     expr = specialize.expr(cx, node.expr),
+    expr_type = false,
     annotations = node.annotations,
     span = node.span,
   })

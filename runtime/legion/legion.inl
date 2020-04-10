@@ -6759,16 +6759,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline IndexSpace& IndexSpace::operator=(const IndexSpace &rhs)
-    //--------------------------------------------------------------------------
-    {
-      id = rhs.id;
-      tid = rhs.tid;
-      type_tag = rhs.type_tag;
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
     inline bool IndexSpace::operator==(const IndexSpace &rhs) const
     //--------------------------------------------------------------------------
     {
@@ -6840,15 +6830,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    IndexSpaceT<DIM,T>::IndexSpaceT(const IndexSpaceT &rhs)
-      : IndexSpace(rhs.get_id(), rhs.get_tree_id(), rhs.get_type_tag())
-    //--------------------------------------------------------------------------
-    {
-      Internal::NT_TemplateHelper::template check_type<DIM,T>(type_tag);
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
     IndexSpaceT<DIM,T>::IndexSpaceT(const IndexSpace &rhs)
       : IndexSpace(rhs.get_id(), rhs.get_tree_id(), rhs.get_type_tag())
     //--------------------------------------------------------------------------
@@ -6869,29 +6850,6 @@ namespace Legion {
       return *this;
     }
 
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    inline IndexSpaceT<DIM,T>& IndexSpaceT<DIM,T>::operator=(
-                                                         const IndexSpaceT &rhs)
-    //--------------------------------------------------------------------------
-    {
-      id = rhs.get_id();
-      tid = rhs.get_tree_id();
-      type_tag = rhs.get_type_tag();
-      Internal::NT_TemplateHelper::template check_type<DIM,T>(type_tag);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    inline IndexPartition& IndexPartition::operator=(const IndexPartition &rhs)
-    //--------------------------------------------------------------------------
-    {
-      id = rhs.id;
-      tid = rhs.tid;
-      type_tag = rhs.type_tag;
-      return *this;
-    }
-    
     //--------------------------------------------------------------------------
     inline bool IndexPartition::operator==(const IndexPartition &rhs) const
     //--------------------------------------------------------------------------
@@ -6965,15 +6923,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    IndexPartitionT<DIM,T>::IndexPartitionT(const IndexPartitionT &rhs)
-      : IndexPartition(rhs.get_id(), rhs.get_tree_id(), rhs.get_type_tag())
-    //--------------------------------------------------------------------------
-    {
-      Internal::NT_TemplateHelper::template check_type<DIM,T>(type_tag);
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
     IndexPartitionT<DIM,T>::IndexPartitionT(const IndexPartition &rhs)
       : IndexPartition(rhs.get_id(), rhs.get_tree_id(), rhs.get_type_tag())
     //--------------------------------------------------------------------------
@@ -6991,27 +6940,6 @@ namespace Legion {
       tid = rhs.get_tree_id();
       type_tag = rhs.get_type_tag();
       Internal::NT_TemplateHelper::template check_type<DIM,T>(type_tag);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    IndexPartitionT<DIM,T>& IndexPartitionT<DIM,T>::operator=(
-                                                     const IndexPartitionT &rhs)
-    //--------------------------------------------------------------------------
-    {
-      id = rhs.get_id();
-      tid = rhs.get_tree_id();
-      type_tag = rhs.get_type_tag();
-      Internal::NT_TemplateHelper::template check_type<DIM,T>(type_tag);
-      return *this;
-    }
-    
-    //--------------------------------------------------------------------------
-    inline FieldSpace& FieldSpace::operator=(const FieldSpace &rhs)
-    //--------------------------------------------------------------------------
-    {
-      id = rhs.id;
       return *this;
     }
 
@@ -7043,16 +6971,6 @@ namespace Legion {
       return (id > rhs.id);
     }
 
-    //--------------------------------------------------------------------------
-    inline LogicalRegion& LogicalRegion::operator=(const LogicalRegion &rhs) 
-    //--------------------------------------------------------------------------
-    {
-      tree_id = rhs.tree_id;
-      index_space = rhs.index_space;
-      field_space = rhs.field_space;
-      return *this;
-    }
-    
     //--------------------------------------------------------------------------
     inline bool LogicalRegion::operator==(const LogicalRegion &rhs) const
     //--------------------------------------------------------------------------
@@ -7108,17 +7026,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    LogicalRegionT<DIM,T>::LogicalRegionT(const LogicalRegionT &rhs)
-      : LogicalRegion(rhs.get_tree_id(), rhs.get_index_space(), 
-                      rhs.get_field_space())
-    //--------------------------------------------------------------------------
-    {
-      Internal::NT_TemplateHelper::template check_type<DIM,T>(
-                                rhs.get_type_tag());
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
     LogicalRegionT<DIM,T>::LogicalRegionT(const LogicalRegion &rhs)
       : LogicalRegion(rhs.get_tree_id(), rhs.get_index_space(), 
                       rhs.get_field_space())
@@ -7139,31 +7046,6 @@ namespace Legion {
       field_space = rhs.get_field_space();
       Internal::NT_TemplateHelper::template check_type<DIM,T>(
                                 rhs.get_type_tag());
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    LogicalRegionT<DIM,T>& LogicalRegionT<DIM,T>::operator=(
-                                                      const LogicalRegionT &rhs)
-    //--------------------------------------------------------------------------
-    {
-      tree_id = rhs.get_tree_id();
-      index_space = rhs.get_index_space();
-      field_space = rhs.get_field_space();
-      Internal::NT_TemplateHelper::template check_type<DIM,T>(
-                                rhs.get_type_tag());
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    inline LogicalPartition& LogicalPartition::operator=(
-                                                    const LogicalPartition &rhs)
-    //--------------------------------------------------------------------------
-    {
-      tree_id = rhs.tree_id;
-      index_partition = rhs.index_partition;
-      field_space = rhs.field_space;
       return *this;
     }
 
@@ -7223,17 +7105,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    LogicalPartitionT<DIM,T>::LogicalPartitionT(const LogicalPartitionT &rhs)
-      : LogicalPartition(rhs.get_tree_id(), rhs.get_index_partition(), 
-                         rhs.get_field_space())
-    //--------------------------------------------------------------------------
-    {
-      Internal::NT_TemplateHelper::template check_type<DIM,T>(
-                                            rhs.get_type_tag());
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
     LogicalPartitionT<DIM,T>::LogicalPartitionT(const LogicalPartition &rhs)
       : LogicalPartition(rhs.get_tree_id(), rhs.get_index_partition(), 
                          rhs.get_field_space())
@@ -7247,20 +7118,6 @@ namespace Legion {
     template<int DIM, typename T>
     LogicalPartitionT<DIM,T>& LogicalPartitionT<DIM,T>::operator=(
                                                     const LogicalPartition &rhs)
-    //--------------------------------------------------------------------------
-    {
-      tree_id = rhs.get_tree_id();
-      index_partition = rhs.get_index_partition();
-      field_space = rhs.get_field_space();
-      Internal::NT_TemplateHelper::template check_type<DIM,T>(
-                                            rhs.get_type_tag());
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    LogicalPartitionT<DIM,T>& LogicalPartitionT<DIM,T>::operator=(
-                                                   const LogicalPartitionT &rhs)
     //--------------------------------------------------------------------------
     {
       tree_id = rhs.get_tree_id();

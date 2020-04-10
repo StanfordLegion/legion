@@ -1739,8 +1739,44 @@ function rquote:getast()
   return self.ast
 end
 
+function rquote:gettype()
+  assert(self.ast.expr_type)
+  return self.ast.expr_type
+end
+
 function rquote:__tostring()
   return self.ast:tostring(true)
+end
+
+-- #####################################
+-- ## Macros
+-- #################
+
+local rmacro = {}
+function rmacro:__index(field)
+  local value = rmacro[field]
+  if value ~= nil then return value end
+  error("macro has no field '" .. field .. "' (in lookup)", 2)
+end
+
+function rmacro:__newindex(field, value)
+  error("macro has no field '" .. field .. "' (in assignment)", 2)
+end
+
+function std.macro(fn)
+  assert(fn ~= nil)
+
+  return setmetatable({
+    fn = fn,
+  }, rmacro)
+end
+
+function std.is_macro(x)
+  return getmetatable(x) == rmacro
+end
+
+function rmacro:__tostring()
+  return "macro(" .. tostring(self.fn) .. ")"
 end
 
 -- #####################################

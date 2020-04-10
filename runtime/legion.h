@@ -90,9 +90,7 @@ namespace Legion {
       IndexSpace(IndexSpaceID id, IndexTreeID tid, TypeTag tag);
     public:
       IndexSpace(void);
-      IndexSpace(const IndexSpace &rhs);
     public:
-      inline IndexSpace& operator=(const IndexSpace &rhs);
       inline bool operator==(const IndexSpace &rhs) const;
       inline bool operator!=(const IndexSpace &rhs) const;
       inline bool operator<(const IndexSpace &rhs) const;
@@ -124,11 +122,9 @@ namespace Legion {
       IndexSpaceT(IndexSpaceID id, IndexTreeID tid);
     public:
       IndexSpaceT(void);
-      IndexSpaceT(const IndexSpaceT &rhs);  
       explicit IndexSpaceT(const IndexSpace &rhs);
     public:
       inline IndexSpaceT& operator=(const IndexSpace &rhs);
-      inline IndexSpaceT& operator=(const IndexSpaceT &rhs);
     };
 
     /**
@@ -146,9 +142,7 @@ namespace Legion {
       IndexPartition(IndexPartitionID id, IndexTreeID tid, TypeTag tag);
     public:
       IndexPartition(void);
-      IndexPartition(const IndexPartition &rhs);
     public:
-      inline IndexPartition& operator=(const IndexPartition &rhs);
       inline bool operator==(const IndexPartition &rhs) const;
       inline bool operator!=(const IndexPartition &rhs) const;
       inline bool operator<(const IndexPartition &rhs) const;
@@ -180,11 +174,9 @@ namespace Legion {
       IndexPartitionT(IndexPartitionID id, IndexTreeID tid);
     public:
       IndexPartitionT(void);
-      IndexPartitionT(const IndexPartitionT &rhs);
       explicit IndexPartitionT(const IndexPartition &rhs);
     public:
       inline IndexPartitionT& operator=(const IndexPartition &rhs);
-      inline IndexPartitionT& operator=(const IndexPartitionT &rhs);
     };
 
     /**
@@ -205,9 +197,7 @@ namespace Legion {
       FieldSpace(FieldSpaceID id);
     public:
       FieldSpace(void);
-      FieldSpace(const FieldSpace &rhs);
     public:
-      inline FieldSpace& operator=(const FieldSpace &rhs);
       inline bool operator==(const FieldSpace &rhs) const;
       inline bool operator!=(const FieldSpace &rhs) const;
       inline bool operator<(const FieldSpace &rhs) const;
@@ -242,9 +232,7 @@ namespace Legion {
       LogicalRegion(RegionTreeID tid, IndexSpace index, FieldSpace field);
     public:
       LogicalRegion(void);
-      LogicalRegion(const LogicalRegion &rhs);
     public:
-      inline LogicalRegion& operator=(const LogicalRegion &rhs);
       inline bool operator==(const LogicalRegion &rhs) const;
       inline bool operator!=(const LogicalRegion &rhs) const;
       inline bool operator<(const LogicalRegion &rhs) const;
@@ -279,11 +267,9 @@ namespace Legion {
       LogicalRegionT(RegionTreeID tid, IndexSpace index, FieldSpace field);
     public:
       LogicalRegionT(void);
-      LogicalRegionT(const LogicalRegionT &rhs);
       explicit LogicalRegionT(const LogicalRegion &rhs);
     public:
       inline LogicalRegionT& operator=(const LogicalRegion &rhs);
-      inline LogicalRegionT& operator=(const LogicalRegionT &rhs);
     };
 
     /**
@@ -310,9 +296,7 @@ namespace Legion {
       LogicalPartition(RegionTreeID tid, IndexPartition pid, FieldSpace field);
     public:
       LogicalPartition(void);
-      LogicalPartition(const LogicalPartition &rhs);
     public:
-      inline LogicalPartition& operator=(const LogicalPartition &rhs);
       inline bool operator==(const LogicalPartition &rhs) const;
       inline bool operator!=(const LogicalPartition &rhs) const;
       inline bool operator<(const LogicalPartition &rhs) const;
@@ -348,11 +332,9 @@ namespace Legion {
       LogicalPartitionT(RegionTreeID tid, IndexPartition pid, FieldSpace field);
     public:
       LogicalPartitionT(void);
-      LogicalPartitionT(const LogicalPartitionT &rhs);
       explicit LogicalPartitionT(const LogicalPartition &rhs);
     public:
       inline LogicalPartitionT& operator=(const LogicalPartition &rhs);
-      inline LogicalPartitionT& operator=(const LogicalPartitionT &rhs);
     };
 
     //==========================================================================
