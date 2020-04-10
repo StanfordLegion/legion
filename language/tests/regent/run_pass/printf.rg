@@ -20,8 +20,16 @@ task main()
   var x : int32 = 1
   var y : uint64 = 1234
   printf.printf("Hello {} {} world!", x, y)
+
   var z : float = 1.23
   var w : double = 3.45
   printf.printf("Floats: {} {}", z, w)
+
+  var i1 = int1d(1)
+  var i2 = int2d { 1, 2 }
+  var i3 = int3d { 1, 2, 3 }
+  printf.printf("int1d {}", i1)
+  printf.printf("int2d {}", i2)
+  printf.printf("int3d {}", i3)
 end
 regentlib.start(main)

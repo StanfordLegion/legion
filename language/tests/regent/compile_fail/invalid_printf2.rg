@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- invalid_printf2.rg:26: printf received 2 arguments but format string has 1 interpolations
+-- invalid_printf2.rg:25: printf received 2 arguments but format string has 1 interpolations
 --   printf.printf("Hello {} world!", 1, 2)
 --         ^
 
