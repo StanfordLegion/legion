@@ -3544,8 +3544,7 @@ namespace Legion {
           color_space->add_nested_resource_ref(did);
         }
         result->register_with_runtime(&mutator);
-        if (parent != NULL)
-          parent->add_child(result, &mutator);
+        parent->add_child(result, &mutator);
       }
       if (local_initialized.exists())
       {
@@ -3652,8 +3651,7 @@ namespace Legion {
           color_space->add_nested_resource_ref(did);
         }
         result->register_with_runtime(&mutator);
-        if (parent != NULL)
-          parent->add_child(result, &mutator);
+        parent->add_child(result, &mutator);
       }
       if (local_initialized.exists())
       {
