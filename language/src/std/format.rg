@@ -31,7 +31,7 @@ local format_string_mapping = {
 
 local function format_value(value, value_type)
   local format_str
-  local format_args = terralib.newlist({})
+  local format_args = terralib.newlist()
   if std.is_bounded_type(value_type) then
     return format_value(value, value_type.index_type)
   elseif std.is_index_type(value_type)then
@@ -75,46 +75,60 @@ local function sanitize(str)
   return string.gsub(str, "%%", "%%%%")
 end
 
+local function format_arguments(macro_name, msg, args)
+  local node = msg:getast()
+
+  if not (node.expr:is(ast.specialized.expr.Constant) and
+            type(node.expr.value) == "string")
+  then
+    report.error(node, macro_name .. " expected first argument to be a format string constant")
+  end
+  msg = node.expr.value
+
+  local idx = 1
+  local last_pos = 1
+  local format_str = ""
+  local format_args = terralib.newlist()
+
+  local function next_match()
+    return string.find(msg, "{}", last_pos)
+  end
+
+  local start, stop
+  start, stop = next_match()
+  while start do
+    if idx <= #args then
+      local arg_format, arg_args = format_value(args[idx], args[idx]:gettype())
+      format_str = format_str .. sanitize(string.sub(msg, last_pos, start-1)) .. arg_format
+      format_args:insertall(arg_args)
+    end
+    idx = idx + 1
+    last_pos = stop + 1
+    start, stop = next_match()
+  end
+  format_str = format_str .. sanitize(string.sub(msg, last_pos, -1)) .. "\n"
+
+  if idx-1 ~= #args then
+    report.error(node, macro_name .. " received " .. #args .. " arguments but format string has " .. (idx-1) .. " interpolations")
+  end
+
+  return format_str, format_args
+end
+
 format.println = regentlib.macro(
   function(msg, ...)
-    local node = msg:getast()
-
     local args = terralib.newlist({...})
-    if not (node.expr:is(ast.specialized.expr.Constant) and
-              type(node.expr.value) == "string")
-    then
-      report.error(node, "println expected first argument to be a format string constant")
-    end
-    msg = node.expr.value
+    local format_str, format_args = format_arguments("println", msg, args)
 
-    local idx = 1
-    local last_pos = 1
-    local format_str = ""
-    local format_args = terralib.newlist()
+    return rexpr regentlib.c.printf(format_str, format_args) end
+  end)
 
-    local function next_match()
-      return string.find(msg, "{}", last_pos)
-    end
+format.fprintln = regentlib.macro(
+  function(stream, msg, ...)
+    local args = terralib.newlist({...})
+    local format_str, format_args = format_arguments("fprintln", msg, args)
 
-    local start, stop
-    start, stop = next_match()
-    while start do
-      if idx <= #args then
-        local arg_format, arg_args = format_value(args[idx], args[idx]:gettype())
-        format_str = format_str .. sanitize(string.sub(msg, last_pos, start-1)) .. arg_format
-        format_args:insertall(arg_args)
-      end
-      idx = idx + 1
-      last_pos = stop + 1
-      start, stop = next_match()
-    end
-    format_str = format_str .. sanitize(string.sub(msg, last_pos, -1)) .. "\n"
-
-    if idx-1 ~= #args then
-      report.error(node, "println received " .. #args .. " arguments but format string has " .. (idx-1) .. " interpolations")
-    end
-
-    return rexpr regentlib.c.printf([format_str], [format_args]) end
+    return rexpr regentlib.c.fprintf(stream, format_str, format_args) end
   end)
 
 return format
