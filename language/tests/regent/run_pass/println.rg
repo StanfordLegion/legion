@@ -31,5 +31,18 @@ task main()
   format.println("int1d {}", i1)
   format.println("int2d {}", i2)
   format.println("int3d {}", i3)
+
+  var is = ispace(int2d, { 2, 2 })
+  var r = region(is, int)
+  for i in is do
+    format.println("int2d(is) {}", i)
+  end
+  for x in r do
+    format.println("int2d(r) {}", x)
+  end
+
+  -- Regent's println *DOES NOT* follow C's printf codes, so this
+  -- should just print the literal string.
+  format.println("%d %f %s %%")
 end
 regentlib.start(main)

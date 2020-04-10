@@ -29,6 +29,45 @@ local format_string_mapping = {
   [double] = "%f",
 }
 
+local function format_value(value, value_type)
+  local format_str
+  local format_args = terralib.newlist({})
+  if std.is_bounded_type(value_type) then
+    return format_value(value, value_type.index_type)
+  elseif std.is_index_type(value_type)then
+    local base_type = value_type.base_type
+    if not value_type.fields then
+      return format_value(rexpr [base_type](value) end, base_type)
+    end
+
+    assert(base_type:isstruct())
+    base_type = base_type:getentries()[1].type or base_type:getentries()[1][1]
+
+    format_str = "{"
+    for i, field_name in ipairs(value_type.fields) do
+      local elt_format, elt_args = format_value(rexpr value.[field_name] end, base_type)
+      format_str = format_str .. field_name .. "=" .. elt_format
+      if i < value_type.dim then
+        format_str = format_str .. ", "
+      end
+      format_args:insertall(elt_args)
+    end
+    format_str = format_str .. "}"
+  else
+    format_str = format_string_mapping[value_type]
+    if not format_str then
+      report.error(node, "println does not understand how to format a value of type " .. tostring(value_type))
+    end
+    format_args:insert(value)
+  end
+
+  return format_str, format_args
+end
+
+local function sanitize(str)
+  return string.gsub(str, "%%", "%%%%")
+end
+
 format.println = regentlib.macro(
   function(msg, ...)
     local node = msg:getast()
@@ -54,44 +93,15 @@ format.println = regentlib.macro(
     start, stop = next_match()
     while start do
       if idx <= #args then
-        local arg_type = args[idx]:gettype()
-        local arg_format = format_string_mapping[arg_type]
-        if std.is_index_type(arg_type) or std.is_bounded_type(arg_type) then
-          local base_type = arg_type
-          if std.is_bounded_type(arg_type) then
-            base_type = base_type.index_type
-          end
-          base_type = base_type.base_type
-          if base_type:isstruct() then
-            base_type = base_type:getentries()[1].type or base_type:getentries()[1][1]
-          end
-          local elt_format = format_string_mapping[base_type]
-          if arg_type.fields then
-            arg_format = "{"
-            for i, field_name in ipairs(arg_type.fields) do
-              arg_format = arg_format .. field_name .. "=" .. elt_format
-              if i < arg_type.dim then
-                arg_format = arg_format .. ", "
-              end
-              format_args:insert(rexpr [args[idx]].[field_name] end)
-            end
-            arg_format = arg_format .. "}"
-          else
-            format_args:insert(rexpr [base_type]([args[idx]]) end)
-            arg_format = elt_format
-          end
-        elseif not arg_format then
-          report.error(node, "println does not understand how to format a value of type " .. tostring(arg_type))
-        else
-          format_args:insert(args[idx])
-        end
-        format_str = format_str .. string.sub(msg, last_pos, start-1) .. arg_format
+        local arg_format, arg_args = format_value(args[idx], args[idx]:gettype())
+        format_str = format_str .. sanitize(string.sub(msg, last_pos, start-1)) .. arg_format
+        format_args:insertall(arg_args)
       end
       idx = idx + 1
       last_pos = stop + 1
       start, stop = next_match()
     end
-    format_str = format_str .. string.sub(msg, last_pos, -1) .. "\n"
+    format_str = format_str .. sanitize(string.sub(msg, last_pos, -1)) .. "\n"
 
     if idx-1 ~= #args then
       report.error(node, "println received " .. #args .. " arguments but format string has " .. (idx-1) .. " interpolations")
