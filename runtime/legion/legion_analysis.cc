@@ -5301,7 +5301,7 @@ namespace Legion {
     ValidInstAnalysis::ValidInstAnalysis(Runtime *rt, Operation *o,unsigned idx, 
                                      const VersionInfo &info, ReductionOpID red)
       : PhysicalAnalysis(rt, o, idx, info, false/*on heap*/), 
-        redop(red), target(this)
+        redop(red), target_analysis(this)
     //--------------------------------------------------------------------------
     {
     }
@@ -5311,14 +5311,14 @@ namespace Legion {
                    AddressSpaceID prev, Operation *o, unsigned idx,
                    VersionManager *man, ValidInstAnalysis *t, ReductionOpID red)
       : PhysicalAnalysis(rt, src, prev, o, idx, man, true/*on heap*/), 
-        redop(red), target(t)
+        redop(red), target_analysis(t)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     ValidInstAnalysis::ValidInstAnalysis(const ValidInstAnalysis &rhs)
-      : PhysicalAnalysis(rhs), redop(0), target(NULL)
+      : PhysicalAnalysis(rhs), redop(0), target_analysis(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -5381,7 +5381,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(!rit->second.empty());
 #endif
-        const AddressSpaceID target_addr = rit->first.first;
+        const AddressSpaceID target = rit->first.first;
         const RtUserEvent ready = Runtime::create_rt_user_event();
         const RtUserEvent applied = Runtime::create_rt_user_event();
         Serializer rez;
@@ -5395,16 +5395,16 @@ namespace Legion {
             rez.serialize(it->first->did);
             rez.serialize(it->second);
           }
-          op->pack_remote_operation(rez, target_addr, applied_events);
+          op->pack_remote_operation(rez, target, applied_events);
           rez.serialize(index);
           rez.serialize(redop);
-          rez.serialize(target);
+          rez.serialize(target_analysis);
           rez.serialize(ready);
           rez.serialize(applied);
           rez.serialize(version_manager);
           rez.serialize<bool>(rit->first.second);
         }
-        runtime->send_equivalence_set_remote_request_instances(target_addr,rez);
+        runtime->send_equivalence_set_remote_request_instances(target, rez);
         ready_events.insert(ready);
         applied_events.insert(applied);
       }
@@ -5437,7 +5437,7 @@ namespace Legion {
           Serializer rez;
           {
             RezCheck z(rez);
-            rez.serialize(target);
+            rez.serialize(target_analysis);
             rez.serialize(response_event);
             rez.serialize<size_t>(remote_instances->size());
             for (FieldMaskSet<InstanceView>::const_iterator it = 
@@ -5452,7 +5452,8 @@ namespace Legion {
           return response_event;
         }
         else
-          target->process_local_instances(*remote_instances, restricted);
+          target_analysis->process_local_instances(*remote_instances,
+                                                   restricted);
       }
       return RtEvent::NO_RT_EVENT;
     }
@@ -5543,7 +5544,7 @@ namespace Legion {
                                   unsigned idx, const VersionInfo &info, 
                                   const FieldMaskSet<InstanceView> &valid_insts)
       : PhysicalAnalysis(rt, o, idx, info, false/*on heap*/), 
-        valid_instances(valid_insts), target(this)
+        valid_instances(valid_insts), target_analysis(this)
     //--------------------------------------------------------------------------
     {
     }
@@ -5553,14 +5554,15 @@ namespace Legion {
         AddressSpaceID prev, Operation *o, unsigned idx, VersionManager *man,
         InvalidInstAnalysis *t, const FieldMaskSet<InstanceView> &valid_insts)
       : PhysicalAnalysis(rt, src, prev, o, idx, man, true/*on heap*/), 
-        valid_instances(valid_insts), target(t)
+        valid_instances(valid_insts), target_analysis(t)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     InvalidInstAnalysis::InvalidInstAnalysis(const InvalidInstAnalysis &rhs)
-      : PhysicalAnalysis(rhs), valid_instances(rhs.valid_instances),target(NULL)
+      : PhysicalAnalysis(rhs), valid_instances(rhs.valid_instances),
+        target_analysis(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -5624,7 +5626,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(!rit->second.empty());
 #endif
-        const AddressSpaceID target_addr = rit->first.first;
+        const AddressSpaceID target = rit->first.first;
         const RtUserEvent ready = Runtime::create_rt_user_event();
         const RtUserEvent applied = Runtime::create_rt_user_event();
         Serializer rez;
@@ -5638,7 +5640,7 @@ namespace Legion {
             rez.serialize(it->first->did);
             rez.serialize(it->second);
           }
-          op->pack_remote_operation(rez, target_addr, applied_events);
+          op->pack_remote_operation(rez, target, applied_events);
           rez.serialize(index);
           rez.serialize<size_t>(valid_instances.size());
           for (FieldMaskSet<InstanceView>::const_iterator it = 
@@ -5647,13 +5649,13 @@ namespace Legion {
             rez.serialize(it->first->did);
             rez.serialize(it->second);
           }
-          rez.serialize(target);
+          rez.serialize(target_analysis);
           rez.serialize(ready);
           rez.serialize(applied);
           rez.serialize(version_manager);
           rez.serialize<bool>(rit->first.second);
         }
-        runtime->send_equivalence_set_remote_request_invalid(target_addr, rez);
+        runtime->send_equivalence_set_remote_request_invalid(target, rez);
         ready_events.insert(ready);
         applied_events.insert(applied);
       }
@@ -5686,7 +5688,7 @@ namespace Legion {
           Serializer rez;
           {
             RezCheck z(rez);
-            rez.serialize(target);
+            rez.serialize(target_analysis);
             rez.serialize(response_event);
             rez.serialize<size_t>(remote_instances->size());
             for (FieldMaskSet<InstanceView>::const_iterator it = 
@@ -5701,7 +5703,8 @@ namespace Legion {
           return response_event;
         }
         else
-          target->process_local_instances(*remote_instances, restricted);
+          target_analysis->process_local_instances(*remote_instances, 
+                                                   restricted);
       }
       return RtEvent::NO_RT_EVENT;
     }
@@ -6216,7 +6219,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     AcquireAnalysis::AcquireAnalysis(Runtime *rt, Operation *o, 
                                      unsigned idx, const VersionInfo &info)
-      : PhysicalAnalysis(rt, o, idx, info, false/*on heap*/), target(this)
+      : PhysicalAnalysis(rt, o, idx, info, false/*on heap*/), 
+        target_analysis(this)
     //--------------------------------------------------------------------------
     {
     }
@@ -6225,14 +6229,15 @@ namespace Legion {
     AcquireAnalysis::AcquireAnalysis(Runtime *rt, AddressSpaceID src, 
                       AddressSpaceID prev, Operation *o, unsigned idx, 
                       VersionManager *man, AcquireAnalysis *t)
-      : PhysicalAnalysis(rt, src, prev, o, idx, man, true/*on heap*/), target(t)
+      : PhysicalAnalysis(rt, src, prev, o, idx, man, true/*on heap*/), 
+        target_analysis(t)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     AcquireAnalysis::AcquireAnalysis(const AcquireAnalysis &rhs)
-      : PhysicalAnalysis(rhs), target(rhs.target)
+      : PhysicalAnalysis(rhs), target_analysis(rhs.target_analysis)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -6313,7 +6318,7 @@ namespace Legion {
           rez.serialize(index);
           rez.serialize(returned);
           rez.serialize(applied);
-          rez.serialize(target);
+          rez.serialize(target_analysis);
           rez.serialize(version_manager);
           rez.serialize<bool>(rit->first.second);
         }
@@ -6350,7 +6355,7 @@ namespace Legion {
           Serializer rez;
           {
             RezCheck z(rez);
-            rez.serialize(target);
+            rez.serialize(target_analysis);
             rez.serialize(response_event);
             rez.serialize<size_t>(remote_instances->size());
             for (FieldMaskSet<InstanceView>::const_iterator it = 
@@ -6365,7 +6370,8 @@ namespace Legion {
           return response_event;
         }
         else
-          target->process_local_instances(*remote_instances, restricted);
+          target_analysis->process_local_instances(*remote_instances, 
+                                                   restricted);
       }
       return RtEvent::NO_RT_EVENT;
     }
@@ -6455,7 +6461,7 @@ namespace Legion {
                                      ApEvent pre, const VersionInfo &info,
                                      const PhysicalTraceInfo &t_info)
       : PhysicalAnalysis(rt, o, idx, info, false/*on heap*/), 
-        precondition(pre), target(this), trace_info(t_info),
+        precondition(pre), target_analysis(this), trace_info(t_info),
         release_aggregator(NULL)
     //--------------------------------------------------------------------------
     {
@@ -6466,7 +6472,7 @@ namespace Legion {
             AddressSpaceID prev, Operation *o, unsigned idx,VersionManager *man,
             ApEvent pre, ReleaseAnalysis *t, const PhysicalTraceInfo &info)
       : PhysicalAnalysis(rt, src, prev, o, idx, man, true/*on heap*/), 
-        precondition(pre), target(t), trace_info(info), 
+        precondition(pre), target_analysis(t), trace_info(info), 
         release_aggregator(NULL)
     //--------------------------------------------------------------------------
     {
@@ -6474,7 +6480,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReleaseAnalysis::ReleaseAnalysis(const ReleaseAnalysis &rhs)
-      : PhysicalAnalysis(rhs), target(rhs.target), trace_info(rhs.trace_info)
+      : PhysicalAnalysis(rhs), target_analysis(rhs.target_analysis), 
+        trace_info(rhs.trace_info)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -6556,7 +6563,7 @@ namespace Legion {
           rez.serialize(precondition);
           rez.serialize(returned);
           rez.serialize(applied);
-          rez.serialize(target);
+          rez.serialize(target_analysis);
           trace_info.pack_trace_info<false>(rez, applied_events, target);
           rez.serialize(version_manager);
           rez.serialize<bool>(rit->first.second);
@@ -6588,7 +6595,7 @@ namespace Legion {
       if (!stale_sets.empty())
         update_stale_equivalence_sets(applied_events);
       // See if we have any instance names to send back
-      if ((target != this) && (remote_instances != NULL))
+      if ((target_analysis != this) && (remote_instances != NULL))
       {
         if (original_source != runtime->address_space)
         {
@@ -6596,7 +6603,7 @@ namespace Legion {
           Serializer rez;
           {
             RezCheck z(rez);
-            rez.serialize(target);
+            rez.serialize(target_analysis);
             rez.serialize(response_event);
             rez.serialize<size_t>(remote_instances->size());
             for (FieldMaskSet<InstanceView>::const_iterator it = 
@@ -6611,7 +6618,8 @@ namespace Legion {
           applied_events.insert(response_event);
         }
         else
-          target->process_local_instances(*remote_instances, restricted);
+          target_analysis->process_local_instances(*remote_instances, 
+                                                   restricted);
       }
       if (release_aggregator != NULL)
       {
