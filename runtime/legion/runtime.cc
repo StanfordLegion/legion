@@ -11372,7 +11372,8 @@ namespace Legion {
         for (std::vector<RegistrationCallbackFnptr>::const_iterator it = 
               registration_callbacks.begin(); it !=
               registration_callbacks.end(); it++)
-          perform_registration_callback(*it, false/*global*/);
+          perform_registration_callback(*it, 
+              false/*global*/, true/*preregistered*/);
         log_run.info("Finished execution of registration callbacks");
       }
     }
@@ -11404,7 +11405,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent Runtime::perform_registration_callback(
-                                RegistrationCallbackFnptr callback, bool global)
+            RegistrationCallbackFnptr callback, bool global, bool preregistered)
     //--------------------------------------------------------------------------
     { 
       if (inside_registration_callback)
@@ -11506,7 +11507,8 @@ namespace Legion {
       // Do the local callback and record it now 
       if (local_perform.exists())
       {
-        if (global)
+        // All the pregistered cases are effectively global too
+        if (global || preregistered)
           inside_registration_callback = GLOBAL_REGISTRATION_CALLBACK;
         else
           inside_registration_callback = LOCAL_REGISTRATION_CALLBACK;
