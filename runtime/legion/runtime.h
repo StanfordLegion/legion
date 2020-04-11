@@ -2059,8 +2059,8 @@ namespace Legion {
       void send_registration_callback(AddressSpaceID space,
                                       Realm::DSOReferenceImplementation *impl,
                                       RtEvent done, std::set<RtEvent> &applied);
-      RtEvent perform_registration_callback(
-          RegistrationCallbackFnptr callback, bool global);
+      RtEvent perform_registration_callback(RegistrationCallbackFnptr callback, 
+                                       bool global, bool preregistered = false);
       void startup_runtime(void);
       void finalize_runtime(void);
       ApEvent launch_mapper_task(Mapper *mapper, Processor proc, 
