@@ -7546,7 +7546,14 @@ namespace Legion {
        * select whether this registration is performed locally (e.g. once
        * on the local node) or globally across all nodes in the machine.
        * The method will not return until the registration has been performed 
-       * on all the target address spaces.
+       * on all the target address spaces. All function pointers passed into
+       * this method with 'global' set to true must "portable", meaning that
+       * we can lookup their shared object name and symbol name. This means
+       * they either need to originate with a shared object or the binary
+       * must be linked with '-rdynamic'. It's up the user to guarantee this
+       * or Legion will raise an error about a non-portable function pointer.
+       * For any given function pointer all calls must be made with the same 
+       * value of 'global' or hangs can occur.
        * @param ctx enclosing task context
        * @param global whether this registration needs to be performed
        *               in all address spaces or just the local one

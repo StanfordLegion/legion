@@ -3505,7 +3505,12 @@ namespace Legion {
     protected:
       mutable LocalLock callback_lock;
       std::map<RegistrationCallbackFnptr,RtEvent> local_callbacks_done;
-      std::map<RegistrationCallbackFnptr,RtEvent> global_callbacks_done;
+      std::map<std::pair<std::string,std::string>,RtEvent> 
+                                                  global_callbacks_done;
+      std::map<std::pair<std::string,std::string>,RtEvent>
+                                                  global_local_done;
+      std::map<std::pair<std::string,std::string>,
+                std::set<RtUserEvent> >           pending_remote_callbacks;
     protected:
       mutable LocalLock redop_lock;
       mutable LocalLock serdez_lock;
