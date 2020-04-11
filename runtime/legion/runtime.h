@@ -3026,12 +3026,6 @@ namespace Legion {
                                     bool tight_region_bounds);
       void release_tree_instances(RegionTreeID tid);
     public:
-      // Helper methods for the RegionTreeForest
-      inline unsigned get_context_count(void) { return total_contexts; }
-      inline unsigned get_start_color(void) const { return address_space; }
-      inline unsigned get_color_modulus(void) const 
-        { return total_address_spaces; }
-    public:
       // Manage the execution of tasks within a context
       void activate_context(InnerContext *context);
       void deactivate_context(InnerContext *context);
@@ -3281,6 +3275,7 @@ namespace Legion {
       CodeDescriptorID   get_unique_code_descriptor_id(void);
       LayoutConstraintID get_unique_constraint_id(void);
       IndexSpaceExprID   get_unique_index_space_expr_id(void);
+      LegionColor        get_unique_color(void);
       ReplicationID      get_unique_replication_id(void);
 #ifdef LEGION_SPY
       unsigned           get_unique_indirections_id(void);
@@ -3410,6 +3405,7 @@ namespace Legion {
       unsigned unique_code_descriptor_id;
       unsigned unique_constraint_id;
       unsigned unique_is_expr_id;
+      unsigned unique_color;
       unsigned unique_control_replication_id;
 #ifdef LEGION_SPY
       unsigned unique_indirections_id;
