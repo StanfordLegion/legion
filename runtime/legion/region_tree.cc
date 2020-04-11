@@ -353,6 +353,7 @@ namespace Legion {
                 part_color = (*prev) + 1;
                 break;
               }
+              prev = next++;
             }
             if (part_color == INVALID_COLOR)
               part_color = (*prev) + 1;
@@ -7742,8 +7743,6 @@ namespace Legion {
       AutoLock n_lock(node_lock);
 #ifdef DEBUG_LEGION
       assert(is_owner());
-      // Should already have allocated the color
-      assert(color_map.find(part_color) != color_map.end());
       assert(remote_colors.find(part_color) == remote_colors.end());
       // should only happen on the owner node
       assert(get_owner_space() == context->runtime->address_space);
