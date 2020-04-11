@@ -524,6 +524,8 @@ namespace Legion {
         // We're the owner so we do most of the work
         IndexSpaceNode *parent_node = get_node(parent);
         IndexSpaceNode *color_node = get_node(color_space);
+        if (partition_color == INVALID_COLOR)
+          partition_color = parent_node->generate_color();
         // If we are making this partition on a different node than the
         // owner node of the parent index space then we have to tell that
         // owner node about the existence of this partition
