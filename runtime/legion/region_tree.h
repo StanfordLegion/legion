@@ -1751,7 +1751,6 @@ namespace Legion {
       bool are_disjoint(LegionColor c1, LegionColor c2); 
       void record_disjointness(bool disjoint, 
                                LegionColor c1, LegionColor c2);
-      LegionColor generate_color(void);
       void record_remote_child(IndexPartition pid, LegionColor part_color);
     public:
       void add_instance(RegionNode *inst);
@@ -1935,8 +1934,6 @@ namespace Legion {
       std::set<RegionNode*> logical_nodes;
       std::set<std::pair<LegionColor,LegionColor> > disjoint_subsets;
       std::set<std::pair<LegionColor,LegionColor> > aliased_subsets;
-      // The next available runtime color for this index space
-      LegionColor next_partition_color;
     };
 
     /**

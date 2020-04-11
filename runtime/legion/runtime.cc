@@ -10411,6 +10411,8 @@ namespace Legion {
                         ((unique == 0) ? runtime_stride : unique)),
         unique_constraint_id((unique == 0) ? runtime_stride : unique),
         unique_is_expr_id((unique == 0) ? runtime_stride : unique),
+        unique_color(LEGION_MAX_APPLICATION_COLOR + 
+                        ((unique == 0) ? runtime_stride : unique)),
 #ifdef LEGION_SPY
         unique_indirections_id((unique == 0) ? runtime_stride : unique),
 #endif
@@ -20237,6 +20239,18 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       // check for overflow
       assert(result <= unique_is_expr_id);
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    LegionColor Runtime::get_unique_color(void)
+    //--------------------------------------------------------------------------
+    {
+      LegionColor result = __sync_fetch_and_add(&unique_color, runtime_stride);
+#ifdef DEBUG_LEGION
+      // check for overflow
+      assert(result <= unique_color);
 #endif
       return result;
     }

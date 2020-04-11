@@ -183,15 +183,7 @@ namespace Legion {
       IndexSpaceNode *parent_node = get_node(parent);
       IndexSpaceNode *color_node = get_node(color_space);
       if (partition_color == INVALID_COLOR)
-        partition_color = parent_node->generate_color();
-      else if (partition_color >= LEGION_MAX_APPLICATION_COLOR)
-        REPORT_LEGION_ERROR(ERROR_EXCEEDED_MAX_APPLICATION_COLOR,
-            "User specified color %lld for partition creation in task %s "
-            "(UID %lld) exceeded the maximum allowed value for an application "
-            "color %d specified in legion_config.h. Please change the value "
-            "of LEGION_MAX_APPLICATION_COLOR in legion_config.h to support "
-            "this use case.", partition_color, ctx->get_task_name(),
-            ctx->get_unique_id(), LEGION_MAX_APPLICATION_COLOR)
+        partition_color = runtime->get_unique_color();
       // If we are making this partition on a different node than the
       // owner node of the parent index space then we have to tell that
       // owner node about the existence of this partition
@@ -308,46 +300,7 @@ namespace Legion {
       // If we haven't been given a color yet, we need to find
       // one that will be valid for all the child partitions
       if (part_color == INVALID_COLOR)
-      {
-        std::set<LegionColor> existing_colors;
-        if (base->total_children == base->max_linearized_color)
-        {
-          for (LegionColor color = 0; color < base->total_children; color++)
-          {
-            IndexSpaceNode *child_node = base->get_child(color);
-            std::vector<LegionColor> colors;
-            child_node->get_colors(colors);
-            if (!colors.empty())
-              existing_colors.insert(colors.begin(), colors.end());
-          }
-        }
-        else
-        {
-          ColorSpaceIterator *itr =
-            base->color_space->create_color_space_iterator();
-          while (itr->is_valid())
-          {
-            const LegionColor color = itr->yield_color();
-            IndexSpaceNode *child_node = base->get_child(color);
-            std::vector<LegionColor> colors;
-            child_node->get_colors(colors);
-            if (!colors.empty())
-              existing_colors.insert(colors.begin(), colors.end());
-          }
-          delete itr;
-        }
-        // Now we have the existing colors, so just do something dumb
-        // like add our current runtime ID to the last color
-        const unsigned offset = (runtime->address_space == 0) ?
-                      runtime->runtime_stride : runtime->address_space;
-        if (!existing_colors.empty())
-        {
-          LegionColor last = *(existing_colors.rbegin());
-          part_color = last + offset;
-        }
-        else
-          part_color = offset;
-      }
+        part_color = runtime->get_unique_color();
       // Iterate over all our sub-regions and generate partitions
       if (base->total_children == base->max_linearized_color)
       {
@@ -363,7 +316,7 @@ namespace Legion {
                                      source->color_space->handle, 
                                      part_color, kind, did, domain_ready, 
                                      ApUserEvent::NO_AP_USER_EVENT, 
-                                     &safe_events); 
+                                     &safe_events);
           // If the user requested the handle for this point return it
           std::map<IndexSpace,IndexPartition>::iterator finder = 
             user_handles.find(child_node->handle);
@@ -390,7 +343,7 @@ namespace Legion {
                                      source->color_space->handle, 
                                      part_color, kind, did, domain_ready, 
                                      ApUserEvent::NO_AP_USER_EVENT,
-                                     &safe_events); 
+                                     &safe_events);
           // If the user requested the handle for this point return it
           std::map<IndexSpace,IndexPartition>::iterator finder = 
             user_handles.find(child_node->handle);
@@ -7038,8 +6991,7 @@ namespace Legion {
         handle(h), parent(par), index_space_ready(ready), 
         realm_index_space_set(Runtime::create_rt_user_event()), 
         tight_index_space_set(Runtime::create_rt_user_event()),
-        tight_index_space(false), next_partition_color(
-            LEGION_MAX_APPLICATION_COLOR + ctx->runtime->get_start_color())
+        tight_index_space(false)
     //--------------------------------------------------------------------------
     {
       if (parent != NULL)
@@ -7583,14 +7535,6 @@ namespace Legion {
       else
         aliased_subsets.insert(std::pair<LegionColor,LegionColor>(c1,c2));
       pending_tests.erase(std::pair<LegionColor,LegionColor>(c1,c2));
-    }
-
-    //--------------------------------------------------------------------------
-    LegionColor IndexSpaceNode::generate_color(void)
-    //--------------------------------------------------------------------------
-    {
-      return __sync_fetch_and_add(&next_partition_color, 
-                  context->runtime->get_color_modulus());
     }
 
     //--------------------------------------------------------------------------
