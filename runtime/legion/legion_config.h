@@ -195,10 +195,6 @@
 #ifndef LEGION_MAX_APPLICATION_SERDEZ_ID
 #define LEGION_MAX_APPLICATION_SERDEZ_ID      (1<<20)
 #endif
-// Maximum ID for an application color
-#ifndef LEGION_MAX_APPLICATION_COLOR
-#define LEGION_MAX_APPLICATION_COLOR          (1<<20)
-#endif
 // Default number of local fields per field space
 #ifndef DEFAULT_LOCAL_FIELDS // For backwards compatibility
 #ifndef LEGION_DEFAULT_LOCAL_FIELDS

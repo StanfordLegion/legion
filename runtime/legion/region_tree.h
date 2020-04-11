@@ -1741,7 +1741,9 @@ namespace Legion {
       static void handle_semantic_info(RegionTreeForest *forest,
                                  Deserializer &derez, AddressSpaceID source);
     public:
-      bool has_color(const LegionColor c);
+      bool has_color(const LegionColor color);
+      LegionColor generate_color(LegionColor suggestion = INVALID_COLOR);
+      void release_color(LegionColor color);
       IndexPartNode* get_child(const LegionColor c, 
                                RtEvent *defer = NULL, bool can_fail = false);
       void add_child(IndexPartNode *child, ReferenceMutator *mutator);
@@ -1779,6 +1781,11 @@ namespace Legion {
       static void handle_colors_response(Deserializer &derez);
       static void handle_index_space_set(RegionTreeForest *forest,
                            Deserializer &derez, AddressSpaceID source);
+      static void handle_generate_color_request(RegionTreeForest *forest,
+                           Deserializer &derez, AddressSpaceID source);
+      static void handle_generate_color_response(Deserializer &derez);
+      static void handle_release_color(RegionTreeForest *forest, 
+                                       Deserializer &derez);
     public:
       // From IndexSpaceExpression
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,

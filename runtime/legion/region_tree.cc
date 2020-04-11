@@ -183,7 +183,7 @@ namespace Legion {
       IndexSpaceNode *parent_node = get_node(parent);
       IndexSpaceNode *color_node = get_node(color_space);
       if (partition_color == INVALID_COLOR)
-        partition_color = runtime->get_unique_color();
+        partition_color = parent_node->generate_color();
       // If we are making this partition on a different node than the
       // owner node of the parent index space then we have to tell that
       // owner node about the existence of this partition
@@ -299,10 +299,116 @@ namespace Legion {
       }
       // If we haven't been given a color yet, we need to find
       // one that will be valid for all the child partitions
-      if (part_color == INVALID_COLOR)
-        part_color = runtime->get_unique_color();
+      // We don't have any way to atomically test and set a color
+      // for all the partitions we're about to make so instead
+      // we'll do this iteratively until we succeed, which 
+      // hopefully will not be too many iterations
+      std::set<LegionColor> existing_colors;
+      std::vector<IndexSpaceNode*> children_nodes;
+      while (part_color == INVALID_COLOR)
+      {
+        // If this is the first time through populate the existing colors
+        if (existing_colors.empty())
+        {
+          if (base->total_children == base->max_linearized_color)
+          {
+            for (LegionColor color = 0; color < base->total_children; color++)
+            {
+              IndexSpaceNode *child_node = base->get_child(color);
+              children_nodes.push_back(child_node);
+              std::vector<LegionColor> colors;
+              child_node->get_colors(colors);
+              if (!colors.empty())
+                existing_colors.insert(colors.begin(), colors.end());
+            }
+          }
+          else
+          {
+            ColorSpaceIterator *itr =
+              base->color_space->create_color_space_iterator();
+            while (itr->is_valid())
+            {
+              const LegionColor color = itr->yield_color();
+              IndexSpaceNode *child_node = base->get_child(color);
+              children_nodes.push_back(child_node);
+              std::vector<LegionColor> colors;
+              child_node->get_colors(colors);
+              if (!colors.empty())
+                existing_colors.insert(colors.begin(), colors.end());
+            }
+            delete itr;
+          }
+        }
+        // Find the next available color
+        if (!existing_colors.empty())
+        {
+          std::set<LegionColor>::const_iterator next = existing_colors.begin();
+          if ((*next) == 0)
+          {
+            std::set<LegionColor>::const_iterator prev = next++;
+            while (next != existing_colors.end())
+            {
+              if ((*next) != ((*prev) + 1))
+              {
+                part_color = (*prev) + 1;
+                break;
+              }
+            }
+            if (part_color == INVALID_COLOR)
+              part_color = (*prev) + 1;
+          }
+          else
+            part_color = 0; 
+        }
+        else
+          part_color = 0;
+#ifdef DEBUG_LEGION
+        assert(part_color != INVALID_COLOR);
+#endif
+        // Now confirm that we can reserve this color in all our subregions
+        for (std::vector<IndexSpaceNode*>::const_iterator it =
+              children_nodes.begin(); it != children_nodes.end(); it++)
+        {
+          LegionColor result = (*it)->generate_color(part_color);  
+          if (result == part_color)
+            continue;
+          // If we failed we need to remove all the failed colors
+          for (std::vector<IndexSpaceNode*>::const_iterator it2 = 
+                children_nodes.begin(); it2 != it; it2++)
+            (*it)->release_color(part_color);
+          // Record that this is an existing color to skip
+          existing_colors.insert(part_color);
+          part_color = INVALID_COLOR;
+          break;
+        }
+      }
       // Iterate over all our sub-regions and generate partitions
-      if (base->total_children == base->max_linearized_color)
+      if (!children_nodes.empty())
+      {
+        for (std::vector<IndexSpaceNode*>::const_iterator it = 
+              children_nodes.begin(); it != children_nodes.end(); it++)
+        {
+          IndexSpaceNode *child_node = *it;
+          IndexPartition pid(runtime->get_unique_index_partition_id(),
+                             handle1.get_tree_id(), handle1.get_type_tag()); 
+          DistributedID did = 
+            runtime->get_available_distributed_id();
+          const RtEvent safe =
+            create_pending_partition(ctx, pid, child_node->handle, 
+                                     source->color_space->handle, 
+                                     part_color, kind, did, domain_ready, 
+                                     ApUserEvent::NO_AP_USER_EVENT, 
+                                     &safe_events);
+          // If the user requested the handle for this point return it
+          std::map<IndexSpace,IndexPartition>::iterator finder = 
+            user_handles.find(child_node->handle);
+          if (finder != user_handles.end())
+            finder->second = pid;
+          if (safe.exists())
+            safe_events.insert(safe);
+        }
+      }
+      else if (base->total_children == base->max_linearized_color)
       {
         for (LegionColor color = 0; color < base->total_children; color++)
         {
@@ -7317,6 +7423,97 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    LegionColor IndexSpaceNode::generate_color(LegionColor suggestion)
+    //--------------------------------------------------------------------------
+    {
+      if (is_owner())
+      {
+        AutoLock n_lock(node_lock);
+        // If the user made a suggestion see if it was right
+        if (suggestion != INVALID_COLOR)
+        {
+          // If someone already has it then they can't use it
+          if (color_map.find(suggestion) != color_map.end())
+            return INVALID_COLOR;
+          else
+            return suggestion;
+        }
+        if (color_map.empty())
+        {
+          // save a space for later
+          color_map[0] = NULL;
+          return 0;
+        }
+        std::map<LegionColor,IndexPartNode*>::const_iterator next = 
+          color_map.begin();
+        if (next->first > 0)
+        {
+          // save a space for later
+          color_map[0] = NULL;
+          return 0;
+        }
+        std::map<LegionColor,IndexPartNode*>::const_iterator prev = next++;
+        while (next != color_map.end())
+        {
+          if (next->first != (prev->first + 1))
+          {
+            // save a space for later
+            color_map[prev->first+1] = NULL;
+            return prev->first+1;
+          }
+          prev = next++;
+        }
+        color_map[prev->first+1] = NULL;
+        return prev->first+1;
+      }
+      else
+      {
+        // Send a message to the owner to pick a color and wait for the result
+        volatile LegionColor result = suggestion; 
+        RtUserEvent ready = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(handle);
+          rez.serialize(suggestion);
+          rez.serialize(&result);
+          rez.serialize(ready);
+        }
+        runtime->send_index_space_generate_color_request(owner_space, rez);
+        if (!ready.has_triggered())
+          ready.wait();
+        return result;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexSpaceNode::release_color(LegionColor color)
+    //--------------------------------------------------------------------------
+    {
+      if (is_owner())
+      {
+        AutoLock n_lock(node_lock);
+        std::map<LegionColor,IndexPartNode*>::iterator finder = 
+          color_map.find(color);
+#ifdef DEBUG_LEGION
+        assert(finder != color_map.end());
+        assert(finder->second == NULL);
+#endif
+        color_map.erase(finder);
+      }
+      else
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(handle);
+          rez.serialize(color);
+        }
+        runtime->send_index_space_release_color(owner_space, rez);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartNode* IndexSpaceNode::get_child(const LegionColor c, 
                                              RtEvent *defer, bool can_fail)
     //--------------------------------------------------------------------------
@@ -7914,6 +8111,67 @@ namespace Legion {
       if (node->unpack_index_space(derez, source))
         delete node;
     } 
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IndexSpaceNode::handle_generate_color_request(
+           RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      IndexSpace handle;
+      derez.deserialize(handle);
+      LegionColor suggestion;
+      derez.deserialize(suggestion);
+      LegionColor *target;
+      derez.deserialize(target);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+
+      IndexSpaceNode *node = forest->get_node(handle);
+      LegionColor result = node->generate_color(suggestion);
+      if (result != suggestion)
+      {
+        Serializer rez;
+        {
+          RezCheck z2(rez);
+          rez.serialize(target);
+          rez.serialize(result);
+          rez.serialize(done_event);
+        }
+        forest->runtime->send_index_space_generate_color_response(source, rez);
+      }
+      else // if we matched the suggestion we know the value is right
+        Runtime::trigger_event(done_event); 
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IndexSpaceNode::handle_generate_color_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      LegionColor *target;
+      derez.deserialize(target);
+      derez.deserialize(*target);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      Runtime::trigger_event(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IndexSpaceNode::handle_release_color(
+                                  RegionTreeForest *forest, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      IndexSpace handle;
+      derez.deserialize(handle);
+      LegionColor color;
+      derez.deserialize(color);
+
+      IndexSpaceNode *node = forest->get_node(handle);
+      node->release_color(color);
+    }
 
     //--------------------------------------------------------------------------
     void IndexSpaceNode::add_expression_reference(void)

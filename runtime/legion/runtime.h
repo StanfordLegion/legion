@@ -2134,6 +2134,12 @@ namespace Legion {
                                                        Serializer &rez);
       void send_index_space_remote_expression_invalidation(
                                     AddressSpaceID target, Serializer &rez);
+      void send_index_space_generate_color_request(AddressSpaceID target,
+                                                   Serializer &rez);
+      void send_index_space_generate_color_response(AddressSpaceID target,
+                                                    Serializer &rez);
+      void send_index_space_release_color(AddressSpaceID target, 
+                                          Serializer &rez);
       void send_index_partition_notification(AddressSpaceID target, 
                                              Serializer &rez);
       void send_index_partition_node(AddressSpaceID target, Serializer &rez);
@@ -2368,6 +2374,10 @@ namespace Legion {
                                                          AddressSpaceID source);
       void handle_index_space_remote_expression_invalidation(
                                                          Deserializer &derez);
+      void handle_index_space_generate_color_request(Deserializer &derez,
+                                                     AddressSpaceID source);
+      void handle_index_space_generate_color_response(Deserializer &derez);
+      void handle_index_space_release_color(Deserializer &derez);
       void handle_index_partition_notification(Deserializer &derez);
       void handle_index_partition_node(Deserializer &derez,
                                        AddressSpaceID source);
@@ -2815,7 +2825,6 @@ namespace Legion {
       CodeDescriptorID   get_unique_code_descriptor_id(void);
       LayoutConstraintID get_unique_constraint_id(void);
       IndexSpaceExprID   get_unique_index_space_expr_id(void);
-      LegionColor        get_unique_color(void);
 #ifdef LEGION_SPY
       unsigned           get_unique_indirections_id(void);
 #endif
@@ -2945,7 +2954,6 @@ namespace Legion {
       unsigned unique_code_descriptor_id;
       unsigned unique_constraint_id;
       unsigned unique_is_expr_id;
-      unsigned unique_color;
 #ifdef LEGION_SPY
       unsigned unique_indirections_id;
 #endif

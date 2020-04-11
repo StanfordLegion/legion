@@ -7107,6 +7107,22 @@ namespace Legion {
               runtime->handle_index_space_remote_expression_invalidation(derez);
               break;
             }
+          case SEND_INDEX_SPACE_GENERATE_COLOR_REQUEST:
+            {
+              runtime->handle_index_space_generate_color_request(derez,
+                                                  remote_address_space);
+              break;
+            }
+          case SEND_INDEX_SPACE_GENERATE_COLOR_RESPONSE:
+            {
+              runtime->handle_index_space_generate_color_response(derez);
+              break;
+            }
+          case SEND_INDEX_SPACE_RELEASE_COLOR:
+            {
+              runtime->handle_index_space_release_color(derez);
+              break;
+            }
           case SEND_INDEX_PARTITION_NOTIFICATION:
             {
               runtime->handle_index_partition_notification(derez);
@@ -10411,8 +10427,6 @@ namespace Legion {
                         ((unique == 0) ? runtime_stride : unique)),
         unique_constraint_id((unique == 0) ? runtime_stride : unique),
         unique_is_expr_id((unique == 0) ? runtime_stride : unique),
-        unique_color(LEGION_MAX_APPLICATION_COLOR + 
-                        ((unique == 0) ? runtime_stride : unique)),
 #ifdef LEGION_SPY
         unique_indirections_id((unique == 0) ? runtime_stride : unique),
 #endif
@@ -15078,6 +15092,37 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_index_space_generate_color_request(AddressSpaceID target,
+                                                          Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_INDEX_SPACE_GENERATE_COLOR_REQUEST, 
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_index_space_generate_color_response(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_INDEX_SPACE_GENERATE_COLOR_RESPONSE,
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_index_space_release_color(AddressSpaceID target,
+                                                 Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      // This has to go on the reference virtual channel so that it is 
+      // handled before the owner node is deleted
+      find_messenger(target)->send_message(rez, SEND_INDEX_SPACE_RELEASE_COLOR,
+                                      REFERENCE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_index_partition_notification(AddressSpaceID target,
                                                     Serializer &rez)
     //--------------------------------------------------------------------------
@@ -16652,6 +16697,29 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       forest->handle_remote_expression_invalidation(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_index_space_generate_color_request(Deserializer &derez,
+                                                          AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceNode::handle_generate_color_request(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_index_space_generate_color_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceNode::handle_generate_color_response(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_index_space_release_color(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceNode::handle_release_color(forest, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -20239,18 +20307,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       // check for overflow
       assert(result <= unique_is_expr_id);
-#endif
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    LegionColor Runtime::get_unique_color(void)
-    //--------------------------------------------------------------------------
-    {
-      LegionColor result = __sync_fetch_and_add(&unique_color, runtime_stride);
-#ifdef DEBUG_LEGION
-      // check for overflow
-      assert(result <= unique_color);
 #endif
       return result;
     }
