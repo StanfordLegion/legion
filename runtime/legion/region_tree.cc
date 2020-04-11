@@ -400,7 +400,7 @@ namespace Legion {
                                               IndexPartition pid,
                                               IndexSpace parent,
                                               IndexSpace color_space,
-                                              LegionColor partition_color,
+                                              LegionColor &partition_color,
                                               PartitionKind part_kind,
                                               DistributedID did,
                                               ValueBroadcast<bool> *part_result,
