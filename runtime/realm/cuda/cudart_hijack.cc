@@ -375,7 +375,7 @@ namespace Realm {
 	CHECK_CU( cuPointerGetAttribute(&hptr,
 					CU_POINTER_ATTRIBUTE_HOST_POINTER,
 					(CUdeviceptr)ptr) );
-#if CUDART_VERSION >= 9000
+#if CUDART_VERSION >= 9200
 	CHECK_CU( cuPointerGetAttribute(&ordinal,
 					CU_POINTER_ATTRIBUTE_DEVICE_ORDINAL,
 					(CUdeviceptr)ptr) );
