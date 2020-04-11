@@ -8133,10 +8133,13 @@ namespace Legion {
         if (suggestion != INVALID_COLOR)
         {
           // If someone already has it then they can't use it
-          if (color_map.find(suggestion) != color_map.end())
-            return INVALID_COLOR;
-          else
+          if (color_map.find(suggestion) == color_map.end())
+          {
+            color_map[suggestion] = NULL;
             return suggestion;
+          }
+          else
+            return INVALID_COLOR;
         }
         if (color_map.empty())
         {
