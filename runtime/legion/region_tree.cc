@@ -7528,13 +7528,8 @@ namespace Legion {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
         std::map<LegionColor,IndexPartNode*>::const_iterator finder = 
           color_map.find(c);
-        if (finder != color_map.end())
-        {
-#ifdef DEBUG_LEGION
-          assert(finder->second != NULL);
-#endif
+        if ((finder != color_map.end()) && (finder->second != NULL))
           return finder->second;
-        }
         std::map<LegionColor,IndexPartition>::const_iterator remote_finder = 
           remote_colors.find(c);
         if (remote_finder != remote_colors.end())
