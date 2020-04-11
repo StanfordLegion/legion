@@ -146,8 +146,7 @@ static void python_main_callback(Machine machine, Runtime *runtime,
   }
   // Register our sharding function for any global import tasks
   const ShardingID sharding_id = runtime->generate_library_sharding_ids(unique_name, 1);
-  runtime->register_sharding_functor(sharding_id, 
-      new LegionPyShardingFunctor(), true/*silence_warnings*/);
+  runtime->register_sharding_functor(sharding_id, new LegionPyShardingFunctor());
   // Register our mapper for the top-level task
   const MapperID top_mapper_id = runtime->generate_library_mapper_ids(unique_name, 1);
   runtime->set_top_level_task_mapper_id(top_mapper_id);
