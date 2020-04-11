@@ -412,10 +412,10 @@ namespace Legion {
       // Iterate over all our sub-regions and generate partitions
       if (!children_nodes.empty())
       {
-        for (std::vector<IndexSpaceNode*>::const_iterator it = 
-              children_nodes.begin(); it != children_nodes.end(); it++)
+        for (unsigned idx = shard; 
+              idx < children_nodes.size(); idx += total_shards)
         {
-          IndexSpaceNode *child_node = *it;
+          IndexSpaceNode *child_node = children_nodes[idx];
           IndexPartition pid(runtime->get_unique_index_partition_id(),
                              handle1.get_tree_id(), handle1.get_type_tag()); 
           DistributedID did = 
