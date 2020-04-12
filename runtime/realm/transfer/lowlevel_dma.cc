@@ -2565,14 +2565,13 @@ namespace Realm {
 	if(dst_is_remote) {
 	  // have to tell rdma to make a copy if we're using the temp buffer
 	  bool make_copy = (src_ptr == src_scratch_buffer);
-	  do_remote_reduce(dst_mem->me,
-			   dst_info.base_offset,
-			   redop_id, red_fold,
-			   src_ptr, num_elems,
-			   src_elem_size, redop->sizeof_rhs,
-			   rdma_sequence_id,
-			   make_copy);
-	  rdma_count += 1;
+	  rdma_count += do_remote_reduce(dst_mem->me,
+					 dst_info.base_offset,
+					 redop_id, red_fold,
+					 src_ptr, num_elems,
+					 src_elem_size, redop->sizeof_rhs,
+					 rdma_sequence_id,
+					 make_copy);
 	} else {
 	  // case 2: destination is directly accessible
 	  void *dst_ptr = dst_mem->get_direct_ptr(dst_info.base_offset,
