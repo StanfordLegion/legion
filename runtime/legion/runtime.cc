@@ -18780,15 +18780,14 @@ namespace Legion {
 
       // Now we can do the translation of ourselves to get the function pointer
       Realm::DSOReferenceImplementation dso(dso_name, sym_name);
-      Realm::DSOCodeTranslator translator;
 #ifdef DEBUG_LEGION
-      assert(translator.can_translate(
+      assert(callback_translator.can_translate(
             typeid(Realm::DSOReferenceImplementation),
             typeid(Realm::FunctionPointerImplementation)));
 #endif
       Realm::FunctionPointerImplementation *impl = 
         static_cast<Realm::FunctionPointerImplementation*>(
-            translator.translate(&dso, 
+            callback_translator.translate(&dso, 
               typeid(Realm::FunctionPointerImplementation)));
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
