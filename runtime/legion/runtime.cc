@@ -13205,14 +13205,13 @@ namespace Legion {
           // but there is no documentation anywhere about whether this is 
           // legal or safe to do...
           Realm::FunctionPointerImplementation impl((void (*)(void))callback);
-          Realm::DSOCodeTranslator translator;
 #ifdef DEBUG_LEGION
-          assert(translator.can_translate(
+          assert(callback_translator.can_translate(
                 typeid(Realm::FunctionPointerImplementation),
                 typeid(Realm::DSOReferenceImplementation)));
 #endif
           dso = static_cast<Realm::DSOReferenceImplementation*>(
-              translator.translate(&impl, 
+              callback_translator.translate(&impl, 
                 typeid(Realm::DSOReferenceImplementation)));
           if (dso == NULL)
             REPORT_LEGION_FATAL(LEGION_FATAL_CALLBACK_NOT_PORTABLE,
@@ -13231,47 +13230,32 @@ namespace Legion {
       RtEvent local_done, global_done;
       RtUserEvent local_perform, global_perform;
       {
-        AutoLock c_lock(callback_lock);
-        std::map<RegistrationCallbackFnptr,RtEvent>::const_iterator
-          local_finder = local_callbacks_done.find(callback);
-        if (local_finder == local_callbacks_done.end())
-        {
-          local_perform = Runtime::create_rt_user_event();
-          local_callbacks_done[callback] = local_perform;
-          if (global)
-            local_done = local_perform;
-        }
-        else
-        {
-          if (!global)
-            return local_finder->second;
-          else
-            local_done = local_finder->second;
-        }
+        AutoLock c_lock(callback_lock); 
         if (global)
         {
-          // Check to see if we have any pending global callbacks to 
-          // notify about being done locally
-          std::map<std::pair<std::string,std::string>,
-                    std::set<RtUserEvent> >::iterator
-            pending_finder = pending_remote_callbacks.find(global_key);
-          if (pending_finder != pending_remote_callbacks.end())
+          // See if we're going to perform this or not
+          std::map<std::pair<std::string,std::string>,RtEvent>::const_iterator
+            local_finder = global_local_done.find(global_key);
+          if (local_finder == global_local_done.end())
           {
-            for (std::set<RtUserEvent>::const_iterator it = 
-                  pending_finder->second.begin(); it != 
-                  pending_finder->second.end(); it++)
-              Runtime::trigger_event(*it, local_done);
-            pending_remote_callbacks.erase(pending_finder);
-          }
-          // If we're going to be the one doing the local case then record it
-          if (local_perform.exists())
-          {
-#ifdef DEBUG_LEGION
-            assert(global_local_done.find(global_key) == 
-                    global_local_done.end());
-#endif
+            local_perform = Runtime::create_rt_user_event();
             global_local_done[global_key] = local_perform;
+            // Check to see if we have any pending global callbacks to 
+            // notify about being done locally
+            std::map<std::pair<std::string,std::string>,
+                      std::set<RtUserEvent> >::iterator
+              pending_finder = pending_remote_callbacks.find(global_key);
+            if (pending_finder != pending_remote_callbacks.end())
+            {
+              for (std::set<RtUserEvent>::const_iterator it = 
+                    pending_finder->second.begin(); it != 
+                    pending_finder->second.end(); it++)
+                Runtime::trigger_event(*it, local_perform);
+              pending_remote_callbacks.erase(pending_finder);
+            }
           }
+          else
+            local_done = local_finder->second;
           // Now see if we need to do our global registration callbacks
           std::map<std::pair<std::string,std::string>,RtEvent>::const_iterator
             global_finder = global_callbacks_done.find(global_key);
@@ -13282,6 +13266,18 @@ namespace Legion {
           }
           else
             global_done = global_finder->second;
+        }
+        else
+        {
+          std::map<RegistrationCallbackFnptr,RtEvent>::const_iterator
+            local_finder = local_callbacks_done.find(callback);
+          if (local_finder == local_callbacks_done.end())
+          {
+            local_perform = Runtime::create_rt_user_event();
+            local_callbacks_done[callback] = local_perform;
+          }
+          else
+            return local_finder->second;
         }
       }
       // Do the local callback and record it now 

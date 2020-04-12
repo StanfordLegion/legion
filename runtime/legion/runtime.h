@@ -3504,6 +3504,9 @@ namespace Legion {
       unsigned unique_library_serdez_id;
     protected:
       mutable LocalLock callback_lock;
+      // Have this be a member variable so that it keeps references
+      // to all the dynamic objects that we load
+      Realm::DSOCodeTranslator callback_translator;
       std::map<RegistrationCallbackFnptr,RtEvent> local_callbacks_done;
       std::map<std::pair<std::string,std::string>,RtEvent> 
                                                   global_callbacks_done;
