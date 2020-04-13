@@ -12,6 +12,9 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+--- Utilities for formatted printing.
+-- @module std.format
+
 import "regent"
 
 local ast = require("regent/ast")
@@ -149,6 +152,9 @@ local function format_arguments(macro_name, msg, args)
   return format_str, format_args
 end
 
+--- Print formatted string (no automatic newline).
+-- @param msg Format string. Must be a literal constant.
+-- @param ... Arguments.
 format.print = regentlib.macro(
   function(msg, ...)
     local args = terralib.newlist({...})
@@ -157,6 +163,9 @@ format.print = regentlib.macro(
     return rexpr regentlib.c.printf(format_str, format_args) end
   end)
 
+--- Print formatted string (with automatic newline).
+-- @param msg Format string. Must be a literal constant.
+-- @param ... Arguments.
 format.println = regentlib.macro(
   function(msg, ...)
     local args = terralib.newlist({...})
@@ -165,6 +174,10 @@ format.println = regentlib.macro(
     return rexpr regentlib.c.printf([format_str .. "\n"], format_args) end
   end)
 
+--- Print formatted string to stream (no automatic newline).
+-- @param stream Destination stream of type `FILE *`.
+-- @param msg Format string. Must be a literal constant.
+-- @param ... Arguments.
 format.fprint = regentlib.macro(
   function(stream, msg, ...)
     local args = terralib.newlist({...})
@@ -173,6 +186,10 @@ format.fprint = regentlib.macro(
     return rexpr regentlib.c.fprintf(stream, format_str, format_args) end
   end)
 
+--- Print formatted string to stream (with automatic newline).
+-- @param stream Destination stream of type `FILE *`.
+-- @param msg Format string. Must be a literal constant.
+-- @param ... Arguments.
 format.fprintln = regentlib.macro(
   function(stream, msg, ...)
     local args = terralib.newlist({...})
@@ -181,6 +198,11 @@ format.fprintln = regentlib.macro(
     return rexpr regentlib.c.fprintf(stream, [format_str .. "\n"], format_args) end
   end)
 
+--- Print formatted string to buffer (no automatic newline).
+-- @param s Destination buffer of type `rawstring`.
+-- @param n Maximum number of bytes to write, including a terminating `NUL` character.
+-- @param msg Format string. Must be a literal constant.
+-- @param ... Arguments.
 format.snprint = regentlib.macro(
   function(s, n, msg, ...)
     local args = terralib.newlist({...})
@@ -189,6 +211,11 @@ format.snprint = regentlib.macro(
     return rexpr regentlib.c.snprintf(s, n, format_str, format_args) end
   end)
 
+--- Print formatted string to buffer (with automatic newline).
+-- @param s Destination buffer of type `rawstring`.
+-- @param n Maximum number of bytes to write, including a terminating `NUL` character.
+-- @param msg Format string. Must be a literal constant.
+-- @param ... Arguments.
 format.snprintln = regentlib.macro(
   function(s, n, msg, ...)
     local args = terralib.newlist({...})
