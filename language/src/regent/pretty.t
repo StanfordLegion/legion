@@ -341,6 +341,12 @@ function pretty.expr_call(cx, node)
   args:insertall(
     node.conditions:map(
       function(condition) return pretty.expr_condition(cx, condition) end))
+  if node.predicate then
+    args:insert(join({"predicate=", pretty.expr(cx, node.predicate)}))
+  end
+  if node.predicate_else_value then
+    args:insert(join({"predicate_else_value=", pretty.expr(cx, node.predicate_else_value)}))
+  end
   return join({pretty.expr(cx, node.fn), "(", commas(args) , ")"})
 end
 
@@ -381,6 +387,10 @@ end
 
 function pretty.expr_raw_fields(cx, node)
   return join({"__fields(", pretty.expr_region_root(cx, node.region), ")"})
+end
+
+function pretty.expr_raw_future(cx, node)
+  return join({"__future(", pretty.expr(cx, node.value), ")"})
 end
 
 function pretty.expr_raw_physical(cx, node)
@@ -797,6 +807,9 @@ function pretty.expr(cx, node)
 
   elseif node:is(ast.typed.expr.RawFields) then
     return pretty.expr_raw_fields(cx, node)
+
+  elseif node:is(ast.typed.expr.RawFuture) then
+    return pretty.expr_raw_future(cx, node)
 
   elseif node:is(ast.typed.expr.RawPhysical) then
     return pretty.expr_raw_physical(cx, node)

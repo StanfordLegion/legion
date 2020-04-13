@@ -41,17 +41,20 @@
 #ifdef REALM_USE_PYTHON
 #include "realm/python/python_module.h"
 #endif
-#ifdef USE_CUDA
+#ifdef REALM_USE_CUDA
 #include "realm/cuda/cuda_module.h"
 #endif
 #ifdef REALM_USE_LLVM
 #include "realm/llvmjit/llvmjit_module.h"
 #endif
-#ifdef USE_HDF
+#ifdef REALM_USE_HDF5
 #include "realm/hdf5/hdf5_module.h"
 #endif
 #ifdef REALM_USE_GASNET1
 #include "realm/gasnet1/gasnet1_module.h"
+#endif
+#if defined REALM_USE_MPI
+#include "realm/mpi/mpi_module.h"
 #endif
 
 namespace Realm {

@@ -1881,6 +1881,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
+        : field(fid), field_region(&region)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -1907,6 +1908,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
+        : field(fid), field_region(&region)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -5578,13 +5580,32 @@ namespace Legion {
                        "a non-zero amount with the -ll:zsize flag");
         assert(false);
       }
-      const Realm::Memory memory = finder.first();
+      const Memory memory = finder.first();
       const Realm::Point<1,coord_t> zero(0);
-      Realm::IndexSpace<1,coord_t> is = Realm::Rect<1,coord_t>(zero, zero);
+      Realm::IndexSpace<1,coord_t> bounds = Realm::Rect<1,coord_t>(zero, zero);
       const std::vector<size_t> field_sizes(1,sizeof(T));
+      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
+      int dim_order[1];
+      dim_order[0] = 0;
+      Realm::InstanceLayoutGeneric *layout = 
+        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
+            constraints, dim_order);
       Realm::ProfilingRequestSet no_requests; 
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(instance,
-                    memory, is, field_sizes, 0/*blocing factor*/, no_requests));
+#ifdef LEGION_MALLOC_INSTANCES
+      // Ask Legion to malloc this instance for us
+      Runtime *runtime = Runtime::get_runtime();
+      const size_t footprint = bounds.bounds.volume() * sizeof(T);
+      allocation = runtime->allocate_deferred_instance(memory, footprint, 
+                                                    false/*do not free*/);
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
+            instance, memory, allocation, layout, no_requests));
+#else
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
+            instance, memory, layout, no_requests));
+#endif
+      // Note we do not destroy this eagerly because we know this value is
+      // going to be returned as the future value and Legion will free it
+      // once it reads the value internally
       if (wait_on.exists())
         wait_on.wait();
 #ifdef DEBUG_LEGION
@@ -5610,7 +5631,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T> __CUDA_HD__
-    inline void DeferredValue<T>::write(T value)
+    inline void DeferredValue<T>::write(T value) const
     //--------------------------------------------------------------------------
     {
       accessor.write(Point<1,coord_t>(0), value);
@@ -5618,7 +5639,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T> __CUDA_HD__
-    inline T* DeferredValue<T>::ptr(void)
+    inline T* DeferredValue<T>::ptr(void) const
     //--------------------------------------------------------------------------
     {
       return accessor.ptr(Point<1,coord_t>(0));
@@ -5626,7 +5647,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T> __CUDA_HD__
-    inline T& DeferredValue<T>::ref(void)
+    inline T& DeferredValue<T>::ref(void) const
     //--------------------------------------------------------------------------
     {
       return accessor[Point<1,coord_t>(0)];
@@ -5654,8 +5675,13 @@ namespace Legion {
     inline void DeferredValue<T>::finalize(InternalContext ctx) const
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_MALLOC_INSTANCES
+      ctx->end_task(accessor.ptr(Point<1,coord_t>(0)), sizeof(T),
+                    false/*owner*/, allocation, instance);
+#else
       ctx->end_task(accessor.ptr(Point<1,coord_t>(0)), sizeof(T),
                     false/*owner*/, instance);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -5669,7 +5695,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
     inline void DeferredReduction<REDOP,EXCLUSIVE>::reduce(
-                                                      typename REDOP::RHS value)
+                                                typename REDOP::RHS value) const
     //--------------------------------------------------------------------------
     {
       REDOP::fold<EXCLUSIVE>(this->accessor[Point<1,coord_t>(0)], value);
@@ -5678,7 +5704,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
     inline void DeferredReduction<REDOP,EXCLUSIVE>::operator<<=(
-                                                      typename REDOP::RHS value)
+                                                typename REDOP::RHS value) const
     //--------------------------------------------------------------------------
     {
       REDOP::fold<EXCLUSIVE>(this->accessor[Point<1,coord_t>(0)], value);
@@ -5692,16 +5718,20 @@ namespace Legion {
       inline DeferredBuffer(void);
       inline DeferredBuffer(Memory::Kind kind, 
                             const Domain &bounds,
-                            const FT *initial_value = NULL);
+                            const FT *initial_value = NULL,
+                            bool fortran_order_dims = false);
       inline DeferredBuffer(Memory::Kind kind, 
                             IndexSpace bounds,
-                            const FT *initial_value = NULL);
+                            const FT *initial_value = NULL,
+                            bool fortran_order_dims = false);
       inline DeferredBuffer(const Rect<N,T> &bounds, 
                             Memory::Kind kind,
-                            const FT *initial_value = NULL);
+                            const FT *initial_value = NULL,
+                            bool fortran_order_dims = false);
       inline DeferredBuffer(IndexSpaceT<N,T> bounds, 
                             Memory::Kind kind,
-                            const FT *initial_value = NULL);
+                            const FT *initial_value = NULL,
+                            bool fortran_order_dims = false);
     public:
       __CUDA_HD__
       inline FT read(const Point<N,T> &p) const;
@@ -5725,16 +5755,20 @@ namespace Legion {
       inline DeferredBuffer(void);
       inline DeferredBuffer(Memory::Kind kind, 
                             const Domain &bounds,
-                            const FT *initial_value = NULL);
+                            const FT *initial_value = NULL,
+                            bool fortran_order_dims = false);
       inline DeferredBuffer(Memory::Kind kind, 
                             IndexSpace bounds,
-                            const FT *initial_value = NULL);
+                            const FT *initial_value = NULL,
+                            bool fortran_order_dims = false);
       inline DeferredBuffer(const Rect<N,T> &bounds, 
                             Memory::Kind kind,
-                            const FT *initial_value = NULL);
+                            const FT *initial_value = NULL,
+                            bool fortran_order_dims = false);
       inline DeferredBuffer(IndexSpaceT<N,T> bounds, 
                             Memory::Kind kind,
-                            const FT *initial_value = NULL);
+                            const FT *initial_value = NULL,
+                            bool fortran_order_dims = false);
     public:
       __CUDA_HD__
       inline FT read(const Point<N,T> &p) const;
@@ -5784,7 +5818,8 @@ namespace Legion {
             CB
 #endif
            >::DeferredBuffer(Memory::Kind kind, const Domain &space,
-                             const FT *initial_value/* = NULL*/)
+                             const FT *initial_value/* = NULL*/,
+                             bool fortran_order_dims/* = false*/)
     //--------------------------------------------------------------------------
     {
       // Construct an instance of the right size in the corresponding memory
@@ -5804,12 +5839,36 @@ namespace Legion {
                 kind);
         assert(false);
       }
-      const Realm::Memory memory = finder.first();
+      const Memory memory = finder.first();
       const DomainT<N,T> bounds = space;
       const std::vector<size_t> field_sizes(1,sizeof(FT));
+      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
+      int dim_order[N];
+      if (fortran_order_dims)
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = i;
+      }
+      else
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = N - (i+1);
+      }
+      Realm::InstanceLayoutGeneric *layout = 
+        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
+            constraints, dim_order);
       Realm::ProfilingRequestSet no_requests; 
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(instance,
-                  memory, bounds, field_sizes, 0/*blocing factor*/, no_requests));
+#ifdef LEGION_MALLOC_INSTANCES
+      // Ask Legion to malloc this instance for us
+      Runtime *runtime = Runtime::get_runtime();
+      const size_t footprint = bounds.bounds.volume() * sizeof(FT);
+      uintptr_t ptr = runtime->allocate_deferred_instance(memory, footprint);
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
+            instance, memory, ptr, layout, no_requests)); 
+#else
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
+            instance, memory, layout, no_requests));
+#endif
       if (initial_value != NULL)
       {
         std::vector<Realm::CopySrcDstField> dsts(1);
@@ -5845,7 +5904,8 @@ namespace Legion {
             CB
 #endif
            >::DeferredBuffer(Memory::Kind kind, const IndexSpace space,
-                             const FT *initial_value/* = NULL*/)
+                             const FT *initial_value/* = NULL*/,
+                             bool fortran_order_dims/* = false*/)
     //--------------------------------------------------------------------------
     {
       // Construct an instance of the right size in the corresponding memory
@@ -5865,14 +5925,37 @@ namespace Legion {
                 kind);
         assert(false);
       }
-      const Realm::Memory memory = finder.first();
+      const Memory memory = finder.first();
       Runtime *runtime = Runtime::get_runtime();
       const DomainT<N,T> bounds = 
         runtime->get_index_space_domain<N,T>(IndexSpaceT<N,T>(space));
       const std::vector<size_t> field_sizes(1,sizeof(FT));
+      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
+      int dim_order[N];
+      if (fortran_order_dims)
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = i;
+      }
+      else
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = N - (i+1);
+      }
+      Realm::InstanceLayoutGeneric *layout = 
+        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
+            constraints, dim_order);
       Realm::ProfilingRequestSet no_requests; 
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(instance,
-                memory, bounds, field_sizes, 0/*blocing factor*/, no_requests));
+#ifdef LEGION_MALLOC_INSTANCES
+      // Ask Legion to malloc this instance for us
+      const size_t footprint = bounds.bounds.volume() * sizeof(FT);
+      uintptr_t ptr = runtime->allocate_deferred_instance(memory, footprint);
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
+            instance, memory, ptr, layout, no_requests));
+#else
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
+            instance, memory, layout, no_requests));
+#endif
       if (initial_value != NULL)
       {
         std::vector<Realm::CopySrcDstField> dsts(1);
@@ -5908,7 +5991,8 @@ namespace Legion {
             CB
 #endif
            >::DeferredBuffer(const Rect<N,T> &rect, Memory::Kind kind,
-                             const FT *initial_value /*= NULL*/)
+                             const FT *initial_value /*= NULL*/,
+                             bool fortran_order_dims /*= false*/)
     //--------------------------------------------------------------------------
     {
       // Construct an instance of the right size in the corresponding memory
@@ -5928,12 +6012,36 @@ namespace Legion {
                 kind);
         assert(false);
       }
-      const Realm::Memory memory = finder.first();
+      const Memory memory = finder.first();
       const DomainT<N,T> bounds(rect);
       const std::vector<size_t> field_sizes(1,sizeof(FT));
+      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
+      int dim_order[N];
+      if (fortran_order_dims)
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = i;
+      }
+      else
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = N - (i+1);
+      }
+      Realm::InstanceLayoutGeneric *layout = 
+        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
+            constraints, dim_order);
       Realm::ProfilingRequestSet no_requests; 
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(instance,
-                memory, bounds, field_sizes, 0/*blocing factor*/, no_requests));
+#ifdef LEGION_MALLOC_INSTANCES
+      // Ask Legion to malloc this instance for us
+      Runtime *runtime = Runtime::get_runtime();
+      const size_t footprint = bounds.bounds.volume() * sizeof(FT);
+      uintptr_t ptr = runtime->allocate_deferred_instance(memory, footprint);
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
+            instance, memory, ptr, layout, no_requests));
+#else
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
+            instance, memory, layout, no_requests));
+#endif
       if (initial_value != NULL)
       {
         std::vector<Realm::CopySrcDstField> dsts(1);
@@ -5969,7 +6077,8 @@ namespace Legion {
             CB
 #endif
            >::DeferredBuffer(const IndexSpaceT<N,T> space, Memory::Kind kind,
-                             const FT *initial_value/* = NULL*/)
+                             const FT *initial_value/* = NULL*/,
+                             bool fortran_order_dims/* = false*/)
     //--------------------------------------------------------------------------
     {
       // Construct an instance of the right size in the corresponding memory
@@ -5993,9 +6102,32 @@ namespace Legion {
       Runtime *runtime = Runtime::get_runtime();
       const DomainT<N,T> bounds = runtime->get_index_space_domain<N,T>(space);
       const std::vector<size_t> field_sizes(1,sizeof(FT));
+      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
+      int dim_order[N];
+      if (fortran_order_dims)
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = i;
+      }
+      else
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = N - (i+1);
+      }
+      Realm::InstanceLayoutGeneric *layout = 
+        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
+            constraints, dim_order);
       Realm::ProfilingRequestSet no_requests; 
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(instance,
-                memory, bounds, field_sizes, 0/*blocing factor*/, no_requests));
+#ifdef LEGION_MALLOC_INSTANCES
+      // Ask Legion to malloc this instance for us
+      const size_t footprint = bounds.bounds.volume() * sizeof(FT);
+      uintptr_t ptr = runtime->allocate_deferred_instance(memory, footprint);
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
+            instance, memory, ptr, layout, no_requests));
+#else
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
+            instance, memory, layout, no_requests));
+#endif
       if (initial_value != NULL)
       {
         std::vector<Realm::CopySrcDstField> dsts(1);
@@ -6157,7 +6289,8 @@ namespace Legion {
             true
 #endif
            >::DeferredBuffer(Memory::Kind kind, const Domain &space,
-                             const FT *initial_value/* = NULL*/)
+                             const FT *initial_value/* = NULL*/,
+                             const bool fortran_order_dims/* = false*/)
     //--------------------------------------------------------------------------
     {
       // Construct an instance of the right size in the corresponding memory
@@ -6177,12 +6310,36 @@ namespace Legion {
                 kind);
         assert(false);
       }
-      const Realm::Memory memory = finder.first();
+      const Memory memory = finder.first();
       bounds = space;
       const std::vector<size_t> field_sizes(1,sizeof(FT));
+      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
+      int dim_order[N];
+      if (fortran_order_dims)
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = i;
+      }
+      else
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = N - (i+1);
+      }
+      Realm::InstanceLayoutGeneric *layout = 
+        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
+            constraints, dim_order);
       Realm::ProfilingRequestSet no_requests; 
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(instance,
-                  memory, bounds, field_sizes, 0/*blocing factor*/, no_requests));
+#ifdef LEGION_MALLOC_INSTANCES
+      // Ask Legion to malloc this instance for us
+      Runtime *runtime = Runtime::get_runtime();
+      const size_t footprint = bounds.bounds.volume() * sizeof(FT);
+      uintptr_t ptr = runtime->allocate_deferred_instance(memory, footprint);
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
+            instance, memory, ptr, layout, no_requests));
+#else
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
+            instance, memory, layout, no_requests));
+#endif
       if (initial_value != NULL)
       {
         std::vector<Realm::CopySrcDstField> dsts(1);
@@ -6218,7 +6375,8 @@ namespace Legion {
             true
 #endif
            >::DeferredBuffer(Memory::Kind kind, const IndexSpace space,
-                             const FT *initial_value/* = NULL*/)
+                             const FT *initial_value/* = NULL*/,
+                             const bool fortran_order_dims/* = false*/)
     //--------------------------------------------------------------------------
     {
       // Construct an instance of the right size in the corresponding memory
@@ -6238,13 +6396,36 @@ namespace Legion {
                 kind);
         assert(false);
       }
-      const Realm::Memory memory = finder.first();
+      const Memory memory = finder.first();
       Runtime *runtime = Runtime::get_runtime();
       bounds = runtime->get_index_space_domain<N,T>(IndexSpaceT<N,T>(space));
       const std::vector<size_t> field_sizes(1,sizeof(FT));
+      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
+      int dim_order[N];
+      if (fortran_order_dims)
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = i;
+      }
+      else
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = N - (i+1);
+      }
+      Realm::InstanceLayoutGeneric *layout = 
+        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
+            constraints, dim_order);
       Realm::ProfilingRequestSet no_requests; 
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(instance,
-                memory, bounds, field_sizes, 0/*blocing factor*/, no_requests));
+#ifdef LEGION_MALLOC_INSTANCES
+      // Ask Legion to malloc this instance for us
+      const size_t footprint = bounds.bounds.volume() * sizeof(FT);
+      uintptr_t ptr = runtime->allocate_deferred_instance(memory, footprint);
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
+            instance, memory, ptr, layout, no_requests));
+#else
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
+            instance, memory, layout, no_requests));
+#endif
       if (initial_value != NULL)
       {
         std::vector<Realm::CopySrcDstField> dsts(1);
@@ -6280,7 +6461,8 @@ namespace Legion {
             true
 #endif
            >::DeferredBuffer(const Rect<N,T> &rect, Memory::Kind kind,
-                             const FT *initial_value /*= NULL*/)
+                             const FT *initial_value /*= NULL*/,
+                             const bool fortran_order_dims/* = false*/)
     //--------------------------------------------------------------------------
     {
       // Construct an instance of the right size in the corresponding memory
@@ -6300,12 +6482,36 @@ namespace Legion {
                 kind);
         assert(false);
       }
-      const Realm::Memory memory = finder.first();
+      const Memory memory = finder.first();
       bounds = DomainT<N,T>(rect);
       const std::vector<size_t> field_sizes(1,sizeof(FT));
+      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
+      int dim_order[N];
+      if (fortran_order_dims)
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = i;
+      }
+      else
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = N - (i+1);
+      }
+      Realm::InstanceLayoutGeneric *layout = 
+        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
+            constraints, dim_order);
       Realm::ProfilingRequestSet no_requests; 
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(instance,
-                memory, bounds, field_sizes, 0/*blocing factor*/, no_requests));
+#ifdef LEGION_MALLOC_INSTANCES
+      // Ask Legion to malloc this instance for us
+      Runtime *runtime = Runtime::get_runtime();
+      const size_t footprint = bounds.bounds.volume() * sizeof(FT);
+      uintptr_t ptr = runtime->allocate_deferred_instance(memory, footprint);
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
+            instance, memory, ptr, layout, no_requests));
+#else
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
+            instance, memory, layout, no_requests));
+#endif
       if (initial_value != NULL)
       {
         std::vector<Realm::CopySrcDstField> dsts(1);
@@ -6341,7 +6547,8 @@ namespace Legion {
             true
 #endif
            >::DeferredBuffer(const IndexSpaceT<N,T> space, Memory::Kind kind,
-                             const FT *initial_value/* = NULL*/)
+                             const FT *initial_value/* = NULL*/,
+                             const bool fortran_order_dims/* = false*/)
     //--------------------------------------------------------------------------
     {
       // Construct an instance of the right size in the corresponding memory
@@ -6361,13 +6568,36 @@ namespace Legion {
                 kind);
         assert(false);
       }
-      const Realm::Memory memory = finder.first();
+      const Memory memory = finder.first();
       Runtime *runtime = Runtime::get_runtime();
       bounds = runtime->get_index_space_domain<N,T>(space);
       const std::vector<size_t> field_sizes(1,sizeof(FT));
+      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
+      int dim_order[N];
+      if (fortran_order_dims)
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = i;
+      }
+      else
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = N - (i+1);
+      }
+      Realm::InstanceLayoutGeneric *layout = 
+        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
+            constraints, dim_order);
       Realm::ProfilingRequestSet no_requests; 
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(instance,
-                memory, bounds, field_sizes, 0/*blocing factor*/, no_requests));
+#ifdef LEGION_MALLOC_INSTANCES
+      // Ask Legion to malloc this instance for us
+      const size_t footprint = bounds.bounds.volume() * sizeof(FT);
+      uintptr_t ptr = runtime->allocate_deferred_instance(memory, footprint);
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
+            instance, memory, ptr, layout, no_requests));
+#else
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
+            instance, memory, layout, no_requests));
+#endif
       if (initial_value != NULL)
       {
         std::vector<Realm::CopySrcDstField> dsts(1);
@@ -6529,16 +6759,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline IndexSpace& IndexSpace::operator=(const IndexSpace &rhs)
-    //--------------------------------------------------------------------------
-    {
-      id = rhs.id;
-      tid = rhs.tid;
-      type_tag = rhs.type_tag;
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
     inline bool IndexSpace::operator==(const IndexSpace &rhs) const
     //--------------------------------------------------------------------------
     {
@@ -6610,15 +6830,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    IndexSpaceT<DIM,T>::IndexSpaceT(const IndexSpaceT &rhs)
-      : IndexSpace(rhs.get_id(), rhs.get_tree_id(), rhs.get_type_tag())
-    //--------------------------------------------------------------------------
-    {
-      Internal::NT_TemplateHelper::template check_type<DIM,T>(type_tag);
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
     IndexSpaceT<DIM,T>::IndexSpaceT(const IndexSpace &rhs)
       : IndexSpace(rhs.get_id(), rhs.get_tree_id(), rhs.get_type_tag())
     //--------------------------------------------------------------------------
@@ -6639,29 +6850,6 @@ namespace Legion {
       return *this;
     }
 
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    inline IndexSpaceT<DIM,T>& IndexSpaceT<DIM,T>::operator=(
-                                                         const IndexSpaceT &rhs)
-    //--------------------------------------------------------------------------
-    {
-      id = rhs.get_id();
-      tid = rhs.get_tree_id();
-      type_tag = rhs.get_type_tag();
-      Internal::NT_TemplateHelper::template check_type<DIM,T>(type_tag);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    inline IndexPartition& IndexPartition::operator=(const IndexPartition &rhs)
-    //--------------------------------------------------------------------------
-    {
-      id = rhs.id;
-      tid = rhs.tid;
-      type_tag = rhs.type_tag;
-      return *this;
-    }
-    
     //--------------------------------------------------------------------------
     inline bool IndexPartition::operator==(const IndexPartition &rhs) const
     //--------------------------------------------------------------------------
@@ -6735,15 +6923,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    IndexPartitionT<DIM,T>::IndexPartitionT(const IndexPartitionT &rhs)
-      : IndexPartition(rhs.get_id(), rhs.get_tree_id(), rhs.get_type_tag())
-    //--------------------------------------------------------------------------
-    {
-      Internal::NT_TemplateHelper::template check_type<DIM,T>(type_tag);
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
     IndexPartitionT<DIM,T>::IndexPartitionT(const IndexPartition &rhs)
       : IndexPartition(rhs.get_id(), rhs.get_tree_id(), rhs.get_type_tag())
     //--------------------------------------------------------------------------
@@ -6761,27 +6940,6 @@ namespace Legion {
       tid = rhs.get_tree_id();
       type_tag = rhs.get_type_tag();
       Internal::NT_TemplateHelper::template check_type<DIM,T>(type_tag);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    IndexPartitionT<DIM,T>& IndexPartitionT<DIM,T>::operator=(
-                                                     const IndexPartitionT &rhs)
-    //--------------------------------------------------------------------------
-    {
-      id = rhs.get_id();
-      tid = rhs.get_tree_id();
-      type_tag = rhs.get_type_tag();
-      Internal::NT_TemplateHelper::template check_type<DIM,T>(type_tag);
-      return *this;
-    }
-    
-    //--------------------------------------------------------------------------
-    inline FieldSpace& FieldSpace::operator=(const FieldSpace &rhs)
-    //--------------------------------------------------------------------------
-    {
-      id = rhs.id;
       return *this;
     }
 
@@ -6813,16 +6971,6 @@ namespace Legion {
       return (id > rhs.id);
     }
 
-    //--------------------------------------------------------------------------
-    inline LogicalRegion& LogicalRegion::operator=(const LogicalRegion &rhs) 
-    //--------------------------------------------------------------------------
-    {
-      tree_id = rhs.tree_id;
-      index_space = rhs.index_space;
-      field_space = rhs.field_space;
-      return *this;
-    }
-    
     //--------------------------------------------------------------------------
     inline bool LogicalRegion::operator==(const LogicalRegion &rhs) const
     //--------------------------------------------------------------------------
@@ -6878,17 +7026,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    LogicalRegionT<DIM,T>::LogicalRegionT(const LogicalRegionT &rhs)
-      : LogicalRegion(rhs.get_tree_id(), rhs.get_index_space(), 
-                      rhs.get_field_space())
-    //--------------------------------------------------------------------------
-    {
-      Internal::NT_TemplateHelper::template check_type<DIM,T>(
-                                rhs.get_type_tag());
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
     LogicalRegionT<DIM,T>::LogicalRegionT(const LogicalRegion &rhs)
       : LogicalRegion(rhs.get_tree_id(), rhs.get_index_space(), 
                       rhs.get_field_space())
@@ -6909,31 +7046,6 @@ namespace Legion {
       field_space = rhs.get_field_space();
       Internal::NT_TemplateHelper::template check_type<DIM,T>(
                                 rhs.get_type_tag());
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    LogicalRegionT<DIM,T>& LogicalRegionT<DIM,T>::operator=(
-                                                      const LogicalRegionT &rhs)
-    //--------------------------------------------------------------------------
-    {
-      tree_id = rhs.get_tree_id();
-      index_space = rhs.get_index_space();
-      field_space = rhs.get_field_space();
-      Internal::NT_TemplateHelper::template check_type<DIM,T>(
-                                rhs.get_type_tag());
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    inline LogicalPartition& LogicalPartition::operator=(
-                                                    const LogicalPartition &rhs)
-    //--------------------------------------------------------------------------
-    {
-      tree_id = rhs.tree_id;
-      index_partition = rhs.index_partition;
-      field_space = rhs.field_space;
       return *this;
     }
 
@@ -6993,17 +7105,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    LogicalPartitionT<DIM,T>::LogicalPartitionT(const LogicalPartitionT &rhs)
-      : LogicalPartition(rhs.get_tree_id(), rhs.get_index_partition(), 
-                         rhs.get_field_space())
-    //--------------------------------------------------------------------------
-    {
-      Internal::NT_TemplateHelper::template check_type<DIM,T>(
-                                            rhs.get_type_tag());
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
     LogicalPartitionT<DIM,T>::LogicalPartitionT(const LogicalPartition &rhs)
       : LogicalPartition(rhs.get_tree_id(), rhs.get_index_partition(), 
                          rhs.get_field_space())
@@ -7017,20 +7118,6 @@ namespace Legion {
     template<int DIM, typename T>
     LogicalPartitionT<DIM,T>& LogicalPartitionT<DIM,T>::operator=(
                                                     const LogicalPartition &rhs)
-    //--------------------------------------------------------------------------
-    {
-      tree_id = rhs.get_tree_id();
-      index_partition = rhs.get_index_partition();
-      field_space = rhs.get_field_space();
-      Internal::NT_TemplateHelper::template check_type<DIM,T>(
-                                            rhs.get_type_tag());
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    LogicalPartitionT<DIM,T>& LogicalPartitionT<DIM,T>::operator=(
-                                                   const LogicalPartitionT &rhs)
     //--------------------------------------------------------------------------
     {
       tree_id = rhs.get_tree_id();
@@ -7483,8 +7570,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void CopyLauncher::add_src_indirect_field(
-     const RegionRequirement &req, FieldID src_idx_field, bool inst, bool range)
+    inline void CopyLauncher::add_src_indirect_field(FieldID src_idx_field,
+                            const RegionRequirement &req, bool range, bool inst)
     //--------------------------------------------------------------------------
     {
       src_indirect_requirements.push_back(req);
@@ -7493,8 +7580,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void CopyLauncher::add_dst_indirect_field(
-     const RegionRequirement &req, FieldID dst_idx_field, bool inst, bool range)
+    inline void CopyLauncher::add_dst_indirect_field(FieldID dst_idx_field,
+                            const RegionRequirement &req, bool range, bool inst)
     //--------------------------------------------------------------------------
     {
       dst_indirect_requirements.push_back(req);
@@ -7596,8 +7683,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void IndexCopyLauncher::add_src_indirect_field(
-       const RegionRequirement &r, FieldID src_idx_field, bool inst, bool range)
+    inline void IndexCopyLauncher::add_src_indirect_field(FieldID src_idx_field,
+                              const RegionRequirement &r, bool range, bool inst)
     //--------------------------------------------------------------------------
     {
       src_indirect_requirements.push_back(r);
@@ -7606,8 +7693,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void IndexCopyLauncher::add_dst_indirect_field(
-       const RegionRequirement &r, FieldID dst_idx_field, bool inst, bool range)
+    inline void IndexCopyLauncher::add_dst_indirect_field(FieldID dst_idx_field,
+                              const RegionRequirement &r, bool range, bool inst)
     //--------------------------------------------------------------------------
     {
       dst_indirect_requirements.push_back(r);
@@ -8258,7 +8345,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<typename T>
     inline T FutureMap::get_result(const DomainPoint &dp, bool silence_warnings,
-                                   const char *warning_string)
+                                   const char *warning_string) const
     //--------------------------------------------------------------------------
     {
       Future f = get_future(dp);
@@ -8267,7 +8354,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename RT, typename PT, unsigned DIM>
-    inline RT FutureMap::get_result(const PT point[DIM])
+    inline RT FutureMap::get_result(const PT point[DIM]) const
     //--------------------------------------------------------------------------
     {
       LEGION_STATIC_ASSERT(DIM <= DomainPoint::MAX_POINT_DIM);
@@ -8281,7 +8368,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename PT, unsigned DIM>
-    inline Future FutureMap::get_future(const PT point[DIM])
+    inline Future FutureMap::get_future(const PT point[DIM]) const
     //--------------------------------------------------------------------------
     {
       LEGION_STATIC_ASSERT(DIM <= DomainPoint::MAX_POINT_DIM);
@@ -8294,7 +8381,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename PT, unsigned DIM>
-    inline void FutureMap::get_void_result(const PT point[DIM])
+    inline void FutureMap::get_void_result(const PT point[DIM]) const
     //--------------------------------------------------------------------------
     {
       LEGION_STATIC_ASSERT(DIM <= DomainPoint::MAX_POINT_DIM);
@@ -8421,12 +8508,32 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexSpaceT<DIM,T> Runtime::create_index_space(Context ctx, 
-                                                   Rect<DIM,T> bounds)
+                                                   const Rect<DIM,T> &bounds)
     //--------------------------------------------------------------------------
     {
-      // Make a Realm index space
-      DomainT<DIM,T> realm_is(bounds);
-      return IndexSpaceT<DIM,T>(create_index_space_internal(ctx, &realm_is,
+      const Domain domain(bounds);
+      return IndexSpaceT<DIM,T>(create_index_space(ctx, domain,
+                Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceT<DIM,T> Runtime::create_index_space(Context ctx, 
+                                                   const DomainT<DIM,T> &bounds)
+    //--------------------------------------------------------------------------
+    {
+      const Domain domain(bounds);
+      return IndexSpaceT<DIM,T>(create_index_space(ctx, domain,
+                Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceT<DIM,T> Runtime::create_index_space(Context ctx, 
+                                                   const Future &future)
+    //--------------------------------------------------------------------------
+    {
+      return IndexSpaceT<DIM,T>(create_index_space(ctx, DIM, future,
                 Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
     }
 
@@ -8440,8 +8547,9 @@ namespace Legion {
       std::vector<Realm::Point<DIM,T> > realm_points(points.size());
       for (unsigned idx = 0; idx < points.size(); idx++)
         realm_points[idx] = points[idx];
-      DomainT<DIM,T> realm_is((Realm::IndexSpace<DIM,T>(realm_points)));
-      return IndexSpaceT<DIM,T>(create_index_space_internal(ctx, &realm_is,
+      const DomainT<DIM,T> realm_is((Realm::IndexSpace<DIM,T>(realm_points)));
+      const Domain domain(realm_is);
+      return IndexSpaceT<DIM,T>(create_index_space(ctx, domain,
                 Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
     }
 
@@ -8455,8 +8563,9 @@ namespace Legion {
       std::vector<Realm::Rect<DIM,T> > realm_rects(rects.size());
       for (unsigned idx = 0; idx < rects.size(); idx++)
         realm_rects[idx] = rects[idx];
-      DomainT<DIM,T> realm_is((Realm::IndexSpace<DIM,T>(realm_rects)));
-      return IndexSpaceT<DIM,T>(create_index_space_internal(ctx, &realm_is,
+      const DomainT<DIM,T> realm_is((Realm::IndexSpace<DIM,T>(realm_rects)));
+      const Domain domain(realm_is);
+      return IndexSpaceT<DIM,T>(create_index_space(ctx, domain,
                 Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
     }
 
@@ -8515,65 +8624,9 @@ namespace Legion {
         c[DomainPoint::from_point<T::IDIM>(pir.p)] =
           Domain::from_rect<T::IDIM>(preimage.intersection(parent_rect));
       }
-      IndexPartition result = create_index_partition(ctx, parent, 
+      return create_index_partition(ctx, parent, 
               Domain::from_rect<T::ODIM>(color_space), c, 
               DISJOINT_KIND, part_color);
-#ifdef DEBUG_LEGION
-      // We don't actually know if we're supposed to check disjointness
-      // so if we're in debug mode then just do it.
-      {
-        std::set<DomainPoint> current_colors;  
-        for (DomainPointColoring::const_iterator it1 = c.begin();
-              it1 != c.end(); it1++)
-        {
-          current_colors.insert(it1->first);
-          for (DomainPointColoring::const_iterator it2 = c.begin();
-                it2 != c.end(); it2++)
-          {
-            if (current_colors.find(it2->first) != current_colors.end())
-              continue;
-            LegionRuntime::Arrays::Rect<T::IDIM> rect1 = 
-              it1->second.get_rect<T::IDIM>();
-            LegionRuntime::Arrays::Rect<T::IDIM> rect2 = 
-              it2->second.get_rect<T::IDIM>();
-            if (rect1.overlaps(rect2))
-            {
-              switch (it1->first.dim)
-              {
-                case 1:
-                  fprintf(stderr, "ERROR: colors %d and %d of partition %d are "
-                                  "not disjoint rectangles as they should be!",
-                                   (int)(it1->first)[0],
-                                   (int)(it2->first)[0], result.id);
-                  break;
-                case 2:
-                  fprintf(stderr, "ERROR: colors (%d, %d) and (%d, %d) of "
-                                  "partition %d are not disjoint rectangles "
-                                  "as they should be!",
-                                  (int)(it1->first)[0], (int)(it1->first)[1],
-                                  (int)(it2->first)[0], (int)(it2->first)[1],
-                                  result.id);
-                  break;
-                case 3:
-                  fprintf(stderr, "ERROR: colors (%d, %d, %d) and (%d, %d, %d) "
-                                  "of partition %d are not disjoint rectangles "
-                                  "as they should be!",
-                                  (int)(it1->first)[0], (int)(it1->first)[1],
-                                  (int)(it1->first)[2], (int)(it2->first)[0],
-                                  (int)(it2->first)[1], (int)(it2->first)[2],
-                                  result.id);
-                  break;
-                default:
-                  assert(false);
-              }
-              assert(false);
-              exit(ERROR_DISJOINTNESS_TEST_FAILURE);
-            }
-          }
-        }
-      }
-#endif
-      return result;
     }
 
     //--------------------------------------------------------------------------

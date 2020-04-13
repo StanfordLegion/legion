@@ -75,6 +75,8 @@ function parser.annotation_name(p, required)
     return "optimize"
   elseif p:nextif("__parallel") then
     return "parallel"
+  elseif p:nextif("__predicate") then
+    return "predicate"
   elseif p:nextif("__replicable") then
     return "replicable"
   elseif p:nextif("__spmd") then
@@ -447,6 +449,21 @@ function parser.disjointness_kind(p)
   end
 end
 
+function parser.is_completeness_kind(p)
+  return p:matches("complete") or p:matches("incomplete")
+end
+
+function parser.completeness_kind(p)
+  local start = ast.save(p)
+  if p:nextif("complete") then
+    return ast.completeness_kind.Complete {}
+  elseif p:nextif("incomplete") then
+    return ast.completeness_kind.Incomplete {}
+  else
+    p:error("expected completeness")
+  end
+end
+
 function parser.fence_kind(p)
   local start = ast.save(p)
   if p:nextif("__execution") then
@@ -536,6 +553,19 @@ function parser.expr_prefix(p)
     p:expect(")")
     return ast.unspecialized.expr.RawFields {
       region = region,
+      annotations = ast.default_annotations(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("__future") then
+    p:expect("(")
+    local value_type_expr = p:luaexpr()
+    p:expect(",")
+    local value = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.RawFuture {
+      value_type_expr = value_type_expr,
+      value = value,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
@@ -693,27 +723,8 @@ function parser.expr_prefix(p)
 
   elseif p:nextif("partition") then
     p:expect("(")
-    if p:is_disjointness_kind() then
-      local disjointness = p:disjointness_kind()
-      p:expect(",")
-      local region = p:expr()
-      p:expect(",")
-      local coloring = p:expr()
-      local colors = false
-      if not p:matches(")") then
-        p:expect(",")
-        colors = p:expr()
-      end
-      p:expect(")")
-      return ast.unspecialized.expr.Partition {
-        disjointness = disjointness,
-        region = region,
-        coloring = coloring,
-        colors = colors,
-        annotations = ast.default_annotations(),
-        span = ast.span(start, p),
-      }
-    elseif p:nextif("equal") then
+    -- case 1: equal partition
+    if p:nextif("equal") then
       p:expect(",")
       local region = p:expr()
       p:expect(",")
@@ -725,12 +736,48 @@ function parser.expr_prefix(p)
         annotations = ast.default_annotations(),
         span = ast.span(start, p),
       }
+    -- case 2: old-style partition
+    -- partition(disjointness, [completeness ,] region, coloring [, colorspace])
+    elseif p:is_disjointness_kind() then
+      local disjointness = p:disjointness_kind()
+      p:expect(",")
+      local completeness = false
+      if p:is_completeness_kind() then
+        completeness = p:completeness_kind()
+        p:expect(",")
+      end
+      local region = p:expr()
+      p:expect(",")
+      local coloring = p:expr()
+      local colors = false
+      if not p:matches(")") then
+        p:expect(",")
+        colors = p:expr()
+      end
+      p:expect(")")
+      return ast.unspecialized.expr.Partition {
+        disjointness = disjointness,
+        completeness = completeness,
+        region = region,
+        coloring = coloring,
+        colors = colors,
+        annotations = ast.default_annotations(),
+        span = ast.span(start, p),
+      }
+    -- case 3: partition by field
+    -- partition([completeness ,] region.field, colorspace)
     else
+      local completeness = false
+      if p:is_completeness_kind() then
+        completeness = p:completeness_kind()
+        p:expect(",")
+      end
       local region = p:expr_region_root()
       p:expect(",")
       local colors = p:expr()
       p:expect(")")
       return ast.unspecialized.expr.PartitionByField {
+        completeness = completeness,
         region = region,
         colors = colors,
         annotations = ast.default_annotations(),
@@ -745,6 +792,11 @@ function parser.expr_prefix(p)
        disjointness = p:disjointness_kind()
        p:expect(",")
     end
+    local completeness = false
+    if p:is_completeness_kind() then
+      completeness = p:completeness_kind()
+       p:expect(",")
+    end
     local parent = p:expr()
     p:expect(",")
     local partition = p:expr()
@@ -753,6 +805,7 @@ function parser.expr_prefix(p)
     p:expect(")")
     return ast.unspecialized.expr.Image {
       disjointness = disjointness,
+      completeness = completeness,
       parent = parent,
       partition = partition,
       region = region,
@@ -767,6 +820,11 @@ function parser.expr_prefix(p)
        disjointness = p:disjointness_kind()
        p:expect(",")
     end
+    local completeness = false
+    if p:is_completeness_kind() then
+      completeness = p:completeness_kind()
+       p:expect(",")
+    end
     local parent = p:expr()
     p:expect(",")
     local partition = p:expr()
@@ -775,6 +833,7 @@ function parser.expr_prefix(p)
     p:expect(")")
     return ast.unspecialized.expr.Preimage {
       disjointness = disjointness,
+      completeness = completeness,
       parent = parent,
       partition = partition,
       region = region,
@@ -789,6 +848,11 @@ function parser.expr_prefix(p)
        disjointness = p:disjointness_kind()
        p:expect(",")
     end
+    local completeness = false
+    if p:is_completeness_kind() then
+       completeness = p:completeness_kind()
+       p:expect(",")
+    end
     local region = p:expr()
     p:expect(",")
     local transform = p:expr()
@@ -799,6 +863,7 @@ function parser.expr_prefix(p)
     p:expect(")")
     return ast.unspecialized.expr.PartitionByRestriction {
       disjointness = disjointness,
+      completeness = completeness,
       region = region,
       transform = transform,
       extent = extent,

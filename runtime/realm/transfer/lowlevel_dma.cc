@@ -31,7 +31,7 @@
 #include <aio.h>
 #endif
 
-#ifdef USE_CUDA
+#ifdef REALM_USE_CUDA
 #include "realm/cuda/cuda_module.h"
 #endif
 
@@ -754,14 +754,14 @@ namespace Realm {
     case XFER_FILE_READ:
     case XFER_FILE_WRITE:
       return SimpleXferDesFactory<FileXferDes>::get_singleton();
-#ifdef USE_CUDA
+#ifdef REALM_USE_CUDA
     case XFER_GPU_FROM_FB:
     case XFER_GPU_TO_FB:
     case XFER_GPU_IN_FB:
     case XFER_GPU_PEER_FB:
       return SimpleXferDesFactory<GPUXferDes>::get_singleton();
 #endif
-#ifdef USE_HDF
+#ifdef REALM_USE_HDF5
     case XFER_HDF_READ:
     case XFER_HDF_WRITE:
       return SimpleXferDesFactory<HDFXferDes>::get_singleton();
@@ -1626,7 +1626,7 @@ namespace Realm {
 	      return XFER_NONE;
             return XFER_GASNET_WRITE;
 	  }
-#ifdef USE_CUDA
+#ifdef REALM_USE_CUDA
           else if (dst_ll_kind == Memory::GPU_FB_MEM) {
 	    // no serdez support
 	    if((src_serdez_id != 0) || (dst_serdez_id != 0))
@@ -1661,7 +1661,7 @@ namespace Realm {
 	  }
           assert(0);
           break;
-#ifdef USE_CUDA
+#ifdef REALM_USE_CUDA
         case Memory::GPU_FB_MEM:
         {
 	  // no serdez support
@@ -2565,13 +2565,13 @@ namespace Realm {
 	if(dst_is_remote) {
 	  // have to tell rdma to make a copy if we're using the temp buffer
 	  bool make_copy = (src_ptr == src_scratch_buffer);
-	  do_remote_reduce(dst_mem->me,
-			   dst_info.base_offset,
-			   redop_id, red_fold,
-			   src_ptr, num_elems,
-			   src_elem_size, redop->sizeof_rhs,
-			   rdma_sequence_id,
-			   make_copy);
+	  rdma_count += do_remote_reduce(dst_mem->me,
+					 dst_info.base_offset,
+					 redop_id, red_fold,
+					 src_ptr, num_elems,
+					 src_elem_size, redop->sizeof_rhs,
+					 rdma_sequence_id,
+					 make_copy);
 	} else {
 	  // case 2: destination is directly accessible
 	  void *dst_ptr = dst_mem->get_direct_ptr(dst_info.base_offset,
@@ -2888,7 +2888,7 @@ namespace Realm {
 						       dst_field,
 						       dst_field_offset,
 						       dst_field_size);
-#ifdef USE_CUDA
+#ifdef REALM_USE_CUDA
       // fills to GPU FB memory are offloaded to the GPU itself
       if (mem_impl->lowlevel_kind == Memory::GPU_FB_MEM) {
 	Cuda::GPU *gpu = static_cast<Cuda::GPUFBMemory *>(mem_impl)->gpu;
@@ -2921,7 +2921,7 @@ namespace Realm {
       }
 #endif
 
-#ifdef USE_HDF
+#ifdef REALM_USE_HDF5
       // fills of an HDF5 instance are also handled specially
       if (mem_impl->lowlevel_kind == Memory::HDF_MEM) {
 	hid_t file_id = -1;

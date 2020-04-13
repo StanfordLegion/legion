@@ -41,6 +41,8 @@ namespace Realm {
 
     T load(void) const;
     T load_acquire(void) const;
+    // a fenced load is an load_acquire that cannot be reordered with earlier stores
+    T load_fenced(void) const;
 
     void store(T newval);
     void store_release(T newval);

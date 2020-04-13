@@ -913,16 +913,21 @@ namespace Legion {
                         const Task &task, std::vector<Processor::Kind> &ranking)
     //--------------------------------------------------------------------------
     {
-      // Default mapper is ignorant about task IDs so just do whatever
-      // GPU > OMP > procset > cpu > IO > Python
+      // Default mapper is ignorant about task IDs so just do whatever:
+      // 1) GPU > OMP > procset > cpu > IO > Python  (default)
+      // 2) OMP > procset > cpu > IO > Python > GPU  (with PREFER_CPU_VARIANT)
       // It is up to the caller to filter out processor kinds that aren't
       // suitable for a given task
-      if (local_gpus.size() > 0) ranking.push_back(Processor::TOC_PROC);
+      bool prefer_cpu = ((task.tag & PREFER_CPU_VARIANT) != 0);
+      if ((local_gpus.size() > 0) && !prefer_cpu)
+       ranking.push_back(Processor::TOC_PROC);
       if (local_omps.size() > 0) ranking.push_back(Processor::OMP_PROC);
       if (local_procsets.size() > 0) ranking.push_back(Processor::PROC_SET);
       ranking.push_back(Processor::LOC_PROC);
       if (local_ios.size() > 0) ranking.push_back(Processor::IO_PROC);
       if (local_pys.size() > 0) ranking.push_back(Processor::PY_PROC);
+      if ((local_gpus.size() > 0) && prefer_cpu)
+       ranking.push_back(Processor::TOC_PROC);
     }
 
     //--------------------------------------------------------------------------
@@ -1947,44 +1952,57 @@ namespace Legion {
         // Get the constraints
         const LayoutConstraintSet &index_constraints = 
                   runtime->find_layout_constraints(ctx, lay_it->second);
-        std::vector<FieldID> overlaping_fields;
+        std::vector<FieldID> overlapping_fields;
         const std::vector<FieldID> &constraint_fields = 
           index_constraints.field_constraint.get_field_set();
-        for (unsigned idx = 0; idx < constraint_fields.size(); idx++)
+        if (!constraint_fields.empty())
         {
-          FieldID fid = constraint_fields[idx];
-          std::set<FieldID>::iterator finder = needed_fields.find(fid);
-          if (finder != needed_fields.end())
+          for (unsigned idx = 0; idx < constraint_fields.size(); idx++)
           {
-            overlaping_fields.push_back(fid);
-            // Remove from the needed fields since we're going to handle it
-            needed_fields.erase(finder);
+            FieldID fid = constraint_fields[idx];
+            std::set<FieldID>::iterator finder = needed_fields.find(fid);
+            if (finder != needed_fields.end())
+            {
+              overlapping_fields.push_back(fid);
+              // Remove from the needed fields since we're going to handle it
+              needed_fields.erase(finder);
+            }
           }
+          // If we don't have any overlapping fields, then keep going
+          if (overlapping_fields.empty())
+            continue;
         }
-        // If we don't have any overlapping fields, then keep going
-        if (overlaping_fields.empty())
-          continue;
+        else // otherwise it applies to all the fields
+        {
+          overlapping_fields.insert(overlapping_fields.end(),
+              needed_fields.begin(), needed_fields.end());
+          needed_fields.clear();
+        }
         // Now figure out how to make an instance
         instances.resize(instances.size()+1);
         // Check to see if these constraints conflict with our constraints
-        if (runtime->do_constraints_conflict(ctx, 
-                                              our_layout_id, lay_it->second))
+        // or whether they entail our mapper preferred constraints
+        if (runtime->do_constraints_conflict(ctx, our_layout_id, lay_it->second)
+            || runtime->do_constraints_entail(ctx, lay_it->second, our_layout_id))
         {
-          // They conflict, so we're just going to make an instance
-          // using these constraints
-          if (!default_make_instance(ctx, target_memory, index_constraints,
+          // They conflict or they entail our constraints so we're just going 
+          // to make an instance using these constraints
+          // Check to see if they have fields and if not constraints with fields
+          if (constraint_fields.empty())
+          {
+            LayoutConstraintSet creation_constraints = index_constraints;
+            creation_constraints.add_constraint(
+                FieldConstraint(overlapping_fields, 
+                  index_constraints.field_constraint.contiguous,
+                  index_constraints.field_constraint.inorder));
+            if (!default_make_instance(ctx, target_memory, creation_constraints,
+                         instances.back(), TASK_MAPPING, force_new_instances, 
+                         true/*meets*/, req, footprint))
+              return false;
+          }
+          else if (!default_make_instance(ctx, target_memory, index_constraints,
                      instances.back(), TASK_MAPPING, force_new_instances, 
                      false/*meets*/, req, footprint))
-            return false;
-        }
-        else if (runtime->do_constraints_entail(ctx, 
-                                                 lay_it->second, our_layout_id))
-        {
-          // These constraints do everything we want to do and maybe more
-          // so we can just use them directly
-          if (!default_make_instance(ctx, target_memory, index_constraints,
-                      instances.back(), TASK_MAPPING, force_new_instances, 
-                      true/*meets*/, req, footprint))
             return false;
         }
         else
@@ -1995,8 +2013,11 @@ namespace Legion {
           default_policy_select_constraints(ctx, creation_constraints, 
                                             target_memory, req);
           creation_constraints.add_constraint(
-              FieldConstraint(overlaping_fields,
-                false/*contig*/, false/*inorder*/));
+              FieldConstraint(overlapping_fields,
+                creation_constraints.field_constraint.contiguous ||
+                index_constraints.field_constraint.contiguous,
+                creation_constraints.field_constraint.inorder ||
+                index_constraints.field_constraint.inorder));
           if (!default_make_instance(ctx, target_memory, creation_constraints,
                          instances.back(), TASK_MAPPING, force_new_instances, 
                          true/*meets*/, req, footprint))
@@ -2244,7 +2265,8 @@ namespace Legion {
       LogicalRegion target_region = 
         default_policy_select_instance_region(ctx, target_memory, req,
                                               constraints, force_new, meets);
-      bool tight_region_bounds = (req.tag & DefaultMapper::EXACT_REGION) != 0;
+      bool tight_region_bounds = constraints.specialized_constraint.is_exact()
+        || ((req.tag & DefaultMapper::EXACT_REGION) != 0);
 
       // TODO: deal with task layout constraints that require multiple
       // region requirements to be mapped to the same instance
@@ -2980,16 +3002,26 @@ namespace Legion {
         runtime->acquire_and_filter_instances(ctx, 
                                           output.chosen_instances);
       // Now see if we have any fields which we still make space for
+      std::vector<unsigned> to_erase;
       std::set<FieldID> missing_fields = 
         partition.requirement.privilege_fields;
       for (std::vector<PhysicalInstance>::const_iterator it = 
             output.chosen_instances.begin(); it != 
             output.chosen_instances.end(); it++)
       {
-        it->remove_space_fields(missing_fields);
-        if (missing_fields.empty())
-          break;
+        if (it->get_location().kind() == Memory::GPU_FB_MEM) {
+          // These instances are not supported yet (see Legion issue #516)
+          to_erase.push_back(it - output.chosen_instances.begin());
+        } else {
+          it->remove_space_fields(missing_fields);
+          if (missing_fields.empty())
+            break;
+        }
       }
+      // Erase undesired instances
+      for (std::vector<unsigned>::const_reverse_iterator it =
+            to_erase.rbegin(); it != to_erase.rend(); it++)
+        output.chosen_instances.erase((*it) + output.chosen_instances.begin());
       // If we've satisfied all our fields, then we are done
       if (missing_fields.empty())
         return;

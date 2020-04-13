@@ -52,3 +52,7 @@ endif()
 if(Legion_USE_OpenMP)
   add_subdirectory(omp_saxpy)
 endif()
+
+if(Legion_USE_Kokkos)
+  add_subdirectory(kokkos_saxpy)
+endif()

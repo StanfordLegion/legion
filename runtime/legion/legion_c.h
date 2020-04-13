@@ -83,7 +83,6 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_accessor_array_##DIM##d_t);
   LEGION_FOREACH_N(NEW_ACCESSOR_ARRAY_TYPE)
 #undef NEW_ACCESSOR_ARRAY_TYPE
-  NEW_OPAQUE_TYPE(legion_index_iterator_t);
   NEW_OPAQUE_TYPE(legion_task_t);
   NEW_OPAQUE_TYPE(legion_copy_t);
   NEW_OPAQUE_TYPE(legion_fill_t);
@@ -873,6 +872,18 @@ extern "C" {
   legion_index_space_create_domain(legion_runtime_t runtime,
                                    legion_context_t ctx,
                                    legion_domain_t domain);
+
+  /**
+   * @return Caller takes ownership of return value
+   *
+   * @see Legion::Runtime::create_index_space(Context, size_t, Future, TypeTag)
+   */
+  legion_index_space_t
+  legion_index_space_create_future(legion_runtime_t runtime,
+                                   legion_context_t ctx,
+                                   size_t dimensions,
+                                   legion_future_t future,
+                                   legion_type_tag_t type_tag/*=0*/);
 
   /**
    * @return Caller takes ownership of return value.
@@ -1796,6 +1807,12 @@ extern "C" {
                                       legion_logical_region_t handle,
                                       const char **result);
 
+  /**
+   * @see Legion::LogicalRegion::get_index_space
+   */
+  legion_index_space_t
+  legion_logical_region_get_index_space(legion_logical_region_t handle); 
+  
   // -----------------------------------------------------------------------
   // Logical Region Tree Traversal Operations
   // -----------------------------------------------------------------------
@@ -2099,6 +2116,12 @@ extern "C" {
   legion_field_allocator_destroy(legion_field_allocator_t handle);
 
   /**
+   * This will give the value of the macro AUTO_GENERATE_ID
+   */
+  legion_field_id_t
+  legion_auto_generate_id(void);
+
+  /**
    * @see Legion::FieldAllocator::allocate_field()
    */
   legion_field_id_t
@@ -2386,6 +2409,14 @@ extern "C" {
   legion_future_get_void_result(legion_future_t handle);
 
   /**
+   * @see Legion::Future::wait
+   */
+  void
+  legion_future_wait(legion_future_t handle, 
+                     bool silence_warnings /* = false */,
+                     const char *warning_string /* = NULL */);
+
+  /**
    * @see Legion::Future::is_empty()
    */
   bool
@@ -2457,11 +2488,24 @@ extern "C" {
    * @see Legion::Runtime::reduce_future_map
    */
   legion_future_t
-  legion_reduce_future_map(legion_runtime_t runtime,
+  legion_future_map_reduce(legion_runtime_t runtime,
                            legion_context_t ctx,
                            legion_future_map_t handle,
                            legion_reduction_op_id_t redop,
                            bool deterministic);
+
+  /**
+   * @return Caller takes ownership of return value
+   *
+   * @see Legion::Runtime::construct_future_map
+   */
+  legion_future_map_t
+  legion_future_map_construct(legion_runtime_t runtime,
+                              legion_context_t ctx,
+                              legion_domain_t domain,
+                              legion_domain_point_t *points,
+                              legion_future_t *futures,
+                              size_t num_futures);
 
   // -----------------------------------------------------------------------
   // Deferred Buffer Operations
@@ -2680,6 +2724,20 @@ extern "C" {
                                           legion_index_space_t is);
 
   /**
+   * @see Legion::TaskLauncher::predicate_false_future
+   */
+  void
+  legion_task_launcher_set_predicate_false_future(legion_task_launcher_t launcher,
+                                                  legion_future_t f);
+
+  /**
+   * @see Legion::TaskLauncher::predicate_false_result
+   */
+  void
+  legion_task_launcher_set_predicate_false_result(legion_task_launcher_t launcher,
+                                                  legion_task_argument_t arg);
+
+  /**
    * @see Legion::TaskLauncher::map_id
    */
   void
@@ -2692,6 +2750,13 @@ extern "C" {
   void
   legion_task_launcher_set_mapping_tag(legion_task_launcher_t launcher,
                                        legion_mapping_tag_id_t tag);
+
+  /**
+   * @see Legion::TaskLauncher::enable_inlining
+   */
+  void
+  legion_task_launcher_set_enable_inlining(legion_task_launcher_t launcher,
+                                           bool enable_inlining);
 
   /**
    * @return Caller takes ownership of return value.
@@ -3296,6 +3361,7 @@ extern "C" {
     legion_coherence_property_t prop,
     legion_logical_region_t parent,
     legion_mapping_tag_id_t tag /* = 0 */,
+    bool is_range_indirection /* = false */,
     bool verified /* = false*/);
 
   /**
@@ -3309,6 +3375,7 @@ extern "C" {
     legion_coherence_property_t prop,
     legion_logical_region_t parent,
     legion_mapping_tag_id_t tag /* = 0 */,
+    bool is_range_indirection /* = false */,
     bool verified /* = false*/);
 
   /**
@@ -3342,6 +3409,20 @@ extern "C" {
   void
   legion_copy_launcher_add_arrival_barrier(legion_copy_launcher_t launcher,
                                            legion_phase_barrier_t bar);
+
+  /**
+   * @see Legion::CopyLauncher::possible_src_indirect_out_of_range
+   */
+  void
+  legion_copy_launcher_set_possible_src_indirect_out_of_range(
+      legion_copy_launcher_t launcher, bool flag);
+
+  /**
+   * @see Legion::CopyLauncher::possible_dst_indirect_out_of_range
+   */
+  void
+  legion_copy_launcher_set_possible_dst_indirect_out_of_range(
+      legion_copy_launcher_t launcher, bool flag);
 
   /**
    * @return Caller does **NOT** take ownership of return value.
@@ -3484,6 +3565,7 @@ extern "C" {
     legion_coherence_property_t prop,
     legion_logical_region_t parent,
     legion_mapping_tag_id_t tag /* = 0 */,
+    bool is_range_indirection /* = false */,
     bool verified /* = false*/);
 
   /**
@@ -3498,6 +3580,7 @@ extern "C" {
     legion_coherence_property_t prop,
     legion_logical_region_t parent,
     legion_mapping_tag_id_t tag /* = 0 */,
+    bool is_range_indirection /* = false */,
     bool verified /* = false*/);
 
   /**
@@ -3512,6 +3595,7 @@ extern "C" {
     legion_coherence_property_t prop,
     legion_logical_region_t parent,
     legion_mapping_tag_id_t tag /* = 0 */,
+    bool is_range_indirection /* = false */,
     bool verified /* = false*/);
 
   /**
@@ -3526,6 +3610,7 @@ extern "C" {
     legion_coherence_property_t prop,
     legion_logical_region_t parent,
     legion_mapping_tag_id_t tag /* = 0 */,
+    bool is_range_indirection /* = false */,
     bool verified /* = false*/);
 
   /**
@@ -3559,6 +3644,20 @@ extern "C" {
   void
   legion_index_copy_launcher_add_arrival_barrier(legion_index_copy_launcher_t launcher,
                                                  legion_phase_barrier_t bar);
+
+  /**
+   * @see Legion::IndexCopyLauncher::possible_src_indirect_out_of_range
+   */
+  void
+  legion_index_copy_launcher_set_possible_src_indirect_out_of_range(
+      legion_index_copy_launcher_t launcher, bool flag);
+
+  /**
+   * @see Legion::IndexCopyLauncher::possible_dst_indirect_out_of_range
+   */
+  void
+  legion_index_copy_launcher_set_possible_dst_indirect_out_of_range(
+      legion_index_copy_launcher_t launcher, bool flag);
 
   // -----------------------------------------------------------------------
   // Acquire Operations
@@ -4080,44 +4179,6 @@ extern "C" {
   LEGION_FOREACH_N(DESTROY_ARRAY)
 #undef DESTROY_ARRAY
 
-  /**
-   * @return Caller takes ownership of return value.
-   *
-   * @see Legion::IndexIterator::IndexIterator()
-   */
-  legion_index_iterator_t
-  legion_index_iterator_create(legion_runtime_t runtime,
-                               legion_context_t context,
-                               legion_index_space_t handle);
-
-  /**
-   * @param handle Caller must have ownership of parameter `handle`.
-   *
-   * @see Legion::IndexIterator::~IndexIterator()
-   */
-  void
-  legion_index_iterator_destroy(legion_index_iterator_t handle);
-
-  /**
-   * @see Legion::IndexIterator::has_next()
-   */
-  bool
-  legion_index_iterator_has_next(legion_index_iterator_t handle);
-
-  /**
-   * @see Legion::IndexIterator::next()
-   */
-  legion_ptr_t
-  legion_index_iterator_next(legion_index_iterator_t handle);
-
-  /**
-   * @see Legion::IndexIterator::next_span()
-   */
-  legion_ptr_t
-  legion_index_iterator_next_span(legion_index_iterator_t handle,
-                                  size_t *act_count,
-                                  size_t req_count /* = -1 */);
-
   // -----------------------------------------------------------------------
   // Mappable Operations
   // -----------------------------------------------------------------------
@@ -4174,6 +4235,12 @@ extern "C" {
    */
   int
   legion_task_get_depth(legion_task_t task);
+
+  /**
+   * @see Legion::Mappable::map_id
+   */
+  legion_mapper_id_t
+  legion_task_get_mapper(legion_task_t task);
 
   /**
    * @see Legion::Mappable::tag
@@ -5454,6 +5521,26 @@ extern "C" {
       legion_physical_instance_t *instances,
       size_t instances_size);
 
+  // A hidden method here that hopefully nobody sees or ever needs
+  // to use but its here anyway just in case
+  legion_shard_id_t
+  legion_context_get_shard_id(legion_runtime_t /*runtime*/,
+                              legion_context_t /*context*/,
+                              bool /*I know what I am doing*/);
+  // Another hidden method for getting the number of shards
+  size_t
+  legion_context_get_num_shards(legion_runtime_t /*runtime*/,
+                                legion_context_t /*context*/,
+                                bool /*I know what I am doing*/);
+      
+  /**
+   * used by fortran API
+   */
+  legion_physical_region_t
+  legion_get_physical_region_by_id(
+      legion_physical_region_t *regionptr, 
+      int id, 
+      int num_regions); 
 #ifdef __cplusplus
 }
 #endif

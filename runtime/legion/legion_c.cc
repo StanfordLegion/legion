@@ -634,6 +634,22 @@ legion_index_space_create_domain(legion_runtime_t runtime_,
 }
 
 legion_index_space_t
+legion_index_space_create_future(legion_runtime_t runtime_,
+                                 legion_context_t ctx_,
+                                 size_t dimensions,
+                                 legion_future_t future_,
+                                 legion_type_tag_t type_tag)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  Future *future = CObjectWrapper::unwrap(future_);
+
+  IndexSpace is = 
+    runtime->create_index_space(ctx, dimensions, *future, type_tag);
+  return CObjectWrapper::wrap(is);
+}
+
+legion_index_space_t
 legion_index_space_union(legion_runtime_t runtime_,
                          legion_context_t ctx_,
                          const legion_index_space_t *spaces_,
@@ -2479,6 +2495,12 @@ legion_field_allocator_destroy(legion_field_allocator_t handle_)
 }
 
 legion_field_id_t
+legion_auto_generate_id(void)
+{
+  return AUTO_GENERATE_ID;
+}
+
+legion_field_id_t
 legion_field_allocator_allocate_field(legion_field_allocator_t allocator_,
                                       size_t field_size,
                                       legion_field_id_t desired_fieldid)
@@ -2573,7 +2595,7 @@ legion_predicate_create(legion_runtime_t runtime_,
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   Future *f = CObjectWrapper::unwrap(f_);
 
-  Predicate result = runtime->create_predicate(ctx, f);
+  Predicate result = runtime->create_predicate(ctx, *f);
   return CObjectWrapper::wrap(new Predicate(result));
 }
 
@@ -2814,6 +2836,16 @@ legion_future_get_void_result(legion_future_t handle_)
   handle->get_void_result();
 }
 
+void
+legion_future_wait(legion_future_t handle_,
+                   bool silence_warnings,
+                   const char *warning_string)
+{
+  Future *handle = CObjectWrapper::unwrap(handle_);
+
+  handle->get_void_result(silence_warnings, warning_string);
+}
+
 bool
 legion_future_is_empty(legion_future_t handle_,
                        bool block /* = false */)
@@ -2894,7 +2926,7 @@ legion_future_map_get_future(legion_future_map_t fm_,
 }
 
 legion_future_t
-legion_reduce_future_map(legion_runtime_t runtime_,
+legion_future_map_reduce(legion_runtime_t runtime_,
                          legion_context_t ctx_,
                          legion_future_map_t fm_,
                          legion_reduction_op_id_t redop,
@@ -2906,6 +2938,27 @@ legion_reduce_future_map(legion_runtime_t runtime_,
 
   return CObjectWrapper::wrap(new Future(
         runtime->reduce_future_map(ctx, *fm, redop, deterministic)));
+}
+
+legion_future_map_t
+legion_future_map_construct(legion_runtime_t runtime_,
+                            legion_context_t ctx_,
+                            legion_domain_t domain_,
+                            legion_domain_point_t *points_,
+                            legion_future_t *futures_,
+                            size_t num_futures)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  Domain domain = CObjectWrapper::unwrap(domain_);
+  std::map<DomainPoint,Future> futures;
+  for (unsigned idx = 0; idx < num_futures; idx++)
+  {
+    DomainPoint point = CObjectWrapper::unwrap(points_[idx]);
+    futures[point] = *(CObjectWrapper::unwrap(futures_[idx]));
+  }
+  return CObjectWrapper::wrap(new FutureMap(
+        runtime->construct_future_map(ctx, domain, futures)));
 }
 
 // -----------------------------------------------------------------------
@@ -3196,6 +3249,26 @@ legion_task_launcher_set_sharding_space(legion_task_launcher_t launcher_,
 }
 
 void
+legion_task_launcher_set_predicate_false_future(legion_task_launcher_t launcher_,
+                                                legion_future_t f_)
+{
+  TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  Future *f = CObjectWrapper::unwrap(f_);
+
+  launcher->predicate_false_future = *f;
+}
+
+void
+legion_task_launcher_set_predicate_false_result(legion_task_launcher_t launcher_,
+                                                legion_task_argument_t arg_)
+{
+  TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  TaskArgument arg = CObjectWrapper::unwrap(arg_);
+
+  launcher->predicate_false_result = arg;
+}
+
+void
 legion_task_launcher_set_mapper(legion_task_launcher_t launcher_,
                                 legion_mapper_id_t mapper_id)
 {
@@ -3211,6 +3284,15 @@ legion_task_launcher_set_mapping_tag(legion_task_launcher_t launcher_,
   TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
 
   launcher->tag = tag;
+}
+
+void
+legion_task_launcher_set_enable_inlining(legion_task_launcher_t launcher_,
+                                         bool enable_inlining)
+{
+  TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->enable_inlining = enable_inlining;
 }
 
 legion_index_launcher_t
@@ -4062,6 +4144,7 @@ legion_copy_launcher_add_src_indirect_region_requirement_logical_region(
   legion_coherence_property_t prop,
   legion_logical_region_t parent_,
   legion_mapping_tag_id_t tag /* = 0 */,
+  bool is_range_indirection /* = false */,
   bool verified /* = false*/)
 {
   CopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
@@ -4069,8 +4152,9 @@ legion_copy_launcher_add_src_indirect_region_requirement_logical_region(
   LogicalRegion parent = CObjectWrapper::unwrap(parent_);
 
   unsigned idx = launcher->src_requirements.size();
-  launcher->add_src_indirect_field(
-    RegionRequirement(handle, READ_ONLY, prop, parent, tag, verified), fid);
+  launcher->add_src_indirect_field(fid,
+    RegionRequirement(handle, READ_ONLY, prop, parent, tag, verified),
+    is_range_indirection);
   return idx;
 }
 
@@ -4082,6 +4166,7 @@ legion_copy_launcher_add_dst_indirect_region_requirement_logical_region(
   legion_coherence_property_t prop,
   legion_logical_region_t parent_,
   legion_mapping_tag_id_t tag /* = 0 */,
+  bool is_range_indirection /* = false */,
   bool verified /* = false*/)
 {
   CopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
@@ -4089,8 +4174,9 @@ legion_copy_launcher_add_dst_indirect_region_requirement_logical_region(
   LogicalRegion parent = CObjectWrapper::unwrap(parent_);
 
   unsigned idx = launcher->dst_requirements.size();
-  launcher->add_dst_indirect_field(
-    RegionRequirement(handle, READ_ONLY, prop, parent, tag, verified), fid);
+  launcher->add_dst_indirect_field(fid,
+    RegionRequirement(handle, READ_ONLY, prop, parent, tag, verified),
+    is_range_indirection);
   return idx;
 }
 
@@ -4134,6 +4220,22 @@ legion_copy_launcher_add_arrival_barrier(legion_copy_launcher_t launcher_,
   PhaseBarrier bar = CObjectWrapper::unwrap(bar_);
 
   launcher->add_arrival_barrier(bar);
+}
+
+void
+legion_copy_launcher_set_possible_src_indirect_out_of_range(
+    legion_copy_launcher_t launcher_, bool flag)
+{
+  CopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  launcher->possible_src_indirect_out_of_range = flag;
+}
+
+void
+legion_copy_launcher_set_possible_dst_indirect_out_of_range(
+    legion_copy_launcher_t launcher_, bool flag)
+{
+  CopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  launcher->possible_dst_indirect_out_of_range = flag;
 }
 
 legion_region_requirement_t
@@ -4330,6 +4432,7 @@ legion_index_copy_launcher_add_src_indirect_region_requirement_logical_region(
   legion_coherence_property_t prop,
   legion_logical_region_t parent_,
   legion_mapping_tag_id_t tag /* = 0 */,
+  bool is_range_indirection /* = false */,
   bool verified /* = false*/)
 {
   IndexCopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
@@ -4337,8 +4440,9 @@ legion_index_copy_launcher_add_src_indirect_region_requirement_logical_region(
   LogicalRegion parent = CObjectWrapper::unwrap(parent_);
 
   unsigned idx = launcher->src_requirements.size();
-  launcher->add_src_indirect_field(
-    RegionRequirement(handle, proj, READ_ONLY, prop, parent, tag, verified), fid);
+  launcher->add_src_indirect_field(fid,
+    RegionRequirement(handle, proj, READ_ONLY, prop, parent, tag, verified),
+    is_range_indirection);
   return idx;
 }
 
@@ -4351,6 +4455,7 @@ legion_index_copy_launcher_add_dst_indirect_region_requirement_logical_region(
   legion_coherence_property_t prop,
   legion_logical_region_t parent_,
   legion_mapping_tag_id_t tag /* = 0 */,
+  bool is_range_indirection /* = false */,
   bool verified /* = false*/)
 {
   IndexCopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
@@ -4358,8 +4463,9 @@ legion_index_copy_launcher_add_dst_indirect_region_requirement_logical_region(
   LogicalRegion parent = CObjectWrapper::unwrap(parent_);
 
   unsigned idx = launcher->dst_requirements.size();
-  launcher->add_dst_indirect_field(
-    RegionRequirement(handle, proj, READ_ONLY, prop, parent, tag, verified), fid);
+  launcher->add_dst_indirect_field(fid,
+    RegionRequirement(handle, proj, READ_ONLY, prop, parent, tag, verified),
+    is_range_indirection);
   return idx;
 }
 
@@ -4372,6 +4478,7 @@ legion_index_copy_launcher_add_src_indirect_region_requirement_logical_partition
   legion_coherence_property_t prop,
   legion_logical_region_t parent_,
   legion_mapping_tag_id_t tag /* = 0 */,
+  bool is_range_indirection /* = false */,
   bool verified /* = false*/)
 {
   IndexCopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
@@ -4379,8 +4486,9 @@ legion_index_copy_launcher_add_src_indirect_region_requirement_logical_partition
   LogicalRegion parent = CObjectWrapper::unwrap(parent_);
 
   unsigned idx = launcher->src_requirements.size();
-  launcher->add_src_indirect_field(
-    RegionRequirement(handle, proj, READ_ONLY, prop, parent, tag, verified), fid);
+  launcher->add_src_indirect_field(fid,
+    RegionRequirement(handle, proj, READ_ONLY, prop, parent, tag, verified),
+    is_range_indirection);
   return idx;
 }
 
@@ -4393,6 +4501,7 @@ legion_index_copy_launcher_add_dst_indirect_region_requirement_logical_partition
   legion_coherence_property_t prop,
   legion_logical_region_t parent_,
   legion_mapping_tag_id_t tag /* = 0 */,
+  bool is_range_indirection /* = false */,
   bool verified /* = false*/)
 {
   IndexCopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
@@ -4400,8 +4509,9 @@ legion_index_copy_launcher_add_dst_indirect_region_requirement_logical_partition
   LogicalRegion parent = CObjectWrapper::unwrap(parent_);
 
   unsigned idx = launcher->dst_requirements.size();
-  launcher->add_dst_indirect_field(
-    RegionRequirement(handle, proj, READ_ONLY, prop, parent, tag, verified), fid);
+  launcher->add_dst_indirect_field(fid,
+    RegionRequirement(handle, proj, READ_ONLY, prop, parent, tag, verified),
+    is_range_indirection);
   return idx;
 }
 
@@ -4445,6 +4555,22 @@ legion_index_copy_launcher_add_arrival_barrier(legion_index_copy_launcher_t laun
   PhaseBarrier bar = CObjectWrapper::unwrap(bar_);
 
   launcher->add_arrival_barrier(bar);
+}
+
+void
+legion_index_copy_launcher_set_possible_src_indirect_out_of_range(
+    legion_index_copy_launcher_t launcher_, bool flag)
+{
+  IndexCopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  launcher->possible_src_indirect_out_of_range = flag;
+}
+
+void
+legion_index_copy_launcher_set_possible_dst_indirect_out_of_range(
+    legion_index_copy_launcher_t launcher_, bool flag)
+{
+  IndexCopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  launcher->possible_dst_indirect_out_of_range = flag;
 }
 
 // -----------------------------------------------------------------------
@@ -5433,53 +5559,6 @@ legion_accessor_array_##DIM##d_ref_point(legion_accessor_array_##DIM##d_t handle
 LEGION_FOREACH_N(REF_POINT)
 #undef REF_POINT
 
-legion_index_iterator_t
-legion_index_iterator_create(legion_runtime_t runtime_,
-                             legion_context_t ctx_,
-                             legion_index_space_t handle_)
-{
-  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
-  IndexSpace handle = CObjectWrapper::unwrap(handle_);
-
-  IndexIterator *iterator = new IndexIterator(runtime, ctx, handle);
-  return CObjectWrapper::wrap(iterator);
-}
-
-void
-legion_index_iterator_destroy(legion_index_iterator_t handle_)
-{
-  IndexIterator *handle = CObjectWrapper::unwrap(handle_);
-
-  delete handle;
-}
-
-bool
-legion_index_iterator_has_next(legion_index_iterator_t handle_)
-{
-  IndexIterator *handle = CObjectWrapper::unwrap(handle_);
-
-  return handle->has_next();
-}
-
-legion_ptr_t
-legion_index_iterator_next(legion_index_iterator_t handle_)
-{
-  IndexIterator *handle = CObjectWrapper::unwrap(handle_);
-
-  return CObjectWrapper::wrap(handle->next());
-}
-
-legion_ptr_t
-legion_index_iterator_next_span(legion_index_iterator_t handle_,
-                                size_t *act_count,
-                                size_t req_count)
-{
-  IndexIterator *handle = CObjectWrapper::unwrap(handle_);
-
-  return CObjectWrapper::wrap(handle->next_span(*act_count, req_count));
-}
-
 //------------------------------------------------------------------------
 // Mappable Operations
 //------------------------------------------------------------------------
@@ -5554,6 +5633,12 @@ int
 legion_task_get_depth(legion_task_t task_)
 {
   return CObjectWrapper::unwrap(task_)->get_depth();
+}
+
+legion_mapper_id_t
+legion_task_get_mapper(legion_task_t task_)
+{
+  return CObjectWrapper::unwrap(task_)->map_id;
 }
 
 legion_mapping_tag_id_t
@@ -7457,4 +7542,63 @@ legion_mapper_runtime_acquire_instances(
   for (size_t idx = 0; idx < instances_size; ++idx)
     instances.push_back(*CObjectWrapper::unwrap(instances_[idx]));
   return runtime->acquire_instances(ctx, instances);
+}
+
+legion_shard_id_t
+legion_context_get_shard_id(legion_runtime_t runtime_,
+                            legion_context_t ctx_,
+                            bool I_know_what_I_am_doing)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+
+  return runtime->get_shard_id(ctx, I_know_what_I_am_doing);
+}
+
+size_t
+legion_context_get_num_shards(legion_runtime_t runtime_,
+                              legion_context_t ctx_,
+                              bool I_know_what_I_am_doing)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+
+  return runtime->get_num_shards(ctx, I_know_what_I_am_doing);
+}
+
+legion_physical_region_t
+legion_get_physical_region_by_id(
+    legion_physical_region_t *regionptr, 
+    int id, 
+    int num_regions)
+{
+  assert(id < num_regions);
+  return regionptr[id];
+}
+
+legion_index_space_t
+legion_logical_region_get_index_space(legion_logical_region_t lr_)
+{
+  LogicalRegion lr = CObjectWrapper::unwrap(lr_);
+  return CObjectWrapper::wrap(lr.get_index_space());
+}
+
+void
+legion_task_cxx_to_c(
+  const Task *task,
+  const std::vector<PhysicalRegion> *regions,
+  Context ctx, 
+  Runtime *runtime,
+  legion_task_t *taskptr,
+  const legion_physical_region_t **regionptr,
+  unsigned * num_regions_ptr,
+  legion_context_t * ctxptr,
+  legion_runtime_t * runtimeptr)
+{
+  CContext *cctx = new CContext(ctx, *regions);
+  *taskptr = CObjectWrapper::wrap_const(task);
+  *regionptr = cctx->regions();
+  *num_regions_ptr = cctx->num_regions();
+  *ctxptr = CObjectWrapper::wrap(cctx);
+  *runtimeptr = CObjectWrapper::wrap(runtime);
 }

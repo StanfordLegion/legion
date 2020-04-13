@@ -20,7 +20,7 @@
 #include "realm/logging.h"
 #include "realm/runtime_impl.h"
 #include "realm/deppart/inst_helper.h"
-#ifdef USE_HDF
+#ifdef REALM_USE_HDF5
 #include "realm/hdf5/hdf5_access.h"
 #endif
 
@@ -883,7 +883,7 @@ namespace Realm {
   FOREACH_NT(DOIT)
 #undef DOIT
 
-#ifdef USE_HDF
+#ifdef REALM_USE_HDF5
   template <int N, typename T>
   /*static*/ Serialization::PolymorphicSerdezSubclass<InstanceLayoutPiece<N,T>, HDF5LayoutPiece<N,T> > HDF5LayoutPiece<N,T>::serdez_subclass;
 

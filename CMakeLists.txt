@@ -123,17 +123,24 @@ endif()
 # -O3 to -O2 and removes -DNDEBUG
 set(CMAKE_CXX_FLAGS_RELEASE "-O2")
 
-# For debug we can see if it supports the new -Og flag that gcc added recently
-check_cxx_compiler_flag("-Og" COMPILER_SUPPORTS_DEBUG_OPTIMIZATIONS)
-if(COMPILER_SUPPORTS_DEBUG_OPTIMIZATIONS)
-  set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -Og")
-endif()
-
 # Legion can't handle certain optimizations. See:
 # https://github.com/StanfordLegion/legion/issues/168#issuecomment-244582958
 check_cxx_compiler_flag("-fno-strict-aliasing" COMPILER_SUPPORTS_NO_STRICT_ALIASING)
 if(COMPILER_SUPPORTS_NO_STRICT_ALIASING)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-strict-aliasing")
+endif()
+
+# if requested (and we know how to) make any warnings during the build fatal
+option(Legion_BUILD_WARN_AS_ERROR "Consider warnings during build of Legion to be fatal errors" OFF)
+if(Legion_BUILD_WARN_AS_ERROR)
+  check_cxx_compiler_flag("-Wall -Werror" COMPILER_SUPPORTS_WALL_WERROR)
+  if(COMPILER_SUPPORTS_WALL_WERROR)
+    set(CXX_BUILD_WARNING_FLAGS -Wall -Werror)
+  else()
+    message(FATAL_ERROR "cannot determine how to convert warnings to errors in C++ compiler")
+  endif()
+else()
+  set(CXX_BUILD_WARNING_FLAGS "")
 endif()
 
 #------------------------------------------------------------------------------#
@@ -189,6 +196,8 @@ set(BINDINGS_DEFAULT_MODULE "" CACHE STRING "module to load by default in Python
 #------------------------------------------------------------------------------#
 option(Legion_USE_CUDA "Enable support for the CUDA runtime" OFF)
 if(Legion_USE_CUDA)
+  set(Legion_CUDA_ARCH "" CACHE STRING "Comma-separated list of CUDA architectures to build for (e.g. 60,70)")
+
   if(NOT BUILD_SHARED_LIBS)
     set(CUDA_USE_STATIC_CUDA_RUNTIME ON)
   else()
@@ -204,11 +213,30 @@ if(Legion_USE_CUDA)
 
   # define variable for legion_defines.h
   set(LEGION_USE_CUDA ON)
+  set(LEGION_GPU_REDUCTIONS ON)
 
   # define variable for realm_defines.h
   set(REALM_USE_CUDA ON)
-  set(USE_CUDA ON) # for backwards compatibility
-  set(REALM_USE_CUDART_HIJACK ON)
+
+  option(Legion_HIJACK_CUDART "Hijack and rewrite application calls into the CUDA runtime" ON)
+  if(Legion_HIJACK_CUDART)
+    set(REALM_USE_CUDART_HIJACK ON)
+  endif()
+endif()
+
+#------------------------------------------------------------------------------#
+# Kokkos configuration
+#------------------------------------------------------------------------------#
+option(Legion_USE_Kokkos "Enable support for the Kokkos runtime" OFF)
+if(Legion_USE_Kokkos)
+  # the kokkos interop stuff uses target_link_options, which doesn't show up
+  #  until cmake 3.13
+  cmake_minimum_required(VERSION 3.13)
+
+  # cmake uses -DKokkos_DIR=.../lib/cmake to look in non-standard locations
+  find_package(Kokkos REQUIRED)
+
+  set(REALM_USE_KOKKOS ON)
 endif()
 
 #------------------------------------------------------------------------------#
@@ -248,6 +276,17 @@ if("${Legion_NETWORKS}" MATCHES .*gasnet1.*)
 endif()
 
 #------------------------------------------------------------------------------#
+# MPI configuration
+#------------------------------------------------------------------------------#
+if("${Legion_NETWORKS}" MATCHES .*mpi.*)
+  cmake_minimum_required(VERSION 3.9)
+  find_package(MPI REQUIRED)
+  # define variable for realm_defines.h
+  set(REALM_USE_MPI ON)
+  set(Legion_MPI_INTEROP ON)
+endif()
+
+#------------------------------------------------------------------------------#
 # LLVM configuration
 #------------------------------------------------------------------------------#
 option(Legion_USE_LLVM "Use LLVM JIT operations" OFF)
@@ -278,8 +317,9 @@ option(Legion_USE_HDF5 "Enable support for HDF5" OFF)
 if(Legion_USE_HDF5)
   find_package(HDF5 REQUIRED COMPONENTS C)
 
-  # define variable for realm_defines.h
-  set(USE_HDF ON)
+  # define variable for both legion_defines.h and realm_defines.h
+  set(LEGION_USE_HDF5 ON)
+  set(REALM_USE_HDF5 ON)
 endif()
 
 #------------------------------------------------------------------------------#
@@ -288,7 +328,7 @@ endif()
 option(Legion_USE_LIBDL "Enable support for libdl" ON)
 if(Legion_USE_LIBDL)
   # define variable for realm_defines.h
-  set(USE_LIBDL ON)
+  set(REALM_USE_LIBDL ON)
 endif()
 
 #------------------------------------------------------------------------------#
@@ -309,7 +349,16 @@ option(Legion_USE_ZLIB "Enable support for zlib" ON)
 if(Legion_USE_ZLIB)
   find_package(ZLIB REQUIRED)
   # define variable for legion_defines.h
-  set(USE_ZLIB ON)
+  set(LEGION_USE_ZLIB ON)
+endif()
+                                                                                          
+#------------------------------------------------------------------------------#
+# Fortran configuration
+#------------------------------------------------------------------------------#
+option(Legion_USE_Fortran "Enable support for Fortran" OFF)
+if(Legion_USE_Fortran)
+  enable_language(Fortran)
+  set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -cpp")
 endif()
 
 #------------------------------------------------------------------------------#
@@ -328,7 +377,7 @@ set_property(CACHE Legion_MAX_FIELDS PROPERTY STRINGS 32 64 128 256 512 1024)
 mark_as_advanced(Legion_MAX_FIELDS)
 
 # define variable for legion_defines.h
-set(MAX_FIELDS ${Legion_MAX_FIELDS})
+set(LEGION_MAX_FIELDS ${Legion_MAX_FIELDS})
 
 option(Legion_ENABLE_TLS "Enable support for TLS storage of Legion context" OFF)
 mark_as_advanced(Legion_ENABLE_TLS)
@@ -338,6 +387,9 @@ set(ENABLE_LEGION_TLS ${Legion_ENABLE_TLS})
 
 option(Legion_WARNINGS_FATAL "Make all runtime warnings fatal" OFF)
 set(LEGION_WARNINGS_FATAL ${Legion_WARNINGS_FATAL})
+
+option(Legion_SPY "Enable detailed logging for Legion Spy" OFF)
+set(LEGION_SPY ${Legion_SPY})
 
 #------------------------------------------------------------------------------#
 # Runtime library targets
@@ -431,6 +483,14 @@ if(Legion_ENABLE_TESTING)
   # if Legion_TEST_LAUNCHER is set, split the string into a list
   separate_arguments(Legion_TEST_LAUNCHER)
   separate_arguments(Legion_TEST_ARGS)
+  # if we are using kokkos and cuda, we must hardcode the use of 1 gpu right now
+  if(Legion_USE_Kokkos AND Legion_USE_CUDA)
+    list(APPEND Legion_TEST_ARGS -ll:gpu 1)
+  endif()
+  # similar restrictions for openmp
+  if(Legion_USE_Kokkos AND Legion_USE_OpenMP)
+    list(APPEND Legion_TEST_ARGS -ll:ocpu 1 -ll:onuma 0)
+  endif()
 endif()
 if(Legion_BUILD_ALL OR Legion_BUILD_APPS OR Legion_BUILD_BINDINGS OR Legion_BUILD_EXAMPLES OR Legion_BUILD_TUTORIAL OR Legion_BUILD_TESTS)
   # Make a namespaced alias so in-build examples can use it the same way as if

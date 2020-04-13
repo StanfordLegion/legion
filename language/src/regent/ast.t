@@ -39,7 +39,7 @@ ast.annotation:leaf("Unroll", {"value"}, true)
 -- Annotation: Sets
 ast.annotation:leaf("Set", {"cuda", "external", "idempotent", "index_launch",
                             "inline", "inner", "leaf", "openmp", "optimize",
-                            "parallel", "replicable", "spmd", "trace",
+                            "parallel", "predicate", "replicable", "spmd", "trace",
                             "vectorize"},
                     false, true)
 
@@ -56,6 +56,7 @@ function ast.default_annotations()
     openmp = allow,
     optimize = allow,
     parallel = allow,
+    predicate = allow,
     replicable = allow,
     spmd = allow,
     trace = allow,
@@ -106,6 +107,10 @@ ast.disjointness_kind:leaf("Aliased"):set_memoize():set_print_custom("aliased")
 ast.disjointness_kind:leaf("Disjoint"):set_memoize():set_print_custom(
   "disjoint")
 
+ast:inner("completeness_kind")
+ast.completeness_kind:leaf("Complete"):set_memoize():set_print_custom("complete")
+ast.completeness_kind:leaf("Incomplete"):set_memoize():set_print_custom("incomplete")
+
 ast:inner("fence_kind")
 ast.fence_kind:leaf("Execution"):set_memoize():set_print_custom("__execution")
 ast.fence_kind:leaf("Mapping"):set_memoize():set_print_custom("__mapping")
@@ -119,6 +124,11 @@ ast.constraint:leaf("Constraint", {"lhs", "rhs", "op"})
 
 ast:inner("privilege")
 ast.privilege:leaf("Privilege", {"privilege", "region", "field_path"})
+
+-- Coherences
+
+ast:inner("coherence")
+ast.coherence:leaf("Coherence", {"coherence_mode", "region", "field_path"})
 
 -- Layout Constraints
 
@@ -169,6 +179,7 @@ ast.unspecialized.expr:leaf("Constant", {"value", "expr_type"})
 ast.unspecialized.expr:leaf("Global", {"value", "expr_type"})
 ast.unspecialized.expr:leaf("RawContext")
 ast.unspecialized.expr:leaf("RawFields", {"region"})
+ast.unspecialized.expr:leaf("RawFuture", {"value_type_expr", "value"})
 ast.unspecialized.expr:leaf("RawPhysical", {"region"})
 ast.unspecialized.expr:leaf("RawRuntime")
 ast.unspecialized.expr:leaf("RawTask")
@@ -181,13 +192,13 @@ ast.unspecialized.expr:leaf("StaticCast", {"type_expr", "value"})
 ast.unspecialized.expr:leaf("UnsafeCast", {"type_expr", "value"})
 ast.unspecialized.expr:leaf("Ispace", {"index_type_expr", "extent", "start"})
 ast.unspecialized.expr:leaf("Region", {"ispace", "fspace_type_expr"})
-ast.unspecialized.expr:leaf("Partition", {"disjointness", "region", "coloring",
+ast.unspecialized.expr:leaf("Partition", {"disjointness", "completeness", "region", "coloring",
                                           "colors"})
 ast.unspecialized.expr:leaf("PartitionEqual", {"region", "colors"})
-ast.unspecialized.expr:leaf("PartitionByField", {"region", "colors"})
-ast.unspecialized.expr:leaf("PartitionByRestriction", {"disjointness", "region", "transform", "extent", "colors"})
-ast.unspecialized.expr:leaf("Image", {"disjointness", "parent", "partition", "region"})
-ast.unspecialized.expr:leaf("Preimage", {"disjointness", "parent", "partition", "region"})
+ast.unspecialized.expr:leaf("PartitionByField", {"completeness", "region", "colors"})
+ast.unspecialized.expr:leaf("PartitionByRestriction", {"disjointness", "completeness", "region", "transform", "extent", "colors"})
+ast.unspecialized.expr:leaf("Image", {"disjointness", "completeness", "parent", "partition", "region"})
+ast.unspecialized.expr:leaf("Preimage", {"disjointness", "completeness", "parent", "partition", "region"})
 ast.unspecialized.expr:leaf("CrossProduct", {"args"})
 ast.unspecialized.expr:leaf("CrossProductArray", {"lhs", "disjointness", "colorings"})
 ast.unspecialized.expr:leaf("ListSlicePartition", {"partition", "indices"})
@@ -299,6 +310,7 @@ ast.specialized.expr:leaf("Constant", {"value", "expr_type"})
 ast.specialized.expr:leaf("Global", {"value", "expr_type"})
 ast.specialized.expr:leaf("RawContext")
 ast.specialized.expr:leaf("RawFields", {"region"})
+ast.specialized.expr:leaf("RawFuture", {"value_type", "value"})
 ast.specialized.expr:leaf("RawPhysical", {"region"})
 ast.specialized.expr:leaf("RawRuntime")
 ast.specialized.expr:leaf("RawTask")
@@ -311,13 +323,13 @@ ast.specialized.expr:leaf("StaticCast", {"value", "expr_type"})
 ast.specialized.expr:leaf("UnsafeCast", {"value", "expr_type"})
 ast.specialized.expr:leaf("Ispace", {"index_type", "extent", "start"})
 ast.specialized.expr:leaf("Region", {"ispace", "fspace_type"})
-ast.specialized.expr:leaf("Partition", {"disjointness", "region", "coloring",
+ast.specialized.expr:leaf("Partition", {"disjointness", "completeness", "region", "coloring",
                                         "colors"})
 ast.specialized.expr:leaf("PartitionEqual", {"region", "colors"})
-ast.specialized.expr:leaf("PartitionByField", {"region", "colors"})
-ast.specialized.expr:leaf("PartitionByRestriction", {"disjointness", "region", "transform", "extent", "colors"})
-ast.specialized.expr:leaf("Image", {"disjointness", "parent", "partition", "region"})
-ast.specialized.expr:leaf("Preimage", {"disjointness", "parent", "partition", "region"})
+ast.specialized.expr:leaf("PartitionByField", {"completeness", "region", "colors"})
+ast.specialized.expr:leaf("PartitionByRestriction", {"disjointness", "completeness", "region", "transform", "extent", "colors"})
+ast.specialized.expr:leaf("Image", {"disjointness", "completeness", "parent", "partition", "region"})
+ast.specialized.expr:leaf("Preimage", {"disjointness", "completeness", "parent", "partition", "region"})
 ast.specialized.expr:leaf("CrossProduct", {"args"})
 ast.specialized.expr:leaf("CrossProductArray", {"lhs", "disjointness", "colorings"})
 ast.specialized.expr:leaf("ListSlicePartition", {"partition", "indices"})
@@ -388,7 +400,7 @@ ast.specialized.top:leaf("Task", {"name", "params", "return_type",
                                   "prototype"})
 ast.specialized.top:leaf("TaskParam", {"symbol", "future"})
 ast.specialized.top:leaf("Fspace", {"name", "fspace", "constraints"})
-ast.specialized.top:leaf("QuoteExpr", {"expr"})
+ast.specialized.top:leaf("QuoteExpr", {"expr", "expr_type"})
 ast.specialized.top:leaf("QuoteStat", {"block"})
 
 
@@ -403,13 +415,14 @@ ast.typed.expr:leaf("ID", {"value"})
 ast.typed.expr:leaf("FieldAccess", {"value", "field_name"})
 ast.typed.expr:leaf("IndexAccess", {"value", "index"})
 ast.typed.expr:leaf("MethodCall", {"value", "method_name", "args"})
-ast.typed.expr:leaf("Call", {"fn", "args", "conditions", "replicable"})
+ast.typed.expr:leaf("Call", {"fn", "args", "conditions", "predicate", "predicate_else_value", "replicable"})
 ast.typed.expr:leaf("Cast", {"fn", "arg"})
 ast.typed.expr:leaf("Ctor", {"fields", "named"})
 ast.typed.expr:leaf("CtorListField", {"value"})
 ast.typed.expr:leaf("CtorRecField", {"name", "value"})
 ast.typed.expr:leaf("RawContext")
 ast.typed.expr:leaf("RawFields", {"region", "fields"})
+ast.typed.expr:leaf("RawFuture", {"value"})
 ast.typed.expr:leaf("RawPhysical", {"region", "fields"})
 ast.typed.expr:leaf("RawRuntime")
 ast.typed.expr:leaf("RawTask")
@@ -421,14 +434,14 @@ ast.typed.expr:leaf("StaticCast", {"value", "parent_region_map"})
 ast.typed.expr:leaf("UnsafeCast", {"value"})
 ast.typed.expr:leaf("Ispace", {"index_type", "extent", "start"})
 ast.typed.expr:leaf("Region", {"ispace", "fspace_type"})
-ast.typed.expr:leaf("Partition", {"disjointness", "region", "coloring",
+ast.typed.expr:leaf("Partition", {"disjointness", "completeness", "region", "coloring",
                                   "colors"})
 ast.typed.expr:leaf("PartitionEqual", {"region", "colors"})
-ast.typed.expr:leaf("PartitionByField", {"region", "colors"})
-ast.typed.expr:leaf("PartitionByRestriction", {"disjointness", "region", "transform", "extent", "colors"})
-ast.typed.expr:leaf("Image", {"disjointness", "parent", "partition", "region"})
+ast.typed.expr:leaf("PartitionByField", {"completeness", "region", "colors"})
+ast.typed.expr:leaf("PartitionByRestriction", {"disjointness", "completeness", "region", "transform", "extent", "colors"})
+ast.typed.expr:leaf("Image", {"disjointness", "completeness", "parent", "partition", "region"})
 ast.typed.expr:leaf("ImageByTask", {"parent", "partition", "task"})
-ast.typed.expr:leaf("Preimage", {"disjointness", "parent", "partition", "region"})
+ast.typed.expr:leaf("Preimage", {"disjointness", "completeness", "parent", "partition", "region"})
 ast.typed.expr:leaf("CrossProduct", {"args"})
 ast.typed.expr:leaf("CrossProductArray", {"lhs", "disjointness", "colorings"})
 ast.typed.expr:leaf("ListSlicePartition", {"partition", "indices"})
@@ -490,10 +503,10 @@ ast.typed.stat:leaf("Repeat", {"block", "until_cond"})
 ast.typed.stat:leaf("MustEpoch", {"block"})
 ast.typed.stat:leaf("Block", {"block"})
 ast.typed.stat:leaf("IndexLaunchNum", {"symbol", "values", "preamble", "call",
-                                       "reduce_lhs", "reduce_op",
+                                       "reduce_lhs", "reduce_op", "reduce_task",
                                        "args_provably", "free_vars", "loop_vars"})
 ast.typed.stat:leaf("IndexLaunchList", {"symbol", "value", "preamble", "call",
-                                        "reduce_lhs", "reduce_op",
+                                        "reduce_lhs", "reduce_op", "reduce_task",
                                         "args_provably", "free_vars", "loop_vars"})
 ast:leaf("IndexLaunchArgsProvably", {"invariant", "projectable"})
 ast.typed.stat:leaf("Var", {"symbol", "type", "value"})
@@ -519,7 +532,8 @@ ast.typed.top:leaf("Fspace", {"name", "fspace"})
 ast.typed.top:leaf("Task", {"name", "params", "return_type", "privileges",
                              "coherence_modes", "flags", "conditions",
                              "constraints", "body", "config_options",
-                             "region_divergence", "metadata", "prototype"})
+                             "region_usage", "region_divergence", "metadata",
+                             "prototype"})
 ast.typed.top:leaf("TaskParam", {"symbol", "param_type", "future"})
 
 -- Metadata for Parallel Code Generation
@@ -567,6 +581,38 @@ function ast.mapreduce_expr_postorder(map_fn, reduce_fn, node, init)
   return ast.mapreduce_node_postorder(
     function(node)
       if node:is(ast.typed.expr) then
+        return map_fn(node)
+      end
+      return init
+    end,
+    reduce_fn, node, init, is_expr_node)
+end
+
+function ast.traverse_expr_stat_postorder(fn, node)
+  ast.traverse_node_postorder(
+    function(node)
+      if node:is(ast.typed.expr) or node:is(ast.typed.stat) then
+        fn(node)
+      end
+    end,
+    node, is_expr_node)
+end
+
+function ast.map_expr_stat_postorder(fn, node)
+  return ast.map_node_postorder(
+    function(node)
+      if node:is(ast.typed.expr) or node:is(ast.typed.stat) then
+        return fn(node)
+      end
+      return node
+    end,
+    node, is_expr_node)
+end
+
+function ast.mapreduce_expr_stat_postorder(map_fn, reduce_fn, node, init)
+  return ast.mapreduce_node_postorder(
+    function(node)
+      if node:is(ast.typed.expr) or node:is(ast.typed.stat) then
         return map_fn(node)
       end
       return init

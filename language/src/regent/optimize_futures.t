@@ -21,6 +21,7 @@
 local ast = require("regent/ast")
 local data = require("common/data")
 local std = require("regent/std")
+local task_helper = require("regent/task_helper")
 
 local context = {}
 
@@ -36,21 +37,40 @@ function context:__newindex (field, value)
   error ("context has no field '" .. field .. "' (in assignment)", 2)
 end
 
-function context:new_task_scope()
+function context:new_stat_scope()
   local cx = {
-    var_flows = {},
-    var_futures = {},
-    var_symbols = {},
+    local_symbols = self.local_symbols,
+    var_flows = self.var_flows,
+    var_futures = self.var_futures,
+    var_symbols = self.var_symbols,
+    conds = self.conds,
+    spills = terralib.newlist(),
   }
   return setmetatable(cx, context)
 end
 
-function context:new_stat_scope()
+function context:new_local_scope(cond)
+  local conds = terralib.newlist()
+  conds:insertall(self.conds)
+  conds:insert(cond)
   local cx = {
+    local_symbols = self.local_symbols:copy(),
     var_flows = self.var_flows,
     var_futures = self.var_futures,
     var_symbols = self.var_symbols,
+    conds = conds,
     spills = terralib.newlist(),
+  }
+  return setmetatable(cx, context)
+end
+
+function context:new_task_scope()
+  local cx = {
+    local_symbols = data.newmap(),
+    var_flows = {},
+    var_futures = {},
+    var_symbols = {},
+    conds = terralib.newlist(),
   }
   return setmetatable(cx, context)
 end
@@ -158,6 +178,10 @@ function analyze_var_flow.expr_binary(cx, node)
     analyze_var_flow.expr(cx, node.rhs))
 end
 
+function analyze_var_flow.expr_raw_future(cx, noe)
+  return flow_future()
+end
+
 function analyze_var_flow.expr(cx, node)
   if node:is(ast.typed.expr.ID) then
     return analyze_var_flow.expr_id(cx, node)
@@ -246,6 +270,9 @@ function analyze_var_flow.expr(cx, node)
   elseif node:is(ast.typed.expr.AddressOf) then
     return flow_empty()
 
+  elseif node:is(ast.typed.expr.RawFuture) then
+    return analyze_var_flow.expr_raw_future(cx, node)
+
   else
     assert(false, "unexpected node type " .. tostring(node.node_type))
   end
@@ -257,6 +284,8 @@ function analyze_var_flow.block(cx, node)
 end
 
 function analyze_var_flow.stat_if(cx, node)
+  local cond = analyze_var_flow.expr(cx, node.cond)
+  local cx = cx:new_local_scope(cond)
   analyze_var_flow.block(cx, node.then_block)
   node.elseif_blocks:map(
     function(block) return analyze_var_flow.stat_elseif(cx, block) end)
@@ -268,6 +297,8 @@ function analyze_var_flow.stat_elseif(cx, node)
 end
 
 function analyze_var_flow.stat_while(cx, node)
+  local cond = analyze_var_flow.expr(cx, node.cond)
+  local cx = cx:new_local_scope(cond)
   analyze_var_flow.block(cx, node.block)
 end
 
@@ -309,6 +340,7 @@ end
 
 function analyze_var_flow.stat_var(cx, node)
   local value = node.value and analyze_var_flow.expr(cx, node.value) or flow_empty()
+  cx.local_symbols[node.symbol] = #cx.conds
   flow_value_into_var(cx, node.symbol, value)
 end
 
@@ -316,12 +348,38 @@ function analyze_var_flow.stat_assignment(cx, node)
   local lhs = analyze_var_flow.expr(cx, node.lhs)
   local rhs = analyze_var_flow.expr(cx, node.rhs)
   flow_value_into(cx, lhs, rhs)
+
+  -- Hack: SCR breaks if certain values are futures, for now just make
+  -- sure we don't do this for certain types.
+  local lhs_type = std.as_read(node.lhs.expr_type)
+  if not (std.is_list(lhs_type) or std.is_phase_barrier(lhs_type) or std.is_dynamic_collective(lhs_type)) then
+    -- Make sure any dominating conditions flow into this assignment.
+    local lhs_symbol = node.lhs:is(ast.typed.expr.ID) and node.lhs.value
+    for i, cond in pairs(cx.conds) do
+      if not cx.local_symbols[lhs_symbol] or i > cx.local_symbols[lhs_symbol] then
+        flow_value_into(cx, lhs, cond)
+      end
+    end
+  end
 end
 
 function analyze_var_flow.stat_reduce(cx, node)
   local lhs = analyze_var_flow.expr(cx, node.lhs)
   local rhs = analyze_var_flow.expr(cx, node.rhs)
   flow_value_into(cx, lhs, rhs)
+
+  -- Hack: SCR breaks if certain values are futures, for now just make
+  -- sure we don't do this for certain types.
+  local lhs_type = std.as_read(node.lhs.expr_type)
+  if not (std.is_list(lhs_type) or std.is_phase_barrier(lhs_type) or std.is_dynamic_collective(lhs_type)) then
+    -- Make sure any dominating conditions flow into this assignment.
+    local lhs_symbol = node.lhs:is(ast.typed.expr.ID) and node.lhs.value
+    for i, cond in pairs(cx.conds) do
+      if not cx.local_symbols[lhs_symbol] or i > cx.local_symbols[lhs_symbol] then
+        flow_value_into(cx, lhs, cond)
+      end
+    end
+  end
 end
 
 function analyze_var_flow.stat(cx, node)
@@ -595,6 +653,32 @@ function optimize_futures.expr_call(cx, node)
   }
 end
 
+local function lift_cast_to_futures(node)
+  local arg_type = std.as_read(node.arg.expr_type)
+  local expr_type = std.as_read(node.expr_type)
+
+  local task = task_helper.make_cast_task(arg_type, expr_type)
+
+  return ast.typed.expr.Call {
+    fn = ast.typed.expr.Function {
+      value = task,
+      expr_type = task:get_type(),
+      annotations = ast.default_annotations(),
+      span = node.span,
+    },
+    args = terralib.newlist({
+      node.arg,
+    }),
+    conditions = terralib.newlist(),
+    predicate = false,
+    predicate_else_value = false,
+    replicable = false,
+    expr_type = expr_type,
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
 function optimize_futures.expr_cast(cx, node)
   local fn = concretize(cx, optimize_futures.expr(cx, node.fn))
   local arg = optimize_futures.expr(cx, node.arg)
@@ -605,11 +689,16 @@ function optimize_futures.expr_cast(cx, node)
     expr_type = std.future(expr_type)
   end
 
-  return node {
+  node = node {
     fn = fn,
     arg = arg,
     expr_type = expr_type,
   }
+
+  if std.is_future(arg_type) then
+    return lift_cast_to_futures(node)
+  end
+  return node
 end
 
 function optimize_futures.expr_ctor_list_field(cx, node)
@@ -641,6 +730,14 @@ end
 function optimize_futures.expr_raw_fields(cx, node)
   local region = concretize(cx, optimize_futures.expr_region_root(cx, node.region))
   return node { region = region }
+end
+
+function optimize_futures.expr_raw_future(cx, node)
+  local value = concretize(cx, optimize_futures.expr(cx, node.value))
+  return node {
+    value = node.value,
+    expr_type = std.future(node.expr_type),
+  }
 end
 
 function optimize_futures.expr_raw_physical(cx, node)
@@ -999,6 +1096,32 @@ function optimize_futures.expr_with_scratch_fields(cx, node)
   }
 end
 
+local function lift_unary_op_to_futures(node)
+  local rhs_type = std.as_read(node.rhs.expr_type)
+  local expr_type = std.as_read(node.expr_type)
+
+  local task = task_helper.make_unary_task(node.op, rhs_type, expr_type)
+
+  return ast.typed.expr.Call {
+    fn = ast.typed.expr.Function {
+      value = task,
+      expr_type = task:get_type(),
+      annotations = ast.default_annotations(),
+      span = node.span,
+    },
+    args = terralib.newlist({
+      node.rhs,
+    }),
+    conditions = terralib.newlist(),
+    predicate = false,
+    predicate_else_value = false,
+    replicable = false,
+    expr_type = expr_type,
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
 function optimize_futures.expr_unary(cx, node)
   local rhs = optimize_futures.expr(cx, node.rhs)
   local rhs_type = std.as_read(rhs.expr_type)
@@ -1008,9 +1131,42 @@ function optimize_futures.expr_unary(cx, node)
     expr_type = std.future(expr_type)
   end
 
-  return node {
+  node = node {
     rhs = rhs,
     expr_type = expr_type,
+  }
+
+  if std.is_future(rhs_type) then
+    return lift_unary_op_to_futures(node)
+  end
+  return node
+end
+
+local function lift_binary_op_to_futures(node)
+  local lhs_type = std.as_read(node.lhs.expr_type)
+  local rhs_type = std.as_read(node.rhs.expr_type)
+  local expr_type = std.as_read(node.expr_type)
+
+  local task = task_helper.make_binary_task(node.op, lhs_type, rhs_type, expr_type)
+
+  return ast.typed.expr.Call {
+    fn = ast.typed.expr.Function {
+      value = task,
+      expr_type = task:get_type(),
+      annotations = ast.default_annotations(),
+      span = node.span,
+    },
+    args = terralib.newlist({
+      node.lhs,
+      node.rhs,
+    }),
+    conditions = terralib.newlist(),
+    predicate = false,
+    predicate_else_value = false,
+    replicable = false,
+    expr_type = expr_type,
+    annotations = node.annotations,
+    span = node.span,
   }
 end
 
@@ -1025,11 +1181,16 @@ function optimize_futures.expr_binary(cx, node)
     expr_type = std.future(expr_type)
   end
 
-  return node {
+  node = node {
     lhs = lhs,
     rhs = rhs,
     expr_type = expr_type,
   }
+
+  if std.is_future(lhs_type) or std.is_future(rhs_type) then
+    return lift_binary_op_to_futures(node)
+  end
+  return node
 end
 
 function optimize_futures.expr_deref(cx, node)
@@ -1112,6 +1273,9 @@ function optimize_futures.expr(cx, node)
 
   elseif node:is(ast.typed.expr.RawFields) then
     return optimize_futures.expr_raw_fields(cx, node)
+
+  elseif node:is(ast.typed.expr.RawFuture) then
+    return optimize_futures.expr_raw_future(cx, node)
 
   elseif node:is(ast.typed.expr.RawPhysical) then
     return optimize_futures.expr_raw_physical(cx, node)
@@ -1389,6 +1553,7 @@ function optimize_futures.stat_index_launch_num(cx, node)
   local call = optimize_futures.expr(cx, node.call)
   local reduce_lhs = node.reduce_lhs and
     optimize_futures.expr(cx, node.reduce_lhs)
+  local reduce_task = false
 
   if call:is(ast.typed.expr.Call) then
     local args = terralib.newlist()
@@ -1410,6 +1575,7 @@ function optimize_futures.stat_index_launch_num(cx, node)
       if std.is_future(call_type) and not std.is_future(reduce_type) then
         call.expr_type = call_type.result_type
       end
+      reduce_task = task_helper.make_binary_task(node.reduce_op, reduce_type, call_type, reduce_type)
     end
 
   elseif call:is(ast.typed.expr.Fill) then
@@ -1436,6 +1602,7 @@ function optimize_futures.stat_index_launch_num(cx, node)
       preamble = preamble,
       call = call,
       reduce_lhs = reduce_lhs,
+      reduce_task = reduce_task,
     }
   ):get_spills()
 end
@@ -1450,6 +1617,7 @@ function optimize_futures.stat_index_launch_list(cx, node)
   local call = optimize_futures.expr(cx, node.call)
   local reduce_lhs = node.reduce_lhs and
     optimize_futures.expr(cx, node.reduce_lhs)
+  local reduce_task = false
 
   if call:is(ast.typed.expr.Call) then
     local args = terralib.newlist()
@@ -1471,6 +1639,7 @@ function optimize_futures.stat_index_launch_list(cx, node)
       if std.is_future(call_type) and not std.is_future(reduce_type) then
         call.expr_type = call_type.result_type
       end
+      reduce_task = task_helper.make_binary_task(node.reduce_op, reduce_type, call_type, reduce_type)
     end
 
   elseif call:is(ast.typed.expr.Fill) then
@@ -1497,6 +1666,7 @@ function optimize_futures.stat_index_launch_list(cx, node)
       preamble = preamble,
       call = call,
       reduce_lhs = reduce_lhs,
+      reduce_task = reduce_task,
     }
   ):get_spills()
 end
@@ -1671,6 +1841,25 @@ function optimize_futures.stat_reduce(cx, node)
   local lhs_type = std.as_read(lhs.expr_type)
   if std.is_future(lhs_type) then
     normalized_rhs = promote(cx, rhs, lhs_type)
+
+    return cx:add_spill(
+      ast.typed.stat.Assignment {
+        lhs = lhs,
+        rhs = lift_binary_op_to_futures(
+          ast.typed.expr.Binary {
+            op = node.op,
+            lhs = lhs,
+            rhs = normalized_rhs,
+            expr_type = lhs_type,
+            annotations = ast.default_annotations(),
+            span = node.span,
+          }
+        ),
+        metadata = false,
+        annotations = ast.default_annotations(),
+        span = node.span,
+      }
+    ):get_spills()
   else
     normalized_rhs = concretize(cx, rhs)
   end

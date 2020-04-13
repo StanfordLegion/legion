@@ -390,8 +390,6 @@ namespace Realm {
       };
 
     protected:
-      void add_completed_event(Event event, bool was_pending);
-
       class CompQueueWaiter : public EventWaiter {
       public:
 	virtual void event_triggered(bool poisoned);
@@ -403,6 +401,8 @@ namespace Realm {
 	bool faultaware;
 	CompQueueWaiter *next_free;
       };
+
+      void add_completed_event(Event event, CompQueueWaiter *waiter);
 
       static const size_t CQWAITER_BATCH_SIZE = 16;
       class CompQueueWaiterBatch {
@@ -416,14 +416,22 @@ namespace Realm {
 
       Mutex mutex; // protects everything below here
 
-      size_t wr_ptr, rd_ptr, cur_events, pending_events, max_events;
       bool resizable;
+      size_t max_events;
+      atomic<size_t> wr_ptr, rd_ptr, pending_events;
+      // used if resizable==false
+      atomic<size_t> commit_ptr, consume_ptr;
+      // used if resizable==true
+      size_t cur_events;
+
       Event *completed_events;
+
+      atomic<bool> has_progress_events;
       GenEventImpl *local_progress_event;
       EventImpl::gen_t local_progress_event_gen;
       // TODO: small vector
       std::vector<Event> remote_progress_events;
-      CompQueueWaiter *first_free_waiter;
+      atomic<CompQueueWaiter *> first_free_waiter;
       CompQueueWaiterBatch *batches;
     };
 

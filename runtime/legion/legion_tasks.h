@@ -226,9 +226,10 @@ namespace Legion {
       virtual size_t get_context_index(void) const;
       virtual void set_context_index(size_t index);
       virtual const char* get_task_name(void) const;
-      virtual void pack_remote_operation(Serializer &rez,
-                                         AddressSpaceID target) const;
-      virtual void pack_profiling_requests(Serializer &rez) const;
+      virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
+                                         std::set<RtEvent> &applied) const;
+      virtual void pack_profiling_requests(Serializer &rez,
+                                           std::set<RtEvent> &applied) const;
     public:
       bool is_remote(void) const;
       inline bool is_stolen(void) const { return (steal_count > 0); }
@@ -302,7 +303,7 @@ namespace Legion {
       virtual bool pack_task(Serializer &rez, AddressSpaceID target) = 0;
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events) = 0;
-      virtual void perform_inlining(void) = 0;
+      virtual void perform_inlining(TaskContext *enclosing) = 0;
     public:
       virtual void end_inline_task(const void *result, 
                                    size_t result_size, bool owned);
@@ -330,9 +331,7 @@ namespace Legion {
       void update_grants(const std::vector<Grant> &grants);
       void update_arrival_barriers(const std::vector<PhaseBarrier> &barriers);
       void compute_point_region_requirements(void);
-      void complete_point_projection(void);
-      void early_map_regions(std::set<RtEvent> &applied_conditions,
-                             const std::vector<unsigned> &must_premap);
+      void complete_point_projection(void); 
       bool prepare_steal(void);
     public:
       void compute_parent_indexes(void);
@@ -423,8 +422,8 @@ namespace Legion {
                                   const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
-      virtual void pack_remote_operation(Serializer &rez,
-                                         AddressSpaceID target) const;
+      virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
+                                         std::set<RtEvent> &applied) const;
       virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
     };
 
@@ -473,6 +472,8 @@ namespace Legion {
         { return no_access_regions; }
       inline VariantID get_selected_variant(void) const 
         { return selected_variant; }
+      inline RtEvent get_profiling_reported(void) const 
+        { return profiling_reported; }
     public:
       RtEvent perform_versioning_analysis(const bool post_mapper);
       void initialize_map_task_input(Mapper::MapTaskInput &input,
@@ -499,16 +500,20 @@ namespace Legion {
       void unpack_single_task(Deserializer &derez, 
                               std::set<RtEvent> &ready_events);
     public:
-      virtual void pack_profiling_requests(Serializer &rez) const;
+      virtual void pack_profiling_requests(Serializer &rez,
+                                           std::set<RtEvent> &applied) const;
       virtual void add_copy_profiling_request(unsigned src_index,
           unsigned dst_index, Realm::ProfilingRequestSet &requests, bool fill);
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
-                                      const Realm::ProfilingResponse &respone);
+                                      const Realm::ProfilingResponse &respone,
+                                      const void *orig, size_t orig_length);
       virtual void handle_profiling_update(int count);
+      void finalize_single_task_profiling(void);
     public:
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0;
       virtual bool is_top_level_task(void) const { return false; }
+      virtual SingleTask* get_origin_task(void) const = 0;
     public:
       virtual void resolve_false(bool speculated, bool launched) = 0;
       virtual void launch_task(void);
@@ -534,7 +539,7 @@ namespace Legion {
       virtual bool pack_task(Serializer &rez, AddressSpaceID target) = 0;
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events) = 0; 
-      virtual void perform_inlining(void) = 0;
+      virtual void perform_inlining(TaskContext *enclosing) = 0;
     public:
       virtual void handle_future(const void *res, 
                                  size_t res_size, bool owned) = 0; 
@@ -547,6 +552,9 @@ namespace Legion {
         { return get_task_completion(); }
       virtual void replay_mapping_output(void) { replay_map_task_output(); }
       virtual void set_effects_postcondition(ApEvent postcondition);
+    public:
+      void handle_remote_profiling_response(Deserializer &derez); 
+      static void process_remote_profiling_response(Deserializer &derez);
     protected:
       // Boolean for each region saying if it is virtual mapped
       std::vector<bool>                     virtual_mapped;
@@ -578,11 +586,18 @@ namespace Legion {
       mutable bool inner_cached, is_inner_result;
     protected:
       // Profiling information
-      std::vector<ProfilingMeasurementID> task_profiling_requests;
-      std::vector<ProfilingMeasurementID> copy_profiling_requests;
-      int                                      profiling_priority;
-      mutable int                  outstanding_profiling_requests;
-      mutable RtUserEvent                      profiling_reported;
+      struct SingleProfilingInfo : public Mapping::Mapper::TaskProfilingInfo {
+      public:
+        void *buffer;
+        size_t buffer_size;
+      };
+      std::vector<ProfilingMeasurementID>      task_profiling_requests;
+      std::vector<ProfilingMeasurementID>      copy_profiling_requests;
+      std::vector<SingleProfilingInfo>                  profiling_info;
+      RtUserEvent                                   profiling_reported;
+      int                                           profiling_priority;
+      int                               outstanding_profiling_requests;
+      int                               outstanding_profiling_reported;
 #ifdef DEBUG_LEGION
     protected:
       // For checking that premapped instances didn't change during mapping
@@ -635,7 +650,7 @@ namespace Legion {
       virtual bool pack_task(Serializer &rez, AddressSpaceID target) = 0;
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events) = 0;
-      virtual void perform_inlining(void) = 0;
+      virtual void perform_inlining(TaskContext *enclosing) = 0;
     public:
       virtual SliceTask* clone_as_slice_task(IndexSpace is,
                       Processor p, bool recurse, bool stealable) = 0;
@@ -705,6 +720,7 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
+      virtual SingleTask* get_origin_task(void) const { return orig_task; }
     public:
       Future initialize_task(InnerContext *ctx,
                              const TaskLauncher &launcher, 
@@ -752,7 +768,7 @@ namespace Legion {
       virtual bool pack_task(Serializer &rez, AddressSpaceID target);
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events);
-      virtual void perform_inlining(void);
+      virtual void perform_inlining(TaskContext *enclosing);
       virtual bool is_top_level_task(void) const { return top_level_task; }
       virtual void end_inline_task(const void *result, 
                                    size_t result_size, bool owned);
@@ -817,6 +833,7 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
+      virtual SingleTask* get_origin_task(void) const { return orig_task; }
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
@@ -843,7 +860,7 @@ namespace Legion {
       virtual bool pack_task(Serializer &rez, AddressSpaceID target);
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events);
-      virtual void perform_inlining(void);
+      virtual void perform_inlining(TaskContext *enclosing);
       virtual std::map<InstanceManager*,std::pair<unsigned,bool> >*
                                        get_acquired_instances_ref(void);
     public:
@@ -874,6 +891,7 @@ namespace Legion {
              const std::vector<DomainPoint> &dependences);
     protected:
       friend class SliceTask;
+      PointTask                   *orig_task;
       SliceTask                   *slice_owner;
       ApUserEvent                 point_termination;
       ApUserEvent                 deferred_effects;
@@ -944,7 +962,7 @@ namespace Legion {
       virtual bool pack_task(Serializer &rez, AddressSpaceID target);
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events);
-      virtual void perform_inlining(void);
+      virtual void perform_inlining(TaskContext *enclosing);
       virtual void end_inline_task(const void *result, 
                                    size_t result_size, bool owned);
       virtual VersionInfo& get_version_info(unsigned idx);
@@ -956,8 +974,15 @@ namespace Legion {
     public:
       virtual void handle_future(const DomainPoint &point, const void *result,
                                  size_t result_size, bool owner);
+    public:
+      virtual void pack_profiling_requests(Serializer &rez,
+                                           std::set<RtEvent> &applied) const;
       virtual void add_copy_profiling_request(unsigned src_index,
           unsigned dst_index, Realm::ProfilingRequestSet &requests, bool fill);
+      virtual void handle_profiling_response(const ProfilingResponseBase *base,
+                                      const Realm::ProfilingResponse &respone,
+                                      const void *orig, size_t orig_length);
+      virtual void handle_profiling_update(int count);
     public:
       virtual void register_must_epoch(void);
     public:
@@ -968,6 +993,8 @@ namespace Legion {
     public:
       virtual void record_reference_mutation_effect(RtEvent event);
     public:
+      void early_map_regions(std::set<RtEvent> &applied_conditions,
+                             const std::vector<unsigned> &must_premap);
       void record_origin_mapped_slice(SliceTask *local_slice);
     public:
       void return_slice_mapped(unsigned points,
@@ -996,10 +1023,11 @@ namespace Legion {
       unsigned mapped_points;
       unsigned complete_points;
       unsigned committed_points;
+      RtUserEvent future_map_ready;
     protected:
       LegionMap<unsigned/*idx*/,VersionInfo>::aligned version_infos;
       std::vector<RegionTreePath> privilege_paths;
-      std::deque<SliceTask*> origin_mapped_slices;
+      std::set<SliceTask*> origin_mapped_slices;
     protected:
       std::set<RtEvent> map_applied_conditions;
       std::set<RtEvent> complete_preconditions;
@@ -1007,6 +1035,20 @@ namespace Legion {
       std::map<InstanceManager*,std::pair<unsigned,bool> > acquired_instances;
     protected:
       std::map<DomainPoint,RtUserEvent> pending_intra_space_dependences;
+    protected:
+      // Profiling information
+      struct IndexProfilingInfo : public Mapping::Mapper::TaskProfilingInfo {
+      public:
+        void *buffer;
+        size_t buffer_size;
+      };
+      std::vector<ProfilingMeasurementID>      task_profiling_requests;
+      std::vector<ProfilingMeasurementID>      copy_profiling_requests;
+      std::vector<IndexProfilingInfo>                   profiling_info;
+      RtUserEvent                                   profiling_reported;
+      int                                           profiling_priority;
+      int                               outstanding_profiling_requests;
+      int                               outstanding_profiling_reported;
     protected:
       // Whether we have to do intra-task alias analysis
       bool need_intra_task_alias_analysis;
@@ -1059,7 +1101,7 @@ namespace Legion {
       virtual bool pack_task(Serializer &rez, AddressSpaceID target);
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events);
-      virtual void perform_inlining(void);
+      virtual void perform_inlining(TaskContext *enclosing);
     public:
       virtual SliceTask* clone_as_slice_task(IndexSpace is,
                   Processor p, bool recurse, bool stealable);
@@ -1076,6 +1118,7 @@ namespace Legion {
       void check_target_processors(void) const;
       void update_target_processor(void);
       void expand_replay_slices(std::list<SliceTask*> &slices);
+      void find_profiling_reported(std::set<RtEvent> &preconditions);
     protected:
       virtual void trigger_task_complete(void);
       virtual void trigger_task_commit(void);

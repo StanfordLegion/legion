@@ -29,12 +29,6 @@ namespace Realm {
   extern Logger log_part;
   extern Logger log_dpops;
 
-  namespace {
-    // module-level globals
-
-    FragmentAssembler fragment_assembler;
-  };
-
   ////////////////////////////////////////////////////////////////////////
   //
   // class SparsityMap<N,T>
@@ -223,6 +217,8 @@ namespace Realm {
   template <int N, typename T>
   SparsityMapImpl<N,T>::SparsityMapImpl(SparsityMap<N,T> _me)
     : me(_me), remaining_contributor_count(0)
+    , total_piece_count(0)
+    , remaining_piece_count(0)
     , precise_requested(false), approx_requested(false)
     , precise_ready_event(Event::NO_EVENT), approx_ready_event(Event::NO_EVENT)
     , sizeof_precise(0)
@@ -259,6 +255,11 @@ namespace Realm {
 	    // also get approx while we're at it
 	    request_approx = !(this->approx_valid || approx_requested);
 	    approx_requested = true;
+	    // can't use set_contributor_count, so directly set
+	    //  remaining_contributor_count to the 1 contribution we expect
+	    // (store is ok because we haven't sent the request that will
+	    //  do the async decrement)
+	    remaining_contributor_count.store(1);
 	  }
 	  // do we have a finish event?
 	  if(precise_ready_event.exists()) {
@@ -308,12 +309,19 @@ namespace Realm {
   void SparsityMapImpl<N,T>::set_contributor_count(int count)
   {
     if(NodeID(ID(me).sparsity_creator_node()) == Network::my_node_id) {
-      // increment the count atomically - if it brings the total up to 0 (which covers count == 0),
-      //  immediately finalize - the contributions happened before we got here
-      // just increment the count atomically
+      // increment the count atomically - if it brings the total up to 0
+      //  (which covers count == 0), immediately propagate the total piece
+      //  count and finalize if needed - the contributions (or at least the
+      //  portions that know how many pieces there were) happened before we
+      //  got here
       int v = remaining_contributor_count.fetch_add(count) + count;
-      if(v == 0)
-	finalize();
+      if(v == 0) {
+	int pcount = total_piece_count.load();
+	bool have_all_pieces = ((pcount == 0) ||
+				((remaining_piece_count.fetch_add(pcount) + pcount) == 0));
+	if(have_all_pieces)
+	  finalize();
+      }
     } else {
       // send the contributor count to the owner node
       ActiveMessage<SetContribCountMessage> amsg(ID(me).sparsity_creator_node(), 0);
@@ -332,8 +340,7 @@ namespace Realm {
       // send (the lack of) data to the owner to collect
       ActiveMessage<RemoteSparsityContrib> amsg(owner, 0);
       amsg->sparsity = me;
-      amsg->sequence_id = fragment_assembler.get_sequence_id();
-      amsg->sequence_count = 1;
+      amsg->piece_count = 1;
       amsg.commit();
 
       return;
@@ -341,8 +348,16 @@ namespace Realm {
 
     // count is allowed to go negative if we get contributions before we know the total expected
     int left = remaining_contributor_count.fetch_sub(1) - 1;
-    if(left == 0)
-      finalize();
+    if(left == 0) {
+      // we didn't have anything to contribute to the total piece count, but
+      //  it's our job to incorporate it into the remaining piece count and
+      //  finalize if needed
+      int pcount = total_piece_count.load();
+      bool have_all_pieces = ((pcount == 0) ||
+			      ((remaining_piece_count.fetch_add(pcount) + pcount) == 0));
+      if(have_all_pieces)
+	finalize();
+    }
   }
 
   template <int N, typename T>
@@ -352,22 +367,20 @@ namespace Realm {
 
     if(owner != Network::my_node_id) {
       // send the data to the owner to collect
-      int seq_id = fragment_assembler.get_sequence_id();
       const size_t max_to_send = DeppartConfig::cfg_max_bytes_per_packet / sizeof(Rect<N,T>);
-      const Rect<N,T> *rdata = &rects[0];
-      int seq_count = 0;
+      const Rect<N,T> *rdata = (rects.empty() ? 0 : &rects[0]);
+      size_t num_pieces = 0;
       size_t remaining = rects.size();
       // send partial messages first
       while(remaining > max_to_send) {
 	size_t bytes = max_to_send * sizeof(Rect<N,T>);
 	ActiveMessage<RemoteSparsityContrib> amsg(owner, bytes);
 	amsg->sparsity = me;
-	amsg->sequence_id = seq_id;
-	amsg->sequence_count = 0;
+	amsg->piece_count = 0;
 	amsg.add_payload(rdata, bytes, PAYLOAD_COPY);
 	amsg.commit();
 
-	seq_count++;
+	num_pieces++;
 	remaining -= max_to_send;
 	rdata += max_to_send;
       }
@@ -376,20 +389,21 @@ namespace Realm {
       size_t bytes = remaining * sizeof(Rect<N,T>);
       ActiveMessage<RemoteSparsityContrib> amsg(owner, bytes);
       amsg->sparsity = me;
-      amsg->sequence_id = seq_id;
-      amsg->sequence_count = seq_count + 1;
+      amsg->piece_count = num_pieces + 1;
       amsg.add_payload(rdata, bytes, PAYLOAD_COPY);
       amsg.commit();
 
       return;
     }
 
-    contribute_raw_rects(&rects[0], rects.size(), true);
+    // local contribution is done as a single piece
+    contribute_raw_rects((rects.empty() ? 0 : &rects[0]), rects.size(), 1);
   }
 
   template <int N, typename T>
   void SparsityMapImpl<N,T>::contribute_raw_rects(const Rect<N,T>* rects,
-						  size_t count, bool last)
+						  size_t count,
+						  size_t piece_count)
   {
     if(count > 0) {
       AutoLock<> al(mutex);
@@ -533,18 +547,39 @@ namespace Realm {
       }
     }
 
-    if(last) {
-      if(NodeID(ID(me).sparsity_creator_node()) == Network::my_node_id) {
-	// we're the owner, so remaining_contributor_count tracks our expected contributions
-	// count is allowed to go negative if we get contributions before we know the total expected
-	int left = remaining_contributor_count.fetch_sub(1) - 1;
-	if(left == 0)
-	  finalize();
+    bool have_all_pieces = false;
+    if(piece_count > 0) {
+      // this is the last (or only) piece of a contribution, so add our
+      //  piece count to the total piece count across all contributions and
+      //  then see if we are the final contributor
+      total_piece_count.fetch_add(piece_count);
+
+      bool last_contrib = (remaining_contributor_count.fetch_sub(1) == 1);
+      if(last_contrib) {
+	// refetch the total piece count and add it to the remaining count,
+	//  minus one for this piece we're doing now - if the count comes out
+	//  to zero, we're the last count
+	int pcount = total_piece_count.load() - 1;
+	have_all_pieces = ((pcount == 0) ||
+			   ((remaining_piece_count.fetch_add(pcount) + pcount) == 0));
       } else {
+	// decrement remaining count for our piece - if count goes to zero,
+	//  we were the last piece
+	have_all_pieces = (remaining_piece_count.fetch_sub(1) == 1);
+      }
+    } else {
+      // decrement remaining count for our piece - if count goes to zero,
+      //  we were the last piece
+      have_all_pieces = (remaining_piece_count.fetch_sub(1) == 1);
+    }
+    
+    if(have_all_pieces) {
+      if(NodeID(ID(me).sparsity_creator_node()) != Network::my_node_id) {
 	// this is a remote sparsity map, so sanity check that we requested the data
 	assert(precise_requested);
-	finalize();
       }
+
+      finalize();
     }
   }
 
@@ -576,6 +611,11 @@ namespace Realm {
 	    // also get approx while we're at it
 	    request_approx = !(this->approx_valid || approx_requested);
 	    approx_requested = true;
+	    // can't use set_contributor_count, so directly set
+	    //  remaining_contributor_count to the 1 contribution we expect
+	    // (store is ok because we haven't sent the request that will
+	    //  do the async decrement)
+	    remaining_contributor_count.store(1);
 	  }
 	}
       } else {
@@ -647,9 +687,6 @@ namespace Realm {
     if(reply_precise) {
       log_part.info() << "sending precise data: sparsity=" << me << " target=" << requestor;
       
-      int seq_id = fragment_assembler.get_sequence_id();
-      int seq_count = 0;
-
       // scan the entry list, sending bitmaps first and making a list of rects
       std::vector<Rect<N,T> > rects;
       for(typename std::vector<SparsityMapEntry<N,T> >::const_iterator it = this->entries.begin();
@@ -670,17 +707,17 @@ namespace Realm {
       const Rect<N,T> *rdata = &rects[0];
       size_t remaining = rects.size();
       const size_t max_to_send = DeppartConfig::cfg_max_bytes_per_packet / sizeof(Rect<N,T>);
+      size_t num_pieces = 0;
       // send partial messages first
       while(remaining > max_to_send) {
 	size_t bytes = max_to_send * sizeof(Rect<N,T>);
 	ActiveMessage<RemoteSparsityContrib> amsg(requestor, bytes);
 	amsg->sparsity = me;
-	amsg->sequence_id = seq_id;
-	amsg->sequence_count = 0;
+	amsg->piece_count = 0;
 	amsg.add_payload(rdata, bytes, PAYLOAD_COPY);
 	amsg.commit();
 
-	seq_count++;
+	num_pieces++;
 	remaining -= max_to_send;
 	rdata += max_to_send;
       }
@@ -689,8 +726,7 @@ namespace Realm {
       size_t bytes = remaining * sizeof(Rect<N,T>);
       ActiveMessage<RemoteSparsityContrib> amsg(requestor, bytes);
       amsg->sparsity = me;
-      amsg->sequence_id = seq_id;
-      amsg->sequence_count = seq_count + 1;
+      amsg->piece_count = num_pieces + 1;
       amsg.add_payload(rdata, bytes, PAYLOAD_COPY);
       amsg.commit();
     }
@@ -885,57 +921,6 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // class FragmentAssembler
-
-  FragmentAssembler::FragmentAssembler(void)
-    : next_sequence_id(0)
-  {}
-
-  FragmentAssembler::~FragmentAssembler(void)
-  {}
-
-  // returns a sequence ID that may not be unique, but hasn't been used in a 
-  //   long time
-  inline int FragmentAssembler::get_sequence_id(void)
-  {
-    return next_sequence_id.fetch_add(1);
-  }
-
-  // adds a fragment to the list, returning true if this is the last one from
-  //  a sequence
-  inline bool FragmentAssembler::add_fragment(NodeID sender,
-					      int sequence_id,
-					      int sequence_count)
-  {
-    // easy case - a fragment with a sequence_count == 1 is a whole message
-    if(sequence_count == 1) return true;
-
-    // rest of this has to be protected by a lock
-    {
-      AutoLock<> al(mutex);
-
-      std::map<int, int>& by_sender = fragments[sender];
-
-      std::map<int, int>::iterator it = by_sender.find(sequence_id);
-      if(it != by_sender.end()) {
-	int new_count = it->second + sequence_count - 1;
-	if(new_count == 0) {
-	  // this was the last packet - delete the entry from the map and return true
-	  by_sender.erase(it);
-	  return true;
-	} else 
-	  it->second = new_count;
-      } else {
-	// first packet (we've seen) of new sequence
-	by_sender[sequence_id] = sequence_count - 1;
-      }
-    }
-    return false;
-  }
-
-
-  ////////////////////////////////////////////////////////////////////////
-  //
   // class SparsityMapImpl<N,T>::RemoteSparsityRequest
 
   template <int N, typename T>
@@ -962,12 +947,9 @@ namespace Realm {
     log_part.info() << "received remote contribution: sparsity=" << msg.sparsity << " len=" << datalen;
     size_t count = datalen / sizeof(Rect<N,T>);
     assert((datalen % sizeof(Rect<N,T>)) == 0);
-    bool last_fragment = fragment_assembler.add_fragment(sender,
-							 msg.sequence_id,
-							 msg.sequence_count);
     SparsityMapImpl<N,T>::lookup(msg.sparsity)->contribute_raw_rects((const Rect<N,T> *)data,
 								     count,
-								     last_fragment);
+								     msg.piece_count);
   }
 
 

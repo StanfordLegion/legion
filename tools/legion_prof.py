@@ -111,7 +111,49 @@ dep_part_kinds = {
     12 : 'Partition by Preimage',
     13 : 'Partition by Preimage Range',
     14 : 'Create Association',
+    15 : 'Partition by Weights',
 }
+# Make sure this is up to date with legion_config.h
+legion_equality_kind_t = {
+    0 : '<',
+    1 : '<=',
+    2 : '>',
+    3 : ' >=',
+    4 : '==',
+    5 : '!=',
+}
+
+legion_dimension_kind_t = {
+    0 : 'DIM_X',
+    1 : 'DIM_Y',
+    2 : 'DIM_Z',
+    3 : 'DIM_W',
+    4 : 'DIM_V',
+    5 : 'DIM_U',
+    6 : 'DIM_T',
+    7 : 'DIM_S',
+    8 : 'DIM_R',
+    9 : 'DIM_F',
+    10: 'INNER_DIM_X',
+    11 : 'OUTER_DIM_X',
+    12 : 'INNER_DIM_Y',
+    13 : 'OUTER_DIM_Y',
+    14 : 'INNER_DIM_Z',
+    15 : 'OUTER_DIM_Z',
+    16 : 'INNER_DIM_W',
+    17 : 'OUTER_DIM_W',
+    18 : 'INNER_DIM_V',
+    19 : 'OUTER_DIM_V',
+    20 : 'INNER_DIM_U',
+    21 : 'OUTER_DIM_U',
+    22 : 'INNER_DIM_T',
+    23 : 'OUTER_DIM_T',
+    24 : 'INNER_DIM_S',
+    25 : 'OUTER_DIM_S',
+    26 : 'INNER_DIM_R',
+    27 : 'OUTER_DIM_R',
+}
+
 
 # Micro-seconds per pixel
 US_PER_PIXEL = 100
@@ -1707,7 +1749,8 @@ class Instance(Base, TimeRange, HasInitiationDependencies):
         self.fspace = []
         self.tree_id = None
         self.fields = {}
-
+        self.align_desc = {}
+        self.dim_order_desc = []
     def get_owner(self):
         return self.mem
 
@@ -1779,11 +1822,18 @@ class Instance(Base, TimeRange, HasInitiationDependencies):
             count = 0
             if key in self.fields:
                 fieldlist = self.fields[key]
-                for f in fieldlist:
-                    if count == 0:
-                        output_str = output_str + '[' + str(f)
+                alignlist = self.align_desc[key]
+                for pos1 in range(0, len(fieldlist)):
+                    f = fieldlist[pos1]
+                    al = alignlist[pos1]
+                    if (al.has_align):
+                        align_str = ":align=" + str(al.align_desc)
                     else:
-                        output_str = output_str + ',' + str(f)
+                        align_str = ""
+                    if count == 0:
+                        output_str = output_str + '[' + str(f) + align_str
+                    else:
+                        output_str = output_str + ',' + str(f) + align_str
                     count = count + 1
                     if len(output_str) > max_len and len(fieldlist) > 1:
                         output_str = output_str + '$'
@@ -1793,6 +1843,64 @@ class Instance(Base, TimeRange, HasInitiationDependencies):
             pend =len(self.ispace)-1
             if (pos != pend):
                 output_str = output_str + '$'
+        if (len(self.dim_order_desc) > 0):
+            cmpx_order = False
+            aos = False
+            soa = False
+            dim_f = 9
+            column_major = 0
+            row_major = 0
+            dim_last = len(self.dim_order_desc)-1
+            output_str = output_str + "$Layout Order:"
+            for pos in range(0, len(self.dim_order_desc)):
+                if pos == 0:
+                    if self.dim_order_desc[pos] == dim_f:
+                        aos = True
+                else:
+                    if pos == len(self.dim_order_desc) - 1:
+                        if self.dim_order_desc[pos] == dim_f:
+                            soa = True
+                    else:
+                        if self.dim_order_desc[pos] == dim_f:
+                            cmpx_order = True
+                #SOA + order -> DIM_X, DIM_Y,.. DIM_F-> column_major
+                #or .. DIM_Y, DIM_X, DIM_F? -> row_major
+                if self.dim_order_desc[dim_last] == dim_f:
+                     if self.dim_order_desc[pos] != dim_f:
+                         if self.dim_order_desc[pos] == pos:
+                             column_major = column_major+1
+                         if self.dim_order_desc[pos] == dim_last-pos-1:
+                            row_major = row_major+1
+                 #AOS + order -> DIM_F, DIM_X, DIM_Y -> column_major
+                 # or DIM_F, DIM_Y, DIM_X -> row_major?
+                if self.dim_order_desc[0] == dim_f:
+                    if self.dim_order_desc[pos] != dim_f:
+                        if self.dim_order_desc[pos] == pos-1:
+                            column_major = column_major+1
+                        if self.dim_order_desc[pos] == dim_last-pos:
+                            row_major = row_major+1
+            if dim_last == 1:
+                output_str = output_str
+            else:
+                if column_major == dim_last and cmpx_order==False:
+                    output_str = output_str  + "[Column Major]"
+                else:
+                    if row_major == dim_last and cmpx_order==False:
+                        output_str = output_str  + "[Row Major]"
+            if cmpx_order:
+                for pos in range(0, len(self.dim_order_desc)):
+                    output_str = output_str + "["
+                    output_str = output_str + legion_dimension_kind_t[self.dim_order_desc[pos]]
+                    output_str = output_str +  "]"
+                    if (pos+1)%4 == 0 and pos != dim_order:
+                        output_str = output_str+ "$"
+            else:
+                if aos == True:
+                    output_str = output_str + "[Array-of-structs (AOS)]"
+                else:
+                    if soa == True:
+                        output_str = output_str + "[Struct-of-arrays (SOA)]"
+
         output_str = output_str + " $Inst: {} $Size: {}"
         return output_str.format(str(hex(self.inst_id)),size_pretty)
 
@@ -1961,6 +2069,19 @@ class Field(StatObject):
         if self.name != None:
             return self.name
         return 'fid:' + str(self.field_id)
+
+class Align(StatObject):
+    def __init__(self, field_id, eqk, align_desc, has_align):
+        StatObject.__init__(self)
+        self.field_id = field_id
+        self.eqk = eqk
+        self.align_desc = align_desc
+        self.has_align = has_align
+
+    def __repr__(self):
+        if self.has_align != False:
+            return 'align:' + (self.align_desc)
+        return ''
 
 class FieldSpace(StatObject):
     def __init__(self, fspace_id, name):
@@ -2345,6 +2466,7 @@ class State(object):
             "LogicalRegionDesc": self.log_logical_region_desc,
             "PhysicalInstRegionDesc": self.log_physical_inst_region_desc,
             "PhysicalInstLayoutDesc": self.log_physical_inst_layout_desc,
+            "PhysicalInstDimOrderDesc": self.log_physical_inst_layout_dim_desc,
             "MaxDimDesc": self.log_max_dim
             #"UserInfo": self.log_user_info
         }
@@ -2397,16 +2519,27 @@ class State(object):
         inst.fspace.append(fspace)
         if fspace not in inst.fields:
             inst.fields[fspace] = []
+            inst.align_desc[fspace] = []
         inst.tree_id = tree_id
 
-    def log_physical_inst_layout_desc(self, op_id, inst_id, field_id, fspace_id):
+    def log_physical_inst_layout_dim_desc(self, op_id, inst_id, dim, dim_kind):
+        op = self.find_op(op_id)
+        inst = self.create_instance(inst_id, op)
+        inst.dim_order_desc.insert(dim, dim_kind)
+
+
+    def log_physical_inst_layout_desc(self, op_id, inst_id, field_id, fspace_id,
+                                      has_align, eqk, align_desc):
         op = self.find_op(op_id)
         inst = self.create_instance(inst_id, op)
         field = self.find_field(fspace_id, field_id)
         fspace = self.find_field_space(fspace_id)
         if fspace not in inst.fields:
             inst.fields[fspace] = []
+            inst.align_desc[fspace] = []
         inst.fields[fspace].append(field)
+        align_elem = Align(field_id, eqk, align_desc, has_align)
+        inst.align_desc[fspace].append(align_elem)
 
     def log_task_info(self, op_id, task_id, variant_id, proc_id,
                       create, ready, start, stop):

@@ -225,7 +225,7 @@ local function analyze_noninterference_previous(
   for i, other_arg in pairs(regions_previously_used) do
     local other_region_type = std.as_read(other_arg.expr_type)
     if other_region_type:is_projected() then
-      other_region_type = region_type:get_projection_source()
+      other_region_type = other_region_type:get_projection_source()
     end
     local constraint = std.constraint(
       region_type,
@@ -466,10 +466,13 @@ end
 local function analyze_noninterference_self(
     cx, task, arg, partition_type, mapping, loop_vars)
   local region_type = std.as_read(arg.expr_type)
-  if partition_type and partition_type:is_disjoint() and
-    analyze_index_noninterference_self(arg.index, cx, loop_vars)
-  then
-    return true
+  if partition_type and partition_type:is_disjoint() then
+    local index =
+      (arg:is(ast.typed.expr.Projection) and arg.region.index) or arg.index
+    if analyze_index_noninterference_self(index, cx, loop_vars)
+    then
+      return true
+    end
   end
 
   local param_region_type = mapping[arg]
@@ -564,6 +567,7 @@ local node_is_side_effect_free = {
   [ast.typed.expr.CtorListField]              = always_true,
   [ast.typed.expr.CtorRecField]               = always_true,
   [ast.typed.expr.RawFields]                  = always_true,
+  [ast.typed.expr.RawFuture]                  = always_true,
   [ast.typed.expr.RawTask]                    = always_true,
   [ast.typed.expr.RawValue]                   = always_true,
   [ast.typed.expr.Isnull]                     = always_true,
@@ -663,6 +667,7 @@ local node_is_loop_invariant = {
   [ast.typed.expr.CtorRecField]               = always_true,
   [ast.typed.expr.RawContext]                 = always_true,
   [ast.typed.expr.RawFields]                  = always_true,
+  [ast.typed.expr.RawFuture]                  = always_true,
   [ast.typed.expr.RawPhysical]                = always_true,
   [ast.typed.expr.RawRuntime]                 = always_true,
   [ast.typed.expr.RawTask]                    = always_true,
@@ -738,6 +743,7 @@ local node_is_simple_index_expression = {
   [ast.typed.expr.Call]                       = always_false,
   [ast.typed.expr.RawContext]                 = always_false,
   [ast.typed.expr.RawFields]                  = always_false,
+  [ast.typed.expr.RawFuture]                  = always_false,
   [ast.typed.expr.RawPhysical]                = always_false,
   [ast.typed.expr.RawRuntime]                 = always_false,
   [ast.typed.expr.RawTask]                    = always_false,
@@ -1128,10 +1134,6 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
         end
 
         do
-          local arg = arg
-          if arg:is(ast.typed.expr.Projection) then
-            arg = arg.region
-          end
           local passed = analyze_noninterference_self(
             loop_cx, task, arg, partition_type, mapping, loop_vars)
           if not passed then
@@ -1198,6 +1200,7 @@ function optimize_index_launch.stat_for_num(cx, node)
     call = body.call,
     reduce_lhs = body.reduce_lhs,
     reduce_op = body.reduce_op,
+    reduce_task = false,
     args_provably = body.args_provably,
     free_vars = body.free_variables,
     loop_vars = body.loop_variables,
@@ -1241,6 +1244,7 @@ function optimize_index_launch.stat_for_list(cx, node)
     call = body.call,
     reduce_lhs = body.reduce_lhs,
     reduce_op = body.reduce_op,
+    reduce_task = false,
     args_provably = body.args_provably,
     free_vars = body.free_variables,
     loop_vars = body.loop_variables,

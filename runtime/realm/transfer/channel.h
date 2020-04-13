@@ -35,11 +35,11 @@
 #include "realm/mem_impl.h"
 #include "realm/inst_impl.h"
 
-#ifdef USE_CUDA
+#ifdef REALM_USE_CUDA
 #include "realm/cuda/cuda_module.h"
 #endif
 
-#ifdef USE_HDF
+#ifdef REALM_USE_HDF5
 #include "realm/hdf5/hdf5_internal.h"
 #include "realm/hdf5/hdf5_access.h"
 #endif
@@ -232,7 +232,7 @@ namespace Realm {
       //size_t nbytes;
     };
 
-#ifdef USE_CUDA
+#ifdef REALM_USE_CUDA
     class GPUCompletionEvent : public Cuda::GPUCompletionNotification {
     public:
       GPUCompletionEvent(void) {triggered = false;}
@@ -253,7 +253,7 @@ namespace Realm {
     };
 #endif
 
-#ifdef USE_HDF
+#ifdef REALM_USE_HDF5
     class HDFRequest : public Request {
     public:
       void *mem_base; // could be source or dest
@@ -308,8 +308,8 @@ namespace Realm {
 	XferDesID peer_guid;
 	int peer_port_idx;
 	int indirect_port_idx;
-	uint64_t local_bytes_total;
-	atomic<uint64_t> local_bytes_cons, remote_bytes_total;
+	size_t local_bytes_total;
+	atomic<size_t> local_bytes_cons, remote_bytes_total;
 	SequenceAssembler seq_local, seq_remote;
 	// used to free up intermediate input buffers as soon as all data
 	//  has been read (rather than waiting for overall transfer chain
@@ -511,7 +511,7 @@ namespace Realm {
       //char *dst_buf_base;
     };
 
-#ifdef USE_CUDA
+#ifdef REALM_USE_CUDA
     class GPUXferDes : public XferDes {
     public:
       GPUXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
@@ -543,7 +543,7 @@ namespace Realm {
     };
 #endif
 
-#ifdef USE_HDF
+#ifdef REALM_USE_HDF5
     class HDFXferDes : public XferDes {
     public:
       HDFXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
@@ -797,7 +797,7 @@ namespace Realm {
       atomic<long> capacity;
     };
    
-#ifdef USE_CUDA
+#ifdef REALM_USE_CUDA
     class GPUChannel : public Channel {
     public:
       GPUChannel(Cuda::GPU* _src_gpu, long max_nr, XferDesKind _kind);
@@ -812,7 +812,7 @@ namespace Realm {
     };
 #endif
 
-#ifdef USE_HDF
+#ifdef REALM_USE_HDF5
     class HDFChannel : public Channel {
     public:
       HDFChannel(long max_nr, XferDesKind _kind);
@@ -849,7 +849,7 @@ namespace Realm {
         disk_write_channel = NULL;
         file_read_channel = NULL;
         file_write_channel = NULL;
-#ifdef USE_HDF
+#ifdef REALM_USE_HDF5
         hdf_read_channel = NULL;
         hdf_write_channel = NULL;
 #endif
@@ -865,13 +865,13 @@ namespace Realm {
       FileChannel* create_file_read_channel(long max_nr);
       FileChannel* create_file_write_channel(long max_nr);
       AddressSplitChannel *create_addr_split_channel();
-#ifdef USE_CUDA
+#ifdef REALM_USE_CUDA
       GPUChannel* create_gpu_to_fb_channel(long max_nr, Cuda::GPU* src_gpu);
       GPUChannel* create_gpu_from_fb_channel(long max_nr, Cuda::GPU* src_gpu);
       GPUChannel* create_gpu_in_fb_channel(long max_nr, Cuda::GPU* src_gpu);
       GPUChannel* create_gpu_peer_fb_channel(long max_nr, Cuda::GPU* src_gpu);
 #endif
-#ifdef USE_HDF
+#ifdef REALM_USE_HDF5
       HDFChannel* create_hdf_read_channel(long max_nr);
       HDFChannel* create_hdf_write_channel(long max_nr);
 #endif
@@ -903,7 +903,7 @@ namespace Realm {
       AddressSplitChannel *get_address_split_channel() {
 	return addr_split_channel;
       }
-#ifdef USE_CUDA
+#ifdef REALM_USE_CUDA
       GPUChannel* get_gpu_to_fb_channel(Cuda::GPU* gpu) {
         std::map<Cuda::GPU*, GPUChannel*>::iterator it;
         it = gpu_to_fb_channels.find(gpu);
@@ -929,7 +929,7 @@ namespace Realm {
         return (it->second);
       }
 #endif
-#ifdef USE_HDF
+#ifdef REALM_USE_HDF5
       HDFChannel* get_hdf_read_channel() {
         return hdf_read_channel;
       }
@@ -943,10 +943,10 @@ namespace Realm {
       RemoteWriteChannel* remote_write_channel;
       DiskChannel *disk_read_channel, *disk_write_channel;
       FileChannel *file_read_channel, *file_write_channel;
-#ifdef USE_CUDA
+#ifdef REALM_USE_CUDA
       std::map<Cuda::GPU*, GPUChannel*> gpu_to_fb_channels, gpu_in_fb_channels, gpu_from_fb_channels, gpu_peer_fb_channels;
 #endif
-#ifdef USE_HDF
+#ifdef REALM_USE_HDF5
       HDFChannel *hdf_read_channel, *hdf_write_channel;
 #endif
       AddressSplitChannel *addr_split_channel;
@@ -1401,7 +1401,7 @@ namespace Realm {
 
     XferDesQueue* get_xdq_singleton();
     ChannelManager* get_channel_manager();
-#ifdef USE_CUDA
+#ifdef REALM_USE_CUDA
     void register_gpu_in_dma_systems(Cuda::GPU* gpu);
 #endif
     void start_channel_manager(int count, bool pinned, int max_nr, CoreReservationSet& crs);

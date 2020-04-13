@@ -21,6 +21,24 @@
 #include "realm/indexspace.h"
 #include "realm/serialize.h"
 
+#if defined(REALM_USE_KOKKOS) && (REALM_CXX_STANDARD >= 11)
+// we don't want to include Kokkos_View.hpp because it brings in too much
+//  other stuff, so forward declare the pieces we need to define a templated
+//  conversion from Realm accessor to Kokkos::View (anything that actually
+//  instantiates the template will presumably have included Kokkos_View.hpp
+//  in its full glory)
+namespace Kokkos {
+  template <class, class...> class View;
+  template <unsigned> struct MemoryTraits;
+  struct LayoutStride;
+};
+// Kokkos::Unmanaged is an enum, which we can't forward declare - we'll test
+//  that we have the right value in the template though
+enum { Kokkos_Unmanaged = 0x01 };
+
+#define REALM_PROVIDE_ACCESSOR_TO_KOKKOS_VIEW_CONVERSION
+#endif
+
 #include <vector>
 #include <map>
 #include <iostream>
@@ -382,13 +400,22 @@ namespace Realm {
     REALM_CUDA_HD
     bool is_dense_row_major(const Rect<N,T> &bounds) const; // C dimension ordering
 
+#ifdef REALM_PROVIDE_ACCESSOR_TO_KOKKOS_VIEW_CONVERSION
+  // conversion to Kokkos unmanaged views
+  template <typename ... Args>
+  operator Kokkos::View<Args...>() const;
+  //operator Kokkos::View<const T *, Kokkos::HostSpace>() const;
+#endif
+
   //protected:
   //friend
   // std::ostream& operator<<(std::ostream& os, const AffineAccessor<FT,N,T>& a);
 //#define REALM_ACCESSOR_DEBUG
+#if defined(REALM_ACCESSOR_DEBUG) || defined(REALM_USE_KOKKOS)
+  Rect<N,T> bounds;
+#endif
 #ifdef REALM_ACCESSOR_DEBUG
-    RegionInstance dbg_inst;
-    Rect<N,T> dbg_bounds;
+  RegionInstance dbg_inst;
 #ifdef __CUDACC__
 #error "REALM_ACCESSOR_DEBUG macro for AffineAccessor not supported for GPU code"
 #endif

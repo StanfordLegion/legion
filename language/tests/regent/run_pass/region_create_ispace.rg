@@ -44,12 +44,15 @@ end
 task main()
   var is0 = ispace(ptr, 5)
   var r0 = region(is0, int)
+  fill(r0, 0)
 
   var is1 = ispace(int1d, 7, 2)
   var r1 = region(is1, int)
+  fill(r1, 0)
 
   var is2 = ispace(int2d, { x = 2, y = 2 }, { x = 3, y = 4 })
   var r2 = region(is2, int)
+  fill(r2, 0)
 
   regentlib.assert(f0(r0) == 5, "test failed")
 

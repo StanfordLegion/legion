@@ -107,7 +107,7 @@ std.subregion = ast.constraint_kind.Subregion {}
 std.disjointness = ast.constraint_kind.Disjointness {}
 
 -- #####################################
--- ## Privileges
+-- ## Privileges & Coherence modes
 -- #################
 
 function std.field_path(...)
@@ -149,6 +149,43 @@ function std.privileges(privilege, regions_fields)
     end
   end
   return privileges
+end
+
+function std.coherence(coherence, region, field_path)
+  assert(coherence:is(ast.coherence_kind), "coherence expected argument 1 to be a coherence kind")
+  assert(std.is_symbol(region), "coherence expected argument 2 to be a symbol")
+
+  if field_path == nil then
+    field_path = data.newtuple()
+  elseif type(field_path) == "string" then
+    field_path = data.newtuple(field_path)
+  end
+  assert(data.is_tuple(field_path), "coherence expected argument 3 to be a field")
+
+  return ast.coherence.Coherence {
+    region = region,
+    field_path = field_path,
+    coherence_mode = coherence,
+  }
+end
+
+function std.coherences(coherence, regions_fields)
+  local coherences = terralib.newlist()
+  for _, region_fields in ipairs(regions_fields) do
+    local region, fields
+    if std.is_symbol(region_fields) then
+      region = region_fields
+      fields = terralib.newlist({data.newtuple()})
+    else
+      region = region_fields.region
+      fields = region_fields.fields
+    end
+    assert(std.is_symbol(region) and terralib.islist(fields))
+    for _, field in ipairs(fields) do
+      coherences:insert(std.coherence(coherence, region, field))
+    end
+  end
+  return coherences
 end
 
 -- #####################################
@@ -1702,8 +1739,44 @@ function rquote:getast()
   return self.ast
 end
 
+function rquote:gettype()
+  assert(self.ast.expr_type)
+  return self.ast.expr_type
+end
+
 function rquote:__tostring()
   return self.ast:tostring(true)
+end
+
+-- #####################################
+-- ## Macros
+-- #################
+
+local rmacro = {}
+function rmacro:__index(field)
+  local value = rmacro[field]
+  if value ~= nil then return value end
+  error("macro has no field '" .. field .. "' (in lookup)", 2)
+end
+
+function rmacro:__newindex(field, value)
+  error("macro has no field '" .. field .. "' (in assignment)", 2)
+end
+
+function std.macro(fn)
+  assert(fn ~= nil)
+
+  return setmetatable({
+    fn = fn,
+  }, rmacro)
+end
+
+function std.is_macro(x)
+  return getmetatable(x) == rmacro
+end
+
+function rmacro:__tostring()
+  return "macro(" .. tostring(self.fn) .. ")"
 end
 
 -- #####################################
@@ -2620,9 +2693,21 @@ std.wild = std.newsymbol(std.wild_type, "wild")
 std.disjoint = ast.disjointness_kind.Disjoint {}
 std.aliased = ast.disjointness_kind.Aliased {}
 
+std.complete   = ast.completeness_kind.Complete {}
+std.incomplete = ast.completeness_kind.Incomplete {}
+
 do
   local next_partition_id = 1
-  function std.partition(disjointness, region_symbol, colors_symbol)
+  function std.partition(disjointness, completeness, region_symbol, colors_symbol)
+    -- Note: completeness can be omitted. If this is the case, then
+    -- shift the remaining arguments backward and default to
+    -- incomplete.
+    if not ast.is_node(completeness) then
+      colors_symbol = region_symbol
+      region_symbol = completeness
+      completeness = std.incomplete
+    end
+
     if colors_symbol == nil then
       colors_symbol = std.newsymbol(std.ispace(std.ptr))
     end
@@ -2632,6 +2717,8 @@ do
 
     assert(disjointness:is(ast.disjointness_kind),
            "Partition type requires disjointness to be one of disjoint or aliased")
+    assert(completeness:is(ast.completeness_kind),
+           "Partition type requires completeness to be one of complete or incomplete")
     assert(std.is_symbol(region_symbol),
            "Partition type requires region to be a symbol")
     if region_symbol:hastype() then
@@ -2654,6 +2741,7 @@ do
 
     st.is_partition = true
     st.disjointness = disjointness
+    st.completeness = completeness
     st.parent_region_symbol = region_symbol
     st.colors_symbol = colors_symbol
     st.index_expr = false
@@ -2661,6 +2749,10 @@ do
 
     function st:is_disjoint()
       return self.disjointness:is(ast.disjointness_kind.Disjoint)
+    end
+
+    function st:is_complete()
+      return self.completeness:is(ast.completeness_kind.Complete)
     end
 
     function st:partition()
@@ -3083,6 +3175,7 @@ std.future = terralib.memoize(function(result_type)
     error("future expected a type as argument 1, got " .. tostring(result_type))
   end
   assert(not std.is_rawref(result_type))
+  assert(not std.is_future(result_type))
 
   local st = terralib.types.newstruct("future")
   st.entries = terralib.newlist({
@@ -4422,6 +4515,16 @@ local function compile_tasks_in_parallel()
 end
 
 function std.start(main_task, extra_setup_thunk)
+  if not std.is_task(main_task) then
+    report.error(
+        { span = ast.trivial_span() },
+        'invalid task to regentlib.start')
+  end
+  if #main_task:get_param_symbols() > 0 then
+    report.error(
+        { span = main_task.span },
+        'toplevel task must not have any parameter')
+  end
   if std.config["pretty"] then
     profile.print_summary()
     os.exit()
@@ -4490,6 +4593,16 @@ local function infer_filetype(filename)
 end
 
 function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flags)
+  if not std.is_task(main_task) then
+    report.error(
+        { span = ast.trivial_span() },
+        'invalid task to regentlib.saveobj')
+  end
+  if #main_task:get_param_symbols() > 0 then
+    report.error(
+        { span = main_task.span },
+        'toplevel task must not have any parameter')
+  end
   assert(std.is_task(main_task))
   filetype = filetype or infer_filetype(filename)
   assert(not link_flags or filetype == 'sharedlibrary' or filetype == 'executable',

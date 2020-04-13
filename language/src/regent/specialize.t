@@ -92,7 +92,8 @@ local function convert_lua_value(cx, node, value, allow_lists)
     terralib.isoverloadedfunction(value) or
     terralib.ismacro(value) or
     terralib.types.istype(value) or
-    std.is_task(value) or std.is_math_fn(value)
+    std.is_task(value) or std.is_math_fn(value) or
+    std.is_macro(value)
   then
     return ast.specialized.expr.Function {
       value = value,
@@ -403,6 +404,14 @@ function specialize.disjointness_kind(cx, node)
   end
 end
 
+function specialize.completeness_kind(cx, node)
+  if node:is(ast.completeness_kind) then
+    return node
+  else
+    assert(false, "unexpected node type " .. tostring(node:type()))
+  end
+end
+
 function specialize.effect_expr(cx, node)
   local span = ast.trivial_span()
 
@@ -439,18 +448,36 @@ function specialize.effect_expr(cx, node)
     }
   end
 
+  local function make_coherence(value)
+    return ast.specialized.Coherence {
+      coherence_modes = terralib.newlist({value.coherence_mode}),
+      regions = terralib.newlist({
+        ast.specialized.region.Root {
+          symbol = value.region,
+          fields = make_fields(value.field_path),
+          span = span,
+        }
+      }),
+      span = span,
+    }
+  end
+
   local value = node.expr(cx.env:env())
   if terralib.islist(value) then
     return value:map(
       function(v)
         if v:is(ast.privilege.Privilege) then
           return make_privilege(v)
+        elseif v:is(ast.coherence.Coherence) then
+          return make_coherence(v)
         else
           assert(false, "unexpected value type " .. tostring(value:type()))
         end
       end)
   elseif value:is(ast.privilege.Privilege) then
     return make_privilege(value)
+  elseif value:is(ast.coherence.Coherence) then
+    return make_coherence(value)
   else
     assert(false, "unexpected value type " .. tostring(value:type()))
   end
@@ -530,19 +557,25 @@ end
 function specialize.expr_field_access(cx, node, allow_lists)
   local value = specialize.expr(cx, node.value)
 
-  local fields = data.flatmap(function(field_name)
-    return specialize.field_names(cx, field_name)
-  end, node.field_names)
+  assert(#node.field_names == 1)
+  local field_names = specialize.field_names(cx, node.field_names[1])
+
+  if type(field_names[1]) == "string" then
+    if #field_names > 1 then
+      report.error(expr, "multi-field access is not allowed")
+    end
+    field_names = field_names[1]
+  end
 
   if value:is(ast.specialized.expr.LuaTable) then
-    if #fields > 1 then
+    if type(field_names) ~= "string" then
       report.error(node, "unable to specialize multi-field access")
     end
-    return convert_lua_value(cx, node, value.value[fields[1]])
+    return convert_lua_value(cx, node, value.value[field_names])
   else
     return ast.specialized.expr.FieldAccess {
       value = value,
-      field_name = fields,
+      field_name = field_names,
       annotations = node.annotations,
       span = node.span,
     }
@@ -596,6 +629,7 @@ function specialize.expr_call(cx, node, allow_lists)
     terralib.ismacro(fn.value) or
     std.is_task(fn.value) or
     std.is_math_fn(fn.value) or
+    std.is_macro(fn.value) or
     type(fn.value) == "cdata"
   then
     if not std.is_task(fn.value) and #node.conditions > 0 then
@@ -709,6 +743,15 @@ end
 function specialize.expr_raw_fields(cx, node, allow_lists)
   return ast.specialized.expr.RawFields {
     region = specialize.expr_region_root(cx, node.region),
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
+function specialize.expr_raw_future(cx, node, allow_lists)
+  return ast.specialized.expr.RawFuture {
+    value_type = node.value_type_expr(cx.env:env()),
+    value = specialize.expr(cx, node.value),
     annotations = node.annotations,
     span = node.span,
   }
@@ -843,6 +886,7 @@ end
 function specialize.expr_partition(cx, node, allow_lists)
   return ast.specialized.expr.Partition {
     disjointness = specialize.disjointness_kind(cx, node.disjointness),
+    completeness = node.completeness and specialize.completeness_kind(cx, node.completeness),
     region = specialize.expr(cx, node.region),
     coloring = specialize.expr(cx, node.coloring),
     colors = node.colors and specialize.expr(cx, node.colors),
@@ -862,6 +906,7 @@ end
 
 function specialize.expr_partition_by_field(cx, node, allow_lists)
   return ast.specialized.expr.PartitionByField {
+    completeness = node.completeness and specialize.completeness_kind(cx, node.completeness),
     region = specialize.expr_region_root(cx, node.region),
     colors = specialize.expr(cx, node.colors),
     annotations = node.annotations,
@@ -872,6 +917,7 @@ end
 function specialize.expr_partition_by_restriction(cx, node, allow_lists)
   return ast.specialized.expr.PartitionByRestriction {
     disjointness = node.disjointness and specialize.disjointness_kind(cx, node.disjointness),
+    completeness = node.completeness and specialize.completeness_kind(cx, node.completeness),
     region = specialize.expr(cx, node.region),
     transform = specialize.expr(cx, node.transform),
     extent = specialize.expr(cx, node.extent),
@@ -884,6 +930,7 @@ end
 function specialize.expr_image(cx, node, allow_lists)
   return ast.specialized.expr.Image {
     disjointness = node.disjointness and specialize.disjointness_kind(cx, node.disjointness),
+    completeness = node.completeness and specialize.completeness_kind(cx, node.completeness),
     parent = specialize.expr(cx, node.parent),
     partition = specialize.expr(cx, node.partition),
     region = specialize.expr_region_root(cx, node.region),
@@ -895,6 +942,7 @@ end
 function specialize.expr_preimage(cx, node, allow_lists)
   return ast.specialized.expr.Preimage {
     disjointness = node.disjointness and specialize.disjointness_kind(cx, node.disjointness),
+    completeness = node.completeness and specialize.completeness_kind(cx, node.completeness),
     parent = specialize.expr(cx, node.parent),
     partition = specialize.expr(cx, node.partition),
     region = specialize.expr_region_root(cx, node.region),
@@ -1301,6 +1349,9 @@ function specialize.expr(cx, node, allow_lists)
 
   elseif node:is(ast.unspecialized.expr.RawFields) then
     return specialize.expr_raw_fields(cx, node, allow_lists)
+
+  elseif node:is(ast.unspecialized.expr.RawFuture) then
+    return specialize.expr_raw_future(cx, node, allow_lists)
 
   elseif node:is(ast.unspecialized.expr.RawPhysical) then
     return specialize.expr_raw_physical(cx, node, allow_lists)
@@ -2032,7 +2083,7 @@ end
 function specialize.top_task(cx, node)
   local cx = cx:new_local_scope()
 
-  local task = std.new_task(node.name)
+  local task = std.new_task(node.name, node.span)
 
   if node.body then
     local variant = task:make_variant("primary")
@@ -2141,6 +2192,7 @@ function specialize.top_quote_expr(cx, node)
   local cx = cx:new_local_scope(true)
   return std.newrquote(ast.specialized.top.QuoteExpr {
     expr = specialize.expr(cx, node.expr),
+    expr_type = false,
     annotations = node.annotations,
     span = node.span,
   })

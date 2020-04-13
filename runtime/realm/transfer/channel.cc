@@ -27,7 +27,7 @@ namespace Realm {
     Logger log_xd("xd");
 
       // TODO: currently we use dma_all_gpus to track the set of GPU* created
-#ifdef USE_CUDA
+#ifdef REALM_USE_CUDA
       std::vector<Cuda::GPU*> dma_all_gpus;
 #endif
       // we use a single queue for all xferDes
@@ -241,7 +241,7 @@ namespace Realm {
 	  p.indirect_port_idx = ii.indirect_port_idx;
 	  p.local_bytes_total = 0;
 	  p.local_bytes_cons = 0;
-	  p.remote_bytes_total = uint64_t(-1);
+	  p.remote_bytes_total = size_t(-1);
 	  p.ib_offset = ii.ib_offset;
 	  p.ib_size = ii.ib_size;
 	  switch(ii.port_type) {
@@ -437,6 +437,9 @@ namespace Realm {
 	    assert(srcptr != 0);
 	    unsigned cword;
 	    memcpy(&cword, srcptr, sizeof(unsigned));
+	    update_bytes_read(input_control.control_port_idx,
+                              icp.local_bytes_total, sizeof(unsigned));
+	    icp.local_bytes_total += sizeof(unsigned);
 	    input_control.remaining_count = cword >> 8;
 	    input_control.current_io_port = (cword & 0x7f) - 1;
 	    input_control.eos_received = (cword & 128) != 0;
@@ -464,8 +467,13 @@ namespace Realm {
 	    assert(amt == sizeof(unsigned));
 	    const void *srcptr = ocp.mem->get_direct_ptr(c_info.base_offset, amt);
 	    assert(srcptr != 0);
+
 	    unsigned cword;
 	    memcpy(&cword, srcptr, sizeof(unsigned));
+	    update_bytes_read(output_control.control_port_idx,
+                              ocp.local_bytes_total, sizeof(unsigned));
+	    ocp.local_bytes_total += sizeof(unsigned);
+	    assert(cword != 0);
 	    output_control.remaining_count = cword >> 8;
 	    output_control.current_io_port = (cword & 0x7f) - 1;
 	    output_control.eos_received = (cword & 128) != 0;
@@ -508,7 +516,7 @@ namespace Realm {
 						       dummy,
 						       flags & TransferIterator::DST_FLAGMASK,
 						       false /*!tentative*/);
-	      log_xd.print() << "skipping " << skip_bytes << " bytes of output";
+	      log_xd.debug() << "skipping " << skip_bytes << " bytes of output";
 	      assert(skip_bytes > 0);
 	      input_control.remaining_count -= skip_bytes;
 	      output_control.remaining_count -= skip_bytes;
@@ -542,7 +550,7 @@ namespace Realm {
 					     dummy,
 					     flags & TransferIterator::SRC_FLAGMASK,
 					     false /*!tentative*/);
-	    log_xd.print() << "skipping " << skip_bytes << " bytes of input";
+	    log_xd.debug() << "skipping " << skip_bytes << " bytes of input";
 	    assert(skip_bytes > 0);
 	    update_bytes_read(input_control.current_io_port,
 			      in_port->local_bytes_total,
@@ -739,6 +747,7 @@ namespace Realm {
 						    !input_data_done);
 
 	    size_t num_elems = dst_bytes / out_port->serdez_op->sizeof_field_type;
+	    if(num_elems == 0) break;
 	    assert((num_elems * out_port->serdez_op->sizeof_field_type) == dst_bytes);
 	    size_t max_src_bytes = num_elems * out_port->serdez_op->max_serialized_size;
 	    // if we have an input control, restrict the max number of
@@ -1172,7 +1181,8 @@ namespace Realm {
 	      if(!in_port->serdez_op && out_port->serdez_op) {
 		// ok to be over, due to the conservative nature of
 		//  deserialization reads
-		assert(rbc_snapshot >= pbt_snapshot);
+		assert((rbc_snapshot >= pbt_snapshot) ||
+		       (pbt_snapshot == size_t(-1)));
 	      } else {
 		// TODO: this check is now too aggressive because the previous
 		//  xd doesn't necessarily know when it's emitting its last
@@ -1497,7 +1507,7 @@ namespace Realm {
 	// do this before we add the span
 	if(pre_bytes_total != (size_t)-1) {
 	  // try to swap -1 for the given total
-	  uint64_t val = -1;
+	  size_t val = -1;
 	  if(!in_port->remote_bytes_total.compare_exchange(val, pre_bytes_total)) {
 	    // failure should only happen if we already had the same value
 	    assert(val == pre_bytes_total);
@@ -1818,7 +1828,7 @@ namespace Realm {
 	}
       }
 
-#ifdef USE_CUDA
+#ifdef REALM_USE_CUDA
       GPUXferDes::GPUXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
 				   const std::vector<XferDesPortInfo>& inputs_info,
 				   const std::vector<XferDesPortInfo>& outputs_info,
@@ -1941,7 +1951,7 @@ namespace Realm {
       }
 #endif
 
-#ifdef USE_HDF
+#ifdef REALM_USE_HDF5
       HDFXferDes::HDFXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
 				   const std::vector<XferDesPortInfo>& inputs_info,
 				   const std::vector<XferDesPortInfo>& outputs_info,
@@ -3081,9 +3091,9 @@ namespace Realm {
 	  // no serdez support
 	  assert((in_port->serdez_op == 0) && (out_port->serdez_op == 0));
 	  NodeID dst_node = ID(out_port->mem->me).memory_owner_node();
-	  uint64_t write_bytes_total = (req->xd->iteration_completed ?
-					  out_port->local_bytes_total :
-					  size_t(-1));
+	  size_t write_bytes_total = (req->xd->iteration_completed ?
+				        out_port->local_bytes_total :
+					size_t(-1));
 	  // send a request if there's data or if there's a next XD to update
 	  if((req->nbytes > 0) ||
 	     (out_port->peer_guid != XferDes::XFERDES_NO_GUID)) {
@@ -3144,7 +3154,7 @@ namespace Realm {
 	capacity.fetch_add(1);
       }
 
-#ifdef USE_CUDA
+#ifdef REALM_USE_CUDA
       GPUChannel::GPUChannel(Cuda::GPU* _src_gpu, long max_nr, XferDesKind _kind)
 	: Channel(_kind)
 	, capacity(max_nr)
@@ -3311,7 +3321,7 @@ namespace Realm {
       }
 #endif
 
-#ifdef USE_HDF
+#ifdef REALM_USE_HDF5
       HDFChannel::HDFChannel(long max_nr, XferDesKind _kind)
 	: Channel(_kind)
 	, capacity(max_nr)
@@ -3526,7 +3536,7 @@ namespace Realm {
         remote_write_channel = new RemoteWriteChannel(max_nr);
         return remote_write_channel;
       }
-#ifdef USE_CUDA
+#ifdef REALM_USE_CUDA
       GPUChannel* ChannelManager::create_gpu_to_fb_channel(long max_nr, Cuda::GPU* src_gpu) {
         gpu_to_fb_channels[src_gpu] = new GPUChannel(src_gpu, max_nr, XFER_GPU_TO_FB);
         return gpu_to_fb_channels[src_gpu];
@@ -3544,7 +3554,7 @@ namespace Realm {
         return gpu_peer_fb_channels[src_gpu];
       }
 #endif
-#ifdef USE_HDF
+#ifdef REALM_USE_HDF5
       HDFChannel* ChannelManager::create_hdf_read_channel(long max_nr) {
         assert(hdf_read_channel == NULL);
         hdf_read_channel = new HDFChannel(max_nr, XFER_HDF_READ);
@@ -3562,7 +3572,7 @@ namespace Realm {
 	return addr_split_channel;
       }
 
-#ifdef USE_CUDA
+#ifdef REALM_USE_CUDA
       void register_gpu_in_dma_systems(Cuda::GPU* gpu)
       {
         dma_all_gpus.push_back(gpu);
@@ -3684,11 +3694,11 @@ namespace Realm {
       {
         log_new_dma.info("XferDesQueue: start_workers");
         // num_memcpy_threads = 0;
-#ifdef USE_HDF
+#ifdef REALM_USE_HDF5
         // Need a dedicated thread for handling HDF requests
         // num_threads ++;
 #endif
-#ifdef USE_CUDA
+#ifdef REALM_USE_CUDA
         // num_threads ++;
 #endif
 	RuntimeImpl *r = get_runtime();
@@ -3730,7 +3740,7 @@ namespace Realm {
 	r->add_dma_channel(disk_write_channel);
 	r->add_dma_channel(file_read_channel);
 	r->add_dma_channel(file_write_channel);
-#ifdef USE_HDF
+#ifdef REALM_USE_HDF5
 	HDFChannel *hdf_read_channel = channel_manager->create_hdf_read_channel(max_nr);
 	HDFChannel *hdf_write_channel = channel_manager->create_hdf_write_channel(max_nr);
         channels.push_back(hdf_read_channel);
@@ -3743,7 +3753,7 @@ namespace Realm {
           channels.clear();
           count --;
         }
-#ifdef USE_CUDA
+#ifdef REALM_USE_CUDA
         std::vector<Cuda::GPU*>::iterator it;
         for (it = dma_all_gpus.begin(); it != dma_all_gpus.end(); it ++) {
 	  GPUChannel *gpu_to_fb_channel = channel_manager->create_gpu_to_fb_channel(max_nr, *it);
@@ -3872,10 +3882,10 @@ CREATE_MESSAGE_HANDLER(GASNetXferDes);
 CREATE_MESSAGE_HANDLER(RemoteWriteXferDes);
 CREATE_MESSAGE_HANDLER(DiskXferDes);
 CREATE_MESSAGE_HANDLER(FileXferDes);
-#ifdef USE_CUDA
+#ifdef REALM_USE_CUDA
 CREATE_MESSAGE_HANDLER(GPUXferDes);
 #endif
-#ifdef USE_HDF
+#ifdef REALM_USE_HDF5
 CREATE_MESSAGE_HANDLER(HDFXferDes);
 #endif
 

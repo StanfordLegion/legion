@@ -18,8 +18,39 @@
 
 #include "legion.h"
 #include "legion/legion_c_util.h"
+#include "mappers/default_mapper.h"
 
 using namespace Legion;
+using namespace Legion::Mapping;
+
+///
+/// Mapper
+///
+
+class EmbedMapper : public DefaultMapper
+{
+public:
+  EmbedMapper(MapperRuntime *rt, Machine machine, Processor local,
+              const char *mapper_name);
+  virtual void select_task_options(const MapperContext    ctx,
+                                   const Task&            task,
+                                         TaskOptions&     output);
+};
+
+EmbedMapper::EmbedMapper(MapperRuntime *rt, Machine machine, Processor local,
+                         const char *mapper_name)
+  : DefaultMapper(rt, machine, local, mapper_name)
+{
+}
+
+void EmbedMapper::select_task_options(const MapperContext    ctx,
+                                      const Task&            task,
+                                            TaskOptions&     output)
+{
+  DefaultMapper::select_task_options(ctx, task, output);
+  if (strcmp(task.get_task_name(), "inline_regent_task") == 0)
+    output.inline_task = true;
+}
 
 enum {
   TID_TOP_LEVEL_TASK,
@@ -101,12 +132,31 @@ void top_level_task(const Task *task,
   }
 
   {
+    inline_regent_task_launcher launcher;
+    launcher.set_enable_inlining(true);
+    launcher.add_argument_r(region, region, fields);
+    launcher.execute(runtime, ctx);
+  }
+
+  {
     other_regent_task_launcher launcher;
     launcher.add_argument_s(other_region, other_region, fields);
     launcher.add_argument_r(region, region, fields);
     launcher.execute(runtime, ctx);
   }
+}
 
+static void create_mappers(Machine machine,
+                           Runtime *runtime,
+                           const std::set<Processor> &local_procs)
+{
+  for (std::set<Processor>::const_iterator it = local_procs.begin();
+        it != local_procs.end(); it++)
+  {
+    EmbedMapper* mapper = new EmbedMapper(runtime->get_mapper_runtime(),
+                                          machine, *it, "circuit_mapper");
+    runtime->replace_default_mapper(mapper, *it);
+  }
 }
 
 int main(int argc, char **argv)
@@ -120,6 +170,7 @@ int main(int argc, char **argv)
   }
 
   embed_tasks_register();
+  Runtime::add_registration_callback(create_mappers);
 
   return Runtime::start(argc, argv);
 }

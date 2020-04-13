@@ -200,7 +200,7 @@ def build_hdf(source_dir, install_dir, thread_count, is_cray):
     subprocess.check_call(['make', '-j', str(thread_count)], cwd=source_dir)
     subprocess.check_call(['make', 'install'], cwd=source_dir)
 
-def build_regent(root_dir, use_cmake, cmake_exe,
+def build_regent(root_dir, use_cmake, cmake_exe, extra_flags,
                  gasnet_dir, llvm_dir, terra_dir, hdf_dir, conduit, thread_count):
     env = dict(list(os.environ.items()) +
         ([('CONDUIT', conduit),
@@ -210,7 +210,8 @@ def build_regent(root_dir, use_cmake, cmake_exe,
         ([('HDF_ROOT', hdf_dir),
           ('USE_HDF', '1')]
          if hdf_enabled() else []) +
-        [('LLVM_CONFIG', os.path.join(llvm_dir, 'bin', 'llvm-config'))]
+        [('LLVM_CONFIG', os.path.join(llvm_dir, 'bin', 'llvm-config')),
+         ('CMAKE_PREFIX_PATH', llvm_dir)]
     )
 
     subprocess.check_call(
@@ -219,7 +220,8 @@ def build_regent(root_dir, use_cmake, cmake_exe,
          '--rdir', 'auto',
          '-j', str(thread_count),
         ] + (['--cmake', '--with-cmake', cmake_exe]
-             if use_cmake else ['--no-cmake']),
+             if use_cmake else ['--no-cmake']) +
+        ['--extra=%s' % flag for flag in extra_flags],
         env=env)
 
 def install_llvm(llvm_dir, llvm_install_dir, scratch_dir, llvm_version, llvm_use_cmake, cmake_exe, thread_count, cache, is_cray, insecure):
@@ -331,7 +333,7 @@ def check_dirty_build(name, build_result, component_dir):
         sys.exit(1)
 
 def driver(prefix_dir=None, scratch_dir=None, cache=False,
-           legion_use_cmake=False, llvm_version=None,
+           legion_use_cmake=False, extra_flags=[], llvm_version=None,
            terra_url=None, terra_branch=None, terra_use_cmake=None,
            thread_count=None, insecure=False):
     if not cache:
@@ -484,7 +486,7 @@ def driver(prefix_dir=None, scratch_dir=None, cache=False,
             assert os.path.exists(hdf_build_result)
 
     if not cache:
-        build_regent(root_dir, legion_use_cmake, cmake_exe,
+        build_regent(root_dir, legion_use_cmake, cmake_exe, extra_flags,
                      gasnet_release_dir, llvm_install_dir, terra_dir, hdf_install_dir,
                      conduit, thread_count)
 
@@ -508,6 +510,10 @@ if __name__ == '__main__':
         '--cmake', dest='legion_use_cmake', action='store_true',
         default=os.environ.get('USE_CMAKE') == 1,
         help='Use CMake to build Legion.')
+    parser.add_argument(
+        '--extra', dest='extra_flags', action='append', required=False,
+        default=[],
+        help='Extra flags for Make/CMake command.')
     parser.add_argument(
         '--llvm-version', dest='llvm_version', required=False, choices=('35', '38', '39', '60'),
         default=discover_llvm_version(),

@@ -331,6 +331,8 @@ terra get_base_and_stride(rect : c.legion_rect_2d_t,
   regentlib.assert(subrect.hi.x[0] == rect.hi.x[0] and subrect.hi.x[1] == rect.hi.x[1], "subrect not equal to rect")
   regentlib.assert(offsets[0].offset == terralib.sizeof(DTYPE), "stride does not match expected value")
 
+  c.legion_accessor_array_2d_destroy(accessor)
+
   return { base = base_pointer, stride = offsets[1].offset }
 end
 
@@ -421,7 +423,8 @@ local function make_increment_interior(private, exterior)
   else
     return rquote
       var rect = get_rect(private.ispace)
-      var { base_input = base, stride_input = stride } = get_base_and_stride(rect, __physical(private)[0], __fields(private)[0])
+      var { base_input = base, stride_input = stride } =
+        get_base_and_stride(rect, __physical(private.input)[0], __fields(private.input)[0])
 
       var exterior_rect = get_rect(exterior.ispace)
       cstencil.increment(base_input,

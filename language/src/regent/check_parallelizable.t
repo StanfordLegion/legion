@@ -125,8 +125,7 @@ function loop_context.new_scope(task, loop, loop_var)
     reductions = data.newmap(),
     admissible = { true, nil },
     parallel = { true, nil },
-    -- True if the loop is the innermost loop that needs an index space iterator
-    innermost = needs_iterator,
+    innermost = true,
     outermost = false,
   }
   cx = setmetatable(cx, loop_context)
@@ -373,7 +372,7 @@ function context:pop_loop_context(node)
     -- When the task demands CUDA code generation, we only keep the innermost
     -- parallelizable for list loop.
     self:forall_context(function(cx_outer)
-      if cx_outer.needs_iterator then cx_outer:set_innermost(false) end
+      cx_outer:set_innermost(false)
       if cx_outer.loop_var then cx_outer:mark_inadmissible(node) end
       return false
     end)
@@ -433,8 +432,14 @@ function analyze_access.expr_id(cx, node, new_privilege, field_path)
 end
 
 function analyze_access.expr_field_access(cx, node, privilege, field_path)
-  local field_path = field_path or node.expr_type.field_path
-  return analyze_access.expr(cx, node.value, privilege, field_path)
+  if std.is_ref(node.expr_type) then
+    local field_path = field_path or node.expr_type.field_path
+    return analyze_access.expr(cx, node.value, privilege, field_path)
+  else
+    local private, center =
+      analyze_access.expr(cx, node.value, privilege, field_path)
+    return private, false
+  end
 end
 
 function analyze_access.expr_deref(cx, node, privilege, field_path)
@@ -553,6 +558,10 @@ function analyze_access.expr_ctor(cx, node, privilege, field_path)
   return false, false, false
 end
 
+function analyze_access.expr_global(cx, node, privilege, field_path)
+  return false, false, false
+end
+
 function analyze_access.expr_not_analyzable(cx, node, privilege, field_path)
   cx:mark_inadmissible(node)
   return false, false, false
@@ -574,6 +583,7 @@ local analyze_access_expr_table = {
   [ast.typed.expr.Null]         = analyze_access.expr_constant,
   [ast.typed.expr.Isnull]       = analyze_access.expr_isnull,
   [ast.typed.expr.Ctor]         = analyze_access.expr_ctor,
+  [ast.typed.expr.Global]       = analyze_access.expr_global,
   [ast.typed.expr]              = analyze_access.expr_not_analyzable,
 }
 

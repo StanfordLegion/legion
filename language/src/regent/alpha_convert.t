@@ -194,6 +194,7 @@ local update_block_with_loop_values = update_block_with_symbol_value("symbol", "
 local node_alpha_conversion = {
   [ast.condition_kind]           = pass_through,
   [ast.disjointness_kind]        = pass_through,
+  [ast.completeness_kind]        = pass_through,
   [ast.fence_kind]               = pass_through,
 
   [ast.specialized.region.Bare]  = update_value,
@@ -235,6 +236,7 @@ local node_alpha_conversion = {
   [ast.specialized.expr.CtorRecField]               = pass_through,
   [ast.specialized.expr.RawContext]                 = pass_through,
   [ast.specialized.expr.RawFields]                  = pass_through,
+  [ast.specialized.expr.RawFuture]                  = pass_through,
   [ast.specialized.expr.RawPhysical]                = pass_through,
   [ast.specialized.expr.RawRuntime]                 = pass_through,
   [ast.specialized.expr.RawTask]                    = pass_through,

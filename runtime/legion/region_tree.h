@@ -49,12 +49,16 @@ namespace Legion {
     struct IndirectRecord {
     public:
       IndirectRecord(void) { }
-      IndirectRecord(const FieldMask &m, PhysicalInstance i,
-                     ApEvent e, const Domain &d)
-        : fields(m), inst(i), ready_event(e), domain(d) { }
+      IndirectRecord(const FieldMask &m, PhysicalManager *p, 
+                     const DomainPoint &key, IndexSpace handle, 
+                     ApEvent e, const Domain &d);
     public:
       FieldMask fields;
       PhysicalInstance inst;
+#ifdef LEGION_SPY
+      ApEvent instance_event;
+      IndexSpace index_space;
+#endif
       ApEvent ready_event;
       Domain domain;
     };
@@ -148,14 +152,24 @@ namespace Legion {
     public:
       RegionTreeForest& operator=(const RegionTreeForest &rhs);
     public:
-      void create_index_space(IndexSpace handle, const void *realm_is,
-                              DistributedID did);
-      IndexSpace find_or_create_union_space(TaskContext *ctx,
-                              const std::vector<IndexSpace> &sources);
-      IndexSpace find_or_create_intersection_space(TaskContext *ctx,
-                              const std::vector<IndexSpace> &sources);
-      IndexSpace find_or_create_difference_space(TaskContext *ctx,
-                              IndexSpace left, IndexSpace right);
+      IndexSpaceNode* create_index_space(IndexSpace handle, 
+                              const Domain *domain, DistributedID did, 
+                              ApEvent ready = ApEvent::NO_AP_EVENT,
+                              std::set<RtEvent> *applied = NULL);
+      IndexSpaceNode* create_union_space(IndexSpace handle, DistributedID did,
+                              const std::vector<IndexSpace> &sources,
+                              RtEvent initialized = RtEvent::NO_RT_EVENT,
+                              std::set<RtEvent> *applied = NULL);
+      IndexSpaceNode* create_intersection_space(IndexSpace handle, 
+                              DistributedID did,
+                              const std::vector<IndexSpace> &sources,
+                              RtEvent initialized = RtEvent::NO_RT_EVENT,
+                              std::set<RtEvent> *applied = NULL);
+      IndexSpaceNode* create_difference_space(IndexSpace handle,
+                              DistributedID did,
+                              IndexSpace left, IndexSpace right,
+                              RtEvent initialized = RtEvent::NO_RT_EVENT,
+                              std::set<RtEvent> *applied = NULL);
       RtEvent create_pending_partition(TaskContext *ctx,
                                        IndexPartition pid,
                                        IndexSpace parent,
@@ -164,7 +178,8 @@ namespace Legion {
                                        PartitionKind part_kind,
                                        DistributedID did,
                                        ApEvent partition_ready,
-            ApUserEvent partial_pending = ApUserEvent::NO_AP_USER_EVENT);
+            ApUserEvent partial_pending = ApUserEvent::NO_AP_USER_EVENT,
+                                       std::set<RtEvent> *applied = NULL);
       void create_pending_cross_product(TaskContext *ctx,
                                         IndexPartition handle1,
                                         IndexPartition handle2,
@@ -289,7 +304,8 @@ namespace Legion {
       bool is_index_partition_complete(IndexPartition p);
       bool has_index_partition(IndexSpace parent, Color color);
     public:
-      void create_field_space(FieldSpace handle, DistributedID did);
+      void create_field_space(FieldSpace handle, DistributedID did,
+                              std::set<RtEvent> *applied = NULL);
       void destroy_field_space(FieldSpace handle, AddressSpaceID source,
                                std::set<RtEvent> &preconditions);
       // Return true if local is set to true and we actually performed the 
@@ -329,7 +345,8 @@ namespace Legion {
       void get_field_space_fields(FieldSpace handle, 
                                   std::vector<FieldID> &fields);
     public:
-      void create_logical_region(LogicalRegion handle);
+      void create_logical_region(LogicalRegion handle,
+                                 std::set<RtEvent> *applied = NULL);
       void destroy_logical_region(LogicalRegion handle, 
                                   AddressSpaceID source,
                                   std::set<RtEvent> &preconditions);
@@ -610,32 +627,42 @@ namespace Legion {
       void check_context_state(RegionTreeContext ctx);
     public:
       // We know the domain of the index space
-      IndexSpaceNode* create_node(IndexSpace is, const void *realm_is, 
-                                  IndexPartNode *par, LegionColor color,
-                                  DistributedID did,
+      IndexSpaceNode* create_node(IndexSpace is, const void *bounds, 
+                                  bool is_domain, IndexPartNode *par, 
+                                  LegionColor color, DistributedID did,
+                                  RtEvent initialized,
                                   ApEvent is_ready = ApEvent::NO_AP_EVENT,
-                                  IndexSpaceExprID expr_id = 0);
+                                  IndexSpaceExprID expr_id = 0,
+                                  std::set<RtEvent> *applied = NULL);
       IndexSpaceNode* create_node(IndexSpace is, const void *realm_is, 
                                   IndexPartNode *par, LegionColor color,
-                                  DistributedID did,
-                                  ApUserEvent is_ready);
+                                  DistributedID did, RtEvent initialized,
+                                  ApUserEvent is_ready,
+                                  std::set<RtEvent> *applied = NULL);
       // We know the disjointness of the index partition
       IndexPartNode*  create_node(IndexPartition p, IndexSpaceNode *par,
                                   IndexSpaceNode *color_space, 
                                   LegionColor color, bool disjoint,int complete,
                                   DistributedID did, ApEvent partition_ready, 
-                                  ApUserEvent partial_pending);
+                                  ApUserEvent partial_pending, RtEvent init,
+                                  std::set<RtEvent> *applied = NULL);
       // Give the event for when the disjointness information is ready
       IndexPartNode*  create_node(IndexPartition p, IndexSpaceNode *par,
                                   IndexSpaceNode *color_space,LegionColor color,
                                   RtEvent disjointness_ready_event,int complete,
                                   DistributedID did, ApEvent partition_ready, 
-                                  ApUserEvent partial_pending);
-      FieldSpaceNode* create_node(FieldSpace space, DistributedID did);
+                                  ApUserEvent partial_pending, RtEvent init,
+                                  std::set<RtEvent> *applied = NULL);
       FieldSpaceNode* create_node(FieldSpace space, DistributedID did, 
-                                  Deserializer &derez);
-      RegionNode*     create_node(LogicalRegion r, PartitionNode *par);
-      PartitionNode*  create_node(LogicalPartition p, RegionNode *par);
+                                  RtEvent initialized, 
+                                  std::set<RtEvent> *applied = NULL);
+      FieldSpaceNode* create_node(FieldSpace space, DistributedID did, 
+                                  RtEvent initialized, Deserializer &derez);
+      RegionNode*     create_node(LogicalRegion r, PartitionNode *par, 
+                                  RtEvent initialized,
+                                  std::set<RtEvent> *applied = NULL);
+      PartitionNode*  create_node(LogicalPartition p, RegionNode *par,
+                                  std::set<RtEvent> *applied = NULL);
     public:
       IndexSpaceNode* get_node(IndexSpace space, RtEvent *defer = NULL);
       IndexPartNode*  get_node(IndexPartition part, RtEvent *defer = NULL);
@@ -715,27 +742,27 @@ namespace Legion {
       void attach_semantic_information(IndexSpace handle, SemanticTag tag,
                                        AddressSpaceID source,
                                        const void *buffer, size_t size,
-                                       bool is_mutable);
+                                       bool is_mutable, bool local_only);
       void attach_semantic_information(IndexPartition handle, SemanticTag tag,
                                        AddressSpaceID source,
                                        const void *buffer, size_t size,
-                                       bool is_mutable);
+                                       bool is_mutable, bool local_only);
       void attach_semantic_information(FieldSpace handle, SemanticTag tag,
                                        AddressSpaceID source,
                                        const void *buffer, size_t size,
-                                       bool is_mutable);
+                                       bool is_mutable, bool local_only);
       void attach_semantic_information(FieldSpace handle, FieldID fid,
                                        SemanticTag tag, AddressSpaceID source,
                                        const void *buffer, size_t size,
-                                       bool is_mutable);
+                                       bool is_mutable, bool local_only);
       void attach_semantic_information(LogicalRegion handle, SemanticTag tag,
                                        AddressSpaceID source,
                                        const void *buffer, size_t size,
-                                       bool is_mutable);
+                                       bool is_mutable, bool local_only);
       void attach_semantic_information(LogicalPartition handle, SemanticTag tag,
                                        AddressSpaceID source,
                                        const void *buffer, size_t size,
-                                       bool is_mutable);
+                                       bool is_mutable, bool local_only);
     public:
       bool retrieve_semantic_information(IndexSpace handle, SemanticTag tag,
                                          const void *&result, size_t &size,
@@ -922,7 +949,7 @@ namespace Legion {
     public:
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag, 
                                            bool need_tight_result) = 0;
-      virtual Domain get_domain(ApEvent &ready, bool need_tight) = 0;
+      virtual Domain get_domain(ApEvent &ready, bool need_tight) = 0; 
       virtual void tighten_index_space(void) = 0;
       virtual bool check_empty(void) = 0;
       virtual size_t get_volume(void) = 0;
@@ -933,7 +960,9 @@ namespace Legion {
       virtual void add_expression_reference(void) = 0;
       virtual bool remove_expression_reference(void) = 0;
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
-      virtual IndexSpaceNode* find_or_create_node(TaskContext *ctx) = 0;
+      virtual IndexSpaceNode* create_node(IndexSpace handle,
+                      DistributedID did, RtEvent initialized,
+                      std::set<RtEvent> *applied) = 0;
     public:
       virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
@@ -953,6 +982,10 @@ namespace Legion {
                                   IndirectRecord>::aligned &records,
                            std::vector<void*> &indirections,
                            std::vector<unsigned> &indirect_indexes,
+#ifdef LEGION_SPY
+                           unsigned unique_indirections_identifier,
+                           const ApEvent indirect_inst_event,
+#endif
                            const bool possible_out_of_range,
                            const bool possible_aliasing) = 0;
       virtual void destroy_indirections(std::vector<void*> &indirections) = 0;
@@ -960,6 +993,9 @@ namespace Legion {
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
                            const std::vector<void*> &indirects,
+#ifdef LEGION_SPY
+                           unsigned unique_indirections_identifier,
+#endif
                            ApEvent precondition, PredEvent pred_guard) = 0;
       virtual Realm::InstanceLayoutGeneric* create_layout(
                            const LayoutConstraintSet &constraints,
@@ -1010,6 +1046,10 @@ namespace Legion {
                                       IndirectRecord>::aligned &records,
                                std::vector<void*> &indirections,
                                std::vector<unsigned> &indirect_indexes,
+#ifdef LEGION_SPY
+                               unsigned unique_indirections_identifier,
+                               const ApEvent indirect_inst_event,
+#endif
                                const bool possible_out_of_range,
                                const bool possible_aliasing);
       template<int DIM, typename T>
@@ -1022,6 +1062,9 @@ namespace Legion {
                                const std::vector<CopySrcDstField> &dst_fields,
                                const std::vector<CopySrcDstField> &src_fields,
                                const std::vector<void*> &indirects,
+#ifdef LEGION_SPY
+                               unsigned unique_indirections_identifier,
+#endif
                                ApEvent precondition, PredEvent pred_guard);
       template<int DIM, typename T>
       inline Realm::InstanceLayoutGeneric* create_layout_internal(
@@ -1071,7 +1114,9 @@ namespace Legion {
       virtual void add_expression_reference(void);
       virtual bool remove_expression_reference(void);
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
-      virtual IndexSpaceNode* find_or_create_node(TaskContext *ctx) = 0; 
+      virtual IndexSpaceNode* create_node(IndexSpace handle,
+                      DistributedID did, RtEvent initialized,
+                      std::set<RtEvent> *applied) = 0;
     protected:
       void record_remote_expression(AddressSpaceID target);
     public:
@@ -1079,10 +1124,6 @@ namespace Legion {
     protected:
       mutable LocalLock inter_lock;
     protected:
-      // An equivalent index space node with the same IndexSpaceExprID as this
-      // We only make this if we actually need to since IndexSpaceNodes
-      // are more expensive to maintain
-      IndexSpaceNode *node; 
       std::set<AddressSpaceID> *remote_exprs;
     };
 
@@ -1112,7 +1153,9 @@ namespace Legion {
                                              const bool top) = 0;
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
       virtual bool remove_expression_reference(void);
-      virtual IndexSpaceNode* find_or_create_node(TaskContext *ctx) = 0;
+      virtual IndexSpaceNode* create_node(IndexSpace handle,
+                      DistributedID did, RtEvent initialized,
+                      std::set<RtEvent> *applied) = 0;
       virtual IndexSpaceExpression* find_congruence(void) = 0;
       virtual void activate_remote(void) = 0;
     public:
@@ -1158,7 +1201,9 @@ namespace Legion {
                                              AddressSpaceID target,
                                              const bool top) = 0;
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
-      virtual IndexSpaceNode* find_or_create_node(TaskContext *ctx);
+      virtual IndexSpaceNode* create_node(IndexSpace handle,
+                          DistributedID did, RtEvent initialized,
+                          std::set<RtEvent> *applied);
       virtual IndexSpaceExpression* find_congruence(void) = 0;
     public:
       virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
@@ -1179,6 +1224,10 @@ namespace Legion {
                                   IndirectRecord>::aligned &records,
                            std::vector<void*> &indirections,
                            std::vector<unsigned> &indirect_indexes,
+#ifdef LEGION_SPY
+                           unsigned unique_indirections_identifier,
+                           const ApEvent indirect_inst_event,
+#endif
                            const bool possible_out_of_range,
                            const bool possible_aliasing);
       virtual void destroy_indirections(std::vector<void*> &indirections);
@@ -1186,6 +1235,9 @@ namespace Legion {
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
                            const std::vector<void*> &indirects,
+#ifdef LEGION_SPY
+                           unsigned unique_indirections_identifier,
+#endif
                            ApEvent precondition, PredEvent pred_guard);
       virtual Realm::InstanceLayoutGeneric* create_layout(
                            const LayoutConstraintSet &constraints,
@@ -1477,7 +1529,7 @@ namespace Legion {
     public:
       IndexTreeNode(RegionTreeForest *ctx, unsigned depth,
                     LegionColor color, DistributedID did,
-                    AddressSpaceID owner); 
+                    AddressSpaceID owner, RtEvent init_event); 
       virtual ~IndexTreeNode(void);
     public:
       virtual void notify_active(ReferenceMutator *mutator) { }
@@ -1500,7 +1552,7 @@ namespace Legion {
       virtual AddressSpaceID get_owner_space(void) const = 0;
     public:
       void attach_semantic_information(SemanticTag tag, AddressSpaceID source,
-                             const void *buffer, size_t size, bool is_mutable);
+           const void *buffer, size_t size, bool is_mutable, bool local_only);
       bool retrieve_semantic_information(SemanticTag tag,
                                          const void *&result, size_t &size,
                                          bool can_fail, bool wait_until);
@@ -1514,6 +1566,7 @@ namespace Legion {
       const unsigned depth;
       const LegionColor color;
     public:
+      RtEvent initialized;
       NodeSet child_creation;
       bool destroyed;
     protected:
@@ -1614,7 +1667,7 @@ namespace Legion {
       IndexSpaceNode(RegionTreeForest *ctx, IndexSpace handle,
                      IndexPartNode *parent, LegionColor color,
                      DistributedID did, ApEvent index_space_ready,
-                     IndexSpaceExprID expr_id);
+                     IndexSpaceExprID expr_id, RtEvent initialized);
       IndexSpaceNode(const IndexSpaceNode &rhs);
       virtual ~IndexSpaceNode(void);
     public:
@@ -1646,17 +1699,18 @@ namespace Legion {
       static void handle_semantic_info(RegionTreeForest *forest,
                                  Deserializer &derez, AddressSpaceID source);
     public:
-      bool has_color(const LegionColor c);
+      bool has_color(const LegionColor color);
+      LegionColor generate_color(LegionColor suggestion = INVALID_COLOR);
+      void release_color(LegionColor color);
       IndexPartNode* get_child(const LegionColor c, 
                                RtEvent *defer = NULL, bool can_fail = false);
       void add_child(IndexPartNode *child, ReferenceMutator *mutator);
       void remove_child(const LegionColor c);
       size_t get_num_children(void) const;
     public:
-      bool are_disjoint(const LegionColor c1, const LegionColor c2); 
+      bool are_disjoint(LegionColor c1, LegionColor c2); 
       void record_disjointness(bool disjoint, 
-                               const LegionColor c1, const LegionColor c2);
-      LegionColor generate_color(void);
+                               LegionColor c1, LegionColor c2);
       void record_remote_child(IndexPartition pid, LegionColor part_color);
     public:
       void add_instance(RegionNode *inst);
@@ -1685,11 +1739,17 @@ namespace Legion {
       static void handle_colors_response(Deserializer &derez);
       static void handle_index_space_set(RegionTreeForest *forest,
                            Deserializer &derez, AddressSpaceID source);
+      static void handle_generate_color_request(RegionTreeForest *forest,
+                           Deserializer &derez, AddressSpaceID source);
+      static void handle_generate_color_response(Deserializer &derez);
+      static void handle_release_color(RegionTreeForest *forest, 
+                                       Deserializer &derez);
     public:
       // From IndexSpaceExpression
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
                                            bool need_tight_result) = 0;
       virtual Domain get_domain(ApEvent &ready, bool need_tight) = 0;
+      virtual bool set_domain(const Domain &domain, AddressSpaceID space) = 0;
       virtual void tighten_index_space(void) = 0;
       virtual bool check_empty(void) = 0;
       virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0;
@@ -1699,8 +1759,9 @@ namespace Legion {
       virtual void add_expression_reference(void);
       virtual bool remove_expression_reference(void);
       virtual bool remove_operation(RegionTreeForest *forest);
-      virtual IndexSpaceNode* find_or_create_node(TaskContext *ctx) 
-        { return this; }
+      virtual IndexSpaceNode* create_node(IndexSpace handle,
+                    DistributedID did, RtEvent initialized,
+                    std::set<RtEvent> *applied) = 0; 
     public:
       virtual ApEvent compute_pending_space(Operation *op,
             const std::vector<IndexSpace> &handles, bool is_union) = 0;
@@ -1851,9 +1912,9 @@ namespace Legion {
     public:
       IndexSpaceNodeT(RegionTreeForest *ctx, IndexSpace handle,
                       IndexPartNode *parent, LegionColor color, 
-                      const Realm::IndexSpace<DIM,T> *realm_is,
+                      const void *bounds, bool is_domain,
                       DistributedID did, ApEvent ready_event,
-                      IndexSpaceExprID expr_id);
+                      IndexSpaceExprID expr_id, RtEvent init);
       IndexSpaceNodeT(const IndexSpaceNodeT &rhs);
       virtual ~IndexSpaceNodeT(void);
     public:
@@ -1868,12 +1929,16 @@ namespace Legion {
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
                                            bool need_tight_result);
       virtual Domain get_domain(ApEvent &ready, bool need_tight);
+      virtual bool set_domain(const Domain &domain, AddressSpaceID space);
       virtual void tighten_index_space(void);
       virtual bool check_empty(void);
       virtual void pack_expression(Serializer &rez, AddressSpaceID target);
       virtual void pack_expression_structure(Serializer &rez,
                                              AddressSpaceID target,
                                              const bool top);
+      virtual IndexSpaceNode* create_node(IndexSpace handle,
+                                DistributedID did, RtEvent initialized,
+                                std::set<RtEvent> *applied);
     public:
       void log_index_space_points(const Realm::IndexSpace<DIM,T> &space) const;
       void log_profiler_index_space_points(
@@ -2055,6 +2120,10 @@ namespace Legion {
                                   IndirectRecord>::aligned &records,
                            std::vector<void*> &indirections,
                            std::vector<unsigned> &indirect_indexes,
+#ifdef LEGION_SPY
+                           unsigned unique_indirections_identifier,
+                           const ApEvent indirect_inst_event,
+#endif
                            const bool possible_out_of_range,
                            const bool possible_aliasing);
       virtual void destroy_indirections(std::vector<void*> &indirections);
@@ -2062,6 +2131,9 @@ namespace Legion {
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
                            const std::vector<void*> &indirects,
+#ifdef LEGION_SPY
+                           unsigned unique_indirections_identifier,
+#endif
                            ApEvent precondition, PredEvent pred_guard);
       virtual Realm::InstanceLayoutGeneric* create_layout(
                            const LayoutConstraintSet &constraints,
@@ -2307,30 +2379,33 @@ namespace Legion {
      */
     class IndexSpaceCreator {
     public:
-      IndexSpaceCreator(RegionTreeForest *f, IndexSpace s, const void *i,
-                        IndexPartNode *p, LegionColor c, DistributedID d, 
-                        ApEvent r, IndexSpaceExprID e)
-        : forest(f), space(s), realm_is(i), parent(p), 
-          color(c), did(d), ready(r), expr_id(e), result(NULL) { }
+      IndexSpaceCreator(RegionTreeForest *f, IndexSpace s, const void *b,
+                        bool is_dom, IndexPartNode *p, LegionColor c, 
+                        DistributedID d, ApEvent r, IndexSpaceExprID e,
+                        RtEvent init)
+        : forest(f), space(s), bounds(b), is_domain(is_dom), parent(p), 
+          color(c), did(d), ready(r), expr_id(e), initialized(init), 
+          result(NULL) { }
     public:
       template<typename N, typename T>
       static inline void demux(IndexSpaceCreator *creator)
       {
-        const Realm::IndexSpace<N::N,T> *is = 
-          (const Realm::IndexSpace<N::N,T>*)creator->realm_is;
         creator->result = new IndexSpaceNodeT<N::N,T>(creator->forest,
-            creator->space, creator->parent, creator->color, is,
-            creator->did, creator->ready, creator->expr_id);
+            creator->space, creator->parent, creator->color, creator->bounds,
+            creator->is_domain, creator->did, creator->ready, 
+            creator->expr_id, creator->initialized);
       }
     public:
       RegionTreeForest *const forest;
       const IndexSpace space; 
-      const void *const realm_is;
+      const void *const bounds;
+      const bool is_domain;
       IndexPartNode *const parent;
       const LegionColor color;
       const DistributedID did;
       const ApEvent ready;
       const IndexSpaceExprID expr_id;
+      const RtEvent initialized;
       IndexSpaceNode *result;
     };
 
@@ -2418,12 +2493,12 @@ namespace Legion {
                     IndexSpaceNode *par, IndexSpaceNode *color_space,
                     LegionColor c, bool disjoint, int complete, 
                     DistributedID did, ApEvent partition_ready, 
-                    ApUserEvent partial_pending);
+                    ApUserEvent partial_pending, RtEvent init);
       IndexPartNode(RegionTreeForest *ctx, IndexPartition p,
                     IndexSpaceNode *par, IndexSpaceNode *color_space,
                     LegionColor c, RtEvent disjointness_ready,
-                    int complete, DistributedID did,
-                    ApEvent partition_ready, ApUserEvent partial_pending);
+                    int complete, DistributedID did, ApEvent partition_ready,
+                    ApUserEvent partial_pending, RtEvent init);
       IndexPartNode(const IndexPartNode &rhs);
       virtual ~IndexPartNode(void);
     public:
@@ -2464,11 +2539,11 @@ namespace Legion {
     public:
       void compute_disjointness(RtUserEvent ready_event);
       bool is_disjoint(bool from_app = false);
-      bool are_disjoint(const LegionColor c1, const LegionColor c2,
+      bool are_disjoint(LegionColor c1, LegionColor c2,
                         bool force_compute = false);
       void record_disjointness(bool disjoint,
-                               const LegionColor c1, const LegionColor c2);
-      bool is_complete(bool from_app = false);
+                               LegionColor c1, LegionColor c2);
+      bool is_complete(bool from_app = false, bool false_if_not_ready = false);
       IndexSpaceExpression* get_union_expression(bool check_complete=true);
       void record_remote_disjoint_ready(RtUserEvent ready);
       void record_remote_disjoint_result(const bool disjoint_result);
@@ -2569,12 +2644,12 @@ namespace Legion {
                      IndexSpaceNode *par, IndexSpaceNode *color_space,
                      LegionColor c, bool disjoint, int complete,
                      DistributedID did, ApEvent partition_ready, 
-                     ApUserEvent pending);
+                     ApUserEvent pending, RtEvent initialized);
       IndexPartNodeT(RegionTreeForest *ctx, IndexPartition p,
                      IndexSpaceNode *par, IndexSpaceNode *color_space,
                      LegionColor c, RtEvent disjointness_ready, 
-                     int complete, DistributedID did,
-                     ApEvent partition_ready, ApUserEvent pending);
+                     int complete, DistributedID did, ApEvent partition_ready,
+                     ApUserEvent pending, RtEvent initialized);
       IndexPartNodeT(const IndexPartNodeT &rhs);
       virtual ~IndexPartNodeT(void);
     public:
@@ -2593,17 +2668,17 @@ namespace Legion {
       IndexPartCreator(RegionTreeForest *f, IndexPartition p,
                        IndexSpaceNode *par, IndexSpaceNode *cs,
                        LegionColor c, bool d, int k, DistributedID id,
-                       ApEvent r, ApUserEvent pend)
+                       ApEvent r, ApUserEvent pend, RtEvent initialized)
         : forest(f), partition(p), parent(par), color_space(cs),
           color(c), disjoint(d), complete(k), did(id), ready(r), 
-          pending(pend) { }
+          pending(pend), init(initialized) { }
       IndexPartCreator(RegionTreeForest *f, IndexPartition p,
                        IndexSpaceNode *par, IndexSpaceNode *cs,
-                       LegionColor c, RtEvent d, int k, 
-                       DistributedID id, ApEvent r, ApUserEvent pend)
+                       LegionColor c, RtEvent d, int k, DistributedID id, 
+                       ApEvent r, ApUserEvent pend, RtEvent initialized)
         : forest(f), partition(p), parent(par), color_space(cs),
           color(c), disjoint(false), complete(k), disjoint_ready(d),
-          did(id), ready(r), pending(pend) { }
+          did(id), ready(r), pending(pend), init(initialized) { }
     public:
       template<typename N, typename T>
       static inline void demux(IndexPartCreator *creator)
@@ -2612,12 +2687,12 @@ namespace Legion {
           creator->result = new IndexPartNodeT<N::N,T>(creator->forest,
               creator->partition, creator->parent, creator->color_space,
               creator->color, creator->disjoint_ready, creator->complete,
-              creator->did, creator->ready, creator->pending);
+              creator->did, creator->ready, creator->pending, creator->init);
         else
           creator->result = new IndexPartNodeT<N::N,T>(creator->forest,
               creator->partition, creator->parent, creator->color_space,
               creator->color, creator->disjoint, creator->complete, 
-              creator->did, creator->ready, creator->pending);
+              creator->did, creator->ready, creator->pending, creator->init);
       }
     public:
       RegionTreeForest *const forest;
@@ -2631,6 +2706,7 @@ namespace Legion {
       const DistributedID did;
       const ApEvent ready;
       const ApUserEvent pending;
+      const RtEvent init;
       IndexPartNode *result;
     };
 
@@ -2706,9 +2782,10 @@ namespace Legion {
         ReferenceMutator *const mutator;
       };
     public:
-      FieldSpaceNode(FieldSpace sp, RegionTreeForest *ctx, DistributedID did);
-      FieldSpaceNode(FieldSpace sp, RegionTreeForest *ctx,
-                     DistributedID did, Deserializer &derez);
+      FieldSpaceNode(FieldSpace sp, RegionTreeForest *ctx, 
+                     DistributedID did, RtEvent initialized);
+      FieldSpaceNode(FieldSpace sp, RegionTreeForest *ctx, DistributedID did,
+                     RtEvent initialized, Deserializer &derez);
       FieldSpaceNode(const FieldSpaceNode &rhs);
       virtual ~FieldSpaceNode(void);
     public:
@@ -2722,11 +2799,11 @@ namespace Legion {
       virtual void notify_invalid(ReferenceMutator *mutator);
     public:
       void attach_semantic_information(SemanticTag tag, AddressSpaceID source,
-                            const void *buffer, size_t size, bool is_mutable);
+            const void *buffer, size_t size, bool is_mutable, bool local_only);
       void attach_semantic_information(FieldID fid, SemanticTag tag,
                                        AddressSpaceID source,
                                        const void *buffer, size_t size,
-                                       bool is_mutable);
+                                       bool is_mutable, bool local_only);
       bool retrieve_semantic_information(SemanticTag tag,
              const void *&result, size_t &size, bool can_fail, bool wait_until);
       bool retrieve_semantic_information(FieldID fid, SemanticTag tag,
@@ -2875,6 +2952,7 @@ namespace Legion {
     public:
       const FieldSpace handle;
       RegionTreeForest *const context;
+      RtEvent initialized;
     private:
       mutable LocalLock node_lock;
       // Top nodes in the trees for which this field space is used
@@ -2915,7 +2993,8 @@ namespace Legion {
      */
     class RegionTreeNode : public DistributedCollectable {
     public:
-      RegionTreeNode(RegionTreeForest *ctx, FieldSpaceNode *column);
+      RegionTreeNode(RegionTreeForest *ctx, FieldSpaceNode *column,
+                     RtEvent initialized, RtEvent tree_init);
       virtual ~RegionTreeNode(void);
     public:
       virtual void notify_active(ReferenceMutator *mutator);
@@ -2943,7 +3022,7 @@ namespace Legion {
       }
     public:
       void attach_semantic_information(SemanticTag tag, AddressSpaceID source,
-                            const void *buffer, size_t size, bool is_mutable);
+            const void *buffer, size_t size, bool is_mutable, bool local_only);
       bool retrieve_semantic_information(SemanticTag tag,
            const void *&result, size_t &size, bool can_fail, bool wait_until);
       virtual void send_semantic_request(AddressSpaceID target, 
@@ -3115,6 +3194,8 @@ namespace Legion {
     public:
       RegionTreeForest *const context;
       FieldSpaceNode *const column_source;
+      RtEvent initialized;
+      const RtEvent tree_initialized; // top level tree initialization
     public:
       NodeSet remote_instances;
       bool registered;
@@ -3166,7 +3247,8 @@ namespace Legion {
       };
     public:
       RegionNode(LogicalRegion r, PartitionNode *par, IndexSpaceNode *row_src,
-                 FieldSpaceNode *col_src, RegionTreeForest *ctx);
+                 FieldSpaceNode *col_src, RegionTreeForest *ctx, 
+                 RtEvent initialized, RtEvent tree_initialized);
       RegionNode(const RegionNode &rhs);
       virtual ~RegionNode(void);
     public:
@@ -3305,7 +3387,7 @@ namespace Legion {
     public:
       PartitionNode(LogicalPartition p, RegionNode *par, 
                     IndexPartNode *row_src, FieldSpaceNode *col_src,
-                    RegionTreeForest *ctx);
+                    RegionTreeForest *ctx, RtEvent init, RtEvent tree);
       PartitionNode(const PartitionNode &rhs);
       virtual ~PartitionNode(void);
     public:

@@ -163,6 +163,7 @@ namespace Legion {
                                     const UniqueID op_id,
                                     const unsigned index,
                                     ApEvent term_event,
+                                    RtEvent collect_event,
                                     std::set<RtEvent> &applied_events,
                                     const PhysicalTraceInfo &trace_info,
                                     const AddressSpaceID source) = 0;
@@ -181,6 +182,7 @@ namespace Legion {
                                     const bool trace_recording,
                                     const AddressSpaceID source) = 0;
       virtual void add_copy_user(bool reading, ApEvent done_event, 
+                                 RtEvent collect_event,
                                  const FieldMask &copy_mask,
                                  IndexSpaceExpression *copy_expr,
                                  UniqueID op_id, unsigned index,
@@ -256,7 +258,7 @@ namespace Legion {
       virtual void collect_users(const std::set<ApEvent> &to_collect) = 0;
     public:
       void defer_collect_user(InstanceManager *manager, ApEvent term_event,
-                              ReferenceMutator *mutator = NULL);
+                              RtEvent collect,ReferenceMutator *mutator = NULL);
       static void handle_deferred_collect(CollectableView *view,
                                           const std::set<ApEvent> &to_collect);
     };
@@ -320,11 +322,13 @@ namespace Legion {
                             UniqueID op_id, unsigned index,
                             FieldMask user_mask,
                             const ApEvent term_event,
+                            const RtEvent collect_event,
                             IndexSpaceExpression *user_expr,
                             const size_t user_volume,
                             const bool trace_recording);
       void add_current_user(PhysicalUser *user, const ApEvent term_event,
-                  const FieldMask &user_mask, const bool trace_recording);
+                            RtEvent collect_event, const FieldMask &user_mask,
+                            const bool trace_recording);
       // TODO: Optimize this so that we prune out intermediate nodes in 
       // the tree that are empty and re-balance the tree. The hard part of
       // this is that it will require stopping any precondition searches
@@ -464,7 +468,8 @@ namespace Legion {
     public:
       PendingTaskUser(const RegionUsage &usage, const FieldMask &user_mask,
                       IndexSpaceNode *user_expr, const UniqueID op_id,
-                      const unsigned index, const ApEvent term_event);
+                      const unsigned index, const ApEvent term_event,
+                      const RtEvent collect_event);
       virtual ~PendingTaskUser(void);
     public:
       virtual bool apply(MaterializedView *view, const FieldMask &mask);
@@ -475,6 +480,7 @@ namespace Legion {
       const UniqueID op_id;
       const unsigned index;
       const ApEvent term_event;
+      const RtEvent collect_event;
     };
 
     class PendingCopyUser : public RemotePendingUser, 
@@ -482,7 +488,8 @@ namespace Legion {
     public:
       PendingCopyUser(const bool reading, const FieldMask &copy_mask,
                       IndexSpaceExpression *copy_expr, const UniqueID op_id,
-                      const unsigned index, const ApEvent term_event);
+                      const unsigned index, const ApEvent term_event,
+                      const RtEvent collect_event);
       virtual ~PendingCopyUser(void);
     public:
       virtual bool apply(MaterializedView *view, const FieldMask &mask);
@@ -493,6 +500,7 @@ namespace Legion {
       const UniqueID op_id;
       const unsigned index;
       const ApEvent term_event;
+      const RtEvent collect_event;
     };
 
     /**
@@ -566,6 +574,7 @@ namespace Legion {
                                     const UniqueID op_id,
                                     const unsigned index,
                                     ApEvent term_event,
+                                    RtEvent collect_event,
                                     std::set<RtEvent> &applied_events,
                                     const PhysicalTraceInfo &trace_info,
                                     const AddressSpaceID source);
@@ -584,6 +593,7 @@ namespace Legion {
                                     const bool trace_recording,
                                     const AddressSpaceID source);
       virtual void add_copy_user(bool reading, ApEvent term_event, 
+                                 RtEvent collect_event,
                                  const FieldMask &copy_mask,
                                  IndexSpaceExpression *copy_expr,
                                  UniqueID op_id, unsigned index,
@@ -613,13 +623,15 @@ namespace Legion {
       void add_internal_task_user(const RegionUsage &usage,
                                   IndexSpaceExpression *user_expr,
                                   const FieldMask &user_mask,
-                                  ApEvent term_event, UniqueID op_id, 
+                                  ApEvent term_event, 
+                                  RtEvent collect_event, UniqueID op_id,
                                   const unsigned index,
                                   const bool trace_recording);
       void add_internal_copy_user(const RegionUsage &usage,
                                   IndexSpaceExpression *user_expr,
                                   const FieldMask &user_mask,
-                                  ApEvent term_event, UniqueID op_id, 
+                                  ApEvent term_event, 
+                                  RtEvent collect_event, UniqueID op_id,
                                   const unsigned index,
                                   const bool trace_recording);
       template<bool NEED_EXPR_LOCK>
@@ -755,6 +767,7 @@ namespace Legion {
                                     const UniqueID op_id,
                                     const unsigned index,
                                     ApEvent term_event,
+                                    RtEvent collect_event,
                                     std::set<RtEvent> &applied_events,
                                     const PhysicalTraceInfo &trace_info,
                                     const AddressSpaceID source);
@@ -773,6 +786,7 @@ namespace Legion {
                                     const bool trace_recording,
                                     const AddressSpaceID source);
       virtual void add_copy_user(bool reading, ApEvent term_event, 
+                                 RtEvent collect_event,
                                  const FieldMask &copy_mask,
                                  IndexSpaceExpression *copy_expr,
                                  UniqueID op_id, unsigned index,
@@ -799,7 +813,8 @@ namespace Legion {
       bool add_user(const RegionUsage &usage,
                     IndexSpaceExpression *user_expr,
                     const FieldMask &user_mask,
-                    ApEvent term_event, UniqueID op_id, unsigned index,
+                    ApEvent term_event, RtEvent collect_event,
+                    UniqueID op_id, unsigned index,
                     bool copy_user, std::set<RtEvent> &applied_events,
                     const bool trace_recording);
     public:

@@ -23,12 +23,14 @@ local builtins = {}
 -- via std).
 
 builtins.aliased = std.aliased
+builtins.complete = std.complete
 builtins.complex = std.complex
 builtins.complex32 = std.complex32
 builtins.complex64 = std.complex64
 builtins.cross_product = std.cross_product
 builtins.disjoint = std.disjoint
 builtins.dynamic_collective = std.dynamic_collective
+builtins.incomplete = std.incomplete
 builtins.index_type = std.index_type
 for dim = 1, std.max_dim do
   builtins["int" .. dim .. "d"] = std["int" .. dim .. "d"]

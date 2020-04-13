@@ -1546,13 +1546,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     VariantID MapperManager::register_task_variant(MappingCallInfo *ctx,
                                       const TaskVariantRegistrar &registrar,
-				      const CodeDescriptor &codedesc,
+				      const CodeDescriptor &realm_desc,
 				      const void *user_data, size_t user_len,
                                       bool has_return_type)
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
-      CodeDescriptor *realm_desc = new CodeDescriptor(codedesc);
       VariantID result = runtime->register_variant(registrar, user_data,
                                     user_len, realm_desc, has_return_type);
       resume_mapper_call(ctx);
@@ -1605,6 +1604,16 @@ namespace Legion {
               conflicts = true;
               break;
             }
+            if (constraints->specialized_constraint.is_exact())
+            {
+              std::vector<LogicalRegion> regions_to_check(1,
+                        task.regions[lay_it->first].region);
+              if (!manager->meets_regions(regions_to_check, true/*exact*/))
+              {
+                conflicts = true;
+                break;
+              }
+            }
           }
           if (conflicts)
             break;
@@ -1650,6 +1659,15 @@ namespace Legion {
             PhysicalManager *manager = it->impl;
             if (manager->conflicts(constraints, DomainPoint(), NULL))
               it = instances.erase(it);
+            else if (constraints->specialized_constraint.is_exact())
+            {
+              std::vector<LogicalRegion> regions_to_check(1,
+                        task.regions[lay_it->first].region);
+              if (!manager->meets_regions(regions_to_check,true/*tight*/))
+                it = instances.erase(it);
+              else
+                it++;
+            }
             else
               it++;
           }
@@ -1698,6 +1716,15 @@ namespace Legion {
           PhysicalManager *manager = it->impl;
           if (manager->conflicts(constraints, DomainPoint(), NULL))
             it = instances.erase(it);
+          else if (constraints->specialized_constraint.is_exact())
+          {
+            std::vector<LogicalRegion> regions_to_check(1,
+                      task.regions[lay_it->first].region);
+            if (!manager->meets_regions(regions_to_check,true/*tight*/))
+              it = instances.erase(it);
+            else
+              it++;
+          }
           else
             it++;
         }
@@ -2404,13 +2431,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexSpace MapperManager::create_index_space(MappingCallInfo *ctx,
                                                  const Domain &domain,
-                                                 const void *realm_is,
                                                  TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
       IndexSpace result = 
-        runtime->find_or_create_index_slice_space(domain, realm_is, type_tag);
+        runtime->find_or_create_index_slice_space(domain, type_tag);
       resume_mapper_call(ctx);
       return result; 
     }
@@ -2420,9 +2446,28 @@ namespace Legion {
                                          const std::vector<IndexSpace> &sources)
     //--------------------------------------------------------------------------
     {
+      if (sources.empty())
+        return IndexSpace::NO_SPACE;
       pause_mapper_call(ctx);
-      IndexSpace result = 
-        runtime->forest->find_or_create_union_space(NULL, sources);
+      bool none_exists = true;
+      for (std::vector<IndexSpace>::const_iterator it = 
+            sources.begin(); it != sources.end(); it++)
+      {
+        if (none_exists && it->exists())
+          none_exists = false;
+        if (sources[0].get_type_tag() != it->get_type_tag())
+          REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
+                        "Dynamic type mismatch in 'union_index_spaces' "
+                        "performed in mapper %s", get_mapper_name())
+      }
+      if (none_exists)
+        return IndexSpace::NO_SPACE;
+      const IndexSpace result(runtime->get_unique_index_space_id(),
+          runtime->get_unique_index_tree_id(), sources[0].get_type_tag());
+      const DistributedID did = runtime->get_available_distributed_id();
+      runtime->forest->create_union_space(result, did, sources);
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_top_index_space(result.get_id());
       resume_mapper_call(ctx);
       return result;
     }
@@ -2432,9 +2477,28 @@ namespace Legion {
                                          const std::vector<IndexSpace> &sources)
     //--------------------------------------------------------------------------
     {
+      if (sources.empty())
+        return IndexSpace::NO_SPACE;
       pause_mapper_call(ctx);
-      IndexSpace result = 
-        runtime->forest->find_or_create_intersection_space(NULL, sources);
+      bool none_exists = true;
+      for (std::vector<IndexSpace>::const_iterator it = 
+            sources.begin(); it != sources.end(); it++)
+      {
+        if (none_exists && it->exists())
+          none_exists = false;
+        if (sources[0].get_type_tag() != it->get_type_tag())
+          REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
+                        "Dynamic type mismatch in 'intersect_index_spaces' "
+                        "performed in mapper %s", get_mapper_name())
+      }
+      if (none_exists)
+        return IndexSpace::NO_SPACE;
+      const IndexSpace result(runtime->get_unique_index_space_id(),
+          runtime->get_unique_index_tree_id(), sources[0].get_type_tag());
+      const DistributedID did = runtime->get_available_distributed_id();
+      runtime->forest->create_intersection_space(result, did, sources);
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_top_index_space(result.get_id());
       resume_mapper_call(ctx);
       return result;
     }
@@ -2444,9 +2508,19 @@ namespace Legion {
                                               IndexSpace left, IndexSpace right)
     //--------------------------------------------------------------------------
     {
+      if (!left.exists())
+        return IndexSpace::NO_SPACE;
       pause_mapper_call(ctx);
-      IndexSpace result = 
-        runtime->forest->find_or_create_difference_space(NULL, left, right);
+      if (right.exists() && left.get_type_tag() != right.get_type_tag())
+        REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
+                        "Dynamic type mismatch in 'create_difference_spaces' "
+                        "performed in mapper %s", get_mapper_name())
+      const IndexSpace result(runtime->get_unique_index_space_id(),
+          runtime->get_unique_index_tree_id(), left.get_type_tag());
+      const DistributedID did = runtime->get_available_distributed_id();
+      runtime->forest->create_difference_space(result, did, left, right);
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_top_index_space(result.get_id());
       resume_mapper_call(ctx);
       return result;
     }
@@ -2470,18 +2544,18 @@ namespace Legion {
                                              IndexSpace one, IndexSpace two)
     //--------------------------------------------------------------------------
     {
+      if (!one.exists() || !two.exists())
+        return false;
       pause_mapper_call(ctx);
-      std::vector<IndexSpace> spaces(2);
-      spaces[0] = one;
-      spaces[1] = two;
-      IndexSpace intersection = 
-        runtime->forest->find_or_create_intersection_space(NULL, spaces);
-      bool result = false;
-      if (intersection.exists())
-      {
-        IndexSpaceNode *node = runtime->forest->get_node(intersection);
-        result = !node->is_empty();
-      }
+      if (one.get_type_tag() != two.get_type_tag())
+        REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
+                        "Dynamic type mismatch in 'index_spaces_overlap' "
+                        "performed in mapper %s", get_mapper_name())
+      IndexSpaceNode *n1 = runtime->forest->get_node(one);
+      IndexSpaceNode *n2 = runtime->forest->get_node(two);
+      IndexSpaceExpression *overlap = 
+        runtime->forest->intersect_index_spaces(n1, n2);
+      const bool result = !overlap->is_empty();
       resume_mapper_call(ctx);
       return result;
     }
@@ -2491,15 +2565,20 @@ namespace Legion {
                                               IndexSpace left, IndexSpace right)
     //--------------------------------------------------------------------------
     {
+      if (!left.exists())
+        return true;
+      if (!right.exists())
+        return false;
       pause_mapper_call(ctx);
-      IndexSpace diff = 
-        runtime->forest->find_or_create_difference_space(NULL, left, right);
-      bool result = true;
-      if (diff.exists())
-      {
-        IndexSpaceNode *node = runtime->forest->get_node(diff);
-        result = node->is_empty();
-      }
+      if (left.get_type_tag() != right.get_type_tag())
+        REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
+                        "Dynamic type mismatch in 'index_spaces_dominates' "
+                        "performed in mapper %s", get_mapper_name())
+      IndexSpaceNode *n1 = runtime->forest->get_node(left);
+      IndexSpaceNode *n2 = runtime->forest->get_node(right);
+      IndexSpaceExpression *difference =
+        runtime->forest->subtract_index_spaces(n1, n2);
+      const bool result = difference->is_empty();
       resume_mapper_call(ctx);
       return result;
     }

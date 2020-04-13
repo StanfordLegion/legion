@@ -113,21 +113,6 @@ namespace Legion {
       NEW_OPAQUE_WRAPPER(legion_accessor_array_##DIM##d_t, ArrayAccessor##DIM##D *);
       LEGION_FOREACH_N(ACCESSOR_ARRAY)
 #undef ACCESSOR_ARRAY
-#ifdef __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#endif
-      NEW_OPAQUE_WRAPPER(legion_index_iterator_t, IndexIterator *);
-#ifdef __GNUC__
-#pragma GCC diagnostic pop
-#endif
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
       NEW_OPAQUE_WRAPPER(legion_task_t, Task *);
       NEW_OPAQUE_WRAPPER(legion_copy_t, Copy *);
       NEW_OPAQUE_WRAPPER(legion_fill_t, Fill *);

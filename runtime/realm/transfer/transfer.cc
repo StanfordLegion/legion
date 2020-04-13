@@ -21,7 +21,7 @@
 #include "realm/transfer/lowlevel_dma.h"
 #include "realm/mem_impl.h"
 #include "realm/inst_layout.h"
-#ifdef USE_HDF
+#ifdef REALM_USE_HDF5
 #include "realm/hdf5/hdf5_access.h"
 #endif
 
@@ -50,7 +50,7 @@ namespace Realm {
     assert(0);
   }
   
-#ifdef USE_HDF
+#ifdef REALM_USE_HDF5
   size_t TransferIterator::step(size_t max_bytes, AddressInfoHDF5& info,
 				bool tentative /*= false*/)
   {
@@ -80,7 +80,7 @@ namespace Realm {
     virtual size_t step(size_t max_bytes, AddressInfo& info,
 			unsigned flags,
 			bool tentative = false);
-#ifdef USE_HDF
+#ifdef REALM_USE_HDF5
     virtual size_t step(size_t max_bytes, AddressInfoHDF5& info,
 			bool tentative = false);
 #endif
@@ -312,7 +312,7 @@ namespace Realm {
     return total_bytes;
   }
 
-#ifdef USE_HDF
+#ifdef REALM_USE_HDF5
   template <int N, typename T>
   size_t TransferIteratorBase<N,T>::step(size_t max_bytes, AddressInfoHDF5& info,
 						bool tentative /*= false*/)
@@ -1771,6 +1771,7 @@ namespace Realm {
       unsigned cword = (((output_count * element_size) << 8) +
 			(input_done ? 128 : 0) + // bit 7
 			(output_space_id + 1));
+      assert(cword != 0);
 
       XferPort &cp = output_ports[spaces.size()];
       if(cp.seq_remote.span_exists(cp.local_bytes_total,
@@ -1979,7 +1980,7 @@ namespace Realm {
       size_t idx = path_infos.size();
       for(size_t j = 0; j < i; j++)
 	if(insts[i].get_location() == insts[j].get_location()) {
-	  idx = j;
+	  idx = path_idx[j];
 	  break;
 	}
 
@@ -2242,7 +2243,7 @@ namespace Realm {
       size_t idx = path_infos.size();
       for(size_t j = 0; j < i; j++)
 	if(insts[i].get_location() == insts[j].get_location()) {
-	  idx = j;
+	  idx = path_idx[j];
 	  break;
 	}
 

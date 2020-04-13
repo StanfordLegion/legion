@@ -55,6 +55,8 @@ local default_options = {
   ["index-launch"] = true,
   ["inline"] = true,
   ["future"] = true,
+  ["predicate"] = true,
+  ["predicate-unroll"] = 2, -- Iterations to unroll predicated loops.
   ["leaf"] = true,
   ["inner"] = true,
   ["idempotent"] = true,
@@ -63,7 +65,7 @@ local default_options = {
   ["openmp"] = config.UNSPECIFIED,
   ["openmp-offline"] = not data.is_luajit(),
   ["openmp-strict"] = false,
-  ["skip-empty-tasks"] = true,
+  ["skip-empty-tasks"] = false,
   ["vectorize"] = true,
 
   -- Legion runtime optimization flags:
@@ -89,7 +91,6 @@ local default_options = {
 
   -- Miscellaneous, internal or special-purpose flags:
   ["aligned-instances"] = false,
-  ["cached-iterators"] = false,
   ["debug"] = false,
   ["warn-as-error"] = false,
   ["no-dynamic-branches"] = true,

@@ -866,8 +866,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InstanceManager::defer_collect_user(CollectableView *view,
-                              ApEvent term_event, std::set<ApEvent> &to_collect,
-                              bool &add_ref, bool &remove_ref) 
+                                             ApEvent term_event,RtEvent collect,
+                                             std::set<ApEvent> &to_collect,
+                                             bool &add_ref, bool &remove_ref) 
     //--------------------------------------------------------------------------
     {
       AutoLock inst(inst_lock);
@@ -875,8 +876,20 @@ namespace Legion {
       if (info.view_events.empty())
         add_ref = true;
       info.view_events.insert(term_event);
+      info.events_added++;
+      if (collect.exists())
+        info.collect_event = collect;
+      // Skip collections if there is a collection event guarding 
+      // collection in the case of tracing
+      if (info.collect_event.exists())
+      {
+        if (!info.collect_event.has_triggered())
+          return;
+        else
+          info.collect_event = RtEvent::NO_RT_EVENT;
+      }
       // Only do the pruning for every so many adds
-      if ((++info.events_added) == runtime->gc_epoch_size)
+      if (info.events_added >= runtime->gc_epoch_size)
       {
         for (std::set<ApEvent>::iterator it = info.view_events.begin();
               it != info.view_events.end(); /*nothing*/)
@@ -1065,7 +1078,7 @@ namespace Legion {
       if (memory_manager != NULL)
         memory_manager->deactivate_instance(this);
       if (!is_owner())
-        send_remote_gc_decrement(owner_space, RtEvent::NO_RT_EVENT, mutator);
+        send_remote_gc_decrement(owner_space, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -1110,6 +1123,10 @@ namespace Legion {
           const RtEvent precondition = 
             Runtime::protect_merge_events(it->second.view_events);
           args.to_collect->swap(it->second.view_events);
+          if (it->second.collect_event.exists() &&
+              !it->second.collect_event.has_triggered())
+            precondition = Runtime::merge_events(precondition, 
+                                    it->second.collect_event);
           runtime->issue_runtime_meta_task(args, 
               LG_THROUGHPUT_WORK_PRIORITY, precondition);
         }
@@ -1215,6 +1232,10 @@ namespace Legion {
         instance.destroy(serdez_fields, deferred_event);
       else
         instance.destroy(deferred_event);
+#ifdef LEGION_MALLOC_INSTANCES
+      if (!is_external_instance())
+        memory_manager->free_legion_instance(this, deferred_event);
+#endif
 #endif
       // Notify any contexts of our deletion
       // Grab a copy of this in case we get any removal calls
@@ -1253,6 +1274,10 @@ namespace Legion {
         instance.destroy(serdez_fields);
       else
         instance.destroy();
+#ifdef LEGION_MALLOC_INSTANCES
+      if (!is_external_instance())
+        memory_manager->free_legion_instance(this, RtEvent::NO_RT_EVENT);
+#endif
 #endif
     }
 
@@ -1447,7 +1472,6 @@ namespace Legion {
           (tracing_dst_fields == NULL) ? dst_fields : *tracing_dst_fields,
           (tracing_src_fields == NULL) ? src_fields : *tracing_src_fields,
 #ifdef LEGION_SPY
-                                         field_space_node->handle,
                                          source_manager->tree_id, tree_id,
 #endif
                                          precondition, predicate_guard,
@@ -2205,7 +2229,6 @@ namespace Legion {
       source_manager->compute_copy_offsets(copy_mask, src_fields);
       return copy_expression->issue_copy(trace_info, dst_fields, src_fields,
 #ifdef LEGION_SPY
-                                         field_space_node->handle,
                                          source_manager->tree_id, tree_id,
 #endif
                                          precondition, predicate_guard,
@@ -2407,16 +2430,19 @@ namespace Legion {
       // Add a profiling request to see if the instance is actually allocated
       // Make it very high priority so we get the response quickly
       ProfilingResponseBase base(this);
+#ifndef LEGION_MALLOC_INSTANCES
       Realm::ProfilingRequest &req = requests.add_request(
           runtime->find_utility_group(), LG_LEGION_PROFILING_ID,
           &base, sizeof(base), LG_RESOURCE_PRIORITY);
       req.add_measurement<Realm::ProfilingMeasurements::InstanceAllocResult>();
       // Create a user event to wait on for the result of the profiling response
       profiling_ready = Runtime::create_rt_user_event();
+#endif
 #ifdef DEBUG_LEGION
       assert(!instance.exists()); // shouldn't exist before this
 #endif
       ApEvent ready;
+#ifndef LEGION_MALLOC_INSTANCES
       if (runtime->profiler != NULL)
       {
         runtime->profiler->add_inst_request(requests, creator_id);
@@ -2435,7 +2461,19 @@ namespace Legion {
                   memory_manager->memory, inst_layout, requests));
       // Wait for the profiling response
       if (!profiling_ready.has_triggered())
-        profiling_ready.wait(); 
+        profiling_ready.wait();
+#else
+      uintptr_t base_ptr = 0;
+      if (instance_footprint > 0)
+      {
+        base_ptr = 
+          memory_manager->allocate_legion_instance(instance_footprint);
+        if (base_ptr == 0)
+          return NULL;
+      }
+      ready = ApEvent(PhysicalInstance::create_external(instance,
+            memory_manager->memory, base_ptr, inst_layout, requests));
+#endif
       // If we couldn't make it then we are done
       if (!instance.exists())
         return NULL;
@@ -2555,6 +2593,9 @@ namespace Legion {
         default:
           assert(false); // illegal specialized case
       }
+#ifdef LEGION_MALLOC_INSTANCES
+      memory_manager->record_legion_instance(result, base_ptr); 
+#endif
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
@@ -2565,9 +2606,11 @@ namespace Legion {
               regions.begin(); it != regions.end(); it++)
           runtime->profiler->record_physical_instance_region(creator_id, 
                                                       instance.id, *it);
-        runtime->profiler->record_physical_instance_fields(creator_id, 
-                                    instance.id, layout->owner->handle, 
-                                    constraints.field_constraint.field_set);
+        runtime->profiler->record_physical_instance_layout(
+                                                     creator_id,
+                                                     instance.id,
+                                                     layout->owner->handle,
+                                                     layout->constraints);
       }
       return result;
     }
@@ -2575,7 +2618,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void InstanceBuilder::handle_profiling_response(
                                        const ProfilingResponseBase *base,
-                                       const Realm::ProfilingResponse &response)
+                                       const Realm::ProfilingResponse &response,
+                                       const void *orig, size_t orig_length)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION

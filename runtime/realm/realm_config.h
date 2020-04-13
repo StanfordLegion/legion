@@ -45,7 +45,7 @@
 #endif
 
 // dynamic loading via dlfcn and a not-completely standard dladdr extension
-#ifdef USE_LIBDL
+#ifdef REALM_USE_LIBDL
 #define REALM_USE_DLFCN
 #ifndef REALM_NO_USE_DLADDR
 #define REALM_USE_DLADDR

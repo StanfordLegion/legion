@@ -22,6 +22,7 @@
 // we need all its declarations so we have all the right types
 #include <cuda_runtime.h>
 
+#include "realm/realm_config.h"
 #include "realm/operation.h"
 #include "realm/module.h"
 #include "realm/threads.h"
@@ -111,6 +112,9 @@ namespace Realm {
       bool cfg_use_background_workers, cfg_use_shared_worker, cfg_pin_sysmem;
       bool cfg_fences_use_callbacks;
       bool cfg_suppress_hijack_warning;
+      unsigned cfg_skip_gpu_count;
+      bool cfg_skip_busy_gpus;
+      size_t cfg_min_avail_mem;
 
       // "global" variables live here too
       GPUWorker *shared_worker;
@@ -353,6 +357,7 @@ namespace Realm {
       void add_fence(GPUWorkFence *fence);
       void add_start_event(GPUWorkStart *start);
       void add_notification(GPUCompletionNotification *notification);
+      void wait_on_streams(const std::set<GPUStream*> &other_streams);
 
       // to be called by a worker (that should already have the GPU context
       //   current) - returns true if any work remains
@@ -454,18 +459,21 @@ namespace Realm {
     class GPU {
     public:
       GPU(CudaModule *_module, GPUInfo *_info, GPUWorker *worker,
+	  CUcontext _context,
 	  int num_streams);
       ~GPU(void);
 
       void push_context(void);
       void pop_context(void);
 
+#ifdef REALM_USE_CUDART_HIJACK
       void register_fat_binary(const FatBin *data);
       void register_variable(const RegisteredVariable *var);
       void register_function(const RegisteredFunction *func);
 
       CUfunction lookup_function(const void *func);
       CUdeviceptr lookup_variable(const void *var);
+#endif
 
       void create_processor(RuntimeImpl *runtime, size_t stack_size);
       void create_fb_memory(RuntimeImpl *runtime, size_t size);
@@ -550,9 +558,9 @@ namespace Realm {
 
       bool can_access_peer(GPU *peer);
 
-      GPUStream *switch_to_next_task_stream(void);
-      GPUStream *get_current_task_stream(void);
-
+      GPUStream *find_stream(CUstream stream) const;
+      GPUStream *get_null_task_stream(void) const;
+      GPUStream *get_next_task_stream(bool create = false);
     protected:
       CUmodule load_cuda_module(const void *data);
 
@@ -578,13 +586,15 @@ namespace Realm {
       GPUStream *device_to_device_stream;
       GPUStream *peer_to_peer_stream;
       std::vector<GPUStream *> task_streams;
-      unsigned current_stream;
+      atomic<unsigned> next_stream;
 
       GPUEventPool event_pool;
 
+#ifdef REALM_USE_CUDART_HIJACK
       std::map<const FatBin *, CUmodule> device_modules;
       std::map<const void *, CUfunction> device_functions;
       std::map<const void *, CUdeviceptr> device_variables;
+#endif
     };
 
     // helper to push/pop a GPU's context by scope
@@ -608,15 +618,19 @@ namespace Realm {
 
       static GPUProcessor *get_current_gpu_proc(void);
 
+#ifdef REALM_USE_CUDART_HIJACK
       // calls that come from the CUDA runtime API
       void push_call_configuration(dim3 grid_dim, dim3 block_dim,
                                    size_t shared_size, void *stream);
       void pop_call_configuration(dim3 *grid_dim, dim3 *block_dim,
                                   size_t *shared_size, void *stream);
+#endif
 
+      void stream_wait_on_event(cudaStream_t stream, cudaEvent_t event);
       void stream_synchronize(cudaStream_t stream);
       void device_synchronize(void);
 
+#ifdef REALM_USE_CUDART_HIJACK
       void event_create(cudaEvent_t *event, int flags);
       void event_destroy(cudaEvent_t event);
       void event_record(cudaEvent_t event, cudaStream_t stream);
@@ -628,11 +642,14 @@ namespace Realm {
       void setup_argument(const void *arg, size_t size, size_t offset);
       void launch(const void *func);
       void launch_kernel(const void *func, dim3 grid_dim, dim3 block_dim, 
-                         void **args, size_t shared_memory, cudaStream_t stream);
+                         void **args, size_t shared_memory, 
+                         cudaStream_t stream, bool cooperative = false);
+#endif
 
       void gpu_memcpy(void *dst, const void *src, size_t size, cudaMemcpyKind kind);
       void gpu_memcpy_async(void *dst, const void *src, size_t size,
 			    cudaMemcpyKind kind, cudaStream_t stream);
+#ifdef REALM_USE_CUDART_HIJACK
       void gpu_memcpy_to_symbol(const void *dst, const void *src, size_t size,
 				size_t offset, cudaMemcpyKind kind);
       void gpu_memcpy_to_symbol_async(const void *dst, const void *src, size_t size,
@@ -643,6 +660,7 @@ namespace Realm {
       void gpu_memcpy_from_symbol_async(void *dst, const void *src, size_t size,
 					size_t offset, cudaMemcpyKind kind,
 					cudaStream_t stream);
+#endif
 
       void gpu_memset(void *dst, int value, size_t count);
       void gpu_memset_async(void *dst, int value, size_t count, cudaStream_t stream);
@@ -660,7 +678,7 @@ namespace Realm {
         cudaStream_t stream; 
         CallConfig(dim3 _grid, dim3 _block, size_t _shared, cudaStream_t _stream);
       };
-      std::vector<LaunchConfig> launch_configs;
+      std::vector<CallConfig> launch_configs;
       std::vector<char> kernel_args;
       std::vector<CallConfig> call_configs;
       bool block_on_synchronize;

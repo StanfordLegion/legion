@@ -137,9 +137,9 @@ directory. For example:
 ```bash
 git clone https://github.com/StanfordLegion/legion.git
 export LG_RT_DIR="$PWD/legion/runtime"
-cd legion/examples/full_circuit
+cd legion/examples/circuit
 make
-./ckt_sim
+./circuit
 ```
 
 ## Makefile Variables

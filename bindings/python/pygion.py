@@ -501,7 +501,7 @@ def is_rect_type(t):
 _redop_ids = {}
 def _fill_redop_ids():
     operators = ['+', '-', '*', '/', 'max', 'min']
-    types = [bool_, int16, int32, int64, uint16, uint32, uint64, None, float32, float64, None, complex64, complex128]
+    types = [bool_, int8, int16, int32, int64, uint8, uint16, uint32, uint64, None, float32, float64, None, complex64, complex128]
     next_id = 1048576
     for operator in operators:
         _redop_ids[operator] = {}
@@ -2368,7 +2368,7 @@ if is_script:
     def _cleanup():
         del _my.ctx
 
-    legion_top.top_level.cleanup_items.append(_cleanup)
+    legion_top.cleanup_items.append(_cleanup)
 
     # FIXME: Really this should be the number of control replicated shards at this level
     c.legion_runtime_enable_scheduler_lock()

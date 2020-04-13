@@ -40,12 +40,9 @@ bindings_dir = os.path.join(os.path.dirname(runtime_dir), 'bindings', 'regent')
 python_dir = os.path.join(os.path.dirname(runtime_dir), 'bindings', 'python')
 
 # Find CUDA.
-if 'CUDA' in os.environ:
-    cuda_dir = os.path.realpath(os.environ['CUDA'])
-elif 'CUDATOOLKIT_HOME' in os.environ:
-    cuda_dir = os.path.realpath(os.environ['CUDATOOLKIT_HOME'])
-else:
-    cuda_dir = None
+cuda_dir = os.environ.get('CUDA') or os.environ.get('CUDA_HOME') or os.environ.get('CUDATOOLKIT_HOME')
+if cuda_dir:
+    cuda_dir = os.path.realpath(cuda_dir)
 cuda_include_dir = os.path.join(cuda_dir, 'include') if cuda_dir is not None else None
 
 # Find RDIR.
@@ -115,6 +112,7 @@ def regent(args, env={}, cwd=None, **kwargs):
           os.path.join(os.path.dirname(first_arg), '?.rg')]
           if first_arg is not None and os.path.exists(first_arg) else []) +
         [os.path.join(regent_dir, 'src', '?.t'),
+         os.path.join(regent_dir, 'src', '?.rg'),
          os.path.join(regent_dir, 'src', 'rdir', 'plugin', 'src', '?.t'),
          os.path.join(terra_dir, 'tests', 'lib', '?.t'),
          os.path.join(terra_dir, 'release', 'include', '?.t'),

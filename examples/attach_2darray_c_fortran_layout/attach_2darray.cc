@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cassert>
 #include <cstdlib>
+#include <cmath>
 #include "legion.h"
 using namespace Legion;
 
@@ -232,7 +233,7 @@ void read_field_task(const Task *task,
 		     ((*pir).x * args.step_x) +
 		     ((*pir).y * args.step_y));
     double actval = acc[*pir];
-    if(expval == actval) {
+    if(fabs(actval - expval) < 1e-10) {
       printf("%.1f\t", actval);
     } else {
       printf("%.1f != %.1f\t", actval, expval);

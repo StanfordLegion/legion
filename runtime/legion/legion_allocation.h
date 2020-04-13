@@ -72,6 +72,7 @@ namespace Legion {
       COPY_OP_ALLOC,
       FENCE_OP_ALLOC,
       FRAME_OP_ALLOC,
+      CREATION_OP_ALLOC,
       DELETION_OP_ALLOC,
       CLOSE_OP_ALLOC,
       DYNAMIC_COLLECTIVE_OP_ALLOC,

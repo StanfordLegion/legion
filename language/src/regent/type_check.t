@@ -896,6 +896,28 @@ function type_check.expr_call(cx, node)
     conditions:insertall(type_check.expr_condition(cx, condition))
   end
 
+  -- For macros, run macro expansion and type check the result.
+  if std.is_macro(fn.value) then
+    local quotes = data.mapi(
+      function(i, arg)
+        return std.newrquote(
+          ast.specialized.top.QuoteExpr {
+            expr = node.args[i],
+            expr_type = arg_types[i],
+            annotations = node.annotations,
+            span = node.span,
+          })
+      end,
+      args)
+    local result = fn.value.fn(unpack(quotes))
+    if not (std.is_rquote(result) and ast.is_node(result:getast()) and
+              result:getast():is(ast.specialized.top.QuoteExpr))
+    then
+      report.error(node, "macro was expected to return an rexpr, but got " .. tostring(result))
+    end
+    return type_check.expr(cx, result:getast().expr)
+  end
+
   -- Determine the type of the function being called.
   local fn_type
   local def_type
@@ -1065,6 +1087,8 @@ function type_check.expr_call(cx, node)
     fn = fn,
     args = args,
     conditions = conditions,
+    predicate = false,
+    predicate_else_value = false,
     replicable = false,
     expr_type = expr_type,
     annotations = node.annotations,
@@ -1218,9 +1242,12 @@ function type_check.expr_raw_fields(cx, node)
     std.get_absolute_field_paths(region_type:fspace(), region.fields)
   local privilege_fields = terralib.newlist()
   for _, field_path in ipairs(absolute_field_paths) do
-    if std.check_any_privilege(cx, region_type, field_path) then
-      privilege_fields:insert(field_path)
+    if not std.check_any_privilege(cx, region_type, field_path) then
+      report.error(node, "invalid privilege: task has no privilege on " ..
+          string.gsub((pretty.entry_expr(region.region) .. "." ..
+              field_path:mkstring(".")), "[$]", ""))
     end
+    privilege_fields:insert(field_path)
   end
   local fields_type = std.c.legion_field_id_t[#privilege_fields]
 
@@ -1228,6 +1255,22 @@ function type_check.expr_raw_fields(cx, node)
     region = region,
     fields = privilege_fields,
     expr_type = fields_type,
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
+function type_check.expr_raw_future(cx, node)
+  local value = type_check.expr(cx, node.value)
+  local value_type = std.as_read(value.expr_type)
+
+  if value_type ~= std.c.legion_future_t then
+    report.error(node, "type mismatch in argument 2: expected legion_future_t but got " .. tostring(value_type))
+  end
+
+  return ast.typed.expr.RawFuture {
+    value = value,
+    expr_type = node.value_type,
     annotations = node.annotations,
     span = node.span,
   }
@@ -1241,9 +1284,12 @@ function type_check.expr_raw_physical(cx, node)
     std.get_absolute_field_paths(region_type:fspace(), region.fields)
   local privilege_fields = terralib.newlist()
   for _, field_path in ipairs(absolute_field_paths) do
-    if std.check_any_privilege(cx, region_type, field_path) then
-      privilege_fields:insert(field_path)
+    if not std.check_any_privilege(cx, region_type, field_path) then
+      report.error(node, "invalid privilege: task has no privilege on " ..
+          string.gsub((pretty.entry_expr(region.region) .. "." ..
+              field_path:mkstring(".")), "[$]", ""))
     end
+    privilege_fields:insert(field_path)
   end
   local physical_type = std.c.legion_physical_region_t[#privilege_fields]
 
@@ -1553,6 +1599,7 @@ end
 
 function type_check.expr_partition(cx, node)
   local disjointness = node.disjointness
+  local completeness = node.completeness or std.incomplete
   local region = type_check.expr(cx, node.region)
   local region_type = std.check_read(cx, region)
   local coloring = type_check.expr(cx, node.coloring)
@@ -1562,6 +1609,8 @@ function type_check.expr_partition(cx, node)
 
   -- Note: This test can't fail because disjointness is tested in the parser.
   assert(disjointness:is(ast.disjointness_kind))
+  -- Note: Same, except defaults to incomplete when unspecified.
+  assert(completeness:is(ast.completeness_kind))
 
   if not std.is_region(region_type) then
     report.error(node, "type mismatch in argument 2: expected region but got " ..
@@ -1629,7 +1678,7 @@ function type_check.expr_partition(cx, node)
   elseif colors then
     colors_symbol = std.newsymbol(colors_type)
   end
-  local expr_type = std.partition(disjointness, region_symbol, colors_symbol)
+  local expr_type = std.partition(disjointness, completeness, region_symbol, colors_symbol)
 
   -- Hack: Stuff the region type back into the partition's region
   -- argument, if necessary.
@@ -1640,6 +1689,7 @@ function type_check.expr_partition(cx, node)
 
   return ast.typed.expr.Partition {
     disjointness = disjointness,
+    completeness = node.completeness,
     region = region,
     coloring = coloring,
     colors = colors,
@@ -1705,6 +1755,8 @@ function type_check.expr_partition_equal(cx, node)
 end
 
 function type_check.expr_partition_by_field(cx, node)
+  local completeness = node.completeness or std.incomplete
+
   local region = type_check.expr_region_root(cx, node.region)
   local region_type = std.check_read(cx, region)
 
@@ -1744,7 +1796,7 @@ function type_check.expr_partition_by_field(cx, node)
   else
     colors_symbol = std.newsymbol(colors_type)
   end
-  local expr_type = std.partition(std.disjoint, region_symbol, colors_symbol)
+  local expr_type = std.partition(std.disjoint, completeness, region_symbol, colors_symbol)
 
   if not std.check_privilege(cx, std.reads, region_type, region.fields[1]) then
     report.error(
@@ -1761,6 +1813,7 @@ function type_check.expr_partition_by_field(cx, node)
   assert(expr_type.parent_region_symbol:gettype() == region_type)
 
   return ast.typed.expr.PartitionByField {
+    completeness = node.completeness,
     region = region,
     colors = colors,
     expr_type = expr_type,
@@ -1771,6 +1824,7 @@ end
 
 function type_check.expr_partition_by_restriction(cx, node)
   local disjointness = node.disjointness or std.aliased
+  local completeness = node.completeness or std.incomplete
 
   local region = type_check.expr(cx, node.region)
   local region_type = std.check_read(cx, region)
@@ -1840,7 +1894,7 @@ function type_check.expr_partition_by_restriction(cx, node)
     colors_symbol = std.newsymbol(colors_type)
   end
 
-  local expr_type = std.partition(disjointness, region_symbol, colors_symbol)
+  local expr_type = std.partition(disjointness, completeness, region_symbol, colors_symbol)
 
   -- Hack: Stuff the region type back into the partition's region
   -- argument, if necessary.
@@ -1851,6 +1905,7 @@ function type_check.expr_partition_by_restriction(cx, node)
 
   return ast.typed.expr.PartitionByRestriction {
     disjointness = node.disjointness,
+    completeness = node.completeness,
     region = region,
     transform = transform,
     extent = extent,
@@ -1863,6 +1918,7 @@ end
 
 function type_check.expr_image(cx, node)
   local disjointness = node.disjointness or std.aliased
+  local completeness = node.completeness or std.incomplete
   local parent = type_check.expr(cx, node.parent)
   local parent_type = std.check_read(cx, parent)
   local partition = type_check.expr(cx, node.partition)
@@ -1937,7 +1993,7 @@ function type_check.expr_image(cx, node)
   else
     parent_symbol = std.newsymbol()
   end
-  local expr_type = std.partition(disjointness, parent_symbol, partition_type.colors_symbol)
+  local expr_type = std.partition(disjointness, completeness, parent_symbol, partition_type.colors_symbol)
 
   -- Hack: Stuff the region type back into the partition's region
   -- argument, if necessary.
@@ -1976,6 +2032,7 @@ function type_check.expr_image(cx, node)
 
   return ast.typed.expr.Image {
     disjointness = node.disjointness,
+    completeness = node.completeness,
     parent = parent,
     partition = partition,
     region = region,
@@ -2055,6 +2112,7 @@ end
 
 function type_check.expr_preimage(cx, node)
   local disjointness = node.disjointness
+  local completeness = node.completeness or std.incomplete
   local parent = type_check.expr(cx, node.parent)
   local parent_type = std.check_read(cx, parent)
   local partition = type_check.expr(cx, node.partition)
@@ -2134,7 +2192,7 @@ function type_check.expr_preimage(cx, node)
   else
     disjointness = disjointness or partition_type.disjointness
   end
-  local expr_type = std.partition(disjointness, parent_symbol, partition_type.colors_symbol)
+  local expr_type = std.partition(disjointness, completeness, parent_symbol, partition_type.colors_symbol)
 
   -- Hack: Stuff the region type back into the partition's region
   -- argument, if necessary.
@@ -2173,6 +2231,7 @@ function type_check.expr_preimage(cx, node)
 
   return ast.typed.expr.Preimage {
     disjointness = node.disjointness,
+    completeness = node.completeness,
     partition = partition,
     region = region,
     parent = parent,
@@ -3778,6 +3837,7 @@ local type_check_expr_node = {
   [ast.specialized.expr.Ctor]                       = type_check.expr_ctor,
   [ast.specialized.expr.RawContext]                 = type_check.expr_raw_context,
   [ast.specialized.expr.RawFields]                  = type_check.expr_raw_fields,
+  [ast.specialized.expr.RawFuture]                  = type_check.expr_raw_future,
   [ast.specialized.expr.RawPhysical]                = type_check.expr_raw_physical,
   [ast.specialized.expr.RawRuntime]                 = type_check.expr_raw_runtime,
   [ast.specialized.expr.RawTask]                    = type_check.expr_raw_task,
@@ -4443,7 +4503,6 @@ local opaque_types = {
   [std.c.legion_attach_launcher_t]             = true,
   [std.c.legion_must_epoch_launcher_t]         = true,
   [std.c.legion_physical_region_t]             = true,
-  [std.c.legion_index_iterator_t]              = true,
   [std.c.legion_task_t]                        = true,
   [std.c.legion_inline_t]                      = true,
   [std.c.legion_mappable_t]                    = true,
@@ -4627,6 +4686,7 @@ function type_check.top_task(cx, node)
       idempotent = false,
       replicable = false,
     },
+    region_usage = false,
     region_divergence = false,
     metadata = false,
     prototype = prototype,

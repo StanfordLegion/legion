@@ -351,7 +351,7 @@ namespace Legion {
       LG_DEFER_MAKE_OWNER_TASK_ID,
       LG_DEFER_MERGE_OR_FORWARD_TASK_ID,
       LG_DEFER_EQ_RESPONSE_TASK_ID,
-      LG_DEFER_REMOTE_DECREMENT_TASK_ID,
+      LG_DEFER_REMOTE_REF_UPDATE_TASK_ID,
       LG_COPY_FILL_AGGREGATION_TASK_ID,
       LG_COPY_FILL_DELETION_TASK_ID,
       LG_FINALIZE_EQ_SETS_TASK_ID,
@@ -371,6 +371,9 @@ namespace Legion {
       LG_DEFER_PERFORM_OUTPUT_TASK_ID,
       LG_DEFER_INDIVIDUAL_MANAGER_TASK_ID,
       LG_DEFER_COLLECTIVE_MANAGER_TASK_ID,
+      LG_DEFER_VERIFY_PARTITION_TASK_ID,
+      LG_MALLOC_INSTANCE_TASK_ID,
+      LG_FREE_INSTANCE_TASK_ID,
       LG_YIELD_TASK_ID,
       LG_MESSAGE_ID, // These two must be the last two
       LG_RETRY_SHUTDOWN_TASK_ID,
@@ -476,7 +479,7 @@ namespace Legion {
         "Defer Make Owner",                                       \
         "Defer Merge or Forward",                                 \
         "Defer Equivalence Set Response",                         \
-        "Defer Remote Decrement",                                 \
+        "Defer Remote Reference Update",                          \
         "Copy Fill Aggregation",                                  \
         "Copy Fill Deletion",                                     \
         "Finalize Equivalence Sets",                              \
@@ -496,6 +499,9 @@ namespace Legion {
         "Defer Physical Analysis Output Stage",                   \
         "Defer Instance Manager Registration",                    \
         "Defer Reduction Manager Registration",                   \
+        "Defer Verify Partition",                                 \
+        "Malloc Instance",                                        \
+        "Free Instance",                                          \
         "Yield",                                                  \
         "Remote Message",                                         \
         "Retry Shutdown",                                         \
@@ -657,7 +663,9 @@ namespace Legion {
       TASK_MESSAGE,
       STEAL_MESSAGE,
       ADVERTISEMENT_MESSAGE,
+      SEND_REGISTRATION_CALLBACK,
       SEND_REMOTE_TASK_REPLAY,
+      SEND_REMOTE_TASK_PROFILING_RESPONSE,
       SEND_INDEX_SPACE_NODE,
       SEND_INDEX_SPACE_REQUEST,
       SEND_INDEX_SPACE_RETURN,
@@ -669,6 +677,9 @@ namespace Legion {
       SEND_INDEX_SPACE_REMOTE_EXPRESSION_REQUEST,
       SEND_INDEX_SPACE_REMOTE_EXPRESSION_RESPONSE,
       SEND_INDEX_SPACE_REMOTE_EXPRESSION_INVALIDATION,
+      SEND_INDEX_SPACE_GENERATE_COLOR_REQUEST,
+      SEND_INDEX_SPACE_GENERATE_COLOR_RESPONSE,
+      SEND_INDEX_SPACE_RELEASE_COLOR,
       SEND_INDEX_PARTITION_NOTIFICATION,
       SEND_INDEX_PARTITION_NODE,
       SEND_INDEX_PARTITION_REQUEST,
@@ -823,7 +834,9 @@ namespace Legion {
         "Task Message",                                               \
         "Steal Message",                                              \
         "Advertisement Message",                                      \
+        "Send Registration Callback",                                 \
         "Send Remote Task Replay",                                    \
+        "Send Remote Task Profiling Response",                        \
         "Send Index Space Node",                                      \
         "Send Index Space Request",                                   \
         "Send Index Space Return",                                    \
@@ -835,6 +848,9 @@ namespace Legion {
         "Send Index Space Remote Expression Request",                 \
         "Send Index Space Remote Expression Response",                \
         "Send Index Space Remote Expression Invalidation",            \
+        "Send Index Space Generate Color Request",                    \
+        "Send Index Space Generate Color Response",                   \
+        "Send Index Space Release Color",                             \
         "Send Index Partition Notification",                          \
         "Send Index Partition Node",                                  \
         "Send Index Partition Request",                               \
@@ -1333,7 +1349,8 @@ namespace Legion {
     public:
       virtual void handle_profiling_response(
                 const ProfilingResponseBase *base,
-                const Realm::ProfilingResponse &response) = 0;
+                const Realm::ProfilingResponse &response,
+                const void *orig, size_t orig_length) = 0;
     };
     struct ProfilingResponseBase {
     public:
@@ -1353,6 +1370,7 @@ namespace Legion {
     class PointCopyOp;
     class FenceOp;
     class FrameOp;
+    class CreationOp;
     class DeletionOp;
     class InternalOp;
     class CloseOp;
@@ -1421,6 +1439,9 @@ namespace Legion {
                                       Legion::Runtime *&rt) = 0;
       virtual void end_task(const void *result, 
                             size_t result_size, bool owned, 
+#ifdef LEGION_MALLOC_INSTANCES
+                            uintptr_t allocation = 0,
+#endif
           Realm::RegionInstance inst = Realm::RegionInstance::NO_INST) = 0;
       // This is safe because we see in legion_context.h that
       // TaskContext implements this interface and no one else
@@ -1443,6 +1464,14 @@ namespace Legion {
     // the provenance of meta-task operations for profiling
     // purposes, this has no bearing on correctness
     extern __thread ::legion_unique_id_t implicit_provenance;
+    // Use this to track if we're inside of a registration 
+    // callback function which we know to be deduplicated
+    enum RegistrationCallbackMode {
+      NO_REGISTRATION_CALLBACK = 0,
+      LOCAL_REGISTRATION_CALLBACK = 1,
+      GLOBAL_REGISTRATION_CALLBACK = 2,
+    };
+    extern __thread unsigned inside_registration_callback;
     // Use this global variable to track if we're an
     // implicit top-level task that needs to do external waits
     extern __thread bool external_implicit_task;
@@ -1594,6 +1623,7 @@ namespace Legion {
     friend class Internal::FenceOp;                         \
     friend class Internal::DynamicCollectiveOp;             \
     friend class Internal::FuturePredOp;                    \
+    friend class Internal::CreationOp;                      \
     friend class Internal::DeletionOp;                      \
     friend class Internal::CloseOp;                         \
     friend class Internal::MergeCloseOp;                    \
@@ -2300,6 +2330,8 @@ namespace Legion {
       Internal::TaskContext *local_ctx = Internal::implicit_context; 
       // Save the task provenance information
       UniqueID local_provenance = Internal::implicit_provenance;
+      // Save whether we are in a registration callback
+      unsigned local_callback = Internal::inside_registration_callback;
       // Check to see if we have any local locks to notify
       if (Internal::local_lock_list != NULL)
       {
@@ -2336,6 +2368,8 @@ namespace Legion {
       Internal::implicit_context = local_ctx;
       // Write the provenance information back
       Internal::implicit_provenance = local_provenance;
+      // Write the registration callback information back
+      Internal::inside_registration_callback = local_callback;
     }
 
 #ifdef LEGION_SPY

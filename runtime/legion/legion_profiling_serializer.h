@@ -19,7 +19,7 @@
 #include <stdio.h>
 #include "legion/legion_profiling.h"
 
-#ifdef USE_ZLIB
+#ifdef LEGION_USE_ZLIB
 #include <zlib.h>
 // lp_fopen expects filename to be a std::string
 #define lp_fopen(filename, mode)      gzopen(filename.c_str(),mode)
@@ -62,8 +62,12 @@ namespace Legion {
       virtual void serialize(const LegionProfInstance::IndexSpaceDesc&) = 0;
       virtual void serialize(const LegionProfInstance::IndexSubSpaceDesc&) = 0;
       virtual void serialize(const LegionProfInstance::LogicalRegionDesc&) = 0;
-      virtual void serialize(const LegionProfInstance::PhysicalInstRegionDesc&) = 0;
-      virtual void serialize(const LegionProfInstance::PhysicalInstLayoutDesc&) = 0;
+      virtual void serialize(const LegionProfInstance::PhysicalInstRegionDesc&)
+      = 0;
+      virtual void serialize(const LegionProfInstance::PhysicalInstLayoutDesc&)
+      = 0;
+      virtual void serialize(const LegionProfInstance::PhysicalInstDimOrderDesc&)
+      = 0;
       virtual void serialize(const LegionProfInstance::TaskKind&) = 0;
       virtual void serialize(const LegionProfInstance::TaskVariant&) = 0;
       virtual void serialize(const LegionProfInstance::OperationInstance&) = 0;
@@ -123,6 +127,7 @@ namespace Legion {
       void serialize(const LegionProfInstance::LogicalRegionDesc&);
       void serialize(const LegionProfInstance::PhysicalInstRegionDesc&);
       void serialize(const LegionProfInstance::PhysicalInstLayoutDesc&);
+      void serialize(const LegionProfInstance::PhysicalInstDimOrderDesc&);
       void serialize(const LegionProfInstance::TaskKind&);
       void serialize(const LegionProfInstance::TaskVariant&);
       void serialize(const LegionProfInstance::OperationInstance&);
@@ -150,7 +155,7 @@ namespace Legion {
       void serialize(const LegionProfInstance::ProfTaskInfo&);
 #endif
     private:
-#ifdef USE_ZLIB
+#ifdef LEGION_USE_ZLIB
       gzFile f;
 #else
       FILE *f;
@@ -182,20 +187,21 @@ namespace Legion {
         MESSAGE_INFO_ID,
         MAPPER_CALL_INFO_ID,
         RUNTIME_CALL_INFO_ID,
-	GPU_TASK_INFO_ID,
+        GPU_TASK_INFO_ID,
         PROC_MEM_DESC_ID,
-	INDEX_SPACE_POINT_ID,
-	INDEX_SPACE_RECT_ID,
-	INDEX_SPACE_EMPTY_ID,
-	FIELD_ID,
-	FIELD_SPACE_ID,
-	INDEX_PART_ID,
-	INDEX_PARTITION_ID,
-	INDEX_SPACE_ID,
-	INDEX_SUBSPACE_ID,
-	LOGICAL_REGION_ID,
-	PHYSICAL_INST_REGION_ID,
-	PHYSICAL_INST_LAYOUT_ID,
+        INDEX_SPACE_POINT_ID,
+        INDEX_SPACE_RECT_ID,
+        INDEX_SPACE_EMPTY_ID,
+        FIELD_ID,
+        FIELD_SPACE_ID,
+        INDEX_PART_ID,
+        INDEX_PARTITION_ID,
+        INDEX_SPACE_ID,
+        INDEX_SUBSPACE_ID,
+        LOGICAL_REGION_ID,
+        PHYSICAL_INST_REGION_ID,
+        PHYSICAL_INST_LAYOUT_ID,
+        PHYSICAL_INST_LAYOUT_DIM_ID,
 #ifdef LEGION_PROF_SELF_PROFILE
         PROFTASK_INFO_ID
 #endif
@@ -231,6 +237,7 @@ namespace Legion {
       void serialize(const LegionProfInstance::LogicalRegionDesc&);
       void serialize(const LegionProfInstance::PhysicalInstRegionDesc&);
       void serialize(const LegionProfInstance::PhysicalInstLayoutDesc&);
+      void serialize(const LegionProfInstance::PhysicalInstDimOrderDesc&);
       void serialize(const LegionProfInstance::TaskKind&);
       void serialize(const LegionProfInstance::TaskVariant&);
       void serialize(const LegionProfInstance::OperationInstance&);

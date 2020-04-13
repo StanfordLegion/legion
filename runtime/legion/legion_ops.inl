@@ -85,7 +85,7 @@ namespace Legion {
           OP::trace->get_physical_trace();
       // Only invoke memoization if we are doing physical tracing
       if (physical_trace != NULL)
-        invoke_memoize_operation(OP::get_mappable()->map_id);
+        invoke_memoize_operation(this->get_mappable()->map_id);
 #ifdef DEBUG_LEGION
       assert(memo_state == NO_MEMO || memo_state == MEMO_REQ);
 #endif
@@ -107,7 +107,7 @@ namespace Legion {
 #endif
           memo_state = REPLAY;
           OP::trace->register_physical_only(this, OP::gen);
-          OP::resolve_speculation();
+          this->resolve_speculation();
           replay_analysis();
           return;
         }
@@ -161,17 +161,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename OP>
-    RtEvent MemoizableOp<OP>::complete_memoizable(RtEvent complete_event)
-    //--------------------------------------------------------------------------
-    {
-      if (tpl != NULL)
-        complete_event =
-          Runtime::merge_events(complete_event, tpl->get_recording_done());
-      return complete_event;
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename OP>
     void MemoizableOp<OP>::find_equivalence_sets(Runtime *runtime, unsigned idx, 
                  const FieldMask &mask, FieldMaskSet<EquivalenceSet> &eqs) const
     //--------------------------------------------------------------------------
@@ -209,7 +198,7 @@ namespace Legion {
       output.memoize = false;
       Processor mapper_proc = OP::parent_ctx->get_executing_processor();
       MapperManager *mapper = OP::runtime->find_mapper(mapper_proc,mapper_id);
-      Mappable *mappable = OP::get_mappable();
+      Mappable *mappable = this->get_mappable();
 #ifdef DEBUG_LEGION
       assert(mappable != NULL);
 #endif

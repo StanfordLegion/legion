@@ -79,6 +79,22 @@ namespace Realm {
 #endif
   }
 
+  // a fenced load is an load_acquire that cannot be reordered with earlier stores
+  template <typename T>
+  inline T atomic<T>::load_fenced(void) const
+  {
+#ifdef REALM_USE_STD_ATOMIC
+    std::atomic_thread_fence(std::memory_order_acq_rel);
+    return value.load(std::memory_order_acquire);
+#else
+    __sync_synchronize();  // full memory fence is all we've got
+    T val = *static_cast<volatile const T*>(&value);
+    //T val = __sync_fetch_and_add(const_cast<T *>(&value), 0);
+    __sync_synchronize();  // full memory fence is all we've got
+    return val;
+#endif
+  }
+
   template <typename T>
   inline void atomic<T>::store(T newval)
   {

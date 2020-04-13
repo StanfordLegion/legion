@@ -154,7 +154,7 @@ namespace Realm {
 				      const ProfilingRequestSet& prs,
 				      Event wait_on = Event::NO_EVENT);
 
-#ifdef USE_HDF
+#ifdef REALM_USE_HDF5
     template <int N, typename T>
     struct HDF5FieldInfo {
       FieldID field_id;

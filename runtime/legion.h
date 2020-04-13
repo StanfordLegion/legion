@@ -93,9 +93,7 @@ namespace Legion {
       IndexSpace(IndexSpaceID id, IndexTreeID tid, TypeTag tag);
     public:
       IndexSpace(void);
-      IndexSpace(const IndexSpace &rhs);
     public:
-      inline IndexSpace& operator=(const IndexSpace &rhs);
       inline bool operator==(const IndexSpace &rhs) const;
       inline bool operator!=(const IndexSpace &rhs) const;
       inline bool operator<(const IndexSpace &rhs) const;
@@ -127,11 +125,9 @@ namespace Legion {
       IndexSpaceT(IndexSpaceID id, IndexTreeID tid);
     public:
       IndexSpaceT(void);
-      IndexSpaceT(const IndexSpaceT &rhs);  
       explicit IndexSpaceT(const IndexSpace &rhs);
     public:
       inline IndexSpaceT& operator=(const IndexSpace &rhs);
-      inline IndexSpaceT& operator=(const IndexSpaceT &rhs);
     };
 
     /**
@@ -149,9 +145,7 @@ namespace Legion {
       IndexPartition(IndexPartitionID id, IndexTreeID tid, TypeTag tag);
     public:
       IndexPartition(void);
-      IndexPartition(const IndexPartition &rhs);
     public:
-      inline IndexPartition& operator=(const IndexPartition &rhs);
       inline bool operator==(const IndexPartition &rhs) const;
       inline bool operator!=(const IndexPartition &rhs) const;
       inline bool operator<(const IndexPartition &rhs) const;
@@ -183,11 +177,9 @@ namespace Legion {
       IndexPartitionT(IndexPartitionID id, IndexTreeID tid);
     public:
       IndexPartitionT(void);
-      IndexPartitionT(const IndexPartitionT &rhs);
       explicit IndexPartitionT(const IndexPartition &rhs);
     public:
       inline IndexPartitionT& operator=(const IndexPartition &rhs);
-      inline IndexPartitionT& operator=(const IndexPartitionT &rhs);
     };
 
     /**
@@ -208,9 +200,7 @@ namespace Legion {
       FieldSpace(FieldSpaceID id);
     public:
       FieldSpace(void);
-      FieldSpace(const FieldSpace &rhs);
     public:
-      inline FieldSpace& operator=(const FieldSpace &rhs);
       inline bool operator==(const FieldSpace &rhs) const;
       inline bool operator!=(const FieldSpace &rhs) const;
       inline bool operator<(const FieldSpace &rhs) const;
@@ -245,9 +235,7 @@ namespace Legion {
       LogicalRegion(RegionTreeID tid, IndexSpace index, FieldSpace field);
     public:
       LogicalRegion(void);
-      LogicalRegion(const LogicalRegion &rhs);
     public:
-      inline LogicalRegion& operator=(const LogicalRegion &rhs);
       inline bool operator==(const LogicalRegion &rhs) const;
       inline bool operator!=(const LogicalRegion &rhs) const;
       inline bool operator<(const LogicalRegion &rhs) const;
@@ -282,11 +270,9 @@ namespace Legion {
       LogicalRegionT(RegionTreeID tid, IndexSpace index, FieldSpace field);
     public:
       LogicalRegionT(void);
-      LogicalRegionT(const LogicalRegionT &rhs);
       explicit LogicalRegionT(const LogicalRegion &rhs);
     public:
       inline LogicalRegionT& operator=(const LogicalRegion &rhs);
-      inline LogicalRegionT& operator=(const LogicalRegionT &rhs);
     };
 
     /**
@@ -313,9 +299,7 @@ namespace Legion {
       LogicalPartition(RegionTreeID tid, IndexPartition pid, FieldSpace field);
     public:
       LogicalPartition(void);
-      LogicalPartition(const LogicalPartition &rhs);
     public:
-      inline LogicalPartition& operator=(const LogicalPartition &rhs);
       inline bool operator==(const LogicalPartition &rhs) const;
       inline bool operator!=(const LogicalPartition &rhs) const;
       inline bool operator<(const LogicalPartition &rhs) const;
@@ -351,11 +335,9 @@ namespace Legion {
       LogicalPartitionT(RegionTreeID tid, IndexPartition pid, FieldSpace field);
     public:
       LogicalPartitionT(void);
-      LogicalPartitionT(const LogicalPartitionT &rhs);
       explicit LogicalPartitionT(const LogicalPartition &rhs);
     public:
       inline LogicalPartitionT& operator=(const LogicalPartition &rhs);
-      inline LogicalPartitionT& operator=(const LogicalPartitionT &rhs);
     };
 
     //==========================================================================
@@ -1300,7 +1282,7 @@ namespace Legion {
         { return impl == f.impl; }
       inline bool operator<(const FutureMap &f) const
         { return impl < f.impl; }
-      inline Future operator[](const DomainPoint &point)
+      inline Future operator[](const DomainPoint &point) const
         { return get_future(point); }
       FutureMap& operator=(const FutureMap &f);
     public:
@@ -1315,7 +1297,7 @@ namespace Legion {
       template<typename T>
         inline T get_result(const DomainPoint &point,
                             bool silence_warnings = false,
-                            const char *warning_string = NULL);
+                            const char *warning_string = NULL) const;
       /**
        * Non-blocking call that will return a future that
        * will contain the value from the given index task
@@ -1323,7 +1305,7 @@ namespace Legion {
        * @param point the point task to wait for
        * @return a future for the index task point
        */
-      Future get_future(const DomainPoint &point);
+      Future get_future(const DomainPoint &point) const;
       /**
        * Blocking call that will return one the point
        * in the index space task has executed.
@@ -1333,7 +1315,7 @@ namespace Legion {
        */
       void get_void_result(const DomainPoint &point,
                            bool silence_warnings = false,
-                           const char *warning_string = NULL);
+                           const char *warning_string = NULL) const;
     public:
       /**
        * An older method for getting the result of
@@ -1343,7 +1325,7 @@ namespace Legion {
        * @return the return value of the index task point
        */
       template<typename RT, typename PT, unsigned DIM> 
-        inline RT get_result(const PT point[DIM]);
+        inline RT get_result(const PT point[DIM]) const;
       /**
        * An older method for getting a future corresponding
        * to a point in an index task launch.  This call is
@@ -1353,14 +1335,14 @@ namespace Legion {
        * @return a future for the point in the index task launch
        */
       template<typename PT, unsigned DIM>
-        inline Future get_future(const PT point[DIM]);
+        inline Future get_future(const PT point[DIM]) const;
       /**
        * An older method for performing a blocking wait
        * for a point in an index task launch.
        * @param point the point in the index task launch to wait for
        */
       template<typename PT, unsigned DIM>
-        inline void get_void_result(const PT point[DIM]);
+        inline void get_void_result(const PT point[DIM]) const;
     public:
       /**
        * Wait for all the tasks in the index space launch of
@@ -1369,7 +1351,7 @@ namespace Legion {
        * @param warning_string a string to be reported with any warnings
        */
       void wait_all_results(bool silence_warnings = false,
-                            const char *warning_string = NULL); 
+                            const char *warning_string = NULL) const; 
     }; 
 
 
@@ -1670,12 +1652,14 @@ namespace Legion {
       inline void add_dst_field(unsigned idx, FieldID fid, bool inst = true);
     public:
       // Specify src/dst indirect requirements (must have exactly 1 field)
-      inline void add_src_indirect_field(const RegionRequirement &src_idx_req,
-                                         FieldID src_idx_fid, bool inst = true,
-                                         bool is_range_indirection = false);
-      inline void add_dst_indirect_field(const RegionRequirement &dst_idx_req,
-                                         FieldID dst_idx_fid, bool inst = true,
-                                         bool is_range_indirection = false);
+      inline void add_src_indirect_field(FieldID src_idx_fid,
+                                         const RegionRequirement &src_idx_req,
+                                         bool is_range_indirection = false,
+                                         bool inst = true);
+      inline void add_dst_indirect_field(FieldID dst_idx_fid,
+                                         const RegionRequirement &dst_idx_req,
+                                         bool is_range_indirection = false,
+                                         bool inst = true);
       inline RegionRequirement& add_src_indirect_field(
                                          const RegionRequirement &src_idx_req,
                                          bool is_range_indirection = false);
@@ -1746,12 +1730,14 @@ namespace Legion {
       inline void add_dst_field(unsigned idx, FieldID fid, bool inst = true);
     public:
       // Specify src/dst indirect requirements (must have exactly 1 field)
-      inline void add_src_indirect_field(const RegionRequirement &src_idx_req,
-                                         FieldID src_idx_fid, bool inst = true,
-                                         bool is_range_indirection = false);
-      inline void add_dst_indirect_field(const RegionRequirement &dst_idx_req,
-                                         FieldID dst_idx_fid, bool inst = true,
-                                         bool is_range_indirection = false);
+      inline void add_src_indirect_field(FieldID src_idx_fid,
+                                         const RegionRequirement &src_idx_req,
+                                         bool is_range_indirection = false,
+                                         bool inst = true);
+      inline void add_dst_indirect_field(FieldID dst_idx_fid,
+                                         const RegionRequirement &dst_idx_req,
+                                         bool is_range_indirection = false,
+                                         bool inst = true);
       inline RegionRequirement& add_src_indirect_field(
                                          const RegionRequirement &src_idx_req,
                                          bool is_range_indirection = false);
@@ -1794,6 +1780,12 @@ namespace Legion {
       // Whether the destination indirection can lead to aliasing 
       // in the destination instances requiring synchronization
       bool                            possible_dst_indirect_aliasing;
+      // Whether the individual point copies should operate collectively
+      // together in the case of indirect copies (e.g. allow indirections
+      // to refer to instances from other points). These settings have
+      // no effect in the case of copies without indirections.
+      bool                            collective_src_indirect_points;
+      bool                            collective_dst_indirect_points;
     public:
       bool                            silence_warnings;
     };
@@ -2003,7 +1995,7 @@ namespace Legion {
      */
     struct PredicateLauncher {
     public:
-      PredicateLauncher(bool and_op = true);
+      explicit PredicateLauncher(bool and_op = true);
     public:
       inline void add_predicate(const Predicate &pred); 
     public:
@@ -2435,11 +2427,11 @@ namespace Legion {
       __CUDA_HD__
       inline T read(void) const;
       __CUDA_HD__
-      inline void write(T value);
+      inline void write(T value) const;
       __CUDA_HD__
-      inline T* ptr(void);
+      inline T* ptr(void) const;
       __CUDA_HD__
-      inline T& ref(void);
+      inline T& ref(void) const;
       __CUDA_HD__
       inline operator T(void) const;
       __CUDA_HD__
@@ -2449,6 +2441,9 @@ namespace Legion {
     protected:
       Realm::RegionInstance instance;
       Realm::AffineAccessor<T,1,coord_t> accessor;
+#ifdef LEGION_MALLOC_INSTANCES
+      uintptr_t allocation;
+#endif
     };
 
     /**
@@ -2467,9 +2462,9 @@ namespace Legion {
       DeferredReduction(void);
     public:
       __CUDA_HD__
-      inline void reduce(typename REDOP::RHS val);
+      inline void reduce(typename REDOP::RHS val) const;
       __CUDA_HD__
-      inline void operator<<=(typename REDOP::RHS val);
+      inline void operator<<=(typename REDOP::RHS val) const;
     };
 
     /**
@@ -2484,7 +2479,10 @@ namespace Legion {
      * initialization value for the buffer. Users must guarantee that no
      * instances of the DeferredBuffer object live past the end of the
      * execution of a task. The user must also guarantee that DefferedBuffer
-     * objects are not returned as the result of the task.
+     * objects are not returned as the result of the task. The user can
+     * control the layout of dimensions with the 'fortran_order_dims'
+     * parameter. The default is C order dimensions (e.g. last changing
+     * fastest), but can be switched to fortran order (e.g. first fastest).
      */
     template<typename T, int DIM, typename COORD_T = coord_t, 
 #ifdef BOUNDS_CHECKS
@@ -2497,16 +2495,20 @@ namespace Legion {
       DeferredBuffer(void);
       DeferredBuffer(Memory::Kind kind, 
                      const Domain &bounds,
-                     const T *initial_value = NULL);
+                     const T *initial_value = NULL,
+                     bool fortran_order_dims = false);
       DeferredBuffer(Memory::Kind kind, 
                      IndexSpace bounds,
-                     const T *initial_value = NULL);
+                     const T *initial_value = NULL,
+                     bool fortran_order_dims = false);
       DeferredBuffer(const Rect<DIM,COORD_T> &bounds, 
                      Memory::Kind kind,
-                     const T *initial_value = NULL);
+                     const T *initial_value = NULL,
+                     bool fortran_order_dims = false);
       DeferredBuffer(IndexSpaceT<DIM,COORD_T> bounds, 
                      Memory::Kind kind,
-                     const T *initial_value = NULL);
+                     const T *initial_value = NULL,
+                     bool fortran_order_dims = false);
     public:
       __CUDA_HD__
       inline T read(const Point<DIM,COORD_T> &p) const;
@@ -3495,15 +3497,39 @@ namespace Legion {
       ///@{
       /**
        * Create a new top-level index space based on the given domain bounds
+       * If the bounds contains a Realm index space then Legion will take
+       * ownership of any sparsity maps.
        * @param ctx the enclosing task context
        * @param bounds the bounds for the new index space
+       * @param type_tag optional type tag to use for the index space
        * @return the handle for the new index space
        */
-      IndexSpace create_index_space(Context ctx, Domain bounds);
+      IndexSpace create_index_space(Context ctx, const Domain &bounds,
+                                    TypeTag type_tag = 0);
       // Template version
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space(Context ctx,
-                                                  Rect<DIM,COORD_T> bounds);
+                                      const Rect<DIM,COORD_T> &bounds);
+      template<int DIM, typename COORD_T>
+      IndexSpaceT<DIM,COORD_T> create_index_space(Context ctx,
+                                    const DomainT<DIM,COORD_T> &bounds);
+      ///@}
+      ///@{
+      /**
+       * Create a new top-level index space from a future which contains
+       * a Domain object. If the Domain conaints a Realm index space then
+       * Legion will take ownership of any sparsity maps.
+       * @param ctx the enclosing task context
+       * @param dimensions number of dimensions for the created space
+       * @param future the future value containing the bounds
+       * @param type_tag optional type tag to use for the index space
+       *                 defaults to 'coord_t'
+       * @return the handle for the new index space
+       */
+      IndexSpace create_index_space(Context ctx, size_t dimensions, 
+                                    const Future &f, TypeTag type_tag = 0);
+      template<int DIM, typename COORD_T>
+      IndexSpaceT<DIM,COORD_T> create_index_space(Context ctx, const Future &f);
       ///@}
       ///@{
       /**
@@ -5496,6 +5522,18 @@ namespace Legion {
                                ReductionOpID redop, bool deterministic = false);
 
       /**
+       * Construct a future map from a collection of futures. The user must
+       * also specify the domain of the futures and there must be one future
+       * for every point in the domain.
+       * @param ctx enclosing task context
+       * @param domain the domain that names all points in the future map
+       * @param futures the set of futures from which to create the future map
+       * @return a new future map containing all the futures
+       */
+      FutureMap construct_future_map(Context ctx, const Domain &domain,
+                           const std::map<DomainPoint,Future> &futures);
+
+      /**
        * @deprecated
        * An older method for launching a single task maintained for backwards
        * compatibility with older Legion programs.  
@@ -7256,17 +7294,23 @@ namespace Legion {
        *              and after every operation.  The runtime must be
        *              compiled in debug mode with the DEBUG_LEGION
        *              macro defined.
-       * -lg:disjointness Verify the specified disjointness of 
-       *              partitioning operations.  The runtime must be
-       *              compiled with the DEBUG_LEGION macro defined.
-       * -lg:separate Indicate that separate instances of the high
+       * -lg:disjointness Verify the specified disjointness of partitioning 
+       *              operations. This flag is now a synonym for -lg:partcheck 
+       * -lg:partcheck This flag will ask the runtime to dynamically verify
+       *              that all correctness properties for partitions are
+       *              upheld. This includes checking that the parent region
+       *              dominates all subregions and that all annotations of
+       *              disjointness and completeness from the user are correct.
+       *              This is an expensive test and users should expect a 
+       *              significant slow-down of their application when using it.
+       * -lg:separate Indicate that separate instances of the Legion 
        *              level runtime should be made for each processor.
        *              The default is one runtime instance per node.
        *              This is primarily useful for debugging purposes
        *              to force messages to be sent between runtime 
        *              instances on the same node.
-       * -lg:registration Record the mapping from low-level task IDs to
-       *              task variant names for debugging low-level runtime
+       * -lg:registration Record the mapping from Realm task IDs to
+       *              task variant names for debugging Realm runtime
        *              error messages.
        * -lg:test     Replace the default mapper with the test mapper
        *              which will generate sound but random mapping 
@@ -7486,6 +7530,28 @@ namespace Legion {
        * @param callback function pointer to the callback function to be run
        */
       static void add_registration_callback(RegistrationCallbackFnptr callback);
+
+      /**
+       * This call allows applications to request a registration callback
+       * be performed after the runtime has started. The application can
+       * select whether this registration is performed locally (e.g. once
+       * on the local node) or globally across all nodes in the machine.
+       * The method will not return until the registration has been performed 
+       * on all the target address spaces. All function pointers passed into
+       * this method with 'global' set to true must "portable", meaning that
+       * we can lookup their shared object name and symbol name. This means
+       * they either need to originate with a shared object or the binary
+       * must be linked with '-rdynamic'. It's up the user to guarantee this
+       * or Legion will raise an error about a non-portable function pointer.
+       * For any given function pointer all calls must be made with the same 
+       * value of 'global' or hangs can occur.
+       * @param ctx enclosing task context
+       * @param global whether this registration needs to be performed
+       *               in all address spaces or just the local one
+       */
+      static void perform_registration_callback(
+                               RegistrationCallbackFnptr callback, bool global);
+
       /**
        * @deprecated
        * This call allows the application to register a callback function
@@ -7935,9 +8001,6 @@ namespace Legion {
        */
       static Context get_context(void);
     private:
-      // Helper methods for templates
-      IndexSpace create_index_space_internal(Context ctx, const void *realm_is,
-                                             TypeTag type_tag);
       IndexPartition create_restricted_partition(Context ctx,
                                       IndexSpace parent,
                                       IndexSpace color_space,
@@ -7990,6 +8053,23 @@ namespace Legion {
       friend class LegionTaskWrapper;
       friend class LegionSerialization;
       Future from_value(const void *value, size_t value_size, bool owned);
+#ifdef LEGION_MALLOC_INSTANCES
+      template<typename T>
+      friend class DeferredValue;
+      template<typename T, int DIM, typename COORD_T, bool CHECK_BOUNDS>
+      friend class DeferredBuffer;
+      uintptr_t allocate_deferred_instance(Memory memory, size_t size, 
+                                           bool free = true);
+#endif
+    public:
+      // This method is hidden down here and not publicly documented because
+      // users shouldn't really need it for anything, however there are some
+      // reasonable cases where it might be utilitized for things like doing
+      // file I/O or printf that people might want it for so we've got it
+      ShardID get_shard_id(Context ctx, bool I_know_what_I_am_doing = false);
+      // We'll also allow users to get the total number of shards in the context
+      // if they also ar willing to attest they know what they are doing
+      size_t get_num_shards(Context ctx, bool I_know_what_I_am_doing = false);
     private:
       friend class Mapper;
       Internal::Runtime *runtime;

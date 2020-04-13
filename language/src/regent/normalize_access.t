@@ -150,6 +150,7 @@ local normalize_access_expr_table = {
   [ast.typed.expr.Call]                       = normalize_access.expr_call,
   [ast.typed.expr.MethodCall]                 = normalize_access.expr_call,
   [ast.typed.expr.RawFields]                  = normalize_access.pass_through_expr,
+  [ast.typed.expr.RawFuture]                  = normalize_access.pass_through_expr,
   [ast.typed.expr.RawPhysical]                = normalize_access.pass_through_expr,
   [ast.typed.expr.RawRuntime]                 = normalize_access.pass_through_expr,
   [ast.typed.expr.RawTask]                    = normalize_access.pass_through_expr,

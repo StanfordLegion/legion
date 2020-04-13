@@ -29,7 +29,7 @@
 #include "realm/event_impl.h"
 #include "realm/rsrv_impl.h"
 
-#ifdef USE_HDF
+#ifdef REALM_USE_HDF5
 #include <hdf5.h>
 #endif
 
@@ -95,14 +95,14 @@ namespace Realm {
 	MKIND_RDMA,    // remote, but accessible via RDMA
 	MKIND_REMOTE,  // not accessible
 
-	// defined even if USE_CUDA==0
+	// defined even if REALM_USE_CUDA isn't
 	// TODO: make kinds more extensible
 	MKIND_GPUFB,   // GPU framebuffer memory (accessible via cudaMemcpy)
 
 	MKIND_ZEROCOPY, // CPU memory, pinned for GPU access
 	MKIND_DISK,    // disk memory accessible by owner node
 	MKIND_FILE,    // file memory accessible by owner node
-#ifdef USE_HDF
+#ifdef REALM_USE_HDF5
 	MKIND_HDF      // HDF memory accessible by owner node
 #endif
       };

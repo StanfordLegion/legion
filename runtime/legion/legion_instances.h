@@ -215,6 +215,9 @@ namespace Legion {
         CollectableInfo(void) : events_added(0) { }
       public:
         std::set<ApEvent> view_events;
+        // This event tracks when tracing is completed and it is safe
+        // to resume pruning of users from this view
+        RtEvent collect_event;
         // Events added since the last collection of view events
         unsigned events_added;
       };
@@ -274,7 +277,8 @@ namespace Legion {
       void unregister_active_context(InnerContext *context); 
     public:
       void defer_collect_user(CollectableView *view, ApEvent term_event,
-               std::set<ApEvent> &to_collect, bool &add_ref, bool &remove_ref);
+                              RtEvent collect, std::set<ApEvent> &to_collect, 
+                              bool &add_ref, bool &remove_ref);
       void find_shutdown_preconditions(std::set<ApEvent> &preconditions);
     public: 
       static ApEvent fetch_metadata(PhysicalInstance inst, ApEvent use_event);
@@ -858,7 +862,8 @@ namespace Legion {
                                                 size_t *footprint = NULL);
     public:
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
-                                      const Realm::ProfilingResponse &response);
+                                      const Realm::ProfilingResponse &response,
+                                      const void *orig, size_t orig_length);
     protected:
       void compute_space_and_domain(RegionTreeForest *forest);
     protected:

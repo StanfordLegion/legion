@@ -32,6 +32,25 @@ do
   end
 end
 
+-- Helpers for zero/min/max values of various types.
+
+local function zero(value_type) return terralib.cast(value_type, 0) end
+local function one(value_type) return terralib.cast(value_type, 1) end
+local function min_value(value_type)
+  if type(rawget(value_type, "min")) == "function" then
+    return value_type:min()
+  else
+    return terralib.cast(value_type, -math.huge)
+  end
+end
+local function max_value(value_type)
+  if type(rawget(value_type, "max")) == "function" then
+    return value_type:max()
+  else
+    return terralib.cast(value_type, math.huge)
+  end
+end
+
 -- #####################################
 -- ## Legion Bindings
 -- #################
@@ -283,22 +302,6 @@ end
 --  * "reads_writes" is a physical privilege (not a normal privilege),
 --    and is the top of the physical privilege lattice
 
-local function zero(value_type) return terralib.cast(value_type, 0) end
-local function one(value_type) return terralib.cast(value_type, 1) end
-local function min_value(value_type)
-  if type(rawget(value_type, "min")) == "function" then
-    return value_type:min()
-  else
-    return terralib.cast(value_type, -math.huge)
-  end
-end
-local function max_value(value_type)
-  if type(rawget(value_type, "max")) == "function" then
-    return value_type:max()
-  else
-    return terralib.cast(value_type, math.huge)
-  end
-end
 local function lift(fn)
   return function(value_type)
     if value_type:isarray() then
@@ -1373,6 +1376,11 @@ function base.task:set_task_id(task_id)
   self.taskid = terralib.constant(c.legion_task_id_t, task_id)
 end
 
+-- TODO: This is actually safe once we make task ids global variables
+function base.task:set_task_id_unsafe(task_id)
+  self.taskid = terralib.constant(c.legion_task_id_t, task_id)
+end
+
 function base.task:get_task_id()
   return self.taskid
 end
@@ -1533,7 +1541,7 @@ end
 
 do
   local next_task_id = base.initial_regent_task_id
-  function base.new_task(name)
+  function base.new_task(name, span)
     if type(name) == "string" then
       name = data.newtuple(name)
     elseif data.is_tuple(name) then
@@ -1546,6 +1554,7 @@ do
     next_task_id = next_task_id + 1
     return setmetatable({
       name = name,
+      span = span,
       taskid = terralib.constant(c.legion_task_id_t, task_id),
       variants = terralib.newlist(),
       calling_convention = false,

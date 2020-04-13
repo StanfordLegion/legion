@@ -74,8 +74,12 @@ list(APPEND REALM_SRC
 if(Legion_USE_CUDA)
   list(APPEND REALM_SRC
     realm/cuda/cuda_module.h    realm/cuda/cuda_module.cc
-    realm/cuda/cudart_hijack.h  realm/cuda/cudart_hijack.cc
   )
+  if(REALM_USE_CUDART_HIJACK)
+    list(APPEND REALM_SRC
+      realm/cuda/cudart_hijack.h
+    )
+  endif()
 endif()
 
 if(Legion_USE_LLVM)
@@ -121,6 +125,15 @@ if(REALM_USE_GASNET1)
     realm/gasnet1/gasnet1_module.cc
     realm/gasnet1/gasnetmsg.h
     realm/gasnet1/gasnetmsg.cc
+  )
+endif()
+
+if(REALM_USE_MPI)
+  list(APPEND REALM_SRC
+    realm/mpi/mpi_module.h
+    realm/mpi/mpi_module.cc
+    realm/mpi/am_mpi.h
+    realm/mpi/am_mpi.cc
   )
 endif()
 
@@ -189,7 +202,7 @@ endforeach()
 
 find_package(Threads REQUIRED)
 add_library(RealmRuntime ${REALM_SRC})
-target_compile_definitions(RealmRuntime PUBLIC REALM_USE_CMAKE)
+target_compile_options(RealmRuntime PRIVATE ${CXX_BUILD_WARNING_FLAGS})
 if(Legion_USE_LIBDL)
   target_link_libraries(RealmRuntime PRIVATE ${CMAKE_DL_LIBS})
   if(APPLE)
@@ -212,6 +225,10 @@ if(REALM_USE_GASNET1)
   target_link_libraries(RealmRuntime PRIVATE GASNet::GASNet)
 endif()
 
+if(REALM_USE_MPI)
+  target_link_libraries(RealmRuntime PRIVATE MPI::MPI_CXX)
+endif()
+
 if(Legion_USE_LLVM)
   if(Legion_LINK_LLVM_LIBS)
     target_link_libraries(RealmRuntime PRIVATE LLVM::LLVM)
@@ -224,6 +241,25 @@ endif()
 
 if(Legion_USE_CUDA)
   if(REALM_USE_CUDART_HIJACK)
+    if(Legion_USE_Kokkos)
+      # we need kokkos to depend on the hijack without creating a circular
+      #  dependency, so put it in an object library - this works only on newer
+      #  cmakes, but we already need cmake 3.13 for Kokkos, so this is ok
+      add_library(realm_cudarthijack OBJECT
+	realm/cuda/cudart_hijack.cc
+	realm/cuda/cudart_hijack.h)
+      set_target_properties(realm_cudarthijack PROPERTIES POSITION_INDEPENDENT_CODE ON)
+      target_include_directories(realm_cudarthijack PRIVATE
+	${CMAKE_CURRENT_SOURCE_DIR}
+	${PROJECT_BINARY_DIR}/runtime
+	${CUDA_INCLUDE_DIRS})
+      target_link_libraries(RealmRuntime PRIVATE realm_cudarthijack)
+      install(TARGETS realm_cudarthijack EXPORT LegionTargets)
+    else()
+      # without Kokkos interop, we can just add the hijack directly
+      target_sources(RealmRuntime PRIVATE realm/cuda/cudart_hijack.cc)
+    endif()
+    
     # filter anything referring to *cudart* out of the CUDA_LIBRARIES
     #  making sure our changes are visible to the scope above
     # so list(FILTER ...) doesn't exist until cmake 3.6 - do string regex instead
@@ -233,11 +269,69 @@ if(Legion_USE_CUDA)
 
   target_include_directories(RealmRuntime PRIVATE ${CUDA_INCLUDE_DIRS})
   target_link_libraries(RealmRuntime PRIVATE ${CUDA_CUDA_LIBRARY})
+  # for backwards compatibility in applications
+  target_compile_definitions(RealmRuntime INTERFACE USE_CUDA)
+endif()
+
+# fetches a specified property list from the target, performs per-element
+#  replacement of the items in the list, and then write the list back to
+#  the target's property
+# importantly, this works on properies of imported targets...
+macro(edit_target_property tgtname propname pattern replacement)
+  get_property(has_prop TARGET ${tgtname} PROPERTY ${propname} SET)
+  if(has_prop)
+    get_property(prop_list TARGET ${tgtname} PROPERTY ${propname})
+    if(NOT "${replacement}" STREQUAL "")
+      list(TRANSFORM prop_list REPLACE ${pattern} ${replacement})
+    else()
+      list(FILTER prop_list EXCLUDE REGEX ${pattern})
+    endif()
+    set_property(TARGET ${tgtname} PROPERTY ${propname} "${prop_list}")
+  endif()
+endmacro()
+
+if(Legion_USE_Kokkos)
+  # realm/kokkos_interop.cc needs to be compiled like a kokkos application, so
+  #  get kokkos' compile options, include dirs - do this by creating a subtarget
+  #  that can import Kokkos::kokkoscore
+  add_library(realm_kokkosinterop OBJECT realm/kokkos_interop.cc)
+  set_target_properties(realm_kokkosinterop PROPERTIES POSITION_INDEPENDENT_CODE ON)
+  target_include_directories(realm_kokkosinterop PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${PROJECT_BINARY_DIR}/runtime)
+  target_link_libraries(realm_kokkosinterop PRIVATE Kokkos::kokkoscore)
+  # older cmakes (e.g. 3.13.0) don't export link requirements for
+  #  private dependencies, so we do it ourselves
+  set_target_properties(realm_kokkosinterop PROPERTIES
+    INTERFACE_LINK_LIBRARIES "\$<LINK_ONLY:Kokkos::kokkoscore>")
+  
+  if(Legion_USE_CUDA AND (CMAKE_CXX_COMPILER_ID STREQUAL "Clang"))
+    target_compile_options(realm_kokkosinterop PRIVATE "--cuda-path=${CUDA_TOOLKIT_ROOT_DIR}")
+  endif()
+
+  install(TARGETS realm_kokkosinterop EXPORT LegionTargets)
+  target_link_libraries(RealmRuntime PRIVATE realm_kokkosinterop)
+
+  # if Kokkos' CUDA target is enabled, and we're performing runtime hijack,
+  #  rewrite Kokkos' cudart dependency to be on Realm instead
+  if(Kokkos_ENABLE_CUDA AND Legion_HIJACK_CUDART)
+    edit_target_property(Kokkos::CUDA INTERFACE_LINK_LIBRARIES .*cudart.* realm_cudarthijack)
+  endif()
+
+  # similarly, if Kokkos' OpenMP target is enabled but we're using Realm's
+  #  OpenMP runtime implementation, remove anything mentioning openmp from
+  #  the exported link options (don't mess with compile options though)
+  if(Kokkos_ENABLE_OPENMP AND Legion_USE_OpenMP)
+    edit_target_property(Kokkos::kokkoscore INTERFACE_LINK_OPTIONS .*openmp.* "")
+    edit_target_property(Kokkos::kokkoscontainers INTERFACE_LINK_OPTIONS .*openmp.* "")
+  endif()
 endif()
 
 if(Legion_USE_HDF5)
   target_include_directories(RealmRuntime PRIVATE ${HDF5_INCLUDE_DIRS})
   target_link_libraries(RealmRuntime PRIVATE ${HDF5_LIBRARIES})
+  # for backwards compatibility in applications
+  target_compile_definitions(RealmRuntime INTERFACE USE_HDF)
 endif()
 
 if(Legion_USE_Python)
@@ -282,6 +376,7 @@ list(APPEND LEGION_SRC
   legion.h
   legion/accessor.h
   legion/arrays.h
+  legion/bitmask.h
   legion/field_tree.h
   legion/garbage_collection.h             legion/garbage_collection.cc
   legion/interval_tree.h                 
@@ -301,7 +396,6 @@ list(APPEND LEGION_SRC
   legion/legion_ops.h                     legion/legion_ops.cc
   legion/legion_profiling.h               legion/legion_profiling.cc
   legion/legion_profiling_serializer.h    legion/legion_profiling_serializer.cc
-  legion/legion_realm.h
   legion/legion_spy.h                     legion/legion_spy.cc
   legion/legion_tasks.h                   legion/legion_tasks.cc
   legion/legion_trace.h                   legion/legion_trace.cc
@@ -314,6 +408,20 @@ list(APPEND LEGION_SRC
   legion/region_tree.h                    legion/region_tree.cc
   legion/runtime.h                        legion/runtime.cc
 )
+
+if(Legion_REDOP_HALF)
+  list(APPEND LEGION_SRC mathtypes/half.h)
+endif()
+
+if(Legion_REDOP_COMPLEX)
+  list(APPEND LEGION_SRC mathtypes/complex.h)
+endif()
+
+if(Legion_USE_CUDA)
+  list(APPEND LEGION_CUDA_SRC
+    legion/legion_redop.cu
+  )
+endif()
 
 # generate per-dimension object files for deppart stuff
 foreach(N1 RANGE 1 ${LEGION_MAX_DIM})
@@ -335,8 +443,42 @@ foreach(N1 RANGE 1 ${LEGION_MAX_DIM})
     list(APPEND LEGION_SRC region_tree_${N1}_${N2}.cc)
   endforeach()
 endforeach()
+              
+# Legion Fortran
+if(Legion_USE_Fortran)
+  list(APPEND LEGION_FORTRAN_SRC
+    legion/legion_f_types.f90
+    legion/legion_f_c_interface.f90
+    legion/legion_f.f90              
+  )
+endif()               
 
-add_library(LegionRuntime ${MAPPER_SRC} ${LEGION_SRC})
+add_library(LegionRuntime ${MAPPER_SRC} ${LEGION_SRC} ${LEGION_FORTRAN_SRC})
+if(Legion_USE_CUDA)
+  if("${Legion_CUDA_ARCH}" STREQUAL "")
+    set(CUDA_GENCODE "")
+  else()
+    string(REPLACE "," ";" CUDA_GENCODE "${Legion_CUDA_ARCH}")
+    string(REGEX REPLACE "([0-9]+)" "-gencode arch=compute_\\1,code=sm_\\1" CUDA_GENCODE "${CUDA_GENCODE}")
+  endif()
+  # starting with NVCC 10.2, we can error out on all warnings
+  if(Legion_BUILD_WARN_AS_ERROR AND CUDA_VERSION VERSION_GREATER "10.1")
+    set(CUDA_WARNINGS "-Werror all-warnings")
+  else()
+    set(CUDA_WARNINGS "")
+  endif()
+  cuda_compile(LEGION_CUDA_OBJS ${LEGION_CUDA_SRC} OPTIONS
+    -Xcudafe "--diag_suppress=boolean_controlling_expr_is_constant"
+    ${CUDA_WARNINGS}
+    ${CUDA_GENCODE}
+    -I ${CMAKE_CURRENT_SOURCE_DIR}
+    -I ${PROJECT_BINARY_DIR}/runtime
+    -Xcompiler -fPIC
+    DEBUG -g
+    RELEASE -O2
+    RELWITHDEBINFO -g -O2)
+  target_sources(LegionRuntime PRIVATE ${LEGION_CUDA_OBJS})
+endif()
 target_link_libraries(LegionRuntime PUBLIC RealmRuntime)
 if(Legion_USE_ZLIB)
   target_link_libraries(LegionRuntime PRIVATE ZLIB::ZLIB)
@@ -344,7 +486,7 @@ endif()
 set_target_properties(LegionRuntime PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(LegionRuntime PROPERTIES OUTPUT_NAME "legion${INSTALL_SUFFIX}")
 set_target_properties(LegionRuntime PROPERTIES SOVERSION ${SOVERSION})
-target_compile_definitions(LegionRuntime PUBLIC LEGION_USE_CMAKE)
+target_compile_options(LegionRuntime PRIVATE ${CXX_BUILD_WARNING_FLAGS})
 
 target_include_directories(LegionRuntime
   INTERFACE

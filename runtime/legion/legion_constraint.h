@@ -233,7 +233,7 @@ namespace Legion {
       virtual OrderingConstraint* as_ordering_constraint(void) = 0;
       virtual SplittingConstraint* as_splitting_constraint(void) = 0;
       virtual DimensionConstraint* as_dimension_constraint(void) = 0;
-      virtual AlignmentConstraint* as_alignement_constraint(void) = 0;
+      virtual AlignmentConstraint* as_alignment_constraint(void) = 0;
       virtual OffsetConstraint* as_offset_constraint(void) = 0;
       virtual PointerConstraint* as_pointer_constraint(void) = 0;
     public:
@@ -250,7 +250,7 @@ namespace Legion {
       virtual const DimensionConstraint* 
         as_dimension_constraint(void) const = 0;
       virtual const AlignmentConstraint* 
-        as_alignement_constraint(void) const = 0;
+        as_alignment_constraint(void) const = 0;
       virtual const OffsetConstraint* 
         as_offset_constraint(void) const = 0;
       virtual const PointerConstraint* 
@@ -285,7 +285,7 @@ namespace Legion {
       virtual DimensionConstraint* as_dimension_constraint(void)
       { return (T::constraint_kind == DIMENSION_CONSTRAINT) ?
                 reinterpret_cast<DimensionConstraint*>(this) : NULL; }
-      virtual AlignmentConstraint* as_alignement_constraint(void)
+      virtual AlignmentConstraint* as_alignment_constraint(void)
       { return (T::constraint_kind == ALIGNMENT_CONSTRAINT) ?
                 reinterpret_cast<AlignmentConstraint*>(this) : NULL; }
       virtual OffsetConstraint* as_offset_constraint(void)
@@ -313,7 +313,7 @@ namespace Legion {
       virtual const DimensionConstraint* as_dimension_constraint(void) const
       { return (T::constraint_kind == DIMENSION_CONSTRAINT) ?
                 reinterpret_cast<const DimensionConstraint*>(this) : NULL; }
-      virtual const AlignmentConstraint* as_alignement_constraint(void) const
+      virtual const AlignmentConstraint* as_alignment_constraint(void) const
       { return (T::constraint_kind == ALIGNMENT_CONSTRAINT) ?
                 reinterpret_cast<const AlignmentConstraint*>(this) : NULL; }
       virtual const OffsetConstraint* as_offset_constraint(void) const
@@ -345,7 +345,9 @@ namespace Legion {
                                             SPECIALIZED_CONSTRAINT;
     public:
       SpecializedConstraint(SpecializedKind kind = NORMAL_SPECIALIZE,
-                            ReductionOpID redop = 0, bool no_access = false);
+                            ReductionOpID redop = 0, 
+                            bool no_access = false,
+                            bool exact = false);
     public:
       bool entails(const SpecializedConstraint &other) const;
       bool conflicts(const SpecializedConstraint &other) const;
@@ -357,15 +359,21 @@ namespace Legion {
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
     public:
-      bool is_normal(void) const;
+      bool is_affine(void) const;
+      bool is_compact(void) const;
+      bool is_varfield(void) const;
       bool is_virtual(void) const;
       bool is_reduction(void) const;
       bool is_file(void) const;
-      bool is_no_access(void) const;
+      inline bool is_no_access(void) const { return no_access; }
+      inline bool is_exact(void) const { return exact; }
+      // For backwards compatibility
+      bool is_normal(void) const;
     public:
       SpecializedKind kind;
       ReductionOpID  redop;
       bool       no_access;
+      bool           exact;
     };
 
     /**
@@ -411,7 +419,7 @@ namespace Legion {
       static const LayoutConstraintKind constraint_kind = 
                                             FIELD_CONSTRAINT;
     public:
-      FieldConstraint(void);
+      FieldConstraint(bool contiguous = false, bool inorder = false);
       FieldConstraint(const std::vector<FieldID> &field_set,
                       bool contiguous, bool inorder = true);
       FieldConstraint(const std::set<FieldID> &field_set,
@@ -463,7 +471,7 @@ namespace Legion {
       static const LayoutConstraintKind constraint_kind = 
                                             ORDERING_CONSTRAINT;
     public:
-      OrderingConstraint(void);
+      OrderingConstraint(bool contiguous = false);
       OrderingConstraint(const std::vector<DimensionKind> &ordering,
                          bool contiguous);
     public:

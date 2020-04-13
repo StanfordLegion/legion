@@ -50,7 +50,8 @@ namespace Realm {
 
     void contribute_nothing(void);
     void contribute_dense_rect_list(const std::vector<Rect<N,T> >& rects);
-    void contribute_raw_rects(const Rect<N,T>* rects, size_t count, bool last);
+    void contribute_raw_rects(const Rect<N,T>* rects, size_t count,
+			      size_t piece_count);
 
     // adds a microop as a waiter for valid sparsity map data - returns true
     //  if the uop is added to the list (i.e. will be getting a callback at some point),
@@ -74,7 +75,7 @@ namespace Realm {
 
     struct RemoteSparsityContrib {
       SparsityMap<N,T> sparsity;
-      size_t sequence_id, sequence_count;
+      size_t piece_count; // non-zero only on last piece of contribution
 
       static void handle_message(NodeID sender,
 				 const RemoteSparsityContrib &msg,
@@ -98,6 +99,7 @@ namespace Realm {
     static ActiveMessageHandlerReg<SetContribCountMessage> set_contrib_count_msg_reg;
 
     atomic<int> remaining_contributor_count;
+    atomic<int> total_piece_count, remaining_piece_count;
     Mutex mutex;
     std::vector<PartitioningMicroOp *> approx_waiters, precise_waiters;
     bool precise_requested, approx_requested;
@@ -126,30 +128,6 @@ namespace Realm {
     SparsityMapImpl<N,T> *get_or_create(SparsityMap<N,T> me);
 
     void destroy(void);
-  };
-
-
-  ///////////////////////////////
-  //
-  // active messages
-
-  class FragmentAssembler {
-  public:
-    FragmentAssembler(void);
-    ~FragmentAssembler(void);
-
-    // returns a sequence ID that may not be unique, but hasn't been used in a 
-    //   long time
-    int get_sequence_id(void);
-
-    // adds a fragment to the list, returning true if this is the last one from
-    //  a sequence
-    bool add_fragment(NodeID sender, int sequence_id, int sequence_count);
-
-  protected:
-    atomic<int> next_sequence_id;
-    Mutex mutex; // protects the fragments map
-    std::map<NodeID, std::map<int, int> > fragments;
   };
 
 
