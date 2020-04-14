@@ -694,6 +694,7 @@ namespace Legion {
       SEND_FIELD_ALLOC_NOTIFICATION,
       SEND_FIELD_SPACE_TOP_ALLOC,
       SEND_FIELD_FREE,
+      SEND_FIELD_SPACE_LAYOUT_INVALIDATION,
       SEND_LOCAL_FIELD_ALLOC_REQUEST,
       SEND_LOCAL_FIELD_ALLOC_RESPONSE,
       SEND_LOCAL_FIELD_FREE,
@@ -864,6 +865,7 @@ namespace Legion {
         "Send Field Alloc Notification",                              \
         "Send Field Space Top Alloc",                                 \
         "Send Field Free",                                            \
+        "Send Field Space Layout Invalidation",                       \
         "Send Local Field Alloc Request",                             \
         "Send Local Field Alloc Response",                            \
         "Send Local Field Free",                                      \

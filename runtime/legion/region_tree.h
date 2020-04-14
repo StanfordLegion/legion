@@ -2986,6 +2986,8 @@ namespace Legion {
                                    Deserializer &derez, AddressSpaceID source);
       static void handle_field_free(RegionTreeForest *forest,
                                     Deserializer &derez, AddressSpaceID source);
+      static void handle_layout_invalidation(RegionTreeForest *forest,
+                                             Deserializer &derez);
       static void handle_local_alloc_request(RegionTreeForest *forest,
                                              Deserializer &derez,
                                              AddressSpaceID source);
@@ -2998,9 +3000,9 @@ namespace Legion {
     protected:
       // Assume we are already holding the node lock
       // when calling these methods
-      int allocate_index(size_t field_size, CustomSerdezID serdez, 
-                         RtEvent &ready_event);
+      int allocate_index(RtEvent &ready_event);
       void free_index(unsigned index, RtEvent free_event);
+      void invalidate_layouts(unsigned index, bool need_lock = true);
     protected:
       bool allocate_local_indexes(CustomSerdezID serdez,
             const std::vector<size_t> &sizes,
@@ -3016,10 +3018,9 @@ namespace Legion {
       std::set<LogicalRegion> logical_trees;
       std::set<RegionNode*> local_trees;
       std::map<FieldID,FieldInfo> fields;
-      // Once allocated all indexes have to have the same field size
-      // for now because it's too hard to go through and prune out all 
-      // the data structures that depend on field sizes being the same.
-      std::vector<std::pair<size_t,CustomSerdezID> > index_infos;
+      // For all normal (aka non-local) fields we track which indexes
+      // in the field mask have not been allocated.
+      FieldMask unallocated_indexes;
       // Local field sizes
       std::vector<std::pair<size_t,CustomSerdezID> > local_index_infos;
       // Use a list here so that we cycle through all the indexes

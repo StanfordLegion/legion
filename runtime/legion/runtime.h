@@ -2158,6 +2158,8 @@ namespace Legion {
       void send_field_alloc_notification(AddressSpaceID target,Serializer &rez);
       void send_field_space_top_alloc(AddressSpaceID target, Serializer &rez);
       void send_field_free(AddressSpaceID target, Serializer &rez);
+      void send_field_space_layout_invalidation(AddressSpaceID target, 
+                                                Serializer &rez);
       void send_local_field_alloc_request(AddressSpaceID target, 
                                           Serializer &rez);
       void send_local_field_alloc_response(AddressSpaceID target,
@@ -2397,6 +2399,7 @@ namespace Legion {
       void handle_field_space_top_alloc(Deserializer &derez,
                                         AddressSpaceID source);
       void handle_field_free(Deserializer &derez, AddressSpaceID source);
+      void handle_field_space_layout_invalidation(Deserializer &derez);
       void handle_local_field_alloc_request(Deserializer &derez,
                                             AddressSpaceID source);
       void handle_local_field_alloc_response(Deserializer &derez);

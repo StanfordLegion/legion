@@ -9818,8 +9818,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (is_owner())
+      {
+        unallocated_indexes = FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
         local_index_infos.resize(runtime->max_local_fields, 
             std::pair<size_t,CustomSerdezID>(0, 0));
+      }
 #ifdef LEGION_GC
       log_garbage.info("GC Field Space %lld %d %d",
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space, handle.id);
@@ -9836,8 +9839,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (is_owner())
+      {
+        unallocated_indexes = FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
         local_index_infos.resize(runtime->max_local_fields, 
             std::pair<size_t,CustomSerdezID>(0, 0));
+      }
       size_t num_fields;
       derez.deserialize(num_fields);
       for (unsigned idx = 0; idx < num_fields; idx++)
@@ -10629,7 +10635,7 @@ namespace Legion {
                           "application in field space %d", fid, handle.id)
         // Find an index in which to allocate this field  
         RtEvent ready_event;
-        int result = allocate_index(size, serdez_id, ready_event);
+        int result = allocate_index(ready_event);
         if (result < 0)
           REPORT_LEGION_ERROR(ERROR_EXCEEDED_MAXIMUM_NUMBER_ALLOCATED_FIELDS,
                           "Exceeded maximum number of allocated fields for "
@@ -10717,7 +10723,7 @@ namespace Legion {
                             "application in field space %d", fid, handle.id)
           // Find an index in which to allocate this field  
           RtEvent ready_event;
-          int result = allocate_index(sizes[idx], serdez_id, ready_event);
+          int result = allocate_index(ready_event);
           if (result < 0)
             REPORT_LEGION_ERROR(ERROR_EXCEEDED_MAXIMUM_NUMBER_ALLOCATED_FIELDS,
               "Exceeded maximum number of allocated fields for "
@@ -11490,6 +11496,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ void FieldSpaceNode::handle_layout_invalidation(
+                                  RegionTreeForest *forest, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      FieldSpace handle;
+      derez.deserialize(handle);
+      unsigned index;
+      derez.deserialize(index);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      FieldSpaceNode *node = forest->get_node(handle);
+      node->invalidate_layouts(index);
+      Runtime::trigger_event(done_event);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void FieldSpaceNode::handle_local_alloc_request(
            RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -12055,20 +12078,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    int FieldSpaceNode::allocate_index(size_t field_size, CustomSerdezID serdez,
-                                       RtEvent &ready_event)
+    int FieldSpaceNode::allocate_index(RtEvent &ready_event)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(is_owner());
 #endif
       // Check to see if we still have spots
-      if (index_infos.size() < (LEGION_MAX_FIELDS - runtime->max_local_fields))
+      int result = unallocated_indexes.find_first_set();
+      if ((result >= 0) && 
+          (result < (LEGION_MAX_FIELDS - runtime->max_local_fields)))
       {
         // We still have unallocated indexes so use those first
-        int result = index_infos.size();
-        index_infos.push_back(
-            std::pair<size_t,CustomSerdezID>(field_size, serdez));
+        unallocated_indexes.unset_bit(result);
         return result;
       }
       // If there are no available indexes then we are done
@@ -12079,18 +12101,10 @@ namespace Legion {
       for (std::list<std::pair<unsigned,RtEvent> >::iterator it = 
             available_indexes.begin(); it != available_indexes.end(); it++)
       {
-#ifdef DEBUG_LEGION
-        assert(it->first < index_infos.size());
-#endif
-        // skip any entires without the right size
-        if (index_infos[it->first].first != field_size)
-          continue;
-        if (index_infos[it->first].second != serdez)
-          continue;
         if (!it->second.exists() || it->second.has_triggered())
         {
           // Found one without an event precondition so use it
-          int result = it->first;
+          result = it->first;
           available_indexes.erase(it);
           return result;
         }
@@ -12104,7 +12118,7 @@ namespace Legion {
       // We didn't find one without a precondition, see if we got a backup
       if (backup != available_indexes.end())
       {
-        int result = backup->first;
+        result = backup->first;
         available_indexes.erase(backup);
         return result;
       }
@@ -12119,11 +12133,48 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_owner());
 #endif
+      // Send messages to any remote nodes to perform the invalidation
+      // We're already holding the lock 
+      if (has_remote_instances())
+      {
+        std::deque<AddressSpaceID> targets;
+        FindTargetsFunctor functor(targets);
+        map_over_remote_instances(functor);
+        std::set<RtEvent> remote_ready;
+        for (std::deque<AddressSpaceID>::const_iterator it = 
+              targets.begin(); it != targets.end(); it++)
+        {
+          RtUserEvent remote_done = Runtime::create_rt_user_event();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(handle);
+            rez.serialize(index);
+            rez.serialize(remote_done);
+          }
+          runtime->send_field_space_layout_invalidation(*it, rez);
+          remote_ready.insert(remote_done);
+        }
+        remote_ready.insert(ready_event);
+        ready_event = Runtime::merge_events(remote_ready);
+      }
+      // Perform our local invalidation too
+      invalidate_layouts(index, false/*need lock*/);
       // Record this as an available index
       available_indexes.push_back(
-          std::pair<unsigned,RtEvent>(index, ready_event));
-      // We also need to invalidate all our layout descriptions
-      // that contain this field
+          std::pair<unsigned,RtEvent>(index, ready_event)); 
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldSpaceNode::invalidate_layouts(unsigned index, bool need_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_lock)
+      {
+        AutoLock n_lock(node_lock);
+        invalidate_layouts(index, false/*need lock*/);
+        return;
+      }
       std::vector<LEGION_FIELD_MASK_FIELD_TYPE> to_delete;
       for (std::map<LEGION_FIELD_MASK_FIELD_TYPE,LegionList<LayoutDescription*,
                   LAYOUT_DESCRIPTION_ALLOC>::tracked>::iterator lit = 
@@ -12157,9 +12208,7 @@ namespace Legion {
       }
       for (std::vector<LEGION_FIELD_MASK_FIELD_TYPE>::const_iterator it = 
             to_delete.begin(); it != to_delete.end(); it++)
-      {
         layouts.erase(*it);
-      }
     }
 
     //--------------------------------------------------------------------------
