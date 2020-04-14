@@ -11064,8 +11064,8 @@ namespace Legion {
       if (future_size != sizeof(size_t))
         REPORT_LEGION_ERROR(ERROR_FUTURE_SIZE_MISMATCH,
             "Size of future passed into dynamic field allocation for "
-            "field %d is %ld bytes which not the same as sizeof(size_t) "
-            "(%ld bytes). Futures passed into field allocation calls must "
+            "field %d is %zd bytes which not the same as sizeof(size_t) "
+            "(%zd bytes). Futures passed into field allocation calls must "
             "contain data of the type size_t.", 
             fid, future_size, sizeof(size_t))
       const size_t field_size = 
