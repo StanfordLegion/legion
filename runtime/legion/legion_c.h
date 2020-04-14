@@ -2131,6 +2131,15 @@ extern "C" {
     legion_field_id_t desired_fieldid /* = AUTO_GENERATE_ID */);
 
   /**
+   * @see Legion::FieldAllocator::allocate_field()
+   */
+  legion_field_id_t
+  legion_field_allocator_allocate_field_future(
+    legion_field_allocator_t allocator,
+    legion_future_t field_size,
+    legion_field_id_t desired_fieldid /* = AUTO_GENERATE_ID */);
+
+  /**
    * @see Legion::FieldAllocator::free_field()
    */
   void

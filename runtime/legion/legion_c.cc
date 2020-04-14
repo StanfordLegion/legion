@@ -2509,6 +2509,16 @@ legion_field_allocator_allocate_field(legion_field_allocator_t allocator_,
   return allocator->allocate_field(field_size, desired_fieldid);
 }
 
+legion_field_id_t
+legion_field_allocator_allocate_field_future(legion_field_allocator_t allocator_,
+                                             legion_future_t field_size_,
+                                             legion_field_id_t desired_fieldid)
+{
+  FieldAllocator *allocator = CObjectWrapper::unwrap(allocator_);
+  Future *field_size = CObjectWrapper::unwrap(field_size_);
+  return allocator->allocate_field(*field_size, desired_fieldid);
+}
+
 void
 legion_field_allocator_free_field(legion_field_allocator_t allocator_,
                                   legion_field_id_t fid)

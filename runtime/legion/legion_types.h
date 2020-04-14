@@ -379,6 +379,7 @@ namespace Legion {
       LG_DEFER_VERIFY_PARTITION_TASK_ID,
       LG_MALLOC_INSTANCE_TASK_ID,
       LG_FREE_INSTANCE_TASK_ID,
+      LG_FIELD_SIZE_TASK_ID,
       LG_DEFER_CONSENSUS_MATCH_TASK_ID,
       LG_YIELD_TASK_ID,
       LG_DEFER_TRACE_UPDATE_TASK_ID,
@@ -513,6 +514,7 @@ namespace Legion {
         "Defer Verify Partition",                                 \
         "Malloc Instance",                                        \
         "Free Instance",                                          \
+        "Field Size Resolution",                                  \
         "Defer Consensus Match",                                  \
         "Yield",                                                  \
         "Defer Trace Update",                                     \
@@ -725,6 +727,7 @@ namespace Legion {
       SEND_FIELD_ALLOC_NOTIFICATION,
       SEND_FIELD_SPACE_TOP_ALLOC,
       SEND_FIELD_FREE,
+      SEND_FIELD_SPACE_LAYOUT_INVALIDATION,
       SEND_LOCAL_FIELD_ALLOC_REQUEST,
       SEND_LOCAL_FIELD_ALLOC_RESPONSE,
       SEND_LOCAL_FIELD_FREE,
@@ -918,6 +921,7 @@ namespace Legion {
         "Send Field Alloc Notification",                              \
         "Send Field Space Top Alloc",                                 \
         "Send Field Free",                                            \
+        "Send Field Space Layout Invalidation",                       \
         "Send Local Field Alloc Request",                             \
         "Send Local Field Alloc Response",                            \
         "Send Local Field Free",                                      \

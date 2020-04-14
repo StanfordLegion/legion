@@ -157,9 +157,15 @@ namespace Legion {
       FieldID allocate_field(size_t field_size, 
                              FieldID desired_fieldid,
                              CustomSerdezID serdez_id, bool local);
+      FieldID allocate_field(const Future &field_size, 
+                             FieldID desired_fieldid,
+                             CustomSerdezID serdez_id, bool local);
       void free_field(FieldID fid, const bool unordered);
     public:
       void allocate_fields(const std::vector<size_t> &field_sizes,
+                           std::vector<FieldID> &resulting_fields,
+                           CustomSerdezID serdez_id, bool local);
+      void allocate_fields(const std::vector<Future> &field_sizes,
                            std::vector<FieldID> &resulting_fields,
                            CustomSerdezID serdez_id, bool local);
       void free_fields(const std::set<FieldID> &to_free, const bool unordered);
@@ -2487,6 +2493,8 @@ namespace Legion {
       void send_field_alloc_notification(AddressSpaceID target,Serializer &rez);
       void send_field_space_top_alloc(AddressSpaceID target, Serializer &rez);
       void send_field_free(AddressSpaceID target, Serializer &rez);
+      void send_field_space_layout_invalidation(AddressSpaceID target, 
+                                                Serializer &rez);
       void send_local_field_alloc_request(AddressSpaceID target, 
                                           Serializer &rez);
       void send_local_field_alloc_response(AddressSpaceID target,
@@ -2767,6 +2775,7 @@ namespace Legion {
       void handle_field_space_top_alloc(Deserializer &derez,
                                         AddressSpaceID source);
       void handle_field_free(Deserializer &derez, AddressSpaceID source);
+      void handle_field_space_layout_invalidation(Deserializer &derez);
       void handle_local_field_alloc_request(Deserializer &derez,
                                             AddressSpaceID source);
       void handle_local_field_alloc_response(Deserializer &derez);

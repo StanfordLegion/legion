@@ -560,6 +560,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    FieldID FieldAllocatorImpl::allocate_field(const Future &field_size,
+                                               FieldID desired_fieldid,
+                                               CustomSerdezID serdez_id, 
+                                               bool local)
+    //--------------------------------------------------------------------------
+    {
+      return context->allocate_field(field_space, field_size, desired_fieldid,
+                                     local, serdez_id);
+    }
+
+    //--------------------------------------------------------------------------
     void FieldAllocatorImpl::free_field(FieldID fid, const bool unordered)
     //--------------------------------------------------------------------------
     {
@@ -569,6 +580,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void FieldAllocatorImpl::allocate_fields(
                                         const std::vector<size_t> &field_sizes,
+                                        std::vector<FieldID> &resulting_fields,
+                                        CustomSerdezID serdez_id, bool local)
+    //--------------------------------------------------------------------------
+    {
+      context->allocate_fields(field_space, field_sizes, resulting_fields,
+                               local, serdez_id);
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldAllocatorImpl::allocate_fields(
+                                        const std::vector<Future> &field_sizes,
                                         std::vector<FieldID> &resulting_fields,
                                         CustomSerdezID serdez_id, bool local)
     //--------------------------------------------------------------------------
@@ -8185,6 +8207,11 @@ namespace Legion {
           case SEND_FIELD_FREE:
             {
               runtime->handle_field_free(derez, remote_address_space);
+              break;
+            }
+          case SEND_FIELD_SPACE_LAYOUT_INVALIDATION:
+            {
+              runtime->handle_field_space_layout_invalidation(derez);
               break;
             }
           case SEND_LOCAL_FIELD_ALLOC_REQUEST:
@@ -17224,8 +17251,11 @@ namespace Legion {
                                                 Serializer &rez)
     //--------------------------------------------------------------------------
     {
+      // put this on the reference virtual channel since it has no effects
+      // tracking and we need to make sure it is handled before references
+      // are removed from the remote copies
       find_messenger(target)->send_message(rez, SEND_FIELD_ALLOC_NOTIFICATION,
-                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+                REFERENCE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -17243,6 +17273,19 @@ namespace Legion {
     {
       find_messenger(target)->send_message(rez, SEND_FIELD_FREE,
                                 DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_field_space_layout_invalidation(AddressSpaceID target,
+                                                       Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      // Send this on the reference virtual channel since it's effects
+      // are not being tracked and we need to know it is handled before
+      // the remote objects have their references removed
+      find_messenger(target)->send_message(rez, 
+          SEND_FIELD_SPACE_LAYOUT_INVALIDATION, 
+          REFERENCE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -19066,6 +19109,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       FieldSpaceNode::handle_field_free(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_field_space_layout_invalidation(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode::handle_layout_invalidation(forest, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -26348,6 +26398,11 @@ namespace Legion {
             break;
           }
 #endif
+        case LG_FIELD_SIZE_TASK_ID:
+          {
+            FieldSpaceNode::handle_field_size(args);
+            break;
+          }
         case LG_DEFER_CONSENSUS_MATCH_TASK_ID:
           {
             ConsensusMatchBase::handle_consensus_match(args);
