@@ -488,6 +488,7 @@ namespace Legion {
       inline bool operator<(const FieldAllocator &rhs) const;
       inline bool operator==(const FieldAllocator &rhs) const;
     public:
+      ///@{
       /**
        * Allocate a field with a given size. Optionally specify
        * the field ID to be assigned.  Note if you use
@@ -509,6 +510,11 @@ namespace Legion {
                              FieldID desired_fieldid = AUTO_GENERATE_ID,
                              CustomSerdezID serdez_id = 0,
                              bool local_field = false);
+      FieldID allocate_field(const Future &field_size,
+                             FieldID desired_fieldid = AUTO_GENERATE_ID,
+                             CustomSerdezID serdez_id = 0,
+                             bool local_field = false);
+      ///@}
       /**
        * Deallocate the specified field from the field space.
        * @param fid the field ID to be deallocated
@@ -527,6 +533,7 @@ namespace Legion {
       FieldID allocate_local_field(size_t field_size,
                                    FieldID desired_fieldid = AUTO_GENERATE_ID,
                                    CustomSerdezID serdez_id = 0);
+      ///@{
       /**
        * Allocate a collection of fields with the specified sizes.
        * Optionally pass in a set of field IDs to use when allocating
@@ -546,6 +553,11 @@ namespace Legion {
                            std::vector<FieldID> &resulting_fields,
                            CustomSerdezID serdez_id = 0,
                            bool local_fields = false);
+      void allocate_fields(const std::vector<Future> &field_sizes,
+                           std::vector<FieldID> &resulting_fields,
+                           CustomSerdezID serdez_id = 0,
+                           bool local_fields = false);
+      ///@}
       /**
        * Free a collection of field IDs
        * @param to_free set of field IDs to be freed

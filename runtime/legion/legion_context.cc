@@ -383,16 +383,11 @@ namespace Legion {
         fid = runtime->get_unique_field_id();
 #ifdef DEBUG_LEGION
       else if (fid >= LEGION_MAX_APPLICATION_FIELD_ID)
-      {
         REPORT_LEGION_ERROR(ERROR_TASK_ATTEMPTED_ALLOCATE_FILED,
           "Task %s (ID %lld) attempted to allocate a field with "
-                       "ID %d which exceeds the LEGION_MAX_APPLICATION_FIELD_ID"
-                       " bound set in legion_config.h", get_task_name(),
-                       get_unique_id(), fid);
-        assert(false);
-      }
+          "ID %d which exceeds the LEGION_MAX_APPLICATION_FIELD_ID "
+          "bound set in legion_config.h", get_task_name(), get_unique_id(), fid)
 #endif
-
       if (runtime->legion_spy_enabled)
         LegionSpy::log_field_creation(space.id, fid, field_size);
 
@@ -427,16 +422,12 @@ namespace Legion {
           resulting_fields[idx] = runtime->get_unique_field_id();
 #ifdef DEBUG_LEGION
         else if (resulting_fields[idx] >= LEGION_MAX_APPLICATION_FIELD_ID)
-        {
           REPORT_LEGION_ERROR(ERROR_TASK_ATTEMPTED_ALLOCATE_FIELD,
             "Task %s (ID %lld) attempted to allocate a field with "
             "ID %d which exceeds the LEGION_MAX_APPLICATION_FIELD_ID "
             "bound set in legion_config.h", get_task_name(),
-            get_unique_id(), resulting_fields[idx]);
-          assert(false);
-        }
+            get_unique_id(), resulting_fields[idx])
 #endif
-
         if (runtime->legion_spy_enabled)
           LegionSpy::log_field_creation(space.id, 
                                         resulting_fields[idx], sizes[idx]);
@@ -5186,6 +5177,31 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
+    FieldID InnerContext::allocate_field(FieldSpace space, 
+                                         const Future &field_size,
+                                         FieldID fid, bool local,
+                                         CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (local)
+        REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
+            "Local fields do no support allocation with future sizes yet.")
+      if (fid == AUTO_GENERATE_ID)
+        fid = runtime->get_unique_field_id();
+#ifdef DEBUG_LEGION
+      else if (fid >= LEGION_MAX_APPLICATION_FIELD_ID)
+        REPORT_LEGION_ERROR(ERROR_TASK_ATTEMPTED_ALLOCATE_FILED,
+          "Task %s (ID %lld) attempted to allocate a field with "
+          "ID %d which exceeds the LEGION_MAX_APPLICATION_FIELD_ID "
+          "bound set in legion_config.h", get_task_name(), get_unique_id(), fid)
+#endif
+      runtime->forest->allocate_field(space, field_size, fid,serdez_id);
+      register_field_creation(space, fid, local);
+      return fid;
+    }
+
+    //--------------------------------------------------------------------------
     void InnerContext::allocate_local_field(FieldSpace space, size_t field_size,
                                           FieldID fid, CustomSerdezID serdez_id,
                                           std::set<RtEvent> &done_events)
@@ -5244,6 +5260,36 @@ namespace Legion {
         runtime->send_local_field_update(it->first, rez);
         done_events.insert(done_event);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::allocate_fields(FieldSpace space,
+                                       const std::vector<Future> &sizes,
+                                       std::vector<FieldID> &resulting_fields,
+                                       bool local, CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (local)
+        REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
+            "Local fields do no support allocation with future sizes yet.")
+      if (resulting_fields.size() < sizes.size())
+        resulting_fields.resize(sizes.size(), AUTO_GENERATE_ID);
+      for (unsigned idx = 0; idx < resulting_fields.size(); idx++)
+      {
+        if (resulting_fields[idx] == AUTO_GENERATE_ID)
+          resulting_fields[idx] = runtime->get_unique_field_id();
+#ifdef DEBUG_LEGION
+        else if (resulting_fields[idx] >= LEGION_MAX_APPLICATION_FIELD_ID)
+          REPORT_LEGION_ERROR(ERROR_TASK_ATTEMPTED_ALLOCATE_FIELD,
+            "Task %s (ID %lld) attempted to allocate a field with "
+            "ID %d which exceeds the LEGION_MAX_APPLICATION_FIELD_ID "
+            "bound set in legion_config.h", get_task_name(),
+            get_unique_id(), resulting_fields[idx])
+#endif
+      }
+      runtime->forest->allocate_fields(space, sizes,resulting_fields,serdez_id);
+      register_field_creations(space, local, resulting_fields);
     }
 
     //--------------------------------------------------------------------------
@@ -10426,6 +10472,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    FieldID LeafContext::allocate_field(FieldSpace space, 
+                                        const Future &field_size,
+                                        FieldID fid, bool local,
+                                        CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_NONLOCAL_FIELD_ALLOCATION,
+        "Illegal deferred field allocation performed in leaf task %s (ID %lld)",
+        get_task_name(), get_unique_id())
+      return 0;
+    }
+
+    //--------------------------------------------------------------------------
     void LeafContext::allocate_local_field(FieldSpace space, size_t field_size,
                                      FieldID fid, CustomSerdezID serdez_id,
                                      std::set<RtEvent> &done_events)
@@ -10434,6 +10493,18 @@ namespace Legion {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_NONLOCAL_FIELD_ALLOCATION,
           "Illegal local field allocation performed in leaf task %s (ID %lld)",
           get_task_name(), get_unique_id())
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::allocate_fields(FieldSpace space,
+                                      const std::vector<Future> &sizes,
+                                      std::vector<FieldID> &resuling_fields,
+                                      bool local, CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_NONLOCAL_FIELD_ALLOCATION2,
+       "Illegal deferred field allocations performed in leaf task %s (ID %lld)",
+       get_task_name(), get_unique_id())
     }
 
     //--------------------------------------------------------------------------
@@ -11904,6 +11975,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    FieldID InlineContext::allocate_field(FieldSpace space, 
+                                          const Future &field_size,
+                                          FieldID fid, bool local,
+                                          CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->allocate_field(space, field_size, fid, local,serdez_id);
+    }
+
+    //--------------------------------------------------------------------------
     void InlineContext::allocate_local_field(FieldSpace space,size_t size,
                                      FieldID fid, CustomSerdezID serdez_id,
                                      std::set<RtEvent> &done_events)
@@ -11911,6 +11992,17 @@ namespace Legion {
     {
       // Should never get here
       assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::allocate_fields(FieldSpace space,
+                                        const std::vector<Future> &sizes,
+                                        std::vector<FieldID> &resulting_fields,
+                                        bool local, CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->allocate_fields(space, sizes, resulting_fields, 
+                                        local, serdez_id);
     }
 
     //--------------------------------------------------------------------------

@@ -374,6 +374,7 @@ namespace Legion {
       LG_DEFER_VERIFY_PARTITION_TASK_ID,
       LG_MALLOC_INSTANCE_TASK_ID,
       LG_FREE_INSTANCE_TASK_ID,
+      LG_FIELD_SIZE_TASK_ID,
       LG_YIELD_TASK_ID,
       LG_MESSAGE_ID, // These two must be the last two
       LG_RETRY_SHUTDOWN_TASK_ID,
@@ -502,6 +503,7 @@ namespace Legion {
         "Defer Verify Partition",                                 \
         "Malloc Instance",                                        \
         "Free Instance",                                          \
+        "Field Size Resolution",                                  \
         "Yield",                                                  \
         "Remote Message",                                         \
         "Retry Shutdown",                                         \

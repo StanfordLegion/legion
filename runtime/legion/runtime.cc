@@ -372,6 +372,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    FieldID FieldAllocatorImpl::allocate_field(const Future &field_size,
+                                               FieldID desired_fieldid,
+                                               CustomSerdezID serdez_id, 
+                                               bool local)
+    //--------------------------------------------------------------------------
+    {
+      return context->allocate_field(field_space, field_size, desired_fieldid,
+                                     local, serdez_id);
+    }
+
+    //--------------------------------------------------------------------------
     void FieldAllocatorImpl::free_field(FieldID fid, const bool unordered)
     //--------------------------------------------------------------------------
     {
@@ -381,6 +392,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void FieldAllocatorImpl::allocate_fields(
                                         const std::vector<size_t> &field_sizes,
+                                        std::vector<FieldID> &resulting_fields,
+                                        CustomSerdezID serdez_id, bool local)
+    //--------------------------------------------------------------------------
+    {
+      context->allocate_fields(field_space, field_sizes, resulting_fields,
+                               local, serdez_id);
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldAllocatorImpl::allocate_fields(
+                                        const std::vector<Future> &field_sizes,
                                         std::vector<FieldID> &resulting_fields,
                                         CustomSerdezID serdez_id, bool local)
     //--------------------------------------------------------------------------
@@ -15270,8 +15292,11 @@ namespace Legion {
                                                 Serializer &rez)
     //--------------------------------------------------------------------------
     {
+      // put this on the reference virtual channel since it has no effects
+      // tracking and we need to make sure it is handled before references
+      // are removed from the remote copies
       find_messenger(target)->send_message(rez, SEND_FIELD_ALLOC_NOTIFICATION,
-                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+                REFERENCE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -23413,6 +23438,11 @@ namespace Legion {
             break;
           }
 #endif
+        case LG_FIELD_SIZE_TASK_ID:
+          {
+            FieldSpaceNode::handle_field_size(args);
+            break;
+          }
         case LG_YIELD_TASK_ID:
           break; // nothing to do here
         case LG_RETRY_SHUTDOWN_TASK_ID:

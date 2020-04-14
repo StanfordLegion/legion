@@ -2611,6 +2611,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    FieldID FieldAllocator::allocate_field(const Future &field_size,
+                                           FieldID desired_fieldid,
+                                           CustomSerdezID serdez_id, bool local)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+#endif
+      return impl->allocate_field(field_size, desired_fieldid, serdez_id,local);
+    }
+
+    //--------------------------------------------------------------------------
     void FieldAllocator::free_field(FieldID fid, const bool unordered)
     //--------------------------------------------------------------------------
     {
@@ -2635,6 +2647,18 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void FieldAllocator::allocate_fields(const std::vector<size_t> &field_sizes,
+                                         std::vector<FieldID> &resulting_fields,
+                                         CustomSerdezID serdez_id, bool local)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+#endif
+      impl->allocate_fields(field_sizes, resulting_fields, serdez_id, local);
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldAllocator::allocate_fields(const std::vector<Future> &field_sizes,
                                          std::vector<FieldID> &resulting_fields,
                                          CustomSerdezID serdez_id, bool local)
     //--------------------------------------------------------------------------

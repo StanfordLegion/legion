@@ -150,9 +150,15 @@ namespace Legion {
       FieldID allocate_field(size_t field_size, 
                              FieldID desired_fieldid,
                              CustomSerdezID serdez_id, bool local);
+      FieldID allocate_field(const Future &field_size, 
+                             FieldID desired_fieldid,
+                             CustomSerdezID serdez_id, bool local);
       void free_field(FieldID fid, const bool unordered);
     public:
       void allocate_fields(const std::vector<size_t> &field_sizes,
+                           std::vector<FieldID> &resulting_fields,
+                           CustomSerdezID serdez_id, bool local);
+      void allocate_fields(const std::vector<Future> &field_sizes,
                            std::vector<FieldID> &resulting_fields,
                            CustomSerdezID serdez_id, bool local);
       void free_fields(const std::set<FieldID> &to_free, const bool unordered);
