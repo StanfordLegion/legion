@@ -12087,7 +12087,7 @@ namespace Legion {
       // Check to see if we still have spots
       int result = unallocated_indexes.find_first_set();
       if ((result >= 0) && 
-          (result < (LEGION_MAX_FIELDS - runtime->max_local_fields)))
+          (result < int(LEGION_MAX_FIELDS - runtime->max_local_fields)))
       {
         // We still have unallocated indexes so use those first
         unallocated_indexes.unset_bit(result);
