@@ -383,6 +383,10 @@ namespace Legion {
 
     bool contains(DomainPoint point) const;
 
+    // This will only check the bounds and not the sparsity map
+    __CUDA_HD__
+    bool contains_bounds_only(DomainPoint point) const;
+
     __CUDA_HD__
     int get_dim(void) const;
 

@@ -1529,6 +1529,9 @@ namespace Legion {
             const Rect<N,T> b = bounds.bounds<N,T>();
             return b.contains(p);
           }
+          else
+            return bounds.contains_bounds_only(transform[DomainPoint(p)]);
+#if 0 // This code is still here to help with debugging an nvcc bug
           switch (M)
           {
             // This is imprecise because we can't see the 
@@ -1545,6 +1548,7 @@ namespace Legion {
             default:
               assert(false);
           }
+#endif
 #else
           if (!has_transform)
           {
@@ -1565,8 +1569,8 @@ namespace Legion {
             default:
               assert(false);
           }
-#endif
           return false;
+#endif
         }
         __CUDA_HD__
         inline bool contains_all(const Rect<N,T> &r) const
@@ -1576,13 +1580,24 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
           if (gpu_warning)
             check_gpu_warning();
-          if (!has_transform)
+          // Note that in CUDA this function is likely being inlined
+          // everywhere and we can't afford to instantiate templates
+          // for every single dimension so do things untyped
+          if (has_transform)
+          {
+            for (PointInRectIterator<N,T> itr(r); itr(); itr++)
+              if (!bounds.contains_bounds_only(transform[DomainPoint(*itr)]))
+                return false;
+            return true;
+          }
+          else
           {
             // This is imprecise because we can't see the 
             // Realm index space on the GPU
             const Rect<N,T> b = bounds.bounds<N,T>();
             return b.contains(r);
           }
+#if 0 // This code is still here to help with debugging an nvcc bug
           // If we have a transform then we have to do each point separately
           switch (M)
           {
@@ -1603,6 +1618,7 @@ namespace Legion {
             default:
               assert(false);
           }
+#endif
 #else
           if (!has_transform)
           {
@@ -1627,8 +1643,8 @@ namespace Legion {
             default:
               assert(false);
           }
-#endif
           return false;
+#endif
         }
       private:
         __CUDA_HD__
