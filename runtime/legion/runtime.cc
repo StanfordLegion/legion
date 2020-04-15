@@ -7207,6 +7207,11 @@ namespace Legion {
               runtime->handle_field_alloc_notification(derez);
               break;
             }
+          case SEND_FIELD_SIZE_UPDATE:
+            {
+              runtime->handle_field_size_update(derez, remote_address_space);
+              break;
+            }
           case SEND_FIELD_SPACE_TOP_ALLOC:
             {
               runtime->handle_field_space_top_alloc(derez,remote_address_space);
@@ -15300,6 +15305,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_field_size_update(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      // put this on the reference virtual channel since it has no effects
+      // tracking and we need to make sure it is handled before references
+      // are removed from the remote copies
+      find_messenger(target)->send_message(rez, SEND_FIELD_SIZE_UPDATE,
+                REFERENCE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_field_space_top_alloc(AddressSpaceID target,
                                              Serializer &rez)
     //--------------------------------------------------------------------------
@@ -16921,6 +16937,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       FieldSpaceNode::handle_alloc_notification(forest, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_field_size_update(Deserializer &derez,
+                                           AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode::handle_field_size_update(forest, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -23438,11 +23462,6 @@ namespace Legion {
             break;
           }
 #endif
-        case LG_FIELD_SIZE_TASK_ID:
-          {
-            FieldSpaceNode::handle_field_size(args);
-            break;
-          }
         case LG_YIELD_TASK_ID:
           break; // nothing to do here
         case LG_RETRY_SHUTDOWN_TASK_ID:

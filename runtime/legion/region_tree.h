@@ -312,15 +312,14 @@ namespace Legion {
       // allocation was not local.
       bool allocate_field(FieldSpace handle, size_t field_size, 
                           FieldID fid, CustomSerdezID serdez_id);
-      bool allocate_field(FieldSpace handle, const Future &field_size,
-                          FieldID fid, CustomSerdezID serdez_id);
+      FieldSpaceNode* allocate_field(FieldSpace handle, ApEvent ready,
+                                     FieldID fid, CustomSerdezID serdez_id);
       void free_field(FieldSpace handle, FieldID fid,
                       std::set<RtEvent> &preconditions);
       void allocate_fields(FieldSpace handle, const std::vector<size_t> &sizes,
                            const std::vector<FieldID> &resulting_fields,
                            CustomSerdezID serdez_id);
-      void allocate_fields(FieldSpace handle, 
-                           const std::vector<Future> &sizes,
+      FieldSpaceNode* allocate_fields(FieldSpace handle, ApEvent ready, 
                            const std::vector<FieldID> &resulting_fields,
                            CustomSerdezID serdez_id);
       void free_fields(FieldSpace handle, 
@@ -2781,21 +2780,6 @@ namespace Legion {
     class FieldSpaceNode : 
       public LegionHeapify<FieldSpaceNode>, public DistributedCollectable {
     public:
-      struct FieldSizeArgs : public LgTaskArgs<FieldSizeArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_FIELD_SIZE_TASK_ID;
-      public:
-        FieldSizeArgs(FieldSpaceNode *n, FieldID fid, 
-                      FutureImpl *i, RtUserEvent t)
-          : LgTaskArgs(implicit_provenance), 
-            node(n), field(fid), impl(i), to_trigger(t) { }
-      public:
-        FieldSpaceNode *const node;
-        const FieldID field;
-        FutureImpl *const impl;
-        const RtUserEvent to_trigger;
-      };
-    public:
       struct FieldInfo {
       public:
         FieldInfo(void) : field_size(0), idx(0), serdez_id(0),
@@ -2803,12 +2787,12 @@ namespace Legion {
         FieldInfo(size_t size, unsigned id, CustomSerdezID sid, bool loc=false)
           : field_size(size), idx(id), serdez_id(sid), 
             destroyed(false), local(loc) { }
-        FieldInfo(RtEvent ready, unsigned id, CustomSerdezID sid,bool loc=false)
+        FieldInfo(ApEvent ready, unsigned id, CustomSerdezID sid,bool loc=false)
           : field_size(0), size_ready(ready), idx(id), serdez_id(sid), 
             destroyed(false), local(loc) { }
       public:
         size_t field_size;
-        RtEvent size_ready;
+        ApEvent size_ready;
         unsigned idx;
         CustomSerdezID serdez_id;
         bool destroyed;
@@ -2911,16 +2895,16 @@ namespace Legion {
     public:
       RtEvent allocate_field(FieldID fid, size_t size,
                              CustomSerdezID serdez_id);
-      RtEvent allocate_field(FieldID fid, const Future &size,
+      RtEvent allocate_field(FieldID fid, ApEvent size_ready,
                              CustomSerdezID serdez_id);
       RtEvent allocate_fields(const std::vector<size_t> &sizes,
                               const std::vector<FieldID> &fids,
                               CustomSerdezID serdez_id);
-      RtEvent allocate_fields(const std::vector<Future> &sizes,
+      RtEvent allocate_fields(ApEvent sizes_ready,
                               const std::vector<FieldID> &fids,
                               CustomSerdezID serdez_id);
-      void update_field_size(FieldID fid, FutureImpl *impl, 
-                             std::set<RtEvent> &update_events);
+      void update_field_size(FieldID fid, size_t field_size, 
+          std::set<RtEvent> &update_events, AddressSpaceID source);
       void free_field(FieldID fid, AddressSpaceID source,
                       std::set<RtEvent> &applied);
       void free_fields(const std::vector<FieldID> &to_free,
@@ -3026,7 +3010,9 @@ namespace Legion {
       static void handle_local_alloc_response(Deserializer &derez);
       static void handle_local_free(RegionTreeForest *forest,
                                     Deserializer &derez);
-      static void handle_field_size(const void *args);
+      static void handle_field_size_update(RegionTreeForest *forest,
+                                           Deserializer &derez, 
+                                           AddressSpaceID source);
     public:
       // Help with debug printing
       char* to_string(const FieldMask &mask, TaskContext *ctx) const;

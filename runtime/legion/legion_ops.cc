@@ -7528,10 +7528,46 @@ namespace Legion {
       assert(index_space_node == NULL);
       assert(futures.empty());
 #endif
-      initialize_operation(ctx, true);
+      initialize_operation(ctx, true/*track*/);
       kind = INDEX_SPACE_CREATION;
       index_space_node = n;
       futures.push_back(f);
+    }
+
+    //--------------------------------------------------------------------------
+    void CreationOp::initialize_field(InnerContext *ctx, FieldSpaceNode *node,
+                                      FieldID fid, const Future &field_size)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(field_space_node == NULL);
+      assert(fields.empty());
+      assert(futures.empty());
+#endif
+      initialize_operation(ctx, true/*track*/);
+      kind = FIELD_ALLOCATION;
+      field_space_node = node;
+      fields.push_back(fid);
+      futures.push_back(field_size);
+    }
+
+    //--------------------------------------------------------------------------
+    void CreationOp::initialize_fields(InnerContext *ctx, FieldSpaceNode *node,
+                                       const std::vector<FieldID> &fids,
+                                       const std::vector<Future> &field_sizes)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(field_space_node == NULL);
+      assert(fields.empty());
+      assert(futures.empty());
+      assert(fids.size() == field_sizes.size());
+#endif
+      initialize_operation(ctx, true/*track*/);
+      kind = FIELD_ALLOCATION;
+      field_space_node = node;     
+      fields = fids;
+      futures = field_sizes;
     }
 
     //--------------------------------------------------------------------------
@@ -7542,7 +7578,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(futures.empty());
 #endif
-      initialize_operation(ctx, true);
+      initialize_operation(ctx, true/*track*/);
       kind = FUTURE_MAP_CREATION;
       futures.resize(future_points.size());
       unsigned index = 0;
@@ -7557,6 +7593,7 @@ namespace Legion {
     {
       activate_operation();
       index_space_node = NULL;
+      field_space_node = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -7565,6 +7602,7 @@ namespace Legion {
     {
       activate_operation();
       futures.clear();
+      fields.clear();
       runtime->free_creation_op(this);
     }
 
@@ -7601,7 +7639,7 @@ namespace Legion {
       }
       // Record this with the context as an implicit dependence for all
       // later operations which may rely on this index space for mapping
-      if (kind == INDEX_SPACE_CREATION)
+      if ((kind == INDEX_SPACE_CREATION) || (kind == FIELD_ALLOCATION))
         parent_ctx->update_current_implicit(this);
     }
 
@@ -7621,6 +7659,17 @@ namespace Legion {
             complete_execution(Runtime::protect_event(ready)); 
             break;
           }
+        case FIELD_ALLOCATION:
+          {
+            std::set<ApEvent> ready_events;
+            for (unsigned idx = 0; idx < futures.size(); idx++)
+              ready_events.insert(futures[idx].impl->subscribe());
+            if (!ready_events.empty())
+              complete_execution(Runtime::protect_merge_events(ready_events));
+            else
+              complete_execution();
+            break;
+          }
         case FUTURE_MAP_CREATION:
           {
             complete_execution();
@@ -7635,6 +7684,7 @@ namespace Legion {
     void CreationOp::trigger_complete(void)
     //--------------------------------------------------------------------------
     {
+      std::set<RtEvent> complete_preconditions;
       switch (kind)
       {
         case INDEX_SPACE_CREATION:
@@ -7656,6 +7706,27 @@ namespace Legion {
               delete index_space_node;
             break;      
           }
+        case FIELD_ALLOCATION:
+          {
+            for (unsigned idx = 0; idx < futures.size(); idx++)
+            {
+              FutureImpl *impl = futures[idx].impl;
+               const size_t future_size = 
+                 impl->get_untyped_size(true/*internal*/);
+              if (future_size != sizeof(size_t))
+                REPORT_LEGION_ERROR(ERROR_FUTURE_SIZE_MISMATCH,
+                    "Size of future passed into dynamic field allocation for "
+                    "field %d is %zd bytes which not the same as sizeof(size_t)"
+                    " (%zd bytes). Futures passed into field allocation calls "
+                    "must contain data of the type size_t.",
+                    fields[idx], future_size, sizeof(size_t))
+              const size_t field_size = 
+                  *((const size_t*)impl->get_untyped_result(true, NULL, true));
+              field_space_node->update_field_size(fields[idx], field_size,
+                          complete_preconditions, runtime->address_space);
+            }
+            break;
+          }
         case FUTURE_MAP_CREATION:
           // Nothing to do here
           break;
@@ -7667,7 +7738,10 @@ namespace Legion {
       LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
                                       ApEvent::NO_AP_EVENT);
 #endif
-      complete_operation();
+      if (!complete_preconditions.empty())
+        complete_operation(Runtime::merge_events(complete_preconditions));
+      else
+        complete_operation();
     }
 
     /////////////////////////////////////////////////////////////

@@ -374,7 +374,6 @@ namespace Legion {
       LG_DEFER_VERIFY_PARTITION_TASK_ID,
       LG_MALLOC_INSTANCE_TASK_ID,
       LG_FREE_INSTANCE_TASK_ID,
-      LG_FIELD_SIZE_TASK_ID,
       LG_YIELD_TASK_ID,
       LG_MESSAGE_ID, // These two must be the last two
       LG_RETRY_SHUTDOWN_TASK_ID,
@@ -503,7 +502,6 @@ namespace Legion {
         "Defer Verify Partition",                                 \
         "Malloc Instance",                                        \
         "Free Instance",                                          \
-        "Field Size Resolution",                                  \
         "Yield",                                                  \
         "Remote Message",                                         \
         "Retry Shutdown",                                         \
@@ -694,6 +692,7 @@ namespace Legion {
       SEND_FIELD_SPACE_RETURN,
       SEND_FIELD_ALLOC_REQUEST,
       SEND_FIELD_ALLOC_NOTIFICATION,
+      SEND_FIELD_SIZE_UPDATE,
       SEND_FIELD_SPACE_TOP_ALLOC,
       SEND_FIELD_FREE,
       SEND_FIELD_SPACE_LAYOUT_INVALIDATION,
@@ -865,6 +864,7 @@ namespace Legion {
         "Send Field Space Return",                                    \
         "Send Field Alloc Request",                                   \
         "Send Field Alloc Notification",                              \
+        "Send Field Size Update",                                     \
         "Send Field Space Top Alloc",                                 \
         "Send Field Free",                                            \
         "Send Field Space Layout Invalidation",                       \
