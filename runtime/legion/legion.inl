@@ -1522,6 +1522,9 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
           if (gpu_warning)
             check_gpu_warning();
+          // Note that in CUDA this function is likely being inlined
+          // everywhere and we can't afford to instantiate templates
+          // for every single dimension so do things untyped
           if (!has_transform)
           {
             // This is imprecise because we can't see the 
@@ -1531,24 +1534,6 @@ namespace Legion {
           }
           else
             return bounds.contains_bounds_only(transform[DomainPoint(p)]);
-#if 0 // This code is still here to help with debugging an nvcc bug
-          switch (M)
-          {
-            // This is imprecise because we can't see the 
-            // Realm index space on the GPU
-#define DIMFUNC(DIM) \
-            case DIM: \
-              { \
-                const Rect<DIM,T> b = bounds.bounds<DIM,T>(); \
-                const AffineTransform<DIM,N,T> t = transform; \
-                return b.contains(t[p]); \
-              }
-            LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
-            default:
-              assert(false);
-          }
-#endif
 #else
           if (!has_transform)
           {
@@ -1597,28 +1582,6 @@ namespace Legion {
             const Rect<N,T> b = bounds.bounds<N,T>();
             return b.contains(r);
           }
-#if 0 // This code is still here to help with debugging an nvcc bug
-          // If we have a transform then we have to do each point separately
-          switch (M)
-          {
-            // This is imprecise because we can't see the 
-            // Realm index space on the GPU
-#define DIMFUNC(DIM) \
-            case DIM: \
-              { \
-                const Rect<DIM,T> b = bounds.bounds<DIM,T>(); \
-                const AffineTransform<DIM,N,T> t = transform; \
-                for (PointInRectIterator<N,T> itr(r); itr(); itr++) \
-                  if (!b.contains(t[*itr])) \
-                    return false; \
-                return true; \
-              }
-            LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
-            default:
-              assert(false);
-          }
-#endif
 #else
           if (!has_transform)
           {
