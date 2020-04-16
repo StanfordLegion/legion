@@ -435,6 +435,10 @@ namespace Legion {
   protected:
   public:
     IDType is_id;
+#ifdef __CUDA_ARCH__
+    // Work around an internal nvcc bug by marking this volatile 
+    volatile
+#endif
     int dim;
     coord_t rect_data[2 * MAX_RECT_DIM];
   };
