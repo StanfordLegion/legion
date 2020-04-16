@@ -1,0 +1,6 @@
+project = "Regent"
+description = "Regent Standard Library"
+title = "Regent Documentation"
+file = "./src/std"
+format = "pandoc"
+pretty = "none"
