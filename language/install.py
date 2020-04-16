@@ -179,7 +179,7 @@ def install_terra(terra_dir, terra_url, terra_branch, use_cmake, cmake_exe,
 
     if not os.path.exists(terra_dir):
         if terra_url is None:
-            terra_url = 'https://github.com/zdevito/terra.git'
+            terra_url = 'https://github.com/terralang/terra.git'
         if terra_branch is None:
             terra_branch = 'master'
         git_clone(terra_dir, terra_url, terra_branch)
@@ -188,6 +188,34 @@ def install_terra(terra_dir, terra_url, terra_branch, use_cmake, cmake_exe,
             raise Exception('Terra URL/branch must be set on first install, please delete the terra directory and try again')
         git_update(terra_dir)
     build_terra(terra_dir, terra_branch, use_cmake, cmake_exe, thread_count, llvm)
+
+def install_luarocks(terra_dir, luarocks_dir):
+    if not os.path.exists(luarocks_dir):
+        # For now we need to use Git until the following patch makes
+        # it into a release:
+        # https://github.com/luarocks/luarocks/commit/708fed20d013e69fd79d80f0b59a45a25eed3a00
+        luarocks_url = 'https://github.com/luarocks/luarocks.git'
+        luarocks_branch = 'master'
+        git_clone(luarocks_dir, luarocks_url, luarocks_branch)
+
+    luarocks_prefix = os.path.join(terra_dir, 'release')
+    luarocks_exe = os.path.join(luarocks_prefix, 'bin', 'luarocks')
+    if not os.path.exists(luarocks_exe):
+        subprocess.check_call(
+            [os.path.join(luarocks_dir, 'configure'),
+             '--prefix=%s' % luarocks_prefix,
+             '--with-lua=%s' % luarocks_prefix,
+             '--with-lua-include=%s' % os.path.join(luarocks_prefix, 'include', 'terra'),
+             '--with-lua-interpreter=terra'],
+            cwd=luarocks_dir)
+        # Hack: This throws an error but we'll keep going anyway...
+        subprocess.call(['make'], cwd=luarocks_dir)
+        subprocess.check_call(['make', 'install'], cwd=luarocks_dir)
+
+    ldoc_exe = os.path.join(luarocks_prefix, 'bin', 'ldoc')
+    if not os.path.exists(ldoc_exe):
+        ldoc_url = 'https://raw.githubusercontent.com/StanfordLegion/LDoc/master/ldoc-scm-2.rockspec'
+        subprocess.check_call([luarocks_exe, 'install', ldoc_url])
 
 def symlink(from_path, to_path):
     if not os.path.lexists(to_path):
@@ -359,6 +387,8 @@ def install(gasnet=False, cuda=False, openmp=False, python=False, llvm=False, hd
     terra_dir = os.path.join(regent_dir, 'terra')
     install_terra(terra_dir, terra_url, terra_branch, terra_use_cmake, cmake_exe,
                   external_terra_dir, thread_count, llvm)
+    luarocks_dir = os.path.join(terra_dir, 'luarocks')
+    install_luarocks(terra_dir, luarocks_dir)
 
     bindings_dir = os.path.join(legion_dir, 'bindings', 'regent')
     python_bindings_dir = os.path.join(legion_dir, 'bindings', 'python')
