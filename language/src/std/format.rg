@@ -12,67 +12,69 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
---- Utilities for formatted printing.
---
--- This module provides macros for formatted printing that are
--- integrated into the Regent language.
---
--- A basic example if the `println` macro, which prints format string
--- followed by a newline. Each location where `{}` appears is replaced
--- by the value of one of the arguments. Arguments are referred to in
--- sequence; there is currently no facility to refer to an arguments
--- explicitly by number or by name.
---
--- ```
--- println("Hello {} {} {} world!", 123, 3.14, "asdf")
--- ```
---
--- Note that the types of the arguments are inferred automatically, so
--- there is no need to use a format specifier, aside from when a
--- specific style is desired.
---
--- Styles and other arguments for formatting are always optional, and
--- are included inside the `{}`. For example, `{x}` formats an integer
--- as hexadecimal, and `{.3}` formats a floating point number with 3
--- decimal places. Examples:
---
--- ```
--- println("{7x}", 123) -- Format as hex, padded on the left up to 7 spaces
--- println("{e}", 12.4) -- Format in scientific notation
--- println{"{09}", 123) -- Format padded on the left by up to 9 zeroes
--- ```
---
--- ## Format Specifiers
---
--- The general form of a format specifier is:
---
--- ```
--- {[padding][.precision][style]}
--- ```
---
--- Currently the following values are supported for each field:
---
---   * Padding: must match `[0-9]*`. Specifies
---     the minimum number of spaces the formatted value must
---     occupy. If the formatted value is at least this number of
---     spaces (or greater), nothing is done. If the formatted value is
---     smaller, then it is padded on the left with spaces (or zeroes,
---     if the padding value starts with a leading `0`) to ensure that
---     the field as a whole occupies the padding number of spaces.
---
---   * Precision: must be a literal period (`.`) followed by
---     `[0-9]+`. Specifies the number of decimal places used to format
---     a floating point value.
---
---   * Style: must match `[ex]`. Each letter specifies a different
---     style. Note that styles may require specific types. Currently
---     the following styles are supported:
---
---       * `e`: The exponential style. Requires a floating point
---         value.
---       * `x`: The hexadecimal style. Requires an integer value.
---
--- @module std.format
+--[[--
+Utilities for formatted printing.
+
+This module provides macros for formatted printing that are
+integrated into the Regent language.
+
+A basic example if the `println` macro, which prints format string
+followed by a newline. Each location where `{}` appears is replaced
+by the value of one of the arguments. Arguments are referred to in
+sequence; there is currently no facility to refer to an arguments
+explicitly by number or by name.
+
+```lua
+println("Hello {} {} {} world!", 123, 3.14, "asdf")
+```
+
+Note that the types of the arguments are inferred automatically, so
+there is no need to use a format specifier, aside from when a
+specific style is desired.
+
+Styles and other arguments for formatting are always optional, and
+are included inside the `{}`. For example, `{x}` formats an integer
+as hexadecimal, and `{.3}` formats a floating point number with 3
+decimal places. Examples:
+
+```lua
+println("{7x}", 123) -- Format as hex, padded on the left up to 7 spaces
+println("{e}", 12.4) -- Format in scientific notation
+println{"{09}", 123) -- Format padded on the left by up to 9 zeroes
+```
+
+## Format Specifiers
+
+The general form of a format specifier is:
+
+```
+{[padding][.precision][style]}
+```
+
+Currently the following values are supported for each field:
+
+  * Padding: must match `[0-9]*`. Specifies
+    the minimum number of spaces the formatted value must
+    occupy. If the formatted value is at least this number of
+    spaces (or greater), nothing is done. If the formatted value is
+    smaller, then it is padded on the left with spaces (or zeroes,
+    if the padding value starts with a leading `0`) to ensure that
+    the field as a whole occupies the padding number of spaces.
+
+  * Precision: must be a literal period (`.`) followed by
+    `[0-9]+`. Specifies the number of decimal places used to format
+    a floating point value.
+
+  * Style: must match `[ex]`. Each letter specifies a different
+    style. Note that styles may require specific types. Currently
+    the following styles are supported:
+
+      * `e`: The exponential style. Requires a floating point
+        value.
+      * `x`: The hexadecimal style. Requires an integer value.
+
+@module std.format
+]]
 
 import "regent"
 
