@@ -198,7 +198,13 @@ def install_luarocks(terra_dir, luarocks_dir):
         luarocks_branch = 'master'
         git_clone(luarocks_dir, luarocks_url, luarocks_branch)
 
-    luarocks_prefix = os.path.join(terra_dir, 'release')
+    if os.path.exists(os.path.join(terra_dir, 'bin', 'terra')):
+        luarocks_prefix = os.path.join(terra_dir)
+    elif os.path.exists(os.path.join(terra_dir, 'release', 'bin', 'terra')):
+        luarocks_prefix = os.path.join(terra_dir, 'release')
+    else:
+        raise Exception('Unable to determine correct prefix for LuaRocks installation')
+
     luarocks_exe = os.path.join(luarocks_prefix, 'bin', 'luarocks')
     if not os.path.exists(luarocks_exe):
         subprocess.check_call(
@@ -387,7 +393,7 @@ def install(gasnet=False, cuda=False, openmp=False, python=False, llvm=False, hd
     terra_dir = os.path.join(regent_dir, 'terra')
     install_terra(terra_dir, terra_url, terra_branch, terra_use_cmake, cmake_exe,
                   external_terra_dir, thread_count, llvm)
-    luarocks_dir = os.path.join(terra_dir, 'luarocks')
+    luarocks_dir = os.path.join(regent_dir, 'luarocks')
     install_luarocks(terra_dir, luarocks_dir)
 
     bindings_dir = os.path.join(legion_dir, 'bindings', 'regent')
