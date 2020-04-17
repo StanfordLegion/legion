@@ -199,19 +199,20 @@ def install_luarocks(terra_dir, luarocks_dir):
         git_clone(luarocks_dir, luarocks_url, luarocks_branch)
 
     if os.path.exists(os.path.join(terra_dir, 'bin', 'terra')):
-        luarocks_prefix = os.path.join(terra_dir)
+        terra_prefix = os.path.join(terra_dir)
     elif os.path.exists(os.path.join(terra_dir, 'release', 'bin', 'terra')):
-        luarocks_prefix = os.path.join(terra_dir, 'release')
+        terra_prefix = os.path.join(terra_dir, 'release')
     else:
         raise Exception('Unable to determine correct prefix for LuaRocks installation')
 
+    luarocks_prefix = os.path.join(luarocks_dir, 'install')
     luarocks_exe = os.path.join(luarocks_prefix, 'bin', 'luarocks')
     if not os.path.exists(luarocks_exe):
         subprocess.check_call(
             [os.path.join(luarocks_dir, 'configure'),
              '--prefix=%s' % luarocks_prefix,
-             '--with-lua=%s' % luarocks_prefix,
-             '--with-lua-include=%s' % os.path.join(luarocks_prefix, 'include', 'terra'),
+             '--with-lua=%s' % terra_prefix,
+             '--with-lua-include=%s' % os.path.join(terra_prefix, 'include', 'terra'),
              '--with-lua-interpreter=terra'],
             cwd=luarocks_dir)
         # Hack: This throws an error but we'll keep going anyway...
