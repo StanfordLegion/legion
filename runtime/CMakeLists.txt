@@ -294,24 +294,60 @@ if(Legion_USE_Kokkos)
   # realm/kokkos_interop.cc needs to be compiled like a kokkos application, so
   #  get kokkos' compile options, include dirs - do this by creating a subtarget
   #  that can import Kokkos::kokkoscore
-  add_library(realm_kokkosinterop OBJECT realm/kokkos_interop.cc)
-  set_target_properties(realm_kokkosinterop PROPERTIES POSITION_INDEPENDENT_CODE ON)
-  target_include_directories(realm_kokkosinterop PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${PROJECT_BINARY_DIR}/runtime)
-  target_link_libraries(realm_kokkosinterop PRIVATE Kokkos::kokkoscore)
-  # older cmakes (e.g. 3.13.0) don't export link requirements for
-  #  private dependencies, so we do it ourselves
-  set_target_properties(realm_kokkosinterop PROPERTIES
-    INTERFACE_LINK_LIBRARIES "\$<LINK_ONLY:Kokkos::kokkoscore>")
-  
-  if(Legion_USE_CUDA AND (CMAKE_CXX_COMPILER_ID STREQUAL "Clang"))
-    target_compile_options(realm_kokkosinterop PRIVATE "--cuda-path=${CUDA_TOOLKIT_ROOT_DIR}")
+
+  # unfortunately, building like Kokkos means using Kokkos' choice of C++
+  #  compiler, and cmake really doesn't want to make that easy - we have to
+  #  do the build as a custom command and construct the entire command line
+  #  ourselves
+
+  # start with compile options exported by kokkos, but we have to parse the
+  #  generator expressions ourselves...
+  get_property(kokkos_compile_options TARGET Kokkos::kokkoscore PROPERTY INTERFACE_COMPILE_OPTIONS)
+  string(REGEX REPLACE "\\$<\\$<COMPILE_LANGUAGE:CXX>:([^<>]*)>" \\1 kokkos_compile_options "${kokkos_compile_options}")
+  string(REGEX REPLACE "\\$<\\$<COMPILE_LANGUAGE:.+>:([^<>]*)>" "" kokkos_compile_options "${kokkos_compile_options}")
+
+  # now add on our own cxx flags, dealing with the whole strings vs lists thing
+  set(cxx_flags_as_list ${CMAKE_CXX_FLAGS} -fPIC ${CXX_BUILD_WARNING_FLAGS})
+  if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    string(APPEND cxx_flags_as_list " ${CMAKE_CXX_FLAGS_DEBUG}")
+  endif()
+  if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    string(APPEND cxx_flags_as_list " ${CMAKE_CXX_FLAGS_RELEASE}")
+  endif()
+  separate_arguments(cxx_flags_as_list)
+  list(APPEND kokkos_compile_options ${cxx_flags_as_list})
+
+  # next up is include directories...
+  get_property(kokkos_include_dirs
+               TARGET Kokkos::kokkoscore
+               PROPERTY INTERFACE_INCLUDE_DIRECTORIES)
+  list(TRANSFORM kokkos_include_dirs PREPEND "-I")
+  list(APPEND kokkos_compile_options ${kokkos_include_dirs}
+                                     "-I${CMAKE_CURRENT_SOURCE_DIR}"
+                                     "-I${PROJECT_BINARY_DIR}/runtime")
+
+  # and then finally, tell clang (if it is clang) where to find CUDA
+  if(Legion_USE_CUDA AND (KOKKOS_CXX_COMPILER MATCHES ".*clang.*"))
+    list(APPEND kokkos_compile_options "--cuda-path=${CUDA_TOOLKIT_ROOT_DIR}")
   endif()
 
-  install(TARGETS realm_kokkosinterop EXPORT LegionTargets)
-  target_link_libraries(RealmRuntime PRIVATE realm_kokkosinterop)
+  # now define our custom build command
+  add_custom_command(OUTPUT realm_kokkos_interop.cc.o
+                     COMMAND ${KOKKOS_CXX_COMPILER}
+                             ${kokkos_compile_options}
+                             -c ${CMAKE_CURRENT_SOURCE_DIR}/realm/kokkos_interop.cc
+                             -o ${CMAKE_CURRENT_BINARY_DIR}/realm_kokkos_interop.cc.o
+                     IMPLICIT_DEPENDS CXX ${CMAKE_CURRENT_SOURCE_DIR}/realm/kokkos_interop.cc
+                     VERBATIM)
 
+  # add our object file to the realm library
+  target_sources(RealmRuntime PRIVATE
+                 ${CMAKE_CURRENT_BINARY_DIR}/realm_kokkos_interop.cc.o)
+
+  # and add kokkos libraries to our exported library requirements
+  set_property(TARGET RealmRuntime APPEND
+    PROPERTY INTERFACE_LINK_LIBRARIES "\$<LINK_ONLY:Kokkos::kokkoscore>")
+  
   # if Kokkos' CUDA target is enabled, and we're performing runtime hijack,
   #  rewrite Kokkos' cudart dependency to be on Realm instead
   if(Kokkos_ENABLE_CUDA AND Legion_HIJACK_CUDART)
@@ -417,7 +453,7 @@ if(Legion_REDOP_COMPLEX)
   list(APPEND LEGION_SRC mathtypes/complex.h)
 endif()
 
-if(Legion_USE_CUDA)
+if(Legion_GPU_REDUCTIONS)
   list(APPEND LEGION_CUDA_SRC
     legion/legion_redop.cu
   )
