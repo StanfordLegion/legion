@@ -394,8 +394,8 @@ def install(gasnet=False, cuda=False, openmp=False, python=False, llvm=False, hd
     terra_dir = os.path.join(regent_dir, 'terra')
     install_terra(terra_dir, terra_url, terra_branch, terra_use_cmake, cmake_exe,
                   external_terra_dir, thread_count, llvm)
-    luarocks_dir = os.path.join(regent_dir, 'luarocks')
-    install_luarocks(terra_dir, luarocks_dir)
+    # luarocks_dir = os.path.join(regent_dir, 'luarocks')
+    # install_luarocks(terra_dir, luarocks_dir)
 
     bindings_dir = os.path.join(legion_dir, 'bindings', 'regent')
     python_bindings_dir = os.path.join(legion_dir, 'bindings', 'python')
