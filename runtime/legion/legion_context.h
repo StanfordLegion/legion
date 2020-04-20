@@ -31,8 +31,7 @@ namespace Legion {
      * provide all the methods for handling the 
      * execution of a task at runtime.
      */
-    class TaskContext : public ContextInterface, 
-                        public ResourceTracker, public Collectable {
+    class TaskContext : public ResourceTracker, public Collectable {
     public:
       class AutoRuntimeCall {
       public:

@@ -6582,10 +6582,19 @@ namespace Legion {
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::legion_task_postamble(Runtime *runtime,Context ctx,
                                                    const void *retvalptr,
-                                                   size_t retvalsize)
+                                                   size_t retvalsize,
+                                                   bool owned,
+#ifdef LEGION_MALLOC_INSTANCES
+                                                   uintptr_t allocation,
+#endif
+                                                   Realm::RegionInstance inst)
     //--------------------------------------------------------------------------
     {
-      ctx->end_task(retvalptr, retvalsize, false/*owned*/);
+#ifdef LEGION_MALLOC_INSTANCES
+      ctx->end_task(retvalptr, retvalsize, owned, allocation, inst);
+#else
+      ctx->end_task(retvalptr, retvalsize, owned, inst);
+#endif
     }
 
     //--------------------------------------------------------------------------

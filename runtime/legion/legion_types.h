@@ -1422,37 +1422,12 @@ namespace Legion {
     class RemoteTask;
 
     // legion_context.h
-    /**
-     * \class ContextInterface
-     * This is a pure virtual class so users don't try to use it. 
-     * It defines the context interface that the task wrappers use 
-     * for getting access to context data when running a task.
-     */
     class TaskContext;
     class InnerContext;;
     class TopLevelContext;
     class RemoteContext;
     class LeafContext;
     class InlineContext;
-    class ContextInterface {
-    public:
-      virtual Task* get_task(void) = 0;
-      virtual const std::vector<PhysicalRegion>& begin_task(
-                                      Legion::Runtime *&rt) = 0;
-      virtual void end_task(const void *result, 
-                            size_t result_size, bool owned, 
-#ifdef LEGION_MALLOC_INSTANCES
-                            uintptr_t allocation = 0,
-#endif
-          Realm::RegionInstance inst = Realm::RegionInstance::NO_INST) = 0;
-      // This is safe because we see in legion_context.h that
-      // TaskContext implements this interface and no one else
-      // does. If only C++ implemented forward declarations of
-      // inheritence then we wouldn't have this dumb problem
-      // (mixin classes anyone?).
-      inline TaskContext* as_context(void) 
-        { return reinterpret_cast<TaskContext*>(this); }
-    };
 
     // Nasty global variable for TLS support of figuring out
     // our context implicitly
@@ -1785,7 +1760,6 @@ namespace Legion {
   // Magical typedefs 
   // (don't forget to update ones in old HighLevel namespace in legion.inl)
   typedef Internal::TaskContext* Context;
-  typedef Internal::ContextInterface* InternalContext;
   // Anothing magical typedef
   namespace Mapping {
     typedef Internal::MappingCallInfo* MapperContext;
