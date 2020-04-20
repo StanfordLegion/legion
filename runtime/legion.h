@@ -8021,6 +8021,13 @@ namespace Legion {
        * @return the context for the enclosing task in which we are executing
        */
       static Context get_context(void);
+
+      /**
+       * Get the task object associated with a context
+       * @param ctx enclosing processor context
+       * @return the task representation of the context
+       */
+      static const Task* get_context_task(Context ctx);
     private:
       IndexPartition create_restricted_partition(Context ctx,
                                       IndexSpace parent,

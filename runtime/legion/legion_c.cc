@@ -5628,8 +5628,8 @@ legion_mappable_as_inline_mapping(legion_mappable_t mappable_)
 legion_unique_id_t
 legion_context_get_unique_id(legion_context_t ctx_)
 {
-  Task* task =
-    reinterpret_cast<Task*>(CObjectWrapper::unwrap(ctx_)->context());
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  const Task *task = Runtime::get_context_task(ctx);
   return task->get_unique_id();
 }
 
