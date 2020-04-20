@@ -114,6 +114,9 @@ if(COMPILER_SUPPORTS_MVSX)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mvsx")
 endif()
 
+# detect use of the cxx_defcheck wrapper and enable build checks
+check_cxx_compiler_flag("--defcheck __test__" COMPILER_SUPPORTS_DEFCHECK)
+
 #------------------------------------------------------------------------------#
 # Optimizations
 #------------------------------------------------------------------------------#
