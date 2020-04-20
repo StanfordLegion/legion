@@ -9,6 +9,7 @@ variables:
   REALM_BACKTRACE: "1"
   REALM_SYNTHETIC_CORE_MAP: "" # Disable Realm thread pinning.
   TIMELIMIT: "600"  # each test should take less than 10 minutes
+  USE_DEFCHECK: "1"
 
 # Local variables (included on a case-by-case basis in each job):
 .gcc48: &gcc48
@@ -365,6 +366,14 @@ before_script:
     - grep 'model name' /proc/cpuinfo | uniq -c || true
     - which $CXX
     - $CXX --version
+    - |
+      if [[ "$USE_DEFCHECK" -eq 1 ]]; then
+        export DEFCHECK_CXX="${CXX}"
+        export CXX=`pwd`/tools/cxx_defcheck
+        # if we're using MPI, make sure mpicxx uses the right compiler too
+        export OMPI_CXX=`pwd`/tools/cxx_defcheck
+        export MPICH_CXX=`pwd`/tools/cxx_defcheck
+      fi
     - free
     - $TEST_PYTHON_EXE ./test.py
   retry:
@@ -382,6 +391,7 @@ before_script:
         eval $(ssh-agent -s)
         ssh-add <(echo "$GITLAB_DEPLOY_KEY")
       fi
+    - unset USE_DEFCHECK
     - $TEST_PYTHON_EXE ./test.py --test=external --test=private
   retry:
     max: 0
