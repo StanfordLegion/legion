@@ -222,7 +222,6 @@ set_target_properties(RealmRuntime PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(RealmRuntime PROPERTIES SOVERSION ${SOVERSION})
 
 if(Legion_USE_HWLOC)
-  target_compile_definitions(RealmRuntime PRIVATE REALM_USE_HWLOC)
   target_link_libraries(RealmRuntime PRIVATE HWLOC::HWLOC)
 endif()
 

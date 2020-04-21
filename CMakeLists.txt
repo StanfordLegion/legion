@@ -358,6 +358,7 @@ if(Legion_USE_HWLOC)
   install(FILES ${Legion_SOURCE_DIR}/cmake/FindHWLOC.cmake
     DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
   )
+  set(REALM_USE_HWLOC ON)
 endif()
 
 #------------------------------------------------------------------------------#

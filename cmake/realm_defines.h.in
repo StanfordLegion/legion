@@ -52,3 +52,5 @@
 
 #cmakedefine REALM_USE_LIBDL
 #cmakedefine REALM_USE_DLMOPEN
+
+#cmakedefine REALM_USE_HWLOC
