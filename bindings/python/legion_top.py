@@ -27,6 +27,7 @@ import struct
 import readline
 import threading
 import importlib
+import traceback
 
 from legion_cffi import ffi, lib as c
 
@@ -129,8 +130,11 @@ def run_cmd(cmd, run_name=None):
     # Hide the current module if it exists.
     old_module = sys.modules.get(run_name)
     sys.modules[run_name] = module
-    code = compile(cmd, '<string>', 'eval')
-    exec(code, module.__dict__, module.__dict__)
+    try:
+        code = compile(cmd, '<string>', 'exec')
+        exec(code, module.__dict__, module.__dict__)
+    except SyntaxError as ex:
+        traceback.print_exception(SyntaxError,ex,sys.exc_info()[2],0)
     # Wait for execution to finish here before removing the module
     # because executing tasks might still need to refer to it
     future = c.legion_runtime_issue_execution_fence(
@@ -164,9 +168,14 @@ def run_path(filename, run_name=None):
 
     sys.path.append(os.path.dirname(filename))
 
-    with open(filename) as f:
-        code = compile(f.read(), filename, 'exec')
-        exec(code, module.__dict__, module.__dict__)
+    try:
+        with open(filename) as f:
+            code = compile(f.read(), filename, 'exec')
+            exec(code, module.__dict__, module.__dict__)
+    except FileNotFoundError as ex:
+        print("legion_python: can't open file "+str(filename)+": "+str(ex))
+    except SyntaxError as ex:
+        traceback.print_exception(SyntaxError,ex,sys.exc_info()[2],0)
     # Wait for execution to finish here before removing the module
     # because executing tasks might still need to refer to it
     future = c.legion_runtime_issue_execution_fence(
@@ -279,15 +288,19 @@ def legion_python_main(raw_args, user_data, proc):
         local_cleanup = False
     else:
         local_cleanup = True
-    if len(args) < (start+1) or args[start] == '-':
+    if len(args) < (start+1):
+        sys.argv = ['']
+        run_repl()
+    elif args[start] == '-':
+        sys.argv = args[start:]
         run_repl()
     elif args[start] == '-c':
         assert len(args) >= 3
-        sys.argv = list(args)
+        sys.argv = ['-c'] + list(args[start+2:])
         run_cmd(args[start+1], run_name='__main__')
     else:
-        assert len(args) >= (start+1) 
-        sys.argv = list(args)
+        assert start < len(args)
+        sys.argv = list(args[start:])
         run_path(args[start], run_name='__main__')
 
     if local_cleanup:
