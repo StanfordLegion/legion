@@ -14,6 +14,9 @@
 # limitations under the License.
 #
 
+# These flags are used to control compiler/linker settings, but should not
+#  contain Legion/Realm-configuration-related flags - those should go in
+#  {LEGION,REALM}_CC_FLAGS below
 CC_FLAGS ?=
 FC_FLAGS ?=
 LD_FLAGS ?=
@@ -185,15 +188,11 @@ endif
 
 USE_HALF ?= 0
 ifeq ($(strip $(USE_HALF)),1)
-  CC_FLAGS += -DLEGION_REDOP_HALF
-  NVCC_FLAGS += -DLEGION_REDOP_HALF
   LEGION_CC_FLAGS += -DLEGION_REDOP_HALF
 endif
 
 USE_COMPLEX ?= 0
 ifeq ($(strip $(USE_COMPLEX)),1)
-  CC_FLAGS += -DLEGION_REDOP_COMPLEX
-  NVCC_FLAGS += -DLEGION_REDOP_COMPLEX
   LEGION_CC_FLAGS += -DLEGION_REDOP_COMPLEX
 endif
 
@@ -245,18 +244,29 @@ ifeq ($(strip $(USE_LLVM)),1)
   endif
   LLVM_VERSION_NUMBER := $(shell $(LLVM_CONFIG) --version | cut -c1,3)
   REALM_CC_FLAGS += -DREALM_USE_LLVM -DREALM_LLVM_VERSION=$(LLVM_VERSION_NUMBER)
+
   # NOTE: do not use these for all source files - just the ones that include llvm include files
   LLVM_CXXFLAGS ?= -std=c++11 -I$(shell $(LLVM_CONFIG) --includedir)
-  ifeq ($(LLVM_VERSION_NUMBER),35)
-    LLVM_LIBS += $(shell $(LLVM_CONFIG) --ldflags --libs irreader jit mcjit x86)
+
+  # realm can be configured to allow LLVM library linkage to be optional
+  #  (i.e. a per-application choice)
+  LLVM_LIBS_OPTIONAL ?= 0
+  ifeq ($(strip $(LLVM_LIBS_OPTIONAL)),1)
+    REALM_CC_FLAGS += -DREALM_ALLOW_MISSING_LLVM_LIBS
   else
-    LLVM_LIBS += $(shell $(LLVM_CONFIG) --ldflags --libs irreader mcjit x86)
+    ifeq ($(LLVM_VERSION_NUMBER),35)
+      LLVM_LIBS += $(shell $(LLVM_CONFIG) --ldflags --libs irreader jit mcjit x86)
+    else
+      LLVM_LIBS += $(shell $(LLVM_CONFIG) --ldflags --libs irreader mcjit x86)
+    endif
+    LEGION_LD_FLAGS += $(LLVM_LIBS)
   endif
+
   # llvm-config --system-libs gives you all the libraries you might need for anything,
   #  which includes things we don't need, and might not be installed
   # by default, filter out libedit
   LLVM_SYSTEM_LIBS ?= $(filter-out -ledit,$(shell $(LLVM_CONFIG) --system-libs))
-  LEGION_LD_FLAGS += $(LLVM_LIBS) $(LLVM_SYSTEM_LIBS)
+  LEGION_LD_FLAGS += $(LLVM_SYSTEM_LIBS)
 endif
 
 OMP_FLAGS ?=
@@ -346,13 +356,11 @@ ifeq ($(strip $(USE_DLMOPEN)),1)
     $(error USE_DLMOPEN requires USE_LIBDL)
   endif
 
-  CC_FLAGS += -DREALM_USE_DLMOPEN
-  FC_FLAGS += -DREALM_USE_DLMPOPN
+  REALM_CC_FLAGS += -DREALM_USE_DLMOPEN
 endif
 
 USE_SPY ?= 0
 ifeq ($(strip $(USE_SPY)),1)
-  CC_FLAGS	+= -DLEGION_SPY
   LEGION_CC_FLAGS += -DLEGION_SPY
 endif
 
@@ -615,8 +623,12 @@ endif
 
 BOUNDS_CHECKS ?= 0
 ifeq ($(strip $(BOUNDS_CHECKS)),1)
-CC_FLAGS	+= -DBOUNDS_CHECKS
 LEGION_CC_FLAGS	+= -DBOUNDS_CHECKS
+endif
+
+PRIVILEGE_CHECKS ?= 0
+ifeq ($(strip $(PRIVILEGE_CHECKS)),1)
+LEGION_CC_FLAGS	+= -DPRIVILEGE_CHECKS
 endif
 
 # DEBUG_TSAN=1 enables thread sanitizer (data race) checks
@@ -627,14 +639,12 @@ endif
 
 # Set maximum number of dimensions
 ifneq ($(strip ${MAX_DIM}),)
-CC_FLAGS	+= -DLEGION_MAX_DIM=$(MAX_DIM)
 REALM_CC_FLAGS	+= -DREALM_MAX_DIM=$(MAX_DIM)
 LEGION_CC_FLAGS	+= -DLEGION_MAX_DIM=$(MAX_DIM)
 endif
 
 # Set maximum number of fields
 ifneq ($(strip ${MAX_FIELDS}),)
-CC_FLAGS	+= -DLEGION_MAX_FIELDS=$(MAX_FIELDS)
 LEGION_CC_FLAGS	+= -DLEGION_MAX_FIELDS=$(MAX_FIELDS)
 endif
 

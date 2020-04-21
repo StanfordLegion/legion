@@ -164,8 +164,8 @@ number of build flags. These flags may be added to variables in the
 environment (or again set inside the Makefile).
 
   * `USE_SPY=1`: enables [Legion Spy](http://legion.stanford.edu/debugging/#legion-spy).
-  * `CC_FLAGS=-DPRIVILEGE_CHECKS`: enables [extra privilege checks](http://legion.stanford.edu/debugging/#privilege-checks).
-  * `CC_FLAGS=-DBOUNDS_CHECKS`: enables [dynamic bounds checks](http://legion.stanford.edu/debugging/#bounds-checks).
+  * `PRIVILEGE_CHECKS=1`: enables [extra privilege checks](http://legion.stanford.edu/debugging/#privilege-checks).
+  * `BOUNDS_CHECKS=1`: enables [dynamic bounds checks](http://legion.stanford.edu/debugging/#bounds-checks).
 
 ## Command-Line Flags
 
@@ -207,7 +207,7 @@ Legion has a number of tools to aid in debugging programs.
 
 ### Extended Correctness Checks
 
-Compile with `DEBUG=1 CC_FLAGS="-DPRIVILEGE_CHECKS -DBOUNDS_CHECKS"
+Compile with `DEBUG=1 PRIVILEGE_CHECKS=1 BOUNDS_CHECKS=1"
 make` and rerun the application. This enables dynamic checks for
 privilege and out-of-bounds errors in the application. (These checks
 are not enabled by default because they are relatively expensive.) If

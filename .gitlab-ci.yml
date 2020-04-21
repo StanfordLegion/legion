@@ -65,22 +65,20 @@ variables:
 .spy: &spy
   USE_SPY: "1"
 
+.checks: &checks
+  BOUNDS_CHECKS: "1"
+  PRIVILEGE_CHECKS: "1"
+
 .cxx98_normal: &cxx98_normal
   CC_FLAGS: "-std=c++98"
-.cxx98_checks: &cxx98_checks
-  CC_FLAGS: "-std=c++98 -DPRIVILEGE_CHECKS -DBOUNDS_CHECKS"
 .cxx11_normal: &cxx11_normal
   CC_FLAGS: "-std=c++11"
 .cxx11_hardened: &cxx11_hardened
   CC_FLAGS: "-std=c++11 -D_FORTIFY_SOURCE=2 -D_GLIBCXX_ASSERTIONS"
 .cxx14_normal: &cxx14_normal
   CC_FLAGS: "-std=c++14"
-.cxx14_checks: &cxx14_checks
-  CC_FLAGS: "-std=c++14 -DPRIVILEGE_CHECKS -DBOUNDS_CHECKS"
 .cxx17_normal: &cxx17_normal
   CC_FLAGS: "-std=c++17"
-.cxx17_checks: &cxx17_checks
-  CC_FLAGS: "-std=c++17 -DPRIVILEGE_CHECKS -DBOUNDS_CHECKS"
 .cxx98_32bit_normal: &cxx98_32bit_normal
   CC_FLAGS: "-std=c++98 -m32"
   LD_FLAGS: "-m32"
@@ -446,7 +444,7 @@ gcc49_cxx98_release_llvm_cmake_regent:
 gcc49_cxx98_debug_checks_legion:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *debug, *cxx98_checks, *legion]
+    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *checks, *legion]
 #   * Spy
 gcc49_cxx98_debug_spy_legion:
   <<: [*linux, *image, *tests]
@@ -630,7 +628,7 @@ clang38_cxx98_release_llvm_cmake_regent:
 clang38_cxx98_debug_checks_legion:
   <<: [*linux, *image_clang, *tests]
   variables:
-    <<: [*clang38, *terra38, *debug, *cxx98_checks, *legion]
+    <<: [*clang38, *terra38, *debug, *cxx98_normal, *checks, *legion]
 #   * Spy
 clang38_cxx98_debug_spy_legion:
   <<: [*linux, *image_clang, *tests]
@@ -806,7 +804,7 @@ gcc6_cxx98_debug_regent:
 gcc6_cxx14_debug_legion:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc6, *terra38, *debug, *cxx14_checks, *legion]
+    <<: [*gcc6, *terra38, *debug, *cxx14_normal, *checks, *legion]
 gcc6_cxx14_debug_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
@@ -814,7 +812,7 @@ gcc6_cxx14_debug_regent:
 gcc7_cxx14_debug_legion:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc7, *terra38, *debug, *cxx14_checks, *legion]
+    <<: [*gcc7, *terra38, *debug, *cxx14_normal, *checks, *legion]
 gcc7_cxx14_debug_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
@@ -822,7 +820,7 @@ gcc7_cxx14_debug_regent:
 gcc7_cxx17_debug_legion:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc7, *terra38, *debug, *cxx17_checks, *legion]
+    <<: [*gcc7, *terra38, *debug, *cxx17_normal, *checks, *legion]
 gcc7_cxx17_debug_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
@@ -830,7 +828,7 @@ gcc7_cxx17_debug_regent:
 gcc8_cxx17_debug_legion:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc8, *terra38, *debug, *cxx17_checks, *legion]
+    <<: [*gcc8, *terra38, *debug, *cxx17_normal, *checks, *legion]
 gcc8_cxx17_debug_regent:
   <<: [*linux_compute, *image, *tests]
   variables:

@@ -42,11 +42,14 @@ ifeq ($(strip $(USE_CUDA)),1)
 GEN_SRC += regent_cudart_hijack.cc
 endif
 
-CC_FLAGS ?= #-DPROF_BINDING #-DBOUNDS_CHECKS #-DLEGION_SPY
+CC_FLAGS ?= #-DPROF_BINDING
 NVCC_FLAGS ?=
 GASNET_FLAGS ?=
 INC_FLAGS ?=
 LD_FLAGS ?=
+
+#BOUNDS_CHECKS = 1
+#USE_SPY = 1
 
 CC_FLAGS += -fPIC
 NVCC_FLAGS += -Xcompiler -fPIC
@@ -63,11 +66,10 @@ else
 endif
 
 # Use reduction operators for complex types by default
-CC_FLAGS += -DLEGION_REDOP_COMPLEX
+USE_COMPLEX = 1
 
 # terra already includes LLVM libs, so we don't want them in our .so
-CC_FLAGS += -DREALM_ALLOW_MISSING_LLVM_LIBS
-$(OUTFILE) : LLVM_LIBS=
+LLVM_LIBS_OPTIONAL = 1
 
 ###########################################################################
 #

@@ -76,7 +76,7 @@ local c = terralib.includecstring([[
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
-]], {"-DLEGION_REDOP_COMPLEX"})
+]])
 base.c = c
 
 -- Hack: Terra's parser isn't smart enough to read the value of
