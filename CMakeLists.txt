@@ -427,9 +427,6 @@ add_subdirectory(doc)
 #------------------------------------------------------------------------------#
 # Checking for all defines in the CXX Flags
 
-add_definitions(-D__STDC_FORMAT_MACROS)
-set (__STDC_FORMAT_MACROS ON)
-
 string(REPLACE " " ";" FLAGS_LIST ${CMAKE_CXX_FLAGS})
 FOREACH(FLAG ${FLAGS_LIST})
   string (FIND ${FLAG} "-D" START_STR)

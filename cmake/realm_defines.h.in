@@ -11,65 +11,43 @@
 //
 // ******************** IMPORTANT **************************
 
-#ifndef DEBUG_REALM
 #cmakedefine DEBUG_REALM
-#endif
 
-#ifndef COMPILE_TIME_MIN_LEVEL
 #cmakedefine COMPILE_TIME_MIN_LEVEL @COMPILE_TIME_MIN_LEVEL@
-#endif
 
-#ifndef REALM_MAX_DIM
 #cmakedefine REALM_MAX_DIM @REALM_MAX_DIM@
-#endif
 
-#ifndef REALM_USE_OPENMP
 #cmakedefine REALM_USE_OPENMP
-#endif
-#ifndef REALM_OPENMP_GOMP_SUPPORT
 #cmakedefine REALM_OPENMP_GOMP_SUPPORT
-#endif
-#ifndef REALM_OPENMP_KMP_SUPPORT
 #cmakedefine REALM_OPENMP_KMP_SUPPORT
-#endif
 
-#ifndef REALM_USE_PYTHON
 #cmakedefine REALM_USE_PYTHON
-#endif
-
-#ifndef REALM_PYTHON_VERSION_MAJOR
 #cmakedefine REALM_PYTHON_VERSION_MAJOR @REALM_PYTHON_VERSION_MAJOR@
-#endif
 
 #cmakedefine REALM_USE_CUDA
-
-#ifndef REALM_USE_CUDART_HIJACK
 #cmakedefine REALM_USE_CUDART_HIJACK
-#endif
 
 #cmakedefine REALM_USE_KOKKOS
 
 #cmakedefine REALM_USE_GASNET1
 
-#cmakedefine GASNET_CONDUIT_MPI
-#cmakedefine GASNET_CONDUIT_IBV
-#cmakedefine GASNET_CONDUIT_UDP
-#cmakedefine GASNET_CONDUIT_ARIES
-#cmakedefine GASNET_CONDUIT_GEMINI
-#cmakedefine GASNET_CONDUIT_PSM
+/* technically these are defined by per-conduit GASNet include files,
+ * but we do it here as well for the benefit of applications that care
+ */
+#cmakedefine GASNET_CONDUIT_MPI 1
+#cmakedefine GASNET_CONDUIT_IBV 1
+#cmakedefine GASNET_CONDUIT_UDP 1
+#cmakedefine GASNET_CONDUIT_ARIES 1
+#cmakedefine GASNET_CONDUIT_GEMINI 1
+#cmakedefine GASNET_CONDUIT_PSM 1
 
 #cmakedefine REALM_USE_MPI
 
-#ifndef REALM_USE_LLVM
 #cmakedefine REALM_USE_LLVM
 #cmakedefine REALM_LLVM_VERSION @REALM_LLVM_VERSION@
 #cmakedefine REALM_ALLOW_MISSING_LLVM_LIBS
-#endif
 
 #cmakedefine REALM_USE_HDF5
 
 #cmakedefine REALM_USE_LIBDL
-
-#ifndef __STDC_FORMAT_MACROS
-#cmakedefine __STDC_FORMAT_MACROS
-#endif
+#cmakedefine REALM_USE_DLMOPEN
