@@ -1030,7 +1030,7 @@ extern "C" {
     legion_index_space_t parent,
     legion_coloring_t coloring,
     bool disjoint,
-    int part_color /* = AUTO_GENERATE_ID */);
+    legion_color_t part_color /* = AUTO_GENERATE_ID */);
 
   /**
    * @return Caller takes ownership of return value.
@@ -1046,7 +1046,7 @@ extern "C" {
     legion_domain_t color_space,
     legion_domain_coloring_t coloring,
     bool disjoint,
-    int part_color /* = AUTO_GENERATE_ID */);
+    legion_color_t part_color /* = AUTO_GENERATE_ID */);
 
   /**
    * @return Caller takes ownership of return value.
@@ -1062,7 +1062,7 @@ extern "C" {
     legion_domain_t color_space,
     legion_point_coloring_t coloring,
     legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-    int color /* = AUTO_GENERATE_ID */);
+    legion_color_t color /* = AUTO_GENERATE_ID */);
 
   /**
    * @return Caller takes ownership of return value.
@@ -1078,7 +1078,7 @@ extern "C" {
     legion_domain_t color_space,
     legion_domain_point_coloring_t coloring,
     legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-    int color /* = AUTO_GENERATE_ID */);
+    legion_color_t color /* = AUTO_GENERATE_ID */);
 
   /**
    * @return Caller takes ownership of return value.
@@ -1094,7 +1094,7 @@ extern "C" {
     legion_domain_t color_space,
     legion_multi_domain_point_coloring_t coloring,
     legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-    int color /* = AUTO_GENERATE_ID */);
+    legion_color_t color /* = AUTO_GENERATE_ID */);
 
   /**
    * @return Caller takes ownership of return value.
@@ -1109,7 +1109,7 @@ extern "C" {
     legion_context_t ctx, \
     legion_index_space_t parent, \
     legion_blockify_##DIM##d_t blockify, \
-    int part_color /* = AUTO_GENERATE_ID */);
+    legion_color_t part_color /* = AUTO_GENERATE_ID */);
   LEGION_FOREACH_N(CREATE_BLOCKIFY)
 #undef CREATE_BLOCKIFY
 
@@ -1124,7 +1124,7 @@ extern "C" {
                                       legion_index_space_t parent,
                                       legion_index_space_t color_space,
                                       size_t granularity,
-                                      int color /* = AUTO_GENERATE_ID */);
+                                      legion_color_t color /* = AUTO_GENERATE_ID */);
 
   /**
    * @return Caller takes ownership of return value
@@ -1141,7 +1141,7 @@ extern "C" {
       size_t num_colors,
       legion_index_space_t color_space,
       size_t granularity /* = 1 */,
-      int color /* = AUTO_GENERATE_ID */);
+      legion_color_t color /* = AUTO_GENERATE_ID */);
 
   /**
    * @return Caller takes ownership of return value
@@ -1156,7 +1156,7 @@ extern "C" {
       legion_future_map_t future_map,
       legion_index_space_t color_space,
       size_t granularity /* = 1 */,
-      int color /* = AUTO_GENERATE_ID */);
+      legion_color_t color /* = AUTO_GENERATE_ID */);
 
   /**
    * @return Caller takes ownership of return value.
@@ -1172,7 +1172,7 @@ extern "C" {
     legion_index_partition_t handle2,
     legion_index_space_t color_space,
     legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-    int color /* = AUTO_GENERATE_ID */);
+    legion_color_t color /* = AUTO_GENERATE_ID */);
 
   /**
    * @return Caller takes ownership of return value.
@@ -1188,7 +1188,7 @@ extern "C" {
     legion_index_partition_t handle2,
     legion_index_space_t color_space,
     legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-    int color /* = AUTO_GENERATE_ID */);
+    legion_color_t color /* = AUTO_GENERATE_ID */);
 
   /**
    * @return Caller takes ownership of return value.
@@ -1202,7 +1202,7 @@ extern "C" {
     legion_index_space_t parent,
     legion_index_partition_t handle,
     legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-    int color /* = AUTO_GENERATE_ID */,
+    legion_color_t color /* = AUTO_GENERATE_ID */,
     bool dominates /* = false */);
 
   /**
@@ -1219,7 +1219,7 @@ extern "C" {
     legion_index_partition_t handle2,
     legion_index_space_t color_space,
     legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-    int color /* = AUTO_GENERATE_ID */);
+    legion_color_t color /* = AUTO_GENERATE_ID */);
 
   /**
    * @return Caller takes ownership of return value
@@ -1237,7 +1237,7 @@ extern "C" {
       legion_index_space_t color_space,
       bool perform_intersections /* = true */,
       legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-      int color /* = AUTO_GENERATE_ID */);
+      legion_color_t color /* = AUTO_GENERATE_ID */);
 
   /**
    * @return Caller takes ownership of return value
@@ -1253,7 +1253,7 @@ extern "C" {
       legion_index_space_t color_space,
       bool perform_intersections /* = true */,
       legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-      int color /* = AUTO_GENERATE_ID */);
+      legion_color_t color /* = AUTO_GENERATE_ID */);
 
   /**
    * @return Caller takes ownership of return value.
@@ -1267,7 +1267,7 @@ extern "C" {
                                          legion_logical_region_t parent,
                                          legion_field_id_t fid,
                                          legion_index_space_t color_space,
-                                         int color /* = AUTO_GENERATE_ID */,
+                                         legion_color_t color /* = AUTO_GENERATE_ID */,
                                          legion_mapper_id_t id /* = 0 */,
                                          legion_mapping_tag_id_t tag /* = 0 */,
                                          legion_partition_kind_t part_kind /* = DISJOINT_KIND */);
@@ -1287,7 +1287,7 @@ extern "C" {
     legion_field_id_t fid,
     legion_index_space_t color_space,
     legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-    int color /* = AUTO_GENERATE_ID */,
+    legion_color_t color /* = AUTO_GENERATE_ID */,
     legion_mapper_id_t id /* = 0 */,
     legion_mapping_tag_id_t tag /* = 0 */);
 
@@ -1306,7 +1306,7 @@ extern "C" {
     legion_field_id_t fid,
     legion_index_space_t color_space,
     legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-    int color /* = AUTO_GENERATE_ID */,
+    legion_color_t color /* = AUTO_GENERATE_ID */,
     legion_mapper_id_t id /* = 0 */,
     legion_mapping_tag_id_t tag /* = 0 */);
 
@@ -1325,7 +1325,7 @@ extern "C" {
     legion_field_id_t fid,
     legion_index_space_t color_space,
     legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-    int color /* = AUTO_GENERATE_ID */,
+    legion_color_t color /* = AUTO_GENERATE_ID */,
     legion_mapper_id_t id /* = 0 */,
     legion_mapping_tag_id_t tag /* = 0 */);
 
@@ -1344,7 +1344,7 @@ extern "C" {
     legion_field_id_t fid,
     legion_index_space_t color_space,
     legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-    int color /* = AUTO_GENERATE_ID */,
+    legion_color_t color /* = AUTO_GENERATE_ID */,
     legion_mapper_id_t id /* = 0 */,
     legion_mapping_tag_id_t tag /* = 0 */);
 
@@ -1362,7 +1362,7 @@ extern "C" {
     legion_domain_transform_t transform,
     legion_domain_t extent,
     legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-    int color /* = AUTO_GENERATE_ID */);
+    legion_color_t color /* = AUTO_GENERATE_ID */);
 
   /**
    * @return Caller takes ownership of return value.
@@ -1376,7 +1376,7 @@ extern "C" {
     legion_index_space_t parent,
     legion_index_space_t color_space,
     legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-    int color /* = AUTO_GENERATE_ID */);
+    legion_color_t color /* = AUTO_GENERATE_ID */);
 
   /**
    * @see Legion::Runtime::create_index_space_union()
