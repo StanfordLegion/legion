@@ -324,10 +324,10 @@ ifeq ($(strip $(USE_PYTHON)),1)
       ifeq ($(wildcard $(PYTHON_LIB)),)
         $(error cannot find libpython$(PYTHON_VERSION_MAJOR).$(PYTHON_VERSION_MINOR).$(PYTHON_EXT) - PYTHON_LIB set but file does not exist)
       else
-        CC_FLAGS += -DREALM_PYTHON_LIB="\"$(PYTHON_LIB)\""
+        REALM_CC_FLAGS += -DREALM_PYTHON_LIB="\"$(PYTHON_LIB)\""
       endif
     else
-      CC_FLAGS += -DREALM_PYTHON_LIB="\"$(PYTHON_LIB)\""
+      REALM_CC_FLAGS += -DREALM_PYTHON_LIB="\"$(PYTHON_LIB)\""
     endif
   endif
 

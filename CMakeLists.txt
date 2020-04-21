@@ -185,8 +185,10 @@ if(Legion_USE_Python)
   find_package(PythonInterp ${Legion_Python_Version} REQUIRED) # Needed to invoke setup.py for install
   find_package(PythonLibs ${Legion_Python_Version} REQUIRED)
 
-  # define variable for realm_defines.h
+  # define variables for realm_defines.h
   set(REALM_USE_PYTHON ON)
+  set(REALM_PYTHON_LIB "${PYTHON_LIBRARIES}")
+  set(REALM_PYTHON_VERSION_MAJOR ${PYTHON_VERSION_MAJOR})
 
   string(REPLACE "." ";" PYTHON_VERSION_SPLIT ${PYTHONLIBS_VERSION_STRING})
   list(GET PYTHON_VERSION_SPLIT 0 PYTHON_VERSION_MAJOR)
