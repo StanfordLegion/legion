@@ -160,10 +160,10 @@ make`) or at the top of each application's Makefile.
 ## Build Flags
 
 In addition to Makefile variables, compilation is influenced by a
-number of build flags. These flags may be added to the environment
-variable `CC_FLAGS` (or again set inside the Makefile).
+number of build flags. These flags may be added to variables in the
+environment (or again set inside the Makefile).
 
-  * `CC_FLAGS=-DLEGION_SPY`: enables [Legion Spy](http://legion.stanford.edu/debugging/#legion-spy).
+  * `USE_SPY=1`: enables [Legion Spy](http://legion.stanford.edu/debugging/#legion-spy).
   * `CC_FLAGS=-DPRIVILEGE_CHECKS`: enables [extra privilege checks](http://legion.stanford.edu/debugging/#privilege-checks).
   * `CC_FLAGS=-DBOUNDS_CHECKS`: enables [dynamic bounds checks](http://legion.stanford.edu/debugging/#bounds-checks).
 
@@ -235,11 +235,11 @@ $LG_RT_DIR/../tools/legion_spy.py -dez spy_*.log
 ```
 
 To run Legion Spy's self-checking mode, Legion must be built with the
-flag `-DLEGION_SPY`. Following this, the application can be run again,
+flag `USE_SPY=1`. Following this, the application can be run again,
 and the script used to validate (or render) the trace.
 
 ```bash
-DEBUG=1 CC_FLAGS="-DLEGION_SPY" make
+DEBUG=1 USE_SPY=1 make
 ./app -lg:spy -logfile spy_%.log
 $LG_RT_DIR/../tools/legion_spy.py -lpa spy_*.log
 $LG_RT_DIR/../tools/legion_spy.py -dez spy_*.log

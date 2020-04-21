@@ -62,10 +62,6 @@ else
 	LD_FLAGS += -Wl,--whole-archive -llegion -lrealm -Wl,--no-whole-archive
 endif
 
-ifeq ($(strip $(USE_SPY)),1)
-	CC_FLAGS += -DLEGION_SPY
-endif
-
 # Use reduction operators for complex types by default
 CC_FLAGS += -DLEGION_REDOP_COMPLEX
 

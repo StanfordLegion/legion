@@ -12189,14 +12189,14 @@ def main(temp_dir):
     state.post_parse(simplify_graphs, physical_checks or event_graphs)
     if logical_checks and not state.detailed_logging:
         print("WARNING: Requested logical analysis but logging information is "+
-              "missing. Please compile the runtime with -DLEGION_SPY to enable "+
+              "missing. Please compile the runtime with USE_SPY=1 to enable "+
               "validation of the runtime. Disabling logical checks.")
         if state.assert_on_warning:
             assert False
         logical_checks = False
     if physical_checks and not state.detailed_logging:
         print("WARNING: Requested physical analysis but logging information is "+
-              "missing. Please compile the runtime with -DLEGION_SPY to enable "+
+              "missing. Please compile the runtime with USE_SPY=1 to enable "+
               "validation of the runtime. Disabling physical checks.")
         if state.assert_on_warning:
             assert False
@@ -12204,7 +12204,7 @@ def main(temp_dir):
     if logical_checks and sanity_checks and not state.detailed_logging:
         print("WARNING: Requested sanity checks for logical analysis but "+
               "logging information of logical analysis is missing. Please "+
-              "compile the runtime with -DLEGION_SPY to enable validation "+
+              "compile the runtime with USE_SPY=1 to enable validation "+
               "of the runtime. Disabling sanity checks.")
         if state.assert_on_warning:
             assert False
@@ -12212,21 +12212,21 @@ def main(temp_dir):
     if physical_checks and sanity_checks and not state.detailed_logging:
         print("WARNING: Requested sanity checks for physical analysis but "+
               "logging information of logical analysis is missing. Please "+
-              "compile the runtime with -DLEGION_SPY to enable validation "+
+              "compile the runtime with USE_SPY=1 to enable validation "+
               "of the runtime. Disabling sanity checks.")
         if state.assert_on_warning:
             assert False
         sanity_checks = False
     if cycle_checks and not state.detailed_logging:
         print("WARNING: Requested cycle checks but logging information is "+
-              "missing. Please compile the runtime with -DLEGION_SPY to enable "+
+              "missing. Please compile the runtime with USE_SPY=1 to enable "+
               "validation of the runtime. Disabling cycle checks.")
         if state.assert_on_warning:
             assert False
         cycle_checks = False
     if user_event_leaks and not state.detailed_logging:
         print("WARNING: Requested user event leak checks but logging information "+
-              "is missing. Please compile the runtime with -DLEGION_SPY to enable "+
+              "is missing. Please compile the runtime with USE_SPY=1 to enable "+
               "validation of the runtime. Disabling user event leak checks.")
         if state.assert_on_warning:
             assert False

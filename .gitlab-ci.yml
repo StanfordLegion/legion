@@ -62,13 +62,13 @@ variables:
 .maxdim5: &maxdim5
   MAX_DIM: "5"      # test up to 5-D (useful because 1-4 have special cases)
 
+.spy: &spy
+  USE_SPY: "1"
+
 .cxx98_normal: &cxx98_normal
   CC_FLAGS: "-std=c++98"
 .cxx98_checks: &cxx98_checks
   CC_FLAGS: "-std=c++98 -DPRIVILEGE_CHECKS -DBOUNDS_CHECKS"
-.cxx98_spy: &cxx98_spy
-  CC_FLAGS: "-std=c++98 -DLEGION_SPY"
-  USE_SPY: "1"
 .cxx11_normal: &cxx11_normal
   CC_FLAGS: "-std=c++11"
 .cxx11_hardened: &cxx11_hardened
@@ -451,11 +451,11 @@ gcc49_cxx98_debug_checks_legion:
 gcc49_cxx98_debug_spy_legion:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *debug, *cxx98_spy, *legion]
+    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *spy, *legion]
 gcc49_cxx98_debug_spy_python3_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *debug, *cxx98_spy, *python3, *regent, *parallel]
+    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *spy, *python3, *regent, *parallel]
 #   * Prof
 gcc49_cxx98_release_prof_regent:
   <<: [*linux_compute, *image, *tests]
@@ -595,11 +595,11 @@ gcc49_cxx98_debug_hdf5_mpi_regent:
 gcc49_cxx98_debug_spy_gasnet_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *cxx98_spy, *gasnet, *regent]
+    <<: [*gcc49, *terra38, *cxx98_normal, *spy, *gasnet, *regent]
 gcc49_cxx98_debug_spy_mpi_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *cxx98_spy, *mpi, *regent]
+    <<: [*gcc49, *terra38, *cxx98_normal, *spy, *mpi, *regent]
 # * Different architectures
 gcc49_cxx98_32bit_debug_legion:
   <<: [*linux, *image, *tests]
@@ -635,11 +635,11 @@ clang38_cxx98_debug_checks_legion:
 clang38_cxx98_debug_spy_legion:
   <<: [*linux, *image_clang, *tests]
   variables:
-    <<: [*clang38, *terra38, *debug, *cxx98_spy, *legion]
+    <<: [*clang38, *terra38, *debug, *cxx98_normal, *spy, *legion]
 clang38_cxx98_debug_spy_python3_regent:
   <<: [*linux_compute, *image_clang, *tests]
   variables:
-    <<: [*clang38, *terra38, *debug, *cxx98_spy, *python3, *regent, *parallel]
+    <<: [*clang38, *terra38, *debug, *cxx98_normal, *spy, *python3, *regent, *parallel]
 #   * Prof
 clang38_cxx98_release_prof_regent:
   <<: [*linux_compute, *image_clang, *tests]
@@ -754,7 +754,7 @@ clang38_cxx98_debug_hdf5_mpi_regent:
 # clang38_cxx98_debug_spy_gasnet_regent:
 #   <<: [*linux_compute, *image_clang, *tests]
 #   variables:
-#     <<: [*clang38, *terra38, *debug, *cxx98_spy, *gasnet, *regent]
+#     <<: [*clang38, *terra38, *debug, *cxx98_normal, *spy, *gasnet, *regent]
 # * Different architectures
 clang38_cxx98_32bit_debug_legion:
   <<: [*linux, *image_clang, *tests]
