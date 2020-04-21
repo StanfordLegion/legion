@@ -18,7 +18,7 @@ module legion_fortran_c_interface
   use, intrinsic :: iso_c_binding
   use legion_fortran_types
   implicit none
-  
+
 #include "legion_defines.h"
 
 #ifndef LEGION_MAX_DIM
@@ -28,7 +28,7 @@ module legion_fortran_c_interface
 #if LEGION_MAX_DIM >= 4
 #error "Illegal value of LEGION_MAX_DIM"
 #endif
-    
+
   interface
     ! -----------------------------------------------------------------------
     ! Task Launcher
@@ -41,7 +41,7 @@ module legion_fortran_c_interface
       import legion_task_argument_f_t
       import legion_predicate_f_t
       implicit none
-  
+
       type(legion_task_launcher_f_t)                      :: legion_task_launcher_create_f
       integer(c_int), value, intent(in)                   :: tid
       type(legion_task_argument_f_t), value, intent(in)   :: arg
@@ -56,7 +56,7 @@ module legion_fortran_c_interface
       use iso_c_binding
       import legion_task_launcher_f_t
       implicit none
-  
+
       type(legion_task_launcher_f_t), value, intent(in) :: handle
     end subroutine legion_task_launcher_destroy_f
 
@@ -69,7 +69,7 @@ module legion_fortran_c_interface
       import legion_context_f_t
       import legion_task_launcher_f_t
       implicit none
-  
+
       type(legion_future_f_t)                            :: legion_task_launcher_execute_f
       type(legion_runtime_f_t), value, intent(in)        :: runtime
       type(legion_context_f_t), value, intent(in)        :: ctx
@@ -84,7 +84,7 @@ module legion_fortran_c_interface
       import legion_task_launcher_f_t
       import legion_logical_region_f_t
       implicit none
-  
+
       integer(c_int)                                     :: legion_task_launcher_add_region_requirement_logical_region_f
       type(legion_task_launcher_f_t), value, intent(in)  :: launcher
       type(legion_logical_region_f_t), value, intent(in) :: handle
@@ -101,13 +101,13 @@ module legion_fortran_c_interface
       use iso_c_binding
       import legion_task_launcher_f_t
       implicit none
-  
+
       type(legion_task_launcher_f_t), value, intent(in) :: launcher
       integer(c_int), value, intent(in)                 :: idx
       integer(c_int), value, intent(in)                 :: fid
-      logical(c_bool), value, intent(in)                :: inst 
+      logical(c_bool), value, intent(in)                :: inst
     end subroutine legion_task_launcher_add_field_f
-    
+
     ! @see Legion::TaskLauncher::add_future()
     subroutine legion_task_launcher_add_future_f(launcher, future) &
         bind(C, name="legion_task_launcher_add_future")
@@ -115,7 +115,7 @@ module legion_fortran_c_interface
       import legion_task_launcher_f_t
       import legion_future_f_t
       implicit none
-      
+
       type(legion_task_launcher_f_t), value, intent(in) :: launcher
       type(legion_future_f_t), value, intent(in)        :: future
     end subroutine legion_task_launcher_add_future_f
@@ -134,7 +134,7 @@ module legion_fortran_c_interface
       import legion_argument_map_f_t
       import legion_predicate_f_t
       implicit none
-  
+
       type(legion_index_launcher_f_t)                     :: legion_index_launcher_create_f
       integer(c_int), value, intent(in)                   :: tid
       type(legion_domain_f_t), value, intent(in)          :: domain
@@ -152,7 +152,7 @@ module legion_fortran_c_interface
       use iso_c_binding
       import legion_index_launcher_f_t
       implicit none
-  
+
       type(legion_index_launcher_f_t), value, intent(in) :: handle
     end subroutine legion_index_launcher_destroy_f
 
@@ -165,7 +165,7 @@ module legion_fortran_c_interface
       import legion_context_f_t
       import legion_index_launcher_f_t
       implicit none
-  
+
       type(legion_future_map_f_t)                         :: legion_index_launcher_execute_f
       type(legion_runtime_f_t), value, intent(in)         :: runtime
       type(legion_context_f_t), value, intent(in)         :: ctx
@@ -182,12 +182,12 @@ module legion_fortran_c_interface
       import legion_context_f_t
       import legion_index_launcher_f_t
       implicit none
-  
+
       type(legion_future_f_t)                            :: legion_index_launcher_execute_reduction_f
       type(legion_runtime_f_t), value, intent(in)        :: runtime
       type(legion_context_f_t), value, intent(in)        :: ctx
       type(legion_index_launcher_f_t), value, intent(in) :: launcher
-      integer(c_int), value, intent(in)                  :: redop 
+      integer(c_int), value, intent(in)                  :: redop
     end function legion_index_launcher_execute_reduction_f
 
     ! @see Legion::IndexTaskLauncher::add_region_requirement()
@@ -200,7 +200,7 @@ module legion_fortran_c_interface
       import legion_logical_partition_f_t
       import legion_logical_region_f_t
       implicit none
-  
+
       integer(c_int)                                        :: legion_index_launcher_add_region_requirement_lp_f
       type(legion_index_launcher_f_t), value, intent(in)    :: launcher
       type(legion_logical_partition_f_t), value, intent(in) :: handle
@@ -218,13 +218,13 @@ module legion_fortran_c_interface
       use iso_c_binding
       import legion_index_launcher_f_t
       implicit none
-  
+
       type(legion_index_launcher_f_t), value, intent(in) :: launcher
       integer(c_int), value, intent(in)                  :: idx
       integer(c_int), value, intent(in)                  :: fid
-      logical(c_bool), value, intent(in)                 :: inst 
+      logical(c_bool), value, intent(in)                 :: inst
     end subroutine legion_index_launcher_add_field_f
-    
+
     ! -----------------------------------------------------------------------
     ! Inline Mapping Operations
     ! -----------------------------------------------------------------------
@@ -237,7 +237,7 @@ module legion_fortran_c_interface
       import legion_inline_launcher_f_t
       import legion_logical_region_f_t
       implicit none
-      
+
       type(legion_inline_launcher_f_t)                   :: legion_inline_launcher_create_logical_region_f
       type(legion_logical_region_f_t), value, intent(in) :: handle
       integer(c_int), value, intent(in)                  :: priv
@@ -248,17 +248,17 @@ module legion_fortran_c_interface
       integer(c_long), value, intent(in)                 :: id
       integer(c_long), value, intent(in)                 :: launcher_tag
     end function legion_inline_launcher_create_logical_region_f
-    
+
     ! @see Legion::InlineLauncher::~InlineLauncher()
     subroutine legion_inline_launcher_destroy_f(handle) &
         bind(C, name="legion_inline_launcher_destroy")
       use iso_c_binding
       import legion_inline_launcher_f_t
       implicit none
-      
+
       type(legion_inline_launcher_f_t), value, intent(in) :: handle
     end subroutine legion_inline_launcher_destroy_f
-    
+
     ! @see Legion::Runtime::map_region()
     function legion_inline_launcher_execute_f(runtime, ctx, launcher) &
         bind(C, name="legion_inline_launcher_execute")
@@ -268,25 +268,25 @@ module legion_fortran_c_interface
       import legion_context_f_t
       import legion_inline_launcher_f_t
       implicit none
-      
+
       type(legion_physical_region_f_t)                    :: legion_inline_launcher_execute_f
       type(legion_runtime_f_t), value, intent(in)         :: runtime
       type(legion_context_f_t), value, intent(in)         :: ctx
       type(legion_inline_launcher_f_t), value, intent(in) :: launcher
     end function legion_inline_launcher_execute_f
-    
+
     ! @see Legion::InlineLauncher::add_field()
     subroutine legion_inline_launcher_add_field_f(launcher, fid, inst) &
         bind(C, name="legion_inline_launcher_add_field")
       use iso_c_binding
       import legion_inline_launcher_f_t
       implicit none
-      
+
       type(legion_inline_launcher_f_t), value, intent(in) :: launcher
       integer(c_int), value, intent(in)                   :: fid
-      logical(c_bool), value, intent(in)                  :: inst 
+      logical(c_bool), value, intent(in)                  :: inst
     end subroutine legion_inline_launcher_add_field_f
-      
+
     ! @see Legion::Runtime::remap_region()
     subroutine legion_runtime_remap_region_f(runtime, ctx, region) &
         bind(C, name="legion_runtime_remap_region")
@@ -295,12 +295,12 @@ module legion_fortran_c_interface
       import legion_context_f_t
       import legion_physical_region_f_t
       implicit none
-      
+
       type(legion_runtime_f_t), value, intent(in)         :: runtime
       type(legion_context_f_t), value, intent(in)         :: ctx
       type(legion_physical_region_f_t), value, intent(in) :: region
     end subroutine legion_runtime_remap_region_f
-    
+
     ! @see Legion::Runtime::unmap_region()
     subroutine legion_runtime_unmap_region_f(runtime, ctx, region) &
         bind(C, name="legion_runtime_unmap_region")
@@ -309,12 +309,12 @@ module legion_fortran_c_interface
       import legion_context_f_t
       import legion_physical_region_f_t
       implicit none
-      
+
       type(legion_runtime_f_t), value, intent(in)         :: runtime
       type(legion_context_f_t), value, intent(in)         :: ctx
       type(legion_physical_region_f_t), value, intent(in) :: region
     end subroutine legion_runtime_unmap_region_f
-    
+
     ! @see Legion::Runtime::unmap_all_regions()
     subroutine legion_runtime_unmap_all_regions_f(runtime, ctx) &
         bind(C, name="legion_runtime_unmap_all_regions")
@@ -322,7 +322,7 @@ module legion_fortran_c_interface
       import legion_runtime_f_t
       import legion_context_f_t
       implicit none
-      
+
       type(legion_runtime_f_t), value, intent(in) :: runtime
       type(legion_context_f_t), value, intent(in) :: ctx
     end subroutine legion_runtime_unmap_all_regions_f
@@ -336,7 +336,7 @@ module legion_fortran_c_interface
       use iso_c_binding
       import legion_predicate_f_t
       implicit none
-  
+
       type(legion_predicate_f_t) :: legion_predicate_true_f
     end function legion_predicate_true_f
 
@@ -346,7 +346,7 @@ module legion_fortran_c_interface
       use iso_c_binding
       import legion_predicate_f_t
       implicit none
-  
+
       type(legion_predicate_f_t) :: legion_predicate_false_f
     end function legion_predicate_false_f
 
@@ -359,7 +359,7 @@ module legion_fortran_c_interface
       use iso_c_binding
       import legion_argument_map_f_t
       implicit none
-  
+
       type(legion_argument_map_f_t) :: legion_argument_map_create_f
     end function legion_argument_map_create_f
 
@@ -371,19 +371,19 @@ module legion_fortran_c_interface
       import legion_domain_point_f_t
       import legion_task_argument_f_t
       implicit none
-  
+
       type(legion_argument_map_f_t), value, intent(in)  :: map
-      type(legion_domain_point_f_t), value, intent(in)  :: dp 
+      type(legion_domain_point_f_t), value, intent(in)  :: dp
       type(legion_task_argument_f_t), value, intent(in) :: arg
-      logical(c_bool), value, intent(in)                :: replace 
+      logical(c_bool), value, intent(in)                :: replace
     end subroutine legion_argument_map_set_point_f
-    
+
     subroutine legion_argument_map_destroy_f(handle) &
         bind(C, name="legion_argument_map_destroy")
       use iso_c_binding
       import legion_argument_map_f_t
       implicit none
-  
+
       type(legion_argument_map_f_t), value, intent(in) :: handle
     end subroutine legion_argument_map_destroy_f
 
@@ -396,7 +396,7 @@ module legion_fortran_c_interface
       use iso_c_binding
       import legion_task_f_t
       implicit none
-  
+
       type(c_ptr)                              :: legion_task_get_args_f
       type(legion_task_f_t), value, intent(in) :: task
     end function legion_task_get_args_f
@@ -407,7 +407,7 @@ module legion_fortran_c_interface
       use iso_c_binding
       import legion_task_f_t
       implicit none
-  
+
       integer(c_size_t)                        :: legion_task_get_arglen_f
       type(legion_task_f_t), value, intent(in) :: task
     end function legion_task_get_arglen_f
@@ -418,7 +418,7 @@ module legion_fortran_c_interface
       use iso_c_binding
       import legion_task_f_t
       implicit none
-  
+
       type(c_ptr)                              :: legion_task_get_local_args_f
       type(legion_task_f_t), value, intent(in) :: task
     end function legion_task_get_local_args_f
@@ -429,7 +429,7 @@ module legion_fortran_c_interface
       use iso_c_binding
       import legion_task_f_t
       implicit none
-  
+
       integer(c_size_t)                        :: legion_task_get_local_arglen_f
       type(legion_task_f_t), value, intent(in) :: task
     end function legion_task_get_local_arglen_f
@@ -441,7 +441,7 @@ module legion_fortran_c_interface
       import legion_domain_f_t
       import legion_task_f_t
       implicit none
-  
+
       type(legion_domain_f_t)                  :: legion_task_get_index_domain_f
       type(legion_task_f_t), value, intent(in) :: task
     end function legion_task_get_index_domain_f
@@ -453,12 +453,12 @@ module legion_fortran_c_interface
       import legion_region_requirement_f_t
       import legion_task_f_t
       implicit none
-  
+
       type(legion_region_requirement_f_t)      :: legion_task_get_requirement_f
       type(legion_task_f_t), value, intent(in) :: task
       integer(c_int), value, intent(in)        :: idx
     end function legion_task_get_requirement_f
-    
+
     ! @see Legion::Task::futures
     function legion_task_get_future_f(task, idx) &
         bind(C, name="legion_task_get_future")
@@ -466,19 +466,19 @@ module legion_fortran_c_interface
       import legion_future_f_t
       import legion_task_f_t
       implicit none
-      
+
       type(legion_future_f_t)                  :: legion_task_get_future_f
       type(legion_task_f_t), value, intent(in) :: task
       integer(c_int), value, intent(in)        :: idx
     end function legion_task_get_future_f
-    
+
     ! @see Legion::Task::futures
     function legion_task_get_futures_size_f(task) &
         bind(C, name="legion_task_get_futures_size")
       use iso_c_binding
       import legion_task_f_t
       implicit none
-      
+
       integer(c_int)                  :: legion_task_get_futures_size_f
       type(legion_task_f_t), value, intent(in) :: task
     end function legion_task_get_futures_size_f
@@ -493,7 +493,7 @@ module legion_fortran_c_interface
       import legion_rect_1d_f_t
       import legion_domain_f_t
       implicit none
-  
+
       type(legion_domain_f_t)                     :: legion_domain_from_rect_1d_f
       type(legion_rect_1d_f_t), value, intent(in) :: r
     end function legion_domain_from_rect_1d_f
@@ -506,7 +506,7 @@ module legion_fortran_c_interface
       import legion_rect_2d_f_t
       import legion_domain_f_t
       implicit none
-  
+
       type(legion_domain_f_t)                     :: legion_domain_from_rect_2d_f
       type(legion_rect_2d_f_t), value, intent(in) :: r
     end function legion_domain_from_rect_2d_f
@@ -520,12 +520,12 @@ module legion_fortran_c_interface
       import legion_rect_3d_f_t
       import legion_domain_f_t
       implicit none
-  
+
       type(legion_domain_f_t)                     :: legion_domain_from_rect_3d_f
       type(legion_rect_3d_f_t), value, intent(in) :: r
     end function legion_domain_from_rect_3d_f
 #endif
-    
+
     ! @see Legion::Domain::get_rect()
     function legion_domain_get_rect_1d_f(d) &
         bind(C, name="legion_domain_get_rect_1d")
@@ -533,7 +533,7 @@ module legion_fortran_c_interface
       import legion_rect_1d_f_t
       import legion_domain_f_t
       implicit none
-  
+
       type(legion_rect_1d_f_t)                   :: legion_domain_get_rect_1d_f
       type(legion_domain_f_t), value, intent(in) :: d
     end function legion_domain_get_rect_1d_f
@@ -546,7 +546,7 @@ module legion_fortran_c_interface
       import legion_rect_2d_f_t
       import legion_domain_f_t
       implicit none
-  
+
       type(legion_rect_2d_f_t)                   :: legion_domain_get_rect_2d_f
       type(legion_domain_f_t), value, intent(in) :: d
     end function legion_domain_get_rect_2d_f
@@ -560,7 +560,7 @@ module legion_fortran_c_interface
       import legion_rect_3d_f_t
       import legion_domain_f_t
       implicit none
-  
+
       type(legion_rect_3d_f_t)                   :: legion_domain_get_rect_3d_f
       type(legion_domain_f_t), value, intent(in) :: d
     end function legion_domain_get_rect_3d_f
@@ -572,11 +572,11 @@ module legion_fortran_c_interface
       use iso_c_binding
       import legion_domain_f_t
       implicit none
-  
+
       integer(c_size_t)                          :: legion_domain_get_volume_f
       type(legion_domain_f_t), value, intent(in) :: d
     end function legion_domain_get_volume_f
-    
+
     ! -----------------------------------------------------------------------
     ! Domain Transform Operations
     ! -----------------------------------------------------------------------
@@ -585,30 +585,30 @@ module legion_fortran_c_interface
       use iso_c_binding
       import legion_domain_transform_f_t
       import legion_transform_1x1_f_t
-      
+
       type(legion_domain_transform_f_t)                 :: legion_domain_transform_from_1x1_f
       type(legion_transform_1x1_f_t), value, intent(in) :: t
     end function legion_domain_transform_from_1x1_f
 
-#if LEGION_MAX_DIM >= 2    
+#if LEGION_MAX_DIM >= 2
     function legion_domain_transform_from_2x2_f(t) &
         bind(C, name="legion_domain_transform_from_2x2")
       use iso_c_binding
       import legion_domain_transform_f_t
       import legion_transform_2x2_f_t
-      
+
       type(legion_domain_transform_f_t)                 :: legion_domain_transform_from_2x2_f
       type(legion_transform_2x2_f_t), value, intent(in) :: t
     end function legion_domain_transform_from_2x2_f
 #endif
 
-#if LEGION_MAX_DIM >= 3    
+#if LEGION_MAX_DIM >= 3
     function legion_domain_transform_from_3x3_f(t) &
         bind(C, name="legion_domain_transform_from_3x3")
       use iso_c_binding
       import legion_domain_transform_f_t
       import legion_transform_3x3_f_t
-      
+
       type(legion_domain_transform_f_t)                 :: legion_domain_transform_from_3x3_f
       type(legion_transform_3x3_f_t), value, intent(in) :: t
     end function legion_domain_transform_from_3x3_f
@@ -624,7 +624,7 @@ module legion_fortran_c_interface
       import legion_domain_point_f_t
       import legion_point_1d_f_t
       implicit none
-  
+
       type(legion_domain_point_f_t)                :: legion_domain_point_from_point_1d_f
       type(legion_point_1d_f_t), value, intent(in) :: p
     end function legion_domain_point_from_point_1d_f
@@ -637,7 +637,7 @@ module legion_fortran_c_interface
       import legion_domain_point_f_t
       import legion_point_2d_f_t
       implicit none
-  
+
       type(legion_domain_point_f_t)                :: legion_domain_point_from_point_2d_f
       type(legion_point_2d_f_t), value, intent(in) :: p
     end function legion_domain_point_from_point_2d_f
@@ -651,12 +651,12 @@ module legion_fortran_c_interface
       import legion_domain_point_f_t
       import legion_point_3d_f_t
       implicit none
-  
+
       type(legion_domain_point_f_t)                :: legion_domain_point_from_point_3d_f
       type(legion_point_3d_f_t), value, intent(in) :: p
     end function legion_domain_point_from_point_3d_f
 #endif
-    
+
     ! @see Legion::DomainPoint::get_point()
     function legion_domain_point_get_point_1d_f(p) &
         bind(C, name="legion_domain_point_get_point_1d")
@@ -664,12 +664,12 @@ module legion_fortran_c_interface
       import legion_domain_point_f_t
       import legion_point_1d_f_t
       implicit none
-      
+
       type(legion_point_1d_f_t)                        :: legion_domain_point_get_point_1d_f
       type(legion_domain_point_f_t), value, intent(in) :: p
     end function legion_domain_point_get_point_1d_f
 
-#if LEGION_MAX_DIM >= 2    
+#if LEGION_MAX_DIM >= 2
     ! @see Legion::DomainPoint::get_point()
     function legion_domain_point_get_point_2d_f(p) &
         bind(C, name="legion_domain_point_get_point_2d")
@@ -677,12 +677,12 @@ module legion_fortran_c_interface
       import legion_domain_point_f_t
       import legion_point_2d_f_t
       implicit none
-      
+
       type(legion_point_2d_f_t)                        :: legion_domain_point_get_point_2d_f
       type(legion_domain_point_f_t), value, intent(in) :: p
     end function legion_domain_point_get_point_2d_f
 #endif
-    
+
 #if LEGION_MAX_DIM >= 3
     ! @see Legion::DomainPoint::get_point()
     function legion_domain_point_get_point_3d_f(p) &
@@ -690,12 +690,12 @@ module legion_fortran_c_interface
       use iso_c_binding
       import legion_domain_point_f_t
       import legion_point_3d_f_t
-      
+
       type(legion_point_3d_f_t)                        :: legion_domain_point_get_point_3d_f
       type(legion_domain_point_f_t), value, intent(in) :: p
     end function legion_domain_point_get_point_3d_f
 #endif
-    
+
     ! -----------------------------------------------------------------------
     ! Domain Point Iterator
     ! -----------------------------------------------------------------------
@@ -706,11 +706,11 @@ module legion_fortran_c_interface
       import legion_domain_point_iterator_f_t
       import legion_domain_f_t
       implicit none
-      
+
       type(legion_domain_point_iterator_f_t)     :: legion_domain_point_iterator_create_f
       type(legion_domain_f_t), value, intent(in) :: handle
     end function legion_domain_point_iterator_create_f
-    
+
     ! @see Legion::Domain::DomainPointIterator::~DomainPointIterator()
     subroutine legion_domain_point_iterator_destroy_f(handle) &
         bind(C, name="legion_domain_point_iterator_destroy")
@@ -719,28 +719,28 @@ module legion_fortran_c_interface
 
       type(legion_domain_point_iterator_f_t), value, intent(in) :: handle
     end subroutine legion_domain_point_iterator_destroy_f
-    
+
     ! @see Legion::Domain::DomainPointIterator::any_left
     function legion_domain_point_iterator_has_next_f(handle) &
         bind(C, name="legion_domain_point_iterator_has_next")
       use iso_c_binding
-      import legion_domain_point_iterator_f_t  
-      
+      import legion_domain_point_iterator_f_t
+
       logical(c_bool)                                           :: legion_domain_point_iterator_has_next_f
-      type(legion_domain_point_iterator_f_t), value, intent(in) :: handle 
+      type(legion_domain_point_iterator_f_t), value, intent(in) :: handle
     end function legion_domain_point_iterator_has_next_f
-    
+
     ! @see Legion::Domain::DomainPointIterator::step()
     function legion_domain_point_iterator_next_f(handle) &
         bind(C, name="legion_domain_point_iterator_next")
       use iso_c_binding
       import legion_domain_point_f_t
-      import legion_domain_point_iterator_f_t  
-      
+      import legion_domain_point_iterator_f_t
+
       type(legion_domain_point_f_t)                             :: legion_domain_point_iterator_next_f
-      type(legion_domain_point_iterator_f_t), value, intent(in) :: handle 
+      type(legion_domain_point_iterator_f_t), value, intent(in) :: handle
     end function legion_domain_point_iterator_next_f
-    
+
     ! -----------------------------------------------------------------------
     ! Future Operations
     ! -----------------------------------------------------------------------
@@ -750,54 +750,54 @@ module legion_fortran_c_interface
       use iso_c_binding
       import legion_future_f_t
       implicit none
-  
+
       type(legion_future_f_t)                    :: legion_future_copy_f
       type(legion_future_f_t), value, intent(in) :: handle
     end function legion_future_copy_f
-    
+
     ! @see Legion::Future::~Future()
     subroutine legion_future_destroy_f(handle) &
         bind(C, name="legion_future_destroy")
       use iso_c_binding
       import legion_future_f_t
       implicit none
-  
+
       type(legion_future_f_t), value, intent(in) :: handle
     end subroutine legion_future_destroy_f
-    
+
     ! @see Legion::Future::is_ready()
     function legion_future_is_ready_f(handle) &
         bind(C, name="legion_future_is_ready")
       use iso_c_binding
       import legion_future_f_t
       implicit none
-  
+
       logical(c_bool)                            :: legion_future_is_ready_f
       type(legion_future_f_t), value, intent(in) :: handle
     end function legion_future_is_ready_f
-    
+
     ! @see Legion::Future::get_untyped_pointer()
     function legion_future_get_untyped_pointer_f(handle) &
         bind(C, name="legion_future_get_untyped_pointer")
       use iso_c_binding
       import legion_future_f_t
       implicit none
-  
+
       type(c_ptr)                                :: legion_future_get_untyped_pointer_f
       type(legion_future_f_t), value, intent(in) :: handle
     end function legion_future_get_untyped_pointer_f
-    
+
     ! @see Legion::Future::get_untyped_size()
     function legion_future_get_untyped_size_f(handle) &
         bind(C, name="legion_future_get_untyped_size")
       use iso_c_binding
       import legion_future_f_t
       implicit none
-  
+
       integer(c_size_t)                          :: legion_future_get_untyped_size_f
       type(legion_future_f_t), value, intent(in) :: handle
     end function legion_future_get_untyped_size_f
-    
+
     ! -----------------------------------------------------------------------
     ! Future Map Operations
     ! -----------------------------------------------------------------------
@@ -807,10 +807,10 @@ module legion_fortran_c_interface
       use iso_c_binding
       import legion_future_map_f_t
       implicit none
-  
+
       type(legion_future_map_f_t), value, intent(in) :: handle
     end subroutine legion_future_map_wait_all_results_f
-    
+
     ! @see Legion::FutureMap::wait_all_results()
     function legion_future_map_get_future_f(handle, point) &
         bind(C, name="legion_future_map_get_future")
@@ -819,7 +819,7 @@ module legion_fortran_c_interface
       import legion_future_map_f_t
       import legion_domain_point_f_t
       implicit none
-  
+
       type(legion_future_f_t)                          :: legion_future_map_get_future_f
       type(legion_future_map_f_t), value, intent(in)   :: handle
       type(legion_domain_point_f_t), value, intent(in) :: point
@@ -836,13 +836,13 @@ module legion_fortran_c_interface
       import legion_runtime_f_t
       import legion_context_f_t
       implicit none
-  
+
       type(legion_index_space_f_t)                :: legion_index_space_create_f
       type(legion_runtime_f_t), value, intent(in) :: runtime
       type(legion_context_f_t), value, intent(in) :: ctx
       integer(c_size_t), value, intent(in)        :: max_num_elmts
     end function legion_index_space_create_f
-    
+
     ! @see Legion::Runtime::create_index_space(Context, Domain)
     function legion_index_space_create_domain_f(runtime, ctx, domain) &
         bind(C, name="legion_index_space_create_domain")
@@ -852,7 +852,7 @@ module legion_fortran_c_interface
       import legion_context_f_t
       import legion_domain_f_t
       implicit none
-  
+
       type(legion_index_space_f_t)                :: legion_index_space_create_domain_f
       type(legion_runtime_f_t), value, intent(in) :: runtime
       type(legion_context_f_t), value, intent(in) :: ctx
@@ -867,7 +867,7 @@ module legion_fortran_c_interface
       import legion_context_f_t
       import legion_index_space_f_t
       implicit none
-  
+
       type(legion_runtime_f_t), value, intent(in)      :: runtime
       type(legion_context_f_t), value, intent(in)      :: ctx
       type(legion_index_space_f_t), value, intent(in)  :: handle
@@ -881,7 +881,7 @@ module legion_fortran_c_interface
       import legion_runtime_f_t
       import legion_index_space_f_t
       implicit none
-  
+
       type(legion_domain_f_t)                         :: legion_index_space_get_domain_f
       type(legion_runtime_f_t), value, intent(in)     :: runtime
       type(legion_index_space_f_t), value, intent(in) :: handle
@@ -894,7 +894,7 @@ module legion_fortran_c_interface
       import legion_runtime_f_t
       import legion_index_space_f_t
       implicit none
-  
+
       type(legion_runtime_f_t), value, intent(in)     :: runtime
       type(legion_index_space_f_t), value, intent(in) :: handle
       type(c_ptr), value, intent(in)                 :: name
@@ -914,7 +914,7 @@ module legion_fortran_c_interface
       import legion_context_f_t
       import legion_index_space_f_t
       implicit none
-  
+
       type(legion_index_partition_f_t)                :: legion_index_partition_create_equal_f
       type(legion_runtime_f_t), value, intent(in)     :: runtime
       type(legion_context_f_t), value, intent(in)     :: ctx
@@ -923,7 +923,7 @@ module legion_fortran_c_interface
       integer(c_size_t), value, intent(in)            :: granularity
       integer(c_int), value, intent(in)               :: color
     end function legion_index_partition_create_equal_f
-    
+
     ! @see Legion::Runtime::create_partition_by_union()
     function legion_index_partition_create_by_union_f(runtime, ctx, parent, &
         handle1, handle2, color_space, part_kind, color) &
@@ -934,7 +934,7 @@ module legion_fortran_c_interface
       import legion_context_f_t
       import legion_index_space_f_t
       implicit none
-      
+
       type(legion_index_partition_f_t)                    :: legion_index_partition_create_by_union_f
       type(legion_runtime_f_t), value, intent(in)         :: runtime
       type(legion_context_f_t), value, intent(in)         :: ctx
@@ -945,7 +945,7 @@ module legion_fortran_c_interface
       integer(c_int), value, intent(in)                   :: part_kind
       integer(c_int), value, intent(in)                   :: color
     end function legion_index_partition_create_by_union_f
-    
+
     ! @see Legion::Runtime::create_partition_by_intersection()
     function legion_index_partition_create_by_intersection_f(runtime, ctx, parent, &
         handle1, handle2, color_space, part_kind, color) &
@@ -956,7 +956,7 @@ module legion_fortran_c_interface
       import legion_context_f_t
       import legion_index_space_f_t
       implicit none
-      
+
       type(legion_index_partition_f_t)                    :: legion_index_partition_create_by_intersection_f
       type(legion_runtime_f_t), value, intent(in)         :: runtime
       type(legion_context_f_t), value, intent(in)         :: ctx
@@ -967,7 +967,7 @@ module legion_fortran_c_interface
       integer(c_int), value, intent(in)                   :: part_kind
       integer(c_int), value, intent(in)                   :: color
     end function legion_index_partition_create_by_intersection_f
-    
+
     !
     function legion_index_partition_create_by_intersection_mirror_f(runtime, ctx, parent, &
         handle, part_kind, color, dominates) &
@@ -978,7 +978,7 @@ module legion_fortran_c_interface
       import legion_context_f_t
       import legion_index_space_f_t
       implicit none
-      
+
       type(legion_index_partition_f_t)                    :: legion_index_partition_create_by_intersection_mirror_f
       type(legion_runtime_f_t), value, intent(in)         :: runtime
       type(legion_context_f_t), value, intent(in)         :: ctx
@@ -988,7 +988,7 @@ module legion_fortran_c_interface
       integer(c_int), value, intent(in)                   :: color
       logical(c_bool), value, intent(in)                  :: dominates
     end function legion_index_partition_create_by_intersection_mirror_f
-    
+
     ! @see Legion::Runtime::create_partition_by_difference()
     function legion_index_partition_create_by_difference_f(runtime, ctx, parent, &
         handle1, handle2, color_space, part_kind, color) &
@@ -999,7 +999,7 @@ module legion_fortran_c_interface
       import legion_context_f_t
       import legion_index_space_f_t
       implicit none
-      
+
       type(legion_index_partition_f_t)                    :: legion_index_partition_create_by_difference_f
       type(legion_runtime_f_t), value, intent(in)         :: runtime
       type(legion_context_f_t), value, intent(in)         :: ctx
@@ -1010,7 +1010,7 @@ module legion_fortran_c_interface
       integer(c_int), value, intent(in)                   :: part_kind
       integer(c_int), value, intent(in)                   :: color
     end function legion_index_partition_create_by_difference_f
-    
+
     ! @see Legion::Runtime::create_partition_by_image()
     function legion_index_partition_create_by_image_f(runtime, ctx, handle, &
         projection, parent, fid, color_space, part_kind, color) &
@@ -1023,7 +1023,7 @@ module legion_fortran_c_interface
       import legion_logical_partition_f_t
       import legion_logical_region_f_t
       implicit none
-      
+
       type(legion_index_partition_f_t)                      :: legion_index_partition_create_by_image_f
       type(legion_runtime_f_t), value, intent(in)           :: runtime
       type(legion_context_f_t), value, intent(in)           :: ctx
@@ -1035,7 +1035,7 @@ module legion_fortran_c_interface
       integer(c_int), value, intent(in)                     :: part_kind
       integer(c_int), value, intent(in)                     :: color
     end function legion_index_partition_create_by_image_f
-    
+
     ! @see Legion::Runtime::create_partition_by_preimage()
     function legion_index_partition_create_by_preimage_f(runtime, ctx, projection, &
         handle, parent, fid, color_space, part_kind, color) &
@@ -1048,7 +1048,7 @@ module legion_fortran_c_interface
       import legion_logical_partition_f_t
       import legion_logical_region_f_t
       implicit none
-      
+
       type(legion_index_partition_f_t)                      :: legion_index_partition_create_by_preimage_f
       type(legion_runtime_f_t), value, intent(in)           :: runtime
       type(legion_context_f_t), value, intent(in)           :: ctx
@@ -1060,7 +1060,7 @@ module legion_fortran_c_interface
       integer(c_int), value, intent(in)                     :: part_kind
       integer(c_int), value, intent(in)                     :: color
     end function legion_index_partition_create_by_preimage_f
-    
+
     ! @see Legion::Runtime::create_partition_by_image_range()
     function legion_index_partition_create_by_image_range_f(runtime, ctx, handle, &
         projection, parent, fid, color_space, part_kind, color) &
@@ -1073,7 +1073,7 @@ module legion_fortran_c_interface
       import legion_logical_partition_f_t
       import legion_logical_region_f_t
       implicit none
-      
+
       type(legion_index_partition_f_t)                      :: legion_index_partition_create_by_image_range_f
       type(legion_runtime_f_t), value, intent(in)           :: runtime
       type(legion_context_f_t), value, intent(in)           :: ctx
@@ -1085,7 +1085,7 @@ module legion_fortran_c_interface
       integer(c_int), value, intent(in)                     :: part_kind
       integer(c_int), value, intent(in)                     :: color
     end function legion_index_partition_create_by_image_range_f
-    
+
     ! @see Legion::Runtime::create_partition_by_preimage_range()
     function legion_index_partition_create_by_preimage_range_f(runtime, ctx, projection, &
         handle, parent, fid, color_space, part_kind, color) &
@@ -1098,7 +1098,7 @@ module legion_fortran_c_interface
       import legion_logical_partition_f_t
       import legion_logical_region_f_t
       implicit none
-      
+
       type(legion_index_partition_f_t)                      :: legion_index_partition_create_by_preimage_range_f
       type(legion_runtime_f_t), value, intent(in)           :: runtime
       type(legion_context_f_t), value, intent(in)           :: ctx
@@ -1110,7 +1110,7 @@ module legion_fortran_c_interface
       integer(c_int), value, intent(in)                     :: part_kind
       integer(c_int), value, intent(in)                     :: color
     end function legion_index_partition_create_by_preimage_range_f
-    
+
     ! @see Legion::Runtime::create_partition_by_restriction()
     function legion_index_partition_create_by_restriction_f(runtime, ctx, parent, &
         color_space, transform, extent, part_kind, color) &
@@ -1123,7 +1123,7 @@ module legion_fortran_c_interface
       import legion_domain_transform_f_t
       import legion_domain_f_t
       implicit none
-      
+
       type(legion_index_partition_f_t)                     :: legion_index_partition_create_by_restriction_f
       type(legion_runtime_f_t), value, intent(in)          :: runtime
       type(legion_context_f_t), value, intent(in)          :: ctx
@@ -1143,7 +1143,7 @@ module legion_fortran_c_interface
       import legion_runtime_f_t
       import legion_index_partition_f_t
       implicit none
-  
+
       type(legion_runtime_f_t), value, intent(in)         :: runtime
       type(legion_index_partition_f_t), value, intent(in) :: handle
       type(c_ptr), value, intent(in)                      :: name
@@ -1163,14 +1163,14 @@ module legion_fortran_c_interface
       import legion_logical_region_f_t
       import legion_index_partition_f_t
       implicit none
-  
+
       type(legion_logical_partition_f_t)                  :: legion_logical_partition_create_f
       type(legion_runtime_f_t), value, intent(in)         :: runtime
       type(legion_context_f_t), value, intent(in)         :: ctx
       type(legion_logical_region_f_t), value, intent(in)  :: parent
       type(legion_index_partition_f_t), value, intent(in) :: handle
     end function legion_logical_partition_create_f
-    
+
     ! @see Legion::Runtime::destroy_logical_partition()
     subroutine legion_logical_partition_destroy_f(runtime, ctx, handle) &
         bind (C, name="legion_logical_partition_destroy")
@@ -1179,7 +1179,7 @@ module legion_fortran_c_interface
       import legion_context_f_t
       import legion_logical_partition_f_t
       implicit none
-      
+
       type(legion_runtime_f_t), value, intent(in)           :: runtime
       type(legion_context_f_t), value, intent(in)           :: ctx
       type(legion_logical_partition_f_t), value, intent(in) :: handle
@@ -1193,7 +1193,7 @@ module legion_fortran_c_interface
       import legion_runtime_f_t
       import legion_logical_partition_f_t
       implicit none
-  
+
       type(legion_runtime_f_t), value, intent(in)           :: runtime
       type(legion_logical_partition_f_t), value, intent(in) :: handle
       type(c_ptr), value, intent(in)                        :: name
@@ -1201,7 +1201,7 @@ module legion_fortran_c_interface
     end subroutine legion_logical_partition_attach_name_f
 
     ! -----------------------------------------------------------------------
-    ! Field Space Operatiins 
+    ! Field Space Operatiins
     ! -----------------------------------------------------------------------
     ! @see Legion::Runtime::create_field_space()
     function legion_field_space_create_f(runtime, ctx) &
@@ -1211,7 +1211,7 @@ module legion_fortran_c_interface
       import legion_runtime_f_t
       import legion_context_f_t
       implicit none
-  
+
       type(legion_field_space_f_t)                :: legion_field_space_create_f
       type(legion_runtime_f_t), value, intent(in) :: runtime
       type(legion_context_f_t), value, intent(in) :: ctx
@@ -1225,14 +1225,14 @@ module legion_fortran_c_interface
       import legion_context_f_t
       import legion_field_space_f_t
       implicit none
-  
+
       type(legion_runtime_f_t), value, intent(in)     :: runtime
       type(legion_context_f_t), value, intent(in)     :: ctx
       type(legion_field_space_f_t), value, intent(in) :: handle
     end subroutine legion_field_space_destroy_f
 
     ! -----------------------------------------------------------------------
-    ! Field Allocator 
+    ! Field Allocator
     ! -----------------------------------------------------------------------
     ! @see Legion::Runtime::create_field_allocator()
     function legion_field_allocator_create_f(runtime, ctx, handle) &
@@ -1243,7 +1243,7 @@ module legion_fortran_c_interface
       import legion_context_f_t
       import legion_field_space_f_t
       implicit none
-  
+
       type(legion_field_allocator_f_t)                :: legion_field_allocator_create_f
       type(legion_runtime_f_t), value, intent(in)     :: runtime
       type(legion_context_f_t), value, intent(in)     :: ctx
@@ -1256,7 +1256,7 @@ module legion_fortran_c_interface
       use iso_c_binding
       import legion_field_allocator_f_t
       implicit none
-  
+
       type(legion_field_allocator_f_t), value, intent(in) :: handle
     end subroutine legion_field_allocator_destroy_f
 
@@ -1267,22 +1267,22 @@ module legion_fortran_c_interface
       use iso_c_binding
       import legion_field_allocator_f_t
       implicit none
-  
+
       integer(c_int)                                      :: legion_field_allocator_allocate_field_f
-      type(legion_field_allocator_f_t), value, intent(in) :: allocator                                          
-      integer(c_size_t), value, intent(in)                :: field_size                                         
-      integer(c_int), value, intent(in)                   :: desired_fieldid                                        
+      type(legion_field_allocator_f_t), value, intent(in) :: allocator
+      integer(c_size_t), value, intent(in)                :: field_size
+      integer(c_int), value, intent(in)                   :: desired_fieldid
     end function legion_field_allocator_allocate_field_f
-    
+
     ! @see Legion::FieldAllocator::free_field()
     subroutine legion_field_allocator_free_field_f(allocator, fid) &
         bind (C, name="legion_field_allocator_free_field")
       use iso_c_binding
       import legion_field_allocator_f_t
       implicit none
-  
-      type(legion_field_allocator_f_t), value, intent(in) :: allocator                                                                             
-      integer(c_int), value, intent(in)                   :: fid                                        
+
+      type(legion_field_allocator_f_t), value, intent(in) :: allocator
+      integer(c_int), value, intent(in)                   :: fid
     end subroutine legion_field_allocator_free_field_f
 
     ! -----------------------------------------------------------------------
@@ -1298,12 +1298,12 @@ module legion_fortran_c_interface
       import legion_index_space_f_t
       import legion_field_space_f_t
       implicit none
-  
+
       type(legion_logical_region_f_t)                 :: legion_logical_region_create_f
       type(legion_runtime_f_t), value, intent(in)     :: runtime
       type(legion_context_f_t), value, intent(in)     :: ctx
       type(legion_index_space_f_t), value, intent(in) :: index
-      type(legion_field_space_f_t), value, intent(in) :: fields        
+      type(legion_field_space_f_t), value, intent(in) :: fields
     end function legion_logical_region_create_f
 
     ! @see Legion::Runtime::destroy_logical_region()
@@ -1314,7 +1314,7 @@ module legion_fortran_c_interface
       import legion_context_f_t
       import legion_logical_region_f_t
       implicit none
-  
+
       type(legion_runtime_f_t), value, intent(in)        :: runtime
       type(legion_context_f_t), value, intent(in)        :: ctx
       type(legion_logical_region_f_t), value, intent(in) :: handle
@@ -1327,7 +1327,7 @@ module legion_fortran_c_interface
       import legion_index_space_f_t
       import legion_logical_region_f_t
       implicit none
-  
+
       type(legion_index_space_f_t)                       :: legion_logical_region_get_index_space_f
       type(legion_logical_region_f_t), value, intent(in) :: handle
     end function legion_logical_region_get_index_space_f
@@ -1342,18 +1342,18 @@ module legion_fortran_c_interface
       import legion_region_requirement_f_t
       import legion_logical_region_f_t
       implicit none
-      
+
       type(legion_logical_region_f_t)                        :: legion_region_requirement_get_region_f
       type(legion_region_requirement_f_t), value, intent(in) :: handle
     end function legion_region_requirement_get_region_f
-    
+
     ! @see Legion::RegionRequirement::privilege_fields
     function legion_region_requirement_get_privilege_field_f(handle, idx) &
         bind (C, name="legion_region_requirement_get_privilege_field")
       use iso_c_binding
       import legion_region_requirement_f_t
       implicit none
-  
+
       integer(c_int)                                         :: legion_region_requirement_get_privilege_field_f
       type(legion_region_requirement_f_t), value, intent(in) :: handle
       integer(c_int), value, intent(in)                      :: idx
@@ -1367,55 +1367,55 @@ module legion_fortran_c_interface
       use iso_c_binding
       import legion_physical_region_f_t
       implicit none
-  
+
       type(legion_physical_region_f_t)  :: legion_get_physical_region_by_id_f
       type(c_ptr), value, intent(in)    :: regionptr
       integer(c_int), value, intent(in) :: id
       integer(c_int), value, intent(in) :: num_regions
     end function legion_get_physical_region_by_id_f
-     
+
     ! @see Legion::PhysicalRegion::~PhysicalRegion()
     subroutine legion_physical_region_destroy_f(handle) &
         bind(C, name="legion_physical_region_destroy")
       use iso_c_binding
       import legion_physical_region_f_t
       implicit none
-      
+
       type(legion_physical_region_f_t), value, intent(in) :: handle
     end subroutine legion_physical_region_destroy_f
-    
+
     ! @see Legion::PhysicalRegion::is_mapped()
     function legion_physical_region_is_mapped_f(handle) &
         bind(C, name="legion_physical_region_is_mapped")
       use iso_c_binding
       import legion_physical_region_f_t
       implicit none
-      
+
       logical(c_bool)                                     :: legion_physical_region_is_mapped_f
       type(legion_physical_region_f_t), value, intent(in) :: handle
     end function legion_physical_region_is_mapped_f
-    
+
     ! @see Legion::PhysicalRegion::wait_until_valid()
     subroutine legion_physical_region_wait_until_valid_f(handle) &
         bind(C, name="legion_physical_region_wait_until_valid")
       use iso_c_binding
       import legion_physical_region_f_t
       implicit none
-      
+
       type(legion_physical_region_f_t), value, intent(in) :: handle
     end subroutine legion_physical_region_wait_until_valid_f
-    
+
     ! @see Legion::PhysicalRegion::is_valid()
     function legion_physical_region_is_valid_f(handle) &
         bind(C, name="legion_physical_region_is_valid")
       use iso_c_binding
       import legion_physical_region_f_t
       implicit none
-      
+
       logical(c_bool)                                     :: legion_physical_region_is_valid_f
       type(legion_physical_region_f_t), value, intent(in) :: handle
     end function legion_physical_region_is_valid_f
-    
+
     ! @see Legion::PhysicalRegion::get_logical_region()
     function legion_physical_region_get_logical_region_f(handle) &
         bind(C, name="legion_physical_region_get_logical_region")
@@ -1423,7 +1423,7 @@ module legion_fortran_c_interface
       import legion_physical_region_f_t
       import legion_logical_region_f_t
       implicit none
-      
+
       type(legion_logical_region_f_t)                     :: legion_physical_region_get_logical_region_f
       type(legion_physical_region_f_t), value, intent(in) :: handle
     end function legion_physical_region_get_logical_region_f
@@ -1435,7 +1435,7 @@ module legion_fortran_c_interface
       import legion_accessor_array_1d_f_t
       import legion_physical_region_f_t
       implicit none
-  
+
       type(legion_accessor_array_1d_f_t)                  :: legion_physical_region_get_field_accessor_array_1d_f
       type(legion_physical_region_f_t), value, intent(in) :: handle
       integer(c_int), value, intent(in)                   :: fid
@@ -1449,7 +1449,7 @@ module legion_fortran_c_interface
       import legion_accessor_array_2d_f_t
       import legion_physical_region_f_t
       implicit none
-  
+
       type(legion_accessor_array_2d_f_t)                  :: legion_physical_region_get_field_accessor_array_2d_f
       type(legion_physical_region_f_t), value, intent(in) :: handle
       integer(c_int), value, intent(in)                   :: fid
@@ -1464,7 +1464,7 @@ module legion_fortran_c_interface
       import legion_accessor_array_3d_f_t
       import legion_physical_region_f_t
       implicit none
-  
+
       type(legion_accessor_array_3d_f_t)                  :: legion_physical_region_get_field_accessor_array_3d_f
       type(legion_physical_region_f_t), value, intent(in) :: handle
       integer(c_int), value, intent(in)                   :: fid
@@ -1479,7 +1479,7 @@ module legion_fortran_c_interface
       import legion_rect_1d_f_t
       import legion_byte_offset_f_t
       implicit none
-  
+
       type(c_ptr)                                           :: legion_accessor_array_1d_raw_rect_ptr_f
       type(legion_accessor_array_1d_f_t), value, intent(in) :: handle
       type(legion_rect_1d_f_t), value, intent(in)           :: rect
@@ -1496,7 +1496,7 @@ module legion_fortran_c_interface
       import legion_rect_2d_f_t
       import legion_byte_offset_f_t
       implicit none
-  
+
       type(c_ptr)                                           :: legion_accessor_array_2d_raw_rect_ptr_f
       type(legion_accessor_array_2d_f_t), value, intent(in) :: handle
       type(legion_rect_2d_f_t), value, intent(in)           :: rect
@@ -1514,7 +1514,7 @@ module legion_fortran_c_interface
       import legion_rect_3d_f_t
       import legion_byte_offset_f_t
       implicit none
-  
+
       type(c_ptr)                                           :: legion_accessor_array_3d_raw_rect_ptr_f
       type(legion_accessor_array_3d_f_t), value, intent(in) :: handle
       type(legion_rect_3d_f_t), value, intent(in)           :: rect
@@ -1530,7 +1530,7 @@ module legion_fortran_c_interface
       import legion_accessor_array_1d_f_t
       import legion_point_1d_f_t
       implicit none
-  
+
       type(legion_accessor_array_1d_f_t), value, intent(in) :: handle
       type(legion_point_1d_f_t), value, intent(in)          :: point
       type(c_ptr), value, intent(in)                        :: dst ! should be OUT, set to IN to cheat compiler
@@ -1545,7 +1545,7 @@ module legion_fortran_c_interface
       import legion_accessor_array_2d_f_t
       import legion_point_2d_f_t
       implicit none
-  
+
       type(legion_accessor_array_2d_f_t), value, intent(in) :: handle
       type(legion_point_2d_f_t), value, intent(in)          :: point
       type(c_ptr), value, intent(in)                        :: dst ! should be OUT, set to IN to cheat compiler
@@ -1561,7 +1561,7 @@ module legion_fortran_c_interface
       import legion_accessor_array_3d_f_t
       import legion_point_3d_f_t
       implicit none
-  
+
       type(legion_accessor_array_3d_f_t), value, intent(in) :: handle
       type(legion_point_3d_f_t), value, intent(in)          :: point
       type(c_ptr), value, intent(in)                        :: dst ! should be OUT, set to IN to cheat compiler
@@ -1576,7 +1576,7 @@ module legion_fortran_c_interface
       import legion_accessor_array_1d_f_t
       import legion_point_1d_f_t
       implicit none
-  
+
       type(legion_accessor_array_1d_f_t), value, intent(in) :: handle
       type(legion_point_1d_f_t), value, intent(in)          :: point
       type(c_ptr), value, intent(in)                        :: src
@@ -1591,7 +1591,7 @@ module legion_fortran_c_interface
       import legion_accessor_array_2d_f_t
       import legion_point_2d_f_t
       implicit none
-  
+
       type(legion_accessor_array_2d_f_t), value, intent(in) :: handle
       type(legion_point_2d_f_t), value, intent(in)          :: point
       type(c_ptr), value, intent(in)                        :: src
@@ -1607,14 +1607,14 @@ module legion_fortran_c_interface
       import legion_accessor_array_3d_f_t
       import legion_point_3d_f_t
       implicit none
-  
+
       type(legion_accessor_array_3d_f_t), value, intent(in) :: handle
       type(legion_point_3d_f_t), value, intent(in)          :: point
       type(c_ptr), value, intent(in)                        :: src
       integer(c_size_t), value, intent(in)                  :: bytes
     end subroutine legion_accessor_array_3d_write_point_f
 #endif
-    
+
     ! -----------------------------------------------------------------------
     ! Fill Field Operations
     ! -----------------------------------------------------------------------
@@ -1626,7 +1626,7 @@ module legion_fortran_c_interface
       import legion_context_f_t
       import legion_logical_region_f_t
       import legion_predicate_f_t
-      
+
       type(legion_runtime_f_t), value, intent(in)        :: runtime
       type(legion_context_f_t), value, intent(in)        :: ctx
       type(legion_logical_region_f_t), value, intent(in) :: handle
@@ -1634,7 +1634,7 @@ module legion_fortran_c_interface
       integer(c_int), value, intent(in)                  :: fid
       type(c_ptr), value, intent(in)                     :: value
       integer(c_size_t), value, intent(in)               :: value_size
-      type(legion_predicate_f_t), value, intent(in)      :: pred    
+      type(legion_predicate_f_t), value, intent(in)      :: pred
     end subroutine legion_runtime_fill_field_f
 
     ! -----------------------------------------------------------------------
@@ -1645,7 +1645,7 @@ module legion_fortran_c_interface
       use iso_c_binding
       import legion_field_map_f_t
       implicit none
-  
+
       type(legion_field_map_f_t) :: legion_field_map_create_f
     end function legion_field_map_create_f
 
@@ -1654,7 +1654,7 @@ module legion_fortran_c_interface
       use iso_c_binding
       import legion_field_map_f_t
       implicit none
-  
+
       type(legion_field_map_f_t), value, intent(in) :: handle
     end subroutine legion_field_map_destroy_f
 
@@ -1663,7 +1663,7 @@ module legion_fortran_c_interface
       use iso_c_binding
       import legion_field_map_f_t
       implicit none
-  
+
       type(legion_field_map_f_t), value, intent(in) :: handle
       integer(c_int), value, intent(in)             :: key
       type(c_ptr), value, intent(in)                :: value
@@ -1680,7 +1680,7 @@ module legion_fortran_c_interface
       import legion_logical_region_f_t
       import legion_field_map_f_t
       implicit none
-  
+
       type(legion_physical_region_f_t)                   :: legion_runtime_attach_hdf5_f
       type(legion_runtime_f_t), value, intent(in)        :: runtime
       type(legion_context_f_t), value, intent(in)        :: ctx
@@ -1699,12 +1699,12 @@ module legion_fortran_c_interface
       import legion_context_f_t
       import legion_physical_region_f_t
       implicit none
-  
+
       type(legion_runtime_f_t), value, intent(in)         :: runtime
       type(legion_context_f_t), value, intent(in)         :: ctx
       type(legion_physical_region_f_t), value, intent(in) :: region
     end subroutine legion_runtime_detach_hdf5_f
-    
+
     ! -----------------------------------------------------------------------
     ! Copy Operations
     ! -----------------------------------------------------------------------
@@ -1715,7 +1715,7 @@ module legion_fortran_c_interface
       import legion_copy_launcher_f_t
       import legion_predicate_f_t
       implicit none
-  
+
       type(legion_copy_launcher_f_t)                :: legion_copy_launcher_create_f
       type(legion_predicate_f_t), value, intent(in) :: pred
       integer(c_int), value, intent(in)             :: id
@@ -1728,7 +1728,7 @@ module legion_fortran_c_interface
       use iso_c_binding
       import legion_copy_launcher_f_t
       implicit none
-  
+
       type(legion_copy_launcher_f_t), value, intent(in) :: handle
     end subroutine legion_copy_launcher_destroy_f
 
@@ -1740,7 +1740,7 @@ module legion_fortran_c_interface
       import legion_context_f_t
       import legion_copy_launcher_f_t
       implicit none
-  
+
       type(legion_runtime_f_t), value, intent(in)       :: runtime
       type(legion_context_f_t), value, intent(in)       :: ctx
       type(legion_copy_launcher_f_t), value, intent(in) :: launcher
@@ -1754,7 +1754,7 @@ module legion_fortran_c_interface
       import legion_copy_launcher_f_t
       import legion_logical_region_f_t
       implicit none
-  
+
       integer(c_int)                                     :: legion_copy_launcher_add_src_region_requirement_lr_f
       type(legion_copy_launcher_f_t), value, intent(in)  :: launcher
       type(legion_logical_region_f_t), value, intent(in) :: handle
@@ -1773,7 +1773,7 @@ module legion_fortran_c_interface
       import legion_copy_launcher_f_t
       import legion_logical_region_f_t
       implicit none
-  
+
       integer(c_int)                                     :: legion_copy_launcher_add_dst_region_requirement_lr_f
       type(legion_copy_launcher_f_t), value, intent(in)  :: launcher
       type(legion_logical_region_f_t), value, intent(in) :: handle
@@ -1790,7 +1790,7 @@ module legion_fortran_c_interface
       use iso_c_binding
       import legion_copy_launcher_f_t
       implicit none
-  
+
       type(legion_copy_launcher_f_t), value, intent(in) :: launcher
       integer(c_int), value, intent(in)                 :: idx
       integer(c_int), value, intent(in)                 :: fid
@@ -1803,13 +1803,13 @@ module legion_fortran_c_interface
       use iso_c_binding
       import legion_copy_launcher_f_t
       implicit none
-  
+
       type(legion_copy_launcher_f_t), value, intent(in) :: launcher
       integer(c_int), value, intent(in)                 :: idx
       integer(c_int), value, intent(in)                 :: fid
       logical(c_bool), value, intent(in)                :: inst
     end subroutine legion_copy_launcher_add_dst_field_f
-    
+
     ! -----------------------------------------------------------------------
     ! Index Copy Operations
     ! -----------------------------------------------------------------------
@@ -1821,7 +1821,7 @@ module legion_fortran_c_interface
       import legion_domain_f_t
       import legion_predicate_f_t
       implicit none
-  
+
       type(legion_index_copy_launcher_f_t)          :: legion_index_copy_launcher_create_f
       type(legion_domain_f_t), value, intent(in)    :: domain
       type(legion_predicate_f_t), value, intent(in) :: pred
@@ -1835,10 +1835,10 @@ module legion_fortran_c_interface
       use iso_c_binding
       import legion_index_copy_launcher_f_t
       implicit none
-  
+
       type(legion_index_copy_launcher_f_t), value, intent(in) :: handle
     end subroutine legion_index_copy_launcher_destroy_f
-    
+
     ! @see Legion::Runtime::issue_copy_operation()
     subroutine legion_index_copy_launcher_execute_f(runtime, ctx, launcher) &
         bind(C, name="legion_index_copy_launcher_execute")
@@ -1847,12 +1847,12 @@ module legion_fortran_c_interface
       import legion_context_f_t
       import legion_index_copy_launcher_f_t
       implicit none
-  
+
       type(legion_runtime_f_t), value, intent(in)             :: runtime
       type(legion_context_f_t), value, intent(in)             :: ctx
       type(legion_index_copy_launcher_f_t), value, intent(in) :: launcher
     end subroutine legion_index_copy_launcher_execute_f
-    
+
     ! @see Legion::IndexCopyLauncher::add_copy_requirements()
     function legion_index_copy_launcher_add_src_region_requirement_lr_f(launcher, &
         handle, proj, priv, prop, parent, tag, verified) &
@@ -1861,7 +1861,7 @@ module legion_fortran_c_interface
       import legion_index_copy_launcher_f_t
       import legion_logical_region_f_t
       implicit none
-  
+
       integer(c_int)                                          :: legion_index_copy_launcher_add_src_region_requirement_lr_f
       type(legion_index_copy_launcher_f_t), value, intent(in) :: launcher
       type(legion_logical_region_f_t), value, intent(in)      :: handle
@@ -1881,7 +1881,7 @@ module legion_fortran_c_interface
       import legion_index_copy_launcher_f_t
       import legion_logical_region_f_t
       implicit none
-  
+
       integer(c_int)                                          :: legion_index_copy_launcher_add_dst_region_requirement_lr_f
       type(legion_index_copy_launcher_f_t), value, intent(in) :: launcher
       type(legion_logical_region_f_t), value, intent(in)      :: handle
@@ -1892,7 +1892,7 @@ module legion_fortran_c_interface
       integer(c_long), value, intent(in)                      :: tag
       logical(c_bool), value, intent(in)                      :: verified
     end function legion_index_copy_launcher_add_dst_region_requirement_lr_f
-    
+
     ! @see Legion::IndexCopyLauncher::add_copy_requirements()
     function legion_index_copy_launcher_add_src_region_requirement_lp_f(launcher, &
         handle, proj, priv, prop, parent, tag, verified) &
@@ -1902,7 +1902,7 @@ module legion_fortran_c_interface
       import legion_logical_partition_f_t
       import legion_logical_region_f_t
       implicit none
-  
+
       integer(c_int)                                          :: legion_index_copy_launcher_add_src_region_requirement_lp_f
       type(legion_index_copy_launcher_f_t), value, intent(in) :: launcher
       type(legion_logical_partition_f_t), value, intent(in)   :: handle
@@ -1923,7 +1923,7 @@ module legion_fortran_c_interface
       import legion_logical_partition_f_t
       import legion_logical_region_f_t
       implicit none
-  
+
       integer(c_int)                                          :: legion_index_copy_launcher_add_dst_region_requirement_lp_f
       type(legion_index_copy_launcher_f_t), value, intent(in) :: launcher
       type(legion_logical_partition_f_t), value, intent(in)   :: handle
@@ -1934,14 +1934,14 @@ module legion_fortran_c_interface
       integer(c_long), value, intent(in)                      :: tag
       logical(c_bool), value, intent(in)                      :: verified
     end function legion_index_copy_launcher_add_dst_region_requirement_lp_f
-    
+
     ! @see Legion::IndexCopyLauncher::add_src_field()
     subroutine legion_index_copy_launcher_add_src_field_f(launcher, idx, fid, inst) &
         bind(C, name="legion_index_copy_launcher_add_src_field")
       use iso_c_binding
       import legion_index_copy_launcher_f_t
       implicit none
-  
+
       type(legion_index_copy_launcher_f_t), value, intent(in) :: launcher
       integer(c_int), value, intent(in)                       :: idx
       integer(c_int), value, intent(in)                       :: fid
@@ -1954,13 +1954,13 @@ module legion_fortran_c_interface
       use iso_c_binding
       import legion_index_copy_launcher_f_t
       implicit none
-  
+
       type(legion_index_copy_launcher_f_t), value, intent(in) :: launcher
       integer(c_int), value, intent(in)                       :: idx
       integer(c_int), value, intent(in)                       :: fid
       logical(c_bool), value, intent(in)                      :: inst
     end subroutine legion_index_copy_launcher_add_dst_field_f
-    
+
     ! -----------------------------------------------------------------------
     ! Attach Operations
     ! -----------------------------------------------------------------------
@@ -1972,23 +1972,23 @@ module legion_fortran_c_interface
       import legion_attach_launcher_f_t
       import legion_logical_region_f_t
       implicit none
-      
+
       type(legion_attach_launcher_f_t)                   :: legion_attach_launcher_create_f
       type(legion_logical_region_f_t), value, intent(in) :: logical_region
       type(legion_logical_region_f_t), value, intent(in) :: parent_region
       integer(c_int), value, intent(in) :: resource
     end function legion_attach_launcher_create_f
-    
+
     ! @see Legion::AttachLauncher::~AttachLauncher()
     subroutine legion_attach_launcher_destroy_f(handle) &
         bind(C, name="legion_attach_launcher_destroy")
       use iso_c_binding
       import legion_attach_launcher_f_t
       implicit none
-      
+
       type(legion_attach_launcher_f_t), value, intent(in) :: handle
     end subroutine legion_attach_launcher_destroy_f
-    
+
     ! @see Legion::Runtime::attach_external_resource()
     function legion_attach_launcher_execute_f(runtime, ctx, launcher) &
         bind(C, name="legion_attach_launcher_execute")
@@ -1998,13 +1998,13 @@ module legion_fortran_c_interface
       import legion_context_f_t
       import legion_attach_launcher_f_t
       implicit none
-      
+
       type(legion_physical_region_f_t)                    :: legion_attach_launcher_execute_f
       type(legion_runtime_f_t), value, intent(in)         :: runtime
       type(legion_context_f_t), value, intent(in)         :: ctx
-      type(legion_attach_launcher_f_t), value, intent(in) :: launcher    
+      type(legion_attach_launcher_f_t), value, intent(in) :: launcher
     end function legion_attach_launcher_execute_f
-    
+
     ! @see Legion::AttachLauncher::attach_array_soa()
     subroutine legion_attach_launcher_add_cpu_soa_field_f(launcher, &
         fid, base_ptr, column_major) &
@@ -2012,13 +2012,13 @@ module legion_fortran_c_interface
       use iso_c_binding
       import legion_attach_launcher_f_t
       implicit none
-      
+
       type(legion_attach_launcher_f_t), value, intent(in) :: launcher
       integer(c_int), value, intent(in)                   :: fid
       type(c_ptr), value, intent(in)                      :: base_ptr
       logical(c_bool), value, intent(in)                  :: column_major
     end subroutine legion_attach_launcher_add_cpu_soa_field_f
-    
+
     ! @see Legion::Runtime::detach_external_resource()
     function legion_detach_external_resource_f(runtime, ctx, handle) &
         bind(C, name="legion_detach_external_resource")
@@ -2028,13 +2028,13 @@ module legion_fortran_c_interface
       import legion_context_f_t
       import legion_physical_region_f_t
       implicit none
-      
+
       type(legion_future_f_t)                             :: legion_detach_external_resource_f
       type(legion_runtime_f_t), value, intent(in)         :: runtime
       type(legion_context_f_t), value, intent(in)         :: ctx
-      type(legion_physical_region_f_t), value, intent(in) :: handle   
+      type(legion_physical_region_f_t), value, intent(in) :: handle
     end function legion_detach_external_resource_f
-    
+
     ! @see Legion::Runtime::detach_external_resource()
     function legion_flush_detach_external_resource_f(runtime, ctx, handle, &
         flush) &
@@ -2045,14 +2045,14 @@ module legion_fortran_c_interface
       import legion_context_f_t
       import legion_physical_region_f_t
       implicit none
-      
+
       type(legion_future_f_t)                             :: legion_flush_detach_external_resource_f
       type(legion_runtime_f_t), value, intent(in)         :: runtime
       type(legion_context_f_t), value, intent(in)         :: ctx
-      type(legion_physical_region_f_t), value, intent(in) :: handle  
-      logical(c_bool), value, intent(in)                  :: flush 
+      type(legion_physical_region_f_t), value, intent(in) :: handle
+      logical(c_bool), value, intent(in)                  :: flush
     end function legion_flush_detach_external_resource_f
-    
+
     ! @see Legion::Runtime::detach_external_resource()
     function legion_unordered_detach_external_resource_f(runtime, ctx, handle, &
         flush, unordered) &
@@ -2063,15 +2063,15 @@ module legion_fortran_c_interface
       import legion_context_f_t
       import legion_physical_region_f_t
       implicit none
-      
+
       type(legion_future_f_t)                             :: legion_unordered_detach_external_resource_f
       type(legion_runtime_f_t), value, intent(in)         :: runtime
       type(legion_context_f_t), value, intent(in)         :: ctx
-      type(legion_physical_region_f_t), value, intent(in) :: handle  
-      logical(c_bool), value, intent(in)                  :: flush 
+      type(legion_physical_region_f_t), value, intent(in) :: handle
+      logical(c_bool), value, intent(in)                  :: flush
       logical(c_bool), value, intent(in)                  :: unordered
     end function legion_unordered_detach_external_resource_f
-    
+
     ! -----------------------------------------------------------------------
     ! Miscellaneous Operations
     ! -----------------------------------------------------------------------
@@ -2081,10 +2081,10 @@ module legion_fortran_c_interface
       use iso_c_binding
       import legion_runtime_f_t
       implicit none
-      
+
       type(legion_runtime_f_t) :: legion_runtime_get_runtime_f
     end function legion_runtime_get_runtime_f
-    
+
     ! -----------------------------------------------------------------------
     ! Execution Constraints
     ! -----------------------------------------------------------------------
@@ -2094,17 +2094,17 @@ module legion_fortran_c_interface
       use iso_c_binding
       import legion_execution_constraint_set_f_t
       implicit none
-  
+
       type(legion_execution_constraint_set_f_t) :: legion_execution_constraint_set_create_f
     end function legion_execution_constraint_set_create_f
-    
+
     ! Legion::ExecutionConstraintSet::~ExecutionConstraintSet()
     subroutine legion_execution_constraint_set_destroy_f(handle) &
         bind(C, name="legion_execution_constraint_set_destroy")
       use iso_c_binding
       import legion_execution_constraint_set_f_t
       implicit none
-  
+
       type(legion_execution_constraint_set_f_t), value, intent(in) :: handle
     end subroutine legion_execution_constraint_set_destroy_f
 
@@ -2114,11 +2114,11 @@ module legion_fortran_c_interface
       use iso_c_binding
       import legion_execution_constraint_set_f_t
       implicit none
-  
+
       type(legion_execution_constraint_set_f_t), value, intent(in)    :: handle
       integer(c_int), value, intent(in)                               :: proc_kind
     end subroutine legion_execution_constraint_set_add_processor_constraint_f
-    
+
     ! -----------------------------------------------------------------------
     ! Task Layout Constraints
     ! -----------------------------------------------------------------------
@@ -2128,20 +2128,20 @@ module legion_fortran_c_interface
       use iso_c_binding
       import legion_task_layout_constraint_set_f_t
       implicit none
-  
+
       type(legion_task_layout_constraint_set_f_t) :: legion_task_layout_constraint_set_create_f
     end function legion_task_layout_constraint_set_create_f
-    
+
     ! Legion::TaskLayoutConstraintSet::TaskLayoutConstraintSet()
     subroutine legion_task_layout_constraint_set_destroy_f(handle) &
         bind(C, name="legion_task_layout_constraint_set_destroy")
       use iso_c_binding
       import legion_task_layout_constraint_set_f_t
       implicit none
-  
+
       type(legion_task_layout_constraint_set_f_t), value, intent(in) :: handle
     end subroutine legion_task_layout_constraint_set_destroy_f
-    
+
     ! -----------------------------------------------------------------------
     ! Start-up Operations
     ! -----------------------------------------------------------------------
@@ -2150,9 +2150,9 @@ module legion_fortran_c_interface
         bind(C, name="legion_runtime_set_top_level_task_id")
       use iso_c_binding
       implicit none
-      
+
       integer(c_int), value, intent(in) :: top_id
-    end subroutine legion_runtime_set_top_level_task_id_f  
+    end subroutine legion_runtime_set_top_level_task_id_f
 
     ! Legion::Runtime::preregister_task_variant()
     function legion_runtime_preregister_task_variant_fnptr_f(id, variant_id, task_name, &
@@ -2169,7 +2169,7 @@ module legion_fortran_c_interface
       import legion_task_layout_constraint_set_f_t
       import legion_task_config_options_f_t
       implicit none
-  
+
       integer(c_int)                                                  :: legion_runtime_preregister_task_variant_fnptr_f
       integer(c_int), value, intent(in)                               :: id
       integer(c_int), value, intent(in)                               :: variant_id
@@ -2188,7 +2188,7 @@ module legion_fortran_c_interface
         bind(C, name="legion_runtime_start")
       use iso_c_binding
       implicit none
-  
+
       integer(c_int)                      :: legion_runtime_start_f
       integer(c_int), value, intent(in)   :: argc
       type(c_ptr), intent(in)             :: argv(*) ! pass reference
@@ -2206,14 +2206,14 @@ module legion_fortran_c_interface
       import legion_context_f_t
       import legion_runtime_f_t
       implicit none
-  
+
       type(c_ptr), value, intent(in)                  :: tdata
       integer(c_size_t), value, intent(in)            :: tdatalen
       integer(c_long_long), value, intent(in)         :: proc_id
       type(legion_task_f_t), intent(out)              :: task ! pass reference
       type(c_ptr), intent(out)                        :: regionptr
       integer(c_int), intent(out)                     :: num_regions ! pass reference
-      type(legion_context_f_t), intent(out)           :: ctx ! pass reference          
+      type(legion_context_f_t), intent(out)           :: ctx ! pass reference
       type(legion_runtime_f_t), intent(out)           :: runtime ! pass reference
     end subroutine legion_task_preamble_f
 
@@ -2224,12 +2224,12 @@ module legion_fortran_c_interface
       import legion_runtime_f_t
       import legion_context_f_t
       implicit none
-  
+
       type(legion_runtime_f_t), value, intent(in) :: runtime
       type(legion_context_f_t), value, intent(in) :: ctx
       type(c_ptr), value, intent(in)              :: retval
       integer(c_size_t), value, intent(in)        :: retsize
     end subroutine legion_task_postamble_f
-    
+
   end interface
 end module
