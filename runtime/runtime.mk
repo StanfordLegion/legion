@@ -213,8 +213,7 @@ ifeq ($(strip $(USE_PAPI)),1)
       $(error USE_PAPI set, but neither PAPI nor PAPI_ROOT is defined, aborting build)
     endif
   endif
-  CC_FLAGS        += -DREALM_USE_PAPI
-  FC_FLAGS	  += -DREALM_USE_PAPI
+  REALM_CC_FLAGS += -DREALM_USE_PAPI
   INC_FLAGS   += -I$(PAPI_ROOT)/include
   LEGION_LD_FLAGS += -L$(PAPI_ROOT)/lib -lpapi
 endif

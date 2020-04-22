@@ -221,6 +221,11 @@ endif()
 set_target_properties(RealmRuntime PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(RealmRuntime PROPERTIES SOVERSION ${SOVERSION})
 
+if(Legion_USE_PAPI)
+  target_include_directories(RealmRuntime PRIVATE ${PAPI_INCLUDE_DIRS})
+  target_link_libraries(RealmRuntime PUBLIC ${PAPI_LIBRARIES})
+endif()
+
 if(Legion_USE_HWLOC)
   target_link_libraries(RealmRuntime PRIVATE HWLOC::HWLOC)
 endif()

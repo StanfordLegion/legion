@@ -54,3 +54,5 @@
 #cmakedefine REALM_USE_DLMOPEN
 
 #cmakedefine REALM_USE_HWLOC
+
+#cmakedefine REALM_USE_PAPI

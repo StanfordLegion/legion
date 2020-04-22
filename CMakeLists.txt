@@ -362,6 +362,27 @@ if(Legion_USE_HWLOC)
 endif()
 
 #------------------------------------------------------------------------------#
+# PAPI configuration
+#------------------------------------------------------------------------------#
+option(Legion_USE_PAPI "Use PAPI for performance measurements" OFF)
+if(Legion_USE_PAPI)
+  # no FindPAPI in cmake by default, so just find the lib and include path
+  #  ourselves
+  find_library(PAPI_LIBRARIES NAMES libpapi.so libpapi.a papi
+    HINTS ${PAPI_ROOT}/lib $ENV{PAPI_ROOT}/lib ENV PAPI_LIB_DIR)
+  find_path(PAPI_INCLUDE_DIRS NAMES papi.h
+    HINTS ${PAPI_ROOT}/include $ENV{PAPI_ROOT}/include ENV PAPI_INC_DIR)
+  if(PAPI_LIBRARIES AND PAPI_INCLUDE_DIRS)
+    set(REALM_USE_PAPI ON)
+  else()
+    message(FATAL_ERROR
+      " Could not find PAPI - set PAPI_{ROOT,INC_DIR,LIB_DIR} if needed -- got:\n"
+      "   PAPI_LIBRARIES: ${PAPI_LIBRARIES}\n"
+      "   PAPI_INCLUDE_DIRS: ${PAPI_INCLUDE_DIRS}")
+  endif()
+endif()
+
+#------------------------------------------------------------------------------#
 # zlib configuration
 #------------------------------------------------------------------------------#
 option(Legion_USE_ZLIB "Enable support for zlib" ON)
