@@ -45,13 +45,6 @@ CXX ?= g++
 NO_BUILD_RULES=1
 include $(LG_RT_DIR)/runtime.mk
 
-# since we're just doing Realm and not Legion, we need to strip out a few
-#  things that might have come in from CC_FLAGS that require Legion goo
-override CC_FLAGS := $(filter-out -DBOUNDS_CHECKS, \
-                     $(filter-out -DPRIVILEGE_CHECKS, \
-                     $(filter-out -DLEGION_SPY, \
-                       $(CC_FLAGS))))
-
 TESTS := serializing test_profiling ctxswitch barrier_reduce taskreg memspeed idcheck inst_reuse transpose
 TESTS += proc_group
 TESTS += deppart
