@@ -431,6 +431,12 @@ set(LEGION_WARNINGS_FATAL ${Legion_WARNINGS_FATAL})
 option(Legion_SPY "Enable detailed logging for Legion Spy" OFF)
 set(LEGION_SPY ${Legion_SPY})
 
+option(Legion_BOUNDS_CHECKS "Enable bounds checking in Legion accessors" OFF)
+set(BOUNDS_CHECKS ${Legion_BOUNDS_CHECKS})
+
+option(Legion_PRIVILEGE_CHECKS "Enable privilege checking in Legion accessors" OFF)
+set(PRIVILEGE_CHECKS ${Legion_PRIVILEGE_CHECKS})
+
 #------------------------------------------------------------------------------#
 # Runtime library targets
 #------------------------------------------------------------------------------#
