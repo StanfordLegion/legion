@@ -490,7 +490,8 @@ if(Legion_USE_Fortran)
 endif()               
 
 add_library(LegionRuntime ${MAPPER_SRC} ${LEGION_SRC} ${LEGION_FORTRAN_SRC})
-if(Legion_USE_CUDA)
+# do we have any cuda source files in Legion itself?
+if(LEGION_CUDA_SRC)
   if("${Legion_CUDA_ARCH}" STREQUAL "")
     set(CUDA_GENCODE "")
   else()
@@ -514,6 +515,7 @@ if(Legion_USE_CUDA)
     RELEASE -O2
     RELWITHDEBINFO -g -O2)
   target_sources(LegionRuntime PRIVATE ${LEGION_CUDA_OBJS})
+  target_link_libraries(LegionRuntime PUBLIC ${CUDA_LIBRARIES})
 endif()
 target_link_libraries(LegionRuntime PUBLIC RealmRuntime)
 if(Legion_USE_ZLIB)

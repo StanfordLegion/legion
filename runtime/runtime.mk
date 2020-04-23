@@ -68,6 +68,9 @@ else
 SLIB_LEGION     := liblegion.so
 SLIB_REALM      := librealm.so
 endif
+# shared libraries can link against other shared libraries
+SLIB_LEGION_DEPS = -L. -lrealm
+SLIB_REALM_DEPS  =
 ifeq ($(strip $(DARWIN)),1)
 SO_FLAGS += -dynamiclib -single_module -undefined dynamic_lookup -fPIC
 else
@@ -393,14 +396,22 @@ endif
 ifeq ($(strip $(DARWIN)),1)
 ifeq ($(strip $(USE_CUDART_HIJACK)),1)
 LEGION_LD_FLAGS	+= -L$(CUDA)/lib -lcuda
+SLIB_LEGION_DEPS += -L$(CUDA)/lib -lcuda
+SLIB_REALM_DEPS	+= -L$(CUDA)/lib -lcuda
 else
 LEGION_LD_FLAGS	+= -L$(CUDA)/lib -lcudart -lcuda
+SLIB_LEGION_DEPS += -L$(CUDA)/lib -lcudart -lcuda
+SLIB_REALM_DEPS	+= -L$(CUDA)/lib -lcuda
 endif
 else
 ifeq ($(strip $(USE_CUDART_HIJACK)),1)
 LEGION_LD_FLAGS	+= -L$(CUDA)/lib64 -L$(CUDA)/lib64/stubs -lcuda -Xlinker -rpath=$(CUDA)/lib64
+SLIB_LEGION_DEPS += -L$(CUDA)/lib64 -L$(CUDA)/lib64/stubs -lcuda
+SLIB_REALM_DEPS += -L$(CUDA)/lib64 -L$(CUDA)/lib64/stubs -lcuda
 else
 LEGION_LD_FLAGS	+= -L$(CUDA)/lib64 -L$(CUDA)/lib64/stubs -lcudart -lcuda -Xlinker -rpath=$(CUDA)/lib64
+SLIB_LEGION_DEPS += -L$(CUDA)/lib64 -L$(CUDA)/lib64/stubs -lcudart -lcuda
+SLIB_REALM_DEPS += -L$(CUDA)/lib64 -L$(CUDA)/lib64/stubs -lcuda
 endif
 endif
 # Add support for Legion GPU reductions
@@ -966,24 +977,14 @@ $(SLIB_LEGION) : $(LEGION_OBJS) $(LEGION_FORTRAN_OBJS) $(LEGION_INST_OBJS) $(MAP
 $(SLIB_REALM) : $(REALM_OBJS) $(REALM_INST_OBJS)
 	rm -f $@
 	$(AR) rcs $@ $^
-else ifeq ($(strip $(DARWIN)),1)
-# On Darwin we need to link liblegion.so against librealm.so because it complains 
-# about having an illegal dependence on thread-local storage if we don't
+else
 $(SLIB_LEGION) : $(LEGION_OBJS) $(LEGION_FORTRAN_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(GPU_RUNTIME_OBJS) $(SLIB_REALM)
 	rm -f $@
-	$(CXX) $(SO_FLAGS) -o $@ $(LEGION_OBJS) $(LEGION_FORTRAN_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(GPU_RUNTIME_OBJS) -L. -lrealm
+	$(CXX) $(SO_FLAGS) -o $@ $(LEGION_OBJS) $(LEGION_FORTRAN_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(GPU_RUNTIME_OBJS) $(SLIB_LEGION_DEPS)
 
 $(SLIB_REALM) : $(REALM_OBJS) $(REALM_INST_OBJS)
 	rm -f $@
-	$(CXX) $(SO_FLAGS) -o $@ $^
-else
-$(SLIB_LEGION) : $(LEGION_OBJS) $(LEGION_FORTRAN_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(GPU_RUNTIME_OBJS)
-	rm -f $@
-	$(CXX) $(SO_FLAGS) -o $@ $^
-
-$(SLIB_REALM) : $(REALM_OBJS) $(REALM_INST_OBJS)
-	rm -f $@
-	$(CXX) $(SO_FLAGS) -o $@ $^
+	$(CXX) $(SO_FLAGS) -o $@ $^ $(SLIB_REALM_DEPS)
 endif
 
 $(GEN_OBJS) : %.cc.o : %.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
