@@ -10893,6 +10893,8 @@ namespace Legion {
 #endif
         if (--outstanding_allocators == 0)
         {
+          // Now we go back to read-only mode
+          allocation_state = FIELD_ALLOC_READ_ONLY;
           if (!is_owner())
           {
             const RtUserEvent done_event = Runtime::create_rt_user_event();
@@ -10924,8 +10926,6 @@ namespace Legion {
             runtime->send_field_space_allocator_free(owner_space, rez);
             return done_event;
           }
-          // Now we go back to read-only mode
-          allocation_state = FIELD_ALLOC_READ_ONLY;
         }
         return RtEvent::NO_RT_EVENT;
       }
