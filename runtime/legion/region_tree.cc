@@ -10837,6 +10837,8 @@ namespace Legion {
             wait_on.wait();
             n_lock.reacquire();
           }
+          else
+            break;
         }
         // See if we already have allocation privileges
         if (allocation_state != FIELD_ALLOC_EXCLUSIVE)
@@ -12671,6 +12673,7 @@ namespace Legion {
               rez.serialize(it->first);
               rez.serialize(it->second);
             }
+            remote_field_infos.insert(target);
           }
           else
             rez.serialize<size_t>(0);
