@@ -10672,6 +10672,7 @@ namespace Legion {
               assert(remote_field_infos.size() == 1);
 #endif
               const AddressSpaceID remote_owner = *(remote_field_infos.begin());
+              remote_field_infos.clear();
 #ifdef DEBUG_LEGION
               assert(remote_owner != local_space);
               // Should never get the ships in the night case either
@@ -13514,12 +13515,16 @@ namespace Legion {
       {
         AutoLock n_lock(node_lock);
 #ifdef DEBUG_LEGION
-        assert(allocation_state == FIELD_ALLOC_INVALID);
-        assert(remote_field_infos.size() == 1);
-        assert(remote_field_infos.find(source) != remote_field_infos.end());
+        assert((allocation_state == FIELD_ALLOC_INVALID) ||
+               (allocation_state == FIELD_ALLOC_PENDING));
+        if (allocation_state == FIELD_ALLOC_INVALID)
+        {
+          assert(remote_field_infos.size() == 1);
+          assert(remote_field_infos.find(source) != remote_field_infos.end());
+          assert(outstanding_allocators == 0);
+        }
         assert(!unallocated_indexes);
         assert(available_indexes.empty());
-        assert(outstanding_allocators == 0);
 #endif
         size_t num_infos;
         derez.deserialize(num_infos);
@@ -13539,7 +13544,8 @@ namespace Legion {
           derez.deserialize(next.second);
           available_indexes.push_back(next);
         }
-        allocation_state = FIELD_ALLOC_READ_ONLY;
+        if (allocation_state == FIELD_ALLOC_INVALID)
+          allocation_state = FIELD_ALLOC_READ_ONLY;
       }
       else
         destroy_allocator(source);
