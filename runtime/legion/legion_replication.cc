@@ -742,8 +742,8 @@ namespace Legion {
       perform_base_dependence_analysis();
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-       ProjectionInfo projection_info(runtime, regions[idx], launch_space, 
-                                      sharding_function, sharding_space);
+        ProjectionInfo projection_info(runtime, regions[idx], launch_space, 
+                                       sharding_function, sharding_space);
         runtime->forest->perform_dependence_analysis(this, idx, regions[idx], 
                                                      projection_info,
                                                      privilege_paths[idx]);
@@ -3045,7 +3045,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_dependent_op();
-      sharding_functor = UINT_MAX;
+      sharding_function = NULL;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL;
 #endif
@@ -3064,12 +3064,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplDependentPartitionOp::trigger_prepipeline_stage(void)
+    void ReplDependentPartitionOp::select_sharding_function(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
       assert(repl_ctx != NULL);
+      assert(sharding_function == NULL);
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
@@ -3087,20 +3088,49 @@ namespace Legion {
                       "dependent partition in task %s (UID %lld)", 
                       mapper->get_mapper_name(),
                       parent_ctx->get_task_name(), parent_ctx->get_unique_id())
-      this->sharding_functor = output.chosen_functor;
+      sharding_function = repl_ctx->shard_manager->find_sharding_function(
+                                                    output.chosen_functor);
 #ifdef DEBUG_LEGION
       assert(sharding_collective != NULL);
-      sharding_collective->contribute(this->sharding_functor);
+      sharding_collective->contribute(output.chosen_functor);
       if (sharding_collective->is_target() &&
-          !sharding_collective->validate(this->sharding_functor))
+          !sharding_collective->validate(output.chosen_functor))
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                       "Mapper %s chose different sharding functions "
                       "for dependent partition op in task %s (UID %lld)", 
                       mapper->get_mapper_name(), parent_ctx->get_task_name(),
                       parent_ctx->get_unique_id())
 #endif
-      // Now we can do the normal prepipeline stage
-      DependentPartitionOp::trigger_prepipeline_stage();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplDependentPartitionOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      if (runtime->check_privileges)
+        check_privilege();
+      // Before doing the dependence analysis we have to ask the
+      // mapper whether it would like to make this an index space
+      // operation or a single operation
+      select_partition_projection();
+      // Now that we know that we have the right region requirement we
+      // can ask the mapper to also pick the sharding function
+      select_sharding_function();
+      // Do thise now that we've picked our region requirement
+      initialize_privilege_path(privilege_path, requirement);
+      if (runtime->legion_spy_enabled)
+        log_requirement();
+      ProjectionInfo projection_info;
+      if (is_index_space)
+        projection_info = ProjectionInfo(runtime, requirement, 
+                                         launch_space, sharding_function);
+      runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
+                                                   requirement,
+                                                   projection_info,
+                                                   privilege_path);
+      // Record this dependent partition op with the context so that it 
+      // can track implicit dependences on it for later operations
+      parent_ctx->update_current_implicit(this);
     }
 
     //--------------------------------------------------------------------------
@@ -3117,13 +3147,13 @@ namespace Legion {
       // Do different things if this is an index space point or a single point
       if (is_index_space)
       {
-        // Get the sharding function implementation to use from our context
-        ShardingFunction *function = 
-          repl_ctx->shard_manager->find_sharding_function(sharding_functor);
+#ifdef DEBUG_LEGION
+        assert(sharding_function != NULL);
+#endif
         // Compute the local index space of points for this shard
         IndexSpace local_space =
-          function->find_shard_space(repl_ctx->owner_shard->shard_id,
-                                     launch_space, launch_space->handle);
+          sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
+                                          launch_space, launch_space->handle);
         // If it's empty we're done, otherwise we go back on the queue
         if (!local_space.exists())
         {

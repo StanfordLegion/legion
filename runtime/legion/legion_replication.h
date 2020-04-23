@@ -1509,11 +1509,13 @@ namespace Legion {
       virtual void deactivate(void);
     public:
       // Need to pick our sharding functor
-      virtual void trigger_prepipeline_stage(void);
+      virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);  
       virtual void finalize_mapping(void);
     protected:
-      ShardingID sharding_functor;
+      void select_sharding_function(void);
+    protected:
+      ShardingFunction *sharding_function;
       RtBarrier mapping_barrier;
 #ifdef DEBUG_LEGION
     public:
