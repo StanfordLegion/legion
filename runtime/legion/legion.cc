@@ -5083,11 +5083,10 @@ namespace Legion {
 #endif
 
     //--------------------------------------------------------------------------
-    FieldAllocator Runtime::create_field_allocator(Context ctx, 
-                                                            FieldSpace handle)
+    FieldAllocator Runtime::create_field_allocator(Context ctx,FieldSpace space)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_field_allocator(ctx, handle);
+      return FieldAllocator(ctx->create_field_allocator(space));
     }
 
     //--------------------------------------------------------------------------

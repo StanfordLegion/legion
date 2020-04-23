@@ -690,8 +690,14 @@ namespace Legion {
       SEND_FIELD_SPACE_NODE,
       SEND_FIELD_SPACE_REQUEST,
       SEND_FIELD_SPACE_RETURN,
+      SEND_FIELD_SPACE_ALLOCATOR_REQUEST,
+      SEND_FIELD_SPACE_ALLOCATOR_RESPONSE,
+      SEND_FIELD_SPACE_ALLOCATOR_INVALIDATION,
+      SEND_FIELD_SPACE_ALLOCATOR_FLUSH,
+      SEND_FIELD_SPACE_ALLOCATOR_FREE,
+      SEND_FIELD_SPACE_INFOS_REQUEST,
+      SEND_FIELD_SPACE_INFOS_RESPONSE,
       SEND_FIELD_ALLOC_REQUEST,
-      SEND_FIELD_ALLOC_NOTIFICATION,
       SEND_FIELD_SIZE_UPDATE,
       SEND_FIELD_SPACE_TOP_ALLOC,
       SEND_FIELD_FREE,
@@ -862,8 +868,14 @@ namespace Legion {
         "Send Field Space Node",                                      \
         "Send Field Space Request",                                   \
         "Send Field Space Return",                                    \
+        "Send Field Space Allocator Request",                         \
+        "Send Field Space Allocator Response",                        \
+        "Send Field Space Allocator Invalidation",                    \
+        "Send Field Space Allocator Flush",                           \
+        "Send Field Space Allocator Free",                            \
+        "Send Field Space Infos Request",                             \
+        "Send Field Space Infos Response",                            \
         "Send Field Alloc Request",                                   \
-        "Send Field Alloc Notification",                              \
         "Send Field Size Update",                                     \
         "Send Field Space Top Alloc",                                 \
         "Send Field Free",                                            \

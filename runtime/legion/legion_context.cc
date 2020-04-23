@@ -348,6 +348,7 @@ namespace Legion {
         field_allocators.find(handle);
       if (finder == field_allocators.end())
       {
+        runtime->forest->create_field_space_allocator(handle);
         // Don't have one so make a new one
         FieldAllocatorImpl *result = new FieldAllocatorImpl(handle, this); 
         // Save it for later
@@ -370,6 +371,7 @@ namespace Legion {
       assert(finder != field_allocators.end());
 #endif
       field_allocators.erase(finder);
+      runtime->forest->destroy_field_space_allocator(handle);
     }
 
     //--------------------------------------------------------------------------
