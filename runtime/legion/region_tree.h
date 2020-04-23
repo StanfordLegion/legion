@@ -2857,6 +2857,21 @@ namespace Legion {
         FieldSpaceNode *const node;
         ReferenceMutator *const mutator;
       };
+      struct DeferRequestFieldInfoArgs : 
+        public LgTaskArgs<DeferRequestFieldInfoArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_FIELD_INFOS_TASK_ID;
+      public:
+        DeferRequestFieldInfoArgs(const FieldSpaceNode *n, 
+            std::map<FieldID,FieldInfo> *c, AddressSpaceID src, RtUserEvent t)
+          : LgTaskArgs<DeferRequestFieldInfoArgs>(implicit_provenance),
+            proxy_this(n), copy(c), source(src), to_trigger(t) { }
+      public:
+        const FieldSpaceNode *const proxy_this;
+        std::map<FieldID,FieldInfo> *const copy;
+        const AddressSpaceID source;
+        const RtUserEvent to_trigger;
+      };
     public:
       FieldSpaceNode(FieldSpace sp, RegionTreeForest *ctx, 
                      DistributedID did, RtEvent initialized);
@@ -3040,6 +3055,7 @@ namespace Legion {
       static void handle_field_size_update(RegionTreeForest *forest,
                                            Deserializer &derez, 
                                            AddressSpaceID source);
+      static void handle_defer_infos_request(const void *args);
     public:
       // Help with debug printing
       char* to_string(const FieldMask &mask, TaskContext *ctx) const;

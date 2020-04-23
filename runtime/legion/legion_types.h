@@ -320,6 +320,7 @@ namespace Legion {
       LG_INDEX_PART_SEMANTIC_INFO_REQ_TASK_ID,
       LG_FIELD_SPACE_SEMANTIC_INFO_REQ_TASK_ID,
       LG_FIELD_SEMANTIC_INFO_REQ_TASK_ID,
+      LG_DEFER_FIELD_INFOS_TASK_ID,
       LG_REGION_SEMANTIC_INFO_REQ_TASK_ID,
       LG_PARTITION_SEMANTIC_INFO_REQ_TASK_ID,
       LG_INDEX_SPACE_DEFER_CHILD_TASK_ID,
@@ -448,6 +449,7 @@ namespace Legion {
         "Index Partition Semantic Request",                       \
         "Field Space Semantic Request",                           \
         "Field Semantic Request",                                 \
+        "Defer Field Infos Request",                              \
         "Region Semantic Request",                                \
         "Partition Semantic Request",                             \
         "Defer Index Space Child Request",                        \

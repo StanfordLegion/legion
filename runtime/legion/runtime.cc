@@ -23319,6 +23319,11 @@ namespace Legion {
                   false, false, RtUserEvent::NO_RT_USER_EVENT);
             break;
           }
+        case LG_DEFER_FIELD_INFOS_TASK_ID:
+          {
+            FieldSpaceNode::handle_defer_infos_request(args);
+            break;
+          }
         case LG_REGION_SEMANTIC_INFO_REQ_TASK_ID:
           {
             RegionNode::SemanticRequestArgs *req_args = 

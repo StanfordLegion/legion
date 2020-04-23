@@ -12352,6 +12352,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ void FieldSpaceNode::handle_defer_infos_request(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferRequestFieldInfoArgs *dargs = 
+        (const DeferRequestFieldInfoArgs*)args;
+      dargs->proxy_this->request_field_infos_copy(dargs->copy, dargs->source, 
+                                                  dargs->to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
     InstanceRef FieldSpaceNode::create_external_instance(
                                          const std::vector<FieldID> &field_set,
                                          RegionNode *node, AttachOp *attach_op)
@@ -13172,7 +13182,21 @@ namespace Legion {
         while (true)
         {
           if (wait_on.exists() && !wait_on.has_triggered())
-            wait_on.wait();
+          {
+            if (source != local_space)
+            {
+              // Need to defer this to avoid blocking the virtual channel
+#ifdef DEBUG_LEGION
+              assert(to_trigger.exists());
+#endif
+              DeferRequestFieldInfoArgs args(this, copy, source, to_trigger);
+              context->runtime->issue_runtime_meta_task(args, 
+                  LG_LATENCY_DEFERRED_PRIORITY, wait_on);
+              return to_trigger;
+            }
+            else
+              wait_on.wait();
+          }
           AutoLock n_lock(node_lock); 
           if (allocation_state == FIELD_ALLOC_INVALID)
           {
