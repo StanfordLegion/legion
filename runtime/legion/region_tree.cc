@@ -10590,7 +10590,8 @@ namespace Legion {
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FIELD_SPACE_DC), 
           get_owner_space(sp, ctx->runtime), false/*register with runtime*/),
         handle(sp), context(ctx), initialized(init), 
-        allocation_state(FIELD_ALLOC_READ_ONLY), outstanding_allocators(0),
+        allocation_state(is_owner() ? FIELD_ALLOC_READ_ONLY : 
+            FIELD_ALLOC_INVALID), outstanding_allocators(0),
         outstanding_invalidations(0), destroyed(false)
     //--------------------------------------------------------------------------
     {
