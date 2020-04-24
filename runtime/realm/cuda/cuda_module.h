@@ -440,12 +440,12 @@ namespace Realm {
       void init_pool(int init_size = 0 /* default == batch size */);
       void empty_pool(void);
 
-      CUevent get_event(void);
-      void return_event(CUevent e);
+      CUevent get_event(bool external = false);
+      void return_event(CUevent e, bool external = false);
 
     protected:
       Mutex mutex;
-      int batch_size, current_size, total_size;
+      int batch_size, current_size, total_size, external_count;
       std::vector<CUevent> available_events;
     };
 
