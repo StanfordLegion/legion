@@ -1133,6 +1133,19 @@ namespace Legion {
   }
 
   //----------------------------------------------------------------------------
+  __CUDA_HD__ inline bool Domain::contains_bounds_only(DomainPoint point) const
+  //----------------------------------------------------------------------------
+  {
+    assert(point.get_dim() == dim);
+    for (int i = 0; i < dim; i++)
+      if (point[i] < rect_data[i])
+        return false;
+      else if (point[i] > rect_data[dim+i])
+        return false;
+    return true;
+  }
+
+  //----------------------------------------------------------------------------
   __CUDA_HD__ inline int Domain::get_dim(void) const
   //----------------------------------------------------------------------------
   {

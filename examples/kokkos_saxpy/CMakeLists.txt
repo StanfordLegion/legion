@@ -26,8 +26,13 @@ add_executable(kokkos_saxpy kokkos_saxpy.cc)
 
 target_link_libraries(kokkos_saxpy Kokkos::kokkoscore)
 target_link_libraries(kokkos_saxpy Legion::Legion)
-if(Legion_USE_CUDA AND (CMAKE_CXX_COMPILER_ID STREQUAL "Clang"))
-  target_compile_options(kokkos_saxpy PRIVATE --cuda-path=${CUDA_TOOLKIT_ROOT_DIR})
+
+if(Kokkos_ENABLE_CUDA)
+  # have to use Kokkos' choice of compiler for cuda-related options to work
+  set(CMAKE_CXX_COMPILER ${KOKKOS_CXX_COMPILER})
+  if(KOKKOS_CXX_COMPILER MATCHES ".*clang.*")
+    target_compile_options(kokkos_saxpy PRIVATE --cuda-path=${CUDA_TOOLKIT_ROOT_DIR})
+  endif()
 endif()
 
 if(Legion_ENABLE_TESTING)

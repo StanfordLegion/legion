@@ -1,9 +1,24 @@
+! Copyright 2020 Stanford University, NVIDIA Corporation,
+!                Los Alamos National Laboratory
+!
+! Licensed under the Apache License, Version 2.0 (the "License");
+! you may not use this file except in compliance with the License.
+! You may obtain a copy of the License at
+!
+!     http://www.apache.org/licenses/LICENSE-2.0
+!
+! Unless required by applicable law or agreed to in writing, software
+! distributed under the License is distributed on an "AS IS" BASIS,
+! WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+! See the License for the specific language governing permissions and
+! limitations under the License.
+
 module legion_fortran_types
   use, intrinsic :: iso_c_binding
   implicit none
-  
+
 #include "legion_defines.h"
-  
+
 #ifndef LEGION_MAX_DIM
 #define LEGION_MAX_DIM     3
 #endif
@@ -14,7 +29,7 @@ module legion_fortran_types
 
 #define MAX_POINT_DIM_F LEGION_MAX_DIM
 #define MAX_RECT_DIM_F LEGION_MAX_DIM
-  
+
   ! legion_privilege_mode_t
   integer(c_int), parameter :: NO_ACCESS = Z'00000000'
   integer(c_int), parameter :: READ_PRIV = Z'00000001'
@@ -26,18 +41,18 @@ module legion_fortran_types
   integer(c_int), parameter :: DISCARD_MASK = Z'10000000'
   integer(c_int), parameter :: WRITE_ONLY = Z'10000002'
   integer(c_int), parameter :: WRITE_DISCARD = Z'10000007'
-  
+
   ! legion_coherence_property_t
   integer(c_int), parameter :: EXCLUSIVE = 0
   integer(c_int), parameter :: ATOMIC = 1
   integer(c_int), parameter :: SIMULTANEOUS = 2
   integer(c_int), parameter :: RELAXED = 3
-  
+
   !legion_file_mode_t
   integer(c_int), parameter :: LEGION_FILE_READ_ONLY = 0
   integer(c_int), parameter :: LEGION_FILE_READ_WRITE = 1
   integer(c_int), parameter :: LEGION_FILE_CREATE = 2
-  
+
   !legion_processor_kind_t
   integer(c_int), parameter :: NO_KIND = 0
   integer(c_int), parameter :: TOC_PROC = 1
@@ -48,7 +63,7 @@ module legion_fortran_types
   integer(c_int), parameter :: PROC_SET = 6
   integer(c_int), parameter :: OMP_PROC = 7
   integer(c_int), parameter :: PY_PROC = 8
-  
+
   ! legion_partition_kind_t
   integer(c_int), parameter :: DISJOINT_KIND = 0
   integer(c_int), parameter :: ALIASED_KIND = 1
@@ -59,15 +74,15 @@ module legion_fortran_types
   integer(c_int), parameter :: DISJOINT_INCOMPLETE_KIND = 6
   integer(c_int), parameter :: ALIASED_INCOMPLETE_KIND = 7
   integer(c_int), parameter :: COMPUTE_INCOMPLETE_KIND = 8
-  
+
   ! legion_external_resource_t
   integer(c_int), parameter :: EXTERNAL_POSIX_FILE = 0
   integer(c_int), parameter :: EXTERNAL_HDF5_FILE = 1
   integer(c_int), parameter :: EXTERNAL_INSTANCE = 2
-  
+
   integer(c_int), parameter :: I4_MAX = 1
   integer(c_int), parameter :: AUTO_GENERATE_ID = -1 !huge(I4_MAX)
-    
+
     ! C NEW_OPAQUE_TYPE_F
 #define NEW_OPAQUE_TYPE_F(T) type, bind(C) :: T; type(c_ptr) :: impl; end type T
   NEW_OPAQUE_TYPE_F(legion_runtime_f_t)
@@ -126,7 +141,7 @@ module legion_fortran_types
 #if LEGION_MAX_DIM >= 2
   NEW_POINT_TYPE_F(legion_point_2d_f_t, 2)
 #endif
-#if LEGION_MAX_DIM >= 3  
+#if LEGION_MAX_DIM >= 3
   NEW_POINT_TYPE_F(legion_point_3d_f_t, 3)
 #endif
 #undef NEW_POINT_TYPE_F
@@ -158,12 +173,12 @@ module legion_fortran_types
     ! transform 1x1,2x2,3x3
 #define NEW_TRANSFORM_TYPE_F(T, D1, D2) type, bind(C) :: T; integer(c_long_long) :: trans(0:D1-1, 0:D2-1); end type T
   NEW_TRANSFORM_TYPE_F(legion_transform_1x1_f_t, 1, 1)
-#if LEGION_MAX_DIM >= 2  
+#if LEGION_MAX_DIM >= 2
   NEW_TRANSFORM_TYPE_F(legion_transform_1x2_f_t, 1, 2)
   NEW_TRANSFORM_TYPE_F(legion_transform_2x1_f_t, 2, 1)
   NEW_TRANSFORM_TYPE_F(legion_transform_2x2_f_t, 2, 2)
 #endif
-#if LEGION_MAX_DIM >= 3  
+#if LEGION_MAX_DIM >= 3
   NEW_TRANSFORM_TYPE_F(legion_transform_1x3_f_t, 1, 3)
   NEW_TRANSFORM_TYPE_F(legion_transform_2x3_f_t, 2, 3)
   NEW_TRANSFORM_TYPE_F(legion_transform_3x1_f_t, 3, 1)
@@ -176,36 +191,36 @@ module legion_fortran_types
     integer(c_long_long)                                  :: is_id
     integer(c_int)                                        :: dim
 #if LEGION_MAX_DIM == 1
-#define MAX_DOMAIN_DIM_F 2 
+#define MAX_DOMAIN_DIM_F 2
 #elif LEGION_MAX_DIM == 2
-#define MAX_DOMAIN_DIM_F 4 
+#define MAX_DOMAIN_DIM_F 4
 #elif LEGION_MAX_DIM == 3
-#define MAX_DOMAIN_DIM_F 6 
+#define MAX_DOMAIN_DIM_F 6
 #elif LEGION_MAX_DIM == 4
-#define MAX_DOMAIN_DIM_F 8 
+#define MAX_DOMAIN_DIM_F 8
 #elif LEGION_MAX_DIM == 5
-#define MAX_DOMAIN_DIM_F 10 
+#define MAX_DOMAIN_DIM_F 10
 #elif LEGION_MAX_DIM == 6
-#define MAX_DOMAIN_DIM_F 12 
+#define MAX_DOMAIN_DIM_F 12
 #elif LEGION_MAX_DIM == 7
-#define MAX_DOMAIN_DIM_F 14 
+#define MAX_DOMAIN_DIM_F 14
 #elif LEGION_MAX_DIM == 8
-#define MAX_DOMAIN_DIM_F 16 
+#define MAX_DOMAIN_DIM_F 16
 #elif LEGION_MAX_DIM == 9
-#define MAX_DOMAIN_DIM_F 18 
+#define MAX_DOMAIN_DIM_F 18
 #else
 #error "Illegal value of LEGION_MAX_DIM"
 #endif
-    integer(c_long_long), dimension(0:MAX_DOMAIN_DIM_F-1) :: rect_data      
+    integer(c_long_long), dimension(0:MAX_DOMAIN_DIM_F-1) :: rect_data
 #undef MAX_DOMAIN_DIM_F
   end type legion_domain_f_t
-  
+
   ! Legion::DomainPoint
   type, bind(C) :: legion_domain_point_f_t
     integer(c_int)                                       :: dim
     integer(c_long_long), dimension(0:MAX_POINT_DIM_F-1) :: point_data
   end type legion_domain_point_f_t
-  
+
   ! Legion::Transform
   type, bind(C) :: legion_domain_transform_f_t
     integer(c_int)                                        :: m
@@ -227,47 +242,47 @@ module legion_fortran_types
 #elif LEGION_MAX_DIM == 8
 #define MAX_MATRIX_DIM_F 64
 #elif LEGION_MAX_DIM == 9
-#define MAX_MATRIX_DIM_F 81 
+#define MAX_MATRIX_DIM_F 81
 #else
 #error "Illegal value of LEGION_MAX_DIM"
 #endif
-    integer(c_long_long), dimension(0:MAX_MATRIX_DIM_F-1) :: matrix      
+    integer(c_long_long), dimension(0:MAX_MATRIX_DIM_F-1) :: matrix
 #undef MAX_MATRIX_DIM_F
   end type legion_domain_transform_f_t
-    
+
   ! Legion::IndexSpace
   type, bind(C) :: legion_index_space_f_t
     integer(c_int) :: id
     integer(c_int) :: tid
     integer(c_int) :: type_tag
   end type legion_index_space_f_t
-  
+
   ! Legion::IndexPartition
   type, bind(C) :: legion_index_partition_f_t
     integer(c_int) :: id
     integer(c_int) :: tid
     integer(c_int) :: type_tag
   end type legion_index_partition_f_t
-  
+
   ! Legion::FieldSpace
   type, bind(C) :: legion_field_space_f_t
     integer(c_int) :: id
   end type legion_field_space_f_t
-  
+
   ! Legion::LogicalRegion
   type, bind(C) :: legion_logical_region_f_t
     integer(c_int)               :: tree_id
     type(legion_index_space_f_t) :: index_space
     type(legion_field_space_f_t) :: field_space
   end type legion_logical_region_f_t
-   
+
   ! Legion::LogicalPartition
   type, bind(C) :: legion_logical_partition_f_t
     integer(c_int)                   :: tree_id
     type(legion_index_partition_f_t) :: index_partition
     type(legion_field_space_f_t)     :: field_space
   end type legion_logical_partition_f_t
-  
+
   ! Legion::TaskConfigOptions
   type, bind(C) :: legion_task_config_options_f_t
     logical(c_bool) :: leaf
@@ -275,21 +290,21 @@ module legion_fortran_types
     logical(c_bool) :: idempotent
     logical(c_bool) :: replicable
   end type legion_task_config_options_f_t
-  
+
   ! Legion::TaskArgument
   type, bind(C) :: legion_task_argument_f_t
     type(c_ptr)         :: args
     integer(c_size_t)   :: arglen
   end type legion_task_argument_f_t
-  
+
   ! offest
   type, bind(C) :: legion_byte_offset_f_t
     integer(c_int) :: offset
   end type legion_byte_offset_f_t
-    
+
     ! C typedef enum
   !  enum, bind(C) :: legion_processor_kind_t
    !     enumrator :: NO_KIND = 0
     !    TOC_PROC, LOC_PROC, UTIL_PROC, IO_PROC, PROC_GROUP, PROC_SET, OMP_PROC
     !end enum
-end module 
+end module

@@ -31,8 +31,7 @@ namespace Legion {
      * provide all the methods for handling the 
      * execution of a task at runtime.
      */
-    class TaskContext : public ContextInterface, 
-                        public ResourceTracker, public Collectable {
+    class TaskContext : public ResourceTracker, public Collectable {
     public:
       class AutoRuntimeCall {
       public:
@@ -1782,6 +1781,9 @@ namespace Legion {
       virtual void destroy_logical_partition(LogicalPartition handle,
                                              const bool unordered);
     public:
+      virtual FieldAllocatorImpl* create_field_allocator(FieldSpace handle);
+      virtual void destroy_field_allocator(FieldSpace handle);
+    public:
       virtual void insert_unordered_ops(AutoLock &d_lock, const bool end_task,
                                         const bool progress);
       virtual Future execute_task(const TaskLauncher &launcher);
@@ -1940,6 +1942,8 @@ namespace Legion {
       unsigned                next_future_map_bar_index;
     protected:
       std::map<std::pair<size_t,DomainPoint>,IntraSpaceDeps> intra_space_deps;
+    protected:
+      std::map<FieldSpace,ShardID> field_allocator_owner_shards;
     protected:
       ShardID index_space_allocator_shard;
       ShardID index_partition_allocator_shard;

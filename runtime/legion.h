@@ -2456,7 +2456,7 @@ namespace Legion {
       __CUDA_HD__
       inline DeferredValue<T>& operator=(T value);
     public:
-      inline void finalize(InternalContext ctx) const;
+      inline void finalize(Runtime *runtime, Context ctx) const;
     protected:
       Realm::RegionInstance instance;
       Realm::AffineAccessor<T,1,coord_t> accessor;
@@ -7900,10 +7900,19 @@ namespace Legion {
        * @param ctx the context for the task
        * @param retvalptr pointer to the return value
        * @param retvalsize the size of the return value in bytes
+       * @param owned whether the runtime now owns this result
+       * @param allocation internal runtime parameter, please ignore
+       * @param inst internal runtime parameter, please ignore
        */
       static void legion_task_postamble(Runtime *runtime, Context ctx,
                                         const void *retvalptr = NULL,
-                                        size_t retvalsize = 0);
+                                        size_t retvalsize = 0,
+                                        bool owned = false,
+#ifdef LEGION_MALLOC_INSTANCES
+                                        uintptr_t allocation = 0,
+#endif
+                                        Realm::RegionInstance inst = 
+                                          Realm::RegionInstance::NO_INST);
     public:
       // ------------------ Deprecated task registration -----------------------
       /**
@@ -8021,6 +8030,13 @@ namespace Legion {
        * @return the context for the enclosing task in which we are executing
        */
       static Context get_context(void);
+
+      /**
+       * Get the task object associated with a context
+       * @param ctx enclosing processor context
+       * @return the task representation of the context
+       */
+      static const Task* get_context_task(Context ctx);
     private:
       IndexPartition create_restricted_partition(Context ctx,
                                       IndexSpace parent,

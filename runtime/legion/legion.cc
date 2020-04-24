@@ -5131,11 +5131,10 @@ namespace Legion {
 #endif
 
     //--------------------------------------------------------------------------
-    FieldAllocator Runtime::create_field_allocator(Context ctx, 
-                                                            FieldSpace handle)
+    FieldAllocator Runtime::create_field_allocator(Context ctx,FieldSpace space)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_field_allocator(ctx, handle);
+      return FieldAllocator(ctx->create_field_allocator(space));
     }
 
     //--------------------------------------------------------------------------
@@ -6512,6 +6511,13 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
+    /*static*/ const Task* Runtime::get_context_task(Context ctx)
+    //--------------------------------------------------------------------------
+    {
+      return ctx->get_owner_task();
+    }
+
+    //--------------------------------------------------------------------------
     TaskID Runtime::generate_dynamic_task_id(void)
     //--------------------------------------------------------------------------
     {
@@ -6628,10 +6634,19 @@ namespace Legion {
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::legion_task_postamble(Runtime *runtime,Context ctx,
                                                    const void *retvalptr,
-                                                   size_t retvalsize)
+                                                   size_t retvalsize,
+                                                   bool owned,
+#ifdef LEGION_MALLOC_INSTANCES
+                                                   uintptr_t allocation,
+#endif
+                                                   Realm::RegionInstance inst)
     //--------------------------------------------------------------------------
     {
-      ctx->end_task(retvalptr, retvalsize, false/*owned*/);
+#ifdef LEGION_MALLOC_INSTANCES
+      ctx->end_task(retvalptr, retvalsize, owned, allocation, inst);
+#else
+      ctx->end_task(retvalptr, retvalsize, owned, inst);
+#endif
     }
 
     //--------------------------------------------------------------------------

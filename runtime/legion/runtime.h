@@ -2206,7 +2206,6 @@ namespace Legion {
                                                     LogicalRegion handle);
       LogicalPartition get_parent_logical_partition(LogicalRegion handle);
     public:
-      FieldAllocator create_field_allocator(Context ctx, FieldSpace handle);
       ArgumentMap create_argument_map(void);
     public:
       Future execute_task(Context ctx, const TaskLauncher &launcher);
@@ -2489,8 +2488,20 @@ namespace Legion {
       void send_field_space_node(AddressSpaceID target, Serializer &rez);
       void send_field_space_request(AddressSpaceID target, Serializer &rez);
       void send_field_space_return(AddressSpaceID target, Serializer &rez);
+      void send_field_space_allocator_request(AddressSpaceID target, 
+                                              Serializer &rez);
+      void send_field_space_allocator_response(AddressSpaceID target, 
+                                               Serializer &rez);
+      void send_field_space_allocator_invalidation(AddressSpaceID, 
+                                                   Serializer &rez);
+      void send_field_space_allocator_flush(AddressSpaceID target, 
+                                            Serializer &rez);
+      void send_field_space_allocator_free(AddressSpaceID target, 
+                                           Serializer &rez);
+      void send_field_space_infos_request(AddressSpaceID, Serializer &rez);
+      void send_field_space_infos_response(AddressSpaceID, Serializer &rez);
       void send_field_alloc_request(AddressSpaceID target, Serializer &rez);
-      void send_field_alloc_notification(AddressSpaceID target,Serializer &rez);
+      void send_field_size_update(AddressSpaceID target, Serializer &rez);
       void send_field_space_top_alloc(AddressSpaceID target, Serializer &rez);
       void send_field_free(AddressSpaceID target, Serializer &rez);
       void send_field_space_layout_invalidation(AddressSpaceID target, 
@@ -2770,12 +2781,22 @@ namespace Legion {
       void handle_field_space_request(Deserializer &derez,
                                       AddressSpaceID source);
       void handle_field_space_return(Deserializer &derez);
+      void handle_field_space_allocator_request(Deserializer &derez,
+                                                AddressSpaceID source);
+      void handle_field_space_allocator_response(Deserializer &derez);
+      void handle_field_space_allocator_invalidation(Deserializer &derez);
+      void handle_field_space_allocator_flush(Deserializer &derez);
+      void handle_field_space_allocator_free(Deserializer &derez, 
+                                             AddressSpaceID source);
+      void handle_field_space_infos_request(Deserializer &derez);
+      void handle_field_space_infos_response(Deserializer &derez);
       void handle_field_alloc_request(Deserializer &derez);
-      void handle_field_alloc_notification(Deserializer &derez);
+      void handle_field_size_update(Deserializer &derez, AddressSpaceID source);
       void handle_field_space_top_alloc(Deserializer &derez,
                                         AddressSpaceID source);
       void handle_field_free(Deserializer &derez, AddressSpaceID source);
-      void handle_field_space_layout_invalidation(Deserializer &derez);
+      void handle_field_space_layout_invalidation(Deserializer &derez,
+                                                  AddressSpaceID source);
       void handle_local_field_alloc_request(Deserializer &derez,
                                             AddressSpaceID source);
       void handle_local_field_alloc_response(Deserializer &derez);

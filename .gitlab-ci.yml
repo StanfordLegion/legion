@@ -248,6 +248,7 @@ before_script:
   - |
     if [[ "$USE_KOKKOS" -eq 1 ]]; then
       git clone -b $KOKKOS_BRANCH -- $KOKKOS_REPO kokkos
+      git -C kokkos log -n 1
       mkdir kokkos/build
       cd kokkos/build
       KOKKOS_CMAKE_OPTS="-DCMAKE_INSTALL_PREFIX=../install -DKokkos_CXX_STANDARD=11"
@@ -266,6 +267,20 @@ before_script:
         #export CUDA_PATH="${CUDA}/lib64:${CUDA}/lib64/stubs"
         #export CUDA_TOOLKIT_ROOT_DIR=$CUDA
         #export CUDA_PATH="${CUDA}/bin"
+
+        if [[ "$CXX" == *clang* ]]; then
+          # clang speaks cuda, so can be used as Kokkos' "C++" compiler
+          export KOKKOS_CXX_COMPILER="$CXX"
+        else
+          # if not using clang, we need CXX to be Kokkos' nvcc_wrapper...
+          NVCC_WRAPPER=`pwd`/../bin/nvcc_wrapper
+          KOKKOS_CMAKE_OPTS="$KOKKOS_CMAKE_OPTS -DCMAKE_CXX_COMPILER=${NVCC_WRAPPER}"
+          export KOKKOS_CXX_COMPILER="${NVCC_WRAPPER}"
+          # which uses nvcc from the path, so make sure the right cuda is first
+          PATH=${CUDA}/bin:$PATH
+        fi
+      else
+        export KOKKOS_CXX_COMPILER="$CXX"
       fi
       echo cmake $KOKKOS_CMAKE_OPTS ..
       cmake $KOKKOS_CMAKE_OPTS ..
@@ -892,6 +907,10 @@ p100_clang7_cxx11_debug_kokkos_cuda_openmp_legion:
   <<: [*p100, *tests]
   variables:
     <<: [*clang7, *debug, *cxx11_normal, *cuda_p100, *kokkos, *openmp, *cmake, *legion, *ctest]
+p100_gcc7_cxx11_debug_kokkos_cuda_openmp_legion:
+  <<: [*p100, *tests]
+  variables:
+    <<: [*gcc7, *debug, *cxx11_normal, *cuda_p100, *kokkos, *openmp, *cmake, *legion, *ctest]
 
 # Darwin Power9 tests:
 darwin_power9_gcc8_cxx17_release_legion:
