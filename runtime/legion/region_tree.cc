@@ -10594,12 +10594,12 @@ namespace Legion {
         outstanding_invalidations(0), destroyed(false)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(is_owner());
-#endif
-      unallocated_indexes = FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
-      local_index_infos.resize(runtime->max_local_fields, 
-          std::pair<size_t,CustomSerdezID>(0, 0));
+      if (is_owner())
+      {
+        unallocated_indexes = FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
+        local_index_infos.resize(runtime->max_local_fields, 
+            std::pair<size_t,CustomSerdezID>(0, 0));
+      }
 #ifdef LEGION_GC
       log_garbage.info("GC Field Space %lld %d %d",
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space, handle.id);
