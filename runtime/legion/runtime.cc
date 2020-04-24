@@ -7197,14 +7197,46 @@ namespace Legion {
               runtime->handle_field_space_return(derez);
               break;
             }
+          case SEND_FIELD_SPACE_ALLOCATOR_REQUEST:
+            {
+              runtime->handle_field_space_allocator_request(derez,
+                                            remote_address_space);
+              break;
+            }
+          case SEND_FIELD_SPACE_ALLOCATOR_RESPONSE:
+            {
+              runtime->handle_field_space_allocator_response(derez);
+              break;
+            }
+          case SEND_FIELD_SPACE_ALLOCATOR_INVALIDATION:
+            {
+              runtime->handle_field_space_allocator_invalidation(derez);
+              break;
+            }
+          case SEND_FIELD_SPACE_ALLOCATOR_FLUSH:
+            {
+              runtime->handle_field_space_allocator_flush(derez);
+              break;
+            }
+          case SEND_FIELD_SPACE_ALLOCATOR_FREE:
+            {
+              runtime->handle_field_space_allocator_free(derez, 
+                                          remote_address_space);
+              break;
+            }
+          case SEND_FIELD_SPACE_INFOS_REQUEST:
+            {
+              runtime->handle_field_space_infos_request(derez);
+              break;
+            }
+          case SEND_FIELD_SPACE_INFOS_RESPONSE:
+            {
+              runtime->handle_field_space_infos_response(derez);
+              break;
+            }
           case SEND_FIELD_ALLOC_REQUEST:
             {
               runtime->handle_field_alloc_request(derez);
-              break;
-            }
-          case SEND_FIELD_ALLOC_NOTIFICATION:
-            {
-              runtime->handle_field_alloc_notification(derez);
               break;
             }
           case SEND_FIELD_SIZE_UPDATE:
@@ -7224,7 +7256,8 @@ namespace Legion {
             }
           case SEND_FIELD_SPACE_LAYOUT_INVALIDATION:
             {
-              runtime->handle_field_space_layout_invalidation(derez);
+              runtime->handle_field_space_layout_invalidation(derez,
+                                              remote_address_space);
               break;
             }
           case SEND_LOCAL_FIELD_ALLOC_REQUEST:
@@ -12495,17 +12528,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldAllocator Runtime::create_field_allocator(Context ctx,
-                                                   FieldSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context create field allocator!");
-      return FieldAllocator(ctx->create_field_allocator(handle)); 
-    }
-
-    //--------------------------------------------------------------------------
     ArgumentMap Runtime::create_argument_map(void)
     //--------------------------------------------------------------------------
     {
@@ -15284,24 +15306,78 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_field_space_allocator_request(AddressSpaceID target,
+                                                     Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_FIELD_SPACE_ALLOCATOR_REQUEST,
+          FIELD_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_field_space_allocator_response(AddressSpaceID target,
+                                                      Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_FIELD_SPACE_ALLOCATOR_RESPONSE,
+          FIELD_SPACE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_field_space_allocator_invalidation(AddressSpaceID target,
+                                                          Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_FIELD_SPACE_ALLOCATOR_INVALIDATION,
+          FIELD_SPACE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_field_space_allocator_flush(AddressSpaceID target,
+                                                   Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,SEND_FIELD_SPACE_ALLOCATOR_FLUSH,
+          FIELD_SPACE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_field_space_allocator_free(AddressSpaceID target,
+                                                  Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_FIELD_SPACE_ALLOCATOR_FREE,
+                                    FIELD_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_field_space_infos_request(AddressSpaceID target, 
+                                                 Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_FIELD_SPACE_INFOS_REQUEST,
+          FIELD_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_field_space_infos_response(AddressSpaceID target, 
+                                                  Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_FIELD_SPACE_INFOS_RESPONSE,
+          FIELD_SPACE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_field_alloc_request(AddressSpaceID target,
                                            Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_FIELD_ALLOC_REQUEST,
-                                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_field_alloc_notification(AddressSpaceID target,
-                                                Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      // put this on the reference virtual channel since it has no effects
-      // tracking and we need to make sure it is handled before references
-      // are removed from the remote copies
-      find_messenger(target)->send_message(rez, SEND_FIELD_ALLOC_NOTIFICATION,
-                REFERENCE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+                              FIELD_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -15320,8 +15396,11 @@ namespace Legion {
                                              Serializer &rez)
     //--------------------------------------------------------------------------
     {
+      // put this on the reference virtual channel since it has no effects
+      // tracking and we need to make sure it is handled before references
+      // are removed from the remote copies
       find_messenger(target)->send_message(rez, SEND_FIELD_SPACE_TOP_ALLOC,
-                                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                                  REFERENCE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -15329,7 +15408,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_FIELD_FREE,
-                                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                    FIELD_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -16926,17 +17005,61 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_field_space_allocator_request(Deserializer &derez,
+                                                       AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode::handle_allocator_request(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_field_space_allocator_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode::handle_allocator_response(forest, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_field_space_allocator_invalidation(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode::handle_allocator_invalidation(forest, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_field_space_allocator_flush(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode::handle_allocator_flush(forest, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_field_space_allocator_free(Deserializer &derez,
+                                                    AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode::handle_allocator_free(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_field_space_infos_request(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode::handle_infos_request(forest, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_field_space_infos_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode::handle_infos_response(forest, derez);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_field_alloc_request(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       FieldSpaceNode::handle_alloc_request(forest, derez);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_field_alloc_notification(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      FieldSpaceNode::handle_alloc_notification(forest, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -16963,10 +17086,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_field_space_layout_invalidation(Deserializer &derez)
+    void Runtime::handle_field_space_layout_invalidation(Deserializer &derez,
+                                                         AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      FieldSpaceNode::handle_layout_invalidation(forest, derez);
+      FieldSpaceNode::handle_layout_invalidation(forest, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -23193,6 +23317,11 @@ namespace Legion {
             req_args->proxy_this->process_semantic_field_request(
                   req_args->fid, req_args->tag, req_args->source, 
                   false, false, RtUserEvent::NO_RT_USER_EVENT);
+            break;
+          }
+        case LG_DEFER_FIELD_INFOS_TASK_ID:
+          {
+            FieldSpaceNode::handle_defer_infos_request(args);
             break;
           }
         case LG_REGION_SEMANTIC_INFO_REQ_TASK_ID:
