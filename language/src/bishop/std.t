@@ -27,7 +27,7 @@ local c = terralib.includecstring ([[
 #include "bishop_c.h"
 #include <stdio.h>
 #include <stdlib.h>
-]], {"-DLEGION_REDOP_COMPLEX"})
+]])
 
 std.c = c
 

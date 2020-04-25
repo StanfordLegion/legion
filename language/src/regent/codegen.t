@@ -1261,7 +1261,7 @@ function ref:__ref(cx, expr_type)
     for i = #region_types, 1, -1 do
       local region_base_pointers = base_pointers_by_region[i]
       local region_strides = strides_by_region[i]
-      local case = data.zip(base_pointers, region_base_pointers, strides, region_strides):map(
+      local case_ = data.zip(base_pointers, region_base_pointers, strides, region_strides):map(
         function(pair)
           local base_pointer, region_base_pointer, field_strides, field_region_strides = unpack(pair)
           local setup = quote [base_pointer] = [region_base_pointer] end
@@ -1275,13 +1275,13 @@ function ref:__ref(cx, expr_type)
       if cases then
         cases = quote
           if [value].__index == [i] then
-            [case]
+            [case_]
           else
             [cases]
           end
         end
       else
-        cases = case
+        cases = case_
       end
     end
 
@@ -1572,24 +1572,24 @@ function aref:__ref(cx, index)
       local region_base_pointer = base_pointers_by_region[i]
       local region_strides = strides_by_region[i]
 
-      local case = quote
+      local case_ = quote
         [base_pointer] = [region_base_pointer]
       end
       for i, stride in ipairs(strides) do
         local region_stride = region_strides[i]
-        setup = quote [case]; [stride] = [region_stride] end
+        setup = quote [case_]; [stride] = [region_stride] end
       end
 
       if cases then
         cases = quote
           if [value].__index == [i] then
-            [case]
+            [case_]
           else
             [cases]
           end
         end
       else
-        cases = case
+        cases = case_
       end
     end
 
@@ -1759,20 +1759,20 @@ function vref:read(cx, expr_type)
         local cases
         for region_idx = #base_pointers_by_region, 1, -1 do
           local base_pointer = base_pointers_by_region[region_idx][field_idx]
-          local case = quote
+          local case_ = quote
               v = base_pointer[ [vref_value].__ptr.value[ [vector_idx - 1] ] ]
           end
 
           if cases then
             cases = quote
               if [vref_value].__index[ [vector_idx - 1] ] == [region_idx] then
-                [case]
+                [case_]
               else
                 [cases]
               end
             end
           else
-            cases = case
+            cases = case_
           end
         end
         actions = quote [actions]; [cases] end
@@ -1870,7 +1870,7 @@ function vref:write(cx, value, expr_type)
         local cases
         for region_idx = #base_pointers_by_region, 1, -1 do
           local base_pointer = base_pointers_by_region[region_idx][field_idx]
-          local case = quote
+          local case_ = quote
             base_pointer[ [vref_value].__ptr.value[ [vector_idx - 1] ] ] =
               result
           end
@@ -1878,13 +1878,13 @@ function vref:write(cx, value, expr_type)
           if cases then
             cases = quote
               if [vref_value].__index[ [vector_idx - 1] ] == [region_idx] then
-                [case]
+                [case_]
               else
                 [cases]
               end
             end
           else
-            cases = case
+            cases = case_
           end
         end
         actions = quote [actions]; [cases] end
@@ -1960,20 +1960,20 @@ function vref:reduce(cx, value, op, expr_type)
         for region_idx = #base_pointers_by_region, 1, -1 do
           local base_pointer = base_pointers_by_region[region_idx][field_idx]
           local field_value = `base_pointer[ [vref_value].__ptr.value[ [vector_idx - 1] ] ]
-          local case = quote
+          local case_ = quote
             [field_value] =
               [std.quote_binary_op(fold_op, field_value, result)]
           end
           if cases then
             cases = quote
               if [vref_value].__index[ [vector_idx - 1] ] == [region_idx] then
-                [case]
+                [case_]
               else
                 [cases]
               end
             end
           else
-            cases = case
+            cases = case_
           end
         end
         actions = quote [actions]; [cases] end
