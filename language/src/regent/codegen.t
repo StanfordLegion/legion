@@ -2908,7 +2908,7 @@ local function strip_casts(node)
 end
 
 local function make_partition_projection_functor(cx, expr, loop_index, color_space,
-                                                 free_vars_setup, requirement)
+                                                 free_vars_setup, free_vars, requirement)
   if expr:is(ast.typed.expr.Projection) then
     expr = expr.region
   end
@@ -2948,6 +2948,20 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
     end
   end
 
+  -- Hack: Rooting any ispaces present manually
+  for _, symbol in ipairs(free_vars) do
+    local symbol_type = symbol:gettype()
+    if cx:has_ispace(symbol_type) then
+      local ispace = cx:ispace(symbol_type)
+      local bounds_actions
+      bounds_actions, ispace.domain, ispace.bounds = index_space_bounds(cx, ispace.index_space, symbol_type)
+       free_vars_setup:insert(quote 
+         var [ispace.index_space] = [symbol:getsymbol()].impl
+         [bounds_actions];
+       end)
+    end
+  end
+
   -- Generate a projection functor that evaluates `expr`.
   local value = codegen.expr(cx, index):read(cx)
 
@@ -2956,11 +2970,12 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
       [value.actions];
     end)
 
-    local terra partition_functor(runtime : c.legion_runtime_t,
+    local terra partition_functor([cx.runtime],
                                   mappable : c.legion_mappable_t,
                                   idx : uint,
                                   parent : c.legion_logical_partition_t,
                                   [point])
+      var runtime = [cx.runtime]
       var [requirement];
       var mappable_type = c.legion_mappable_get_type(mappable)
       if mappable_type == c.TASK_MAPPABLE then
@@ -3383,7 +3398,7 @@ local function expr_call_setup_partition_arg(
     end
     assert(add_requirement)
 
-    local projection_functor = make_partition_projection_functor(cx, arg_value, loop_index, false, free_vars_setup, reg_requirement)
+    local projection_functor = make_partition_projection_functor(cx, arg_value, loop_index, false, free_vars_setup, free_vars, reg_requirement)
 
     local requirement = terralib.newsymbol(uint, "requirement")
     local requirement_args = terralib.newlist({
