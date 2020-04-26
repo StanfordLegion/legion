@@ -10626,6 +10626,8 @@ namespace Legion {
             allocation_state = FIELD_ALLOC_READ_ONLY;
         }
       }
+      else if (allocation_state == FIELD_ALLOC_COLLECTIVE)
+        unallocated_indexes = FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
 #ifdef LEGION_GC
       log_garbage.info("GC Field Space %lld %d %d",
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space, handle.id);
