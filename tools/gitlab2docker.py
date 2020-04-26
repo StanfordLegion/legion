@@ -23,6 +23,8 @@ parser.add_argument('-k', '--keep', action='store_true',
                     help='modify test.py invocation to keep results')
 parser.add_argument('-i', '--image', type=str,
                     help='override base container image')
+parser.add_argument('-n', '--noscript', action='store_true',
+                    help='do not actually run /script.sh during docker build')
 parser.add_argument('-t', '--tag', type=str,
                     help='tag to apply to built container')
 parser.add_argument('cfgfile', type=str,
@@ -98,7 +100,9 @@ def generate_dockerfile(args, cfg, job, script=None):
     else:
         s += 'RUN git clone -b {} {} repo\n'.format(args.branch, args.repo)
     s += 'WORKDIR "/repo"\n'
-    s += 'RUN /script.sh\n'
+
+    if not args.noscript:
+        s += 'RUN /script.sh\n'
 
     return s
 

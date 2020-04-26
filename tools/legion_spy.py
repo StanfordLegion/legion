@@ -89,6 +89,7 @@ TIMING_OP_KIND = 21
 ALL_REDUCE_OP_KIND = 22
 PREDICATE_OP_KIND = 23
 MUST_EPOCH_OP_KIND = 24
+CREATION_OP_KIND = 25
 
 OPEN_NONE = 0
 OPEN_READ_ONLY = 1
@@ -122,6 +123,7 @@ OpNames = [
 "Reduce Op",
 "Predicate Op",
 "Must Epoch Op",
+"Creation Op",
 ]
 
 INDEX_SPACE_EXPR = 0
@@ -7027,6 +7029,7 @@ class Operation(object):
             FILL_OP_KIND : "darkorange1",
             ACQUIRE_OP_KIND : "darkolivegreen",
             RELEASE_OP_KIND : "darksalmon",
+            CREATION_OP_KIND : "forestgreen",
             DELETION_OP_KIND : "maroon",
             ATTACH_OP_KIND : "firebrick1",
             DETACH_OP_KIND : "cornflowerblue",
@@ -7170,6 +7173,8 @@ class Operation(object):
         if self.kind is FILL_OP_KIND:
             return False
         if self.kind is FENCE_OP_KIND:
+            return False
+        if self.kind is CREATION_OP_KIND:
             return False
         if self.kind is DELETION_OP_KIND:
             return False
@@ -9843,6 +9848,8 @@ acquire_op_pat           = re.compile(
     prefix+"Acquire Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 release_op_pat           = re.compile(
     prefix+"Release Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+creation_pat             = re.compile(
+    prefix+"Creation Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 deletion_pat             = re.compile(
     prefix+"Deletion Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 attach_pat               = re.compile(
@@ -10523,6 +10530,14 @@ def parse_legion_spy_line(line, state):
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(RELEASE_OP_KIND)
         op.set_name("Release Op "+m.group('uid'))
+        context = state.get_task(int(m.group('ctx')))
+        op.set_context(context)
+        return True
+    m = creation_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid')))
+        op.set_op_kind(CREATION_OP_KIND)
+        op.set_name("Creation Op "+m.group('uid'))
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
         return True
@@ -12189,14 +12204,14 @@ def main(temp_dir):
     state.post_parse(simplify_graphs, physical_checks or event_graphs)
     if logical_checks and not state.detailed_logging:
         print("WARNING: Requested logical analysis but logging information is "+
-              "missing. Please compile the runtime with -DLEGION_SPY to enable "+
+              "missing. Please compile the runtime with USE_SPY=1 to enable "+
               "validation of the runtime. Disabling logical checks.")
         if state.assert_on_warning:
             assert False
         logical_checks = False
     if physical_checks and not state.detailed_logging:
         print("WARNING: Requested physical analysis but logging information is "+
-              "missing. Please compile the runtime with -DLEGION_SPY to enable "+
+              "missing. Please compile the runtime with USE_SPY=1 to enable "+
               "validation of the runtime. Disabling physical checks.")
         if state.assert_on_warning:
             assert False
@@ -12204,7 +12219,7 @@ def main(temp_dir):
     if logical_checks and sanity_checks and not state.detailed_logging:
         print("WARNING: Requested sanity checks for logical analysis but "+
               "logging information of logical analysis is missing. Please "+
-              "compile the runtime with -DLEGION_SPY to enable validation "+
+              "compile the runtime with USE_SPY=1 to enable validation "+
               "of the runtime. Disabling sanity checks.")
         if state.assert_on_warning:
             assert False
@@ -12212,21 +12227,21 @@ def main(temp_dir):
     if physical_checks and sanity_checks and not state.detailed_logging:
         print("WARNING: Requested sanity checks for physical analysis but "+
               "logging information of logical analysis is missing. Please "+
-              "compile the runtime with -DLEGION_SPY to enable validation "+
+              "compile the runtime with USE_SPY=1 to enable validation "+
               "of the runtime. Disabling sanity checks.")
         if state.assert_on_warning:
             assert False
         sanity_checks = False
     if cycle_checks and not state.detailed_logging:
         print("WARNING: Requested cycle checks but logging information is "+
-              "missing. Please compile the runtime with -DLEGION_SPY to enable "+
+              "missing. Please compile the runtime with USE_SPY=1 to enable "+
               "validation of the runtime. Disabling cycle checks.")
         if state.assert_on_warning:
             assert False
         cycle_checks = False
     if user_event_leaks and not state.detailed_logging:
         print("WARNING: Requested user event leak checks but logging information "+
-              "is missing. Please compile the runtime with -DLEGION_SPY to enable "+
+              "is missing. Please compile the runtime with USE_SPY=1 to enable "+
               "validation of the runtime. Disabling user event leak checks.")
         if state.assert_on_warning:
             assert False

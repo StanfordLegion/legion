@@ -11,53 +11,29 @@
  *
  ******************** IMPORTANT ****************************/
 
-#ifndef DEBUG_LEGION
 #cmakedefine DEBUG_LEGION
-#endif
 
-#ifndef PRIVILEGE_CHECKS
 #cmakedefine PRIVILEGE_CHECKS
-#endif
 
-#ifndef BOUNDS_CHECKS
 #cmakedefine BOUNDS_CHECKS
-#endif
 
-#ifndef LEGION_MAX_DIM
 #cmakedefine LEGION_MAX_DIM @LEGION_MAX_DIM@
-#endif
 
-#ifndef LEGION_MAX_FIELDS
 #cmakedefine LEGION_MAX_FIELDS @LEGION_MAX_FIELDS@
-#endif
 
-#ifndef ENABLE_LEGION_TLS
 #cmakedefine ENABLE_LEGION_TLS
-#endif
 
-#ifndef __STDC_FORMAT_MACROS
-#cmakedefine __STDC_FORMAT_MACROS
-#endif
-
-#ifndef LEGION_USE_CUDA
 #cmakedefine LEGION_USE_CUDA
-#endif
 
 #cmakedefine LEGION_GPU_REDUCTIONS
 
 #cmakedefine LEGION_USE_ZLIB
 
-#ifndef LEGION_REDOP_COMPLEX
 #cmakedefine LEGION_REDOP_COMPLEX
-#endif
 
-#ifndef LEGION_REDOP_HALF
 #cmakedefine LEGION_REDOP_HALF
-#endif
 
-#ifndef LEGION_WARNINGS_FATAL
 #cmakedefine LEGION_WARNINGS_FATAL
-#endif
 
 #cmakedefine LEGION_USE_HDF5
 

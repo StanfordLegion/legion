@@ -308,14 +308,21 @@ namespace Legion {
                               std::set<RtEvent> *applied = NULL);
       void destroy_field_space(FieldSpace handle, AddressSpaceID source,
                                std::set<RtEvent> &preconditions);
+      void create_field_space_allocator(FieldSpace handle);
+      void destroy_field_space_allocator(FieldSpace handle);
       // Return true if local is set to true and we actually performed the 
       // allocation.  It is an error if the field already existed and the
       // allocation was not local.
       bool allocate_field(FieldSpace handle, size_t field_size, 
                           FieldID fid, CustomSerdezID serdez_id);
+      FieldSpaceNode* allocate_field(FieldSpace handle, ApEvent ready,
+                                     FieldID fid, CustomSerdezID serdez_id);
       void free_field(FieldSpace handle, FieldID fid,
                       std::set<RtEvent> &preconditions);
       void allocate_fields(FieldSpace handle, const std::vector<size_t> &sizes,
+                           const std::vector<FieldID> &resulting_fields,
+                           CustomSerdezID serdez_id);
+      FieldSpaceNode* allocate_fields(FieldSpace handle, ApEvent ready, 
                            const std::vector<FieldID> &resulting_fields,
                            CustomSerdezID serdez_id);
       void free_fields(FieldSpace handle, 
@@ -2718,6 +2725,14 @@ namespace Legion {
     class FieldSpaceNode : 
       public LegionHeapify<FieldSpaceNode>, public DistributedCollectable {
     public:
+      enum FieldAllocationState {
+        FIELD_ALLOC_INVALID, // field_infos is invalid
+        FIELD_ALLOC_READ_ONLY, // field_infos is valid and read-only
+        FIELD_ALLOC_PENDING, // about to have allocation privileges (owner-only)
+        FIELD_ALLOC_EXCLUSIVE, // field_infos is valid and can allocate
+        FIELD_ALLOC_COLLECTIVE,// same as above but exactly one total CR context
+      };
+    public:
       struct FieldInfo {
       public:
         FieldInfo(void) : field_size(0), idx(0), serdez_id(0),
@@ -2725,8 +2740,12 @@ namespace Legion {
         FieldInfo(size_t size, unsigned id, CustomSerdezID sid, bool loc=false)
           : field_size(size), idx(id), serdez_id(sid), 
             destroyed(false), local(loc) { }
+        FieldInfo(ApEvent ready, unsigned id, CustomSerdezID sid,bool loc=false)
+          : field_size(0), size_ready(ready), idx(id), serdez_id(sid), 
+            destroyed(false), local(loc) { }
       public:
         size_t field_size;
+        ApEvent size_ready;
         unsigned idx;
         CustomSerdezID serdez_id;
         bool destroyed;
@@ -2781,6 +2800,21 @@ namespace Legion {
         FieldSpaceNode *const node;
         ReferenceMutator *const mutator;
       };
+      struct DeferRequestFieldInfoArgs : 
+        public LgTaskArgs<DeferRequestFieldInfoArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_FIELD_INFOS_TASK_ID;
+      public:
+        DeferRequestFieldInfoArgs(const FieldSpaceNode *n, 
+            std::map<FieldID,FieldInfo> *c, AddressSpaceID src, RtUserEvent t)
+          : LgTaskArgs<DeferRequestFieldInfoArgs>(implicit_provenance),
+            proxy_this(n), copy(c), source(src), to_trigger(t) { }
+      public:
+        const FieldSpaceNode *const proxy_this;
+        std::map<FieldID,FieldInfo> *const copy;
+        const AddressSpaceID source;
+        const RtUserEvent to_trigger;
+      };
     public:
       FieldSpaceNode(FieldSpace sp, RegionTreeForest *ctx, 
                      DistributedID did, RtEvent initialized);
@@ -2827,11 +2861,22 @@ namespace Legion {
       static void handle_field_semantic_info(RegionTreeForest *forest,
                                    Deserializer &derez, AddressSpaceID source);
     public:
+      RtEvent create_allocator(AddressSpaceID source,
+          RtUserEvent ready = RtUserEvent::NO_RT_USER_EVENT);
+      RtEvent destroy_allocator(AddressSpaceID source);
+    public:
       RtEvent allocate_field(FieldID fid, size_t size,
+                             CustomSerdezID serdez_id);
+      RtEvent allocate_field(FieldID fid, ApEvent size_ready,
                              CustomSerdezID serdez_id);
       RtEvent allocate_fields(const std::vector<size_t> &sizes,
                               const std::vector<FieldID> &fids,
                               CustomSerdezID serdez_id);
+      RtEvent allocate_fields(ApEvent sizes_ready,
+                              const std::vector<FieldID> &fids,
+                              CustomSerdezID serdez_id);
+      void update_field_size(FieldID fid, size_t field_size, 
+          std::set<RtEvent> &update_events, AddressSpaceID source);
       void free_field(FieldID fid, AddressSpaceID source,
                       std::set<RtEvent> &applied);
       void free_fields(const std::vector<FieldID> &to_free,
@@ -2849,8 +2894,6 @@ namespace Legion {
                                const std::vector<CustomSerdezID> &serdez_ids,
                                const std::vector<unsigned> &indexes);
       void remove_local_fields(const std::vector<FieldID> &to_removes);
-    protected:
-      void process_alloc_notification(Deserializer &derez);
     public:
       bool has_field(FieldID fid);
       size_t get_field_size(FieldID fid);
@@ -2915,6 +2958,22 @@ namespace Legion {
                                       Deserializer &derez,
                                       AddressSpaceID source);
       static void handle_node_return(Deserializer &derez);
+      static void handle_allocator_request(RegionTreeForest *forest,
+                                           Deserializer &derez,
+                                           AddressSpaceID source);
+      static void handle_allocator_response(RegionTreeForest *forest,
+                                            Deserializer &derez);
+      static void handle_allocator_invalidation(RegionTreeForest *forest,
+                                                Deserializer &derez);
+      static void handle_allocator_flush(RegionTreeForest *forest, 
+                                         Deserializer &derez);
+      static void handle_allocator_free(RegionTreeForest *forest,
+                                        Deserializer &derez,
+                                        AddressSpaceID source);
+      static void handle_infos_request(RegionTreeForest *forest,
+                                       Deserializer &derez);
+      static void handle_infos_response(RegionTreeForest *forest,
+                                        Deserializer &derez);
     public:
       static void handle_remote_instance_creation(RegionTreeForest *forest,
                                 Deserializer &derez, AddressSpaceID source);
@@ -2923,27 +2982,42 @@ namespace Legion {
     public:
       static void handle_alloc_request(RegionTreeForest *forest,
                                        Deserializer &derez);
-      static void handle_alloc_notification(RegionTreeForest *forest,
-                                            Deserializer &derez);
       static void handle_top_alloc(RegionTreeForest *forest,
                                    Deserializer &derez, AddressSpaceID source);
       static void handle_field_free(RegionTreeForest *forest,
                                     Deserializer &derez, AddressSpaceID source);
+      static void handle_layout_invalidation(RegionTreeForest *forest,
+                                             Deserializer &derez,
+                                             AddressSpaceID source);
       static void handle_local_alloc_request(RegionTreeForest *forest,
                                              Deserializer &derez,
                                              AddressSpaceID source);
       static void handle_local_alloc_response(Deserializer &derez);
       static void handle_local_free(RegionTreeForest *forest,
                                     Deserializer &derez);
+      static void handle_field_size_update(RegionTreeForest *forest,
+                                           Deserializer &derez, 
+                                           AddressSpaceID source);
+      static void handle_defer_infos_request(const void *args);
     public:
       // Help with debug printing
       char* to_string(const FieldMask &mask, TaskContext *ctx) const;
     protected:
       // Assume we are already holding the node lock
       // when calling these methods
-      int allocate_index(size_t field_size, CustomSerdezID serdez, 
-                         RtEvent &ready_event);
+      int allocate_index(RtEvent &ready_event);
       void free_index(unsigned index, RtEvent free_event);
+      void invalidate_layouts(unsigned index, std::set<RtEvent> &applied,
+                              AddressSpaceID source, bool need_lock = true);
+    protected:
+      RtEvent request_field_infos_copy(std::map<FieldID,FieldInfo> *copy,
+          AddressSpaceID source, 
+          RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT) const;
+      void record_read_only_infos(const std::map<FieldID,FieldInfo> &infos);
+      void process_allocator_response(Deserializer &derez);
+      void process_allocator_invalidation(RtUserEvent done);
+      void process_allocator_flush(Deserializer &derez);
+      void process_allocator_free(Deserializer &derez, AddressSpaceID source);
     protected:
       bool allocate_local_indexes(CustomSerdezID serdez,
             const std::vector<size_t> &sizes,
@@ -2956,19 +3030,11 @@ namespace Legion {
     private:
       mutable LocalLock node_lock;
       // Top nodes in the trees for which this field space is used
-      std::set<LogicalRegion> logical_trees;
-      std::set<RegionNode*> local_trees;
-      std::map<FieldID,FieldInfo> fields;
-      // Once allocated all indexes have to have the same field size
-      // for now because it's too hard to go through and prune out all 
-      // the data structures that depend on field sizes being the same.
-      std::vector<std::pair<size_t,CustomSerdezID> > index_infos;
+      std::set<LogicalRegion> logical_trees; // valid on every node currently
+      std::set<RegionNode*> local_trees; // valid on the local node
+      std::map<FieldID,FieldInfo> field_infos; // depends on allocation_state
       // Local field sizes
       std::vector<std::pair<size_t,CustomSerdezID> > local_index_infos;
-      // Use a list here so that we cycle through all the indexes
-      // that have been freed before we reuse to avoid false aliasing
-      // We may pull things out from the middle though
-      std::list<std::pair<unsigned,RtEvent> > available_indexes;
     private:
       // Keep track of the layouts associated with this field space
       // Index them by their hash of their field mask to help
@@ -2979,6 +3045,25 @@ namespace Legion {
       LegionMap<SemanticTag,SemanticInfo>::aligned semantic_info;
       LegionMap<std::pair<FieldID,SemanticTag>,SemanticInfo>::aligned 
                                                     semantic_field_info;
+    private:
+      // Track which node is the owner for allocation privileges
+      FieldAllocationState allocation_state;
+      // For all normal (aka non-local) fields we track which indexes in the 
+      // field mask have not been allocated. Only valid on the allocation owner
+      FieldMask unallocated_indexes;
+      // Use a list here so that we cycle through all the indexes
+      // that have been freed before we reuse to avoid false aliasing
+      // We may pull things out from the middle though
+      std::list<std::pair<unsigned,RtEvent> > available_indexes;
+      // Keep track of the nodes with remote copies of field_infos
+      mutable std::set<AddressSpaceID> remote_field_infos;
+      // An event for recording when we are available for allocation
+      // on the owner node in the case we had to send invalidations
+      RtEvent pending_field_allocation;
+      // Total number of outstanding allocators
+      unsigned outstanding_allocators;
+      // Total number of outstanding invalidations (owner node only)
+      unsigned outstanding_invalidations;
     public:
       bool destroyed;
     };

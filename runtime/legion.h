@@ -488,6 +488,7 @@ namespace Legion {
       inline bool operator<(const FieldAllocator &rhs) const;
       inline bool operator==(const FieldAllocator &rhs) const;
     public:
+      ///@{
       /**
        * Allocate a field with a given size. Optionally specify
        * the field ID to be assigned.  Note if you use
@@ -509,6 +510,11 @@ namespace Legion {
                              FieldID desired_fieldid = AUTO_GENERATE_ID,
                              CustomSerdezID serdez_id = 0,
                              bool local_field = false);
+      FieldID allocate_field(const Future &field_size,
+                             FieldID desired_fieldid = AUTO_GENERATE_ID,
+                             CustomSerdezID serdez_id = 0,
+                             bool local_field = false);
+      ///@}
       /**
        * Deallocate the specified field from the field space.
        * @param fid the field ID to be deallocated
@@ -527,6 +533,7 @@ namespace Legion {
       FieldID allocate_local_field(size_t field_size,
                                    FieldID desired_fieldid = AUTO_GENERATE_ID,
                                    CustomSerdezID serdez_id = 0);
+      ///@{
       /**
        * Allocate a collection of fields with the specified sizes.
        * Optionally pass in a set of field IDs to use when allocating
@@ -546,6 +553,11 @@ namespace Legion {
                            std::vector<FieldID> &resulting_fields,
                            CustomSerdezID serdez_id = 0,
                            bool local_fields = false);
+      void allocate_fields(const std::vector<Future> &field_sizes,
+                           std::vector<FieldID> &resulting_fields,
+                           CustomSerdezID serdez_id = 0,
+                           bool local_fields = false);
+      ///@}
       /**
        * Free a collection of field IDs
        * @param to_free set of field IDs to be freed
@@ -2437,7 +2449,7 @@ namespace Legion {
       __CUDA_HD__
       inline DeferredValue<T>& operator=(T value);
     public:
-      inline void finalize(InternalContext ctx) const;
+      inline void finalize(Runtime *runtime, Context ctx) const;
     protected:
       Realm::RegionInstance instance;
       Realm::AffineAccessor<T,1,coord_t> accessor;
@@ -7879,10 +7891,19 @@ namespace Legion {
        * @param ctx the context for the task
        * @param retvalptr pointer to the return value
        * @param retvalsize the size of the return value in bytes
+       * @param owned whether the runtime now owns this result
+       * @param allocation internal runtime parameter, please ignore
+       * @param inst internal runtime parameter, please ignore
        */
       static void legion_task_postamble(Runtime *runtime, Context ctx,
                                         const void *retvalptr = NULL,
-                                        size_t retvalsize = 0);
+                                        size_t retvalsize = 0,
+                                        bool owned = false,
+#ifdef LEGION_MALLOC_INSTANCES
+                                        uintptr_t allocation = 0,
+#endif
+                                        Realm::RegionInstance inst = 
+                                          Realm::RegionInstance::NO_INST);
     public:
       // ------------------ Deprecated task registration -----------------------
       /**
@@ -8000,6 +8021,13 @@ namespace Legion {
        * @return the context for the enclosing task in which we are executing
        */
       static Context get_context(void);
+
+      /**
+       * Get the task object associated with a context
+       * @param ctx enclosing processor context
+       * @return the task representation of the context
+       */
+      static const Task* get_context_task(Context ctx);
     private:
       IndexPartition create_restricted_partition(Context ctx,
                                       IndexSpace parent,

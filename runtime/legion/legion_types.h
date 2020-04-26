@@ -320,6 +320,7 @@ namespace Legion {
       LG_INDEX_PART_SEMANTIC_INFO_REQ_TASK_ID,
       LG_FIELD_SPACE_SEMANTIC_INFO_REQ_TASK_ID,
       LG_FIELD_SEMANTIC_INFO_REQ_TASK_ID,
+      LG_DEFER_FIELD_INFOS_TASK_ID,
       LG_REGION_SEMANTIC_INFO_REQ_TASK_ID,
       LG_PARTITION_SEMANTIC_INFO_REQ_TASK_ID,
       LG_INDEX_SPACE_DEFER_CHILD_TASK_ID,
@@ -448,6 +449,7 @@ namespace Legion {
         "Index Partition Semantic Request",                       \
         "Field Space Semantic Request",                           \
         "Field Semantic Request",                                 \
+        "Defer Field Infos Request",                              \
         "Region Semantic Request",                                \
         "Partition Semantic Request",                             \
         "Defer Index Space Child Request",                        \
@@ -690,10 +692,18 @@ namespace Legion {
       SEND_FIELD_SPACE_NODE,
       SEND_FIELD_SPACE_REQUEST,
       SEND_FIELD_SPACE_RETURN,
+      SEND_FIELD_SPACE_ALLOCATOR_REQUEST,
+      SEND_FIELD_SPACE_ALLOCATOR_RESPONSE,
+      SEND_FIELD_SPACE_ALLOCATOR_INVALIDATION,
+      SEND_FIELD_SPACE_ALLOCATOR_FLUSH,
+      SEND_FIELD_SPACE_ALLOCATOR_FREE,
+      SEND_FIELD_SPACE_INFOS_REQUEST,
+      SEND_FIELD_SPACE_INFOS_RESPONSE,
       SEND_FIELD_ALLOC_REQUEST,
-      SEND_FIELD_ALLOC_NOTIFICATION,
+      SEND_FIELD_SIZE_UPDATE,
       SEND_FIELD_SPACE_TOP_ALLOC,
       SEND_FIELD_FREE,
+      SEND_FIELD_SPACE_LAYOUT_INVALIDATION,
       SEND_LOCAL_FIELD_ALLOC_REQUEST,
       SEND_LOCAL_FIELD_ALLOC_RESPONSE,
       SEND_LOCAL_FIELD_FREE,
@@ -861,10 +871,18 @@ namespace Legion {
         "Send Field Space Node",                                      \
         "Send Field Space Request",                                   \
         "Send Field Space Return",                                    \
+        "Send Field Space Allocator Request",                         \
+        "Send Field Space Allocator Response",                        \
+        "Send Field Space Allocator Invalidation",                    \
+        "Send Field Space Allocator Flush",                           \
+        "Send Field Space Allocator Free",                            \
+        "Send Field Space Infos Request",                             \
+        "Send Field Space Infos Response",                            \
         "Send Field Alloc Request",                                   \
-        "Send Field Alloc Notification",                              \
+        "Send Field Size Update",                                     \
         "Send Field Space Top Alloc",                                 \
         "Send Field Free",                                            \
+        "Send Field Space Layout Invalidation",                       \
         "Send Local Field Alloc Request",                             \
         "Send Local Field Alloc Response",                            \
         "Send Local Field Free",                                      \
@@ -1420,37 +1438,12 @@ namespace Legion {
     class RemoteTask;
 
     // legion_context.h
-    /**
-     * \class ContextInterface
-     * This is a pure virtual class so users don't try to use it. 
-     * It defines the context interface that the task wrappers use 
-     * for getting access to context data when running a task.
-     */
     class TaskContext;
     class InnerContext;;
     class TopLevelContext;
     class RemoteContext;
     class LeafContext;
     class InlineContext;
-    class ContextInterface {
-    public:
-      virtual Task* get_task(void) = 0;
-      virtual const std::vector<PhysicalRegion>& begin_task(
-                                      Legion::Runtime *&rt) = 0;
-      virtual void end_task(const void *result, 
-                            size_t result_size, bool owned, 
-#ifdef LEGION_MALLOC_INSTANCES
-                            uintptr_t allocation = 0,
-#endif
-          Realm::RegionInstance inst = Realm::RegionInstance::NO_INST) = 0;
-      // This is safe because we see in legion_context.h that
-      // TaskContext implements this interface and no one else
-      // does. If only C++ implemented forward declarations of
-      // inheritence then we wouldn't have this dumb problem
-      // (mixin classes anyone?).
-      inline TaskContext* as_context(void) 
-        { return reinterpret_cast<TaskContext*>(this); }
-    };
 
     // Nasty global variable for TLS support of figuring out
     // our context implicitly
@@ -1780,7 +1773,6 @@ namespace Legion {
   // Magical typedefs 
   // (don't forget to update ones in old HighLevel namespace in legion.inl)
   typedef Internal::TaskContext* Context;
-  typedef Internal::ContextInterface* InternalContext;
   // Anothing magical typedef
   namespace Mapping {
     typedef Internal::MappingCallInfo* MapperContext;

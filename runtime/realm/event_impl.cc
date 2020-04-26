@@ -2138,7 +2138,7 @@ static void *bytedup(const void *data, size_t datalen)
       }
 
     struct RemoteNotification {
-      unsigned node;
+      NodeID node;
       EventImpl::gen_t trigger_gen, previous_gen;
     };
 
@@ -2398,15 +2398,21 @@ static void *bytedup(const void *data, size_t datalen)
 	for(std::vector<RemoteNotification>::const_iterator it = remote_notifications.begin();
 	    it != remote_notifications.end();
 	    it++) {
+	  // normally we'll just send a remote waiter data up to the
+	  //  generation they asked for - the exception is the target of a
+	  //  migration, who must get up to date data
+	  gen_t tgt_trigger_gen = (*it).trigger_gen;
+	  if((*it).node == migration_target)
+	    tgt_trigger_gen = trigger_gen;
 	  log_barrier.info() << "sending remote trigger notification: " << me << "/"
-			     << (*it).previous_gen << " -> " << (*it).trigger_gen << ", dest=" << (*it).node;
+			     << (*it).previous_gen << " -> " << tgt_trigger_gen << ", dest=" << (*it).node;
 	  void *data = 0;
 	  size_t datalen = 0;
 	  if(final_values_copy) {
 	    data = (char *)final_values_copy + (((*it).previous_gen - oldest_previous) * redop->sizeof_lhs);
-	    datalen = ((*it).trigger_gen - (*it).previous_gen) * redop->sizeof_lhs;
+	    datalen = (tgt_trigger_gen - (*it).previous_gen) * redop->sizeof_lhs;
 	  }
-	  BarrierTriggerMessage::send_request((*it).node, me.id, (*it).trigger_gen, (*it).previous_gen,
+	  BarrierTriggerMessage::send_request((*it).node, me.id, tgt_trigger_gen, (*it).previous_gen,
 					      first_generation, redop_id, migration_target, base_arrival_count,
 					      data, datalen);
 	}

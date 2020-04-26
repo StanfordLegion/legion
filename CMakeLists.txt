@@ -114,6 +114,9 @@ if(COMPILER_SUPPORTS_MVSX)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mvsx")
 endif()
 
+# detect use of the cxx_defcheck wrapper and enable build checks
+check_cxx_compiler_flag("--defcheck __test__" COMPILER_SUPPORTS_DEFCHECK)
+
 #------------------------------------------------------------------------------#
 # Optimizations
 #------------------------------------------------------------------------------#
@@ -182,8 +185,10 @@ if(Legion_USE_Python)
   find_package(PythonInterp ${Legion_Python_Version} REQUIRED) # Needed to invoke setup.py for install
   find_package(PythonLibs ${Legion_Python_Version} REQUIRED)
 
-  # define variable for realm_defines.h
+  # define variables for realm_defines.h
   set(REALM_USE_PYTHON ON)
+  set(REALM_PYTHON_LIB "${PYTHON_LIBRARIES}")
+  set(REALM_PYTHON_VERSION_MAJOR ${PYTHON_VERSION_MAJOR})
 
   string(REPLACE "." ";" PYTHON_VERSION_SPLIT ${PYTHONLIBS_VERSION_STRING})
   list(GET PYTHON_VERSION_SPLIT 0 PYTHON_VERSION_MAJOR)
@@ -213,7 +218,11 @@ if(Legion_USE_CUDA)
 
   # define variable for legion_defines.h
   set(LEGION_USE_CUDA ON)
-  set(LEGION_GPU_REDUCTIONS ON)
+
+  option(Legion_GPU_REDUCTIONS "Support reductions natively on GPU" ON)
+  if(Legion_GPU_REDUCTIONS)
+    set(LEGION_GPU_REDUCTIONS ON)
+  endif()
 
   # define variable for realm_defines.h
   set(REALM_USE_CUDA ON)
@@ -235,6 +244,15 @@ if(Legion_USE_Kokkos)
 
   # cmake uses -DKokkos_DIR=.../lib/cmake to look in non-standard locations
   find_package(Kokkos REQUIRED)
+
+  # in order to build using Kokkos' exported compile options, we need to use
+  #  the same compiler, but Kokkos doesn't tell us what that is, so we need it
+  #  from the configuration or the environment
+  set(KOKKOS_CXX_COMPILER $ENV{KOKKOS_CXX_COMPILER} CACHE STRING
+      "C++ compiler used by Kokkos")
+  if(NOT KOKKOS_CXX_COMPILER)
+    message(FATAL_ERROR "to build correctly with Kokkos, the exact compiler used in the Kokkos build (typically set via CXX=... or -DCMAKE_CXX_COMPILER=...) must be provided in KOKKOS_CXX_COMPILER (either on the command line or from the environment)")
+  endif()
 
   set(REALM_USE_KOKKOS ON)
 endif()
@@ -340,6 +358,28 @@ if(Legion_USE_HWLOC)
   install(FILES ${Legion_SOURCE_DIR}/cmake/FindHWLOC.cmake
     DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
   )
+  set(REALM_USE_HWLOC ON)
+endif()
+
+#------------------------------------------------------------------------------#
+# PAPI configuration
+#------------------------------------------------------------------------------#
+option(Legion_USE_PAPI "Use PAPI for performance measurements" OFF)
+if(Legion_USE_PAPI)
+  # no FindPAPI in cmake by default, so just find the lib and include path
+  #  ourselves
+  find_library(PAPI_LIBRARIES NAMES libpapi.so libpapi.a papi
+    HINTS ${PAPI_ROOT}/lib $ENV{PAPI_ROOT}/lib ENV PAPI_LIB_DIR)
+  find_path(PAPI_INCLUDE_DIRS NAMES papi.h
+    HINTS ${PAPI_ROOT}/include $ENV{PAPI_ROOT}/include ENV PAPI_INC_DIR)
+  if(PAPI_LIBRARIES AND PAPI_INCLUDE_DIRS)
+    set(REALM_USE_PAPI ON)
+  else()
+    message(FATAL_ERROR
+      " Could not find PAPI - set PAPI_{ROOT,INC_DIR,LIB_DIR} if needed -- got:\n"
+      "   PAPI_LIBRARIES: ${PAPI_LIBRARIES}\n"
+      "   PAPI_INCLUDE_DIRS: ${PAPI_INCLUDE_DIRS}")
+  endif()
 endif()
 
 #------------------------------------------------------------------------------#
@@ -391,6 +431,12 @@ set(LEGION_WARNINGS_FATAL ${Legion_WARNINGS_FATAL})
 option(Legion_SPY "Enable detailed logging for Legion Spy" OFF)
 set(LEGION_SPY ${Legion_SPY})
 
+option(Legion_BOUNDS_CHECKS "Enable bounds checking in Legion accessors" OFF)
+set(BOUNDS_CHECKS ${Legion_BOUNDS_CHECKS})
+
+option(Legion_PRIVILEGE_CHECKS "Enable privilege checking in Legion accessors" OFF)
+set(PRIVILEGE_CHECKS ${Legion_PRIVILEGE_CHECKS})
+
 #------------------------------------------------------------------------------#
 # Runtime library targets
 #------------------------------------------------------------------------------#
@@ -410,9 +456,6 @@ add_subdirectory(doc)
 # configure header
 #------------------------------------------------------------------------------#
 # Checking for all defines in the CXX Flags
-
-add_definitions(-D__STDC_FORMAT_MACROS)
-set (__STDC_FORMAT_MACROS ON)
 
 string(REPLACE " " ";" FLAGS_LIST ${CMAKE_CXX_FLAGS})
 FOREACH(FLAG ${FLAGS_LIST})

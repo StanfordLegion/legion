@@ -31,8 +31,7 @@ namespace Legion {
      * provide all the methods for handling the 
      * execution of a task at runtime.
      */
-    class TaskContext : public ContextInterface, 
-                        public ResourceTracker, public Collectable {
+    class TaskContext : public ResourceTracker, public Collectable {
     public:
       class AutoRuntimeCall {
       public:
@@ -266,6 +265,9 @@ namespace Legion {
       virtual FieldID allocate_field(FieldSpace space, size_t field_size,
                                      FieldID fid, bool local,
                                      CustomSerdezID serdez_id);
+      virtual FieldID allocate_field(FieldSpace space, const Future &field_size,
+                                     FieldID fid, bool local,
+                                     CustomSerdezID serdez_id) = 0;
       virtual void allocate_local_field(
                                      FieldSpace space, size_t field_size,
                                      FieldID fid, CustomSerdezID serdez_id,
@@ -276,6 +278,10 @@ namespace Legion {
                                    const std::vector<size_t> &sizes,
                                    std::vector<FieldID> &resuling_fields,
                                    bool local, CustomSerdezID serdez_id);
+      virtual void allocate_fields(FieldSpace space,
+                                   const std::vector<Future> &sizes,
+                                   std::vector<FieldID> &resuling_fields,
+                                   bool local, CustomSerdezID serdez_id) = 0;
       virtual void allocate_local_fields(FieldSpace space,
                                    const std::vector<size_t> &sizes,
                                    const std::vector<FieldID> &resuling_fields,
@@ -980,9 +986,16 @@ namespace Legion {
                                     const char *function_name);
       static void handle_partition_verification(const void *args);
       virtual void destroy_field_space(FieldSpace handle, const bool unordered);
+      virtual FieldID allocate_field(FieldSpace space, const Future &field_size,
+                                     FieldID fid, bool local,
+                                     CustomSerdezID serdez_id);
       virtual void allocate_local_field(FieldSpace space, size_t field_size,
                                      FieldID fid, CustomSerdezID serdez_id,
                                      std::set<RtEvent> &done_events);
+      virtual void allocate_fields(FieldSpace space,
+                                   const std::vector<Future> &sizes,
+                                   std::vector<FieldID> &resuling_fields,
+                                   bool local, CustomSerdezID serdez_id);
       virtual void allocate_local_fields(FieldSpace space,
                                    const std::vector<size_t> &sizes,
                                    const std::vector<FieldID> &resuling_fields,
@@ -1615,9 +1628,16 @@ namespace Legion {
                                             IndexSpace initial,
                                 const std::vector<IndexSpace> &handles);
       virtual void destroy_field_space(FieldSpace handle, const bool unordered);
+      virtual FieldID allocate_field(FieldSpace space, const Future &field_size,
+                                     FieldID fid, bool local,
+                                     CustomSerdezID serdez_id);
       virtual void allocate_local_field(FieldSpace space, size_t field_size,
                                      FieldID fid, CustomSerdezID serdez_id,
                                      std::set<RtEvent> &done_events);
+      virtual void allocate_fields(FieldSpace space,
+                                   const std::vector<Future> &sizes,
+                                   std::vector<FieldID> &resuling_fields,
+                                   bool local, CustomSerdezID serdez_id);
       virtual void allocate_local_fields(FieldSpace space,
                                    const std::vector<size_t> &sizes,
                                    const std::vector<FieldID> &resuling_fields,
@@ -1944,6 +1964,9 @@ namespace Legion {
       virtual FieldID allocate_field(FieldSpace space, size_t field_size,
                                      FieldID fid, bool local,
                                      CustomSerdezID serdez_id);
+      virtual FieldID allocate_field(FieldSpace space, const Future &field_size,
+                                     FieldID fid, bool local,
+                                     CustomSerdezID serdez_id);
       virtual void free_field(FieldSpace space, FieldID fid,
                               const bool unordered);
       virtual void allocate_fields(FieldSpace space,
@@ -1956,6 +1979,10 @@ namespace Legion {
       virtual void allocate_local_field(FieldSpace space, size_t field_size,
                                      FieldID fid, CustomSerdezID serdez_id,
                                      std::set<RtEvent> &done_events);
+      virtual void allocate_fields(FieldSpace space,
+                                   const std::vector<Future> &sizes,
+                                   std::vector<FieldID> &resuling_fields,
+                                   bool local, CustomSerdezID serdez_id);
       virtual void allocate_local_fields(FieldSpace space,
                                    const std::vector<size_t> &sizes,
                                    const std::vector<FieldID> &resuling_fields,

@@ -824,7 +824,7 @@ legion_index_partition_create_coloring(
   legion_index_space_t parent_,
   legion_coloring_t coloring_,
   bool disjoint,
-  int part_color /* = AUTO_GENERATE_ID */)
+  legion_color_t part_color /* = AUTO_GENERATE_ID */)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
@@ -845,7 +845,7 @@ legion_index_partition_create_domain_coloring(
   legion_domain_t color_space_,
   legion_domain_coloring_t coloring_,
   bool disjoint,
-  int part_color /* = AUTO_GENERATE_ID */)
+  legion_color_t part_color /* = AUTO_GENERATE_ID */)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
@@ -873,7 +873,7 @@ legion_index_partition_create_point_coloring(
   legion_domain_t color_space_,
   legion_point_coloring_t coloring_,
   legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-  int color /* = AUTO_GENERATE_ID */)
+  legion_color_t color /* = AUTO_GENERATE_ID */)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
@@ -900,7 +900,7 @@ legion_index_partition_create_domain_point_coloring(
   legion_domain_t color_space_,
   legion_domain_point_coloring_t coloring_,
   legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-  int color /* = AUTO_GENERATE_ID */)
+  legion_color_t color /* = AUTO_GENERATE_ID */)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
@@ -1013,7 +1013,7 @@ legion_index_partition_create_multi_domain_point_coloring(
   legion_domain_t color_space_,
   legion_multi_domain_point_coloring_t coloring_,
   legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-  int color /* = AUTO_GENERATE_ID */)
+  legion_color_t color /* = AUTO_GENERATE_ID */)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
@@ -1125,7 +1125,7 @@ legion_index_partition_create_blockify_##DIM##d( \
   legion_context_t ctx_, \
   legion_index_space_t parent_, \
   legion_blockify_##DIM##d_t blockify_, \
-  int part_color /* = AUTO_GENERATE_ID */) \
+  legion_color_t part_color /* = AUTO_GENERATE_ID */) \
 { \
   Runtime *runtime = CObjectWrapper::unwrap(runtime_); \
   Context ctx = CObjectWrapper::unwrap(ctx_)->context(); \
@@ -1146,7 +1146,7 @@ legion_index_partition_create_equal(legion_runtime_t runtime_,
                                     legion_index_space_t parent_,
                                     legion_index_space_t color_space_,
                                     size_t granularity,
-                                    int color /* = AUTO_GENERATE_ID */)
+                                    legion_color_t color /* = AUTO_GENERATE_ID */)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
@@ -1169,7 +1169,7 @@ legion_index_partition_create_by_weights(
   size_t num_colors,
   legion_index_space_t color_space_,
   size_t granularity /* = 1 */,
-  int color /* = AUTO_GENERATE_ID */)
+  legion_color_t color /* = AUTO_GENERATE_ID */)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
@@ -1193,7 +1193,7 @@ legion_index_partition_create_by_weights_future_map(
   legion_future_map_t future_map_,
   legion_index_space_t color_space_,
   size_t granularity /* = 1 */,
-  int color /* = AUTO_GENERATE_ID */)
+  legion_color_t color /* = AUTO_GENERATE_ID */)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
@@ -1216,7 +1216,7 @@ legion_index_partition_create_by_union(
   legion_index_partition_t handle2_,
   legion_index_space_t color_space_,
   legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-  int color /* = AUTO_GENERATE_ID */)
+  legion_color_t color /* = AUTO_GENERATE_ID */)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
@@ -1240,7 +1240,7 @@ legion_index_partition_create_by_intersection(
   legion_index_partition_t handle2_,
   legion_index_space_t color_space_,
   legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-  int color /* = AUTO_GENERATE_ID */)
+  legion_color_t color /* = AUTO_GENERATE_ID */)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
@@ -1262,7 +1262,7 @@ legion_index_partition_create_by_intersection_mirror(
   legion_index_space_t parent_,
   legion_index_partition_t handle_,
   legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-  int color /* = AUTO_GENERATE_ID */,
+  legion_color_t color /* = AUTO_GENERATE_ID */,
   bool dominates /* = false */)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
@@ -1285,7 +1285,7 @@ legion_index_partition_create_by_difference(
   legion_index_partition_t handle2_,
   legion_index_space_t color_space_,
   legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-  int color /* = AUTO_GENERATE_ID */)
+  legion_color_t color /* = AUTO_GENERATE_ID */)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
@@ -1311,7 +1311,7 @@ legion_index_partition_create_by_domain(
   legion_index_space_t color_space_,
   bool perform_intersections /* = true */,
   legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-  int color /* = AUTO_GENERATE_ID */)
+  legion_color_t color /* = AUTO_GENERATE_ID */)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
@@ -1337,7 +1337,7 @@ legion_index_partition_create_by_domain_future_map(
   legion_index_space_t color_space_,
   bool perform_intersections,
   legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-  int color /* = AUTO_GENERATE_ID */)
+  legion_color_t color /* = AUTO_GENERATE_ID */)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
@@ -1358,7 +1358,7 @@ legion_index_partition_create_by_field(legion_runtime_t runtime_,
                                        legion_logical_region_t parent_,
                                        legion_field_id_t fid,
                                        legion_index_space_t color_space_,
-                                       int color /* = AUTO_GENERATE_ID */,
+                                       legion_color_t color /* = AUTO_GENERATE_ID */,
                                        legion_mapper_id_t id /* = 0 */,
                                        legion_mapping_tag_id_t tag /* = 0 */,
                                        legion_partition_kind_t part_kind /* = DISJOINT_KIND */)
@@ -1386,7 +1386,7 @@ legion_index_partition_create_by_image(
   legion_field_id_t fid,
   legion_index_space_t color_space_,
   legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-  int color /* = AUTO_GENERATE_ID */,
+  legion_color_t color /* = AUTO_GENERATE_ID */,
   legion_mapper_id_t id /* = 0 */,
   legion_mapping_tag_id_t tag /* = 0 */)
 {
@@ -1414,7 +1414,7 @@ legion_index_partition_create_by_preimage(
   legion_field_id_t fid,
   legion_index_space_t color_space_,
   legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-  int color /* = AUTO_GENERATE_ID */,
+  legion_color_t color /* = AUTO_GENERATE_ID */,
   legion_mapper_id_t id /* = 0 */,
   legion_mapping_tag_id_t tag /* = 0 */)
 {
@@ -1442,7 +1442,7 @@ legion_index_partition_create_by_image_range(
   legion_field_id_t fid,
   legion_index_space_t color_space_,
   legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-  int color /* = AUTO_GENERATE_ID */,
+  legion_color_t color /* = AUTO_GENERATE_ID */,
   legion_mapper_id_t id /* = 0 */,
   legion_mapping_tag_id_t tag /* = 0 */)
 {
@@ -1470,7 +1470,7 @@ legion_index_partition_create_by_preimage_range(
   legion_field_id_t fid,
   legion_index_space_t color_space_,
   legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-  int color /* = AUTO_GENERATE_ID */,
+  legion_color_t color /* = AUTO_GENERATE_ID */,
   legion_mapper_id_t id /* = 0 */,
   legion_mapping_tag_id_t tag /* = 0 */)
 {
@@ -1497,7 +1497,7 @@ legion_index_partition_create_by_restriction(
     legion_domain_transform_t transform_,
     legion_domain_t extent_,
     legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-    int color /* = AUTO_GENERATE_ID */)
+    legion_color_t color /* = AUTO_GENERATE_ID */)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
@@ -1520,7 +1520,7 @@ legion_index_partition_create_pending_partition(
   legion_index_space_t parent_,
   legion_index_space_t color_space_,
   legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-  int color /* = AUTO_GENERATE_ID */)
+  legion_color_t color /* = AUTO_GENERATE_ID */)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
@@ -2507,6 +2507,16 @@ legion_field_allocator_allocate_field(legion_field_allocator_t allocator_,
 {
   FieldAllocator *allocator = CObjectWrapper::unwrap(allocator_);
   return allocator->allocate_field(field_size, desired_fieldid);
+}
+
+legion_field_id_t
+legion_field_allocator_allocate_field_future(legion_field_allocator_t allocator_,
+                                             legion_future_t field_size_,
+                                             legion_field_id_t desired_fieldid)
+{
+  FieldAllocator *allocator = CObjectWrapper::unwrap(allocator_);
+  Future *field_size = CObjectWrapper::unwrap(field_size_);
+  return allocator->allocate_field(*field_size, desired_fieldid);
 }
 
 void
@@ -5618,8 +5628,8 @@ legion_mappable_as_inline_mapping(legion_mappable_t mappable_)
 legion_unique_id_t
 legion_context_get_unique_id(legion_context_t ctx_)
 {
-  Task* task =
-    reinterpret_cast<Task*>(CObjectWrapper::unwrap(ctx_)->context());
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  const Task *task = Runtime::get_context_task(ctx);
   return task->get_unique_id();
 }
 

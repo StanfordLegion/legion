@@ -1,0 +1,166 @@
+#!/usr/bin/env python3
+
+# in order to support both make and cmake builds, Legion and Realm put all
+#  configuration-specific defines in generated files called:
+#    legion_defines.h
+#    realm_defines.h
+#
+# unfortunately, it's possible that a source file will forget to include
+#  these headers (either directly or transitively) before trying to test
+#  one of the configuration flags, so this wrapper script provides a way
+#  to do that
+#
+# first, it forwards whatever command line it's given to the actual C++
+#  compiler (controlled via the DEFCHECK_CXX environment variable, which
+#  must be set) to actually build the file
+#
+# assuming that works, it then tries to rewrite the command line to just
+#  run the preprocessor, looking for the first non-empty line that is not
+#  in a system header file - if it's not one of:
+#    #define LEGION_DEFINES_INCLUDED
+#    #define REALM_DEFINES_INCLUDED
+# the result is a fatal error
+
+import sys
+import os
+import subprocess
+import re
+
+try:
+    real_cxx = os.environ['DEFCHECK_CXX']
+except KeyError:
+    sys.stderr.write('{}: FATAL - DEFCHECK_CXX not set in environemnt\n'.format(sys.argv[0]))
+    exit(1)
+
+# parse the command line, looking for '-c' to indicate it's a compilation
+#  (rather than a link or something else) and build up the command we'll use
+#  for the preprocessor
+is_compile = False
+real_cmd = [ real_cxx ]
+preproc_cmd = [ real_cxx ]
+check_header = None
+output_file = None
+
+i = 1
+while i < len(sys.argv):
+    if sys.argv[i] == '-c':
+        is_compile = True
+        real_cmd.append('-c')
+        preproc_cmd.append('-E')
+        i += 1
+        continue
+
+    if sys.argv[i] == '-o':
+        # skip -o outputfile in preproc command
+        real_cmd.extend(sys.argv[i:i+2])
+        output_file = sys.argv[i+1]
+        i += 2
+        continue
+
+    if sys.argv[i] == '--defcheck':
+        # this doesn't appear in either command line
+        # allow support for this flag to be tested with magic header name
+        if sys.argv[i+1] != '__test__':
+            check_header = sys.argv[i+1]
+        i += 2
+        continue
+
+    real_cmd.append(sys.argv[i])
+    preproc_cmd.append(sys.argv[i])
+    i += 1
+
+if is_compile == False or check_header is None:
+    # just exec the real compile - we don't have anything to add
+    os.execlp(real_cmd[0], *real_cmd)
+    exit(1)
+
+# run the compile first
+ret = subprocess.call(real_cmd)
+if ret != 0:
+    exit(ret)
+
+# that worked, now call the preprocessor
+try:
+    cpp_output = subprocess.check_output(preproc_cmd)
+except subprocess.CalledProcessError as e:
+    sys.stderr.write('{}: preprocessor returned {}\n'.format(sys.argv[0],
+                                                             e.returncode))
+    exit(e.returncode)
+
+# as we parse the preprocessor output, we're looking for which files
+#  (and how many lines of them) are read before we get to the desired header
+
+files_read = {}
+
+firstfile = None
+curfile = None
+curline = 0
+issyshdr = False
+for l in cpp_output.decode('latin_1', errors='ignore').splitlines():
+    if l.startswith('# '):
+        rest = l[2:].rstrip().split(' ')
+        if len(rest) == 1:
+            curline = int(rest[0])
+        else:
+            curfile = rest[1].strip('"')
+            curline = int(rest[0])
+            flags = rest[2:]
+            issyshdr = ('3' in flags)
+            if curfile.endswith(check_header):
+                # now that we know the full path to the header, read it
+                #  and see what it defines (or doesn't define)
+                try:
+                    f = open(curfile, 'r')
+                except:
+                    raise
+                defines = {}
+                for l2 in f:
+                    if l2.startswith('#define '):
+                        try:
+                            defvar, val = l2[8:].rstrip().split(' ', 1)
+                        except ValueError:
+                            defvar = l2[8:].rstrip()
+                            val = '1'
+                        defines[defvar] = val
+                    if l2.startswith('/* #undef '):
+                        defvar = l2[10:].rstrip().split(' ', 1)[0]
+                        defines[defvar] = None
+                f.close()
+
+                # now go through all the files we read before this point to see
+                #  if they refer to any of these defines
+                errors = 0
+                for checkfile, checkline in files_read.items():
+                    if checkfile.startswith('<') or checkfile.endswith('/'):
+                        continue
+
+                    f2 = open(checkfile, 'r', encoding='ascii', errors='ignore')
+                    for lineno, l2 in enumerate(f2, 1):
+                        if lineno > checkline:
+                            break
+                        for defvar in defines:
+                            if re.search(r'\b' + defvar + r'\b', l2):
+                                sys.stderr.write('{}:{}:1: error: reference to \'{}\' before inclusion of \'{}\'\n'.format(checkfile, lineno,
+                                                                                                                           defvar, check_header))
+                                errors += 1
+
+                if errors:
+                    os.remove(output_file)
+                    exit(1)
+                else:
+                    exit(0)
+    else:
+        curline += 1
+
+    if not firstfile:
+        firstfile = curfile
+    # don't worry about system header files
+    if not issyshdr:
+        files_read[curfile] = curline
+
+# if we get here, the required header file wasn't included at all
+sys.stderr.write('{}:{}:1: error: required header not included: \'{}\'\n'.format(curfile,
+                                                                                 curline,
+                                                                                 check_header))
+os.remove(output_file)
+exit(1)

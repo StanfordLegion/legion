@@ -1263,7 +1263,7 @@ namespace Realm {
     // class GPUEventPool
 
     GPUEventPool::GPUEventPool(int _batch_size)
-      : batch_size(_batch_size), current_size(0), total_size(0)
+      : batch_size(_batch_size), current_size(0), total_size(0), external_count(0)
     {
       // don't immediately fill the pool because we're not managing the context ourselves
     }
@@ -1292,7 +1292,9 @@ namespace Realm {
     void GPUEventPool::empty_pool(void)
     {
       // shouldn't be any events running around still
-      assert(current_size == total_size);
+      assert((current_size + external_count) == total_size);
+      if(external_count)
+        log_stream.warning() << "Application leaking " << external_count << " cuda events";
 
       for(int i = 0; i < current_size; i++)
 	CHECK_CU( cuEventDestroy(available_events[i]) );
@@ -1304,7 +1306,7 @@ namespace Realm {
       std::vector<CUevent>().swap(available_events);
     }
 
-    CUevent GPUEventPool::get_event(void)
+    CUevent GPUEventPool::get_event(bool external)
     {
       AutoLock<> al(mutex);
 
@@ -1321,15 +1323,23 @@ namespace Realm {
 	for(int i = 0; i < batch_size; i++)
 	  CHECK_CU( cuEventCreate(&available_events[i], CU_EVENT_DEFAULT) );
       }
+      
+      if(external)
+        external_count++;
 
       return available_events[--current_size];
     }
 
-    void GPUEventPool::return_event(CUevent e)
+    void GPUEventPool::return_event(CUevent e, bool external)
     {
       AutoLock<> al(mutex);
 
       assert(current_size < total_size);
+
+      if(external) {
+        assert(external_count);
+        external_count--;
+      }
 
       available_events[current_size++] = e;
     }
@@ -2219,7 +2229,7 @@ namespace Realm {
       // 	cu_flags |= CU_EVENT_DISABLE_TIMING;
 
       // get an event from our event pool (ignoring the flags for now)
-      CUevent e = gpu->event_pool.get_event();
+      CUevent e = gpu->event_pool.get_event(true/*external*/);
       *event = e;
     }
 
@@ -2228,7 +2238,7 @@ namespace Realm {
       // assume the event is one of ours and put it back in the pool
       CUevent e = event;
       if(e)
-	gpu->event_pool.return_event(e);
+	gpu->event_pool.return_event(e, true/*external*/);
     }
 
     void GPUProcessor::event_record(cudaEvent_t event, cudaStream_t stream)

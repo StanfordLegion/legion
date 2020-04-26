@@ -47,10 +47,10 @@ namespace Legion {
     public:
       // A helper method for getting access to the runtime's
       // end_task method with private access
-      static inline void end_helper(Runtime *rt, InternalContext ctx,
+      static inline void end_helper(Runtime *rt, Context ctx,
           const void *result, size_t result_size, bool owned)
       {
-        ctx->end_task(result, result_size, owned);
+        Runtime::legion_task_postamble(rt, ctx, result, result_size, owned);
       }
       static inline Future from_value_helper(Runtime *rt, 
           const void *value, size_t value_size, bool owned)
@@ -67,7 +67,7 @@ namespace Legion {
       
       template<typename T, bool HAS_SERIALIZE>
       struct NonPODSerializer {
-        static inline void end_task(Runtime *rt, InternalContext ctx,
+        static inline void end_task(Runtime *rt, Context ctx,
                                     T *result)
         {
           size_t buffer_size = result->legion_buffer_size();
@@ -102,10 +102,10 @@ namespace Legion {
       // Further specialization for deferred reductions
       template<typename REDOP, bool EXCLUSIVE>
       struct NonPODSerializer<DeferredReduction<REDOP,EXCLUSIVE>,false> {
-        static inline void end_task(Runtime *rt, InternalContext ctx,
+        static inline void end_task(Runtime *rt, Context ctx,
                                     DeferredReduction<REDOP,EXCLUSIVE> *result)
         {
-          result->finalize(ctx);
+          result->finalize(rt, ctx);
         }
         static inline Future from_value(Runtime *rt, 
             const DeferredReduction<REDOP,EXCLUSIVE> *value)
@@ -128,10 +128,10 @@ namespace Legion {
       // Further specialization to see if this a deferred value
       template<typename T>
       struct NonPODSerializer<DeferredValue<T>,false> {
-        static inline void end_task(Runtime *rt, InternalContext ctx,
+        static inline void end_task(Runtime *rt, Context ctx,
                                     DeferredValue<T> *result)
         {
-          result->finalize(ctx);
+          result->finalize(rt, ctx);
         }
         static inline Future from_value(Runtime *rt, const DeferredValue<T> *value)
         {
@@ -153,8 +153,7 @@ namespace Legion {
       
       template<typename T>
       struct NonPODSerializer<T,false> {
-        static inline void end_task(Runtime *rt, InternalContext ctx,
-                                    T *result)
+        static inline void end_task(Runtime *rt, Context ctx, T *result)
         {
           end_helper(rt, ctx, (void*)result, sizeof(T), false/*owned*/);
         }
@@ -193,8 +192,7 @@ namespace Legion {
 
       template<typename T, bool IS_STRUCT>
       struct StructHandler {
-        static inline void end_task(Runtime *rt, 
-                                    InternalContext ctx, T *result)
+        static inline void end_task(Runtime *rt, Context ctx, T *result)
         {
           // Otherwise this is a struct, so see if it has serialization methods
           NonPODSerializer<T,HasSerialize<T>::value>::end_task(rt, ctx, result);
@@ -214,8 +212,7 @@ namespace Legion {
       // False case of template specialization
       template<typename T>
       struct StructHandler<T,false> {
-        static inline void end_task(Runtime *rt, InternalContext ctx, 
-                                    T *result)
+        static inline void end_task(Runtime *rt, Context ctx, T *result)
         {
           end_helper(rt, ctx, (void*)result, sizeof(T), false/*owned*/);
         }
@@ -246,7 +243,7 @@ namespace Legion {
       // Figure out whether this is a struct or not 
       // and call the appropriate Finisher
       template<typename T>
-      static inline void end_task(Runtime *rt, InternalContext ctx, T *result)
+      static inline void end_task(Runtime *rt, Context ctx, T *result)
       {
         StructHandler<T,IsAStruct<T>::value>::end_task(rt, ctx, result);
       }
@@ -1522,6 +1519,9 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
           if (gpu_warning)
             check_gpu_warning();
+          // Note that in CUDA this function is likely being inlined
+          // everywhere and we can't afford to instantiate templates
+          // for every single dimension so do things untyped
           if (!has_transform)
           {
             // This is imprecise because we can't see the 
@@ -1529,22 +1529,8 @@ namespace Legion {
             const Rect<N,T> b = bounds.bounds<N,T>();
             return b.contains(p);
           }
-          switch (M)
-          {
-            // This is imprecise because we can't see the 
-            // Realm index space on the GPU
-#define DIMFUNC(DIM) \
-            case DIM: \
-              { \
-                const Rect<DIM,T> b = bounds.bounds<DIM,T>(); \
-                const AffineTransform<DIM,N,T> t = transform; \
-                return b.contains(t[p]); \
-              }
-            LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
-            default:
-              assert(false);
-          }
+          else
+            return bounds.contains_bounds_only(transform[DomainPoint(p)]);
 #else
           if (!has_transform)
           {
@@ -1565,8 +1551,8 @@ namespace Legion {
             default:
               assert(false);
           }
-#endif
           return false;
+#endif
         }
         __CUDA_HD__
         inline bool contains_all(const Rect<N,T> &r) const
@@ -1576,32 +1562,22 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
           if (gpu_warning)
             check_gpu_warning();
-          if (!has_transform)
+          // Note that in CUDA this function is likely being inlined
+          // everywhere and we can't afford to instantiate templates
+          // for every single dimension so do things untyped
+          if (has_transform)
+          {
+            for (PointInRectIterator<N,T> itr(r); itr(); itr++)
+              if (!bounds.contains_bounds_only(transform[DomainPoint(*itr)]))
+                return false;
+            return true;
+          }
+          else
           {
             // This is imprecise because we can't see the 
             // Realm index space on the GPU
             const Rect<N,T> b = bounds.bounds<N,T>();
             return b.contains(r);
-          }
-          // If we have a transform then we have to do each point separately
-          switch (M)
-          {
-            // This is imprecise because we can't see the 
-            // Realm index space on the GPU
-#define DIMFUNC(DIM) \
-            case DIM: \
-              { \
-                const Rect<DIM,T> b = bounds.bounds<DIM,T>(); \
-                const AffineTransform<DIM,N,T> t = transform; \
-                for (PointInRectIterator<N,T> itr(r); itr(); itr++) \
-                  if (!b.contains(t[*itr])) \
-                    return false; \
-                return true; \
-              }
-            LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
-            default:
-              assert(false);
           }
 #else
           if (!has_transform)
@@ -1627,8 +1603,8 @@ namespace Legion {
             default:
               assert(false);
           }
-#endif
           return false;
+#endif
         }
       private:
         __CUDA_HD__
@@ -5672,14 +5648,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T>
-    inline void DeferredValue<T>::finalize(InternalContext ctx) const
+    inline void DeferredValue<T>::finalize(Runtime *runtime, Context ctx) const
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_MALLOC_INSTANCES
-      ctx->end_task(accessor.ptr(Point<1,coord_t>(0)), sizeof(T),
+      Runtime::legion_task_postamble(runtime, ctx, 
+                    accessor.ptr(Point<1,coord_t>(0)), sizeof(T),
                     false/*owner*/, allocation, instance);
 #else
-      ctx->end_task(accessor.ptr(Point<1,coord_t>(0)), sizeof(T),
+      Runtime::legion_task_postamble(runtime, ctx,
+                    accessor.ptr(Point<1,coord_t>(0)), sizeof(T),
                     false/*owner*/, instance);
 #endif
     }
@@ -9538,20 +9516,15 @@ namespace Legion {
       LEGION_STATIC_ASSERT((LegionTypeInequality<T,FutureMap>::value));
       // Assert that the return type size is within the required size
       LEGION_STATIC_ASSERT(sizeof(T) <= LEGION_MAX_RETURN_SIZE);
-      // Read the context out of the buffer
-#ifdef DEBUG_LEGION
-      assert(arglen == sizeof(InternalContext));
-#endif
-      InternalContext ctx = *((const InternalContext*)args);
-      Runtime *runtime;
-      const std::vector<PhysicalRegion> &regions = ctx->begin_task(runtime);
+      const Task *task; Context ctx; Runtime *rt;
+      const std::vector<PhysicalRegion> *regions;
+      Runtime::legion_task_preamble(args, arglen, p, task, regions, ctx, rt);
 
       // Invoke the task with the given context
-      T return_value = 
-        (*TASK_PTR)(ctx->get_task(), regions, ctx->as_context(), runtime);
+      T return_value = (*TASK_PTR)(task, *regions, ctx, rt);
 
       // Send the return value back
-      LegionSerialization::end_task<T>(runtime, ctx, &return_value);
+      LegionSerialization::end_task<T>(rt, ctx, &return_value);
     }
 
     //--------------------------------------------------------------------------
@@ -9565,18 +9538,13 @@ namespace Legion {
                                                 Processor p)
     //--------------------------------------------------------------------------
     {
-      // Read the context out of the buffer
-#ifdef DEBUG_LEGION
-      assert(arglen == sizeof(InternalContext));
-#endif
-      InternalContext ctx = *((const InternalContext*)args);
-      Runtime *runtime;
-      const std::vector<PhysicalRegion> &regions = ctx->begin_task(runtime); 
+      const Task *task; Context ctx; Runtime *rt;
+      const std::vector<PhysicalRegion> *regions;
+      Runtime::legion_task_preamble(args, arglen, p, task, regions, ctx, rt);
 
-      (*TASK_PTR)(ctx->get_task(), regions, ctx->as_context(), runtime);
+      (*TASK_PTR)(task, *regions, ctx, rt);
 
-      // Send an empty return value back
-      ctx->end_task(NULL, 0, false);
+      Runtime::legion_task_postamble(rt, ctx, NULL, 0);
     }
 
     //--------------------------------------------------------------------------
@@ -9596,22 +9564,17 @@ namespace Legion {
       // Assert that the return type size is within the required size
       LEGION_STATIC_ASSERT(sizeof(T) <= LEGION_MAX_RETURN_SIZE);
 
-      // Read the context out of the buffer
-#ifdef DEBUG_LEGION
-      assert(arglen == sizeof(InternalContext));
-#endif
-      InternalContext ctx = *((const InternalContext*)args);
+      const Task *task; Context ctx; Runtime *rt;
+      const std::vector<PhysicalRegion> *regions;
+      Runtime::legion_task_preamble(args, arglen, p, task, regions, ctx, rt);
 
       const UDT *user_data = reinterpret_cast<const UDT*>(userdata);
-      Runtime *runtime;
-      const std::vector<PhysicalRegion> &regions = ctx->begin_task(runtime);
 
       // Invoke the task with the given context
-      T return_value = (*TASK_PTR)(ctx->get_task(), regions, 
-                                   ctx->as_context(), runtime, *user_data);
+      T return_value = (*TASK_PTR)(task, *regions, ctx, rt, *user_data); 
 
       // Send the return value back
-      LegionSerialization::end_task<T>(runtime, ctx, &return_value);
+      LegionSerialization::end_task<T>(rt, ctx, &return_value);
     }
 
     //--------------------------------------------------------------------------
@@ -9625,21 +9588,16 @@ namespace Legion {
                                                     Processor p)
     //--------------------------------------------------------------------------
     {
-      // Read the context out of the buffer
-#ifdef DEBUG_LEGION
-      assert(arglen == sizeof(InternalContext));
-#endif
-      InternalContext ctx = *((const InternalContext*)args);
+      const Task *task; Context ctx; Runtime *rt;
+      const std::vector<PhysicalRegion> *regions;
+      Runtime::legion_task_preamble(args, arglen, p, task, regions, ctx, rt);
 
       const UDT *user_data = reinterpret_cast<const UDT*>(userdata);
-      Runtime *runtime;
-      const std::vector<PhysicalRegion> &regions = ctx->begin_task(runtime);
 
-      (*TASK_PTR)(ctx->get_task(), regions, 
-                  ctx->as_context(), runtime, *user_data);
+      (*TASK_PTR)(task, *regions, ctx, rt, *user_data); 
 
       // Send an empty return value back
-      ctx->end_task(NULL, 0, false);
+      Runtime::legion_task_postamble(rt, ctx, NULL, 0);
     }
 
     //--------------------------------------------------------------------------

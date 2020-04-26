@@ -73,8 +73,7 @@ for dim in range(1, 9):
     _max_dim = dim
 assert _max_dim is not None, 'Unable to detect LEGION_MAX_DIM'
 
-# Can't seem to pull this out of the header, so reproduce it here.
-AUTO_GENERATE_ID = -1
+AUTO_GENERATE_ID = c.legion_auto_generate_id()
 
 # Note: don't use __file__ here, it may return either .py or .pyc and cause
 # non-deterministic failures.
