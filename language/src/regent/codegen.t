@@ -2908,7 +2908,7 @@ local function strip_casts(node)
 end
 
 local function make_partition_projection_functor(cx, expr, loop_index, color_space,
-                                                 free_vars_setup, free_vars, requirement)
+                                                 free_vars, free_vars_setup, requirement)
   if expr:is(ast.typed.expr.Projection) then
     expr = expr.region
   end
@@ -3398,7 +3398,7 @@ local function expr_call_setup_partition_arg(
     end
     assert(add_requirement)
 
-    local projection_functor = make_partition_projection_functor(cx, arg_value, loop_index, false, free_vars_setup, free_vars, reg_requirement)
+    local projection_functor = make_partition_projection_functor(cx, arg_value, loop_index, false, free_vars, free_vars_setup, reg_requirement)
 
     local requirement = terralib.newsymbol(uint, "requirement")
     local requirement_args = terralib.newlist({
