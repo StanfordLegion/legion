@@ -720,9 +720,12 @@ def build_make_clean(root_dir, env, thread_count, test_legion_cxx, test_perf,
     if test_legion_cxx and env['LEGION_USE_FORTRAN'] == '1':
         clean_cxx(legion_fortran_tests, root_dir, env, thread_count)
 
-def option_enabled(option, options, var_prefix='', default=True):
+def option_enabled(option, options, default, envprefix='', envname=None):
     if options is not None: return option in options
-    option_var = '%s%s' % (var_prefix, option.upper())
+    if envname is not None:
+        option_var = envname
+    else:
+        option_var = '%s%s' % (envprefix, option.upper())
     if option_var in os.environ: return os.environ[option_var] == '1'
     return default
 
@@ -820,8 +823,9 @@ def run_tests(test_modules=None,
             timelimit = int(os.environ['TIMELIMIT'])
 
     # Determine which test modules to run.
-    def module_enabled(module, default=True):
-        return option_enabled(module, test_modules, 'TEST_', default)
+    def module_enabled(module, default=True, prefix='TEST_', **kwargs):
+        return option_enabled(module, test_modules, default,
+                              envprefix=prefix, **kwargs)
     test_regent = module_enabled('regent')
     test_legion_cxx = module_enabled('legion_cxx')
     test_fuzzer = module_enabled('fuzzer', False)
@@ -832,8 +836,9 @@ def run_tests(test_modules=None,
     test_ctest = module_enabled('ctest', False)
 
     # Determine which features to build with.
-    def feature_enabled(feature, default=True, prefix='USE_'):
-        return option_enabled(feature, use_features, prefix, default)
+    def feature_enabled(feature, default=True, prefix='USE_', **kwargs):
+        return option_enabled(feature, use_features, default,
+                              envprefix=prefix, **kwargs)
     use_cuda = feature_enabled('cuda', False)
     use_openmp = feature_enabled('openmp', False)
     use_kokkos = feature_enabled('kokkos', False)
@@ -843,8 +848,10 @@ def run_tests(test_modules=None,
     use_fortran = feature_enabled('fortran', False, prefix='LEGION_USE_')
     use_spy = feature_enabled('spy', False)
     use_prof = feature_enabled('prof', False)
-    use_bounds_checks = feature_enabled('bounds', False)
-    use_privilege_checks = feature_enabled('privilege', False)
+    use_bounds_checks = feature_enabled('bounds', False,
+                                        envname='BOUNDS_CHCEKCS')
+    use_privilege_checks = feature_enabled('privilege', False,
+                                           envname='PRIVILEGE_CHECKS')
     use_gcov = feature_enabled('gcov', False)
     use_cmake = feature_enabled('cmake', False)
     use_rdir = feature_enabled('rdir', True)

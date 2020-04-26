@@ -7574,6 +7574,9 @@ namespace Legion {
       kind = INDEX_SPACE_CREATION;
       index_space_node = n;
       futures.push_back(f);
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_creation_operation(parent_ctx->get_unique_id(),
+                                          unique_op_id);
     }
 
     //--------------------------------------------------------------------------
@@ -7591,6 +7594,9 @@ namespace Legion {
       field_space_node = node;
       fields.push_back(fid);
       futures.push_back(field_size);
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_creation_operation(parent_ctx->get_unique_id(),
+                                          unique_op_id);
     }
 
     //--------------------------------------------------------------------------
@@ -7610,6 +7616,9 @@ namespace Legion {
       field_space_node = node;     
       fields = fids;
       futures = field_sizes;
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_creation_operation(parent_ctx->get_unique_id(),
+                                          unique_op_id);
     }
 
     //--------------------------------------------------------------------------
@@ -7627,6 +7636,9 @@ namespace Legion {
       for (std::map<DomainPoint,Future>::const_iterator it = 
             future_points.begin(); it != future_points.end(); it++, index++)
         futures[index] = it->second;
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_creation_operation(parent_ctx->get_unique_id(),
+                                          unique_op_id);
     }
 
     //--------------------------------------------------------------------------
@@ -7766,6 +7778,9 @@ namespace Legion {
                   *((const size_t*)impl->get_untyped_result(true, NULL, true));
               field_space_node->update_field_size(fields[idx], field_size,
                           complete_preconditions, runtime->address_space);
+              if (runtime->legion_spy_enabled)
+                LegionSpy::log_field_creation(field_space_node->handle.id,
+                                              fields[idx], field_size);
             }
             break;
           }
