@@ -7562,6 +7562,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void CreationOp::initialize_fence(InnerContext *ctx, RtEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!mapping_precondition.exists());
+#endif
+      initialize_operation(ctx, true/*track*/);
+      kind = FENCE_CREATION;
+      mapping_precondition = precondition;
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_creation_operation(parent_ctx->get_unique_id(),
+                                          unique_op_id);
+    }
+
+    //--------------------------------------------------------------------------
     void CreationOp::initialize_index_space(
                           InnerContext *ctx, IndexSpaceNode *n, const Future &f)
     //--------------------------------------------------------------------------
@@ -7581,19 +7596,22 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CreationOp::initialize_field(InnerContext *ctx, FieldSpaceNode *node,
-                                      FieldID fid, const Future &field_size)
+          FieldID fid, const Future &field_size, RtEvent precondition, bool own)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(field_space_node == NULL);
       assert(fields.empty());
       assert(futures.empty());
+      assert(!mapping_precondition.exists());
 #endif
       initialize_operation(ctx, true/*track*/);
       kind = FIELD_ALLOCATION;
       field_space_node = node;
       fields.push_back(fid);
       futures.push_back(field_size);
+      mapping_precondition = precondition;
+      owner = own;
       if (runtime->legion_spy_enabled)
         LegionSpy::log_creation_operation(parent_ctx->get_unique_id(),
                                           unique_op_id);
@@ -7602,7 +7620,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void CreationOp::initialize_fields(InnerContext *ctx, FieldSpaceNode *node,
                                        const std::vector<FieldID> &fids,
-                                       const std::vector<Future> &field_sizes)
+                                       const std::vector<Future> &field_sizes,
+                                       RtEvent precondition, bool own)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -7610,12 +7629,15 @@ namespace Legion {
       assert(fields.empty());
       assert(futures.empty());
       assert(fids.size() == field_sizes.size());
+      assert(!mapping_precondition.exists());
 #endif
       initialize_operation(ctx, true/*track*/);
       kind = FIELD_ALLOCATION;
       field_space_node = node;     
       fields = fids;
       futures = field_sizes;
+      mapping_precondition = precondition;
+      owner = own;
       if (runtime->legion_spy_enabled)
         LegionSpy::log_creation_operation(parent_ctx->get_unique_id(),
                                           unique_op_id);
@@ -7648,6 +7670,8 @@ namespace Legion {
       activate_operation();
       index_space_node = NULL;
       field_space_node = NULL;
+      mapping_precondition = RtEvent::NO_RT_EVENT;
+      owner = true;
     }
 
     //--------------------------------------------------------------------------
@@ -7678,9 +7702,6 @@ namespace Legion {
     void CreationOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!futures.empty());
-#endif
       for (std::vector<Future>::const_iterator it = 
             futures.begin(); it != futures.end(); it++)
       {
@@ -7693,7 +7714,8 @@ namespace Legion {
       }
       // Record this with the context as an implicit dependence for all
       // later operations which may rely on this index space for mapping
-      if ((kind == INDEX_SPACE_CREATION) || (kind == FIELD_ALLOCATION))
+      if ((kind == FENCE_CREATION) || (kind == INDEX_SPACE_CREATION) || 
+          (kind == FIELD_ALLOCATION))
         parent_ctx->update_current_implicit(this);
     }
 
@@ -7701,7 +7723,7 @@ namespace Legion {
     void CreationOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      complete_mapping();
+      complete_mapping(mapping_precondition);
       switch (kind)
       {
         case INDEX_SPACE_CREATION:
@@ -7724,6 +7746,7 @@ namespace Legion {
               complete_execution();
             break;
           }
+        case FENCE_CREATION:
         case FUTURE_MAP_CREATION:
           {
             complete_execution();
@@ -7778,12 +7801,13 @@ namespace Legion {
                   *((const size_t*)impl->get_untyped_result(true, NULL, true));
               field_space_node->update_field_size(fields[idx], field_size,
                           complete_preconditions, runtime->address_space);
-              if (runtime->legion_spy_enabled)
+              if (runtime->legion_spy_enabled && owner)
                 LegionSpy::log_field_creation(field_space_node->handle.id,
                                               fields[idx], field_size);
             }
             break;
           }
+        case FENCE_CREATION:
         case FUTURE_MAP_CREATION:
           // Nothing to do here
           break;

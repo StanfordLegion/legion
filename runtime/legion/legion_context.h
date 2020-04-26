@@ -1483,6 +1483,15 @@ namespace Legion {
         DistributedID did;
         bool double_buffer;
       };
+      struct FIDBroadcast {
+      public:
+        FIDBroadcast(void) : field_id(0), double_buffer(false) { }
+        FIDBroadcast(FieldID fid, bool db)
+          : field_id(fid), double_buffer(db) { }
+      public:
+        FieldID field_id;
+        bool double_buffer;
+      };
       struct LRBroadcast {
       public:
         LRBroadcast(void) : tid(0), double_buffer(0) { }
@@ -1873,6 +1882,7 @@ namespace Legion {
       void increase_pending_index_spaces(unsigned count, bool double_buffer);
       void increase_pending_partitions(unsigned count, bool double_buffer);
       void increase_pending_field_spaces(unsigned count, bool double_buffer);
+      void increase_pending_fields(unsigned count, bool double_buffer);
       void increase_pending_region_trees(unsigned count, bool double_buffer);
       bool create_shard_partition(IndexPartition &pid,
           IndexSpace parent, IndexSpace color_space, PartitionKind part_kind,
@@ -1943,7 +1953,9 @@ namespace Legion {
     protected:
       std::map<std::pair<size_t,DomainPoint>,IntraSpaceDeps> intra_space_deps;
     protected:
-      std::map<FieldSpace,ShardID> field_allocator_owner_shards;
+      // Store the global owner shard and local owner shard for allocation
+      std::map<FieldSpace,
+               std::pair<ShardID,bool> > field_allocator_owner_shards;
     protected:
       ShardID index_space_allocator_shard;
       ShardID index_partition_allocator_shard;
@@ -1996,6 +2008,8 @@ namespace Legion {
                                             pending_index_partitions;
       std::deque<std::pair<ValueBroadcast<FSBroadcast>*,bool> >
                                             pending_field_spaces;
+      std::deque<std::pair<ValueBroadcast<FIDBroadcast>*,bool> >
+                                            pending_fields;
       std::deque<std::pair<ValueBroadcast<LRBroadcast>*,bool> >
                                             pending_region_trees;
     protected:

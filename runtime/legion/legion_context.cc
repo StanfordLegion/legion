@@ -441,16 +441,34 @@ namespace Legion {
         LegionSpy::log_field_creation(space.id, fid, field_size);
 
       std::set<RtEvent> done_events;
-      if (local)
+      if (!local)
+      {
+        const RtEvent precondition = 
+          runtime->forest->allocate_field(space, field_size, fid, serdez_id);
+        if (precondition.exists())
+          done_events.insert(precondition);
+      }
+      else
         allocate_local_field(space, field_size, fid, 
                              serdez_id, done_events);
-      else
-        runtime->forest->allocate_field(space, field_size, fid, serdez_id);
       register_field_creation(space, fid, local);
       if (!done_events.empty())
       {
-        RtEvent wait_on = Runtime::merge_events(done_events);
-        wait_on.wait();
+        const RtEvent precondition = Runtime::merge_events(done_events);
+        if (precondition.exists() && !precondition.has_triggered())
+        {
+          if (is_inner_context())
+          {
+            InnerContext *ctx = static_cast<InnerContext*>(this);
+            // Need a fence to make sure that no one tries to use these
+            // fields where they haven't been made visible yet
+            CreationOp *creator = runtime->get_available_creation_op();
+            creator->initialize_fence(ctx, precondition);
+            runtime->add_to_dependence_queue(ctx, executing_processor, creator);
+          }
+          else
+            precondition.wait();
+        }
       }
       return fid;
     }
@@ -482,17 +500,34 @@ namespace Legion {
                                         resulting_fields[idx], sizes[idx]);
       }
       std::set<RtEvent> done_events;
-      if (local)
+      if (!local)
+      {
+        const RtEvent precondition = runtime->forest->allocate_fields(space, 
+                                        sizes,  resulting_fields, serdez_id);
+        if (precondition.exists())
+          done_events.insert(precondition);
+      }
+      else
         allocate_local_fields(space, sizes, resulting_fields,
                               serdez_id, done_events);
-      else
-        runtime->forest->allocate_fields(space, sizes, 
-                                         resulting_fields, serdez_id);
       register_field_creations(space, local, resulting_fields);
       if (!done_events.empty())
       {
-        RtEvent wait_on = Runtime::merge_events(done_events);
-        wait_on.wait();
+        const RtEvent precondition = Runtime::merge_events(done_events);
+        if (precondition.exists() && !precondition.has_triggered())
+        {
+          if (is_inner_context())
+          {
+            // Need a fence to make sure that no one tries to use these
+            // fields where they haven't been made visible yet
+            InnerContext *ctx = static_cast<InnerContext*>(this);
+            CreationOp *creator = runtime->get_available_creation_op();
+            creator->initialize_fence(ctx, precondition);
+            runtime->add_to_dependence_queue(ctx, executing_processor, creator);
+          }
+          else
+            precondition.wait();
+        }
       }
     }
 
@@ -5340,9 +5375,10 @@ namespace Legion {
       const ApEvent ready = creator_op->get_completion_event();
       // Tell the node that we're allocating a field of size zero
       // which will indicate that we'll fill in the size later
-      FieldSpaceNode *node = 
-        runtime->forest->allocate_field(space, ready, fid, serdez_id);
-      creator_op->initialize_field(this, node, fid, field_size); 
+      RtEvent precondition;
+      FieldSpaceNode *node = runtime->forest->allocate_field(space, ready, fid, 
+                                                      serdez_id, precondition);
+      creator_op->initialize_field(this, node, fid, field_size, precondition);
       register_field_creation(space, fid, local);
       runtime->add_to_dependence_queue(this, executing_processor, creator_op);
       return fid;
@@ -5446,9 +5482,11 @@ namespace Legion {
       const ApEvent ready = creator_op->get_completion_event();
       // Tell the node that we're allocating a field of size zero
       // which will indicate that we'll fill in the size later
+      RtEvent precondition;
       FieldSpaceNode *node = runtime->forest->allocate_fields(space, ready, 
-                                              resulting_fields, serdez_id);
-      creator_op->initialize_fields(this, node, resulting_fields, sizes);
+                                resulting_fields, serdez_id, precondition);
+      creator_op->initialize_fields(this, node, resulting_fields, 
+                                    sizes, precondition);
       register_field_creations(space, local, resulting_fields);
       runtime->add_to_dependence_queue(this, executing_processor, creator_op);
     }
@@ -9671,6 +9709,20 @@ namespace Legion {
         delete collective.first;
         pending_field_spaces.pop_front();
       }
+      while (!pending_fields.empty())
+      {
+        std::pair<ValueBroadcast<FIDBroadcast>*,bool> &collective = 
+          pending_fields.front();
+        if (!collective.second)
+        {
+          // Make sure this collective is done before we delete it
+          const RtEvent done = collective.first->get_done_event();
+          if (!done.has_triggered())
+            done.wait();
+        }
+        delete collective.first;
+        pending_fields.pop_front();
+      }
       while (!pending_region_trees.empty())
       {
         std::pair<ValueBroadcast<LRBroadcast>*,bool> &collective = 
@@ -12477,6 +12529,7 @@ namespace Legion {
       bool double_buffer = false;
       std::pair<ValueBroadcast<FSBroadcast>*,bool> &collective = 
         pending_field_spaces.front();
+      ShardMapping &shard_mapping = shard_manager->get_mapping();
       if (collective.second)
       {
         const FSBroadcast value = collective.first->get_value(false);
@@ -12485,9 +12538,9 @@ namespace Legion {
         // Need to register this before broadcasting
         std::set<RtEvent> applied;
         FieldSpaceNode *node = forest->create_field_space(space, value.did, 
-                        false/*notify remote*/, creation_barrier, &applied);
+            false/*notify remote*/, creation_barrier, &applied, &shard_mapping);
         // Now we can update the creation set
-        node->update_creation_set(shard_manager->get_mapping());
+        node->update_creation_set(shard_mapping);
         // Arrive on the creation barrier
         if (!applied.empty())
           Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
@@ -12519,7 +12572,7 @@ namespace Legion {
 #endif
         std::set<RtEvent> applied;
         runtime->forest->create_field_space(space, value.did,
-                    false/*notify remote*/, creation_barrier, &applied);
+            false/*notify remote*/, creation_barrier, &applied, &shard_mapping);
         // Arrive on the creation barrier
         if (!applied.empty())
           Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
@@ -12658,40 +12711,102 @@ namespace Legion {
                       "Local field creation is not currently supported "
                       "for control replication with task %s (UID %lld)",
                       get_task_name(), get_unique_id())
-      std::map<FieldSpace,ShardID>::const_iterator finder = 
+      if (fid == AUTO_GENERATE_ID)
+      {
+        if (pending_fields.empty())
+          increase_pending_fields(1/*count*/, false/*double*/);
+        bool double_next = false;
+        bool double_buffer = false;
+        std::pair<ValueBroadcast<FIDBroadcast>*,bool> &collective = 
+          pending_fields.front();
+        if (collective.second)
+        {
+          const FIDBroadcast value = collective.first->get_value(false);
+          fid = value.field_id;
+          double_buffer = value.double_buffer;
+        }
+        else
+        {
+          const RtEvent done = collective.first->get_done_event();
+          if (!done.has_triggered())
+          {
+            double_next = true;
+            done.wait();
+          }
+          const FIDBroadcast value = collective.first->get_value(false);
+          fid = value.field_id;
+          double_buffer = value.double_buffer;
+        }
+        delete collective.first;
+        pending_fields.pop_front();
+        increase_pending_fields(double_buffer ? pending_fields.size() + 1 : 1,
+                                double_next && !double_buffer);
+      }
+      else if (fid >= LEGION_MAX_APPLICATION_FIELD_ID)
+        REPORT_LEGION_ERROR(ERROR_TASK_ATTEMPTED_ALLOCATE_FIELD,
+                     "Task %s (ID %lld) attempted to allocate a field with "
+                     "ID %d which exceeds the LEGION_MAX_APPLICATION_FIELD_ID"
+                     " bound set in legion_config.h", get_task_name(),
+                     get_unique_id(), fid)
+      std::map<FieldSpace,std::pair<ShardID,bool> >::const_iterator finder = 
         field_allocator_owner_shards.find(space);
 #ifdef DEBUG_LEGION
       assert(finder != field_allocator_owner_shards.end());
 #endif
-      if (finder->second == owner_shard->shard_id)
+      RtEvent precondition;
+      // This deduplicates multiple shards on the same node
+      if (finder->second.second)
       {
-        // We're the owner so we do the allocation
-        if (fid == AUTO_GENERATE_ID)
-          fid = runtime->get_unique_field_id();
-#ifdef DEBUG_LEGION
-        else if (fid >= LEGION_MAX_APPLICATION_FIELD_ID)
-          REPORT_LEGION_ERROR(ERROR_TASK_ATTEMPTED_ALLOCATE_FIELD,
-                       "Task %s (ID %lld) attempted to allocate a field with "
-                       "ID %d which exceeds the LEGION_MAX_APPLICATION_FIELD_ID"
-                       " bound set in legion_config.h", get_task_name(),
-                       get_unique_id(), fid)
-#endif
-        runtime->forest->allocate_field(space, field_size, fid, serdez_id);
-        ValueBroadcast<FieldID> field_collective(this, COLLECTIVE_LOC_33);
-        field_collective.broadcast(fid);
-        if (runtime->legion_spy_enabled)
+        const bool non_owner = (finder->second.first != owner_shard->shard_id);
+        precondition = runtime->forest->allocate_field(space, field_size, fid, 
+                                                       serdez_id, non_owner);
+        if (runtime->legion_spy_enabled && !non_owner)
           LegionSpy::log_field_creation(space.id, fid, field_size);
       }
-      else
-      {
-        // We need to get the barrier result
-        ValueBroadcast<FieldID> field_collective(this, 
-                                  finder->second, COLLECTIVE_LOC_33);
-        fid = field_collective.get_value();
-        // No need to do the allocation since it was already done
-      } 
+      Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/, precondition);
+      // Launch the creation op in this context to act as a fence to ensure
+      // that the allocations are done on all shard nodes before anyone else
+      // tries to use them or their meta-data
+      CreationOp *creator_op = runtime->get_available_creation_op();
+      creator_op->initialize_fence(this, creation_barrier);
+      runtime->add_to_dependence_queue(this, executing_processor, creator_op);
+      // Advance the creation barrier so that we know when it is ready
+      advance_replicate_barrier(creation_barrier, total_shards);
       register_field_creation(space, fid, local);
       return fid;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::increase_pending_fields(unsigned count, 
+                                                   bool double_next)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < count; idx++)
+      {
+        if (owner_shard->shard_id == field_allocator_shard)
+        {
+          const FieldID fid = runtime->get_unique_field_id();
+          // Do our arrival on this generation, should be the last one
+          ValueBroadcast<FIDBroadcast> *collective = 
+            new ValueBroadcast<FIDBroadcast>(this, COLLECTIVE_LOC_33);
+          collective->broadcast(FIDBroadcast(fid, double_next));
+          pending_fields.push_back(
+              std::pair<ValueBroadcast<FIDBroadcast>*,bool>(collective, true));
+        }
+        else
+        {
+          ValueBroadcast<FIDBroadcast> *collective = 
+            new ValueBroadcast<FIDBroadcast>(this, field_allocator_shard,
+                                             COLLECTIVE_LOC_33);
+          register_collective(collective);
+          pending_fields.push_back(
+              std::pair<ValueBroadcast<FIDBroadcast>*,bool>(collective, false));
+        }
+        field_allocator_shard++;
+        if (field_allocator_shard == total_shards)
+          field_allocator_shard = 0;
+        double_next = false;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -12707,40 +12822,78 @@ namespace Legion {
                       "Local field creation is not currently supported "
                       "for control replication with task %s (UID %lld)",
                       get_task_name(), get_unique_id())
-#if 0
-      if (field_allocator_shard == owner_shard->shard_id)
+      if (fid == AUTO_GENERATE_ID)
       {
-        // We're the owner so we do the allocation
-        if (fid == AUTO_GENERATE_ID)
-          fid = runtime->get_unique_field_id();
+        if (pending_fields.empty())
+          increase_pending_fields(1/*count*/, false/*double*/);
+        bool double_next = false;
+        bool double_buffer = false;
+        std::pair<ValueBroadcast<FIDBroadcast>*,bool> &collective = 
+          pending_fields.front();
+        if (collective.second)
+        {
+          const FIDBroadcast value = collective.first->get_value(false);
+          fid = value.field_id;
+          double_buffer = value.double_buffer;
+        }
+        else
+        {
+          const RtEvent done = collective.first->get_done_event();
+          if (!done.has_triggered())
+          {
+            double_next = true;
+            done.wait();
+          }
+          const FIDBroadcast value = collective.first->get_value(false);
+          fid = value.field_id;
+          double_buffer = value.double_buffer;
+        }
+        delete collective.first;
+        pending_fields.pop_front();
+        increase_pending_fields(double_buffer ? pending_fields.size() + 1 : 1,
+                                double_next && !double_buffer);
+      }
+      else if (fid >= LEGION_MAX_APPLICATION_FIELD_ID)
+        REPORT_LEGION_ERROR(ERROR_TASK_ATTEMPTED_ALLOCATE_FIELD,
+                     "Task %s (ID %lld) attempted to allocate a field with "
+                     "ID %d which exceeds the LEGION_MAX_APPLICATION_FIELD_ID"
+                     " bound set in legion_config.h", get_task_name(),
+                     get_unique_id(), fid)
+      if (field_size.impl == NULL)
+        REPORT_LEGION_ERROR(ERROR_REQUEST_FOR_EMPTY_FUTURE,
+            "Invalid empty future passed to field allocation for field %d "
+            "in task %s (UID %lld)", fid, get_task_name(), get_unique_id())
+      std::map<FieldSpace,std::pair<ShardID,bool> >::const_iterator finder = 
+        field_allocator_owner_shards.find(space);
 #ifdef DEBUG_LEGION
-        else if (fid >= LEGION_MAX_APPLICATION_FIELD_ID)
-          REPORT_LEGION_ERROR(ERROR_TASK_ATTEMPTED_ALLOCATE_FIELD,
-                       "Task %s (ID %lld) attempted to allocate a field with "
-                       "ID %d which exceeds the LEGION_MAX_APPLICATION_FIELD_ID"
-                       " bound set in legion_config.h", get_task_name(),
-                       get_unique_id(), fid)
+      assert(finder != field_allocator_owner_shards.end());
 #endif
-        runtime->forest->allocate_field(space, field_size, fid, serdez_id);
-        ValueBroadcast<FieldID> field_collective(this, COLLECTIVE_LOC_33);
-        field_collective.broadcast(fid);
+      // Get a new creation operation
+      CreationOp *creator_op = runtime->get_available_creation_op();
+      // This deduplicates multiple shards on the same node
+      if (finder->second.second)
+      {
+        const ApEvent ready = creator_op->get_completion_event();
+        const bool owner = (finder->second.first == owner_shard->shard_id);
+        RtEvent precondition;
+        FieldSpaceNode *node = runtime->forest->allocate_field(space, ready,
+            fid, serdez_id, precondition, !owner);
+        Runtime::phase_barrier_arrive(creation_barrier,1/*count*/,precondition);
+        creator_op->initialize_field(this, node, fid, field_size, 
+                                     precondition, owner);
       }
       else
       {
-        // We need to get the barrier result
-        ValueBroadcast<FieldID> field_collective(this, 
-                                  field_allocator_shard, COLLECTIVE_LOC_33);
-        fid = field_collective.get_value();
-        // No need to do the allocation since it was already done
-      } 
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        creator_op->initialize_fence(this, creation_barrier);
+      }
+      // Launch the creation op in this context to act as a fence to ensure
+      // that the allocations are done on all shard nodes before anyone else
+      // tries to use them or their meta-data
+      runtime->add_to_dependence_queue(this, executing_processor, creator_op);
+      // Advance the creation barrier so that we know when it is ready
+      advance_replicate_barrier(creation_barrier, total_shards);
       register_field_creation(space, fid, local);
-      // Update the allocator
-      field_allocator_shard++;
-      if (field_allocator_shard == total_shards)
-        field_allocator_shard = 0;
-#else
-      assert(false); // need support for this with control replication
-#endif
       return fid;
     }
 
@@ -12794,58 +12947,72 @@ namespace Legion {
                       get_task_name(), get_unique_id())
       if (resulting_fields.size() < sizes.size())
         resulting_fields.resize(sizes.size(), AUTO_GENERATE_ID);
-      std::map<FieldSpace,ShardID>::const_iterator finder = 
+      for (unsigned idx = 0; idx < resulting_fields.size(); idx++)
+      {
+        if (resulting_fields[idx] == AUTO_GENERATE_ID)
+        {
+          if (pending_fields.empty())
+            increase_pending_fields(1/*count*/, false/*double*/);
+          bool double_next = false;
+          bool double_buffer = false;
+          std::pair<ValueBroadcast<FIDBroadcast>*,bool> &collective = 
+            pending_fields.front();
+          if (collective.second)
+          {
+            const FIDBroadcast value = collective.first->get_value(false);
+            resulting_fields[idx] = value.field_id;
+            double_buffer = value.double_buffer;
+          }
+          else
+          {
+            const RtEvent done = collective.first->get_done_event();
+            if (!done.has_triggered())
+            {
+              double_next = true;
+              done.wait();
+            }
+            const FIDBroadcast value = collective.first->get_value(false);
+            resulting_fields[idx] = value.field_id;
+            double_buffer = value.double_buffer;
+          }
+          delete collective.first;
+          pending_fields.pop_front();
+          increase_pending_fields(double_buffer ? pending_fields.size() + 1 : 1,
+                                  double_next && !double_buffer);
+        }
+        else if (resulting_fields[idx] >= LEGION_MAX_APPLICATION_FIELD_ID)
+          REPORT_LEGION_ERROR(ERROR_TASK_ATTEMPTED_ALLOCATE_FIELD,
+            "Task %s (ID %lld) attempted to allocate a field with "
+            "ID %d which exceeds the LEGION_MAX_APPLICATION_FIELD_ID "
+            "bound set in legion_config.h", get_task_name(),
+            get_unique_id(), resulting_fields[idx])
+      }
+      std::map<FieldSpace,std::pair<ShardID,bool> >::const_iterator finder = 
         field_allocator_owner_shards.find(space);
 #ifdef DEBUG_LEGION
       assert(finder != field_allocator_owner_shards.end());
 #endif
-      if (finder->second == owner_shard->shard_id)
+      RtEvent precondition;
+      // This deduplicates multiple shards on the same node
+      if (finder->second.second)
       {
-        // We're the owner so we do the allocation
-        for (unsigned idx = 0; idx < resulting_fields.size(); idx++)
-        {
-          if (resulting_fields[idx] == AUTO_GENERATE_ID)
-            resulting_fields[idx] = runtime->get_unique_field_id();
-#ifdef DEBUG_LEGION
-          else if (resulting_fields[idx] >= LEGION_MAX_APPLICATION_FIELD_ID)
-            REPORT_LEGION_ERROR(ERROR_TASK_ATTEMPTED_ALLOCATE_FIELD,
-              "Task %s (ID %lld) attempted to allocate a field with "
-              "ID %d which exceeds the LEGION_MAX_APPLICATION_FIELD_ID "
-              "bound set in legion_config.h", get_task_name(),
-              get_unique_id(), resulting_fields[idx])
-#endif
-          if (runtime->legion_spy_enabled)
+        const bool non_owner = (finder->second.first != owner_shard->shard_id);
+        precondition = runtime->forest->allocate_fields(space, sizes, 
+                              resulting_fields, serdez_id, non_owner);
+        if (runtime->legion_spy_enabled && !non_owner)
+          for (unsigned idx = 0; idx < resulting_fields.size(); idx++)
             LegionSpy::log_field_creation(space.id, 
                                           resulting_fields[idx], sizes[idx]);
-        }
-        std::set<RtEvent> done_events;
-        runtime->forest->allocate_fields(space, sizes, 
-                                         resulting_fields, serdez_id);
-        if (!done_events.empty())
-        {
-          RtEvent wait_on = Runtime::merge_events(done_events);
-          wait_on.wait();
-        }
-        BufferBroadcast fields_collective(this, COLLECTIVE_LOC_82);
-        fields_collective.broadcast(&resulting_fields[0], 
-            resulting_fields.size() * sizeof(FieldID), false/*copy*/);
       }
-      else
-      {
-        // We need to get the barrier result
-        BufferBroadcast fields_collective(this, 
-            finder->second, COLLECTIVE_LOC_82);
-        size_t buffer_size;
-        const FieldID *buffer = 
-          (const FieldID*) fields_collective.get_buffer(buffer_size);
-#ifdef DEBUG_LEGION
-        assert(buffer != NULL);
-        assert(buffer_size == (resulting_fields.size() * sizeof(FieldID)));
-#endif
-        for (unsigned idx = 0; idx < resulting_fields.size(); idx++)
-          resulting_fields[idx] = buffer[idx];
-        // No need to do the allocation since it was already done
-      }
+      Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/, precondition);
+      // Launch the creation op in this context to act as a fence to ensure
+      // that the allocations are done on all shard nodes before anyone else
+      // tries to use them or their meta-data
+      CreationOp *creator_op = runtime->get_available_creation_op();
+      creator_op->initialize_fence(this, creation_barrier);
+      runtime->add_to_dependence_queue(this, executing_processor, creator_op);
+      // Advance the creation barrier so that we know when it is ready
+      advance_replicate_barrier(creation_barrier, total_shards);
       TaskContext::register_field_creations(space, local, resulting_fields);
     }
 
@@ -12862,61 +13029,85 @@ namespace Legion {
                       "Local field creation is not currently supported "
                       "for control replication with task %s (UID %lld)",
                       get_task_name(), get_unique_id())
-#if 0
-      if (resulting_fields.size() < sizes.size())
-        resulting_fields.resize(sizes.size(), AUTO_GENERATE_ID);
-      if (field_allocator_shard == owner_shard->shard_id)
+      for (unsigned idx = 0; idx < resulting_fields.size(); idx++)
       {
-        // We're the owner so we do the allocation
-        for (unsigned idx = 0; idx < resulting_fields.size(); idx++)
+        if (resulting_fields[idx] == AUTO_GENERATE_ID)
         {
-          if (resulting_fields[idx] == AUTO_GENERATE_ID)
-            resulting_fields[idx] = runtime->get_unique_field_id();
+          if (pending_fields.empty())
+            increase_pending_fields(1/*count*/, false/*double*/);
+          bool double_next = false;
+          bool double_buffer = false;
+          std::pair<ValueBroadcast<FIDBroadcast>*,bool> &collective = 
+            pending_fields.front();
+          if (collective.second)
+          {
+            const FIDBroadcast value = collective.first->get_value(false);
+            resulting_fields[idx] = value.field_id;
+            double_buffer = value.double_buffer;
+          }
+          else
+          {
+            const RtEvent done = collective.first->get_done_event();
+            if (!done.has_triggered())
+            {
+              double_next = true;
+              done.wait();
+            }
+            const FIDBroadcast value = collective.first->get_value(false);
+            resulting_fields[idx] = value.field_id;
+            double_buffer = value.double_buffer;
+          }
+          delete collective.first;
+          pending_fields.pop_front();
+          increase_pending_fields(double_buffer ? pending_fields.size() + 1 : 1,
+                                  double_next && !double_buffer);
+        }
 #ifdef DEBUG_LEGION
-          else if (resulting_fields[idx] >= LEGION_MAX_APPLICATION_FIELD_ID)
-            REPORT_LEGION_ERROR(ERROR_TASK_ATTEMPTED_ALLOCATE_FIELD,
-              "Task %s (ID %lld) attempted to allocate a field with "
-              "ID %d which exceeds the LEGION_MAX_APPLICATION_FIELD_ID "
-              "bound set in legion_config.h", get_task_name(),
-              get_unique_id(), resulting_fields[idx])
+        else if (resulting_fields[idx] >= LEGION_MAX_APPLICATION_FIELD_ID)
+          REPORT_LEGION_ERROR(ERROR_TASK_ATTEMPTED_ALLOCATE_FIELD,
+            "Task %s (ID %lld) attempted to allocate a field with "
+            "ID %d which exceeds the LEGION_MAX_APPLICATION_FIELD_ID "
+            "bound set in legion_config.h", get_task_name(),
+            get_unique_id(), resulting_fields[idx])
 #endif
-        }
-        std::set<RtEvent> done_events;
-        runtime->forest->allocate_fields(space, sizes, 
-                                         resulting_fields, serdez_id);
-        if (!done_events.empty())
-        {
-          RtEvent wait_on = Runtime::merge_events(done_events);
-          wait_on.wait();
-        }
-        BufferBroadcast fields_collective(this, COLLECTIVE_LOC_82);
-        fields_collective.broadcast(&resulting_fields[0], 
-            resulting_fields.size() * sizeof(FieldID), false/*copy*/);
+      }
+      for (unsigned idx = 0; idx < sizes.size(); idx++)
+        if (sizes[idx].impl == NULL)
+          REPORT_LEGION_ERROR(ERROR_REQUEST_FOR_EMPTY_FUTURE,
+              "Invalid empty future passed to field allocation for field %d "
+              "in task %s (UID %lld)", resulting_fields[idx],
+              get_task_name(), get_unique_id())
+      std::map<FieldSpace,std::pair<ShardID,bool> >::const_iterator finder = 
+        field_allocator_owner_shards.find(space);
+#ifdef DEBUG_LEGION
+      assert(finder != field_allocator_owner_shards.end());
+#endif
+      // Get a new creation operation
+      CreationOp *creator_op = runtime->get_available_creation_op();
+      // This deduplicates multiple shards on the same node
+      if (finder->second.second)
+      {
+        const ApEvent ready = creator_op->get_completion_event();
+        const bool owner = (finder->second.first == owner_shard->shard_id);
+        RtEvent precondition;
+        FieldSpaceNode *node = runtime->forest->allocate_fields(space, ready,
+                          resulting_fields, serdez_id, precondition, !owner);
+        Runtime::phase_barrier_arrive(creation_barrier,1/*count*/,precondition);
+        creator_op->initialize_fields(this, node, resulting_fields, 
+                                      sizes, precondition, owner);
       }
       else
       {
-        // We need to get the barrier result
-        BufferBroadcast fields_collective(this, 
-            field_allocator_shard, COLLECTIVE_LOC_82);
-        size_t buffer_size;
-        const FieldID *buffer = 
-          (const FieldID*) fields_collective.get_buffer(buffer_size);
-#ifdef DEBUG_LEGION
-        assert(buffer != NULL);
-        assert(buffer_size == (resulting_fields.size() * sizeof(FieldID)));
-#endif
-        for (unsigned idx = 0; idx < resulting_fields.size(); idx++)
-          resulting_fields[idx] = buffer[idx];
-        // No need to do the allocation since it was already done
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        creator_op->initialize_fence(this, creation_barrier);
       }
+      // Launch the creation op in this context to act as a fence to ensure
+      // that the allocations are done on all shard nodes before anyone else
+      // tries to use them or their meta-data
+      runtime->add_to_dependence_queue(this, executing_processor, creator_op);
+      // Advance the creation barrier so that we know when it is ready
+      advance_replicate_barrier(creation_barrier, total_shards);
       TaskContext::register_field_creations(space, local, resulting_fields);
-      // Update the allocator
-      field_allocator_shard++;
-      if (field_allocator_shard == total_shards)
-        field_allocator_shard = 0;
-#else
-      assert(false); // need support for this with control replication
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -13170,31 +13361,35 @@ namespace Legion {
           FieldSpaceNode::get_owner_space(handle, runtime);
         // Figure out which shard is the owner
         bool found = false;
-        ShardID owner = 0;
+        std::pair<ShardID,bool> owner(0,false);
         const ShardMapping &mapping = shard_manager->get_mapping();
         for (unsigned idx = 0; idx < mapping.size(); idx++)
         {
           if (mapping[idx] != owner_space)
             continue;
-          owner = idx;
+          owner.first = idx;
           found = true;
           break;
         }
         // Pick a shard to be the owner if we don't have a local shard
         if (!found)
         {
-          owner = field_allocator_shard++;
+          owner.first = field_allocator_shard++;
           if (field_allocator_shard == total_shards)
             field_allocator_shard = 0;
         }
+        if (owner_space == runtime->address_space)
+          owner.second = (owner.first == owner_shard->shard_id);
+        else
+          owner.second = shard_manager->is_first_local_shard(owner_shard);
 #ifdef DEBUG_LEGION
         assert(field_allocator_owner_shards.find(handle) == 
                 field_allocator_owner_shards.end());
 #endif
         field_allocator_owner_shards[handle] = owner;
-        // Actually initialize the allocator on this shard
-        if (owner == owner_shard->shard_id)
-          runtime->forest->create_field_space_allocator(handle);
+        if (owner.second)
+          runtime->forest->create_field_space_allocator(handle,
+              true/*sharded context*/, (owner.first == owner_shard->shard_id));
         // Don't have one so make a new one
         FieldAllocatorImpl *result = new FieldAllocatorImpl(handle, this); 
         // Save it for later
@@ -13217,13 +13412,14 @@ namespace Legion {
       assert(finder != field_allocators.end());
 #endif
       field_allocators.erase(finder);
-      std::map<FieldSpace,ShardID>::iterator owner_finder = 
+      std::map<FieldSpace,std::pair<ShardID,bool> >::iterator owner_finder = 
         field_allocator_owner_shards.find(handle);
 #ifdef DEBUG_LEGION
       assert(owner_finder != field_allocator_owner_shards.end());
 #endif
-      if (owner_finder->second == owner_shard->shard_id)
-        runtime->forest->destroy_field_space_allocator(handle);
+      if (owner_finder->second.second)
+        runtime->forest->destroy_field_space_allocator(handle, true/*sharded*/,
+            (owner_finder->second.first == owner_shard->shard_id));
       field_allocator_owner_shards.erase(owner_finder);
     }
 

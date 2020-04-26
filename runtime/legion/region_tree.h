@@ -355,30 +355,43 @@ namespace Legion {
       FieldSpaceNode* create_field_space(FieldSpace handle, DistributedID did,
                                    const bool notify_remote = true,
                                    RtEvent initialized = RtEvent::NO_RT_EVENT,
-                                   std::set<RtEvent> *applied = NULL);
+                                   std::set<RtEvent> *applied = NULL,
+                                   ShardMapping *shard_mapping = NULL);
       void destroy_field_space(FieldSpace handle, AddressSpaceID source,
                                std::set<RtEvent> &applied,
                                const bool collective = false);
-      void create_field_space_allocator(FieldSpace handle);
-      void destroy_field_space_allocator(FieldSpace handle);
+      void create_field_space_allocator(FieldSpace handle, 
+                                        bool sharded_owner_context = false,
+                                        bool owner_shard = false);
+      void destroy_field_space_allocator(FieldSpace handle,
+                                         bool sharded_owner_context = false,
+                                         bool owner_shard = false);
       // Return true if local is set to true and we actually performed the 
       // allocation.  It is an error if the field already existed and the
       // allocation was not local.
-      bool allocate_field(FieldSpace handle, size_t field_size, 
-                          FieldID fid, CustomSerdezID serdez_id);
+      RtEvent allocate_field(FieldSpace handle, size_t field_size, 
+                             FieldID fid, CustomSerdezID serdez_id,
+                             bool sharded_non_owner = false);
       FieldSpaceNode* allocate_field(FieldSpace handle, ApEvent ready,
-                                     FieldID fid, CustomSerdezID serdez_id);
+                                     FieldID fid, CustomSerdezID serdez_id,
+                                     RtEvent &precondition,
+                                     bool sharded_non_owner = false);
       void free_field(FieldSpace handle, FieldID fid, 
-                      std::set<RtEvent> &applied);
-      void allocate_fields(FieldSpace handle, const std::vector<size_t> &sizes,
+                      std::set<RtEvent> &applied,
+                      bool sharded_non_owner = false);
+      RtEvent allocate_fields(FieldSpace handle, 
+                           const std::vector<size_t> &sizes,
                            const std::vector<FieldID> &resulting_fields,
-                           CustomSerdezID serdez_id);
+                           CustomSerdezID serdez_id,
+                           bool sharded_non_owner = false);
       FieldSpaceNode* allocate_fields(FieldSpace handle, ApEvent ready, 
                            const std::vector<FieldID> &resulting_fields,
-                           CustomSerdezID serdez_id);
+                           CustomSerdezID serdez_id, RtEvent &precondition,
+                           bool sharded_non_owner = false);
       void free_fields(FieldSpace handle, 
                        const std::vector<FieldID> &to_free,
-                       std::set<RtEvent> &applied);
+                       std::set<RtEvent> &applied,
+                       bool sharded_non_owner = false);
     public:
       bool allocate_local_fields(FieldSpace handle, 
                                  const std::vector<FieldID> &resulting_fields,
@@ -731,7 +744,8 @@ namespace Legion {
                                   std::set<RtEvent> *applied = NULL);
       FieldSpaceNode* create_node(FieldSpace space, DistributedID did,
                                   RtEvent init,const bool notify_remote = true,
-                                  std::set<RtEvent> *applied = NULL);
+                                  std::set<RtEvent> *applied = NULL,
+                                  ShardMapping *shard_mapping = NULL);
       FieldSpaceNode* create_node(FieldSpace space, DistributedID did,
                                   RtEvent initialized, Deserializer &derez);
       RegionNode*     create_node(LogicalRegion r, PartitionNode *par,
@@ -3011,18 +3025,21 @@ namespace Legion {
       public:
         FieldInfo(void) : field_size(0), idx(0), serdez_id(0),
                           destroyed(false), local(false) { }
-        FieldInfo(size_t size, unsigned id, CustomSerdezID sid, bool loc=false)
+        FieldInfo(size_t size, unsigned id, CustomSerdezID sid, 
+                  bool loc = false, bool collect = false)
           : field_size(size), idx(id), serdez_id(sid), 
-            destroyed(false), local(loc) { }
-        FieldInfo(ApEvent ready, unsigned id, CustomSerdezID sid,bool loc=false)
+            destroyed(false), collective(collect), local(loc) { }
+        FieldInfo(ApEvent ready, unsigned id, CustomSerdezID sid,
+                  bool loc = false, bool collect = false)
           : field_size(0), size_ready(ready), idx(id), serdez_id(sid), 
-            destroyed(false), local(loc) { }
+            destroyed(false), collective(collect), local(loc) { }
       public:
         size_t field_size;
         ApEvent size_ready;
         unsigned idx;
         CustomSerdezID serdez_id;
         bool destroyed;
+        bool collective;
         bool local;
       };
       struct FindTargetsFunctor {
@@ -3090,8 +3107,8 @@ namespace Legion {
         const RtUserEvent to_trigger;
       };
     public:
-      FieldSpaceNode(FieldSpace sp, RegionTreeForest *ctx, 
-                     DistributedID did, RtEvent initialized);
+      FieldSpaceNode(FieldSpace sp, RegionTreeForest *ctx, DistributedID did,
+                     RtEvent initialized, ShardMapping *shard_mapping);
       FieldSpaceNode(FieldSpace sp, RegionTreeForest *ctx, DistributedID did,
                      RtEvent initialized, Deserializer &derez);
       FieldSpaceNode(const FieldSpaceNode &rhs);
@@ -3136,25 +3153,33 @@ namespace Legion {
                                    Deserializer &derez, AddressSpaceID source);
     public:
       RtEvent create_allocator(AddressSpaceID source,
-          RtUserEvent ready = RtUserEvent::NO_RT_USER_EVENT);
-      RtEvent destroy_allocator(AddressSpaceID source);
+          RtUserEvent ready = RtUserEvent::NO_RT_USER_EVENT,
+          bool sharded_owner_context = false, bool owner_shard = false);
+      RtEvent destroy_allocator(AddressSpaceID source,
+          bool sharded_owner_context = false, bool owner_shard = false);
     public:
       RtEvent allocate_field(FieldID fid, size_t size,
-                             CustomSerdezID serdez_id);
+                             CustomSerdezID serdez_id,
+                             bool sharded_non_owner = false);
       RtEvent allocate_field(FieldID fid, ApEvent size_ready,
-                             CustomSerdezID serdez_id);
+                             CustomSerdezID serdez_id,
+                             bool sharded_non_owner = false);
       RtEvent allocate_fields(const std::vector<size_t> &sizes,
                               const std::vector<FieldID> &fids,
-                              CustomSerdezID serdez_id);
+                              CustomSerdezID serdez_id,
+                              bool sharded_non_owner = false);
       RtEvent allocate_fields(ApEvent sizes_ready,
                               const std::vector<FieldID> &fids,
-                              CustomSerdezID serdez_id);
+                              CustomSerdezID serdez_id,
+                              bool sharded_non_owner = false);
       void update_field_size(FieldID fid, size_t field_size, 
           std::set<RtEvent> &update_events, AddressSpaceID source);
       void free_field(FieldID fid, AddressSpaceID source,
-                       std::set<RtEvent> &applied);
+                       std::set<RtEvent> &applied,
+                       bool sharded_non_owner = false);
       void free_fields(const std::vector<FieldID> &to_free,
-                       AddressSpaceID source, std::set<RtEvent> &applied);
+                       AddressSpaceID source, std::set<RtEvent> &applied,
+                       bool sharded_non_owner = false);
     public:
       bool allocate_local_fields(const std::vector<FieldID> &fields,
                                  const std::vector<size_t> &sizes,
@@ -3293,7 +3318,8 @@ namespace Legion {
           RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT) const;
       void record_read_only_infos(const std::map<FieldID,FieldInfo> &infos);
       void process_allocator_response(Deserializer &derez);
-      void process_allocator_invalidation(RtUserEvent done);
+      void process_allocator_invalidation(RtUserEvent done, 
+                                          bool flush, bool merge);
       void process_allocator_flush(Deserializer &derez);
       void process_allocator_free(Deserializer &derez, AddressSpaceID source);
     protected:

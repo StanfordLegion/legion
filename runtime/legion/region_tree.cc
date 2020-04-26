@@ -1267,10 +1267,12 @@ namespace Legion {
                                                        DistributedID did,
                                                        const bool notify_remote,
                                                        RtEvent initialized,
-                                                     std::set<RtEvent> *applied)
+                                                    std::set<RtEvent> *applied,
+                                                    ShardMapping *shard_mapping)
     //--------------------------------------------------------------------------
     {
-      return create_node(handle, did, initialized, notify_remote, applied);
+      return create_node(handle, did, initialized, notify_remote, 
+                         applied, shard_mapping);
     }
 
     //--------------------------------------------------------------------------
@@ -1288,65 +1290,72 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::create_field_space_allocator(FieldSpace handle)
+    void RegionTreeForest::create_field_space_allocator(FieldSpace handle,
+                                   bool sharded_owner_context, bool owner_shard)
     //--------------------------------------------------------------------------
     {
       FieldSpaceNode *node = get_node(handle);
-      const RtEvent ready = node->create_allocator(runtime->address_space);
+      const RtEvent ready = node->create_allocator(runtime->address_space,
+             RtUserEvent::NO_RT_USER_EVENT, sharded_owner_context, owner_shard);
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::destroy_field_space_allocator(FieldSpace handle)
+    void RegionTreeForest::destroy_field_space_allocator(FieldSpace handle,
+                                   bool sharded_owner_context, bool owner_shard)
     //--------------------------------------------------------------------------
     {
       FieldSpaceNode *node = get_node(handle);
-      const RtEvent ready = node->destroy_allocator(runtime->address_space);
+      const RtEvent ready = node->destroy_allocator(runtime->address_space,
+                                        sharded_owner_context, owner_shard);
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
     }
 
     //--------------------------------------------------------------------------
-    bool RegionTreeForest::allocate_field(FieldSpace handle, size_t field_size,
-                                          FieldID fid, CustomSerdezID serdez_id)
+    RtEvent RegionTreeForest::allocate_field(FieldSpace handle, 
+                                             size_t field_size, FieldID fid, 
+                                             CustomSerdezID serdez_id,
+                                             bool sharded_non_owner)
     //--------------------------------------------------------------------------
     {
       FieldSpaceNode *node = get_node(handle);
-      RtEvent ready = node->allocate_field(fid, field_size, serdez_id);
-      if (ready.exists())
-        ready.wait();
-      return false;
+      RtEvent ready = 
+        node->allocate_field(fid, field_size, serdez_id, sharded_non_owner);
+      return ready;
     }
 
     //--------------------------------------------------------------------------
     FieldSpaceNode* RegionTreeForest::allocate_field(FieldSpace handle,
-                      ApEvent size_ready, FieldID fid, CustomSerdezID serdez_id)
+                      ApEvent size_ready, FieldID fid, CustomSerdezID serdez_id,
+                      RtEvent &precondition, bool sharded_non_owner)
     //--------------------------------------------------------------------------
     {
       FieldSpaceNode *node = get_node(handle);
-      RtEvent ready = node->allocate_field(fid, size_ready, serdez_id);
-      if (ready.exists())
-        ready.wait();
+      precondition = 
+        node->allocate_field(fid, size_ready, serdez_id, sharded_non_owner);
       return node;
     }
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::free_field(FieldSpace handle, FieldID fid,
-                                      std::set<RtEvent> &applied) 
+                                      std::set<RtEvent> &applied,
+                                      bool sharded_non_owner)
     //--------------------------------------------------------------------------
     {
       if (!has_node(handle))
         return;
       FieldSpaceNode *node = get_node(handle);
-      node->free_field(fid, runtime->address_space, applied);
+      node->free_field(fid, runtime->address_space, applied, sharded_non_owner);
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::allocate_fields(FieldSpace handle, 
-                                           const std::vector<size_t> &sizes,
-                                           const std::vector<FieldID> &fields,
-                                           CustomSerdezID serdez_id)
+    RtEvent RegionTreeForest::allocate_fields(FieldSpace handle, 
+                                             const std::vector<size_t> &sizes,
+                                             const std::vector<FieldID> &fields,
+                                             CustomSerdezID serdez_id,
+                                             bool sharded_non_owner)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1354,38 +1363,39 @@ namespace Legion {
 #endif
       // We know that none of these field allocations are local
       FieldSpaceNode *node = get_node(handle);
-      RtEvent ready = node->allocate_fields(sizes, fields, serdez_id);
-      // Wait for this to exist
-      if (ready.exists())
-        ready.wait();
+      RtEvent ready = 
+        node->allocate_fields(sizes, fields, serdez_id, sharded_non_owner);
+      return ready;
     }
 
     //--------------------------------------------------------------------------
     FieldSpaceNode* RegionTreeForest::allocate_fields(FieldSpace handle, 
                                            ApEvent sizes_ready,
                                            const std::vector<FieldID> &fields,
-                                           CustomSerdezID serdez_id)
+                                           CustomSerdezID serdez_id,
+                                           RtEvent &precondition,
+                                           bool sharded_non_owner)
     //--------------------------------------------------------------------------
     {
       // We know that none of these field allocations are local
       FieldSpaceNode *node = get_node(handle);
-      RtEvent ready = node->allocate_fields(sizes_ready, fields, serdez_id);
-      // Wait for this to exist
-      if (ready.exists())
-        ready.wait();
+      precondition =
+        node->allocate_fields(sizes_ready, fields, serdez_id,sharded_non_owner);
       return node;
     }
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::free_fields(FieldSpace handle,
                                        const std::vector<FieldID> &to_free,
-                                       std::set<RtEvent> &applied)
+                                       std::set<RtEvent> &applied,
+                                       bool sharded_non_owner)
     //--------------------------------------------------------------------------
     {
       if (!has_node(handle))
         return;
       FieldSpaceNode *node = get_node(handle);
-      node->free_fields(to_free, runtime->address_space, applied);
+      node->free_fields(to_free, runtime->address_space, applied, 
+                        sharded_non_owner);
     }
 
     //--------------------------------------------------------------------------
@@ -4167,7 +4177,8 @@ namespace Legion {
                                                   DistributedID did,
                                                   RtEvent initialized,
                                                   const bool notify_remote,
-                                                  std::set<RtEvent> *applied)
+                                                  std::set<RtEvent> *applied,
+                                                  ShardMapping *shard_mapping)
     //--------------------------------------------------------------------------
     {
       RtUserEvent local_initialized;
@@ -4180,7 +4191,8 @@ namespace Legion {
           local_applied.insert(initialized);
         initialized = local_initialized;
       }
-      FieldSpaceNode *result = new FieldSpaceNode(space, this, did,initialized);
+      FieldSpaceNode *result = 
+        new FieldSpaceNode(space, this, did, initialized, shard_mapping);
 #ifdef DEBUG_LEGION
       assert(result != NULL);
       assert(applied != NULL);
@@ -10585,14 +10597,14 @@ namespace Legion {
     
     //--------------------------------------------------------------------------
     FieldSpaceNode::FieldSpaceNode(FieldSpace sp, RegionTreeForest *ctx,
-                                   DistributedID did, RtEvent init)
+                   DistributedID did, RtEvent init, ShardMapping *shard_mapping)
       : DistributedCollectable(ctx->runtime, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FIELD_SPACE_DC), 
           get_owner_space(sp, ctx->runtime), false/*register with runtime*/),
         handle(sp), context(ctx), initialized(init), 
-        allocation_state(is_owner() ? FIELD_ALLOC_READ_ONLY : 
-            FIELD_ALLOC_INVALID), outstanding_allocators(0),
-        outstanding_invalidations(0), destroyed(false)
+        allocation_state((shard_mapping != NULL) ? FIELD_ALLOC_COLLECTIVE :
+            is_owner() ? FIELD_ALLOC_READ_ONLY : FIELD_ALLOC_INVALID), 
+        outstanding_allocators(0), outstanding_invalidations(0),destroyed(false)
     //--------------------------------------------------------------------------
     {
       if (is_owner())
@@ -10600,6 +10612,19 @@ namespace Legion {
         unallocated_indexes = FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
         local_index_infos.resize(runtime->max_local_fields, 
             std::pair<size_t,CustomSerdezID>(0, 0));
+        if (shard_mapping != NULL)
+        {
+          const ShardMapping &mapping = *shard_mapping;
+          for (unsigned idx = 0; idx < mapping.size(); idx++)
+          {
+            const AddressSpaceID space = mapping[idx];
+            if (space != local_space)
+              remote_field_infos.insert(mapping[idx]);
+          }
+          // We can have control replication inside of just a single node
+          if (remote_field_infos.empty())
+            allocation_state = FIELD_ALLOC_READ_ONLY;
+        }
       }
 #ifdef LEGION_GC
       log_garbage.info("GC Field Space %lld %d %d",
@@ -11384,10 +11409,28 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent FieldSpaceNode::create_allocator(AddressSpaceID source,
-                                             RtUserEvent ready_event)
+          RtUserEvent ready_event, bool sharded_owner_context, bool owner_shard)
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(node_lock);
+      if (sharded_owner_context)
+      {
+        // If we were the sharded collective context that made this
+        // field space and we're still in collective allocation mode
+        // then we are trivially done
+        if (allocation_state == FIELD_ALLOC_COLLECTIVE)
+        {
+#ifdef DEBUG_LEGION
+          assert(outstanding_allocators == 0);
+#endif
+          outstanding_allocators = 1;
+          return RtEvent::NO_RT_EVENT;
+        }
+        // Otherwise if we're not the owner shard then we're also done since
+        // the owner shard is the only one doing the allocation
+        if (!owner_shard)
+          return RtEvent::NO_RT_EVENT;
+      }
       if (is_owner())
       {
         switch (allocation_state)
@@ -11416,6 +11459,8 @@ namespace Legion {
                 RezCheck z(rez);
                 rez.serialize(handle);
                 rez.serialize(ready_event);
+                rez.serialize<bool>(true); // flush allocation
+                rez.serialize<bool>(false); // need merge
               }
               runtime->send_field_space_allocator_invalidation(remote_owner, 
                                                                rez); 
@@ -11423,6 +11468,42 @@ namespace Legion {
               pending_field_allocation = ready_event;
               allocation_state = FIELD_ALLOC_PENDING;
               break;
+            }
+          case FIELD_ALLOC_COLLECTIVE:
+            {
+              // This is the case when we're still in collective mode
+              // and we need to switch to exclusive mode on just one node
+              // because someone else asked for an allocator
+              if (outstanding_allocators > 0)
+              {
+#ifdef DEBUG_LEGION
+                assert(!remote_field_infos.empty());
+                assert(outstanding_invalidations == 0);
+#endif
+                std::set<RtEvent> preconditions;
+                for (std::set<AddressSpaceID>::const_iterator it = 
+                      remote_field_infos.begin(); it != 
+                      remote_field_infos.end(); it++)
+                {
+                  const RtUserEvent done = Runtime::create_rt_user_event();
+                  outstanding_invalidations++;
+                  Serializer rez;
+                  {
+                    RezCheck z(rez);
+                    rez.serialize(handle);
+                    rez.serialize(done);
+                    rez.serialize<bool>(true); // flush allocation
+                    rez.serialize<bool>(true); // need merge
+                  }
+                  runtime->send_field_space_allocator_invalidation(*it, rez);
+                  preconditions.insert(done);
+                }
+                remote_field_infos.clear();
+                pending_field_allocation = Runtime::merge_events(preconditions);
+                allocation_state = FIELD_ALLOC_PENDING;
+                break;
+              }
+              // otherwise we fall through to the identical read-only case
             }
           case FIELD_ALLOC_READ_ONLY:
             {
@@ -11454,6 +11535,8 @@ namespace Legion {
                     RezCheck z(rez);
                     rez.serialize(handle);
                     rez.serialize(done);
+                    rez.serialize<bool>(false); // flush allocation
+                    rez.serialize<bool>(false); // need merge
                   }
                   runtime->send_field_space_allocator_invalidation(*it, rez);
                   preconditions.insert(done);
@@ -11539,13 +11622,7 @@ namespace Legion {
               if (ready_event.exists())
                 Runtime::trigger_event(ready_event, pending_field_allocation);
               break;
-            }
-          case FIELD_ALLOC_COLLECTIVE:
-            {
-              // TODO: implement this for control replication
-              assert(false);
-              break;
-            }
+            } 
           default:
             assert(false);
         }
@@ -11589,7 +11666,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent FieldSpaceNode::destroy_allocator(AddressSpaceID source)
+    RtEvent FieldSpaceNode::destroy_allocator(AddressSpaceID source,
+                                   bool sharded_owner_context, bool owner_shard)
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(node_lock);
@@ -11598,6 +11676,24 @@ namespace Legion {
              (allocation_state == FIELD_ALLOC_COLLECTIVE) ||
              (allocation_state == FIELD_ALLOC_INVALID));
 #endif
+      if (sharded_owner_context)
+      {
+        // If we were the sharded collective context that made this
+        // field space and we're still in collective allocation mode
+        // then we are trivially done
+        if (allocation_state == FIELD_ALLOC_COLLECTIVE)
+        {
+#ifdef DEBUG_LEGION
+          assert(outstanding_allocators == 1);
+#endif
+          outstanding_allocators = 0;
+          return RtEvent::NO_RT_EVENT;
+        }
+        // Otherwise if we're not the owner shard then we're also done since
+        // the owner shard is the only one doing the allocation
+        if (!owner_shard)
+          return RtEvent::NO_RT_EVENT;
+      }
       if (allocation_state == FIELD_ALLOC_INVALID)
       {
 #ifdef DEBUG_LEGION
@@ -11662,10 +11758,26 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent FieldSpaceNode::allocate_field(FieldID fid, size_t size, 
-                                           CustomSerdezID serdez_id)
+                                           CustomSerdezID serdez_id,
+                                           bool sharded_non_owner)
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(node_lock);
+      // For control replication see if we've been invalidated and do not need
+      // to do anything because we are not the owner any longer
+      if (sharded_non_owner && (allocation_state != FIELD_ALLOC_COLLECTIVE))
+        return RtEvent::NO_RT_EVENT;
+      while (allocation_state == FIELD_ALLOC_PENDING)
+      {
+#ifdef DEBUG_LEGION
+        assert(is_owner());
+#endif
+        const RtEvent wait_on = pending_field_allocation;
+        n_lock.release();
+        if (!wait_on.has_triggered())
+          wait_on.wait();
+        n_lock.reacquire();
+      }
       // Check to see if we can do the allocation
       if ((allocation_state != FIELD_ALLOC_EXCLUSIVE) &&
           (allocation_state != FIELD_ALLOC_COLLECTIVE))
@@ -11689,10 +11801,17 @@ namespace Legion {
         return allocated_event;
       }
       // We're the owner so do the field allocation
-      if (field_infos.find(fid) != field_infos.end())
+      std::map<FieldID,FieldInfo>::iterator finder = field_infos.find(fid);
+      if (finder != field_infos.end())
+      {
+        // Handle the case of deduplicating fields that were allocated
+        // in a collective mode but are now merged together
+        if (finder->second.collective)
+          return RtEvent::NO_RT_EVENT;
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_DUPLICATE_FIELD_ID,
           "Illegal duplicate field ID %d used by the "
                         "application in field space %d", fid, handle.id)
+      }
       // Find an index in which to allocate this field  
       RtEvent ready_event;
       int result = allocate_index(ready_event);
@@ -11703,16 +11822,33 @@ namespace Legion {
                         " related macros at the top of legion_config.h and "
                         "recompile.", handle.id, LEGION_MAX_FIELDS)
       const unsigned index = result;
-      field_infos[fid] = FieldInfo(size, index, serdez_id);
+      field_infos[fid] = FieldInfo(size, index, serdez_id, false/*local*/,
+                             (allocation_state == FIELD_ALLOC_COLLECTIVE));
       return ready_event;
     }
 
     //--------------------------------------------------------------------------
     RtEvent FieldSpaceNode::allocate_field(FieldID fid, ApEvent size_ready, 
-                                           CustomSerdezID serdez_id)
+                                           CustomSerdezID serdez_id,
+                                           bool sharded_non_owner)
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(node_lock);
+      // For control replication see if we've been invalidated and do not need
+      // to do anything because we are not the owner any longer
+      if (sharded_non_owner && (allocation_state != FIELD_ALLOC_COLLECTIVE))
+        return RtEvent::NO_RT_EVENT;
+      while (allocation_state == FIELD_ALLOC_PENDING)
+      {
+#ifdef DEBUG_LEGION
+        assert(is_owner());
+#endif
+        const RtEvent wait_on = pending_field_allocation;
+        n_lock.release();
+        if (!wait_on.has_triggered())
+          wait_on.wait();
+        n_lock.reacquire();
+      }
       // Check to see if we can do the allocation
       if ((allocation_state != FIELD_ALLOC_EXCLUSIVE) &&
           (allocation_state != FIELD_ALLOC_COLLECTIVE))
@@ -11735,10 +11871,17 @@ namespace Legion {
         return allocated_event;
       }
       // We're the owner so do the field allocation
-      if (field_infos.find(fid) != field_infos.end())
+      std::map<FieldID,FieldInfo>::iterator finder = field_infos.find(fid);
+      if (finder != field_infos.end())
+      {
+        // Handle the case of deduplicating fields that were allocated
+        // in a collective mode but are now merged together
+        if (finder->second.collective)
+          return RtEvent::NO_RT_EVENT;
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_DUPLICATE_FIELD_ID,
           "Illegal duplicate field ID %d used by the "
                         "application in field space %d", fid, handle.id)
+      }
       // Find an index in which to allocate this field  
       RtEvent ready_event;
       int result = allocate_index(ready_event);
@@ -11749,20 +11892,37 @@ namespace Legion {
                         " related macros at the top of legion_config.h and "
                         "recompile.", handle.id, LEGION_MAX_FIELDS)
       const unsigned index = result;
-      field_infos[fid] = FieldInfo(size_ready, index, serdez_id);
+      field_infos[fid] = FieldInfo(size_ready, index, serdez_id, false/*local*/,
+                                  (allocation_state == FIELD_ALLOC_COLLECTIVE));
       return ready_event;
     }
 
     //--------------------------------------------------------------------------
     RtEvent FieldSpaceNode::allocate_fields(const std::vector<size_t> &sizes,
                                             const std::vector<FieldID> &fids,
-                                            CustomSerdezID serdez_id)
+                                            CustomSerdezID serdez_id,
+                                            bool sharded_non_owner)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(sizes.size() == fids.size());
 #endif
       AutoLock n_lock(node_lock);
+      // For control replication see if we've been invalidated and do not need
+      // to do anything because we are not the owner any longer
+      if (sharded_non_owner && (allocation_state != FIELD_ALLOC_COLLECTIVE))
+        return RtEvent::NO_RT_EVENT;
+      while (allocation_state == FIELD_ALLOC_PENDING)
+      {
+#ifdef DEBUG_LEGION
+        assert(is_owner());
+#endif
+        const RtEvent wait_on = pending_field_allocation;
+        n_lock.release();
+        if (!wait_on.has_triggered())
+          wait_on.wait();
+        n_lock.reacquire();
+      }
       // Check to see if we can do the allocation
       if ((allocation_state != FIELD_ALLOC_EXCLUSIVE) &&
           (allocation_state != FIELD_ALLOC_COLLECTIVE))
@@ -11789,11 +11949,18 @@ namespace Legion {
       std::set<RtEvent> allocated_events;
       for (unsigned idx = 0; idx < fids.size(); idx++)
       {
-        FieldID fid = fids[idx];
+        const FieldID fid = fids[idx];
+        std::map<FieldID,FieldInfo>::iterator finder = field_infos.find(fid);
         if (field_infos.find(fid) != field_infos.end())
+        {
+          // Handle the case of deduplicating fields that were allocated
+          // in a collective mode but are now merged together
+          if (finder->second.collective)
+            continue;
           REPORT_LEGION_ERROR(ERROR_ILLEGAL_DUPLICATE_FIELD_ID,
             "Illegal duplicate field ID %d used by the "
                           "application in field space %d", fid, handle.id)
+        }
         // Find an index in which to allocate this field  
         RtEvent ready_event;
         int result = allocate_index(ready_event);
@@ -11806,7 +11973,8 @@ namespace Legion {
         if (ready_event.exists())
           allocated_events.insert(ready_event);
         const unsigned index = result;
-        field_infos[fid] = FieldInfo(sizes[idx], index, serdez_id);
+        field_infos[fid] = FieldInfo(sizes[idx], index, serdez_id, 
+            false/*local*/, (allocation_state == FIELD_ALLOC_COLLECTIVE));
       }
       if (!allocated_events.empty())
         return Runtime::merge_events(allocated_events);
@@ -11817,10 +11985,26 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RtEvent FieldSpaceNode::allocate_fields(ApEvent sizes_ready,
                                             const std::vector<FieldID> &fids,
-                                            CustomSerdezID serdez_id)
+                                            CustomSerdezID serdez_id,
+                                            bool sharded_non_owner)
     //--------------------------------------------------------------------------
     { 
       AutoLock n_lock(node_lock);
+      // For control replication see if we've been invalidated and do not need
+      // to do anything because we are not the owner any longer
+      if (sharded_non_owner && (allocation_state != FIELD_ALLOC_COLLECTIVE))
+        return RtEvent::NO_RT_EVENT;
+      while (allocation_state == FIELD_ALLOC_PENDING)
+      {
+#ifdef DEBUG_LEGION
+        assert(is_owner());
+#endif
+        const RtEvent wait_on = pending_field_allocation;
+        n_lock.release();
+        if (!wait_on.has_triggered())
+          wait_on.wait();
+        n_lock.reacquire();
+      }
       // Check to see if we can do the allocation
       if ((allocation_state != FIELD_ALLOC_EXCLUSIVE) &&
           (allocation_state != FIELD_ALLOC_COLLECTIVE))
@@ -11844,11 +12028,18 @@ namespace Legion {
       std::set<RtEvent> allocated_events;
       for (unsigned idx = 0; idx < fids.size(); idx++)
       {
-        FieldID fid = fids[idx];
-        if (field_infos.find(fid) != field_infos.end())
+        const FieldID fid = fids[idx];
+        std::map<FieldID,FieldInfo>::iterator finder = field_infos.find(fid);
+        if (finder != field_infos.end())
+        {
+          // Handle the case of deduplicating fields that were allocated
+          // in a collective mode but are now merged together
+          if (finder->second.collective)
+            continue;
           REPORT_LEGION_ERROR(ERROR_ILLEGAL_DUPLICATE_FIELD_ID,
             "Illegal duplicate field ID %d used by the "
                           "application in field space %d", fid, handle.id)
+        }
         // Find an index in which to allocate this field  
         RtEvent ready_event;
         int result = allocate_index(ready_event);
@@ -11861,7 +12052,8 @@ namespace Legion {
         if (ready_event.exists())
           allocated_events.insert(ready_event);
         const unsigned index = result;
-        field_infos[fid] = FieldInfo(sizes_ready, index, serdez_id);
+        field_infos[fid] = FieldInfo(sizes_ready, index, serdez_id, 
+            false/*local*/, (allocation_state == FIELD_ALLOC_COLLECTIVE));
       }
       if (!allocated_events.empty())
         return Runtime::merge_events(allocated_events);
@@ -11951,10 +12143,26 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void FieldSpaceNode::free_field(FieldID fid, AddressSpaceID source,
-                                    std::set<RtEvent> &applied)   
+                                    std::set<RtEvent> &applied,
+                                    bool sharded_non_owner)   
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(node_lock); 
+      // For control replication see if we've been invalidated and do not need
+      // to do anything because we are not the owner any longer
+      if (sharded_non_owner && (allocation_state != FIELD_ALLOC_COLLECTIVE))
+        return;
+      while (allocation_state == FIELD_ALLOC_PENDING)
+      {
+#ifdef DEBUG_LEGION
+        assert(is_owner());
+#endif
+        const RtEvent wait_on = pending_field_allocation;
+        n_lock.release();
+        if (!wait_on.has_triggered())
+          wait_on.wait();
+        n_lock.reacquire();
+      }
       if ((allocation_state != FIELD_ALLOC_EXCLUSIVE) &&
           (allocation_state != FIELD_ALLOC_COLLECTIVE))
       {
@@ -11987,10 +12195,26 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void FieldSpaceNode::free_fields(const std::vector<FieldID> &to_free,
-                              AddressSpaceID source, std::set<RtEvent> &applied)
+                              AddressSpaceID source, std::set<RtEvent> &applied,
+                              bool sharded_non_owner)
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(node_lock); 
+      // For control replication see if we've been invalidated and do not need
+      // to do anything because we are not the owner any longer
+      if (sharded_non_owner && (allocation_state != FIELD_ALLOC_COLLECTIVE))
+        return;
+      while (allocation_state == FIELD_ALLOC_PENDING)
+      {
+#ifdef DEBUG_LEGION
+        assert(is_owner());
+#endif
+        const RtEvent wait_on = pending_field_allocation;
+        n_lock.release();
+        if (!wait_on.has_triggered())
+          wait_on.wait();
+        n_lock.reacquire();
+      }
       if ((allocation_state != FIELD_ALLOC_EXCLUSIVE) &&
           (allocation_state != FIELD_ALLOC_COLLECTIVE))
       {
@@ -12018,7 +12242,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(finder != field_infos.end());
 #endif
-        // Only need to free the index if we weren't destroyed preivously
+        // Only need to free the index if we weren't destroyed previously
         if (!finder->second.destroyed)
           free_index(finder->second.idx, RtEvent::NO_RT_EVENT);
         // Remove it from the fields map
@@ -13590,9 +13814,13 @@ namespace Legion {
       derez.deserialize(handle);
       RtUserEvent done_event;
       derez.deserialize(done_event);
+      bool flush_allocation;
+      derez.deserialize(flush_allocation);
+      bool merge;
+      derez.deserialize(merge);
 
       FieldSpaceNode *node = forest->get_node(handle);
-      node->process_allocator_invalidation(done_event);
+      node->process_allocator_invalidation(done_event, flush_allocation, merge);
     }
 
     //--------------------------------------------------------------------------
@@ -14160,21 +14388,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FieldSpaceNode::process_allocator_invalidation(RtUserEvent done_event)
+    void FieldSpaceNode::process_allocator_invalidation(RtUserEvent done_event,
+                                         bool flush_allocation, bool need_merge)
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(node_lock);
 #ifdef DEBUG_LEGION
       assert(!is_owner());
       assert((allocation_state == FIELD_ALLOC_EXCLUSIVE) ||
+             (allocation_state == FIELD_ALLOC_COLLECTIVE) ||
              (allocation_state == FIELD_ALLOC_READ_ONLY));
 #endif
       Serializer rez;
-      if (allocation_state == FIELD_ALLOC_EXCLUSIVE)
+      if (flush_allocation)
       {
+#ifdef DEBUG_LEGION
+        assert((allocation_state == FIELD_ALLOC_EXCLUSIVE) ||
+               (allocation_state == FIELD_ALLOC_COLLECTIVE));
+#endif
         RezCheck z(rez);
         rez.serialize(handle);
         rez.serialize<bool>(true); // allocation meta data
+        rez.serialize<bool>(need_merge);
         rez.serialize(field_infos.size());
         for (std::map<FieldID,FieldInfo>::iterator it = 
               field_infos.begin(); it != field_infos.end(); /*nothing*/)
@@ -14205,6 +14440,10 @@ namespace Legion {
       }
       else
       {
+#ifdef DEBUG_LEGION
+        assert((allocation_state == FIELD_ALLOC_READ_ONLY) ||
+               (allocation_state == FIELD_ALLOC_COLLECTIVE));
+#endif
         RezCheck z(rez);
         rez.serialize(handle);
         rez.serialize<bool>(false); // allocation meta data
@@ -14239,31 +14478,73 @@ namespace Legion {
       AutoLock n_lock(node_lock);
       if (allocator_meta_data)
       {
-        size_t num_infos;
-        derez.deserialize(num_infos);
-        for (unsigned idx = 0; idx < num_infos; idx++)
+        bool need_merge;
+        derez.deserialize(need_merge);
+        if (need_merge)
         {
-          FieldID fid;
-          derez.deserialize(fid);
-          derez.deserialize(field_infos[fid]);
+          size_t num_infos;
+          derez.deserialize(num_infos);
+          for (unsigned idx = 0; idx < num_infos; idx++)
+          {
+            FieldID fid;
+            derez.deserialize(fid);
+            if (field_infos.find(fid) == field_infos.end())
+              derez.deserialize(field_infos[fid]);
+            else
+              derez.advance_pointer(sizeof(FieldInfo));
+          }
+          FieldMask unallocated;
+          derez.deserialize(unallocated);
+          unallocated_indexes |= unallocated;
+          size_t num_available;
+          derez.deserialize(num_available);
+          for (unsigned idx = 0; idx < num_available; idx++)
+          {
+            std::pair<unsigned,RtEvent> next;
+            derez.deserialize(next.first);
+            derez.deserialize(next.second);
+            bool found = false;
+            for (std::list<std::pair<unsigned,RtEvent> >::const_iterator it =
+                 available_indexes.begin(); it != available_indexes.end(); it++)
+            {
+              if (it->first != next.first)
+                continue;
+              found = true;
+              break;
+            }
+            if (!found)
+              available_indexes.push_back(next);
+          }
+          derez.advance_pointer(sizeof(outstanding_allocators));
         }
+        else
+        {
+          size_t num_infos;
+          derez.deserialize(num_infos);
+          for (unsigned idx = 0; idx < num_infos; idx++)
+          {
+            FieldID fid;
+            derez.deserialize(fid);
+            derez.deserialize(field_infos[fid]);
+          }
 #ifdef DEBUG_LEGION
-        assert(!unallocated_indexes);
-        assert(available_indexes.empty());
+          assert(!unallocated_indexes);
+          assert(available_indexes.empty());
 #endif
-        derez.deserialize(unallocated_indexes);
-        size_t num_available;
-        derez.deserialize(num_available);
-        for (unsigned idx = 0; idx < num_available; idx++)
-        {
-          std::pair<unsigned,RtEvent> next;
-          derez.deserialize(next.first);
-          derez.deserialize(next.second);
-          available_indexes.push_back(next);
+          derez.deserialize(unallocated_indexes);
+          size_t num_available;
+          derez.deserialize(num_available);
+          for (unsigned idx = 0; idx < num_available; idx++)
+          {
+            std::pair<unsigned,RtEvent> next;
+            derez.deserialize(next.first);
+            derez.deserialize(next.second);
+            available_indexes.push_back(next);
+          }
+          unsigned remote_allocators;
+          derez.deserialize(remote_allocators);
+          outstanding_allocators += remote_allocators;
         }
-        unsigned remote_allocators;
-        derez.deserialize(remote_allocators);
-        outstanding_allocators += remote_allocators;
       }
 #ifdef DEBUG_LEGION
       assert(outstanding_invalidations > 0);
