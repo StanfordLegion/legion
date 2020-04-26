@@ -673,6 +673,9 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
     cmdline.append('-DLegion_USE_LLVM=%s' % ('ON' if env['USE_LLVM'] == '1' else 'OFF'))
     cmdline.append('-DLegion_USE_HDF5=%s' % ('ON' if env['USE_HDF'] == '1' else 'OFF'))
     cmdline.append('-DLegion_USE_Fortran=%s' % ('ON' if env['LEGION_USE_FORTRAN'] == '1' else 'OFF'))
+    cmdline.append('-DLegion_SPY=%s' % ('ON' if env['USE_SPY'] == '1' else 'OFF'))
+    cmdline.append('-DLegion_BOUNDS_CHECKS=%s' % ('ON' if env['BOUNDS_CHECKS'] == '1' else 'OFF'))
+    cmdline.append('-DLegion_PRIVILEGE_CHECKS=%s' % ('ON' if env['PRIVILEGE_CHECKS'] == '1' else 'OFF'))
     if 'LEGION_WARNINGS_FATAL' in env:
         cmdline.append('-DLegion_WARNINGS_FATAL=%s' % ('ON' if env['LEGION_WARNINGS_FATAL'] == '1' else 'OFF'))
     if test_ctest:
@@ -715,9 +718,12 @@ def build_make_clean(root_dir, env, thread_count, test_legion_cxx, test_perf,
     if test_legion_cxx and env['LEGION_USE_FORTRAN'] == '1':
         clean_cxx(legion_fortran_tests, root_dir, env, thread_count)
 
-def option_enabled(option, options, var_prefix='', default=True):
+def option_enabled(option, options, default, envprefix='', envname=None):
     if options is not None: return option in options
-    option_var = '%s%s' % (var_prefix, option.upper())
+    if envname is not None:
+        option_var = envname
+    else:
+        option_var = '%s%s' % (envprefix, option.upper())
     if option_var in os.environ: return os.environ[option_var] == '1'
     return default
 
@@ -749,6 +755,7 @@ def report_mode(debug, max_dim, launcher,
                 test_external, test_private, test_perf, test_ctest, networks,
                 use_cuda, use_openmp, use_kokkos, use_python, use_llvm,
                 use_hdf, use_fortran, use_spy, use_prof,
+                use_bounds_checks, use_privilege_checks,
                 use_gcov, use_cmake, use_rdir):
     print()
     print('#'*60)
@@ -781,6 +788,8 @@ def report_mode(debug, max_dim, launcher,
     print('###   * Fortran:    %s' % use_fortran)
     print('###   * Spy:        %s' % use_spy)
     print('###   * Prof:       %s' % use_prof)
+    print('###   * Bounds:     %s' % use_bounds_checks)
+    print('###   * Privilege:  %s' % use_privilege_checks)
     print('###   * Gcov:       %s' % use_gcov)
     print('###   * CMake:      %s' % use_cmake)
     print('###   * RDIR:       %s' % use_rdir)
@@ -812,8 +821,9 @@ def run_tests(test_modules=None,
             timelimit = int(os.environ['TIMELIMIT'])
 
     # Determine which test modules to run.
-    def module_enabled(module, default=True):
-        return option_enabled(module, test_modules, 'TEST_', default)
+    def module_enabled(module, default=True, prefix='TEST_', **kwargs):
+        return option_enabled(module, test_modules, default,
+                              envprefix=prefix, **kwargs)
     test_regent = module_enabled('regent')
     test_legion_cxx = module_enabled('legion_cxx')
     test_fuzzer = module_enabled('fuzzer', False)
@@ -824,8 +834,9 @@ def run_tests(test_modules=None,
     test_ctest = module_enabled('ctest', False)
 
     # Determine which features to build with.
-    def feature_enabled(feature, default=True, prefix='USE_'):
-        return option_enabled(feature, use_features, prefix, default)
+    def feature_enabled(feature, default=True, prefix='USE_', **kwargs):
+        return option_enabled(feature, use_features, default,
+                              envprefix=prefix, **kwargs)
     use_cuda = feature_enabled('cuda', False)
     use_openmp = feature_enabled('openmp', False)
     use_kokkos = feature_enabled('kokkos', False)
@@ -835,6 +846,10 @@ def run_tests(test_modules=None,
     use_fortran = feature_enabled('fortran', False, prefix='LEGION_USE_')
     use_spy = feature_enabled('spy', False)
     use_prof = feature_enabled('prof', False)
+    use_bounds_checks = feature_enabled('bounds', False,
+                                        envname='BOUNDS_CHCEKCS')
+    use_privilege_checks = feature_enabled('privilege', False,
+                                           envname='PRIVILEGE_CHECKS')
     use_gcov = feature_enabled('gcov', False)
     use_cmake = feature_enabled('cmake', False)
     use_rdir = feature_enabled('rdir', True)
@@ -873,6 +888,7 @@ def run_tests(test_modules=None,
                 networks,
                 use_cuda, use_openmp, use_kokkos, use_python, use_llvm,
                 use_hdf, use_fortran, use_spy, use_prof,
+                use_bounds_checks, use_privilege_checks,
                 use_gcov, use_cmake, use_rdir)
 
     tmp_dir = tempfile.mkdtemp(dir=root_dir)
@@ -902,6 +918,8 @@ def run_tests(test_modules=None,
         ('TEST_SPY', '1' if use_spy else '0'),
         ('USE_PROF', '1' if use_prof else '0'),
         ('TEST_PROF', '1' if use_prof else '0'),
+        ('BOUNDS_CHECKS', '1' if use_bounds_checks else '0'),
+        ('PRIVILEGE_CHECKS', '1' if use_privilege_checks else '0'),
         ('TEST_GCOV', '1' if use_gcov else '0'),
         ('USE_RDIR', '1' if use_rdir else '0'),
         ('MAX_DIM', str(max_dim)),
@@ -1044,6 +1062,7 @@ def driver():
         '--use', dest='use_features', action=ExtendAction,
         choices=MultipleChoiceList('gasnet', 'cuda', 'openmp', 'kokkos',
                                    'python', 'llvm', 'hdf', 'fortran', 'spy', 'prof',
+                                   'bounds', 'privilege',
                                    'gcov', 'cmake', 'rdir'),
         type=lambda s: s.split(','),
         default=None,

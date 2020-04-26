@@ -257,8 +257,6 @@ def install_bindings(regent_dir, legion_dir, bindings_dir, python_bindings_dir, 
         if not os.path.exists(build_dir):
             os.mkdir(build_dir)
         cc_flags = os.environ['CC_FLAGS'] if 'CC_FLAGS' in os.environ else ''
-        if spy:
-            cc_flags = cc_flags + ' -DLEGION_SPY'
         flags = (
             ['-DCMAKE_BUILD_TYPE=%s' % ('Debug' if debug else 'Release'),
              '-DLegion_USE_CUDA=%s' % ('ON' if cuda else 'OFF'),
@@ -267,6 +265,7 @@ def install_bindings(regent_dir, legion_dir, bindings_dir, python_bindings_dir, 
              '-DLegion_USE_LLVM=%s' % ('ON' if llvm else 'OFF'),
              '-DLegion_USE_GASNet=%s' % ('ON' if gasnet else 'OFF'),
              '-DLegion_USE_HDF5=%s' % ('ON' if hdf else 'OFF'),
+             '-DLegion_SPY=%s' % ('ON' if spy else 'OFF'),
              '-DLegion_BUILD_BINDINGS=ON',
              '-DBUILD_SHARED_LIBS=ON',
             ] +

@@ -44,7 +44,7 @@ GASNET_FLAGS	?=
 LD_FLAGS	?=
 
 # Use reduction operators for complex types by default
-CC_FLAGS += -DLEGION_REDOP_COMPLEX
+USE_COMPLEX = 1
 
 NO_BUILD_ALL=1
 .PHONY: all

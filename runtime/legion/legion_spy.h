@@ -607,6 +607,13 @@ namespace Legion {
 		      context, unique_id);
       }
 
+      static inline void log_creation_operation(UniqueID context,
+                                                UniqueID creation)
+      {
+        log_spy.print("Creation Operation %llu %llu",
+                      context, creation);
+      }
+
       static inline void log_deletion_operation(UniqueID context,
                                                 UniqueID deletion)
       {

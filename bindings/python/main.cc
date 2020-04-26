@@ -111,7 +111,6 @@ static void python_main_callback(Machine machine, Runtime *runtime,
     CodeDescriptor code_desc(Realm::Type::from_cpp_type<Processor::TaskFuncPtr>());
     code_desc.add_implementation(
         new Realm::PythonSourceImplementation("legion_top", task_name));
-    registrar.set_leaf(true);
     runtime->register_task_variant(registrar, code_desc, NULL, 0, task_name, vid);
     runtime->attach_name(top_task_id+1, task_name, false/*mutable*/, true/*local only*/);
   }
@@ -123,7 +122,6 @@ static void python_main_callback(Machine machine, Runtime *runtime,
     CodeDescriptor code_desc(Realm::Type::from_cpp_type<Processor::TaskFuncPtr>());
     code_desc.add_implementation(
         new Realm::PythonSourceImplementation("legion_top", task_name));
-    registrar.set_leaf(true);
     runtime->register_task_variant(registrar, code_desc, NULL, 0, task_name, vid);
     runtime->attach_name(top_task_id+2, task_name, false/*mutable*/, true/*local only*/);
   }

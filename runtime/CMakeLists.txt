@@ -203,6 +203,11 @@ endforeach()
 find_package(Threads REQUIRED)
 add_library(RealmRuntime ${REALM_SRC})
 target_compile_options(RealmRuntime PRIVATE ${CXX_BUILD_WARNING_FLAGS})
+if(COMPILER_SUPPORTS_DEFCHECK)
+  # use the cxx_defcheck wrapper to make sure realm_defines.h is included
+  #  any place it needs to be
+  target_compile_options(RealmRuntime PRIVATE --defcheck realm_defines.h)
+endif()
 if(Legion_USE_LIBDL)
   target_link_libraries(RealmRuntime PRIVATE ${CMAKE_DL_LIBS})
   if(APPLE)
@@ -216,8 +221,12 @@ endif()
 set_target_properties(RealmRuntime PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(RealmRuntime PROPERTIES SOVERSION ${SOVERSION})
 
+if(Legion_USE_PAPI)
+  target_include_directories(RealmRuntime PRIVATE ${PAPI_INCLUDE_DIRS})
+  target_link_libraries(RealmRuntime PUBLIC ${PAPI_LIBRARIES})
+endif()
+
 if(Legion_USE_HWLOC)
-  target_compile_definitions(RealmRuntime PRIVATE REALM_USE_HWLOC)
   target_link_libraries(RealmRuntime PRIVATE HWLOC::HWLOC)
 endif()
 
@@ -370,11 +379,6 @@ if(Legion_USE_HDF5)
   target_compile_definitions(RealmRuntime INTERFACE USE_HDF)
 endif()
 
-if(Legion_USE_Python)
-  target_compile_definitions(RealmRuntime PRIVATE REALM_PYTHON_LIB="${PYTHON_LIBRARIES}")
-  target_compile_definitions(RealmRuntime PRIVATE REALM_PYTHON_VERSION_MAJOR=${PYTHON_VERSION_MAJOR})
-endif()
-
 set_target_properties(RealmRuntime PROPERTIES OUTPUT_NAME "realm${INSTALL_SUFFIX}")
 
 target_include_directories(RealmRuntime
@@ -525,6 +529,11 @@ set_target_properties(LegionRuntime PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(LegionRuntime PROPERTIES OUTPUT_NAME "legion${INSTALL_SUFFIX}")
 set_target_properties(LegionRuntime PROPERTIES SOVERSION ${SOVERSION})
 target_compile_options(LegionRuntime PRIVATE ${CXX_BUILD_WARNING_FLAGS})
+if(COMPILER_SUPPORTS_DEFCHECK)
+  # use the cxx_defcheck wrapper to make sure legion_defines.h is included
+  #  any place it needs to be
+  target_compile_options(LegionRuntime PRIVATE --defcheck legion_defines.h)
+endif()
 
 target_include_directories(LegionRuntime
   INTERFACE
