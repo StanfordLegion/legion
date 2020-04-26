@@ -436,6 +436,13 @@ namespace Realm {
   }
 
   template <typename T, typename PT, IntrusivePriorityListLink<T> T::*LINK, PT T::*PRI, typename LT>
+  inline bool IntrusivePriorityList<T, PT, LINK, PRI, LT>::empty(void) const
+  {
+    // no lock taken here because it's not thread-safe even with a lock
+    return(head == 0);
+  }
+
+  template <typename T, typename PT, IntrusivePriorityListLink<T> T::*LINK, PT T::*PRI, typename LT>
   inline bool IntrusivePriorityList<T, PT, LINK, PRI, LT>::empty(PT min_priority) const
   {
     // have to take lock here in order to test priority safely
@@ -451,6 +458,44 @@ namespace Realm {
   inline T *IntrusivePriorityList<T, PT, LINK, PRI, LT>::front(void) const
   {
     return head;
+  }
+
+  template <typename T, typename PT, IntrusivePriorityListLink<T> T::*LINK, PT T::*PRI, typename LT>
+  T *IntrusivePriorityList<T, PT, LINK, PRI, LT>::pop_front(void)
+  {
+    lock.lock();
+#ifdef DEBUG_REALM_LISTS
+    size_t exp_size = size();
+#endif
+    T *popped = head;
+    if(popped) {
+#ifdef DEBUG_REALM_LISTS
+      exp_size--;
+#endif
+      if((popped->*LINK).next_within_pri != 0) {
+	// others in tier - next one becomes head
+        head = (popped->*LINK).next_within_pri;
+	(head->*LINK).lastlink_within_pri = (popped->*LINK).lastlink_within_pri;
+        (head->*LINK).next_lower_pri = (popped->*LINK).next_lower_pri;
+      } else {
+	// was only one in tier - point head at next priority tier
+        head = (popped->*LINK).next_lower_pri;
+      }
+#ifdef DEBUG_REALM_LISTS
+      assert((popped->*LINK).current_list == this);
+      (popped->*LINK).current_list = 0;
+      // clean up now-unused pointers to make debugging easier
+      (popped->*LINK).next_within_pri = 0;
+      (popped->*LINK).lastlink_within_pri = 0;
+      (popped->*LINK).next_lower_pri = 0;
+#endif
+    }
+#ifdef DEBUG_REALM_LISTS
+    size_t act_size = size();
+    assert(exp_size == act_size);
+#endif
+    lock.unlock();
+    return popped;
   }
 
   template <typename T, typename PT, IntrusivePriorityListLink<T> T::*LINK, PT T::*PRI, typename LT>
