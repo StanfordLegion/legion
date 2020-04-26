@@ -121,9 +121,10 @@ extern void init_endpoints(size_t gasnet_mem_size,
 			   size_t registered_mem_size,
 			   size_t registered_ib_mem_size,
 			   Realm::CoreReservationSet& crs,
-			   int num_polling_threads, int num_handler_thread,
+			   int num_polling_threads,
 			   Realm::BackgroundWorkManager& bgwork,
-			   bool poll_use_bgwork, bool handler_use_bgwork);
+			   bool poll_use_bgwork,
+			   Realm::IncomingMessageManager *message_manager);
 extern void start_polling_threads(void);
 extern void start_handler_threads(size_t stacksize);
 extern void flush_activemsg_channels(void);
@@ -156,6 +157,56 @@ extern void release_srcptr(void *ptr);
 
 enum { MSGID_RELEASE_SRCPTR = 252 };
 
+class PayloadSource {
+public:
+  PayloadSource(void) { }
+  virtual ~PayloadSource(void) { }
+public:
+  virtual void copy_data(void *dest) = 0;
+  virtual void *get_contig_pointer(void) { assert(false); return 0; }
+  virtual int get_payload_mode(void) { return Realm::PAYLOAD_KEEP; }
+};
+
+class ContiguousPayload : public PayloadSource {
+public:
+  ContiguousPayload(void *_srcptr, size_t _size, int _mode);
+  virtual ~ContiguousPayload(void) { }
+  virtual void copy_data(void *dest);
+  virtual void *get_contig_pointer(void) { return srcptr; }
+  virtual int get_payload_mode(void) { return mode; }
+protected:
+  void *srcptr;
+  size_t size;
+  int mode;
+};
+
+class TwoDPayload : public PayloadSource {
+public:
+  TwoDPayload(const void *_srcptr, size_t _line_size, size_t _line_count,
+	      ptrdiff_t _line_stride, int _mode);
+  virtual ~TwoDPayload(void) { }
+  virtual void copy_data(void *dest);
+protected:
+  const void *srcptr;
+  size_t line_size, line_count;
+  ptrdiff_t line_stride;
+  int mode;
+};
+
+typedef std::pair<const void *, size_t> SpanListEntry;
+typedef std::vector<SpanListEntry> SpanList;
+
+class SpanPayload : public PayloadSource {
+public:
+  SpanPayload(const SpanList& _spans, size_t _size, int _mode);
+  virtual ~SpanPayload(void) { }
+  virtual void copy_data(void *dest);
+protected:
+  SpanList spans;
+  size_t size;
+  int mode;
+};
+
 extern void enqueue_message(Realm::NodeID target, int msgid,
 			    const void *args, size_t arg_size,
 			    const void *payload, size_t payload_size,
@@ -169,13 +220,10 @@ extern void enqueue_message(Realm::NodeID target, int msgid,
 
 extern void enqueue_message(Realm::NodeID target, int msgid,
 			    const void *args, size_t arg_size,
-			    const Realm::SpanList& spans, size_t payload_size,
+			    const SpanList& spans, size_t payload_size,
 			    int payload_mode, void *dstptr = 0);
 
-class IncomingMessage; // defined below
-class IncomingMessageManager;
-
-extern void enqueue_incoming(Realm::NodeID sender, IncomingMessage *msg);
+//extern void enqueue_incoming(Realm::NodeID sender, Realm::IncomingMessage *msg);
 
 extern void handle_long_msgptr(Realm::NodeID source, const void *ptr);
 //extern size_t adjust_long_msgsize(gasnet_node_t source, void *ptr, size_t orig_size);
@@ -219,24 +267,6 @@ class ActiveMsgProfilingHelper {
 };
 #endif
 
-// abstract class for incoming messages - actual messages are
-//  templated on their argument types and handler
-class IncomingMessage {
- public:
-  IncomingMessage(void)
-    : next_msg(0)
-  {}
-  virtual ~IncomingMessage(void) {}
-
-  virtual void run_handler(void) = 0;
-
-  virtual int get_peer(void) = 0;
-  virtual int get_msgid(void) = 0;
-  virtual size_t get_msgsize(void) = 0;
-
-  IncomingMessage *next_msg;
-};
-
 template <class MSGTYPE>
 void dummy_short_handler(MSGTYPE dummy) {}
 
@@ -249,8 +279,9 @@ template <class MSGTYPE, int MSGID,
           int MSG_N>
 struct MessageRawArgs;
 
+#if 0
 template <class MSGTYPE, int MSGID, void (*SHORT_HNDL_PTR)(MSGTYPE), int MSG_N>
-class IncomingShortMessage : public IncomingMessage {
+class IncomingShortMessage : public Realm::IncomingMessage {
  public:
   IncomingShortMessage(int _sender) 
     : sender(_sender) 
@@ -275,7 +306,7 @@ class IncomingShortMessage : public IncomingMessage {
 
 template <class MSGTYPE, int MSGID, 
           void (*MED_HNDL_PTR)(MSGTYPE, const void *, size_t), int MSG_N>
-class IncomingMediumMessage : public IncomingMessage {
+class IncomingMediumMessage : public Realm::IncomingMessage {
  public:
   IncomingMediumMessage(int _sender, const void *_msgdata, size_t _msglen)
     : sender(_sender), msgdata(_msgdata), msglen(_msglen)
@@ -302,6 +333,7 @@ class IncomingMediumMessage : public IncomingMessage {
     MSGTYPE typed;
   } u;
 };
+#endif
 
 #define HANDLERARG_DECL_1                     handlerarg_t arg0
 #define HANDLERARG_DECL_2  HANDLERARG_DECL_1; handlerarg_t arg1
@@ -376,6 +408,7 @@ class IncomingMediumMessage : public IncomingMessage {
 extern Realm::NodeID get_message_source(token_t token);
 extern void send_srcptr_release(token_t token, uint64_t srcptr);
 
+#if 0
 #define SPECIALIZED_RAW_ARGS(n) \
 template <class MSGTYPE, int MSGID, \
           void (*SHORT_HNDL_PTR)(MSGTYPE), \
@@ -436,6 +469,7 @@ SPECIALIZED_RAW_ARGS(13);
 SPECIALIZED_RAW_ARGS(14);
 SPECIALIZED_RAW_ARGS(15);
 SPECIALIZED_RAW_ARGS(16);
+#endif
 
 #ifdef ACTIVE_MESSAGE_TRACE
 void record_am_handler(int msgid, const char *description, bool reply = false);

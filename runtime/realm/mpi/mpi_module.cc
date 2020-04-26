@@ -542,7 +542,8 @@ namespace Realm {
     CHECK_MPI( MPI_Win_allocate(attach_size, 1, MPI_INFO_NULL, MPI_COMM_WORLD, &baseptr, &g_am_win) );
     CHECK_MPI( MPI_Win_lock_all(0, g_am_win) );
 
-    Realm::MPI::AM_init_long_messages(g_am_win, baseptr);
+    Realm::MPI::AM_init_long_messages(g_am_win, baseptr,
+				      runtime->message_manager);
 
     int num_nodes = Network::max_node_id + 1;
     int size_p = sizeof(baseptr);

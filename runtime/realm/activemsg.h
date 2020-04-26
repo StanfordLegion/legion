@@ -24,6 +24,9 @@
 #include "realm/serialize.h"
 #include "realm/nodeset.h"
 #include "realm/network.h"
+#include "realm/atomics.h"
+#include "realm/threads.h"
+#include "realm/bgwork.h"
 
 namespace Realm {
 
@@ -33,195 +36,216 @@ namespace Realm {
     extern bool profile_activemsg_handlers;
   };
 
-enum { PAYLOAD_NONE, // no payload in packet
-       PAYLOAD_KEEP, // use payload pointer, guaranteed to be stable
-       PAYLOAD_FREE, // take ownership of payload, free when done
-       PAYLOAD_COPY, // make a copy of the payload
-       PAYLOAD_SRCPTR, // payload has been copied to the src data pool
-       PAYLOAD_PENDING, // payload needs to be copied, but hasn't yet
-       PAYLOAD_KEEPREG, // use payload pointer, AND it's registered!
-       PAYLOAD_EMPTY, // message can have payload, but this one is 0 bytes
-};
-
-class ActiveMessageImpl;
- 
-template <typename T>
-class ActiveMessage {
-public:
-  // construct a new active message for either a single recipient or a mask
-  //  of recipients
-  // in addition to the header struct (T), a message can include a variable
-  //  payload which can be delivered to a particular destination address
-  ActiveMessage(NodeID _target,
-		size_t _max_payload_size = 0, void *_dest_payload_addr = 0);
-  ActiveMessage(const Realm::NodeSet &_targets, size_t _max_payload_size = 0);
-  ~ActiveMessage(void);
-
-  // operator-> gives access to the header structure
-  T *operator->(void);
-
-  // variable payload can be written to in three ways:
-  //  (a) Realm-style serialization (currently eager)
-  template <typename T2>
-  bool operator<<(const T2& to_append);
-  //  (b) old memcpy-like behavior (using the various payload modes)
-  void add_payload(const void *data, size_t datalen,
-		   int payload_mode = PAYLOAD_COPY);
-  //  (c) request for a pointer to write into (writes must be completed before
-  //       call to commit or cancel)
-  void *payload_ptr(size_t datalen);
-
-  // every active message must eventually be commit()'ed or cancel()'ed
-  void commit(void);
-  void cancel(void);
-
-protected:
-  ActiveMessageImpl *impl;
-  T *header;
-  Realm::Serialization::FixedBufferSerializer fbs;
-  static const size_t INLINE_STORAGE = 256;
-  uint64_t inline_capacity[INLINE_STORAGE / sizeof(uint64_t)];
-};
-
-// per-network active message implementations are mostly opaque, but a few
-//  fields are exposed to avoid virtual function calls
-class ActiveMessageImpl {
-public:
-  virtual ~ActiveMessageImpl() {}
-
-  virtual void commit(size_t act_payload_size) = 0;
-  virtual void cancel() = 0;
-
-  void *header_base;
-  void *payload_base;
-  size_t payload_size;
-};
-
-class ActiveMessageHandlerRegBase;
-
-struct ActiveMessageHandlerStats {
-  size_t count, sum, sum2, minval, maxval;
-
-  ActiveMessageHandlerStats(void);
-  void record(long long t_start, long long t_end);
-};
-
-// singleton class that can convert message type->ID and ID->handler
-class ActiveMessageHandlerTable {
-public:
-  ActiveMessageHandlerTable(void);
-  ~ActiveMessageHandlerTable(void);
-
-  typedef unsigned short MessageID;
-  typedef void (*MessageHandler)(NodeID sender, const void *header,
-				 const void *payload, size_t payload_size);
-
-  template <typename T>
-  MessageID lookup_message_id(void) const;
-
-  MessageHandler lookup_message_handler(MessageID id);
-  const char *lookup_message_name(MessageID id);
-  void record_message_handler_call(MessageID id,
-				   long long t_start, long long t_end);
-  void report_message_handler_stats();
-
-  static void append_handler_reg(ActiveMessageHandlerRegBase *new_reg);
-
-  void construct_handler_table(void);
-
-  typedef unsigned TypeHash;
-
-  struct HandlerEntry {
-    TypeHash hash;
-    const char *name;
-    bool must_free;
-    MessageHandler handler;
-    ActiveMessageHandlerStats stats;
+  enum { PAYLOAD_NONE, // no payload in packet
+	 PAYLOAD_KEEP, // use payload pointer, guaranteed to be stable
+	 PAYLOAD_FREE, // take ownership of payload, free when done
+	 PAYLOAD_COPY, // make a copy of the payload
+	 PAYLOAD_SRCPTR, // payload has been copied to the src data pool
+	 PAYLOAD_PENDING, // payload needs to be copied, but hasn't yet
+	 PAYLOAD_KEEPREG, // use payload pointer, AND it's registered!
+	 PAYLOAD_EMPTY, // message can have payload, but this one is 0 bytes
   };
 
-protected:
-  static ActiveMessageHandlerRegBase *pending_handlers;
+  class ActiveMessageImpl;
+ 
+  template <typename T>
+    class ActiveMessage {
+  public:
+    // construct a new active message for either a single recipient or a mask
+    //  of recipients
+    // in addition to the header struct (T), a message can include a variable
+    //  payload which can be delivered to a particular destination address
+    ActiveMessage(NodeID _target,
+		  size_t _max_payload_size = 0, void *_dest_payload_addr = 0);
+    ActiveMessage(const Realm::NodeSet &_targets, size_t _max_payload_size = 0);
+    ~ActiveMessage(void);
 
-  std::vector<HandlerEntry> handlers;
-};
+    // operator-> gives access to the header structure
+    T *operator->(void);
 
-extern ActiveMessageHandlerTable activemsg_handler_table;
+    // variable payload can be written to in three ways:
+    //  (a) Realm-style serialization (currently eager)
+    template <typename T2>
+      bool operator<<(const T2& to_append);
+    //  (b) old memcpy-like behavior (using the various payload modes)
+    void add_payload(const void *data, size_t datalen,
+		     int payload_mode = PAYLOAD_COPY);
+    void add_payload(const void *data, size_t bytes_per_line,
+		     size_t lines, size_t line_stride,
+		     int payload_mode = PAYLOAD_COPY);
+    //  (c) request for a pointer to write into (writes must be completed before
+    //       call to commit or cancel)
+    void *payload_ptr(size_t datalen);
 
-class ActiveMessageHandlerRegBase {
-public:
-  virtual ~ActiveMessageHandlerRegBase(void) {}
-  virtual ActiveMessageHandlerTable::MessageHandler get_handler(void) const = 0;
+    // every active message must eventually be commit()'ed or cancel()'ed
+    void commit(void);
+    void cancel(void);
 
-  ActiveMessageHandlerTable::TypeHash hash;
-  const char *name;
-  bool must_free;
-  ActiveMessageHandlerRegBase *next_handler;
-};
+  protected:
+    ActiveMessageImpl *impl;
+    T *header;
+    Realm::Serialization::FixedBufferSerializer fbs;
+    static const size_t INLINE_STORAGE = 256;
+    uint64_t inline_capacity[INLINE_STORAGE / sizeof(uint64_t)];
+  };
 
-template <typename T, typename T2 = T>
-class ActiveMessageHandlerReg : public ActiveMessageHandlerRegBase {
-public:
-  ActiveMessageHandlerReg(void);
-  virtual ActiveMessageHandlerTable::MessageHandler get_handler(void) const;
+  // per-network active message implementations are mostly opaque, but a few
+  //  fields are exposed to avoid virtual function calls
+  class ActiveMessageImpl {
+  public:
+    virtual ~ActiveMessageImpl() {}
 
-  // this method does nothing, but can be called to force the instantiation
-  //  of a handler registration object (needed when things are inside templates)
-  void force_instantiation(void) {}
+    virtual void commit(size_t act_payload_size) = 0;
+    virtual void cancel() = 0;
 
-protected:
-  static void handler_wrapper(NodeID sender, const void *header,
-			      const void *payload, size_t payload_size);
-};
+    void *header_base;
+    void *payload_base;
+    size_t payload_size;
+  };
 
-class PayloadSource {
-public:
-  PayloadSource(void) { }
-  virtual ~PayloadSource(void) { }
-public:
-  virtual void copy_data(void *dest) = 0;
-  virtual void *get_contig_pointer(void) { assert(false); return 0; }
-  virtual int get_payload_mode(void) { return PAYLOAD_KEEP; }
-};
+  class ActiveMessageHandlerRegBase;
 
-class ContiguousPayload : public PayloadSource {
-public:
-  ContiguousPayload(void *_srcptr, size_t _size, int _mode);
-  virtual ~ContiguousPayload(void) { }
-  virtual void copy_data(void *dest);
-  virtual void *get_contig_pointer(void) { return srcptr; }
-  virtual int get_payload_mode(void) { return mode; }
-protected:
-  void *srcptr;
-  size_t size;
-  int mode;
-};
+  struct ActiveMessageHandlerStats {
+    size_t count, sum, sum2, minval, maxval;
 
-class TwoDPayload : public PayloadSource {
-public:
-  TwoDPayload(const void *_srcptr, size_t _line_size, size_t _line_count,
-	      ptrdiff_t _line_stride, int _mode);
-  virtual ~TwoDPayload(void) { }
-  virtual void copy_data(void *dest);
-protected:
-  const void *srcptr;
-  size_t line_size, line_count;
-  ptrdiff_t line_stride;
-  int mode;
-};
+    ActiveMessageHandlerStats(void);
+    void record(long long t_start, long long t_end);
+  };
 
-typedef std::pair<const void *, size_t> SpanListEntry;
-typedef std::vector<SpanListEntry> SpanList;
+  // singleton class that can convert message type->ID and ID->handler
+  class ActiveMessageHandlerTable {
+  public:
+    ActiveMessageHandlerTable(void);
+    ~ActiveMessageHandlerTable(void);
 
-class SpanPayload : public PayloadSource {
-public:
-  SpanPayload(const SpanList& _spans, size_t _size, int _mode);
-  virtual ~SpanPayload(void) { }
-  virtual void copy_data(void *dest);
-protected:
-  SpanList spans;
-  size_t size;
-  int mode;
-};
+    typedef unsigned short MessageID;
+    typedef void (*MessageHandler)(NodeID sender, const void *header,
+				   const void *payload, size_t payload_size);
+
+    template <typename T>
+      MessageID lookup_message_id(void) const;
+
+    const char *lookup_message_name(MessageID id);
+    void record_message_handler_call(MessageID id,
+				     long long t_start, long long t_end);
+    void report_message_handler_stats();
+
+    static void append_handler_reg(ActiveMessageHandlerRegBase *new_reg);
+
+    void construct_handler_table(void);
+
+    typedef unsigned TypeHash;
+
+    struct HandlerEntry {
+      TypeHash hash;
+      const char *name;
+      bool must_free;
+      MessageHandler handler;
+      ActiveMessageHandlerStats stats;
+    };
+
+    HandlerEntry *lookup_message_handler(MessageID id);
+
+  protected:
+    static ActiveMessageHandlerRegBase *pending_handlers;
+
+    std::vector<HandlerEntry> handlers;
+  };
+
+  extern ActiveMessageHandlerTable activemsg_handler_table;
+
+  class ActiveMessageHandlerRegBase {
+  public:
+    virtual ~ActiveMessageHandlerRegBase(void) {}
+    virtual ActiveMessageHandlerTable::MessageHandler get_handler(void) const = 0;
+
+    ActiveMessageHandlerTable::TypeHash hash;
+    const char *name;
+    bool must_free;
+    ActiveMessageHandlerRegBase *next_handler;
+  };
+
+  template <typename T, typename T2 = T>
+  class ActiveMessageHandlerReg : public ActiveMessageHandlerRegBase {
+  public:
+    ActiveMessageHandlerReg(void);
+    virtual ActiveMessageHandlerTable::MessageHandler get_handler(void) const;
+
+    // this method does nothing, but can be called to force the instantiation
+    //  of a handler registration object (needed when things are inside templates)
+    void force_instantiation(void) {}
+
+  protected:
+    static void handler_wrapper(NodeID sender, const void *header,
+				const void *payload, size_t payload_size);
+  };
+
+  namespace ThreadLocal {
+    // this flag will be true when we are running a message handler
+    extern REALM_THREAD_LOCAL bool in_message_handler;
+  };
+  
+  class IncomingMessageManager : public BackgroundWorkItem {
+  public:
+    IncomingMessageManager(int _nodes, int _dedicated_threads,
+			   Realm::CoreReservationSet& crs);
+    ~IncomingMessageManager(void);
+
+    typedef uintptr_t CallbackData;
+    typedef void (*CallbackFnptr)(NodeID, CallbackData);
+
+    // adds an incoming message to the queue
+    // returns true if the call was handled immediately (in which case the
+    //  callback, if present, will NOT be called), or false if the message
+    //  will be processed later
+    bool add_incoming_message(NodeID sender,
+			      ActiveMessageHandlerTable::MessageID msgid,
+			      const void *hdr, size_t hdr_size,
+			      int hdr_mode,
+			      const void *payload, size_t payload_size,
+			      int payload_mode,
+			      CallbackFnptr callback_fnptr,
+			      CallbackData callback_data);
+
+    void start_handler_threads(size_t stack_size);
+
+    void shutdown(void);
+
+    virtual void do_work(TimeLimit work_until);
+
+    void handler_thread_loop(void);
+
+  protected:
+    struct Message {
+      Message *next_msg;
+      NodeID sender;
+      ActiveMessageHandlerTable::HandlerEntry *handler;
+      void *hdr;
+      size_t hdr_size;
+      bool hdr_needs_free;
+      void *payload;
+      size_t payload_size;
+      bool payload_needs_free;
+      CallbackFnptr callback_fnptr;
+      CallbackData callback_data;
+    };
+
+    int get_messages(Message *& head, Message **& tail, bool wait);
+    void return_messages(int sender, Message *head, Message **tail);
+
+    int nodes, dedicated_threads, sleeper_count;
+    atomic<bool> bgwork_requested;
+    int shutdown_flag;
+    Message **heads;
+    Message ***tails;
+    bool *in_handler;
+    int *todo_list; // list of nodes with non-empty message lists
+    int todo_oldest, todo_newest;
+    Realm::Mutex mutex;
+    Realm::CondVar condvar;
+    Realm::CoreReservation *core_rsrv;
+    std::vector<Realm::Thread *> handler_threads;
+  };
 
 }; // namespace Realm
 

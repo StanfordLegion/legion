@@ -124,40 +124,6 @@ static bool is_registered(void *ptr)
   return false;
 }
 
-class IncomingMessageManager : public BackgroundWorkItem {
-public:
-  IncomingMessageManager(int _nodes, int _dedicated_threads,
-			 Realm::CoreReservationSet& crs);
-  ~IncomingMessageManager(void);
-
-  void add_incoming_message(int sender, IncomingMessage *msg);
-
-  void start_handler_threads(size_t stack_size);
-
-  void shutdown(void);
-
-  virtual void do_work(TimeLimit work_until);
-
-  void handler_thread_loop(void);
-
-protected:
-  int get_messages(IncomingMessage *& head, IncomingMessage **& tail, bool wait);
-  void return_messages(int sender, IncomingMessage *head, IncomingMessage **tail);
-
-  int nodes, dedicated_threads, sleeper_count;
-  atomic<bool> bgwork_requested;
-  int shutdown_flag;
-  IncomingMessage **heads;
-  IncomingMessage ***tails;
-  bool *in_handler;
-  int *todo_list; // list of nodes with non-empty message lists
-  int todo_oldest, todo_newest;
-  Realm::Mutex mutex;
-  Realm::CondVar condvar;
-  Realm::CoreReservation *core_rsrv;
-  std::vector<Realm::Thread *> handler_threads;
-};
-
 void init_deferred_frees(void)
 {
   deferred_free_pos = 0;
@@ -528,7 +494,9 @@ bool SrcDataPool::alloc_spill_memory(size_t size_needed, int msgtype, Lock& held
     size_t old_spill_bytes = current_spill_bytes.load();
     size_t new_spill_bytes = old_spill_bytes + size_needed;
 
-    if((max_spill_bytes != 0) && !::ThreadLocal::always_allow_spilling &&
+    if((max_spill_bytes != 0) &&
+       !::ThreadLocal::always_allow_spilling &&
+       !Realm::ThreadLocal::in_message_handler &&
        (new_spill_bytes > max_spill_bytes))
       break;
 
@@ -881,205 +849,10 @@ protected:
 static DetailedMessageTiming detailed_message_timing;
 #endif
 
-IncomingMessageManager::IncomingMessageManager(int _nodes,
-					       int _dedicated_threads,
-					       Realm::CoreReservationSet& crs)
-  : BackgroundWorkItem("activemsg handler")
-  , nodes(_nodes), dedicated_threads(_dedicated_threads)
-  , sleeper_count(0)
-  , bgwork_requested(false)
-  , shutdown_flag(0), condvar(mutex)
-{
-  heads = new IncomingMessage *[nodes];
-  tails = new IncomingMessage **[nodes];
-  in_handler = new bool[nodes];
-  for(int i = 0; i < nodes; i++) {
-    heads[i] = 0;
-    tails[i] = 0;
-    in_handler[i] = false;
-  }
-  todo_list = new int[nodes + 1];  // an extra entry to distinguish full from empty
-  todo_oldest = todo_newest = 0;
-
-  if(dedicated_threads > 0)
-    core_rsrv = new Realm::CoreReservation("AM handlers", crs,
-					   Realm::CoreReservationParameters());
-  else
-    core_rsrv = 0;
-}
-
-IncomingMessageManager::~IncomingMessageManager(void)
-{
-  delete core_rsrv;
-  delete[] heads;
-  delete[] tails;
-  delete[] in_handler;
-  delete[] todo_list;
-}
-
-void IncomingMessageManager::add_incoming_message(int sender, IncomingMessage *msg)
-{
-#ifdef DEBUG_INCOMING
-  printf("adding incoming message from %d\n", sender);
-#endif
-  mutex.lock();
-  if(heads[sender]) {
-    // tack this on to the existing list
-    assert(tails[sender]);
-    *(tails[sender]) = msg;
-    tails[sender] = &(msg->next_msg);
-  } else {
-    // this starts a list, and the node needs to be added to the todo list
-    heads[sender] = msg;
-    tails[sender] = &(msg->next_msg);
-
-    // enqueue if this sender isn't currently being handled
-    if(!in_handler[sender]) {
-      bool was_empty = todo_oldest == todo_newest;
-
-      todo_list[todo_newest] = sender;
-      todo_newest++;
-      if(todo_newest > nodes)
-	todo_newest = 0;
-      assert(todo_newest != todo_oldest);  // should never wrap around
-      if(sleeper_count > 0)
-	condvar.broadcast();  // wake up any sleepers
-
-      if(was_empty && !bgwork_requested.load()) {
-	bgwork_requested.store(true);
-	make_active();
-      }
-    }
-  }
-  mutex.unlock();
-}
-
-void IncomingMessageManager::start_handler_threads(size_t stack_size)
-{
-  handler_threads.resize(dedicated_threads);
-
-  Realm::ThreadLaunchParameters tlp;
-  tlp.set_stack_size(stack_size);
-
-  for(int i = 0; i < dedicated_threads; i++)
-    handler_threads[i] = Realm::Thread::create_kernel_thread<IncomingMessageManager, 
-							     &IncomingMessageManager::handler_thread_loop>(this,
-													   tlp,
-													   *core_rsrv);
-}
-
-void IncomingMessageManager::shutdown(void)
-{
-#ifdef DEBUG_REALM
-  shutdown_work_item();
-#endif
-
-  mutex.lock();
-  if(!shutdown_flag) {
-    shutdown_flag = true;
-    condvar.broadcast();  // wake up any sleepers
-  }
-  mutex.unlock();
-
-  for(std::vector<Realm::Thread *>::iterator it = handler_threads.begin();
-      it != handler_threads.end();
-      it++) {
-    (*it)->join();
-    delete (*it);
-  }
-  handler_threads.clear();
-}
-
-int IncomingMessageManager::get_messages(IncomingMessage *& head,
-					 IncomingMessage **& tail,
-					 bool wait)
-{
-  AutoLock<> al(mutex);
-
-  while(todo_oldest == todo_newest) {
-    // todo list is empty
-    if(shutdown_flag || !wait)
-      return -1;
-
-#ifdef DEBUG_INCOMING
-    printf("incoming message list is empty - sleeping\n");
-#endif
-    sleeper_count += 1;
-    condvar.wait();
-    sleeper_count -= 1;
-  }
-
-  // pop the oldest entry off the todo list
-  int sender = todo_list[todo_oldest];
-  todo_oldest++;
-  if(todo_oldest > nodes)
-    todo_oldest = 0;
-  head = heads[sender];
-  tail = tails[sender];
-  heads[sender] = 0;
-  tails[sender] = 0;
-  in_handler[sender] = true;
-#ifdef DEBUG_INCOMING
-  printf("handling incoming messages from %d\n", sender);
-#endif
-  // if there are other senders with messages waiting, we can request more
-  //  background workers right away
-  if((todo_oldest != todo_newest) && !bgwork_requested.load()) {
-    bgwork_requested.store(true);
-    make_active();
-  }
-
-  return sender;
-}
-
-void IncomingMessageManager::return_messages(int sender,
-					     IncomingMessage *head,
-					     IncomingMessage **tail)
-{
-  // TODO: if we're in out-of-order mode, we don't need to take the lock
-  //  if we're not actually putting anything back
-
-  AutoLock<> al(mutex);
-  in_handler[sender] = false;
-
-  bool enqueue_needed = false;
-  if(heads[sender] != 0) {
-    // list was non-empty
-    if(head != 0) {
-      // prepend on list
-      *tail = heads[sender];
-      heads[sender] = head;
-    }
-    // in in-order mode, we hadn't enqueued this sender, so do that now
-    enqueue_needed = true;
-  } else {
-    if(head != 0) {
-      heads[sender] = head;
-      tails[sender] = tail;
-      enqueue_needed = true;
-    }
-  }
-
-  if(enqueue_needed) {
-    bool was_empty = todo_oldest == todo_newest;
-
-    todo_list[todo_newest] = sender;
-    todo_newest++;
-    if(todo_newest > nodes)
-      todo_newest = 0;
-    assert(todo_newest != todo_oldest);  // should never wrap around
-    if(sleeper_count > 0)
-      condvar.broadcast();  // wake up any sleepers
-
-    if(was_empty && !bgwork_requested.load()) {
-      bgwork_requested.store(true);
-      make_active();
-    }
-  }
-}
 
 static IncomingMessageManager *incoming_message_manager = 0;
 
+#if 0
 extern void enqueue_incoming(NodeID sender, IncomingMessage *msg)
 {
 #ifdef ACTIVE_MESSAGE_TRACE
@@ -1092,6 +865,7 @@ extern void enqueue_incoming(NodeID sender, IncomingMessage *msg)
   assert(incoming_message_manager != 0);
   incoming_message_manager->add_incoming_message(sender, msg);
 }
+#endif
 
 class ActiveMessageEndpoint {
 public:
@@ -2553,103 +2327,7 @@ static void handle_channel_close(gasnet_token_t token,
   endpoint_manager->handle_channel_close(src, count_lo, count_hi);
 }
 
-void IncomingMessageManager::do_work(TimeLimit work_until)
-{
-  // now that we've been called, our previous request for bgwork has been
-  //  granted and we will need another one if/when more work comes
-  // it's ok if this races with other threads that are adding/getting messages
-  //  because we'll do the request ourselves below in that case
-  bgwork_requested.store(false);
-
-  IncomingMessage *current_msg = 0;
-  IncomingMessage **current_tail = 0;
-  int sender = get_messages(current_msg, current_tail, false /*!wait*/);
-
-  // we're here because there was work to do, so an empty list is bad unless
-  //  there are also dedicated threads that might have grabbed it
-  if(sender == -1) {
-    assert(dedicated_threads > 0);
-    return;
-  }
-
-  // messages enqueued in response to incoming messages can never be stalled
-  ::ThreadLocal::always_allow_spilling = true;
-
-  while(current_msg) {
-    IncomingMessage *next_msg = current_msg->next_msg;
-#ifdef DETAILED_MESSAGE_TIMING
-    int timing_idx = detailed_message_timing.get_next_index(); // grab this while we still hold the lock
-    CurrentTime start_time;
-#endif
-    current_msg->run_handler();
-    endpoint_manager->count_handled_message(current_msg->get_peer());
-#ifdef DETAILED_MESSAGE_TIMING
-    detailed_message_timing.record(timing_idx,
-				   current_msg->get_peer(),
-				   current_msg->get_msgid(),
-				   -4, // 0xc - flagged as an incoming message,
-				   current_msg->get_msgsize(),
-				   count++, // how many messages we handle in a batch
-				   start_time, CurrentTime());
-#endif
-    delete current_msg;
-    current_msg = next_msg;
-
-    // do we need to stop early?
-    if(current_msg && work_until.is_expired())
-      break;
-  }
-
-  // messages enqueued in response to incoming messages can never be stalled
-  ::ThreadLocal::always_allow_spilling = false;
-
-  // put back whatever we had left, if anything - this'll requeue us if needed
-  return_messages(sender, current_msg, current_tail);
-}
-
-void IncomingMessageManager::handler_thread_loop(void)
-{
-  // messages enqueued in response to incoming messages can never be stalled
-  ::ThreadLocal::always_allow_spilling = true;
-
-  while (true) {
-    IncomingMessage *current_msg = 0;
-    IncomingMessage **current_tail = 0;
-    int sender = get_messages(current_msg, current_tail, true /*wait*/);
-    if(sender == -1) {
-#ifdef DEBUG_INCOMING
-      printf("received empty list - assuming shutdown!\n");
-#endif
-      break;
-    }
-#ifdef DETAILED_MESSAGE_TIMING
-    int count = 0;
-#endif
-    while(current_msg) {
-      IncomingMessage *next_msg = current_msg->next_msg;
-#ifdef DETAILED_MESSAGE_TIMING
-      int timing_idx = detailed_message_timing.get_next_index(); // grab this while we still hold the lock
-      CurrentTime start_time;
-#endif
-      current_msg->run_handler();
-      endpoint_manager->count_handled_message(current_msg->get_peer());
-#ifdef DETAILED_MESSAGE_TIMING
-      detailed_message_timing.record(timing_idx, 
-				     current_msg->get_peer(),
-				     current_msg->get_msgid(),
-				     -4, // 0xc - flagged as an incoming message,
-				     current_msg->get_msgsize(),
-				     count++, // how many messages we handle in a batch
-				     start_time, CurrentTime());
-#endif
-      delete current_msg;
-      current_msg = next_msg;
-    }
-    // we always handle all the messages, but still indicate we're done
-    return_messages(sender, 0, 0);
-  }
-}
-
+#if 0
 class IncomingMessageNew : public IncomingMessage {
  public:
   IncomingMessageNew(NodeID _src, void *_buf, size_t _nbytes,
@@ -2717,6 +2395,23 @@ size_t IncomingMessageNew::get_msgsize(void)
 {
   return nbytes;
 }
+#endif
+
+typedef union {
+  struct {
+    BaseMedium base;
+    unsigned short msgid;
+    unsigned short sender;
+    unsigned payload_len;
+  } hdr;
+  gasnet_handlerarg_t args[16];
+} MessageHeader;
+
+static void incoming_message_handled(NodeID sender, uintptr_t buf)
+{
+  endpoint_manager->count_handled_message(sender);
+  handle_long_msgptr(sender, reinterpret_cast<const void *>(buf));
+}
 
 static void handle_new_activemsg(gasnet_token_t token,
 				 void *buf, size_t nbytes,
@@ -2742,29 +2437,48 @@ static void handle_new_activemsg(gasnet_token_t token,
   if(handle_now) {
     unsigned short msgid = arg4 & 0xffff;
 
-    ActiveMessageHandlerTable::MessageHandler handler = activemsg_handler_table.lookup_message_handler(msgid);
+    MessageHeader header;
+    header.args[0] = arg0;
+    header.args[1] = arg1;
+    header.args[2] = arg2;
+    header.args[3] = arg3;
+    header.args[4] = arg4;
+    header.args[5] = arg5;
+    header.args[6] = arg6;
+    header.args[7] = arg7;
+    header.args[8] = arg8;
+    header.args[9] = arg9;
+    header.args[10] = arg10;
+    header.args[11] = arg11;
+    header.args[12] = arg12;
+    header.args[13] = arg13;
+    header.args[14] = arg14;
+    header.args[15] = arg15;
 
-    IncomingMessageNew *imsg = new IncomingMessageNew(src, buf, nbytes, handler);
-    imsg->header.args[0] = arg0;
-    imsg->header.args[1] = arg1;
-    imsg->header.args[2] = arg2;
-    imsg->header.args[3] = arg3;
-    imsg->header.args[4] = arg4;
-    imsg->header.args[5] = arg5;
-    imsg->header.args[6] = arg6;
-    imsg->header.args[7] = arg7;
-    imsg->header.args[8] = arg8;
-    imsg->header.args[9] = arg9;
-    imsg->header.args[10] = arg10;
-    imsg->header.args[11] = arg11;
-    imsg->header.args[12] = arg12;
-    imsg->header.args[13] = arg13;
-    imsg->header.args[14] = arg14;
-    imsg->header.args[15] = arg15;
     /* save a copy of the srcptr - imsg may be freed any time*/
     /*  after we enqueue it */
-    uint64_t srcptr = reinterpret_cast<uintptr_t>(imsg->header.hdr.base.srcptr);
-    enqueue_incoming(src, imsg);
+    uint64_t srcptr = reinterpret_cast<uintptr_t>(header.hdr.base.srcptr);
+#ifdef ACTIVE_MESSAGE_TRACE
+    log_amsg_trace.info("Active Message Received: %d %d %ld",
+			msg->get_msgid(), msg->get_peer(), msg->get_msgsize());
+#endif
+#ifdef DEBUG_AMREQUESTS
+    printf("%d: incoming(%d, %p)\n", gasnet_mynode(), src, msg);
+#endif
+    assert(incoming_message_manager != 0);
+    bool handled = 
+      incoming_message_manager->add_incoming_message(src, msgid,
+						     &header.args[6], 10*4,
+						     PAYLOAD_COPY,
+						     buf, nbytes,
+						     PAYLOAD_KEEP,
+						     incoming_message_handled,
+						     reinterpret_cast<uintptr_t>(buf));
+    if(handled) {
+      // we need to call the callback ourselves
+      incoming_message_handled(src, reinterpret_cast<uintptr_t>(buf));
+    }
+
     /* we can (and should) release the srcptr immediately */
     if(srcptr) {
       assert(nbytes > 0);
@@ -2797,9 +2511,10 @@ void init_endpoints(size_t gasnet_mem_size,
 		    size_t registered_mem_size,
 		    size_t registered_ib_mem_size,
 		    CoreReservationSet& crs,
-		    int num_worker_threads, int num_handler_threads,
+		    int num_worker_threads,
 		    BackgroundWorkManager& bgwork,
-		    bool poll_use_bgwork, bool handler_use_bgwork)
+		    bool poll_use_bgwork,
+		    IncomingMessageManager *message_manager)
 {
   size_t total_lmb_size = (gasnet_nodes() * 
 			   num_lmbs *
@@ -2896,11 +2611,7 @@ void init_endpoints(size_t gasnet_mem_size,
   if(poll_use_bgwork)
     endpoint_manager->add_to_manager(&bgwork);
 
-  incoming_message_manager = new IncomingMessageManager(gasnet_nodes(),
-							num_handler_threads,
-							crs);
-  if(handler_use_bgwork)
-    incoming_message_manager->add_to_manager(&bgwork);
+  incoming_message_manager = message_manager;
 
   init_deferred_frees();
 }
@@ -3036,10 +2747,7 @@ void stop_activemsg_threads(void)
 {
   endpoint_manager->stop_threads();
 	
-  incoming_message_manager->shutdown();
-
   delete endpoint_manager;
-  delete incoming_message_manager;
 
 #ifdef DETAILED_MESSAGE_TIMING
   // dump timing data from all the endpoints to a file
@@ -3178,5 +2886,69 @@ extern void record_message(NodeID source, bool sent_reply)
 #ifdef TRACE_MESSAGES
   endpoint_manager->record_message(source, sent_reply);
 #endif
+}
+
+////////////////////////////////////////////////////////////////////////
+//
+// class ContiguousPayload
+//
+
+ContiguousPayload::ContiguousPayload(void *_srcptr, size_t _size, int _mode)
+  : srcptr(_srcptr), size(_size), mode(_mode)
+{}
+
+void ContiguousPayload::copy_data(void *dest)
+{
+  //  log_sdp.info("contig copy %p <- %p (%zd bytes)", dest, srcptr, size);
+  memcpy(dest, srcptr, size);
+  if(mode == PAYLOAD_FREE)
+    free(srcptr);
+}
+
+////////////////////////////////////////////////////////////////////////
+//
+// class TwoDPayload
+//
+
+TwoDPayload::TwoDPayload(const void *_srcptr, size_t _line_size,
+			 size_t _line_count,
+			 ptrdiff_t _line_stride, int _mode)
+  : srcptr(_srcptr), line_size(_line_size), line_count(_line_count),
+    line_stride(_line_stride), mode(_mode)
+{}
+
+void TwoDPayload::copy_data(void *dest)
+{
+  char *dst_c = (char *)dest;
+  const char *src_c = (const char *)srcptr;
+
+  for(size_t i = 0; i < line_count; i++) {
+    memcpy(dst_c, src_c, line_size);
+    dst_c += line_size;
+    src_c += line_stride;
+  }
+}
+
+////////////////////////////////////////////////////////////////////////
+//
+// class SpanPayload
+//
+
+SpanPayload::SpanPayload(const SpanList&_spans, size_t _size, int _mode)
+  : spans(_spans), size(_size), mode(_mode)
+{}
+
+void SpanPayload::copy_data(void *dest)
+{
+  char *dst_c = (char *)dest;
+  size_t bytes_left = size;
+  for(SpanList::const_iterator it = spans.begin(); it != spans.end(); it++) {
+    assert(it->second <= (size_t)bytes_left);
+    memcpy(dst_c, it->first, it->second);
+    dst_c += it->second;
+    bytes_left -= it->second;
+    assert(bytes_left >= 0);
+  }
+  assert(bytes_left == 0);
 }
 

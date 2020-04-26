@@ -1825,9 +1825,8 @@ namespace Realm {
 	    amsg->offset = offset;
 	    amsg->sequence_id = sequence_id;
 	    if (payload_size) {
-	      PayloadSource *payload_src = new TwoDPayload(pos, datalen, max_lines_per_xfer,
-							   stride, PAYLOAD_COPY);
-	      payload_src->copy_data(amsg.payload_ptr(payload_size));
+	      amsg.add_payload(pos, datalen, max_lines_per_xfer, stride,
+			       (make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP));
 	    }
 	    amsg.commit();
 	    offset += datalen * max_lines_per_xfer;
@@ -1843,9 +1842,8 @@ namespace Realm {
 	  amsg->offset = offset;
 	  amsg->sequence_id = sequence_id;
 	  if (payload_size) {
-	    PayloadSource *payload_src = new TwoDPayload(pos, datalen,lines,
-							 stride, PAYLOAD_COPY);
-	    payload_src->copy_data(amsg.payload_ptr(payload_size));
+	    amsg.add_payload(pos, datalen, lines, stride,
+			     (make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP));
 	  }
 	  amsg.commit();
 	  return count;
@@ -1861,15 +1859,15 @@ namespace Realm {
 	amsg->offset = offset;
 	amsg->sequence_id = sequence_id;
 	if (payload_size) {
-	  PayloadSource *payload_src = new TwoDPayload(data, datalen,lines,
-						       stride,PAYLOAD_COPY);
-	  payload_src->copy_data(amsg.payload_ptr(payload_size));
+	  amsg.add_payload(data, datalen, lines, stride,
+			   (make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP));
 	}
 	amsg.commit();
 	return 1;
       }
     }
 
+#if 0
     unsigned do_remote_write(Memory mem, off_t offset,
 			     const SpanList &spans, size_t datalen,
 			     unsigned sequence_id,
@@ -1976,6 +1974,7 @@ namespace Realm {
 	return 1;
       }
     }
+#endif
 
     unsigned do_remote_serdez(Memory mem, off_t offset,
                              CustomSerdezID serdez_id,
@@ -2082,9 +2081,8 @@ namespace Realm {
 	    size_t payload_size = rhs_size*max_elmts_per_xfer;
 	    ActiveMessage<RemoteReduceMessage> amsg(ID(mem).memory_owner_node(), payload_size);
 	    if (payload_size) {
-	      PayloadSource *payload_src = new TwoDPayload(pos, rhs_size,max_elmts_per_xfer,
-							   src_stride, PAYLOAD_COPY);
-	      payload_src->copy_data(amsg.payload_ptr(payload_size));
+	      amsg.add_payload(pos, rhs_size, max_elmts_per_xfer, src_stride,
+			       (make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP));
 	    }
 	    amsg->mem = mem;
 	    amsg->offset = offset;
@@ -2107,9 +2105,8 @@ namespace Realm {
 	  amsg1->redop_id = red_fold ? -redop_id : redop_id;
 	  amsg1->sequence_id = sequence_id;
 	  if (payload_size) {
-	    PayloadSource *payload_src = new TwoDPayload(pos, rhs_size,count,
-							 src_stride, PAYLOAD_COPY);
-	    payload_src->copy_data(amsg1.payload_ptr(payload_size));
+	    amsg1.add_payload(pos, rhs_size, count, src_stride,
+			      (make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP));
 	  }
 	  amsg1.commit();
 	  return xfers;
@@ -2126,9 +2123,8 @@ namespace Realm {
 	amsg1->redop_id = red_fold ? -redop_id : redop_id;
 	amsg1->sequence_id = sequence_id;
 	if (payload_size) {
-	  PayloadSource *payload_src = new TwoDPayload(data, rhs_size,count,
-						       src_stride, PAYLOAD_COPY);
-	  payload_src->copy_data(amsg1.payload_ptr(payload_size));
+	  amsg1.add_payload(data, rhs_size, count, src_stride,
+			    (make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP));
 	}
 	amsg1.commit();
 	return 1;

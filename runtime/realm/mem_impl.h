@@ -450,11 +450,12 @@ namespace Realm {
 				    off_t stride, size_t lines,
 				    unsigned sequence_id,
 				    bool make_copy = false);
-    
+#if 0
     extern unsigned do_remote_write(Memory mem, off_t offset,
 				    const SpanList& spans, size_t datalen,
 				    unsigned sequence_id,
 				    bool make_copy = false);
+#endif
     extern unsigned do_remote_serdez(Memory mem, off_t offset,
                                      CustomSerdezID serdez_id,
                                      const void *data, size_t datalen,

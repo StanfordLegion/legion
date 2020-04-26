@@ -825,6 +825,7 @@ namespace Realm {
 	shutdown_initiated(false),
 	shutdown_in_progress(false),
 	core_map(0), core_reservations(0),
+	message_manager(0),
 	sampling_profiler(true /*system default*/),
 	num_local_memories(0), num_local_ib_memories(0),
 	num_local_processors(0),
@@ -1101,6 +1102,8 @@ namespace Realm {
       //  a reasonable cutoff for switching to twolevel nodeset bitmasks
       //  (measured on an E5-2698 v4)
       int bitset_twolevel = -1024; // i.e. yes if > 1024 nodes
+      int active_msg_handler_threads = 0; // default is none (use bgwork)
+      bool active_msg_handler_bgwork = true;
 
       CommandLineParser cp;
       cp.add_option_int_units("-ll:rsize", reg_mem_size, 'm')
@@ -1133,6 +1136,8 @@ namespace Realm {
       cp.add_option_int("-ll:machine_query_cache", Config::use_machine_query_cache);
       cp.add_option_int("-ll:defalloc", Config::deferred_instance_allocation);
       cp.add_option_int("-ll:amprofile", Config::profile_activemsg_handlers);
+      cp.add_option_int("-ll:ahandlers", active_msg_handler_threads);
+      cp.add_option_int("-ll:handler_bgwork", active_msg_handler_bgwork);
 
       bool cmdline_ok = cp.parse_command_line(cmdline);
 
@@ -1260,6 +1265,15 @@ namespace Realm {
 
       // construct active message handler table once before any network(s) init
       activemsg_handler_table.construct_handler_table();
+
+      // and also our incoming active message manager
+      message_manager = new IncomingMessageManager(Network::max_node_id + 1,
+						   active_msg_handler_threads,
+						   *core_reservations);
+      if(active_msg_handler_bgwork)
+	message_manager->add_to_manager(&bgwork);
+      else
+	assert(active_msg_handler_threads > 0);
 
       // attach to the network
       for(std::vector<NetworkModule *>::const_iterator it = network_modules.begin();
@@ -2144,6 +2158,10 @@ namespace Realm {
 	(*it)->detach(this, network_segments);
 
       bgwork.stop_dedicated_workers();
+
+      // tear down the active message manager
+      message_manager->shutdown();
+      delete message_manager;
 
       sampling_profiler.shutdown();
 

@@ -18,6 +18,7 @@
 
 static MPI_Win g_am_win = MPI_WIN_NULL;
 static void *g_am_base = NULL;
+static Realm::IncomingMessageManager *g_message_manager = NULL;
 static __thread int thread_id = 0;
 static __thread int am_seq = 0;
 static Realm::atomic<unsigned int> num_threads(0);
@@ -89,10 +90,12 @@ void AM_Finalize()
     }
 }
 
-void AM_init_long_messages(MPI_Win win, void *am_base)
+void AM_init_long_messages(MPI_Win win, void *am_base,
+			   Realm::IncomingMessageManager *message_manager)
 {
     g_am_win = win;
     g_am_base = am_base;
+    g_message_manager = message_manager;
 }
 
 void AMPoll()
@@ -113,21 +116,23 @@ void AMPoll()
 
         char *header;
         char *payload;
-        int payload_type = 0;
+	int payload_mode = PAYLOAD_NONE;
         if (msg->type == 0) {
             header = msg->stuff;
             payload = msg->stuff + msg->header_size;
+	    payload_mode = PAYLOAD_COPY;
         } else if (msg->type == 1) {
             header = msg->stuff + 4;
 
             int msg_tag = *(int32_t *)(msg->stuff);
             payload = (char *) malloc(msg->payload_size);
-            payload_type = 1;    // need_free;
+	    payload_mode = PAYLOAD_FREE;
             CHECK_MPI( MPI_Recv(payload, msg->payload_size, MPI_BYTE, tn_src, msg_tag, comm_medium, &status) );
         } else if (msg->type == 2) {
             int offset = *(int32_t *)(msg->stuff);
             header = msg->stuff + 4;
             payload = (char *) g_am_base + offset;
+	    payload_mode = PAYLOAD_KEEP;  // already in dest memory
         } else {
             assert(0 && "invalid message type");
             header = 0;
@@ -136,13 +141,14 @@ void AMPoll()
         }
 
         if (msg->msgid != 0x7fff) {
-            Realm::ActiveMessageHandlerTable::MessageHandler handler = Realm::activemsg_handler_table.lookup_message_handler(msg->msgid);
-            (*handler) (tn_src, header, payload, msg->payload_size);
+	    g_message_manager->add_incoming_message(tn_src, msg->msgid,
+						    header, msg->header_size,
+						    PAYLOAD_COPY,
+						    payload, msg->payload_size,
+						    payload_mode,
+						    0, 0);
         }
 
-        if (payload_type == 1) {
-            free(payload);
-        }
         CHECK_MPI( MPI_Irecv(buf_recv_list[i_recv_list], 1024, MPI_CHAR, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &req_recv_list[i_recv_list]) );
         i_recv_list = (i_recv_list + 1) % n_am_mult_recv;
         buf_recv = buf_recv_list[i_recv_list];

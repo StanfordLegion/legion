@@ -44,6 +44,7 @@
 #include "realm/network.h"
 
 #include "realm/bgwork.h"
+#include "realm/activemsg.h"
 
 namespace Realm {
 
@@ -334,6 +335,7 @@ namespace Realm {
       CoreMap *core_map;
       CoreReservationSet *core_reservations;
       BackgroundWorkManager bgwork;
+      IncomingMessageManager *message_manager;
 
       OperationTable optable;
 

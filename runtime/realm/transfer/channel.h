@@ -1148,9 +1148,7 @@ namespace Realm {
 	amsg->span_start = span_start;
 	amsg->span_size = span_size;
 	amsg->pre_bytes_total = pre_bytes_total;
-        //TODO: need to ask Sean what payload mode we should use
-	PayloadSource *payload_src = new TwoDPayload(src_buf, nbytes, nlines, src_str, PAYLOAD_KEEP);
-	payload_src->copy_data(amsg.payload_ptr(payload_size));
+	amsg.add_payload(src_buf, nbytes, nlines, src_str, PAYLOAD_KEEP);
 	amsg.commit();
       }
     };
