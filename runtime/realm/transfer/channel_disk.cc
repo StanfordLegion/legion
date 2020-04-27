@@ -240,11 +240,11 @@ namespace Realm {
 	if(_kind == XFER_FILE_READ)
 	  add_path(Memory::FILE_MEM, false,
 		   cpu_mem_kinds[i], false,
-		   bw, latency, false, false);
+		   bw, latency, false, false, XFER_FILE_READ);
 	else
 	  add_path(cpu_mem_kinds[i], false,
 		   Memory::FILE_MEM, false,
-		   bw, latency, false, false);
+		   bw, latency, false, false, XFER_FILE_WRITE);
     }
 
     FileChannel::~FileChannel()
@@ -295,11 +295,11 @@ namespace Realm {
 	if(_kind == XFER_DISK_READ)
 	  add_path(Memory::DISK_MEM, false,
 		   cpu_mem_kinds[i], false,
-		   bw, latency, false, false);
+		   bw, latency, false, false, XFER_DISK_READ);
 	else
 	  add_path(cpu_mem_kinds[i], false,
 		   Memory::DISK_MEM, false,
-		   bw, latency, false, false);
+		   bw, latency, false, false, XFER_DISK_WRITE);
     }
 
     DiskChannel::~DiskChannel()

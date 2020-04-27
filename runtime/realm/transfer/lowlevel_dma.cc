@@ -762,9 +762,9 @@ namespace Realm {
       return SimpleXferDesFactory<GPUXferDes>::get_singleton();
 #endif
 #ifdef REALM_USE_HDF5
-    case XFER_HDF_READ:
-    case XFER_HDF_WRITE:
-      return SimpleXferDesFactory<HDFXferDes>::get_singleton();
+    case XFER_HDF5_READ:
+    case XFER_HDF5_WRITE:
+      return SimpleXferDesFactory<HDF5XferDes>::get_singleton();
 #endif
     default:
       assert(0);
@@ -1651,7 +1651,7 @@ namespace Realm {
 	    // no serdez support
 	    if((src_serdez_id != 0) || (dst_serdez_id != 0))
 	      return XFER_NONE;
-            return XFER_HDF_WRITE;
+            return XFER_HDF5_WRITE;
 	  }
           else if (dst_ll_kind == Memory::FILE_MEM) {
 	    // no serdez support
@@ -1710,7 +1710,7 @@ namespace Realm {
 	  if((src_serdez_id != 0) || (dst_serdez_id != 0))
 	    return XFER_NONE;
           if (is_cpu_mem(dst_ll_kind))
-            return XFER_HDF_READ;
+            return XFER_HDF5_READ;
           else
             return XFER_NONE;
         default:
@@ -1748,8 +1748,7 @@ namespace Realm {
 	if((*it)->supports_path(src_mem, dst_mem,
 				src_serdez_id, dst_serdez_id,
 				redop_id,
-				&bw, &latency)) {
-	  kind = (*it)->kind;
+				&kind, &bw, &latency)) {
 	  break;
 	}
       }
@@ -1765,8 +1764,7 @@ namespace Realm {
 	  if((*it)->supports_path(src_mem, dst_mem,
 				  src_serdez_id, dst_serdez_id,
 				  redop_id,
-				  &bw, &latency)) {
-	    kind = (*it)->kind;
+				  &kind, &bw, &latency)) {
 	    break;
 	  }
 	}
