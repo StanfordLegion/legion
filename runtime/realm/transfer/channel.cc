@@ -1957,6 +1957,7 @@ namespace Realm {
         for (int i = 0; i < max_nr; i++) {
           GPURequest* gpu_req = new GPURequest;
           gpu_req->xd = this;
+	  gpu_req->event.req = gpu_req;
           enqueue_request(gpu_req);
         }
       }
@@ -1969,7 +1970,6 @@ namespace Realm {
 			  TransferIterator::PLANES_OK);
         long new_nr = default_get_requests(requests, nr, flags);
         for (long i = 0; i < new_nr; i++) {
-          reqs[i]->event.reset();
           switch (kind) {
             case XFER_GPU_TO_FB:
             {
@@ -2008,6 +2008,23 @@ namespace Realm {
           }
         }
         return new_nr;
+      }
+
+      bool GPUXferDes::progress_xd(GPUChannel *channel,
+				   TimeLimit work_until)
+      {
+	Request *rq;
+	bool did_work = false;
+	do {
+	  long count = get_requests(&rq, 1);
+	  if(count > 0) {
+	    channel->submit(&rq, count);
+	    did_work = true;
+	  } else
+	    break;
+	} while(!work_until.is_expired());
+
+	return did_work;
       }
 
       void GPUXferDes::notify_request_read_done(Request* req)
@@ -3180,9 +3197,11 @@ namespace Realm {
       }
 
 #ifdef REALM_USE_CUDA
-      GPUChannel::GPUChannel(Cuda::GPU* _src_gpu, long max_nr, XferDesKind _kind)
-	: Channel(_kind)
-	, capacity(max_nr)
+      GPUChannel::GPUChannel(Cuda::GPU* _src_gpu, XferDesKind _kind,
+			     BackgroundWorkManager *bgwork)
+	: SingleXDQChannel<GPUChannel,GPUXferDes>(bgwork,
+						  _kind,
+						  stringbuilder() << "cuda channel (gpu=" << _src_gpu->info->index << " kind=" << (int)_kind << ")")
       {
         src_gpu = _src_gpu;
 
@@ -3362,37 +3381,15 @@ namespace Realm {
 	      assert(0);
 	  }
 
-          pending_copies.push_back(req);
+          //pending_copies.push_back(req);
         }
         return nr;
       }
 
-      void GPUChannel::pull()
+      void GPUCompletionEvent::request_completed(void)
       {
-        switch (kind) {
-          case XFER_GPU_TO_FB:
-          case XFER_GPU_FROM_FB:
-          case XFER_GPU_IN_FB:
-          case XFER_GPU_PEER_FB:
-            while (!pending_copies.empty()) {
-              GPURequest* req = (GPURequest*)pending_copies.front();
-              if (req->event.has_triggered()) {
-                req->xd->notify_request_read_done(req);
-                req->xd->notify_request_write_done(req);
-                pending_copies.pop_front();
-              }
-              else
-                break;
-            }
-            break;
-          default:
-            assert(0);
-        }
-      }
-
-      long GPUChannel::available()
-      {
-        return capacity.load() - pending_copies.size();
+	req->xd->notify_request_read_done(req);
+	req->xd->notify_request_write_done(req);
       }
 #endif
 
@@ -3611,20 +3608,32 @@ namespace Realm {
         return remote_write_channel;
       }
 #ifdef REALM_USE_CUDA
-      GPUChannel* ChannelManager::create_gpu_to_fb_channel(long max_nr, Cuda::GPU* src_gpu) {
-        gpu_to_fb_channels[src_gpu] = new GPUChannel(src_gpu, max_nr, XFER_GPU_TO_FB);
+      GPUChannel* ChannelManager::create_gpu_to_fb_channel(Cuda::GPU* src_gpu,
+							   BackgroundWorkManager *bgwork) {
+        gpu_to_fb_channels[src_gpu] = new GPUChannel(src_gpu,
+						     XFER_GPU_TO_FB,
+						     bgwork);
         return gpu_to_fb_channels[src_gpu];
       }
-      GPUChannel* ChannelManager::create_gpu_from_fb_channel(long max_nr, Cuda::GPU* src_gpu) {
-        gpu_from_fb_channels[src_gpu] = new GPUChannel(src_gpu, max_nr, XFER_GPU_FROM_FB);
+      GPUChannel* ChannelManager::create_gpu_from_fb_channel(Cuda::GPU* src_gpu,
+							     BackgroundWorkManager *bgwork) {
+        gpu_from_fb_channels[src_gpu] = new GPUChannel(src_gpu,
+						       XFER_GPU_FROM_FB,
+						       bgwork);
         return gpu_from_fb_channels[src_gpu];
       }
-      GPUChannel* ChannelManager::create_gpu_in_fb_channel(long max_nr, Cuda::GPU* src_gpu) {
-        gpu_in_fb_channels[src_gpu] = new GPUChannel(src_gpu, max_nr, XFER_GPU_IN_FB);
+      GPUChannel* ChannelManager::create_gpu_in_fb_channel(Cuda::GPU* src_gpu,
+							   BackgroundWorkManager *bgwork) {
+        gpu_in_fb_channels[src_gpu] = new GPUChannel(src_gpu,
+						     XFER_GPU_IN_FB,
+						     bgwork);
         return gpu_in_fb_channels[src_gpu];
       }
-      GPUChannel* ChannelManager::create_gpu_peer_fb_channel(long max_nr, Cuda::GPU* src_gpu) {
-        gpu_peer_fb_channels[src_gpu] = new GPUChannel(src_gpu, max_nr, XFER_GPU_PEER_FB);
+      GPUChannel* ChannelManager::create_gpu_peer_fb_channel(Cuda::GPU* src_gpu,
+							     BackgroundWorkManager *bgwork) {
+        gpu_peer_fb_channels[src_gpu] = new GPUChannel(src_gpu,
+						       XFER_GPU_PEER_FB,
+						       bgwork);
         return gpu_peer_fb_channels[src_gpu];
       }
 #endif
@@ -3827,14 +3836,14 @@ namespace Realm {
 #ifdef REALM_USE_CUDA
         std::vector<Cuda::GPU*>::iterator it;
         for (it = dma_all_gpus.begin(); it != dma_all_gpus.end(); it ++) {
-	  GPUChannel *gpu_to_fb_channel = channel_manager->create_gpu_to_fb_channel(max_nr, *it);
-	  GPUChannel *gpu_from_fb_channel = channel_manager->create_gpu_from_fb_channel(max_nr, *it);
-	  GPUChannel *gpu_in_fb_channel = channel_manager->create_gpu_in_fb_channel(max_nr, *it);
-	  GPUChannel *gpu_peer_fb_channel = channel_manager->create_gpu_peer_fb_channel(max_nr, *it);
-          channels.push_back(gpu_to_fb_channel);
-          channels.push_back(gpu_from_fb_channel);
-          channels.push_back(gpu_in_fb_channel);
-          channels.push_back(gpu_peer_fb_channel);
+	  GPUChannel *gpu_to_fb_channel = channel_manager->create_gpu_to_fb_channel(*it, bgwork);
+	  GPUChannel *gpu_from_fb_channel = channel_manager->create_gpu_from_fb_channel(*it, bgwork);
+	  GPUChannel *gpu_in_fb_channel = channel_manager->create_gpu_in_fb_channel(*it, bgwork);
+	  GPUChannel *gpu_peer_fb_channel = channel_manager->create_gpu_peer_fb_channel(*it, bgwork);
+          //channels.push_back(gpu_to_fb_channel);
+          //channels.push_back(gpu_from_fb_channel);
+          //channels.push_back(gpu_in_fb_channel);
+          //channels.push_back(gpu_peer_fb_channel);
           r->add_dma_channel(gpu_to_fb_channel);
           r->add_dma_channel(gpu_from_fb_channel);
           r->add_dma_channel(gpu_in_fb_channel);

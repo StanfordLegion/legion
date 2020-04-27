@@ -234,14 +234,13 @@ namespace Realm {
     };
 
 #ifdef REALM_USE_CUDA
+    class GPURequest;
+
     class GPUCompletionEvent : public Cuda::GPUCompletionNotification {
     public:
-      GPUCompletionEvent(void) {triggered = false;}
-      void request_completed(void) {triggered = true;}
-      void reset(void) {triggered = false;}
-      bool has_triggered(void) {return triggered;}
-    private:
-      bool triggered;
+      void request_completed(void);
+
+      GPURequest *req;
     };
 
     class GPURequest : public Request {
@@ -542,6 +541,8 @@ namespace Realm {
     };
 
 #ifdef REALM_USE_CUDA
+    class GPUChannel;
+
     class GPUXferDes : public XferDes {
     public:
       GPUXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
@@ -564,6 +565,8 @@ namespace Realm {
       void notify_request_read_done(Request* req);
       void notify_request_write_done(Request* req);
       void flush();
+
+      bool progress_xd(GPUChannel *channel, TimeLimit work_until);
 
     private:
       //GPURequest* gpu_reqs;
@@ -869,17 +872,20 @@ namespace Realm {
     };
    
 #ifdef REALM_USE_CUDA
-    class GPUChannel : public Channel {
+    class GPUChannel : public SingleXDQChannel<GPUChannel, GPUXferDes> {
     public:
-      GPUChannel(Cuda::GPU* _src_gpu, long max_nr, XferDesKind _kind);
+      GPUChannel(Cuda::GPU* _src_gpu, XferDesKind _kind,
+		 BackgroundWorkManager *bgwork);
       ~GPUChannel();
+
+      // multiple concurrent cuda copies ok
+      static const bool is_ordered = false;
+
       long submit(Request** requests, long nr);
-      void pull();
-      long available();
+
     private:
       Cuda::GPU* src_gpu;
-      atomic<long> capacity;
-      std::deque<Request*> pending_copies;
+      //std::deque<Request*> pending_copies;
     };
 #endif
 
@@ -937,10 +943,14 @@ namespace Realm {
       FileChannel* create_file_write_channel(long max_nr);
       AddressSplitChannel *create_addr_split_channel();
 #ifdef REALM_USE_CUDA
-      GPUChannel* create_gpu_to_fb_channel(long max_nr, Cuda::GPU* src_gpu);
-      GPUChannel* create_gpu_from_fb_channel(long max_nr, Cuda::GPU* src_gpu);
-      GPUChannel* create_gpu_in_fb_channel(long max_nr, Cuda::GPU* src_gpu);
-      GPUChannel* create_gpu_peer_fb_channel(long max_nr, Cuda::GPU* src_gpu);
+      GPUChannel* create_gpu_to_fb_channel(Cuda::GPU* src_gpu,
+					   BackgroundWorkManager *bgwork);
+      GPUChannel* create_gpu_from_fb_channel(Cuda::GPU* src_gpu,
+					     BackgroundWorkManager *bgwork);
+      GPUChannel* create_gpu_in_fb_channel(Cuda::GPU* src_gpu,
+					   BackgroundWorkManager *bgwork);
+      GPUChannel* create_gpu_peer_fb_channel(Cuda::GPU* src_gpu,
+					     BackgroundWorkManager *bgwork);
 #endif
 #ifdef REALM_USE_HDF5
       HDF5Channel* create_hdf5_channel(BackgroundWorkManager *bgwork);
