@@ -2949,16 +2949,18 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
   end
 
   -- Hack: Rooting any ispaces present manually
-  for _, symbol in ipairs(free_vars) do
-    local symbol_type = symbol:gettype()
-    if cx:has_ispace(symbol_type) then
-      local ispace = cx:ispace(symbol_type)
-      local bounds_actions
-      bounds_actions, ispace.domain, ispace.bounds = index_space_bounds(cx, ispace.index_space, symbol_type)
-       free_vars_setup:insert(quote 
-         var [ispace.index_space] = [symbol:getsymbol()].impl
-         [bounds_actions];
-       end)
+  if free_vars then
+    for _, symbol in ipairs(free_vars) do
+      local symbol_type = symbol:gettype()
+      if cx:has_ispace(symbol_type) then
+        local ispace = cx:ispace(symbol_type)
+        local bounds_actions
+        bounds_actions, ispace.domain, ispace.bounds = index_space_bounds(cx, ispace.index_space, symbol_type)
+         free_vars_setup:insert(quote 
+           var [ispace.index_space] = [symbol:getsymbol()].impl
+           [bounds_actions];
+         end)
+      end
     end
   end
 
