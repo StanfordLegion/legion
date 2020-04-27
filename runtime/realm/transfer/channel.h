@@ -512,6 +512,8 @@ namespace Realm {
       GASNetRequest* gasnet_reqs;
     };
 
+    class RemoteWriteChannel;
+
     class RemoteWriteXferDes : public XferDes {
     public:
       RemoteWriteXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
@@ -534,6 +536,8 @@ namespace Realm {
       // doesn't do pre_bytes_write updates, since the remote write message
       //  takes care of it with lower latency
       virtual void update_bytes_write(int port_idx, size_t offset, size_t size);
+
+      bool progress_xd(RemoteWriteChannel *channel, TimeLimit work_until);
 
     private:
       RemoteWriteRequest* requests;
@@ -855,20 +859,15 @@ namespace Realm {
       atomic<long> capacity;
     };
 
-    class RemoteWriteChannel : public Channel {
+    class RemoteWriteChannel : public SingleXDQChannel<RemoteWriteChannel, RemoteWriteXferDes> {
     public:
-      RemoteWriteChannel(long max_nr);
+      RemoteWriteChannel(BackgroundWorkManager *bgwork);
       ~RemoteWriteChannel();
-      long submit(Request** requests, long nr);
-      void pull();
-      long available();
-      void notify_completion();
 
-    private:
-      // RemoteWriteChannel is maintained by dma threads
-      // and active message threads, so we need atomic ops
-      // for preventing data race
-      atomic<long> capacity;
+      // multiple concurrent RDMAs ok
+      static const bool is_ordered = false;
+
+      long submit(Request** requests, long nr);
     };
    
 #ifdef REALM_USE_CUDA
@@ -936,7 +935,7 @@ namespace Realm {
       MemcpyChannel* create_memcpy_channel(BackgroundWorkManager *bgwork);
       GASNetChannel* create_gasnet_read_channel(long max_nr);
       GASNetChannel* create_gasnet_write_channel(long max_nr);
-      RemoteWriteChannel* create_remote_write_channel(long max_nr);
+      RemoteWriteChannel* create_remote_write_channel(BackgroundWorkManager *bgwork);
       DiskChannel* create_disk_read_channel(long max_nr);
       DiskChannel* create_disk_write_channel(long max_nr);
       FileChannel* create_file_read_channel(long max_nr);

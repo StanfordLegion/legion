@@ -1566,15 +1566,20 @@ namespace Realm {
       void XferDes::default_notify_request_write_done(Request* req)
       {
         req->is_write_done = true;
-	update_bytes_write(req->dst_port_idx,
-			   req->write_seq_pos, req->write_seq_count);
+	// calling update_bytes_write can cause the transfer descriptor to
+	//  be destroyed, so enqueue the request first, and cache the values
+	//  we need
+	int dst_port_idx = req->dst_port_idx;
+	size_t write_seq_pos = req->write_seq_pos;
+	size_t write_seq_count = req->write_seq_count;
+        enqueue_request(req);
+	update_bytes_write(dst_port_idx, write_seq_pos, write_seq_count);
 #if 0
         if (req->dim == Request::DIM_1D)
           simple_update_bytes_write(req->dst_off, req->nbytes);
         else
           simple_update_bytes_write(req->dst_off, req->nbytes * req->nlines);
 #endif
-        enqueue_request(req);
       }
 
       MemcpyXferDes::MemcpyXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
@@ -1847,6 +1852,23 @@ namespace Realm {
         return new_nr;
       }
 
+      bool RemoteWriteXferDes::progress_xd(RemoteWriteChannel *channel,
+					   TimeLimit work_until)
+      {
+	Request *rq;
+	bool did_work = false;
+	do {
+	  long count = get_requests(&rq, 1);
+	  if(count > 0) {
+	    channel->submit(&rq, count);
+	    did_work = true;
+	  } else
+	    break;
+	} while(!work_until.is_expired());
+
+	return did_work;
+      }
+
       void RemoteWriteXferDes::notify_request_read_done(Request* req)
       {
         xd_lock.lock();
@@ -1876,6 +1898,9 @@ namespace Realm {
 	size_t inc_amt = out_port->seq_local.add_span(offset, size);
 	log_xd.info() << "bytes_write: " << std::hex << guid << std::dec
 		      << "(" << port_idx << ") " << offset << "+" << size << " -> " << inc_amt;
+	// if our oldest write was ack'd, update progress in case the xd
+	//  is just waiting for all writes to complete
+	if(inc_amt > 0) update_progress();
 	if((size == 0) && iteration_completed &&
 	   (out_port->peer_guid != XFERDES_NO_GUID)) {
 	  // have to send an update in this case
@@ -3108,9 +3133,10 @@ namespace Realm {
         return capacity.load();
       }
 
-      RemoteWriteChannel::RemoteWriteChannel(long max_nr)
-	: Channel(XFER_REMOTE_WRITE)
-	, capacity(max_nr)
+      RemoteWriteChannel::RemoteWriteChannel(BackgroundWorkManager *bgwork)
+	: SingleXDQChannel<RemoteWriteChannel, RemoteWriteXferDes>(bgwork,
+								   XFER_REMOTE_WRITE,
+								   "remote write channel")
       {
 	unsigned bw = 0; // TODO
 	unsigned latency = 0;
@@ -3125,7 +3151,6 @@ namespace Realm {
 
       long RemoteWriteChannel::submit(Request** requests, long nr)
       {
-        assert(nr <= capacity.load());
         for (long i = 0; i < nr; i ++) {
           RemoteWriteRequest* req = (RemoteWriteRequest*) requests[i];
 	  XferDes::XferPort *in_port = &req->xd->input_ports[req->src_port_idx];
@@ -3162,9 +3187,7 @@ namespace Realm {
 	  if(req->nbytes == 0) {
 	    req->xd->notify_request_read_done(req);
 	    req->xd->notify_request_write_done(req);
-	    notify_completion();
 	  }
-	  capacity.fetch_sub(1);
         /*RemoteWriteRequest* req = (RemoteWriteRequest*) requests[i];
           req->complete_event = GenEventImpl::create_genevent()->current_event();
           Realm::RemoteWriteMessage::RequestArgs args;
@@ -3180,20 +3203,6 @@ namespace Realm {
                                                       req->dst_buf);*/
         }
         return nr;
-      }
-
-      void RemoteWriteChannel::pull()
-      {
-      }
-
-      long RemoteWriteChannel::available()
-      {
-        return capacity.load();
-      }
-
-      void RemoteWriteChannel::notify_completion()
-      {
-	capacity.fetch_add(1);
       }
 
 #ifdef REALM_USE_CUDA
@@ -3476,7 +3485,6 @@ namespace Realm {
         RemoteWriteRequest* req = args.req;
         req->xd->notify_request_read_done(req);
         req->xd->notify_request_write_done(req);
-        channel_manager->get_remote_write_channel()->notify_completion();
       }
 
       /*static*/ void XferDesDestroyMessage::handle_message(NodeID sender,
@@ -3602,9 +3610,9 @@ namespace Realm {
         gasnet_write_channel = new GASNetChannel(max_nr, XFER_GASNET_WRITE);
         return gasnet_write_channel;
       }
-      RemoteWriteChannel* ChannelManager::create_remote_write_channel(long max_nr) {
+      RemoteWriteChannel* ChannelManager::create_remote_write_channel(BackgroundWorkManager *bgwork) {
         assert(remote_write_channel == NULL);
-        remote_write_channel = new RemoteWriteChannel(max_nr);
+        remote_write_channel = new RemoteWriteChannel(bgwork);
         return remote_write_channel;
       }
 #ifdef REALM_USE_CUDA
@@ -3808,12 +3816,12 @@ namespace Realm {
           count --;
         }
         // dma thread #2: async xfer
-	RemoteWriteChannel *remote_channel = channel_manager->create_remote_write_channel(max_nr);
+	RemoteWriteChannel *remote_channel = channel_manager->create_remote_write_channel(bgwork);
 	DiskChannel *disk_read_channel = channel_manager->create_disk_read_channel(max_nr);
 	DiskChannel *disk_write_channel = channel_manager->create_disk_write_channel(max_nr);
 	FileChannel *file_read_channel = channel_manager->create_file_read_channel(max_nr);
 	FileChannel *file_write_channel = channel_manager->create_file_write_channel(max_nr);
-        channels.push_back(remote_channel);
+        //channels.push_back(remote_channel);
 	channels.push_back(disk_read_channel);
 	channels.push_back(disk_write_channel);
 	channels.push_back(file_read_channel);
