@@ -1070,7 +1070,7 @@ namespace Legion {
         assert(unique_event.exists());
 #endif
         LegionSpy::log_physical_instance(unique_event,inst.id,memory->memory.id,
-         instance_domain->expr_id, field_space_node->handle,tree_id,0/*redop*/);
+         instance_domain->expr_id, field_space_node->handle, tree_id, redop);
         layout->log_instance_layout(unique_event);
       }
     }
