@@ -27,6 +27,8 @@
 
 import "regent"
 
+local format = require("std/format")
+
 require("pennant_common")
 
 local use_python_main = rawget(_G, "pennant_use_python_main") == true
