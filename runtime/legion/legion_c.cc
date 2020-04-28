@@ -4744,7 +4744,21 @@ legion_attach_launcher_create(legion_logical_region_t logical_region_,
   return CObjectWrapper::wrap(launcher);
 }
 
-void 
+void
+legion_attach_launcher_attach_hdf5(legion_attach_launcher_t handle_,
+                                   const char *filename,
+                                   legion_field_map_t field_map_,
+                                   legion_file_mode_t mode)
+{
+  AttachLauncher *handle = CObjectWrapper::unwrap(handle_);
+
+  std::map<FieldID, const char *> *field_map =
+    CObjectWrapper::unwrap(field_map_);
+
+  handle->attach_hdf5(filename, *field_map, mode);
+}
+
+void
 legion_attach_launcher_set_restricted(legion_attach_launcher_t handle_,
                                       bool restricted)
 {
