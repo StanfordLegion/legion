@@ -510,7 +510,7 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    void CollectableView::defer_collect_user(InstanceManager *manager,
+    void CollectableView::defer_collect_user(PhysicalManager *manager,
                  ApEvent term_event, RtEvent collect, ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
@@ -545,7 +545,7 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    ExprView::ExprView(RegionTreeForest *ctx, InstanceManager *man, 
+    ExprView::ExprView(RegionTreeForest *ctx, PhysicalManager *man, 
                        InstanceView *view, IndexSpaceExpression *exp) 
       : context(ctx), manager(man), inst_view(view),
         view_expr(exp), view_volume(view_expr->get_volume()),
@@ -2252,7 +2252,7 @@ namespace Legion {
     MaterializedView::MaterializedView(
                                RegionTreeForest *ctx, DistributedID did,
                                AddressSpaceID own_addr,
-                               AddressSpaceID log_own, InstanceManager *man,
+                               AddressSpaceID log_own, PhysicalManager *man,
                                UniqueID own_ctx, bool register_now)
       : InstanceView(ctx, encode_materialized_did(did), own_addr,
                      log_own, own_ctx, register_now), 
@@ -3794,7 +3794,7 @@ namespace Legion {
       UniqueID context_uid;
       derez.deserialize(context_uid);
       RtEvent man_ready;
-      InstanceManager *manager =
+      PhysicalManager *manager =
         runtime->find_or_request_instance_manager(manager_did, man_ready);
       if (man_ready.exists() && !man_ready.has_triggered())
       {
@@ -3822,7 +3822,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void MaterializedView::create_remote_view(Runtime *runtime,
-                            DistributedID did, InstanceManager *manager,
+                            DistributedID did, PhysicalManager *manager,
                             AddressSpaceID owner_space,
                             AddressSpaceID logical_owner, UniqueID context_uid)
     //--------------------------------------------------------------------------
@@ -3830,7 +3830,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(manager->is_instance_manager());
 #endif
-      InstanceManager *inst_manager = manager->as_instance_manager();
+      PhysicalManager *inst_manager = manager->as_instance_manager();
       void *location;
       MaterializedView *view = NULL;
       if (runtime->find_pending_collectable_location(did, location))
@@ -4319,7 +4319,7 @@ namespace Legion {
     ReductionView::ReductionView(RegionTreeForest *ctx, DistributedID did,
                                  AddressSpaceID own_sp,
                                  AddressSpaceID log_own,
-                                 InstanceManager *man, UniqueID own_ctx, 
+                                 PhysicalManager *man, UniqueID own_ctx, 
                                  bool register_now)
       : InstanceView(ctx, encode_reduction_did(did), own_sp, log_own, 
                      own_ctx, register_now), manager(man)
@@ -4375,7 +4375,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InstanceManager* ReductionView::get_manager(void) const
+    PhysicalManager* ReductionView::get_manager(void) const
     //--------------------------------------------------------------------------
     {
       return manager;
@@ -5033,7 +5033,7 @@ namespace Legion {
       derez.deserialize(context_uid);
 
       RtEvent man_ready;
-      InstanceManager *manager =
+      PhysicalManager *manager =
         runtime->find_or_request_instance_manager(manager_did, man_ready);
       if (man_ready.exists() && !man_ready.has_triggered())
       {
@@ -5061,7 +5061,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void ReductionView::create_remote_view(Runtime *runtime,
-                            DistributedID did, InstanceManager *manager,
+                            DistributedID did, PhysicalManager *manager,
                             AddressSpaceID owner_space, 
                             AddressSpaceID logical_owner, UniqueID context_uid)
     //--------------------------------------------------------------------------

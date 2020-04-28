@@ -502,6 +502,10 @@ namespace Legion {
                                              IndexSpaceExpression *expr,
                                  const std::vector<CopySrcDstField>& src_fields,
                                  const std::vector<CopySrcDstField>& dst_fields,
+#ifdef LEGION_SPY
+                                             RegionTreeID src_tree_id,
+                                             RegionTreeID dst_tree_id,
+#endif
                                              ApEvent precondition, 
                                              PredEvent pred_guard,
                                              ReductionOpID redop,
@@ -530,6 +534,10 @@ namespace Legion {
             pack_src_dst_field(rez, src_fields[idx]);
             pack_src_dst_field(rez, dst_fields[idx]);
           }
+#ifdef LEGION_SPY
+          rez.serialize(src_tree_id);
+          rez.serialize(dst_tree_id);
+#endif
           rez.serialize(precondition);
           rez.serialize(pred_guard);
           rez.serialize(redop);
@@ -541,6 +549,9 @@ namespace Legion {
       }
       else
         remote_tpl->record_issue_copy(memo, lhs, expr, src_fields, dst_fields,
+#ifdef LEGION_SPY
+                              src_tree_id, dst_tree_id,
+#endif
                               precondition, pred_guard, redop, reduction_fold);
     }
 
@@ -615,6 +626,11 @@ namespace Legion {
                                  const std::vector<CopySrcDstField> &fields,
                                              const void *fill_value, 
                                              size_t fill_size,
+#ifdef LEGION_SPY
+                                             UniqueID fill_uid, 
+                                             FieldSpace handle,
+                                             RegionTreeID tree_id,
+#endif
                                              ApEvent precondition,
                                              PredEvent pred_guard)
     //--------------------------------------------------------------------------
@@ -637,6 +653,11 @@ namespace Legion {
             pack_src_dst_field(rez, fields[idx]);
           rez.serialize(fill_size);
           rez.serialize(fill_value, fill_size);
+#ifdef LEGION_SPY
+          rez.serialize(fill_uid);
+          rez.serialize(handle);
+          rez.serialize(tree_id);
+#endif
           rez.serialize(precondition);
           rez.serialize(pred_guard);  
         }
@@ -645,8 +666,12 @@ namespace Legion {
         done.wait();
       }
       else
-        remote_tpl->record_issue_fill(memo, lhs, expr, fields, fill_value, 
-                                      fill_size, precondition, pred_guard);
+        remote_tpl->record_issue_fill(memo, lhs, expr, fields, 
+                                      fill_value, fill_size, 
+#ifdef LEGION_SPY
+                                      fill_uid, handle, tree_id,
+#endif
+                                      precondition, pred_guard);
     }
 
     //--------------------------------------------------------------------------
@@ -1020,6 +1045,11 @@ namespace Legion {
               unpack_src_dst_field(derez, src_fields[idx]);
               unpack_src_dst_field(derez, dst_fields[idx]);
             }
+#ifdef LEGION_SPY
+            RegionTreeID src_tree_id, dst_tree_id;
+            derez.deserialize(src_tree_id);
+            derez.deserialize(dst_tree_id);
+#endif
             ApEvent precondition;
             derez.deserialize(precondition);
             PredEvent pred_guard;
@@ -1033,6 +1063,9 @@ namespace Legion {
             // Do the base call
             tpl->record_issue_copy(memo, lhs, expr,
                                    src_fields, dst_fields,
+#ifdef LEGION_SPY
+                                   src_tree_id, dst_tree_id,
+#endif
                                    precondition, pred_guard,
                                    redop, reduction_fold);
             if (lhs != lhs_copy)
@@ -1138,6 +1171,14 @@ namespace Legion {
             derez.deserialize(fill_size);
             const void *fill_value = derez.get_current_pointer();
             derez.advance_pointer(fill_size);
+#ifdef LEGION_SPY
+            UniqueID fill_uid;
+            derez.deserialize(fill_uid);
+            FieldSpace handle;
+            derez.deserialize(handle);
+            RegionTreeID tree_id;
+            derez.deserialize(tree_id);
+#endif
             ApEvent precondition;
             derez.deserialize(precondition);
             PredEvent pred_guard;
@@ -1147,6 +1188,9 @@ namespace Legion {
             // Do the base call
             tpl->record_issue_fill(memo, lhs, expr, fields,
                                    fill_value, fill_size,
+#ifdef LEGION_SPY
+                                   fill_uid, handle, tree_id,
+#endif
                                    precondition, pred_guard);
             if (lhs != lhs_copy)
             {
@@ -4447,7 +4491,7 @@ namespace Legion {
       assert(!!fill_mask); 
 #endif
       const UniqueID op_id = op->get_unique_op_id();
-      InstanceManager *manager = target->get_manager();
+      PhysicalManager *manager = target->get_manager();
       if (fills.size() == 1)
       {
         FillUpdate *update = fills[0];
@@ -4602,7 +4646,7 @@ namespace Legion {
       assert(!!copy_mask);
 #endif
       const UniqueID op_id = op->get_unique_op_id();
-      InstanceManager *target_manager = target->get_manager();
+      PhysicalManager *target_manager = target->get_manager();
       for (std::map<InstanceView*,std::vector<CopyUpdate*> >::const_iterator
             cit = copies.begin(); cit != copies.end(); cit++)
       {
@@ -6183,7 +6227,7 @@ namespace Legion {
         DistributedID did;
         derez.deserialize(did);
         RtEvent ready;
-        PhysicalManager *manager = 
+        InstanceManager *manager = 
           runtime->find_or_request_instance_manager(did, ready);
         if (ready.exists())
           ready_events.insert(ready);
@@ -7283,7 +7327,6 @@ namespace Legion {
         delete analysis;
     }
 
-#if 0
     //--------------------------------------------------------------------------
     /*static*/ std::vector<CopyAcrossHelper*> 
                           CopyAcrossAnalysis::create_across_helpers(
@@ -7301,14 +7344,13 @@ namespace Legion {
       for (unsigned idx = 0; idx < dst_instances.size(); idx++)
       {
         result[idx] = new CopyAcrossHelper(src_mask, src_indexes, dst_indexes);
-        InstanceManager *manager = 
-          dst_instances[idx].get_manager()->as_instance_manager();
+        IndividualManager *manager = 
+          dst_instances[idx].get_manager()->as_individual_manager();
         manager->initialize_across_helper(result[idx],
                               dst_mask, src_indexes, dst_indexes);
       }
       return result;
     }
-#endif
 
     /////////////////////////////////////////////////////////////
     // Overwrite Analysis
@@ -9985,7 +10027,7 @@ namespace Legion {
             for (std::vector<ReductionView*>::const_reverse_iterator it = 
                   current->second.rbegin(); it != current->second.rend(); it++)
             {
-              InstanceManager *manager = (*it)->get_manager();
+              PhysicalManager *manager = (*it)->get_manager();
               if (manager->redop != analysis.redop)
                 break;
               analysis.record_instance(*it, local_mask);
@@ -13928,7 +13970,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InstanceRef::InstanceRef(PhysicalManager *man, const FieldMask &m,ApEvent r)
+    InstanceRef::InstanceRef(InstanceManager *man, const FieldMask &m,ApEvent r)
       : valid_fields(m), ready_event(r), manager(man), local(true)
     //--------------------------------------------------------------------------
     {
@@ -14021,7 +14063,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InstanceManager* InstanceRef::get_instance_manager(void) const
+    PhysicalManager* InstanceRef::get_instance_manager(void) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION

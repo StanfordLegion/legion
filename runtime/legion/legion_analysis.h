@@ -151,6 +151,9 @@ namespace Legion {
                            IndexSpaceExpression *expr,
                            const std::vector<CopySrcDstField>& src_fields,
                            const std::vector<CopySrcDstField>& dst_fields,
+#ifdef LEGION_SPY
+                           RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
+#endif
                            ApEvent precondition, PredEvent pred_guard,
                            ReductionOpID redop, bool reduction_fold) = 0;
       virtual void record_issue_indirect(Memoizable *memo, ApEvent &lhs,
@@ -159,22 +162,27 @@ namespace Legion {
                            const std::vector<CopySrcDstField>& dst_fields,
                            const std::vector<void*> &indirections,
                            ApEvent precondition, PredEvent pred_guard) = 0;
+      virtual void record_copy_views(ApEvent lhs, Memoizable *memo,
+                           unsigned src_idx, unsigned dst_idx,
+                           IndexSpaceExpression *expr,
+                           const FieldMaskSet<InstanceView> &tracing_srcs,
+                           const FieldMaskSet<InstanceView> &tracing_dsts,
+                           std::set<RtEvent> &applied) = 0;
       virtual void record_issue_fill(Memoizable *memo, ApEvent &lhs,
                            IndexSpaceExpression *expr,
                            const std::vector<CopySrcDstField> &fields,
                            const void *fill_value, size_t fill_size,
+#ifdef LEGION_SPY
+                           UniqueID fill_uid, 
+                           FieldSpace handle,
+                           RegionTreeID tree_id,
+#endif
                            ApEvent precondition, PredEvent pred_guard) = 0;
       virtual void record_post_fill_view(FillView *view, 
                                          const FieldMask &mask) = 0;
       virtual void record_fill_views(ApEvent lhs, Memoizable *memo,
                            unsigned idx, IndexSpaceExpression *expr, 
                            const FieldMaskSet<FillView> &tracing_srcs,
-                           const FieldMaskSet<InstanceView> &tracing_dsts,
-                           std::set<RtEvent> &applied_events) = 0;
-      virtual void record_copy_views(ApEvent lhs, Memoizable *memo,
-                           unsigned src_idx, unsigned dst_idx,
-                           IndexSpaceExpression *expr,
-                           const FieldMaskSet<InstanceView> &tracing_srcs,
                            const FieldMaskSet<InstanceView> &tracing_dsts,
                            std::set<RtEvent> &applied_events) = 0;
     public:
@@ -252,6 +260,9 @@ namespace Legion {
                            IndexSpaceExpression *expr,
                            const std::vector<CopySrcDstField>& src_fields,
                            const std::vector<CopySrcDstField>& dst_fields,
+#ifdef LEGION_SPY
+                           RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
+#endif
                            ApEvent precondition, PredEvent pred_guard,
                            ReductionOpID redop, bool reduction_fold);
       virtual void record_issue_indirect(Memoizable *memo, ApEvent &lhs,
@@ -260,21 +271,26 @@ namespace Legion {
                            const std::vector<CopySrcDstField>& dst_fields,
                            const std::vector<void*> &indirections,
                            ApEvent precondition, PredEvent pred_guard);
+      virtual void record_copy_views(ApEvent lhs, Memoizable *memo,
+                           unsigned src_idx, unsigned dst_idx,
+                           IndexSpaceExpression *expr,
+                           const FieldMaskSet<InstanceView> &tracing_srcs,
+                           const FieldMaskSet<InstanceView> &tracing_dsts,
+                           std::set<RtEvent> &applied);
       virtual void record_issue_fill(Memoizable *memo, ApEvent &lhs,
                            IndexSpaceExpression *expr,
                            const std::vector<CopySrcDstField> &fields,
                            const void *fill_value, size_t fill_size,
+#ifdef LEGION_SPY
+                           UniqueID fill_uid, 
+                           FieldSpace handle,
+                           RegionTreeID tree_id,
+#endif
                            ApEvent precondition, PredEvent pred_guard);
       virtual void record_post_fill_view(FillView *view, const FieldMask &mask);
       virtual void record_fill_views(ApEvent lhs, Memoizable *memo,
                            unsigned idx, IndexSpaceExpression *expr, 
                            const FieldMaskSet<FillView> &tracing_srcs,
-                           const FieldMaskSet<InstanceView> &tracing_dsts,
-                           std::set<RtEvent> &applied_events);
-      virtual void record_copy_views(ApEvent lhs, Memoizable *memo,
-                           unsigned src_idx, unsigned dst_idx,
-                           IndexSpaceExpression *expr,
-                           const FieldMaskSet<InstanceView> &tracing_srcs,
                            const FieldMaskSet<InstanceView> &tracing_dsts,
                            std::set<RtEvent> &applied_events);
     public:
@@ -433,23 +449,36 @@ namespace Legion {
                           IndexSpaceExpression *expr,
                           const std::vector<CopySrcDstField>& src_fields,
                           const std::vector<CopySrcDstField>& dst_fields,
+#ifdef LEGION_SPY
+                          RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
+#endif
                           ApEvent precondition, PredEvent pred_guard,
                           ReductionOpID redop, bool reduction_fold) const
         {
           sanity_check();
-          rec->record_issue_copy(memo, result, expr, 
-                                 src_fields, dst_fields, precondition, 
-                                 pred_guard, redop, reduction_fold);
+          rec->record_issue_copy(memo, result, expr, src_fields, dst_fields,
+#ifdef LEGION_SPY
+                                 src_tree_id, dst_tree_id,
+#endif
+                                 precondition, pred_guard,redop,reduction_fold);
         }
       inline void record_issue_fill(ApEvent &result,
                           IndexSpaceExpression *expr,
                           const std::vector<CopySrcDstField> &fields,
                           const void *fill_value, size_t fill_size,
+#ifdef LEGION_SPY
+                          UniqueID fill_uid,
+                          FieldSpace handle,
+                          RegionTreeID tree_id,
+#endif
                           ApEvent precondition, PredEvent pred_guard) const
         {
           sanity_check();
           rec->record_issue_fill(memo, result, expr, fields, 
                                  fill_value, fill_size,
+#ifdef LEGION_SPY
+                                 fill_uid, handle, tree_id,
+#endif
                                  precondition, pred_guard);
         }
       inline void record_post_fill_view(FillView *view, 
@@ -467,16 +496,6 @@ namespace Legion {
           sanity_check();
           rec->record_fill_views(lhs, memo, index, expr, srcs, dsts, applied);
         }
-      inline void record_copy_views(ApEvent lhs,
-                                    IndexSpaceExpression *expr, 
-                                    const FieldMaskSet<InstanceView> &srcs,
-                                    const FieldMaskSet<InstanceView> &dsts,
-                                    std::set<RtEvent> &applied) const
-        {
-          sanity_check();
-          rec->record_copy_views(lhs, memo, index, dst_index, 
-                                 expr, srcs, dsts, applied);
-        }
       inline void record_issue_indirect(ApEvent &result,
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
@@ -487,6 +506,16 @@ namespace Legion {
           sanity_check();
           rec->record_issue_indirect(memo, result, expr, src_fields, dst_fields,
                                      indirections, precondition, pred_guard);
+        }
+      inline void record_copy_views(ApEvent lhs,
+                                    IndexSpaceExpression *expr,
+                                 const FieldMaskSet<InstanceView> &tracing_srcs,
+                                 const FieldMaskSet<InstanceView> &tracing_dsts,
+                                    std::set<RtEvent> &applied) const
+        {
+          sanity_check();
+          rec->record_copy_views(lhs, memo, index, dst_index, expr,
+                                 tracing_srcs, tracing_dsts, applied);
         }
       inline void record_op_view(const RegionUsage &usage,
                                  const FieldMask &user_mask,
@@ -873,7 +902,7 @@ namespace Legion {
     public:
       InstanceRef(bool composite = false);
       InstanceRef(const InstanceRef &rhs);
-      InstanceRef(PhysicalManager *manager, const FieldMask &valid_fields,
+      InstanceRef(InstanceManager *manager, const FieldMask &valid_fields,
                   ApEvent ready_event = ApEvent::NO_AP_EVENT);
       ~InstanceRef(void);
     public:
@@ -885,7 +914,7 @@ namespace Legion {
       inline bool has_ref(void) const { return (manager != NULL); }
       inline ApEvent get_ready_event(void) const { return ready_event; }
       inline void set_ready_event(ApEvent ready) { ready_event = ready; }
-      inline PhysicalManager* get_manager(void) const { return manager; }
+      inline InstanceManager* get_manager(void) const { return manager; }
       inline const FieldMask& get_valid_fields(void) const 
         { return valid_fields; }
     public:
@@ -899,7 +928,7 @@ namespace Legion {
       void remove_valid_reference(ReferenceSource source) const;
     public:
       Memory get_memory(void) const;
-      InstanceManager* get_instance_manager(void) const;
+      PhysicalManager* get_instance_manager(void) const;
     public:
       bool is_field_set(FieldID fid) const;
       LegionRuntime::Accessor::RegionAccessor<
@@ -914,7 +943,7 @@ namespace Legion {
     protected:
       FieldMask valid_fields; 
       ApEvent ready_event;
-      PhysicalManager *manager;
+      InstanceManager *manager;
       bool local;
     };
 

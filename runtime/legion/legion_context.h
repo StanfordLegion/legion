@@ -419,7 +419,7 @@ namespace Legion {
       virtual void invalidate_region_tree_contexts(void) = 0;
       virtual void send_back_created_state(AddressSpaceID target) = 0;
     public:
-      virtual InstanceView* create_instance_top_view(InstanceManager *manager,
+      virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                              AddressSpaceID source, RtEvent *ready = NULL) = 0;
     public:
       virtual const std::vector<PhysicalRegion>& begin_task(
@@ -762,14 +762,14 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_REMOTE_VIEW_CREATION_TASK_ID;
       public:
-        RemoteCreateViewArgs(InnerContext *proxy, InstanceManager *man,
+        RemoteCreateViewArgs(InnerContext *proxy, PhysicalManager *man,
                InstanceView **tar, RtUserEvent trig, AddressSpaceID src)
           : LgTaskArgs<RemoteCreateViewArgs>(implicit_provenance),
             proxy_this(proxy), manager(man), target(tar), 
             to_trigger(trig), source(src) { }
       public:
         InnerContext *const proxy_this;
-        InstanceManager *const manager;
+        PhysicalManager *const manager;
         InstanceView **target;
         const RtUserEvent to_trigger;
         const AddressSpaceID source;
@@ -1126,13 +1126,13 @@ namespace Legion {
       virtual void invalidate_remote_tree_contexts(Deserializer &derez);
       virtual void send_back_created_state(AddressSpaceID target);
     public:
-      virtual InstanceView* create_instance_top_view(InstanceManager *manager,
+      virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                              AddressSpaceID source, RtEvent *ready = NULL);
       virtual FillView* find_or_create_fill_view(FillOp *op, 
                              std::set<RtEvent> &map_applied_events,
                              const void *value, const size_t value_size);
       static void handle_remote_view_creation(const void *args);
-      void notify_instance_deletion(InstanceManager *deleted); 
+      void notify_instance_deletion(PhysicalManager *deleted); 
       static void handle_create_top_view_request(Deserializer &derez, 
                             Runtime *runtime, AddressSpaceID source);
       static void handle_create_top_view_response(Deserializer &derez,
@@ -1282,8 +1282,8 @@ namespace Legion {
       TaskPriority current_priority;
     protected: // Instance top view data structures
       mutable LocalLock                         instance_view_lock;
-      std::map<InstanceManager*,InstanceView*>  instance_top_views;
-      std::map<InstanceManager*,RtUserEvent>    pending_top_views;
+      std::map<PhysicalManager*,InstanceView*>  instance_top_views;
+      std::map<PhysicalManager*,RtUserEvent>    pending_top_views;
     protected:
       mutable LocalLock                         tree_set_lock;
       std::map<RegionTreeID,EquivalenceSet*>    tree_equivalence_sets;
@@ -1761,7 +1761,7 @@ namespace Legion {
       virtual void invalidate_region_tree_contexts(void);
       virtual void send_back_created_state(AddressSpaceID target);
     public:
-      virtual InstanceView* create_instance_top_view(InstanceManager *manager,
+      virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                              AddressSpaceID source, RtEvent *ready = NULL);
     public:
       virtual void end_task(const void *res, size_t res_size, bool owned,
@@ -2108,7 +2108,7 @@ namespace Legion {
       virtual void invalidate_region_tree_contexts(void);
       virtual void send_back_created_state(AddressSpaceID target);
     public:
-      virtual InstanceView* create_instance_top_view(InstanceManager *manager,
+      virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                              AddressSpaceID source, RtEvent *ready = NULL);
     public:
       virtual const std::vector<PhysicalRegion>& begin_task(

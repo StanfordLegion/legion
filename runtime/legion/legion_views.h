@@ -69,7 +69,7 @@ namespace Legion {
       inline PhiView *as_phi_view(void) const;
     public:
       virtual bool has_manager(void) const = 0;
-      virtual InstanceManager* get_manager(void) const = 0;
+      virtual PhysicalManager* get_manager(void) const = 0;
       virtual bool has_space(const FieldMask &space_mask) const = 0;
     public:
       virtual void notify_active(ReferenceMutator *mutator) = 0;
@@ -146,7 +146,7 @@ namespace Legion {
         { return (local_space == logical_owner); }
     public:
       virtual bool has_manager(void) const = 0;
-      virtual InstanceManager* get_manager(void) const = 0;
+      virtual PhysicalManager* get_manager(void) const = 0;
       virtual bool has_space(const FieldMask &space_mask) const = 0;
     public: 
       // Entry point functions for doing physical dependence analysis
@@ -257,7 +257,7 @@ namespace Legion {
       virtual bool remove_collectable_reference(ReferenceMutator *mutator) = 0;
       virtual void collect_users(const std::set<ApEvent> &to_collect) = 0;
     public:
-      void defer_collect_user(InstanceManager *manager, ApEvent term_event,
+      void defer_collect_user(PhysicalManager *manager, ApEvent term_event,
                               RtEvent collect,ReferenceMutator *mutator = NULL);
       static void handle_deferred_collect(CollectableView *view,
                                           const std::set<ApEvent> &to_collect);
@@ -282,7 +282,7 @@ namespace Legion {
                                                               EventFieldUsers;
       typedef FieldMaskSet<PhysicalUser> EventUsers;
     public:
-      ExprView(RegionTreeForest *ctx, InstanceManager *manager,
+      ExprView(RegionTreeForest *ctx, PhysicalManager *manager,
                InstanceView *view, IndexSpaceExpression *expr); 
       ExprView(const ExprView &rhs);
       virtual ~ExprView(void);
@@ -417,7 +417,7 @@ namespace Legion {
                                   EventFieldUsers &current_to_filter);
     public:
       RegionTreeForest *const context;
-      InstanceManager *const manager;
+      PhysicalManager *const manager;
       InstanceView *const inst_view;
       IndexSpaceExpression *const view_expr;
       const size_t view_volume;
@@ -524,14 +524,14 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_MATERIALIZED_VIEW_TASK_ID;
       public:
-        DeferMaterializedViewArgs(DistributedID d, InstanceManager *m,
+        DeferMaterializedViewArgs(DistributedID d, PhysicalManager *m,
             AddressSpaceID own, AddressSpaceID log, UniqueID ctx)
           : LgTaskArgs<DeferMaterializedViewArgs>(implicit_provenance),
             did(d), manager(m), owner_space(own), 
             logical_owner(log), context_uid(ctx) { }
       public:
         const DistributedID did;
-        InstanceManager *const manager;
+        PhysicalManager *const manager;
         const AddressSpaceID owner_space;
         const AddressSpaceID logical_owner;
         const UniqueID context_uid;
@@ -539,7 +539,7 @@ namespace Legion {
     public:
       MaterializedView(RegionTreeForest *ctx, DistributedID did,
                        AddressSpaceID owner_proc, 
-                       AddressSpaceID logical_owner, InstanceManager *manager,
+                       AddressSpaceID logical_owner, PhysicalManager *manager,
                        UniqueID owner_context, bool register_now);
       MaterializedView(const MaterializedView &rhs);
       virtual ~MaterializedView(void);
@@ -560,7 +560,7 @@ namespace Legion {
                    std::vector<CopySrcDstField> &src_fields);
     public:
       virtual bool has_manager(void) const { return true; }
-      virtual InstanceManager* get_manager(void) const { return manager; }
+      virtual PhysicalManager* get_manager(void) const { return manager; }
     public:
       virtual void add_initial_user(ApEvent term_event,
                                     const RegionUsage &usage,
@@ -658,12 +658,12 @@ namespace Legion {
                               Deserializer &derez, AddressSpaceID source);
       static void handle_defer_materialized_view(const void *args, Runtime *rt);
       static void create_remote_view(Runtime *runtime, DistributedID did, 
-                                     InstanceManager *manager,
+                                     PhysicalManager *manager,
                                      AddressSpaceID owner_space, 
                                      AddressSpaceID logical_owner, 
                                      UniqueID context_uid);
     public:
-      InstanceManager *const manager;
+      PhysicalManager *const manager;
     protected:
       // Keep track of the locks used for managing atomic coherence
       // on individual fields of this materialized view. Only the
@@ -728,14 +728,14 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_REDUCTION_VIEW_TASK_ID;
       public:
-        DeferReductionViewArgs(DistributedID d, InstanceManager *m,
+        DeferReductionViewArgs(DistributedID d, PhysicalManager *m,
             AddressSpaceID own, AddressSpaceID log, UniqueID ctx)
           : LgTaskArgs<DeferReductionViewArgs>(implicit_provenance),
             did(d), manager(m), owner_space(own), 
             logical_owner(log), context_uid(ctx) { }
       public:
         const DistributedID did;
-        InstanceManager *const manager;
+        PhysicalManager *const manager;
         const AddressSpaceID owner_space;
         const AddressSpaceID logical_owner;
         const UniqueID context_uid;
@@ -743,7 +743,7 @@ namespace Legion {
     public:
       ReductionView(RegionTreeForest *ctx, DistributedID did,
                     AddressSpaceID owner_proc,
-                    AddressSpaceID logical_owner, InstanceManager *manager,
+                    AddressSpaceID logical_owner, PhysicalManager *manager,
                     UniqueID owner_context, bool register_now);
       ReductionView(const ReductionView &rhs);
       virtual ~ReductionView(void);
@@ -751,7 +751,7 @@ namespace Legion {
       ReductionView& operator=(const ReductionView&rhs);
     public:
       virtual bool has_manager(void) const { return true; } 
-      virtual InstanceManager* get_manager(void) const;
+      virtual PhysicalManager* get_manager(void) const;
       virtual bool has_space(const FieldMask &space_mask) const
         { return false; }
     public: 
@@ -842,14 +842,14 @@ namespace Legion {
                               Deserializer &derez, AddressSpaceID source);
       static void handle_defer_reduction_view(const void *args, Runtime *rt);
       static void create_remote_view(Runtime *runtime, DistributedID did, 
-                                     InstanceManager *manager,
+                                     PhysicalManager *manager,
                                      AddressSpaceID owner_space, 
                                      AddressSpaceID logical_owner, 
                                      UniqueID context_uid);
     public:
       ReductionOpID get_redop(void) const;
     public:
-      InstanceManager *const manager;
+      PhysicalManager *const manager;
     protected:
       EventFieldUsers reduction_users;
       EventFieldUsers reading_users;
@@ -877,7 +877,7 @@ namespace Legion {
     public:
       // Deferred views never have managers
       virtual bool has_manager(void) const { return false; }
-      virtual InstanceManager* get_manager(void) const
+      virtual PhysicalManager* get_manager(void) const
         { return NULL; }
       virtual bool has_space(const FieldMask &space_mask) const
         { return false; }

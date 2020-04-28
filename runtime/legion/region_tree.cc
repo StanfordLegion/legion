@@ -35,7 +35,7 @@ namespace Legion {
 
 #ifdef LEGION_SPY
     //--------------------------------------------------------------------------
-    IndirectRecord::IndirectRecord(const FieldMask &m, PhysicalManager *p,
+    IndirectRecord::IndirectRecord(const FieldMask &m, InstanceManager *p,
                const DomainPoint &key, IndexSpace s, ApEvent e, const Domain &d)
       : fields(m),inst(p->get_instance(key)),
         instance_event(p->get_unique_event()),
@@ -45,7 +45,7 @@ namespace Legion {
     }
 #else
     //--------------------------------------------------------------------------
-    IndirectRecord::IndirectRecord(const FieldMask &m, PhysicalManager *p,
+    IndirectRecord::IndirectRecord(const FieldMask &m, InstanceManager *p,
                const DomainPoint &key, IndexSpace s, ApEvent e, const Domain &d)
       : fields(m), inst(p->get_instance(key)), ready_event(e), domain(d)
     //--------------------------------------------------------------------------
@@ -1562,7 +1562,7 @@ namespace Legion {
                   const RegionRequirement &req, const bool restricted,
                   const InstanceSet &sources, ApEvent term_event, 
                   InnerContext *context,unsigned init_index,
-                  std::map<InstanceManager*,InstanceView*> &top_views,
+                  std::map<PhysicalManager*,InstanceView*> &top_views,
                   std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
@@ -1592,13 +1592,13 @@ namespace Legion {
         for (unsigned idx = 0; idx < sources.size(); idx++)
         {
           const InstanceRef &src_ref = sources[idx];
-          InstanceManager *manager = src_ref.get_instance_manager();
+          PhysicalManager *manager = src_ref.get_instance_manager();
           const FieldMask &view_mask = src_ref.get_valid_fields();
 #ifdef DEBUG_LEGION
           assert(!(view_mask - user_mask)); // should be dominated
 #endif
           // Check to see if the view exists yet or not
-          std::map<InstanceManager*,InstanceView*>::const_iterator 
+          std::map<PhysicalManager*,InstanceView*>::const_iterator 
             finder = top_views.find(manager);
           if (finder == top_views.end())
           {
@@ -1625,13 +1625,13 @@ namespace Legion {
         for (unsigned idx = 0; idx < sources.size(); idx++)
         {
           const InstanceRef &src_ref = sources[idx];
-          InstanceManager *manager = src_ref.get_instance_manager();
+          PhysicalManager *manager = src_ref.get_instance_manager();
           const FieldMask &view_mask = src_ref.get_valid_fields();
 #ifdef DEBUG_LEGION
           assert(!(view_mask - user_mask)); // should be dominated
 #endif
           // Check to see if the view exists yet or not
-          std::map<InstanceManager*,InstanceView*>::const_iterator 
+          std::map<PhysicalManager*,InstanceView*>::const_iterator 
             finder = top_views.find(manager);
           if (finder == top_views.end())
           {
@@ -1724,7 +1724,7 @@ namespace Legion {
         FieldMask overlap = intersection_mask & ref.get_valid_fields();
         if (!overlap)
           continue;
-        PhysicalManager *manager = ref.get_manager();
+        InstanceManager *manager = ref.get_manager();
         for (unsigned idx2 = 0; idx2 < inst2.size(); idx2++)
         {
           const InstanceRef &other = inst2[idx2];
@@ -1789,7 +1789,7 @@ namespace Legion {
       for (FieldMaskSet<InstanceView>::const_iterator it = 
             instances.begin(); it != instances.end(); it++)
       {
-        PhysicalManager *manager = it->first->get_manager();
+        InstanceManager *manager = it->first->get_manager();
         if (manager->meets_regions(to_meet))
           targets.add_instance(InstanceRef(manager, it->second));
       }
@@ -2295,6 +2295,10 @@ namespace Legion {
                   dst_targets[idx].get_valid_fields());
             const ApEvent result = intersect->issue_copy(trace_info, 
                                          dst_fields, src_fields,
+#ifdef LEGION_SPY
+                                         src_req.region.get_tree_id(),
+                                         dst_req.region.get_tree_id(),
+#endif
                                          full_precondition, guard,
                                          dst_req.redop, false/*fold*/); 
             trace_info.record_copy_views(result, intersect,
@@ -2304,6 +2308,10 @@ namespace Legion {
           }
           else
             return intersect->issue_copy(trace_info, dst_fields, src_fields,
+#ifdef LEGION_SPY
+                                         src_req.region.get_tree_id(),
+                                         dst_req.region.get_tree_id(),
+#endif
                                          full_precondition, guard,
                                          dst_req.redop, false/*fold*/); 
         }
@@ -2320,6 +2328,10 @@ namespace Legion {
                   dst_targets[idx].get_valid_fields());
             const ApEvent result = dst_expr->issue_copy(trace_info, 
                                         dst_fields, src_fields,
+#ifdef LEGION_SPY
+                                        src_req.region.get_tree_id(),
+                                        dst_req.region.get_tree_id(),
+#endif
                                         full_precondition, guard,
                                         dst_req.redop, false/*fold*/);
             trace_info.record_copy_views(result, dst_expr, 
@@ -2329,6 +2341,10 @@ namespace Legion {
           }
           else
             return dst_expr->issue_copy(trace_info, dst_fields, src_fields,
+#ifdef LEGION_SPY
+                                        src_req.region.get_tree_id(),
+                                        dst_req.region.get_tree_id(),
+#endif
                                         full_precondition, guard,
                                         dst_req.redop, false/*fold*/);
         }
@@ -3076,9 +3092,9 @@ namespace Legion {
                                   const std::vector<MappingInstance> &chosen,
                                   InstanceSet &result, RegionTreeID &bad_tree,
                                   std::vector<FieldID> &missing_fields,
-                                  std::map<InstanceManager*,
+                                  std::map<PhysicalManager*,
                                        std::pair<unsigned,bool> > *acquired,
-                                  std::vector<InstanceManager*> &unacquired,
+                                  std::vector<PhysicalManager*> &unacquired,
                                   const bool do_acquire_checks,
                                   const bool allow_partial_virtual)
     //--------------------------------------------------------------------------
@@ -3094,7 +3110,7 @@ namespace Legion {
       for (std::vector<MappingInstance>::const_iterator it = chosen.begin();
             it != chosen.end(); it++)
       {
-        PhysicalManager *man = it->impl;
+        InstanceManager *man = it->impl;
         if (man == NULL)
           continue;
         if (man->is_virtual_manager())
@@ -3102,7 +3118,7 @@ namespace Legion {
           has_virtual = true;
           continue;
         }
-        InstanceManager *manager = man->as_instance_manager();
+        PhysicalManager *manager = man->as_instance_manager();
         // Check to see if the region trees are the same
         if (req_tid != manager->tree_id)
         {
@@ -3171,9 +3187,9 @@ namespace Legion {
                                      const RegionRequirement &req,
                                      const std::vector<MappingInstance> &chosen,
                                      InstanceSet &result,RegionTreeID &bad_tree,
-                                     std::map<InstanceManager*,
+                                     std::map<PhysicalManager*,
                                           std::pair<unsigned,bool> > *acquired,
-                                     std::vector<InstanceManager*> &unacquired,
+                                     std::vector<PhysicalManager*> &unacquired,
                                      const bool do_acquire_checks)
     //--------------------------------------------------------------------------
     {
@@ -3190,7 +3206,7 @@ namespace Legion {
       for (std::vector<MappingInstance>::const_iterator it = chosen.begin();
             it != chosen.end(); it++)
       {
-        PhysicalManager *man = it->impl;
+        InstanceManager *man = it->impl;
         if (man == NULL)
           continue;
         if (man->is_virtual_manager())
@@ -3198,7 +3214,7 @@ namespace Legion {
           has_composite = true;
           continue;
         }
-        InstanceManager *manager = man->as_instance_manager();
+        PhysicalManager *manager = man->as_instance_manager();
         // Check to see if the tree IDs are the same
         if (reg_tree != manager->tree_id)
         {
@@ -3243,7 +3259,7 @@ namespace Legion {
       {
         const InstanceRef &inst = targets[idx];
         const FieldMask &valid_mask = inst.get_valid_fields();
-        PhysicalManager *manager = inst.get_manager();
+        InstanceManager *manager = inst.get_manager();
         std::vector<FieldID> valid_fields;
         node->get_field_set(valid_mask, context, valid_fields);
         for (std::vector<FieldID>::const_iterator it = valid_fields.begin();
@@ -3261,19 +3277,19 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::perform_missing_acquires(Operation *op,
-                std::map<InstanceManager*,std::pair<unsigned,bool> > &acquired,
-                                const std::vector<InstanceManager*> &unacquired)
+                std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired,
+                                const std::vector<PhysicalManager*> &unacquired)
     //--------------------------------------------------------------------------
     {
       // This code is very similar to what we see in the memory managers
       std::map<MemoryManager*,MapperManager::AcquireStatus> remote_acquires;
       // Try and do the acquires for any instances that weren't acquired
-      for (std::vector<InstanceManager*>::const_iterator it = 
+      for (std::vector<PhysicalManager*>::const_iterator it = 
             unacquired.begin(); it != unacquired.end(); it++)
       {
         if ((*it)->acquire_instance(MAPPING_ACQUIRE_REF, op))
         {
-          acquired.insert(std::pair<InstanceManager*,
+          acquired.insert(std::pair<PhysicalManager*,
              std::pair<unsigned,bool> >(*it,std::pair<unsigned,bool>(1,false)));
           continue;
         }
@@ -3308,12 +3324,12 @@ namespace Legion {
               req_it != remote_acquires.end(); req_it++)
         {
           unsigned idx = 0;
-          for (std::set<InstanceManager*>::const_iterator it = 
+          for (std::set<PhysicalManager*>::const_iterator it = 
                 req_it->second.instances.begin(); it !=
                 req_it->second.instances.end(); it++, idx++)
           {
             if (req_it->second.results[idx])
-              acquired.insert(std::pair<InstanceManager*,std::pair<unsigned,
+              acquired.insert(std::pair<PhysicalManager*,std::pair<unsigned,
                   bool> >(*it,std::pair<unsigned,bool>(1,false)));
           }
         }
@@ -3329,7 +3345,7 @@ namespace Legion {
     {
       FieldSpaceNode *node = get_node(handle);
       const FieldMask coloc_mask = node->get_field_mask(fields);
-      FieldMaskSet<PhysicalManager> colocate_instances;
+      FieldMaskSet<InstanceManager> colocate_instances;
       // Figure out the first set
       InstanceSet &first_set = *(instances[0]);
       for (unsigned idx = 0; idx < first_set.size(); idx++)
@@ -3337,7 +3353,7 @@ namespace Legion {
         FieldMask overlap = coloc_mask & first_set[idx].get_valid_fields();
         if (!overlap)
           continue;
-        PhysicalManager *manager = first_set[idx].get_manager();
+        InstanceManager *manager = first_set[idx].get_manager();
         // Not allowed to have virtual views here
         if (manager->is_virtual_manager())
         {
@@ -3356,14 +3372,14 @@ namespace Legion {
           FieldMask overlap = coloc_mask & next_set[idx2].get_valid_fields();
           if (!overlap)
             continue;
-          PhysicalManager *manager = next_set[idx2].get_manager();
+          InstanceManager *manager = next_set[idx2].get_manager();
           if (manager->is_virtual_manager())
           {
             bad1 = idx1;
             bad2 = idx1;
             return false;
           }
-          FieldMaskSet<PhysicalManager>::const_iterator finder = 
+          FieldMaskSet<InstanceManager>::const_iterator finder = 
             colocate_instances.find(manager);
           if ((finder == colocate_instances.end()) ||
               (!!(overlap - finder->second)))
@@ -12405,7 +12421,7 @@ namespace Legion {
         wait_for.wait();
         // Now we can request the physical manager
         RtEvent wait_on;
-        InstanceManager *result = 
+        PhysicalManager *result = 
          context->runtime->find_or_request_instance_manager(remote_did,wait_on);
         if (wait_on.exists())
           wait_on.wait();
@@ -12458,7 +12474,7 @@ namespace Legion {
       RtUserEvent done_event;
       derez.deserialize(done_event);
 
-      InstanceManager *manager = fs->create_external_manager(inst, ready_event,
+      PhysicalManager *manager = fs->create_external_manager(inst, ready_event,
           footprint, constraints, field_set, field_sizes, file_mask,
           mask_index_map, region_node, serdez);
       Serializer rez;
@@ -12487,7 +12503,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InstanceManager* FieldSpaceNode::create_external_manager(
+    PhysicalManager* FieldSpaceNode::create_external_manager(
             PhysicalInstance inst, ApEvent ready_event, 
             size_t instance_footprint, LayoutConstraintSet &constraints, 
             const std::vector<FieldID> &field_set,

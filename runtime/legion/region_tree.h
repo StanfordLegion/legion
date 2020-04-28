@@ -49,7 +49,7 @@ namespace Legion {
     struct IndirectRecord {
     public:
       IndirectRecord(void) { }
-      IndirectRecord(const FieldMask &m, PhysicalManager *p, 
+      IndirectRecord(const FieldMask &m, InstanceManager *p, 
                      const DomainPoint &key, IndexSpace handle, 
                      ApEvent e, const Domain &d);
     public:
@@ -420,7 +420,7 @@ namespace Legion {
                     const RegionRequirement &req, const bool restricted,
                     const InstanceSet &sources, ApEvent term_event, 
                     InnerContext *context, unsigned index,
-                    std::map<InstanceManager*,InstanceView*> &top_views,
+                    std::map<PhysicalManager*,InstanceView*> &top_views,
                     std::set<RtEvent> &applied_events);
       void invalidate_current_context(RegionTreeContext ctx, bool users_only,
                                       LogicalRegion handle);
@@ -603,18 +603,18 @@ namespace Legion {
                                const std::vector<MappingInstance> &chosen,
                                InstanceSet &result, RegionTreeID &bad_tree,
                                std::vector<FieldID> &missing_fields,
-                               std::map<InstanceManager*,
+                               std::map<PhysicalManager*,
                                     std::pair<unsigned,bool> > *acquired,
-                               std::vector<InstanceManager*> &unacquired,
+                               std::vector<PhysicalManager*> &unacquired,
                                const bool do_acquire_checks,
                                const bool allow_partial_virtual = false);
       bool physical_convert_postmapping(Operation *op,
                                const RegionRequirement &req,
                                const std::vector<MappingInstance> &chosen,
                                InstanceSet &result, RegionTreeID &bad_tree,
-                               std::map<InstanceManager*,
+                               std::map<PhysicalManager*,
                                     std::pair<unsigned,bool> > *acquired,
-                               std::vector<InstanceManager*> &unacquired,
+                               std::vector<PhysicalManager*> &unacquired,
                                const bool do_acquire_checks);
       void log_mapping_decision(const UniqueID unique_id, TaskContext *context,
                                 const unsigned index, 
@@ -623,8 +623,8 @@ namespace Legion {
                                 bool postmapping = false);
     public: // helper method for the above two methods
       void perform_missing_acquires(Operation *op,
-                 std::map<InstanceManager*,std::pair<unsigned,bool> > &acquired,
-                               const std::vector<InstanceManager*> &unacquired);
+                 std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired,
+                               const std::vector<PhysicalManager*> &unacquired);
     public:
       bool are_colocated(const std::vector<InstanceSet*> &instances,
                          FieldSpace handle, const std::set<FieldID> &fields,
@@ -974,10 +974,19 @@ namespace Legion {
       virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
                            const void *fill_value, size_t fill_size,
+#ifdef LEGION_SPY
+                           UniqueID fill_uid,
+                           FieldSpace handle,
+                           RegionTreeID tree_id,
+#endif
                            ApEvent precondition, PredEvent pred_guard) = 0;
       virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
+#ifdef LEGION_SPY
+                           RegionTreeID src_tree_id,
+                           RegionTreeID dst_tree_id,
+#endif
                            ApEvent precondition, PredEvent pred_guard,
                            ReductionOpID redop, bool reduction_fold) = 0;
       virtual void construct_indirections(
@@ -1034,6 +1043,11 @@ namespace Legion {
                                const PhysicalTraceInfo &trace_info,
                                const std::vector<CopySrcDstField> &dst_fields,
                                const void *fill_value, size_t fill_size,
+#ifdef LEGION_SPY
+                               UniqueID fill_uid,
+                               FieldSpace handle,
+                               RegionTreeID tree_id,
+#endif
                                ApEvent precondition, PredEvent pred_guard);
       template<int DIM, typename T>
       inline ApEvent issue_copy_internal(RegionTreeForest *forest,
@@ -1041,6 +1055,10 @@ namespace Legion {
                                const PhysicalTraceInfo &trace_info,
                                const std::vector<CopySrcDstField> &dst_fields,
                                const std::vector<CopySrcDstField> &src_fields,
+#ifdef LEGION_SPY
+                               RegionTreeID src_tree_id,
+                               RegionTreeID dst_tree_id,
+#endif
                                ApEvent precondition, PredEvent pred_guard,
                                ReductionOpID redop, bool reduction_fold);
       template<int DIM, typename T>
@@ -1216,10 +1234,19 @@ namespace Legion {
       virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
                            const void *fill_value, size_t fill_size,
+#ifdef LEGION_SPY
+                           UniqueID fill_uid,
+                           FieldSpace handle,
+                           RegionTreeID tree_id,
+#endif
                            ApEvent precondition, PredEvent pred_guard);
       virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
+#ifdef LEGION_SPY
+                           RegionTreeID src_tree_id,
+                           RegionTreeID dst_tree_id,
+#endif
                            ApEvent precondition, PredEvent pred_guard,
                            ReductionOpID redop, bool reduction_fold);
       virtual void construct_indirections(
@@ -2112,10 +2139,19 @@ namespace Legion {
       virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
                            const void *fill_value, size_t fill_size,
+#ifdef LEGION_SPY
+                           UniqueID fill_uid,
+                           FieldSpace handle,
+                           RegionTreeID tree_id,
+#endif
                            ApEvent precondition, PredEvent pred_guard);
       virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
+#ifdef LEGION_SPY
+                           RegionTreeID src_tree_id,
+                           RegionTreeID dst_tree_id,
+#endif
                            ApEvent precondition, PredEvent pred_guard,
                            ReductionOpID redop, bool reduction_fold);
       virtual void construct_indirections(
@@ -2925,7 +2961,7 @@ namespace Legion {
     public:
       InstanceRef create_external_instance(
             const std::vector<FieldID> &fields, RegionNode *node, AttachOp *op);
-      InstanceManager* create_external_manager(PhysicalInstance inst,
+      PhysicalManager* create_external_manager(PhysicalInstance inst,
             ApEvent ready_event, size_t instance_footprint, 
             LayoutConstraintSet &constraints, 
             const std::vector<FieldID> &field_set,

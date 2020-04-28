@@ -1550,10 +1550,9 @@ namespace Legion {
     class NeverReferenceMutator;
     class DistributedCollectable;
     class LayoutDescription;
-    class PhysicalManager; // base class for instance and reduction
+    class InstanceManager; // base class for all instances
     class CopyAcrossHelper;
     class LogicalView; // base class for instance and reduction
-    class InstanceManager;
     class InstanceKey;
     class InstanceView;
     class CollectableView; // pure virtual class
@@ -1566,6 +1565,7 @@ namespace Legion {
     class InstanceSet;
     class InnerTaskView;
     class VirtualManager;
+    class PhysicalManager;
     class IndividualManager;
     class CollectiveManager;
     class ReductionView;
@@ -1663,7 +1663,7 @@ namespace Legion {
     friend class Internal::MaterializedView;                \
     friend class Internal::FillView;                        \
     friend class Internal::LayoutDescription;               \
-    friend class Internal::PhysicalManager;                 \
+    friend class Internal::InstanceManager;                 \
     friend class Internal::IndividualManager;               \
     friend class Internal::CollectiveManager;               \
     friend class Internal::TreeStateLogger;                 \
@@ -1776,7 +1776,7 @@ namespace Legion {
   // Anothing magical typedef
   namespace Mapping {
     typedef Internal::MappingCallInfo* MapperContext;
-    typedef Internal::PhysicalManager* PhysicalInstanceImpl;
+    typedef Internal::InstanceManager* PhysicalInstanceImpl;
   };
 
   namespace Internal { 

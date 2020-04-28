@@ -31,6 +31,11 @@ namespace Legion {
                                  const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const void *fill_value, size_t fill_size,
+#ifdef LEGION_SPY
+                                 UniqueID fill_uid,
+                                 FieldSpace handle,
+                                 RegionTreeID tree_id,
+#endif
                                  ApEvent precondition, PredEvent pred_guard)
     //--------------------------------------------------------------------------
     {
@@ -112,6 +117,9 @@ namespace Legion {
       if (trace_info.recording)
         trace_info.record_issue_fill(result, this, dst_fields,
                                      fill_value, fill_size,
+#ifdef LEGION_SPY
+                                     fill_uid, handle, tree_id,
+#endif
                                      precondition, pred_guard);
       return result;
     }
@@ -124,6 +132,10 @@ namespace Legion {
                                  const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
+#ifdef LEGION_SPY
+                                 RegionTreeID src_tree_id,
+                                 RegionTreeID dst_tree_id,
+#endif
                                  ApEvent precondition, PredEvent pred_guard,
                                  ReductionOpID redop, bool reduction_fold)
     //--------------------------------------------------------------------------
@@ -199,6 +211,9 @@ namespace Legion {
       }
       if (trace_info.recording)
         trace_info.record_issue_copy(result, this, src_fields, dst_fields,
+#ifdef LEGION_SPY
+                                     src_tree_id, dst_tree_id,
+#endif
                          precondition, pred_guard, redop, reduction_fold);
 #ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!result.exists())
@@ -853,6 +868,11 @@ namespace Legion {
                                  const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const void *fill_value, size_t fill_size,
+#ifdef LEGION_SPY
+                                 UniqueID fill_uid,
+                                 FieldSpace handle,
+                                 RegionTreeID tree_id,
+#endif
                                  ApEvent precondition, PredEvent pred_guard)
     //--------------------------------------------------------------------------
     {
@@ -861,15 +881,24 @@ namespace Legion {
       if (space_ready.exists() && precondition.exists())
         return issue_fill_internal(context, local_space, trace_info, 
             dst_fields, fill_value, fill_size, 
+#ifdef LEGION_SPY
+            fill_uid, handle, tree_id,
+#endif
             Runtime::merge_events(&trace_info, space_ready, precondition),
             pred_guard);
       else if (space_ready.exists())
         return issue_fill_internal(context, local_space, trace_info, 
                                    dst_fields, fill_value, fill_size,
+#ifdef LEGION_SPY
+                                   fill_uid, handle, tree_id,
+#endif
                                    space_ready, pred_guard);
       else
         return issue_fill_internal(context, local_space, trace_info, 
                                    dst_fields, fill_value, fill_size,
+#ifdef LEGION_SPY
+                                   fill_uid, handle, tree_id,
+#endif
                                    precondition, pred_guard);
     }
 
@@ -879,6 +908,10 @@ namespace Legion {
                                  const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
+#ifdef LEGION_SPY
+                                 RegionTreeID src_tree_id,
+                                 RegionTreeID dst_tree_id,
+#endif
                                  ApEvent precondition, PredEvent pred_guard,
                                  ReductionOpID redop, bool reduction_fold)
     //--------------------------------------------------------------------------
@@ -888,15 +921,24 @@ namespace Legion {
       if (space_ready.exists() && precondition.exists())
         return issue_copy_internal(context, local_space, trace_info, 
             dst_fields, src_fields,
+#ifdef LEGION_SPY
+            src_tree_id, dst_tree_id,
+#endif
             Runtime::merge_events(&trace_info, precondition, space_ready),
             pred_guard, redop, reduction_fold);
       else if (space_ready.exists())
         return issue_copy_internal(context, local_space, trace_info, 
                 dst_fields, src_fields, 
+#ifdef LEGION_SPY
+                src_tree_id, dst_tree_id,
+#endif
                 space_ready, pred_guard, redop, reduction_fold);
       else
         return issue_copy_internal(context, local_space, trace_info, 
                 dst_fields, src_fields, 
+#ifdef LEGION_SPY
+                src_tree_id, dst_tree_id,
+#endif
                 precondition, pred_guard, redop, reduction_fold);
     }
 
@@ -4292,6 +4334,11 @@ namespace Legion {
                                  const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const void *fill_value, size_t fill_size,
+#ifdef LEGION_SPY
+                                 UniqueID fill_uid,
+                                 FieldSpace handle,
+                                 RegionTreeID tree_id,
+#endif
                                  ApEvent precondition, PredEvent pred_guard)
     //--------------------------------------------------------------------------
     {
@@ -4300,15 +4347,24 @@ namespace Legion {
       if (precondition.exists() && space_ready.exists())
         return issue_fill_internal(context, local_space, trace_info, 
                                    dst_fields, fill_value, fill_size,
+#ifdef LEGION_SPY
+                                   fill_uid, handle, tree_id,
+#endif
             Runtime::merge_events(&trace_info, space_ready, precondition),
             pred_guard);
       else if (space_ready.exists())
         return issue_fill_internal(context, local_space, trace_info, 
                                    dst_fields, fill_value, fill_size,
+#ifdef LEGION_SPY
+                                   fill_uid, handle, tree_id,
+#endif
                                    space_ready, pred_guard);
       else
         return issue_fill_internal(context, local_space, trace_info, 
                                    dst_fields, fill_value, fill_size,
+#ifdef LEGION_SPY
+                                   fill_uid, handle, tree_id,
+#endif
                                    precondition, pred_guard);
     }
 
@@ -4318,6 +4374,10 @@ namespace Legion {
                                  const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
+#ifdef LEGION_SPY
+                                 RegionTreeID src_tree_id,
+                                 RegionTreeID dst_tree_id,
+#endif
                                  ApEvent precondition, PredEvent pred_guard,
                                  ReductionOpID redop, bool reduction_fold)
     //--------------------------------------------------------------------------
@@ -4327,15 +4387,24 @@ namespace Legion {
       if (precondition.exists() && space_ready.exists())
         return issue_copy_internal(context, local_space, trace_info, dst_fields,
             src_fields,
+#ifdef LEGION_SPY
+            src_tree_id, dst_tree_id,
+#endif
             Runtime::merge_events(&trace_info, space_ready, precondition),
             pred_guard, redop, reduction_fold);
       else if (space_ready.exists())
         return issue_copy_internal(context, local_space, trace_info, 
                 dst_fields, src_fields, 
+#ifdef LEGION_SPY
+                src_tree_id, dst_tree_id,
+#endif
                 space_ready, pred_guard, redop, reduction_fold);
       else
         return issue_copy_internal(context, local_space, trace_info, 
                 dst_fields, src_fields, 
+#ifdef LEGION_SPY
+                src_tree_id, dst_tree_id,
+#endif
                 precondition, pred_guard, redop, reduction_fold);
     }
 

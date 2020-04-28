@@ -1598,7 +1598,7 @@ namespace Legion {
                                        chosen_instances[lay_it->first];
           for (unsigned idx = 0; idx < instances.size(); idx++)
           {
-            PhysicalManager *manager = instances[idx].impl;
+            InstanceManager *manager = instances[idx].impl;
             if (manager->conflicts(constraints, DomainPoint(), NULL))
             {
               conflicts = true;
@@ -1656,7 +1656,7 @@ namespace Legion {
           for (std::vector<MappingInstance>::iterator it = 
                 instances.begin(); it != instances.end(); /*nothing*/)
           {
-            PhysicalManager *manager = it->impl;
+            InstanceManager *manager = it->impl;
             if (manager->conflicts(constraints, DomainPoint(), NULL))
               it = instances.erase(it);
             else if (constraints->specialized_constraint.is_exact())
@@ -1680,7 +1680,7 @@ namespace Legion {
         for (std::vector<MappingInstance>::const_iterator it = 
               instances.begin(); it != instances.end(); it++)
         {
-          PhysicalManager *manager = it->impl;
+          InstanceManager *manager = it->impl;
           manager->remove_space_fields(missing);
           if (missing.empty())
             break;
@@ -1713,7 +1713,7 @@ namespace Legion {
         for (std::vector<MappingInstance>::iterator it = 
               instances.begin(); it != instances.end(); /*nothing*/)
         {
-          PhysicalManager *manager = it->impl;
+          InstanceManager *manager = it->impl;
           if (manager->conflicts(constraints, DomainPoint(), NULL))
             it = instances.erase(it);
           else if (constraints->specialized_constraint.is_exact())
@@ -1736,7 +1736,7 @@ namespace Legion {
       for (std::vector<MappingInstance>::const_iterator it = 
             instances.begin(); it != instances.end(); it++)
       {
-        PhysicalManager *manager = it->impl;
+        InstanceManager *manager = it->impl;
         manager->remove_space_fields(missing_fields);
         if (missing_fields.empty())
           break;
@@ -1957,11 +1957,11 @@ namespace Legion {
                            const MappingInstance &instance, GCPriority priority)
     //--------------------------------------------------------------------------
     {
-      PhysicalManager *man = instance.impl;
+      InstanceManager *man = instance.impl;
       if (man->is_virtual_manager())
         return;
       pause_mapper_call(ctx);
-      InstanceManager *manager = man->as_instance_manager();
+      PhysicalManager *manager = man->as_instance_manager();
       manager->set_garbage_collection_priority(mapper_id, processor, priority);
       resume_mapper_call(ctx);
     }
@@ -1979,11 +1979,11 @@ namespace Legion {
                         get_mapper_name());
         return false;
       }
-      PhysicalManager *man = instance.impl;
+      InstanceManager *man = instance.impl;
       // virtual instances are easy
       if (man->is_virtual_manager())
         return true;
-      InstanceManager *manager = man->as_instance_manager();
+      PhysicalManager *manager = man->as_instance_manager();
       // See if we already acquired it
       if (ctx->acquired_instances->find(manager) !=
           ctx->acquired_instances->end())
@@ -2000,7 +2000,7 @@ namespace Legion {
         resume_mapper_call(ctx);
         return false;
       }
-      std::set<InstanceManager*> instances; 
+      std::set<PhysicalManager*> instances; 
       instances.insert(manager);
       std::vector<bool> results;
       IndividualManager *individual = manager->as_individual_manager();
@@ -2090,12 +2090,12 @@ namespace Legion {
       bool remote_acquired = perform_remote_acquires(ctx, acquire_requests);
       if (!remote_acquired)
       {
-        std::map<InstanceManager*,std::pair<unsigned,bool> > &already_acquired =
+        std::map<PhysicalManager*,std::pair<unsigned,bool> > &already_acquired =
           *(ctx->acquired_instances);
         // Figure out which instances weren't deleted yet
         for (unsigned idx = 0; idx < instances.size(); idx++)
         {
-          PhysicalManager *manager = instances[idx].impl;
+          InstanceManager *manager = instances[idx].impl;
           if (manager->is_virtual_manager())
             continue;
           if (already_acquired.find(manager->as_instance_manager()) ==
@@ -2186,7 +2186,7 @@ namespace Legion {
       bool remote_acquired = perform_remote_acquires(ctx, acquire_requests);
       if (!remote_acquired)
       {
-        std::map<InstanceManager*,std::pair<unsigned,bool> > &already_acquired =
+        std::map<PhysicalManager*,std::pair<unsigned,bool> > &already_acquired =
           *(ctx->acquired_instances); 
         std::vector<unsigned> to_erase;
         for (std::vector<std::vector<MappingInstance> >::iterator it = 
@@ -2195,7 +2195,7 @@ namespace Legion {
           std::vector<MappingInstance> &current = *it;
           for (unsigned idx = 0; idx < current.size(); idx++)
           {
-            PhysicalManager *manager = current[idx].impl;
+            InstanceManager *manager = current[idx].impl;
             if (manager->is_virtual_manager())
               continue;
             if (already_acquired.find(manager->as_instance_manager()) ==
@@ -2223,15 +2223,15 @@ namespace Legion {
                       std::vector<unsigned> *to_erase)
     //--------------------------------------------------------------------------
     {
-      std::map<InstanceManager*,std::pair<unsigned,bool> > &already_acquired = 
+      std::map<PhysicalManager*,std::pair<unsigned,bool> > &already_acquired = 
         *(info->acquired_instances);
       bool local_acquired = true;
       for (unsigned idx = 0; idx < instances.size(); idx++)
       {
-        PhysicalManager *man = instances[idx].impl;
+        InstanceManager *man = instances[idx].impl;
         if (man->is_virtual_manager())
           continue;
-        InstanceManager *manager = man->as_instance_manager();
+        PhysicalManager *manager = man->as_instance_manager();
         if (already_acquired.find(manager) != already_acquired.end())
           continue;
         // Try to add an acquired reference immediately
@@ -2284,7 +2284,7 @@ namespace Legion {
             acquire_requests.begin(); req_it != acquire_requests.end();req_it++)
       {
         unsigned idx = 0;
-        for (std::set<InstanceManager*>::const_iterator it =  
+        for (std::set<PhysicalManager*>::const_iterator it =  
               req_it->second.instances.begin(); it != 
               req_it->second.instances.end(); it++, idx++)
         {
@@ -2360,18 +2360,18 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MapperManager::record_acquired_instance(MappingCallInfo *ctx,
-                                             PhysicalManager *man, bool created)
+                                             InstanceManager *man, bool created)
     //--------------------------------------------------------------------------
     {
       if (man->is_virtual_manager())
         return;
-      InstanceManager *manager = man->as_instance_manager();
+      PhysicalManager *manager = man->as_instance_manager();
 #ifdef DEBUG_LEGION
       assert(ctx->acquired_instances != NULL);
 #endif
-      std::map<InstanceManager*,
+      std::map<PhysicalManager*,
         std::pair<unsigned,bool> > &acquired =*(ctx->acquired_instances);
-      std::map<InstanceManager*,std::pair<unsigned,bool> >::iterator finder = 
+      std::map<PhysicalManager*,std::pair<unsigned,bool> >::iterator finder = 
         acquired.find(manager); 
       if (finder == acquired.end())
         acquired[manager] = std::pair<unsigned,bool>(1/*first ref*/, created);
@@ -2381,18 +2381,18 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MapperManager::release_acquired_instance(MappingCallInfo *ctx,
-                                                  PhysicalManager *man)
+                                                  InstanceManager *man)
     //--------------------------------------------------------------------------
     {
       if (man->is_virtual_manager())
         return;
-      InstanceManager *manager = man->as_instance_manager();
+      PhysicalManager *manager = man->as_instance_manager();
 #ifdef DEBUG_LEGION
       assert(ctx->acquired_instances != NULL);
 #endif
-      std::map<InstanceManager*,std::pair<unsigned,bool> > &acquired =
+      std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired =
         *(ctx->acquired_instances);
-      std::map<InstanceManager*,std::pair<unsigned,bool> >::iterator finder = 
+      std::map<PhysicalManager*,std::pair<unsigned,bool> >::iterator finder = 
         acquired.find(manager);
       if (finder == acquired.end())
         return;

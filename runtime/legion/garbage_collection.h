@@ -37,8 +37,8 @@ namespace Legion {
 
     enum DistCollectableType {
       INSTANCE_MANAGER_DC = 0x1,
-      REDUCTION_FOLD_DC = 0x2,
-      REDUCTION_LIST_DC = 0x3,
+      //= 0x2,
+      //= 0x3,
       MATERIALIZED_VIEW_DC = 0x4,
       REDUCTION_VIEW_DC = 0x5,
       FILL_VIEW_DC = 0x6,
@@ -50,7 +50,8 @@ namespace Legion {
       FIELD_SPACE_DC = 0xC,
       REGION_TREE_NODE_DC = 0xD,
       EQUIVALENCE_SET_DC = 0xE,
-      DIST_TYPE_LAST_DC = 0xF,
+      // be careful making this last one bigger than 0x10! see instance encoding
+      DIST_TYPE_LAST_DC = 0xF,  // must be last
     };
 
     enum ReferenceSource {

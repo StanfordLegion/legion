@@ -271,10 +271,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Operation::release_acquired_instances(
-       std::map<InstanceManager*,std::pair<unsigned,bool> > &acquired_instances)
+       std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired_instances)
     //--------------------------------------------------------------------------
     {
-      for (std::map<InstanceManager*,std::pair<unsigned,bool> >::iterator it = 
+      for (std::map<PhysicalManager*,std::pair<unsigned,bool> >::iterator it = 
             acquired_instances.begin(); it != acquired_instances.end(); it++)
       {
         if (it->first->remove_base_valid_ref(MAPPING_ACQUIRE_REF, 
@@ -541,7 +541,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<InstanceManager*,std::pair<unsigned,bool> >* 
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
                                      Operation::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
@@ -1251,7 +1251,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < valid.size(); idx++)
       {
         const InstanceRef &ref = valid[idx];
-        InstanceManager *manager = ref.get_instance_manager();
+        PhysicalManager *manager = ref.get_instance_manager();
         if (!manager->has_visible_from(visible_filter))
           continue;
         input_valid.resize(next_index+1);
@@ -1271,7 +1271,7 @@ namespace Legion {
       for (std::deque<MappingInstance>::const_iterator it = 
             output.begin(); it != output.end(); it++)
       {
-        const PhysicalManager *manager = it->impl;
+        const InstanceManager *manager = it->impl;
         bool found = false;
         for (unsigned idx = 0; idx < sources.size(); idx++)
         {
@@ -3068,7 +3068,7 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    std::map<InstanceManager*,std::pair<unsigned,bool> >* 
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
                                          MapOp::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
@@ -3354,7 +3354,7 @@ namespace Legion {
       // Also check to make sure that none of them are composite instances
       RegionTreeID bad_tree = 0;
       std::vector<FieldID> missing_fields;
-      std::vector<InstanceManager*> unacquired;
+      std::vector<PhysicalManager*> unacquired;
       int virtual_index = runtime->forest->physical_convert_mapping(this,
                                 requirement, output.chosen_instances, 
                                 chosen_instances, bad_tree, missing_fields,
@@ -3395,7 +3395,7 @@ namespace Legion {
       }
       if (!unacquired.empty())
       {
-        for (std::vector<InstanceManager*>::const_iterator it = 
+        for (std::vector<PhysicalManager*>::const_iterator it = 
               unacquired.begin(); it != unacquired.end(); it++)
         {
           if (acquired_instances.find(*it) == acquired_instances.end())
@@ -3466,7 +3466,7 @@ namespace Legion {
       std::vector<LogicalRegion> regions_to_check(1, requirement.region);
       for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
       {
-        InstanceManager *manager = chosen_instances[idx].get_instance_manager();
+        PhysicalManager *manager = chosen_instances[idx].get_instance_manager();
         if (!manager->meets_regions(regions_to_check))
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of 'map_inline' "
@@ -3491,7 +3491,7 @@ namespace Legion {
                           "inline mapping operation in task %s (ID %lld).",
                           mapper->get_mapper_name(),parent_ctx->get_task_name(),
                           parent_ctx->get_unique_id())
-          std::map<InstanceManager*,std::pair<unsigned,bool> >::const_iterator 
+          std::map<PhysicalManager*,std::pair<unsigned,bool> >::const_iterator 
             finder = acquired_instances.find(
                 chosen_instances[idx].get_instance_manager());
 #ifdef DEBUG_LEGION
@@ -3531,7 +3531,7 @@ namespace Legion {
           runtime->find_layout_constraints(layout_constraint_id);
         for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
         {
-          PhysicalManager *manager = chosen_instances[idx].get_manager();
+          InstanceManager *manager = chosen_instances[idx].get_manager();
           const LayoutConstraint *conflict_constraint = NULL;
           if (manager->conflicts(constraints, get_shard_point(), 
                                  &conflict_constraint))
@@ -5190,7 +5190,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<InstanceManager*,std::pair<unsigned,bool> >* 
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
                                         CopyOp::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
@@ -5804,7 +5804,7 @@ namespace Legion {
     {
       RegionTreeID bad_tree = 0;
       std::vector<FieldID> missing_fields;
-      std::vector<InstanceManager*> unacquired;
+      std::vector<PhysicalManager*> unacquired;
       int composite_idx = runtime->forest->physical_convert_mapping(this,
                               req, output, targets, bad_tree, missing_fields,
                               &acquired_instances, unacquired, 
@@ -5845,7 +5845,7 @@ namespace Legion {
       }
       if (!unacquired.empty())
       {
-        for (std::vector<InstanceManager*>::const_iterator it = 
+        for (std::vector<PhysicalManager*>::const_iterator it = 
               unacquired.begin(); it != unacquired.end(); it++)
         {
           if (acquired_instances.find(*it) == acquired_instances.end())
@@ -5903,10 +5903,10 @@ namespace Legion {
       for (unsigned idx = 0; idx < targets.size(); idx++)
       {
         const InstanceRef &ref = targets[idx];
-        PhysicalManager *man = ref.get_manager();
+        InstanceManager *man = ref.get_manager();
         if (man->is_virtual_manager())
           continue;
-        InstanceManager *manager = man->as_instance_manager();
+        PhysicalManager *manager = man->as_instance_manager();
         if (!manager->meets_regions(regions_to_check))
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of 'map_copy' "
@@ -8992,7 +8992,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<InstanceManager*,std::pair<unsigned,bool> >* 
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
                                    PostCloseOp::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
@@ -9694,7 +9694,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<InstanceManager*,std::pair<unsigned,bool> >* 
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
                                      AcquireOp::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
@@ -10580,7 +10580,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<InstanceManager*,std::pair<unsigned,bool> >* 
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
                                      ReleaseOp::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
@@ -12375,7 +12375,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<InstanceManager*,std::pair<unsigned,bool> >*
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                                    MustEpochOp::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
@@ -13850,7 +13850,7 @@ namespace Legion {
           instances.resize(instances.size() + 1);
           FieldDataDescriptor &desc = instances.back();
           const InstanceRef &ref = mapped_insts[0];
-          PhysicalManager *manager = ref.get_manager();
+          InstanceManager *manager = ref.get_manager();
           desc.index_space = handle;
           desc.inst = manager->get_instance(key);
           desc.field_offset = manager->layout->find_field_info(
@@ -13885,7 +13885,7 @@ namespace Legion {
         instances.resize(1);
         FieldDataDescriptor &desc = instances[0];
         const InstanceRef &ref = mapped_insts[0];
-        PhysicalManager *manager = ref.get_manager();
+        InstanceManager *manager = ref.get_manager();
         desc.index_space = handle;
         desc.inst = manager->get_instance(key);
         desc.field_offset = manager->layout->find_field_info(
@@ -13934,7 +13934,7 @@ namespace Legion {
       // Also check to make sure that none of them are composite instances
       RegionTreeID bad_tree = 0;
       std::vector<FieldID> missing_fields;
-      std::vector<InstanceManager*> unacquired;
+      std::vector<PhysicalManager*> unacquired;
       int virtual_index = runtime->forest->physical_convert_mapping(this,
                                 requirement, output.chosen_instances, 
                                 mapped_instances, bad_tree, missing_fields,
@@ -13974,7 +13974,7 @@ namespace Legion {
       }
       if (!unacquired.empty())
       {
-        for (std::vector<InstanceManager*>::const_iterator it = 
+        for (std::vector<PhysicalManager*>::const_iterator it = 
               unacquired.begin(); it != unacquired.end(); it++)
         {
           if (acquired_instances.find(*it) == acquired_instances.end())
@@ -14015,7 +14015,7 @@ namespace Legion {
       std::vector<LogicalRegion> regions_to_check(1, requirement.region);
       for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
       {
-        InstanceManager *manager = mapped_instances[idx].get_instance_manager();
+        PhysicalManager *manager = mapped_instances[idx].get_instance_manager();
         if (!manager->meets_regions(regions_to_check))
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of "
@@ -14394,7 +14394,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<InstanceManager*,std::pair<unsigned,bool> >* 
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
                           DependentPartitionOp::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
@@ -15081,7 +15081,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<InstanceManager*,std::pair<unsigned,bool> >*
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                                         FillOp::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
@@ -16455,7 +16455,7 @@ namespace Legion {
           assert(false);
       }
       // Register this instance with the memory manager
-      InstanceManager *external_manager = 
+      PhysicalManager *external_manager = 
         external_instance.get_instance_manager();
       const RtEvent attached = external_manager->attach_external_instance();
       if (attached.exists())
@@ -16857,7 +16857,7 @@ namespace Legion {
       FieldMask all_allocated_fields;
       for (unsigned idx = 0; idx < references.size(); idx++)
       {
-        PhysicalManager *manager = references[idx].get_manager();
+        InstanceManager *manager = references[idx].get_manager();
         all_allocated_fields |= manager->layout->allocated_fields;
       }
       FieldSpaceNode *field_space = 
@@ -17042,7 +17042,7 @@ namespace Legion {
                                         completion_event);
 #endif
       }
-      InstanceManager *manager = reference.get_instance_manager();
+      PhysicalManager *manager = reference.get_instance_manager();
 #ifdef DEBUG_LEGION
       assert(!manager->is_reduction_manager()); 
 #endif
@@ -17645,7 +17645,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<InstanceManager*,std::pair<unsigned,bool> >*
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                                       RemoteOp::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
