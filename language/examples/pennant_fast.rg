@@ -1607,7 +1607,7 @@ task toplevel()
   var rp_all = region(ispace(ptr, conf.np), point)
   var rs_all = region(ispace(ptr, conf.ns), side(wild, wild, wild, wild))
 
-  format.println("Reading input (t={.1f}...", c.legion_get_current_time_in_micros()/1.e6)
+  format.println("Reading input (t={.1}...", c.legion_get_current_time_in_micros()/1.e6)
 
   var colorings : mesh_colorings
 
