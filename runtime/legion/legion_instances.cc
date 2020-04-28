@@ -24,6 +24,22 @@
 #include "legion/legion_instances.h"
 #include "legion/legion_views.h"
 
+namespace LegionRuntime {
+  namespace Accessor {
+    namespace DebugHooks {
+      // these are calls that can be implemented by a higher level (e.g. Legion)
+      // to perform privilege/bounds checks on accessor reference and produce 
+      // more useful information for debug
+
+      /*extern*/ void (*check_bounds_ptr)(void *region, ptr_t ptr) = 0;
+      /*extern*/ void (*check_bounds_dpoint)(void *region, 
+                                    const Legion::DomainPoint &dp) = 0;
+
+      /*extern*/ const char *(*find_privilege_task_name)(void *region) = 0;
+    };
+  };
+};
+
 namespace Legion {
   namespace Internal {
 
