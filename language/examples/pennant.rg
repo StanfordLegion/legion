@@ -1061,8 +1061,8 @@ do
 
     if cycle > 0 and cycle % interval == 0 then
       var current_time = c.legion_get_current_time_in_micros()/1.e6
-      output5("cycle %4ld    sim time %.3e    dt %.3e    time %.3e (per iteration) %.3e (total)\n",
-               cycle, time, dt, (current_time - last_time)/interval, current_time - start_time)
+      format.println("cycle {4}    sim time {.3e}    dt {.3e}    time {.3e} (per iteration) {.3e} (total)",
+                     cycle, time, dt, (current_time - last_time)/interval, current_time - start_time)
       last_time = current_time
     end
     if cycle == prune then
@@ -1265,7 +1265,7 @@ do
   if prune == 0 then
     ts_end = c.legion_get_current_time_in_micros()
   end
-  output1("ELAPSED TIME = %7.3f s\n", 1e-6 * (ts_end - ts_start))
+  format.println("ELAPSED TIME = {7.3} s", 1e-6 * (ts_end - ts_start))
 end
 
 __demand(__inline)
