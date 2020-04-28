@@ -3647,7 +3647,6 @@ namespace Legion {
                                              const void *fill_value, 
                                              size_t fill_size,
 #ifdef LEGION_SPY
-                                             UniqueID fill_uid,
                                              FieldSpace handle,
                                              RegionTreeID tree_id,
 #endif
@@ -3675,7 +3674,7 @@ namespace Legion {
                                        find_trace_local_id(memo),
                                        fields, fill_value, fill_size, 
 #ifdef LEGION_SPY
-                                       fill_uid, handle, tree_id,
+                                       handle, tree_id,
 #endif
                                        find_event(precondition))); 
     }
@@ -3715,7 +3714,6 @@ namespace Legion {
       insert_instruction(new IssueFill(*this, lhs_, expr, op_key,
                                        fields, fill_value, fill_size,
 #ifdef LEGION_SPY
-                                       0/*fill uid*/,
                                        manager->field_space_node->handle,
                                        manager->tree_id,
 #endif
@@ -4568,12 +4566,12 @@ namespace Legion {
                          const std::vector<CopySrcDstField> &f,
                          const void *value, size_t size, 
 #ifdef LEGION_SPY
-                         UniqueID uid, FieldSpace h, RegionTreeID tid,
+                         FieldSpace h, RegionTreeID tid,
 #endif
                          unsigned pi)
       : Instruction(tpl, key), lhs(l), expr(e), fields(f), fill_size(size),
 #ifdef LEGION_SPY
-        fill_uid(uid), handle(h), tree_id(tid),
+        handle(h), tree_id(tid),
 #endif
         precondition_idx(pi)
     //--------------------------------------------------------------------------
@@ -4612,7 +4610,8 @@ namespace Legion {
       events[lhs] = expr->issue_fill(trace_info, fields, 
                                      fill_value, fill_size,
 #ifdef LEGION_SPY
-                                     fill_uid, handle, tree_id,
+                                     trace_info.op->get_unique_op_id(),
+                                     handle, tree_id,
 #endif
                                      precondition, PredEvent::NO_PRED_EVENT);
     }

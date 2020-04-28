@@ -173,7 +173,6 @@ namespace Legion {
                            const std::vector<CopySrcDstField> &fields,
                            const void *fill_value, size_t fill_size,
 #ifdef LEGION_SPY
-                           UniqueID fill_uid, 
                            FieldSpace handle,
                            RegionTreeID tree_id,
 #endif
@@ -282,7 +281,6 @@ namespace Legion {
                            const std::vector<CopySrcDstField> &fields,
                            const void *fill_value, size_t fill_size,
 #ifdef LEGION_SPY
-                           UniqueID fill_uid, 
                            FieldSpace handle,
                            RegionTreeID tree_id,
 #endif
@@ -467,7 +465,6 @@ namespace Legion {
                           const std::vector<CopySrcDstField> &fields,
                           const void *fill_value, size_t fill_size,
 #ifdef LEGION_SPY
-                          UniqueID fill_uid,
                           FieldSpace handle,
                           RegionTreeID tree_id,
 #endif
@@ -477,7 +474,7 @@ namespace Legion {
           rec->record_issue_fill(memo, result, expr, fields, 
                                  fill_value, fill_size,
 #ifdef LEGION_SPY
-                                 fill_uid, handle, tree_id,
+                                 handle, tree_id,
 #endif
                                  precondition, pred_guard);
         }

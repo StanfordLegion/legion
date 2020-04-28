@@ -118,7 +118,7 @@ namespace Legion {
         trace_info.record_issue_fill(result, this, dst_fields,
                                      fill_value, fill_size,
 #ifdef LEGION_SPY
-                                     fill_uid, handle, tree_id,
+                                     handle, tree_id,
 #endif
                                      precondition, pred_guard);
       return result;
