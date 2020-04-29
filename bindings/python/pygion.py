@@ -22,6 +22,7 @@ try:
 except ImportError:
     import pickle
 import collections
+import contextlib
 from io import StringIO
 import itertools
 import math
@@ -1244,29 +1245,16 @@ def copy(src_region, src_field_names, dst_region, dst_field_names, redop=None):
 
     c.legion_copy_launcher_destroy(launcher)
 
-# For now we just put the attached instance in an opaque wrapper.
-class _AttachedInstanceWrapper(object):
-    __slots__ = ['handle']
-
-    def __init__(self, handle):
-        self.handle = handle
-
-    def __del__(self):
-        if self.handle:
-            self.detach()
-
-    def detach(self):
-        c.legion_detach_external_resource(
-            _my.ctx.runtime, _my.ctx.context, self.handle)
-
+@contextlib.contextmanager
 def attach_hdf5(region, filename, field_map, mode, restricted=True, mapped=False):
     assert(isinstance(region, Region))
 
     assert(isinstance(filename, basestring))
+    filename = filename.encode('utf-8')
 
     raw_field_map = c.legion_field_map_create()
     for field_name, value in field_map.items():
-        c.legion_field_map_insert(region.fspace.field_ids[field_name], value)
+        c.legion_field_map_insert(raw_field_map, region.fspace.field_ids[field_name], value.encode('utf-8'))
         region._clear_instance(field_name)
 
     assert(isinstance(mode, FileMode))
@@ -1276,17 +1264,48 @@ def attach_hdf5(region, filename, field_map, mode, restricted=True, mapped=False
         region.parent.raw_value() if region.parent is not None else region.raw_value(),
         EXTERNAL_HDF5_FILE)
 
-    c.legion_attach_launcher_attach_hdf5(launcher, filename, raw_field_map)
-    c.legion_attach_launcher_set_restricted(restricted)
-    c.legion_attach_launcher_set_mapped(mapped)
+    c.legion_attach_launcher_attach_hdf5(launcher, filename, raw_field_map, mode.value)
+    c.legion_attach_launcher_set_restricted(launcher, restricted)
+    c.legion_attach_launcher_set_mapped(launcher, mapped)
 
-    instance = _AttachedInstanceWrapper(
-        c.legion_attach_launcher_execute(_my.ctx.runtime, _my.ctx.context, launcher))
+    instance = c.legion_attach_launcher_execute(
+        _my.ctx.runtime, _my.ctx.context, launcher)
 
     c.legion_attach_launcher_destroy(launcher)
     c.legion_field_map_destroy(raw_field_map)
 
-    return instance
+    yield
+
+    c.legion_detach_external_resource(
+        _my.ctx.runtime, _my.ctx.context, instance)
+
+@contextlib.contextmanager
+def acquire(region, field_names):
+    assert(isinstance(region, Region))
+
+    launcher = c.legion_acquire_launcher_create(
+        region.raw_value(),
+        region.parent.raw_value() if region.parent is not None else region.raw_value(),
+        c.legion_predicate_true(), 0, 0)
+
+    for field_name in field_names:
+        c.legion_acquire_launcher_add_field(launcher, region.fspace.field_ids[field_name])
+
+    c.legion_acquire_launcher_execute(_my.ctx.runtime, _my.ctx.context, launcher)
+    c.legion_acquire_launcher_destroy(launcher)
+
+    yield
+
+    launcher = c.legion_release_launcher_create(
+        region.raw_value(),
+        region.parent.raw_value() if region.parent is not None else region.raw_value(),
+        c.legion_predicate_true(), 0, 0)
+
+    for field_name in field_names:
+        c.legion_release_launcher_add_field(launcher, region.fspace.field_ids[field_name])
+
+    c.legion_release_launcher_execute(_my.ctx.runtime, _my.ctx.context, launcher)
+    c.legion_release_launcher_destroy(launcher)
 
 # Hack: Can't pickle static methods.
 def _Ipartition_unpickle(tid, id, type_tag, parent, color_space):
