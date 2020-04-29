@@ -34,6 +34,8 @@
 
 import "regent"
 
+local format = require("std/format")
+
 require("pennant_common")
 
 local use_python_main = rawget(_G, "pennant_use_python_main") == true
@@ -337,7 +339,7 @@ where
 do
   if not enable then return end
 
-  if print_ts then c.printf("t: %ld\n", c.legion_get_current_time_in_micros()) end
+  if print_ts then format.println("t: {}", c.legion_get_current_time_in_micros()) end
 
   var dth = 0.5 * dt
 
@@ -1447,7 +1449,7 @@ do
     dthydro min= dtlast * cflv / dvovmax
   end
 
-  if print_ts then c.printf("t: %ld\n", c.legion_get_current_time_in_micros()) end
+  if print_ts then format.println("t: {}", c.legion_get_current_time_in_micros()) end
 
   return dthydro
 end
@@ -1597,7 +1599,7 @@ end
 terra unwrap(x : mesh_colorings) return x end
 
 task toplevel()
-  c.printf("Running test (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
+  format.println("Running test (t={.1})...", c.legion_get_current_time_in_micros()/1.e6)
 
   var conf : config = read_config()
 
@@ -1605,7 +1607,7 @@ task toplevel()
   var rp_all = region(ispace(ptr, conf.np), point)
   var rs_all = region(ispace(ptr, conf.ns), side(wild, wild, wild, wild))
 
-  c.printf("Reading input (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
+  format.println("Reading input (t={.1}...", c.legion_get_current_time_in_micros()/1.e6)
 
   var colorings : mesh_colorings
 
@@ -1838,7 +1840,7 @@ task toplevel()
 
     -- if cycle > 0 and cycle % interval == 0 then
     --   var current_time = c.legion_get_current_time_in_micros()/1.e6
-    --   c.printf("cycle %4ld    sim time %.3e    dt %.3e    time %.3e (per iteration) %.3e (total)\n",
+    --   format.println("cycle {4}    sim time {.3e}    dt {.3e}    time {.3e} (per iteration) {.3e} (total)",
     --            cycle, time, dt, (current_time - last_time)/interval, current_time - start_time)
     --   last_time = current_time
     -- end
@@ -1926,7 +1928,7 @@ task toplevel()
     validate_output_sequential(
       rz_all, rp_all, rs_all, conf)
   else
-    c.printf("Warning: Skipping sequential validation\n")
+    format.println("Warning: Skipping sequential validation")
   end
 
   -- write_output(conf, rz_all, rp_all, rs_all)
