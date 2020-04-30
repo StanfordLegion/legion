@@ -2434,7 +2434,8 @@ namespace Legion {
     template<typename T>
     class DeferredValue {
     public:
-      DeferredValue(T initial_value);
+      DeferredValue(T initial_value,
+                    size_t alignment = 16);
     public:
       __CUDA_HD__
       inline T read(void) const;
@@ -2471,7 +2472,7 @@ namespace Legion {
     template<typename REDOP, bool EXCLUSIVE=false>
     class DeferredReduction: public DeferredValue<typename REDOP::RHS> {
     public:
-      DeferredReduction(void);
+      DeferredReduction(size_t alignment = 16);
     public:
       __CUDA_HD__
       inline void reduce(typename REDOP::RHS val) const;
@@ -2505,21 +2506,47 @@ namespace Legion {
     class DeferredBuffer {
     public:
       DeferredBuffer(void);
+    public: // Constructors specifying a generic memory kind
       DeferredBuffer(Memory::Kind kind, 
                      const Domain &bounds,
                      const T *initial_value = NULL,
+                     size_t alignment = 16,
                      bool fortran_order_dims = false);
       DeferredBuffer(Memory::Kind kind, 
                      IndexSpace bounds,
                      const T *initial_value = NULL,
+                     size_t alignment = 16,
                      bool fortran_order_dims = false);
       DeferredBuffer(const Rect<DIM,COORD_T> &bounds, 
                      Memory::Kind kind,
                      const T *initial_value = NULL,
+                     size_t alignment = 16,
                      bool fortran_order_dims = false);
       DeferredBuffer(IndexSpaceT<DIM,COORD_T> bounds, 
                      Memory::Kind kind,
                      const T *initial_value = NULL,
+                     size_t alignment = 16,
+                     bool fortran_order_dims = false);
+    public: // Constructors specifying a specific memory
+      DeferredBuffer(Memory memory, 
+                     const Domain &bounds,
+                     const T *initial_value = NULL,
+                     size_t alignment = 16,
+                     bool fortran_order_dims = false);
+      DeferredBuffer(Memory memory, 
+                     IndexSpace bounds,
+                     const T *initial_value = NULL,
+                     size_t alignment = 16,
+                     bool fortran_order_dims = false);
+      DeferredBuffer(const Rect<DIM,COORD_T> &bounds, 
+                     Memory memory,
+                     const T *initial_value = NULL,
+                     size_t alignment = 16,
+                     bool fortran_order_dims = false);
+      DeferredBuffer(IndexSpaceT<DIM,COORD_T> bounds, 
+                     Memory memory,
+                     const T *initial_value = NULL,
+                     size_t alignment = 16,
                      bool fortran_order_dims = false);
     public:
       __CUDA_HD__

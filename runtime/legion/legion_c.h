@@ -3798,14 +3798,23 @@ extern "C" {
     legion_external_resource_t resource);
 
   /**
-   * @see Legion::AttachLauncher::AttachLauncher()
+   * @see Legion::AttachLauncher::attach_hdf5()
+   */
+  void
+  legion_attach_launcher_attach_hdf5(legion_attach_launcher_t handle,
+                                     const char *filename,
+                                     legion_field_map_t field_map,
+                                     legion_file_mode_t mode);
+
+  /**
+   * @see Legion::AttachLauncher::restricted
    */
   void
   legion_attach_launcher_set_restricted(legion_attach_launcher_t handle,
                                         bool restricted);
 
   /**
-   * @see Legion::AttachLauncher::AttachLauncher()
+   * @see Legion::AttachLauncher::mapped
    */
   void
   legion_attach_launcher_set_mapped(legion_attach_launcher_t handle,

@@ -22,6 +22,7 @@ try:
 except ImportError:
     import pickle
 import collections
+import contextlib
 from io import StringIO
 import itertools
 import math
@@ -74,6 +75,22 @@ for dim in range(1, 9):
 assert _max_dim is not None, 'Unable to detect LEGION_MAX_DIM'
 
 AUTO_GENERATE_ID = c.legion_auto_generate_id()
+
+# Duplicate enum values from legion_config.h since CFFI isn't smart
+# enough to parse them directly.
+
+EXTERNAL_HDF5_FILE = 1
+
+NO_ACCESS       = 0x00000000
+READ_PRIV       = 0x00000001
+READ_ONLY       = 0x00000001 # READ_PRIV
+WRITE_PRIV      = 0x00000002
+REDUCE_PRIV     = 0x00000004
+REDUCE          = 0x00000004 # REDUCE_PRIV
+READ_WRITE      = 0x00000007 # READ_PRIV | WRITE_PRIV | REDUCE_PRIV
+DISCARD_MASK    = 0x10000000 # For marking we don't need inputs
+WRITE_ONLY      = 0x10000002 # WRITE_PRIV | DISCARD_MASK
+WRITE_DISCARD   = 0x10000007 # READ_WRITE | DISCARD_MASK
 
 # Note: don't use __file__ here, it may return either .py or .pyc and cause
 # non-deterministic failures.
@@ -566,14 +583,14 @@ class Privilege(object):
         return priv
 
     def _legion_privilege(self):
-        bits = 0
-        if self.discard:
-            bits |= 2 # WRITE_DISCARD
-        elif self.reduce:
+        bits = NO_ACCESS
+        if self.reduce:
             assert False
         else:
-            if self.write: bits = 7 # READ_WRITE
-            elif self.read: bits = 1 # READ_ONLY
+            if self.write: bits = READ_WRITE
+            elif self.read: bits = READ_ONLY
+        if self.discard:
+            bits |= DISCARD_MASK
         return bits
 
     def _legion_grouped_privileges(self, fspace):
@@ -731,6 +748,30 @@ compute_complete = Disjointness('compute_complete', 5)
 disjoint_incomplete = Disjointness('disjoint_incomplete', 6)
 aliased_incomplete = Disjointness('aliased_incomplete', 7)
 compute_incomplete = Disjointness('compute_incomplete', 8)
+
+class FileMode(object):
+    __slots__ = ['kind', 'value']
+
+    def __init__(self, kind, value):
+        self.kind = kind
+        self.value = value
+
+    def __eq__(self, other):
+        return isinstance(other, FileMode) and self.value == other.value
+
+    def __cmp__(self, other):
+        assert isinstance(other, FileMode)
+        return self.value.__cmp__(other.value)
+
+    def __hash__(self):
+        return hash(self.value)
+
+    def __str__(self):
+        return self.kind
+
+file_read_only = FileMode('read_only', 0)
+file_read_write = FileMode('read_write', 1)
+file_create = FileMode('create', 2)
 
 # Hack: Can't pickle static methods.
 def _Ispace_unpickle(ispace_tid, ispace_id, ispace_type_tag, owned):
@@ -1017,6 +1058,13 @@ class Region(object):
         if privilege is not None:
             self._set_privilege(field_name, privilege)
 
+    def _clear_instance(self, field_name):
+        assert self.parent is None # not supported on subregions
+        if field_name in self.instances:
+            # FIXME: need to determine when it is safe to destroy the
+            # associated instance (may or may not be inline mapped)
+            del self.instances[field_name]
+
     def _map_inline(self):
         assert self.parent is None # FIXME: support inline mapping subregions
 
@@ -1196,6 +1244,68 @@ def copy(src_region, src_field_names, dst_region, dst_field_names, redop=None):
     c.legion_copy_launcher_execute(_my.ctx.runtime, _my.ctx.context, launcher)
 
     c.legion_copy_launcher_destroy(launcher)
+
+@contextlib.contextmanager
+def attach_hdf5(region, filename, field_map, mode, restricted=True, mapped=False):
+    assert(isinstance(region, Region))
+
+    assert(isinstance(filename, basestring))
+    filename = filename.encode('utf-8')
+
+    raw_field_map = c.legion_field_map_create()
+    for field_name, value in field_map.items():
+        c.legion_field_map_insert(raw_field_map, region.fspace.field_ids[field_name], value.encode('utf-8'))
+        region._clear_instance(field_name)
+
+    assert(isinstance(mode, FileMode))
+
+    launcher = c.legion_attach_launcher_create(
+        region.raw_value(),
+        region.parent.raw_value() if region.parent is not None else region.raw_value(),
+        EXTERNAL_HDF5_FILE)
+
+    c.legion_attach_launcher_attach_hdf5(launcher, filename, raw_field_map, mode.value)
+    c.legion_attach_launcher_set_restricted(launcher, restricted)
+    c.legion_attach_launcher_set_mapped(launcher, mapped)
+
+    instance = c.legion_attach_launcher_execute(
+        _my.ctx.runtime, _my.ctx.context, launcher)
+
+    c.legion_attach_launcher_destroy(launcher)
+    c.legion_field_map_destroy(raw_field_map)
+
+    yield
+
+    c.legion_detach_external_resource(
+        _my.ctx.runtime, _my.ctx.context, instance)
+
+@contextlib.contextmanager
+def acquire(region, field_names):
+    assert(isinstance(region, Region))
+
+    launcher = c.legion_acquire_launcher_create(
+        region.raw_value(),
+        region.parent.raw_value() if region.parent is not None else region.raw_value(),
+        c.legion_predicate_true(), 0, 0)
+
+    for field_name in field_names:
+        c.legion_acquire_launcher_add_field(launcher, region.fspace.field_ids[field_name])
+
+    c.legion_acquire_launcher_execute(_my.ctx.runtime, _my.ctx.context, launcher)
+    c.legion_acquire_launcher_destroy(launcher)
+
+    yield
+
+    launcher = c.legion_release_launcher_create(
+        region.raw_value(),
+        region.parent.raw_value() if region.parent is not None else region.raw_value(),
+        c.legion_predicate_true(), 0, 0)
+
+    for field_name in field_names:
+        c.legion_release_launcher_add_field(launcher, region.fspace.field_ids[field_name])
+
+    c.legion_release_launcher_execute(_my.ctx.runtime, _my.ctx.context, launcher)
+    c.legion_release_launcher_destroy(launcher)
 
 # Hack: Can't pickle static methods.
 def _Ipartition_unpickle(tid, id, type_tag, parent, color_space):

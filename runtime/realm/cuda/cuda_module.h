@@ -650,6 +650,11 @@ namespace Realm {
       void gpu_memcpy_async(void *dst, const void *src, size_t size,
 			    cudaMemcpyKind kind, cudaStream_t stream);
 #ifdef REALM_USE_CUDART_HIJACK
+      void gpu_memcpy2d(void *dst, size_t dpitch, const void *src, size_t spitch,
+                        size_t width, size_t height, cudaMemcpyKind kind);
+      void gpu_memcpy2d_async(void *dst, size_t dpitch, const void *src, 
+                              size_t spitch, size_t width, size_t height, 
+                              cudaMemcpyKind kind, cudaStream_t stream);
       void gpu_memcpy_to_symbol(const void *dst, const void *src, size_t size,
 				size_t offset, cudaMemcpyKind kind);
       void gpu_memcpy_to_symbol_async(const void *dst, const void *src, size_t size,

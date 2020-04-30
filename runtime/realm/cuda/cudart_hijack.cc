@@ -479,6 +479,23 @@ namespace Realm {
 	return cudaSuccess;
       }
 
+      cudaError_t cudaMemcpy2D(void *dst, size_t dpitch, const void *src, size_t spitch,
+                               size_t width, size_t height, cudaMemcpyKind kind)
+      {
+        GPUProcessor *p = get_gpu_or_die("cudaMemcpy2D");
+        p->gpu_memcpy2d(dst, dpitch, src, spitch, width, height, kind);
+        return cudaSuccess;
+      }
+
+      cudaError_t cudaMemcpy2DAsync(void *dst, size_t dpitch, const void *src, 
+                                    size_t spitch, size_t width, size_t height, 
+                                    cudaMemcpyKind kind, cudaStream_t stream)
+      {
+        GPUProcessor *p = get_gpu_or_die("cudaMemcpy2DAsync");
+        p->gpu_memcpy2d_async(dst, dpitch, src, spitch, width, height, kind, stream);
+        return cudaSuccess;
+      }
+
       cudaError_t cudaMemset(void *dst, int value, size_t count)
       {
         GPUProcessor *p = get_gpu_or_die("cudaMemset");

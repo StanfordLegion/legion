@@ -5541,7 +5541,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T>
-    inline DeferredValue<T>::DeferredValue(T initial_value)
+    inline DeferredValue<T>::DeferredValue(T initial_value, size_t alignment)
     //--------------------------------------------------------------------------
     {
       // Construct a Region of size 1 in the zero copy memory for now
@@ -5566,6 +5566,7 @@ namespace Legion {
       Realm::InstanceLayoutGeneric *layout = 
         Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
             constraints, dim_order);
+      layout->alignment_reqd = alignment;
       Realm::ProfilingRequestSet no_requests; 
 #ifdef LEGION_MALLOC_INSTANCES
       // Ask Legion to malloc this instance for us
@@ -5664,8 +5665,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename REDOP, bool EXCLUSIVE>
-    inline DeferredReduction<REDOP,EXCLUSIVE>::DeferredReduction(void)
-      : DeferredValue<typename REDOP::LHS>(REDOP::identity)
+    inline DeferredReduction<REDOP,EXCLUSIVE>::DeferredReduction(size_t align)
+      : DeferredValue<typename REDOP::LHS>(REDOP::identity, align)
     //--------------------------------------------------------------------------
     {
     }
@@ -5694,21 +5695,47 @@ namespace Legion {
     class DeferredBuffer<FT,N,T,false> {
     public:
       inline DeferredBuffer(void);
+      // Memory kinds
       inline DeferredBuffer(Memory::Kind kind, 
                             const Domain &bounds,
                             const FT *initial_value = NULL,
+                            size_t alignment = 16,
                             bool fortran_order_dims = false);
       inline DeferredBuffer(Memory::Kind kind, 
                             IndexSpace bounds,
                             const FT *initial_value = NULL,
+                            size_t alignment = 16,
                             bool fortran_order_dims = false);
       inline DeferredBuffer(const Rect<N,T> &bounds, 
                             Memory::Kind kind,
                             const FT *initial_value = NULL,
+                            size_t alignment = 16,
                             bool fortran_order_dims = false);
       inline DeferredBuffer(IndexSpaceT<N,T> bounds, 
                             Memory::Kind kind,
                             const FT *initial_value = NULL,
+                            size_t alignment = 16,
+                            bool fortran_order_dims = false);
+      // Explicit memory
+      inline DeferredBuffer(Memory memory, 
+                            const Domain &bounds,
+                            const FT *initial_value = NULL,
+                            size_t alignment = 16,
+                            bool fortran_order_dims = false);
+      inline DeferredBuffer(Memory memory, 
+                            IndexSpace bounds,
+                            const FT *initial_value = NULL,
+                            size_t alignment = 16,
+                            bool fortran_order_dims = false);
+      inline DeferredBuffer(const Rect<N,T> &bounds, 
+                            Memory memory,
+                            const FT *initial_value = NULL,
+                            size_t alignment = 16,
+                            bool fortran_order_dims = false);
+      inline DeferredBuffer(IndexSpaceT<N,T> bounds, 
+                            Memory memory,
+                            const FT *initial_value = NULL,
+                            size_t alignment = 16,
                             bool fortran_order_dims = false);
     public:
       __CUDA_HD__
@@ -5731,21 +5758,47 @@ namespace Legion {
     class DeferredBuffer<FT,N,T,true> {
     public:
       inline DeferredBuffer(void);
+      // Memory kind
       inline DeferredBuffer(Memory::Kind kind, 
                             const Domain &bounds,
                             const FT *initial_value = NULL,
+                            size_t alignment = 16,
                             bool fortran_order_dims = false);
       inline DeferredBuffer(Memory::Kind kind, 
                             IndexSpace bounds,
                             const FT *initial_value = NULL,
+                            size_t alignment = 16,
                             bool fortran_order_dims = false);
       inline DeferredBuffer(const Rect<N,T> &bounds, 
                             Memory::Kind kind,
                             const FT *initial_value = NULL,
+                            size_t alignment = 16,
                             bool fortran_order_dims = false);
       inline DeferredBuffer(IndexSpaceT<N,T> bounds, 
                             Memory::Kind kind,
                             const FT *initial_value = NULL,
+                            size_t alignment = 16,
+                            bool fortran_order_dims = false);
+      // Explicit memory
+      inline DeferredBuffer(Memory memory, 
+                            const Domain &bounds,
+                            const FT *initial_value = NULL,
+                            size_t alignment = 16,
+                            bool fortran_order_dims = false);
+      inline DeferredBuffer(Memory memory, 
+                            IndexSpace bounds,
+                            const FT *initial_value = NULL,
+                            size_t alignment = 16,
+                            bool fortran_order_dims = false);
+      inline DeferredBuffer(const Rect<N,T> &bounds, 
+                            Memory memory,
+                            const FT *initial_value = NULL,
+                            size_t alignment = 16,
+                            bool fortran_order_dims = false);
+      inline DeferredBuffer(IndexSpaceT<N,T> bounds, 
+                            Memory memory,
+                            const FT *initial_value = NULL,
+                            size_t alignment = 16,
                             bool fortran_order_dims = false);
     public:
       __CUDA_HD__
@@ -5797,6 +5850,7 @@ namespace Legion {
 #endif
            >::DeferredBuffer(Memory::Kind kind, const Domain &space,
                              const FT *initial_value/* = NULL*/,
+                             size_t alignment/* = 16*/,
                              bool fortran_order_dims/* = false*/)
     //--------------------------------------------------------------------------
     {
@@ -5835,6 +5889,7 @@ namespace Legion {
       Realm::InstanceLayoutGeneric *layout = 
         Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
             constraints, dim_order);
+      layout->alignment_reqd = alignment;
       Realm::ProfilingRequestSet no_requests; 
 #ifdef LEGION_MALLOC_INSTANCES
       // Ask Legion to malloc this instance for us
@@ -5883,6 +5938,7 @@ namespace Legion {
 #endif
            >::DeferredBuffer(Memory::Kind kind, const IndexSpace space,
                              const FT *initial_value/* = NULL*/,
+                             size_t alignment/* = 16*/,
                              bool fortran_order_dims/* = false*/)
     //--------------------------------------------------------------------------
     {
@@ -5923,6 +5979,7 @@ namespace Legion {
       Realm::InstanceLayoutGeneric *layout = 
         Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
             constraints, dim_order);
+      layout->alignment_reqd = alignment;
       Realm::ProfilingRequestSet no_requests; 
 #ifdef LEGION_MALLOC_INSTANCES
       // Ask Legion to malloc this instance for us
@@ -5970,6 +6027,7 @@ namespace Legion {
 #endif
            >::DeferredBuffer(const Rect<N,T> &rect, Memory::Kind kind,
                              const FT *initial_value /*= NULL*/,
+                             size_t alignment/* = 16*/,
                              bool fortran_order_dims /*= false*/)
     //--------------------------------------------------------------------------
     {
@@ -6008,6 +6066,7 @@ namespace Legion {
       Realm::InstanceLayoutGeneric *layout = 
         Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
             constraints, dim_order);
+      layout->alignment_reqd = alignment;
       Realm::ProfilingRequestSet no_requests; 
 #ifdef LEGION_MALLOC_INSTANCES
       // Ask Legion to malloc this instance for us
@@ -6056,6 +6115,7 @@ namespace Legion {
 #endif
            >::DeferredBuffer(const IndexSpaceT<N,T> space, Memory::Kind kind,
                              const FT *initial_value/* = NULL*/,
+                             size_t alignment/* = 16*/,
                              bool fortran_order_dims/* = false*/)
     //--------------------------------------------------------------------------
     {
@@ -6095,6 +6155,288 @@ namespace Legion {
       Realm::InstanceLayoutGeneric *layout = 
         Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
             constraints, dim_order);
+      layout->alignment_reqd = alignment;
+      Realm::ProfilingRequestSet no_requests; 
+#ifdef LEGION_MALLOC_INSTANCES
+      // Ask Legion to malloc this instance for us
+      const size_t footprint = bounds.bounds.volume() * sizeof(FT);
+      uintptr_t ptr = runtime->allocate_deferred_instance(memory, footprint);
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
+            instance, memory, ptr, layout, no_requests));
+#else
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
+            instance, memory, layout, no_requests));
+#endif
+      if (initial_value != NULL)
+      {
+        std::vector<Realm::CopySrcDstField> dsts(1);
+        dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
+        wait_on = Internal::LgEvent(bounds.fill(dsts, no_requests, 
+                            initial_value, sizeof(FT), wait_on));
+      }
+      // Delete the instance when the currently executing task is done
+      instance.destroy(Processor::get_current_finish_event());
+      if (wait_on.exists())
+        wait_on.wait();
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+      const bool is_compatible =
+        Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 0/*fid*/);
+#endif
+      assert(is_compatible);
+#endif
+      // We can make the accessor
+      accessor = Realm::AffineAccessor<FT,N,T>(instance, 0/*field id*/);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifndef BOUNDS_CHECKS
+              , bool CB
+#endif
+              >
+    inline DeferredBuffer<FT,N,T,
+#ifdef BOUNDS_CHECKS
+           false
+#else
+            CB
+#endif
+           >::DeferredBuffer(Memory memory, const Domain &space,
+                             const FT *initial_value/* = NULL*/,
+                             size_t alignment/* = 16*/,
+                             bool fortran_order_dims/* = false*/)
+    //--------------------------------------------------------------------------
+    {
+      const DomainT<N,T> bounds = space;
+      const std::vector<size_t> field_sizes(1,sizeof(FT));
+      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
+      int dim_order[N];
+      if (fortran_order_dims)
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = i;
+      }
+      else
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = N - (i+1);
+      }
+      Realm::InstanceLayoutGeneric *layout = 
+        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
+            constraints, dim_order);
+      layout->alignment_reqd = alignment;
+      Realm::ProfilingRequestSet no_requests; 
+#ifdef LEGION_MALLOC_INSTANCES
+      // Ask Legion to malloc this instance for us
+      Runtime *runtime = Runtime::get_runtime();
+      const size_t footprint = bounds.bounds.volume() * sizeof(FT);
+      uintptr_t ptr = runtime->allocate_deferred_instance(memory, footprint);
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
+            instance, memory, ptr, layout, no_requests)); 
+#else
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
+            instance, memory, layout, no_requests));
+#endif
+      if (initial_value != NULL)
+      {
+        std::vector<Realm::CopySrcDstField> dsts(1);
+        dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
+        wait_on = Internal::LgEvent(bounds.fill(dsts, no_requests, 
+                            initial_value, sizeof(FT), wait_on));
+      }
+      // Delete the instance when the currently executing task is done
+      instance.destroy(Processor::get_current_finish_event());
+      if (wait_on.exists())
+        wait_on.wait();
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+      const bool is_compatible = 
+        Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 0/*fid*/);
+#endif
+      assert(is_compatible);
+#endif
+      // We can make the accessor
+      accessor = Realm::AffineAccessor<FT,N,T>(instance, 0/*field id*/);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifndef BOUNDS_CHECKS
+              , bool CB
+#endif
+              >
+    inline DeferredBuffer<FT,N,T,
+#ifdef BOUNDS_CHECKS
+           false
+#else
+            CB
+#endif
+           >::DeferredBuffer(Memory memory, const IndexSpace space,
+                             const FT *initial_value/* = NULL*/,
+                             size_t alignment/* = 16*/,
+                             bool fortran_order_dims/* = false*/)
+    //--------------------------------------------------------------------------
+    {
+      Runtime *runtime = Runtime::get_runtime();
+      const DomainT<N,T> bounds = 
+        runtime->get_index_space_domain<N,T>(IndexSpaceT<N,T>(space));
+      const std::vector<size_t> field_sizes(1,sizeof(FT));
+      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
+      int dim_order[N];
+      if (fortran_order_dims)
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = i;
+      }
+      else
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = N - (i+1);
+      }
+      Realm::InstanceLayoutGeneric *layout = 
+        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
+            constraints, dim_order);
+      layout->alignment_reqd = alignment;
+      Realm::ProfilingRequestSet no_requests; 
+#ifdef LEGION_MALLOC_INSTANCES
+      // Ask Legion to malloc this instance for us
+      const size_t footprint = bounds.bounds.volume() * sizeof(FT);
+      uintptr_t ptr = runtime->allocate_deferred_instance(memory, footprint);
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
+            instance, memory, ptr, layout, no_requests));
+#else
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
+            instance, memory, layout, no_requests));
+#endif
+      if (initial_value != NULL)
+      {
+        std::vector<Realm::CopySrcDstField> dsts(1);
+        dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
+        wait_on = Internal::LgEvent(bounds.fill(dsts, no_requests, 
+                            initial_value, sizeof(FT), wait_on));
+      }
+      // Delete the instance when the currently executing task is done
+      instance.destroy(Processor::get_current_finish_event());
+      if (wait_on.exists())
+        wait_on.wait();
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+      const bool is_compatible = 
+        Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 0/*fid*/);
+#endif
+      assert(is_compatible);
+#endif
+      // We can make the accessor
+      accessor = Realm::AffineAccessor<FT,N,T>(instance, 0/*field id*/);
+    } 
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifndef BOUNDS_CHECKS
+              , bool CB
+#endif
+              >
+    inline DeferredBuffer<FT,N,T,
+#ifdef BOUNDS_CHECKS
+           false
+#else
+            CB
+#endif
+           >::DeferredBuffer(const Rect<N,T> &rect, Memory memory,
+                             const FT *initial_value /*= NULL*/,
+                             size_t alignment/* = 16*/,
+                             bool fortran_order_dims /*= false*/)
+    //--------------------------------------------------------------------------
+    {
+      const DomainT<N,T> bounds(rect);
+      const std::vector<size_t> field_sizes(1,sizeof(FT));
+      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
+      int dim_order[N];
+      if (fortran_order_dims)
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = i;
+      }
+      else
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = N - (i+1);
+      }
+      Realm::InstanceLayoutGeneric *layout = 
+        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
+            constraints, dim_order);
+      layout->alignment_reqd = alignment;
+      Realm::ProfilingRequestSet no_requests; 
+#ifdef LEGION_MALLOC_INSTANCES
+      // Ask Legion to malloc this instance for us
+      Runtime *runtime = Runtime::get_runtime();
+      const size_t footprint = bounds.bounds.volume() * sizeof(FT);
+      uintptr_t ptr = runtime->allocate_deferred_instance(memory, footprint);
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
+            instance, memory, ptr, layout, no_requests));
+#else
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
+            instance, memory, layout, no_requests));
+#endif
+      if (initial_value != NULL)
+      {
+        std::vector<Realm::CopySrcDstField> dsts(1);
+        dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
+        wait_on = Internal::LgEvent(bounds.fill(dsts, no_requests, 
+                            initial_value, sizeof(FT), wait_on));
+      }
+      // Delete the instance when the currently executing task is done
+      instance.destroy(Processor::get_current_finish_event());
+      if (wait_on.exists())
+        wait_on.wait();
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+      const bool is_compatible = 
+        Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 0/*fid*/);
+#endif
+      assert(is_compatible);
+#endif
+      // We can make the accessor
+      accessor = Realm::AffineAccessor<FT,N,T>(instance, 0/*field id*/);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifndef BOUNDS_CHECKS
+              , bool CB
+#endif
+              >
+    inline DeferredBuffer<FT,N,T,
+#ifdef BOUNDS_CHECKS
+           false
+#else
+            CB
+#endif
+           >::DeferredBuffer(const IndexSpaceT<N,T> space, Memory memory,
+                             const FT *initial_value/* = NULL*/,
+                             size_t alignment/* = 16*/,
+                             bool fortran_order_dims/* = false*/)
+    //--------------------------------------------------------------------------
+    {
+      Runtime *runtime = Runtime::get_runtime();
+      const DomainT<N,T> bounds = runtime->get_index_space_domain<N,T>(space);
+      const std::vector<size_t> field_sizes(1,sizeof(FT));
+      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
+      int dim_order[N];
+      if (fortran_order_dims)
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = i;
+      }
+      else
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = N - (i+1);
+      }
+      Realm::InstanceLayoutGeneric *layout = 
+        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
+            constraints, dim_order);
+      layout->alignment_reqd = alignment;
       Realm::ProfilingRequestSet no_requests; 
 #ifdef LEGION_MALLOC_INSTANCES
       // Ask Legion to malloc this instance for us
@@ -6268,6 +6610,7 @@ namespace Legion {
 #endif
            >::DeferredBuffer(Memory::Kind kind, const Domain &space,
                              const FT *initial_value/* = NULL*/,
+                             size_t alignment/* = 16*/,
                              const bool fortran_order_dims/* = false*/)
     //--------------------------------------------------------------------------
     {
@@ -6306,6 +6649,7 @@ namespace Legion {
       Realm::InstanceLayoutGeneric *layout = 
         Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
             constraints, dim_order);
+      layout->alignment_reqd = alignment;
       Realm::ProfilingRequestSet no_requests; 
 #ifdef LEGION_MALLOC_INSTANCES
       // Ask Legion to malloc this instance for us
@@ -6354,6 +6698,7 @@ namespace Legion {
 #endif
            >::DeferredBuffer(Memory::Kind kind, const IndexSpace space,
                              const FT *initial_value/* = NULL*/,
+                             size_t alignment/* = 16*/,
                              const bool fortran_order_dims/* = false*/)
     //--------------------------------------------------------------------------
     {
@@ -6393,6 +6738,7 @@ namespace Legion {
       Realm::InstanceLayoutGeneric *layout = 
         Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
             constraints, dim_order);
+      layout->alignment_reqd = alignment;
       Realm::ProfilingRequestSet no_requests; 
 #ifdef LEGION_MALLOC_INSTANCES
       // Ask Legion to malloc this instance for us
@@ -6440,6 +6786,7 @@ namespace Legion {
 #endif
            >::DeferredBuffer(const Rect<N,T> &rect, Memory::Kind kind,
                              const FT *initial_value /*= NULL*/,
+                             size_t alignment/* = 16*/,
                              const bool fortran_order_dims/* = false*/)
     //--------------------------------------------------------------------------
     {
@@ -6478,6 +6825,7 @@ namespace Legion {
       Realm::InstanceLayoutGeneric *layout = 
         Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
             constraints, dim_order);
+      layout->alignment_reqd = alignment;
       Realm::ProfilingRequestSet no_requests; 
 #ifdef LEGION_MALLOC_INSTANCES
       // Ask Legion to malloc this instance for us
@@ -6526,6 +6874,7 @@ namespace Legion {
 #endif
            >::DeferredBuffer(const IndexSpaceT<N,T> space, Memory::Kind kind,
                              const FT *initial_value/* = NULL*/,
+                             size_t alignment/* = 16*/,
                              const bool fortran_order_dims/* = false*/)
     //--------------------------------------------------------------------------
     {
@@ -6565,6 +6914,287 @@ namespace Legion {
       Realm::InstanceLayoutGeneric *layout = 
         Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
             constraints, dim_order);
+      layout->alignment_reqd = alignment;
+      Realm::ProfilingRequestSet no_requests; 
+#ifdef LEGION_MALLOC_INSTANCES
+      // Ask Legion to malloc this instance for us
+      const size_t footprint = bounds.bounds.volume() * sizeof(FT);
+      uintptr_t ptr = runtime->allocate_deferred_instance(memory, footprint);
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
+            instance, memory, ptr, layout, no_requests));
+#else
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
+            instance, memory, layout, no_requests));
+#endif
+      if (initial_value != NULL)
+      {
+        std::vector<Realm::CopySrcDstField> dsts(1);
+        dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
+        wait_on = Internal::LgEvent(bounds.fill(dsts, no_requests, 
+                            initial_value, sizeof(FT), wait_on));
+      }
+      // Delete the instance when the currently executing task is done
+      instance.destroy(Processor::get_current_finish_event());
+      if (wait_on.exists())
+        wait_on.wait();
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+      const bool is_compatible =
+        Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 0/*fid*/);
+#endif
+      assert(is_compatible);
+#endif
+      // We can make the accessor
+      accessor = Realm::AffineAccessor<FT,N,T>(instance, 0/*field id*/);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifdef BOUNDS_CHECKS
+              , bool CB
+#endif
+              >
+    inline DeferredBuffer<FT,N,T,
+#ifdef BOUNDS_CHECKS
+            CB 
+#else
+            true
+#endif
+           >::DeferredBuffer(Memory memory, const Domain &space,
+                             const FT *initial_value/* = NULL*/,
+                             size_t alignment/* = 16*/,
+                             const bool fortran_order_dims/* = false*/)
+    //--------------------------------------------------------------------------
+    {
+      bounds = space;
+      const std::vector<size_t> field_sizes(1,sizeof(FT));
+      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
+      int dim_order[N];
+      if (fortran_order_dims)
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = i;
+      }
+      else
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = N - (i+1);
+      }
+      Realm::InstanceLayoutGeneric *layout = 
+        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
+            constraints, dim_order);
+      layout->alignment_reqd = alignment;
+      Realm::ProfilingRequestSet no_requests; 
+#ifdef LEGION_MALLOC_INSTANCES
+      // Ask Legion to malloc this instance for us
+      Runtime *runtime = Runtime::get_runtime();
+      const size_t footprint = bounds.bounds.volume() * sizeof(FT);
+      uintptr_t ptr = runtime->allocate_deferred_instance(memory, footprint);
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
+            instance, memory, ptr, layout, no_requests));
+#else
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
+            instance, memory, layout, no_requests));
+#endif
+      if (initial_value != NULL)
+      {
+        std::vector<Realm::CopySrcDstField> dsts(1);
+        dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
+        wait_on = Internal::LgEvent(bounds.fill(dsts, no_requests, 
+                            initial_value, sizeof(FT), wait_on));
+      }
+      // Delete the instance when the currently executing task is done
+      instance.destroy(Processor::get_current_finish_event());
+      if (wait_on.exists())
+        wait_on.wait();
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+      const bool is_compatible = 
+        Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 0/*fid*/);
+#endif
+      assert(is_compatible);
+#endif
+      // We can make the accessor
+      accessor = Realm::AffineAccessor<FT,N,T>(instance, 0/*field id*/);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifdef BOUNDS_CHECKS
+              , bool CB
+#endif
+              >
+    inline DeferredBuffer<FT,N,T,
+#ifdef BOUNDS_CHECKS
+            CB
+#else
+            true
+#endif
+           >::DeferredBuffer(Memory memory, const IndexSpace space,
+                             const FT *initial_value/* = NULL*/,
+                             size_t alignment/* = 16*/,
+                             const bool fortran_order_dims/* = false*/)
+    //--------------------------------------------------------------------------
+    {
+      Runtime *runtime = Runtime::get_runtime();
+      bounds = runtime->get_index_space_domain<N,T>(IndexSpaceT<N,T>(space));
+      const std::vector<size_t> field_sizes(1,sizeof(FT));
+      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
+      int dim_order[N];
+      if (fortran_order_dims)
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = i;
+      }
+      else
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = N - (i+1);
+      }
+      Realm::InstanceLayoutGeneric *layout = 
+        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
+            constraints, dim_order);
+      layout->alignment_reqd = alignment;
+      Realm::ProfilingRequestSet no_requests; 
+#ifdef LEGION_MALLOC_INSTANCES
+      // Ask Legion to malloc this instance for us
+      const size_t footprint = bounds.bounds.volume() * sizeof(FT);
+      uintptr_t ptr = runtime->allocate_deferred_instance(memory, footprint);
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
+            instance, memory, ptr, layout, no_requests));
+#else
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
+            instance, memory, layout, no_requests));
+#endif
+      if (initial_value != NULL)
+      {
+        std::vector<Realm::CopySrcDstField> dsts(1);
+        dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
+        wait_on = Internal::LgEvent(bounds.fill(dsts, no_requests, 
+                            initial_value, sizeof(FT), wait_on));
+      }
+      // Delete the instance when the currently executing task is done
+      instance.destroy(Processor::get_current_finish_event());
+      if (wait_on.exists())
+        wait_on.wait();
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+      const bool is_compatible =
+        Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 0/*fid*/);
+#endif
+      assert(is_compatible);
+#endif
+      // We can make the accessor
+      accessor = Realm::AffineAccessor<FT,N,T>(instance, 0/*field id*/);
+    } 
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifdef BOUNDS_CHECKS
+              , bool CB
+#endif
+              >
+    inline DeferredBuffer<FT,N,T,
+#ifdef BOUNDS_CHECKS
+            CB
+#else
+            true
+#endif
+           >::DeferredBuffer(const Rect<N,T> &rect, Memory memory,
+                             const FT *initial_value /*= NULL*/,
+                             size_t alignment/* = 16*/,
+                             const bool fortran_order_dims/* = false*/)
+    //--------------------------------------------------------------------------
+    {
+      bounds = DomainT<N,T>(rect);
+      const std::vector<size_t> field_sizes(1,sizeof(FT));
+      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
+      int dim_order[N];
+      if (fortran_order_dims)
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = i;
+      }
+      else
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = N - (i+1);
+      }
+      Realm::InstanceLayoutGeneric *layout = 
+        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
+            constraints, dim_order);
+      layout->alignment_reqd = alignment;
+      Realm::ProfilingRequestSet no_requests; 
+#ifdef LEGION_MALLOC_INSTANCES
+      // Ask Legion to malloc this instance for us
+      Runtime *runtime = Runtime::get_runtime();
+      const size_t footprint = bounds.bounds.volume() * sizeof(FT);
+      uintptr_t ptr = runtime->allocate_deferred_instance(memory, footprint);
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
+            instance, memory, ptr, layout, no_requests));
+#else
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
+            instance, memory, layout, no_requests));
+#endif
+      if (initial_value != NULL)
+      {
+        std::vector<Realm::CopySrcDstField> dsts(1);
+        dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
+        wait_on = Internal::LgEvent(bounds.fill(dsts, no_requests, 
+                            initial_value, sizeof(FT), wait_on));
+      }
+      // Delete the instance when the currently executing task is done
+      instance.destroy(Processor::get_current_finish_event());
+      if (wait_on.exists())
+        wait_on.wait();
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+      const bool is_compatible =
+        Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 0/*fid*/);
+#endif
+      assert(is_compatible);
+#endif
+      // We can make the accessor
+      accessor = Realm::AffineAccessor<FT,N,T>(instance, 0/*field id*/);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifdef BOUNDS_CHECKS
+              , bool CB
+#endif
+              >
+    inline DeferredBuffer<FT,N,T,
+#ifdef BOUNDS_CHECKS
+            CB 
+#else
+            true
+#endif
+           >::DeferredBuffer(const IndexSpaceT<N,T> space, Memory memory,
+                             const FT *initial_value/* = NULL*/,
+                             size_t alignment/* = 16*/,
+                             const bool fortran_order_dims/* = false*/)
+    //--------------------------------------------------------------------------
+    {
+      Runtime *runtime = Runtime::get_runtime();
+      bounds = runtime->get_index_space_domain<N,T>(space);
+      const std::vector<size_t> field_sizes(1,sizeof(FT));
+      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
+      int dim_order[N];
+      if (fortran_order_dims)
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = i;
+      }
+      else
+      {
+        for (int i = 0; i < N; i++)
+          dim_order[i] = N - (i+1);
+      }
+      Realm::InstanceLayoutGeneric *layout = 
+        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
+            constraints, dim_order);
+      layout->alignment_reqd = alignment;
       Realm::ProfilingRequestSet no_requests; 
 #ifdef LEGION_MALLOC_INSTANCES
       // Ask Legion to malloc this instance for us

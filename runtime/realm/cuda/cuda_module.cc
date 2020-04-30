@@ -2385,6 +2385,65 @@ namespace Realm {
     }
 
 #ifdef REALM_USE_CUDART_HIJACK
+    void GPUProcessor::gpu_memcpy2d(void *dst, size_t dpitch, const void *src, 
+                                    size_t spitch, size_t width, size_t height, 
+                                    cudaMemcpyKind kind)
+    {
+      CUstream current = ThreadLocal::current_gpu_stream->get_stream();
+      CUDA_MEMCPY2D copy_info;
+      copy_info.srcMemoryType = (kind == cudaMemcpyHostToDevice) ||
+        (kind == cudaMemcpyHostToHost) ? CU_MEMORYTYPE_HOST : 
+        (kind == cudaMemcpyDefault) ? CU_MEMORYTYPE_UNIFIED : CU_MEMORYTYPE_DEVICE;
+      copy_info.dstMemoryType = (kind == cudaMemcpyDeviceToHost) ||
+        (kind == cudaMemcpyHostToHost) ? CU_MEMORYTYPE_HOST : 
+        (kind == cudaMemcpyDefault) ? CU_MEMORYTYPE_UNIFIED : CU_MEMORYTYPE_DEVICE;
+      copy_info.srcDevice = (CUdeviceptr)src;
+      copy_info.srcHost = src;
+      copy_info.srcPitch = spitch;
+      copy_info.srcY = 0;
+      copy_info.srcXInBytes = 0;
+      copy_info.dstDevice = (CUdeviceptr)dst;
+      copy_info.dstHost = dst;
+      copy_info.dstPitch = dpitch;
+      copy_info.dstY = 0;
+      copy_info.dstXInBytes = 0;
+      copy_info.WidthInBytes = width;
+      copy_info.Height = height;
+      // the synchronous copy still uses cuMemcpyAsync so that we can limit the
+      //  synchronization to just the right stream
+      CHECK_CU( cuMemcpy2DAsync(&copy_info, current) );
+      stream_synchronize(current);
+    }
+
+    void GPUProcessor::gpu_memcpy2d_async(void *dst, size_t dpitch, const void *src, 
+                                          size_t spitch, size_t width, size_t height, 
+                                          cudaMemcpyKind kind, cudaStream_t stream)
+    {
+      if (stream == 0)
+        stream = ThreadLocal::current_gpu_stream->get_stream();
+      CUDA_MEMCPY2D copy_info;
+      copy_info.srcMemoryType = (kind == cudaMemcpyHostToDevice) ||
+        (kind == cudaMemcpyHostToHost) ? CU_MEMORYTYPE_HOST : 
+        (kind == cudaMemcpyDefault) ? CU_MEMORYTYPE_UNIFIED : CU_MEMORYTYPE_DEVICE;
+      copy_info.dstMemoryType = (kind == cudaMemcpyDeviceToHost) ||
+        (kind == cudaMemcpyHostToHost) ? CU_MEMORYTYPE_HOST : 
+        (kind == cudaMemcpyDefault) ? CU_MEMORYTYPE_UNIFIED : CU_MEMORYTYPE_DEVICE;
+      copy_info.srcDevice = (CUdeviceptr)src;
+      copy_info.srcHost = src;
+      copy_info.srcPitch = spitch;
+      copy_info.srcY = 0;
+      copy_info.srcXInBytes = 0;
+      copy_info.dstDevice = (CUdeviceptr)dst;
+      copy_info.dstHost = dst;
+      copy_info.dstPitch = dpitch;
+      copy_info.dstY = 0;
+      copy_info.dstXInBytes = 0;
+      copy_info.WidthInBytes = width;
+      copy_info.Height = height;
+      CHECK_CU( cuMemcpy2DAsync(&copy_info, stream) );
+      // no synchronization here
+    }
+
     void GPUProcessor::gpu_memcpy_to_symbol(const void *dst, const void *src,
 					    size_t size, size_t offset,
 					    cudaMemcpyKind kind)
