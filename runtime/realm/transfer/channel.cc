@@ -239,6 +239,7 @@ namespace Realm {
 	  p.peer_guid = ii.peer_guid;
 	  p.peer_port_idx = ii.peer_port_idx;
 	  p.indirect_port_idx = ii.indirect_port_idx;
+	  p.is_indirect_port = false;  // we'll set these below as needed
 	  p.local_bytes_total = 0;
 	  p.local_bytes_cons = 0;
 	  p.remote_bytes_total = size_t(-1);
@@ -255,9 +256,11 @@ namespace Realm {
 	// connect up indirect input ports in a second pass
 	for(size_t i = 0; i < inputs_info.size(); i++) {
 	  XferPort& p = input_ports[i];
-	  if(p.indirect_port_idx >= 0)
+	  if(p.indirect_port_idx >= 0) {
 	    p.iter->set_indirect_input_port(this, p.indirect_port_idx,
 					    input_ports[p.indirect_port_idx].iter);
+	    input_ports[p.indirect_port_idx].is_indirect_port = true;
+	  }
 	}
 	if(gather_control_port >= 0) {
 	  input_control.control_port_idx = gather_control_port;
@@ -287,9 +290,12 @@ namespace Realm {
 	  p.peer_guid = oi.peer_guid;
 	  p.peer_port_idx = oi.peer_port_idx;
 	  p.indirect_port_idx = oi.indirect_port_idx;
-	  if(oi.indirect_port_idx >= 0)
+	  p.is_indirect_port = false;  // outputs are never indirections
+	  if(oi.indirect_port_idx >= 0) {
 	    p.iter->set_indirect_input_port(this, oi.indirect_port_idx,
 					    inputs_info[oi.indirect_port_idx].iter);
+	    input_ports[p.indirect_port_idx].is_indirect_port = true;
+	  }
 	  p.local_bytes_total = 0;
 	  p.local_bytes_cons = 0;
 	  p.remote_bytes_total = size_t(-1);
@@ -1845,8 +1851,17 @@ namespace Realm {
 	   (input_ports[0].mem->kind == MemoryImpl::MKIND_GPUFB)) {
 	  // all input ports should agree on which gpu they target
 	  src_gpu = ((Cuda::GPUFBMemory*)(input_ports[0].mem))->gpu;
-	  for(size_t i = 1; i < input_ports.size(); i++)
+	  for(size_t i = 1; i < input_ports.size(); i++) {
+	    // exception: control and indirect ports should be readable from cpu
+	    if((int(i) == input_control.control_port_idx) ||
+	       (int(i) == output_control.control_port_idx) ||
+	       input_ports[i].is_indirect_port) {
+	      assert((input_ports[i].mem->kind == MemoryImpl::MKIND_SYSMEM) ||
+		     (input_ports[i].mem->kind == MemoryImpl::MKIND_ZEROCOPY));
+	      continue;
+	    }
 	    assert(input_ports[i].mem == input_ports[0].mem);
+	  }
 	} else
 	  src_gpu = 0;
 
