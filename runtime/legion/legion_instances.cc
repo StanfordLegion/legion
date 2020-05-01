@@ -2988,8 +2988,21 @@ namespace Legion {
       {
         const std::vector<FieldID> &field_set = 
           constraints.field_constraint.get_field_set();
+        bool compact = false;
+        switch (constraints.specialized_constraint.get_kind())
+        {
+          case COMPACT_SPECIALIZE:
+          case COMPACT_REDUCTION_SPECIALIZE:
+            {
+              compact = true;
+              break;
+            }
+          default:
+            break;
+        }
         realm_layout =
-          instance_domain->create_layout(constraints, field_set, field_sizes);
+          instance_domain->create_layout(constraints, field_set, 
+                                         field_sizes, compact);
 #ifdef DEBUG_LEGION
         assert(realm_layout != NULL);
 #endif
@@ -3271,9 +3284,6 @@ namespace Legion {
       }
       instance_domain = (region_exprs.size() == 1) ? 
         *(region_exprs.begin()) : forest->union_index_spaces(region_exprs);
-      // This also serves to guarantee that the instance domain is
-      // valid on the local node
-      instance_volume = instance_domain->get_volume();
     }
 
     //--------------------------------------------------------------------------
@@ -3418,9 +3428,11 @@ namespace Legion {
       switch (constraints.specialized_constraint.get_kind())
       {
         case NO_SPECIALIZE:
-        case NORMAL_SPECIALIZE:
+        case AFFINE_SPECIALIZE:
+        case COMPACT_SPECIALIZE:
           break;
-        case REDUCTION_FOLD_SPECIALIZE:
+        case AFFINE_REDUCTION_SPECIALIZE:
+        case COMPACT_REDUCTION_SPECIALIZE:
           {
             // Reduction folds are a special case of normal specialize
             redop_id = constraints.specialized_constraint.get_reduction_op();
@@ -3438,14 +3450,6 @@ namespace Legion {
             }
             break;
           }
-        case REDUCTION_LIST_SPECIALIZE:
-          {
-            // TODO: implement list reduction instances
-            assert(false);
-            redop_id = constraints.specialized_constraint.get_reduction_op();
-            reduction_op = Runtime::get_reduction_op(redop_id);
-            break;
-          }
         case VIRTUAL_SPECIALIZE:
           {
             REPORT_LEGION_ERROR(ERROR_ILLEGAL_REQUEST_VIRTUAL_INSTANCE,
@@ -3453,7 +3457,9 @@ namespace Legion {
             assert(false);
           }
         default:
-          assert(false); // unknown kind
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_REQUEST_VIRTUAL_INSTANCE,
+                        "Illegal request to create instance of type %d", 
+                        constraints.specialized_constraint.get_kind())
       }
     }
 

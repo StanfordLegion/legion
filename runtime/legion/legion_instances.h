@@ -703,7 +703,6 @@ namespace Legion {
     protected:
       FieldSpaceNode *field_space_node;
       IndexSpaceExpression *instance_domain;
-      size_t instance_volume;
       RegionTreeID tree_id;
       // Mapping from logical field order to layout order
       std::vector<unsigned> mask_index_map;

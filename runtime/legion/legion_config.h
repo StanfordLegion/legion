@@ -1736,16 +1736,14 @@ typedef enum legion_specialized_constraint_t {
   AFFINE_SPECIALIZE = 1, // affine layout
   NORMAL_SPECIALIZE = AFFINE_SPECIALIZE, // backwards compatibility
   COMPACT_SPECIALIZE = 2, // compacted sparsity
-  VARFIELD_SPECIALIZE = 3, // variable field size layout
-  AFFINE_REDUCTION_SPECIALIZE = 4,
+  AFFINE_REDUCTION_SPECIALIZE = 3,
   REDUCTION_FOLD_SPECIALIZE = AFFINE_REDUCTION_SPECIALIZE, // backwards compat
-  COMPACT_REDUCTION_SPECIALIZE = 5,
+  COMPACT_REDUCTION_SPECIALIZE = 4,
   REDUCTION_LIST_SPECIALIZE = COMPACT_REDUCTION_SPECIALIZE, // backwards compat
-  //VARFIELD_REDUCTION_SPECIALIZE = 6, // TODO
-  VIRTUAL_SPECIALIZE = 6,
+  VIRTUAL_SPECIALIZE = 5,
   // All file types must go below here, everything else above
-  GENERIC_FILE_SPECIALIZE = 7,
-  HDF5_FILE_SPECIALIZE = 8,
+  GENERIC_FILE_SPECIALIZE = 6,
+  HDF5_FILE_SPECIALIZE = 7,
 } legion_specialized_constraint_t;
 
 // Keep this in sync with Domain::MAX_RECT_DIM in legion_domain.h

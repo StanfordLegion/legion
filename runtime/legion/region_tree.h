@@ -1016,7 +1016,8 @@ namespace Legion {
       virtual Realm::InstanceLayoutGeneric* create_layout(
                            const LayoutConstraintSet &constraints,
                            const std::vector<FieldID> &field_ids,
-                           const std::vector<size_t> &field_sizes) = 0;
+                           const std::vector<size_t> &field_sizes,
+                           bool compact) = 0;
     public:
       static void handle_tighten_index_space(const void *args);
       static AddressSpaceID get_owner_space(IndexSpaceExprID id, Runtime *rt);
@@ -1096,7 +1097,8 @@ namespace Legion {
                                const Realm::IndexSpace<DIM,T> &space,
                                const LayoutConstraintSet &constraints,
                                const std::vector<FieldID> &field_ids,
-                               const std::vector<size_t> &field_sizes) const;
+                               const std::vector<size_t> &field_sizes,
+                               bool compact) const;
     public:
       static IndexSpaceExpression* unpack_expression(Deserializer &derez,
                          RegionTreeForest *forest, AddressSpaceID source);
@@ -1276,7 +1278,8 @@ namespace Legion {
       virtual Realm::InstanceLayoutGeneric* create_layout(
                            const LayoutConstraintSet &constraints,
                            const std::vector<FieldID> &field_ids,
-                           const std::vector<size_t> &field_sizes);
+                           const std::vector<size_t> &field_sizes,
+                           bool compact);
     public:
       ApEvent get_realm_index_space(Realm::IndexSpace<DIM,T> &space,
                                     bool need_tight_result);
@@ -2181,7 +2184,8 @@ namespace Legion {
       virtual Realm::InstanceLayoutGeneric* create_layout(
                            const LayoutConstraintSet &constraints,
                            const std::vector<FieldID> &field_ids,
-                           const std::vector<size_t> &field_sizes);
+                           const std::vector<size_t> &field_sizes,
+                           bool compact);
     public:
       virtual void get_launch_space_domain(Domain &launch_domain);
       virtual void validate_slicing(const std::vector<IndexSpace> &slice_spaces,
