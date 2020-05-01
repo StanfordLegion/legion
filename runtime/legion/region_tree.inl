@@ -553,6 +553,179 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(order.ordering.size() == (DIM+1));
 #endif
+      // Single affine piece or AOS on all pieces 
+      // In this case we know fsize and falign are the same for
+      // each of the pieces
+      int field_index = -1;
+      std::vector<size_t> elements_between_per_piece(piece_bounds.size(), 1);
+      for (unsigned idx = 0; order.ordering.size(); idx++)
+      {
+        const DimensionKind dim = order.ordering[idx];
+        if (dim == DIM_F)
+        {
+          field_index = idx;
+          break;
+        }
+#ifdef DEBUG_LEGION
+        assert(int(dim) < DIM);
+#endif
+        for (unsigned pidx = 0; pidx < piece_bounds.size(); pidx++)
+        {
+          const Rect<DIM,T> &bounds = piece_bounds[pidx];
+          elements_between_per_piece[pidx] *=
+            (bounds.hi[dim] - bounds.lo[dim] + 1);
+        }
+      }
+#ifdef DEBUG_LEGION
+      assert(field_index >= 0);
+#endif
+      size_t elements_between_fields = elements_between_per_piece.front();
+      for (unsigned idx = 1; idx < elements_between_per_piece.size(); idx++)
+        elements_between_fields += elements_between_per_piece[idx];
+      // This code borrows from choose_instance_layout but
+      // there are subtle differences to handle Legion's layout constraints
+      // What we want to compute is the size of the field dimension
+      // in a way that guarantees that all fields maintain their alignments
+      size_t fsize = 0;
+      size_t falign = 1;
+      // We can't make the piece lists yet because we don't know the 
+      // extent of the field dimension needed to ensure alignment 
+      std::map<FieldID, size_t> field_offsets;
+      for (std::vector<std::pair<size_t,FieldID> >::const_iterator it = 
+            zip_fields.begin(); it != zip_fields.end(); it++)
+      {
+        // if not specified, field goes at the end of all known fields
+        // (or a bit past if alignment is a concern)
+        size_t offset = fsize;
+        std::map<FieldID,off_t>::const_iterator offset_finder = 
+          offsets.find(it->second);
+        if (offset_finder != offsets.end())
+          offset += offset_finder->second;
+        std::map<FieldID,size_t>::const_iterator alignment_finder = 
+          alignments.find(it->second);
+        const size_t field_alignment = (alignment_finder != alignments.end())
+          ? alignment_finder->second : 1;
+        if (field_alignment > 1)
+        {
+          offset = round_up(offset, field_alignment);
+          if ((falign % field_alignment) != 0)
+            falign = lcm(falign, field_alignment);
+        }
+        // increase size and alignment if needed
+        fsize = max(fsize, offset + it->first * elements_between_fields);
+        field_offsets[it->second] = offset;
+      }
+      if (falign > 1)
+      {
+        // group size needs to be rounded up to match group alignment
+        fsize = round_up(fsize, falign);
+        // overall instance alignment layout must be compatible with group
+        layout->alignment_reqd = lcm(layout->alignment_reqd, falign);
+      }
+      // Check if it is safe to re-use piece lists
+      // It's only safe if fsize describes the size of a piece, which
+      // is true if we only have a single piece or we're doing AOS
+      const bool safe_reuse = 
+        ((piece_bounds.size() == 1) || (order.ordering.back() == DIM_F));
+      // compute the starting offsets for each piece
+      std::vector<size_t> piece_offsets(piece_bounds.size());
+      if (safe_reuse)
+      {
+        for (unsigned pidx = 0; pidx < piece_bounds.size(); pidx++)
+        {
+          const Rect<DIM,T> &bounds = piece_bounds[pidx];
+          piece_offsets[pidx] = round_up(layout->bytes_used, falign);
+          size_t piece_size = fsize;
+          for (unsigned idx = field_index+1; idx < order.ordering.size(); idx++)
+          {
+            const DimensionKind dim = order.ordering[idx];
+#ifdef DEBUG_LEGION
+            assert(int(dim) < DIM);
+#endif
+            piece_size *= (bounds.hi[dim] - bounds.lo[dim] + 1);
+          }
+          layout->bytes_used = piece_offsets[pidx] + piece_size;
+        }
+      }
+      // we've handled the offsets and alignment for every field across
+      // all dimensions so we can just use the size of the field to 
+      // determine the piece list
+      std::map<size_t,unsigned> pl_indexes;
+      layout->piece_lists.reserve(unique_sizes.size());
+      for (std::vector<std::pair<size_t,FieldID> >::const_iterator it = 
+            zip_fields.begin(); it != zip_fields.end(); it++)
+      {
+        unsigned li;
+        std::map<size_t,unsigned>::const_iterator finder =
+          safe_reuse ? pl_indexes.find(it->first) : pl_indexes.end();
+        if (finder == pl_indexes.end())
+        {
+          li = layout->piece_lists.size();
+#ifdef DEBUG_LEGION
+          assert(li < unique_sizes.size());
+#endif
+          layout->piece_lists.resize(li + 1);
+          pl_indexes[it->first] = li;
+
+          // create the piece list
+          Realm::InstancePieceList<DIM,T>& pl = layout->piece_lists[li];
+          pl.pieces.reserve(piece_bounds.size());
+
+          size_t next_piece = safe_reuse ? 0 : field_offsets[it->second];
+          for (unsigned pidx = 0; pidx < piece_bounds.size(); pidx++)
+          {
+            const Rect<DIM,T> &bounds = piece_bounds[pidx];
+            // create the piece
+            Realm::AffineLayoutPiece<DIM,T> *piece = 
+              new Realm::AffineLayoutPiece<DIM,T>;
+            piece->bounds = bounds; 
+            size_t piece_start;
+            if (safe_reuse)
+              piece_start = piece_offsets[pidx];
+            else
+              piece_start = next_piece;
+            piece->offset = piece_start;
+            size_t stride = it->first;
+            for (std::vector<DimensionKind>::const_iterator dit = 
+                  order.ordering.begin(); dit != order.ordering.end(); dit++)
+            {
+              if ((*dit) != DIM_F)
+              {
+#ifdef DEBUG_LEGION
+                assert(int(*dit) < DIM);
+#endif
+                piece->strides[*dit] = stride;
+                piece->offset -= bounds.lo[*dit] * stride;
+                stride *= (bounds.hi[*dit] - bounds.lo[*dit] + 1);
+              }
+              else
+              {
+                // Update the location for the next piece to start
+                if (!safe_reuse)
+                  next_piece = piece_start + stride;
+                // Reset the stride to the fsize for the next dimension
+                // since it already incorporates everything prior to it
+                stride = fsize;
+              }
+            }
+            // Update the total bytes used for the last piece
+            if (!safe_reuse && ((pidx+1) == piece_bounds.size()))
+              layout->bytes_used = piece_start + stride;
+            pl.pieces.push_back(piece);
+          }
+        }
+        else
+          li = finder->second;
+#ifdef DEBUG_LEGION
+        assert(layout->fields.count(it->second) == 0);
+#endif
+        Realm::InstanceLayoutGeneric::FieldLayout &fl = 
+          layout->fields[it->second];
+        fl.list_idx = li;
+        fl.rel_offset = safe_reuse ? field_offsets[it->second] : 0;
+        fl.size_in_bytes = it->first;
+      }
+#if 0
       // We have a two different implementations of how to compute the layout 
       // 1. In cases where we either have just one piece or we know we're
       //    doing AOS then we know the alignment and fsize will be the same
@@ -561,161 +734,15 @@ namespace Legion {
       //    pieces so we can't deduplicate piece lists safely given Realm's
       //    current encoding so instead we build a piece list per field and
       //    build up the representation for each piece individually
-      if ((piece_bounds.size() == 1) || (order.ordering.front() == DIM_F))
-      {
-        // Single affine piece or AOS on all pieces 
-        // In this case we know fsize and falign are the same for
-        // each of the pieces
-        size_t elements_between_fields = 1;
-        const Rect<DIM,T> &first_bounds = piece_bounds.front();
-        for (unsigned idx = 0; order.ordering.size(); idx++)
-        {
-          const DimensionKind dim = order.ordering[idx];
-          if (dim == DIM_F)
-            break;
-#ifdef DEBUG_LEGION
-          assert(int(dim) < DIM);
-#endif
-          elements_between_fields *= 
-            (first_bounds.hi[dim] - first_bounds.lo[dim] + 1);
-        }
-        // This code borrows from choose_instance_layout but
-        // there are subtle differences to handle Legion's layout constraints
-        // What we want to compute is the size of the field dimension
-        // in a way that guarantees that all fields maintain their alignments
-        size_t fsize = 0;
-        size_t falign = 1;
-        // We can't make the piece lists yet because we don't know the 
-        // extent of the field dimension needed to ensure alignment 
-        std::map<FieldID, size_t> field_offsets;
-        for (std::vector<std::pair<size_t,FieldID> >::const_iterator it = 
-              zip_fields.begin(); it != zip_fields.end(); it++)
-        {
-          // if not specified, field goes at the end of all known fields
-          // (or a bit past if alignment is a concern)
-          size_t offset = fsize;
-          std::map<FieldID,off_t>::const_iterator offset_finder = 
-            offsets.find(it->second);
-          if (offset_finder != offsets.end())
-            offset += offset_finder->second;
-          std::map<FieldID,size_t>::const_iterator alignment_finder = 
-            alignments.find(it->second);
-          const size_t field_alignment = (alignment_finder != alignments.end())
-            ? alignment_finder->second : 1;
-          if (field_alignment > 1)
-          {
-            offset = round_up(offset, field_alignment);
-            if ((falign % field_alignment) != 0)
-              falign = lcm(falign, field_alignment);
-          }
-          // increase size and alignment if needed
-          fsize = max(fsize, offset + it->first * elements_between_fields);
-          field_offsets[it->second] = offset;
-        }
-        if (falign > 1)
-        {
-          // group size needs to be rounded up to match group alignment
-          fsize = round_up(fsize, falign);
-          // overall instance alignment layout must be compatible with group
-          layout->alignment_reqd = lcm(layout->alignment_reqd, falign);
-        }
-        // we've handled the offsets and alignment for every field across
-        // all dimensions so we can just use the size of the field to 
-        // determine the piece list
-        std::map<size_t,unsigned> pl_indexes;
-        std::map<size_t,size_t> pl_starts, pl_sizes;
-        layout->piece_lists.reserve(unique_sizes.size());
-        for (std::vector<std::pair<size_t,FieldID> >::const_iterator it = 
-              zip_fields.begin(); it != zip_fields.end(); it++)
-        {
-          unsigned li;
-          size_t reuse_offset;
-          std::map<size_t,unsigned>::const_iterator finder =
-            pl_indexes.find(it->first);
-          if (finder == pl_indexes.end())
-          {
-            li = layout->piece_lists.size();
-#ifdef DEBUG_LEGION
-            assert(li < unique_sizes.size());
-#endif
-            layout->piece_lists.resize(li + 1);
-            reuse_offset = 0;
-            pl_indexes[it->first] = li;
 
-            // create the piece list
-            Realm::InstancePieceList<DIM,T>& pl = layout->piece_lists[li];
-            pl.pieces.reserve(piece_bounds.size());
-
-            size_t pl_start = 0;
-            for (typename std::vector<Rect<DIM,T> >::const_iterator pit = 
-                  piece_bounds.begin(); pit != piece_bounds.end(); pit++)
-            {
-              const Rect<DIM,T> &bounds = *pit;
-              // create the piece
-              Realm::AffineLayoutPiece<DIM,T> *piece = 
-                new Realm::AffineLayoutPiece<DIM,T>;
-              piece->bounds = bounds; 
-              // starting point for piece is first aligned location above
-              // existing pieces
-              size_t piece_start = round_up(layout->bytes_used, falign);
-              // Save this for later
-              if (pit == piece_bounds.begin())
-                pl_start = piece_start;
-              piece->offset = piece_start;
-              size_t stride = it->first;
-              for (std::vector<DimensionKind>::const_iterator dit = 
-                    order.ordering.begin(); dit != order.ordering.end(); dit++)
-              {
-                if ((*dit) != DIM_F)
-                {
-#ifdef DEBUG_LEGION
-                  assert(int(*dit) < DIM);
-#endif
-                  piece->strides[*dit] = stride;
-                  piece->offset -= bounds.lo[*dit] * stride;
-                  stride *= (bounds.hi[*dit] - bounds.lo[*dit] + 1);
-                }
-                else
-                  // Reset the stride to the fsize for the next dimension
-                  // since it already incorporates everything prior to it
-                  stride = fsize;
-              }
-              // final value of stride is total bytes used by piece - 
-              // use that to set new instance footprint
-              layout->bytes_used = piece_start + stride;
-
-              pl.pieces.push_back(piece);
-            }
-            pl_starts[it->first] = pl_start;
-            pl_sizes[it->first] = layout->bytes_used - pl_start;
-          }
-          else
-          {
-            li = finder->second;
-            size_t piece_start = round_up(layout->bytes_used, falign);
-            reuse_offset = piece_start - pl_starts[it->first];
-
-            // we're not going to create piece lists, 
-            // but we still have to update the overall size
-            layout->bytes_used = piece_start + pl_sizes[it->first];
-          }
-#ifdef DEBUG_LEGION
-          assert(layout->fields.count(it->second) == 0);
-#endif
-          Realm::InstanceLayoutGeneric::FieldLayout &fl = 
-            layout->fields[it->second];
-          fl.list_idx = li;
-          fl.rel_offset = field_offsets[it->second] + reuse_offset;
-          fl.size_in_bytes = it->first;
-        }
-      }
-      else
+      // This is formerly case 2 that would lay out SOA and hybrid
+      // layouts for each piece individually rather than grouping
+      // pieces together for each field
       {
         // We have multiple pieces and we're not AOS so the per-field
         // offsets can be different in each piece dependent upon the
         // size of the piece and which dimensions are before the fields
         // In this case we're going to have one piece list for each field
-        layout->piece_lists.resize(zip_fields.size());
         for (unsigned idx = 0; idx < zip_fields.size(); idx++)
         {
           layout->piece_lists[idx].pieces.reserve(piece_bounds.size());
@@ -835,6 +862,7 @@ namespace Legion {
           layout->bytes_used = piece_start + piece_bytes;
         }
       }
+#endif
       return layout;
     }
 
