@@ -388,8 +388,12 @@ LEGION_CC_FLAGS       += -DLEGION_USE_CUDA
 # provide this for backward-compatibility in applications
 CC_FLAGS              += -DUSE_CUDA
 FC_FLAGS	      += -DUSE_CUDA
-USE_CUDART_HIJACK ?= 1
-ifeq ($(strip $(USE_CUDART_HIJACK)),1)
+REALM_USE_CUDART_HIJACK ?= 1
+# Have this for backwards compatibility
+ifdef USE_CUDART_HIJACK
+REALM_USE_CUDART_HIJACK = $(USE_CUDART_HIJACK)
+endif
+ifeq ($(strip $(REALM_USE_CUDART_HIJACK)),1)
 REALM_CC_FLAGS        += -DREALM_USE_CUDART_HIJACK
 endif
 INC_FLAGS	+= -I$(CUDA)/include -I$(LG_RT_DIR)/realm/transfer
@@ -400,7 +404,7 @@ else
 NVCC_FLAGS	+= -O2
 endif
 ifeq ($(strip $(DARWIN)),1)
-ifeq ($(strip $(USE_CUDART_HIJACK)),1)
+ifeq ($(strip $(REALM_USE_CUDART_HIJACK)),1)
 LEGION_LD_FLAGS	+= -L$(CUDA)/lib -lcuda
 SLIB_LEGION_DEPS += -L$(CUDA)/lib -lcuda
 SLIB_REALM_DEPS	+= -L$(CUDA)/lib -lcuda
@@ -410,7 +414,7 @@ SLIB_LEGION_DEPS += -L$(CUDA)/lib -lcudart -lcuda
 SLIB_REALM_DEPS	+= -L$(CUDA)/lib -lcuda
 endif
 else
-ifeq ($(strip $(USE_CUDART_HIJACK)),1)
+ifeq ($(strip $(REALM_USE_CUDART_HIJACK)),1)
 LEGION_LD_FLAGS	+= -L$(CUDA)/lib64 -L$(CUDA)/lib64/stubs -lcuda -Xlinker -rpath=$(CUDA)/lib64
 SLIB_LEGION_DEPS += -L$(CUDA)/lib64 -L$(CUDA)/lib64/stubs -lcuda
 SLIB_REALM_DEPS += -L$(CUDA)/lib64 -L$(CUDA)/lib64/stubs -lcuda
@@ -731,7 +735,7 @@ REALM_SRC 	+= $(LG_RT_DIR)/realm/python/python_module.cc \
 endif
 ifeq ($(strip $(USE_CUDA)),1)
 REALM_SRC 	+= $(LG_RT_DIR)/realm/cuda/cuda_module.cc
-ifeq ($(strip $(USE_CUDART_HIJACK)),1)
+ifeq ($(strip $(REALM_USE_CUDART_HIJACK)),1)
 REALM_SRC       += $(LG_RT_DIR)/realm/cuda/cudart_hijack.cc
 endif
 endif
