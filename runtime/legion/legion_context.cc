@@ -13565,11 +13565,14 @@ namespace Legion {
         }
         return Future(result);
       }
+      // If we're doing a local-function task then we can run that with just
+      // a normal individual task in each shard since it is safe to duplicate
+      if (launcher.local_function_task)
+        return InnerContext::execute_task(launcher);
       ReplIndividualTask *task = 
         runtime->get_available_repl_individual_task();
       Future result = task->initialize_task(this, launcher);
 #ifdef DEBUG_LEGION
-      
       if (owner_shard->shard_id == 0)
         log_task.debug("Registering new single task with unique id %lld "
                         "and task %s (ID %lld) with high level runtime in "
