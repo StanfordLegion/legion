@@ -4812,6 +4812,7 @@ namespace Legion {
       sent_remotely = false;
       top_level_task = false;
       implicit_top_level_task = false;
+      local_function_task = false;
       need_intra_task_alias_analysis = true;
     }
 
@@ -4942,6 +4943,17 @@ namespace Legion {
           }
         }
       } 
+      if (launcher.local_function_task)
+      {
+        if (!regions.empty())
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_LOCAL_FUNCTION_TASK_LAUNCH, 
+              "Local function task launch for task %s in parent task %s "
+              "(UID %lld) has %zd region requirements. Local function tasks "
+              "are not permitted to have any region requirements.", 
+              get_task_name(), parent_ctx->get_task_name(), 
+              parent_ctx->get_unique_id(), regions.size())
+        local_function_task = true;
+      }
       // Get a future from the parent context to use as the result
       result = Future(new FutureImpl(runtime, true/*register*/,
             runtime->get_available_distributed_id(), 
@@ -4994,6 +5006,9 @@ namespace Legion {
     void IndividualTask::trigger_prepipeline_stage(void)
     //--------------------------------------------------------------------------
     {
+      // local function tasks have no region requirements so nothing to do here
+      if (local_function_task)
+        return;
       // First compute the parent indexes
       compute_parent_indexes();
       privilege_paths.resize(regions.size());
@@ -5039,10 +5054,11 @@ namespace Legion {
       assert(memo_state != MEMO_REQ);
       assert(privilege_paths.size() == regions.size());
 #endif
-      if (runtime->check_privileges && !is_top_level_task())
+      if (runtime->check_privileges && 
+          !is_top_level_task() && !local_function_task)
         perform_privilege_checks();
       // If we have a trace we do our alias analysis now
-      if (need_intra_task_alias_analysis)
+      if (need_intra_task_alias_analysis && !local_function_task)
       {
         LegionTrace *local_trace = get_trace();
         if (local_trace != NULL)
@@ -5081,7 +5097,7 @@ namespace Legion {
       }
       // If we're replaying this for for a trace then don't even
       // bother asking the mapper about when to map this
-      else if (is_replaying())
+      else if (is_replaying() || local_function_task)
         enqueue_ready_operation();
       // Figure out whether this task is local or remote
       else if (!runtime->is_local(target_proc))

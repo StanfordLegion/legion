@@ -3305,6 +3305,15 @@ legion_task_launcher_set_enable_inlining(legion_task_launcher_t launcher_,
   launcher->enable_inlining = enable_inlining;
 }
 
+void
+legion_task_launcher_set_local_function_task(legion_task_launcher_t launcher_,
+                                             bool local_function_task)
+{
+  TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->local_function_task = local_function_task;
+}
+
 legion_index_launcher_t
 legion_index_launcher_create(
   legion_task_id_t tid,

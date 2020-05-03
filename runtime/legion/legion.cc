@@ -1392,8 +1392,8 @@ namespace Legion {
     TaskLauncher::TaskLauncher(void)
       : task_id(0), argument(TaskArgument()), predicate(Predicate::TRUE_PRED),
         map_id(0), tag(0), point(DomainPoint()), static_dependences(NULL),
-        enable_inlining(false), independent_requirements(false), 
-        silence_warnings(false)
+        enable_inlining(false), local_function_task(false),
+        independent_requirements(false), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1403,7 +1403,8 @@ namespace Legion {
                                Predicate pred /*= Predicate::TRUE_PRED*/,
                                MapperID mid /*=0*/, MappingTagID t /*=0*/)
       : task_id(tid), argument(arg), predicate(pred), map_id(mid), tag(t), 
-        point(DomainPoint()), static_dependences(NULL), enable_inlining(false),
+        point(DomainPoint()), static_dependences(NULL), 
+        enable_inlining(false), local_function_task(false),
         independent_requirements(false), silence_warnings(false)
     //--------------------------------------------------------------------------
     {

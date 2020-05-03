@@ -805,6 +805,7 @@ namespace Legion {
       // Special field for the top level task
       bool top_level_task;
       bool implicit_top_level_task;
+      bool local_function_task;
       // Whether we have to do intra-task alias analysis
       bool need_intra_task_alias_analysis;
     protected:

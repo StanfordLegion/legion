@@ -1483,6 +1483,15 @@ namespace Legion {
       // gets scheduled on the processor that launched this task.
       bool                               enable_inlining;
     public:
+      // In some cases users (most likely compilers) will want
+      // to run a light-weight function (e.g. a continuation)
+      // as a task that just depends on futures once those futures 
+      // are ready on a local processor where the parent task
+      // is executing. We call this a local function task and it 
+      // must not have any region requirements. This task will
+      // not have the option of being distributed to remote nodes.
+      bool                               local_function_task;
+    public:
       // Users can inform the runtime that all region requirements
       // are independent of each other in this task. Independent
       // means that either field sets are independent or region
