@@ -1405,8 +1405,8 @@ namespace Legion {
       : task_id(0), argument(TaskArgument()), predicate(Predicate::TRUE_PRED),
         map_id(0), tag(0), point(DomainPoint(0)), 
         sharding_space(IndexSpace::NO_SPACE), static_dependences(NULL),
-        enable_inlining(false), independent_requirements(false), 
-        silence_warnings(false)
+        enable_inlining(false), local_function_task(false),
+        independent_requirements(false), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1418,7 +1418,8 @@ namespace Legion {
       : task_id(tid), argument(arg), predicate(pred), map_id(mid), tag(t), 
         point(DomainPoint(0)), sharding_space(IndexSpace::NO_SPACE), 
         static_dependences(NULL), enable_inlining(false),
-        independent_requirements(false), silence_warnings(false)
+        local_function_task(false), independent_requirements(false), 
+        silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
