@@ -308,6 +308,7 @@ namespace Realm {
 	XferDesID peer_guid;
 	int peer_port_idx;
 	int indirect_port_idx;
+	bool is_indirect_port;
 	size_t local_bytes_total;
 	atomic<size_t> local_bytes_cons, remote_bytes_total;
 	SequenceAssembler seq_local, seq_remote;
