@@ -6441,11 +6441,11 @@ namespace Legion {
         }
       __CUDA_HD__
       inline ArraySyntax::GenericSyntaxHelper<MultiRegionAccessor<FT,N,T,
-             Realm::AffineAccessor<FT,N,T>,false,false>,FT,N,T,2,READ_WRITE>
+             Realm::AffineAccessor<FT,N,T>,CB,CP>,FT,N,T,2,READ_WRITE>
           operator[](T index) const
       {
         return ArraySyntax::GenericSyntaxHelper<MultiRegionAccessor<FT,N,T,
-              Realm::AffineAccessor<FT,N,T>,false,false>,FT,N,T,2,READ_WRITE>(
+              Realm::AffineAccessor<FT,N,T>,CB,CP>,FT,N,T,2,READ_WRITE>(
               *this, Point<1,T>(index));
       }
       template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
