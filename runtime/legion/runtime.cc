@@ -15898,16 +15898,40 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ShardingFunctor* Runtime::find_sharding_functor(ShardingID sid)
+    ShardingFunctor* Runtime::find_sharding_functor(ShardingID sid, 
+                                                    bool can_fail)
     //--------------------------------------------------------------------------
     {
       AutoLock s_lock(sharding_lock,1,false/*exclusive*/);
       std::map<ShardingID,ShardingFunctor*>::const_iterator finder = 
         sharding_functors.find(sid);
       if (finder == sharding_functors.end())
+      {
+        if (can_fail)
+          return NULL;
         REPORT_LEGION_ERROR(ERROR_INVALID_SHARDING_ID,
                     "Unable to find registered sharding functor ID %d.", sid)
+      }
       return finder->second;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ ShardingFunctor* Runtime::get_sharding_functor(ShardingID sid)
+    //--------------------------------------------------------------------------
+    {
+      if (!runtime_started)
+      {
+        std::map<ShardingID,ShardingFunctor*> &pending_sharding_functors = 
+          get_pending_sharding_table();
+        std::map<ShardID,ShardingFunctor*>::const_iterator finder = 
+          pending_sharding_functors.find(sid);
+        if (finder == pending_sharding_functors.end())
+          return NULL;
+        else
+          return finder->second;
+      }
+      else
+        return the_runtime->find_sharding_functor(sid, true/*can fail*/);
     }
 
     //--------------------------------------------------------------------------

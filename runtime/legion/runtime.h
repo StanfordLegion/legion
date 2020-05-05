@@ -2347,7 +2347,9 @@ namespace Legion {
                                      bool preregistered = false);
       static void preregister_sharding_functor(ShardingID sid,
                                      ShardingFunctor *func);
-      ShardingFunctor* find_sharding_functor(ShardingID sid);
+      ShardingFunctor* find_sharding_functor(ShardingID sid, 
+                                             bool can_fail = false);
+      static ShardingFunctor* get_sharding_functor(ShardingID sid);
     public:
       void register_reduction(ReductionOpID redop_id,
                               ReductionOp *redop,

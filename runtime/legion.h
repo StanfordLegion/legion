@@ -7105,6 +7105,14 @@ namespace Legion {
        */
       static void preregister_sharding_functor(ShardingID sid,
                                                ShardingFunctor *functor);
+
+      /**
+       * Return a pointer to a given sharding functor object.
+       * The runtime retains ownership of this object.
+       * @param sid ID of the sharding functor to find
+       * @return a pointer o the sharding functor if it exists
+       */
+      static ShardingFunctor* get_sharding_functor(ShardingID sid);
     public:
       /**
        * Dynamically generate a unique reduction ID for use across the machine
