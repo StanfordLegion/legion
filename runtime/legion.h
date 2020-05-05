@@ -4015,8 +4015,21 @@ namespace Legion {
                     const std::map<Point<COLOR_DIM,COLOR_COORD_T>,int> &weights,
                     IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
                     size_t granularity = 1, Color color = AUTO_GENERATE_ID);
+      // 64-bit versions
+      IndexPartition create_partition_by_weights(Context ctx, IndexSpace parent,
+                                    const std::map<DomainPoint,size_t> &weights,
+                                    IndexSpace color_space,
+                                    size_t granularity = 1,
+                                    Color color = AUTO_GENERATE_ID);
+      template<int DIM, typename COORD_T, int COLOR_DIM, typename COLOR_COORD_T>
+      IndexPartitionT<DIM,COORD_T> create_partition_by_weights(Context ctx,
+                 IndexSpaceT<DIM,COORD_T> parent,
+                 const std::map<Point<COLOR_DIM,COLOR_COORD_T>,size_t> &weights,
+                 IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
+                 size_t granularity = 1, Color color = AUTO_GENERATE_ID);
       // Alternate versions of the above method that take a future map where
-      // the values in the future map will be interpretted as a integer weights
+      // the values in the future map will be interpretted as integer weights
+      // You can use this method with both 32 and 64 bit weights
       IndexPartition create_partition_by_weights(Context ctx, IndexSpace parent,
                                                  const FutureMap &weights,
                                                  IndexSpace color_space,
