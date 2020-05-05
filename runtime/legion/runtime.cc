@@ -2220,8 +2220,18 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void PhysicalRegionImpl::fail_bounds_check(DomainPoint p, FieldID fid,
-                                               PrivilegeMode mode)
+    void PhysicalRegionImpl::report_incompatible_accessor(
+              const char *accessor_kind, PhysicalInstance instance, FieldID fid)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_ACCESSOR_COMPATIBILITY_CHECK,
+          "Unable to create Realm %s for field %d of instance %llx in task %s",
+          accessor_kind, fid, instance.id, context->get_task_name())
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalRegionImpl::fail_bounds_check(DomainPoint p, 
+                                                FieldID fid, PrivilegeMode mode)
     //--------------------------------------------------------------------------
     {
       char point_string[128];
@@ -2243,7 +2253,7 @@ namespace Legion {
             REPORT_LEGION_ERROR(ERROR_ACCESSOR_BOUNDS_CHECK, 
                           "Bounds check failure reading point %s from "
                           "field %d in task %s\n", point_string, fid,
-                          context->get_task_name())
+                          implicit_context->get_task_name())
             break;
           }
         case READ_WRITE:
@@ -2251,7 +2261,7 @@ namespace Legion {
             REPORT_LEGION_ERROR(ERROR_ACCESSOR_BOUNDS_CHECK, 
                           "Bounds check failure geting a reference to point %s "
                           "from field %d in task %s\n", point_string, fid,
-                          context->get_task_name())
+                          implicit_context->get_task_name())
             break;
           }
         case WRITE_ONLY:
@@ -2260,7 +2270,7 @@ namespace Legion {
             REPORT_LEGION_ERROR(ERROR_ACCESSOR_BOUNDS_CHECK, 
                           "Bounds check failure writing to point %s in "
                           "field %d in task %s\n", point_string, fid,
-                          context->get_task_name())
+                          implicit_context->get_task_name())
             break;
           }
         case REDUCE:
@@ -2268,7 +2278,7 @@ namespace Legion {
             REPORT_LEGION_ERROR(ERROR_ACCESSOR_BOUNDS_CHECK, 
                           "Bounds check failure reducing to point %s in "
                           "field %d in task %s\n", point_string, fid,
-                          context->get_task_name())
+                          implicit_context->get_task_name())
             break;
           }
         default:
@@ -2277,8 +2287,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalRegionImpl::fail_bounds_check(Domain dom, FieldID fid,
-                                               PrivilegeMode mode)
+    /*static*/ void PhysicalRegionImpl::fail_bounds_check(Domain dom, 
+                                                FieldID fid, PrivilegeMode mode)
     //--------------------------------------------------------------------------
     {
       char rect_string[256];
@@ -2310,7 +2320,7 @@ namespace Legion {
             REPORT_LEGION_ERROR(ERROR_ACCESSOR_BOUNDS_CHECK, 
                           "Bounds check failure getting a read-only reference "
                           "to rect %s from field %d in task %s\n", 
-                          rect_string, fid, context->get_task_name())
+                          rect_string, fid, implicit_context->get_task_name())
             break;
           }
         case READ_WRITE:
@@ -2318,23 +2328,13 @@ namespace Legion {
             REPORT_LEGION_ERROR(ERROR_ACCESSOR_BOUNDS_CHECK, 
                           "Bounds check failure geting a reference to rect %s "
                           "from field %d in task %s\n", rect_string, fid,
-                          context->get_task_name())
+                          implicit_context->get_task_name())
             break;
           }
         default:
           assert(false);
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalRegionImpl::report_incompatible_accessor(
-              const char *accessor_kind, PhysicalInstance instance, FieldID fid)
-    //--------------------------------------------------------------------------
-    {
-      REPORT_LEGION_ERROR(ERROR_ACCESSOR_COMPATIBILITY_CHECK,
-          "Unable to create Realm %s for field %d of instance %llx in task %s",
-          accessor_kind, fid, instance.id, context->get_task_name())
-    }
+    } 
 
     /////////////////////////////////////////////////////////////
     // Grant Impl 

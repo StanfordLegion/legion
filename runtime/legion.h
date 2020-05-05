@@ -2252,12 +2252,12 @@ namespace Legion {
                                               bool generic_accessor,
                                               bool check_field_size,
                                               ReductionOpID redop = 0) const;
-      void fail_bounds_check(DomainPoint p, FieldID fid,
-                             PrivilegeMode mode) const;
-      void fail_bounds_check(Domain d, FieldID fid,
-                             PrivilegeMode mode) const;
       void report_incompatible_accessor(const char *accessor_kind,
                              Realm::RegionInstance instance, FieldID fid) const;
+      static void fail_bounds_check(DomainPoint p, FieldID fid,
+                                    PrivilegeMode mode);
+      static void fail_bounds_check(Domain d, FieldID fid,
+                                    PrivilegeMode mode);
     protected:
       void get_bounds(void *realm_is, TypeTag type_tag) const;
     };

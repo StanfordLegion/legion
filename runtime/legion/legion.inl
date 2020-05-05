@@ -654,7 +654,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &bounds,
@@ -675,7 +675,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region), bounds(source_bounds)
+        : field(fid), bounds(source_bounds)
       {
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &bounds,
@@ -691,14 +691,14 @@ namespace Legion {
       inline FT read(const Point<N,T>& p) const 
         { 
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
           return accessor.read(p); 
         }
       inline const Realm::AccessorRefHelper<FT> 
           operator[](const Point<N,T>& p) const
         { 
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
           return accessor[p]; 
         }
       inline ArraySyntax::GenericSyntaxHelper<FieldAccessor<READ_ONLY,FT,N,T,
@@ -712,7 +712,6 @@ namespace Legion {
     public:
       mutable Realm::GenericAccessor<FT,N,T> accessor;
       FieldID field;
-      const PhysicalRegion *field_region;
       DomainT<N,T> bounds;
     public:
       typedef FT value_type;
@@ -805,7 +804,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &bounds,
@@ -826,7 +825,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &bounds,
@@ -842,20 +841,19 @@ namespace Legion {
       inline FT read(const Point<1,T>& p) const 
         { 
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
           return accessor.read(p); 
         }
       inline const Realm::AccessorRefHelper<FT> 
           operator[](const Point<1,T>& p) const
         { 
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
           return accessor[p]; 
         }
     public:
       mutable Realm::GenericAccessor<FT,1,T> accessor;
       FieldID field;
-      const PhysicalRegion *field_region;
       DomainT<1,T> bounds;
     public:
       typedef FT value_type;
@@ -959,7 +957,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &bounds,
@@ -980,7 +978,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &bounds,
@@ -996,20 +994,21 @@ namespace Legion {
       inline FT read(const Point<N,T>& p) const
         { 
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
           return accessor.read(p); 
         }
       inline void write(const Point<N,T>& p, FT val) const
         { 
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p),field,WRITE_DISCARD);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p),
+                                              field, WRITE_DISCARD);
           accessor.write(p, val); 
         }
       inline Realm::AccessorRefHelper<FT> 
           operator[](const Point<N,T>& p) const
         { 
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
           return accessor[p]; 
         }
       inline ArraySyntax::GenericSyntaxHelper<FieldAccessor<READ_WRITE,FT,N,T,
@@ -1024,7 +1023,6 @@ namespace Legion {
     public:
       mutable Realm::GenericAccessor<FT,N,T> accessor;
       FieldID field;
-      const PhysicalRegion *field_region;
       DomainT<N,T> bounds;
     public:
       typedef FT value_type;
@@ -1121,7 +1119,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &bounds,
@@ -1142,7 +1140,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &bounds,
@@ -1158,27 +1156,27 @@ namespace Legion {
       inline FT read(const Point<1,T>& p) const
         { 
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
           return accessor.read(p); 
         }
       inline void write(const Point<1,T>& p, FT val) const
         { 
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p),field,WRITE_DISCARD);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p),
+                                              field, WRITE_DISCARD);
           accessor.write(p, val); 
         }
       inline Realm::AccessorRefHelper<FT> 
           operator[](const Point<1,T>& p) const
         { 
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
           return accessor[p]; 
         }
       // No reduction since we can't handle atomicity correctly
     public:
       mutable Realm::GenericAccessor<FT,1,T> accessor;
       FieldID field;
-      const PhysicalRegion *field_region;
       DomainT<1,T> bounds;
     public:
       typedef FT value_type;
@@ -1282,7 +1280,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid,actual_field_size,&bounds,
@@ -1303,7 +1301,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid,actual_field_size,&bounds,
@@ -1319,20 +1317,21 @@ namespace Legion {
       inline FT read(const Point<N,T>& p) const
         { 
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
           return accessor.read(p); 
         }
       inline void write(const Point<N,T>& p, FT val) const
         { 
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p),field,WRITE_DISCARD);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p),
+                                              field, WRITE_DISCARD);
           accessor.write(p, val); 
         }
       inline Realm::AccessorRefHelper<FT> 
           operator[](const Point<N,T>& p) const
         { 
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
           return accessor[p]; 
         }
       inline ArraySyntax::GenericSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,N,
@@ -1346,7 +1345,6 @@ namespace Legion {
     public:
       mutable Realm::GenericAccessor<FT,N,T> accessor;
       FieldID field;
-      const PhysicalRegion *field_region;
       DomainT<N,T> bounds;
     public:
       typedef FT value_type;
@@ -1442,7 +1440,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid,actual_field_size,&bounds,
@@ -1463,7 +1461,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid,actual_field_size,&bounds,
@@ -1479,26 +1477,26 @@ namespace Legion {
       inline FT read(const Point<1,T>& p) const
         { 
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
           return accessor.read(p); 
         }
       inline void write(const Point<1,T>& p, FT val) const
         { 
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p),field,WRITE_DISCARD);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p),
+                                              field, WRITE_DISCARD);
           accessor.write(p, val); 
         }
       inline Realm::AccessorRefHelper<FT> 
           operator[](const Point<1,T>& p) const
         { 
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
           return accessor[p]; 
         }
     public:
       mutable Realm::GenericAccessor<FT,1,T> accessor;
       FieldID field;
-      const PhysicalRegion *field_region;
       DomainT<1,T> bounds;
     public:
       typedef FT value_type;
@@ -1598,7 +1596,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid,actual_field_size,&bounds,
@@ -1619,7 +1617,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid,actual_field_size,&bounds,
@@ -1635,14 +1633,15 @@ namespace Legion {
       inline void write(const Point<N,T>& p, FT val) const
         { 
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p),field,WRITE_DISCARD);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p),
+                                              field, WRITE_DISCARD);
           accessor.write(p, val); 
         }
       inline Realm::AccessorRefHelper<FT> 
           operator[](const Point<N,T>& p) const
         { 
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
           return accessor[p]; 
         }
       inline ArraySyntax::GenericSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,N,
@@ -1656,7 +1655,6 @@ namespace Legion {
     public:
       mutable Realm::GenericAccessor<FT,N,T> accessor;
       FieldID field;
-      const PhysicalRegion *field_region;
       DomainT<N,T> bounds;
     public:
       typedef FT value_type;
@@ -1748,7 +1746,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid,actual_field_size,&bounds,
@@ -1769,7 +1767,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid,actual_field_size,&bounds,
@@ -1785,20 +1783,20 @@ namespace Legion {
       inline void write(const Point<1,T>& p, FT val) const
         { 
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p),field,WRITE_DISCARD);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p),
+                                              field, WRITE_DISCARD);
           accessor.write(p, val); 
         }
       inline Realm::AccessorRefHelper<FT> 
           operator[](const Point<1,T>& p) const
         { 
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
           return accessor[p]; 
         }
     public:
       mutable Realm::GenericAccessor<FT,1,T> accessor;
       FieldID field;
-      const PhysicalRegion *field_region;
       DomainT<1,T> bounds;
     public:
       typedef FT value_type;
@@ -2136,7 +2134,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -2160,7 +2158,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -2185,7 +2183,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -2212,7 +2210,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -2234,7 +2232,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
 #endif
           return accessor.read(p); 
         }
@@ -2245,7 +2243,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
 #endif
           return accessor.ptr(p); 
         }
@@ -2256,7 +2254,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region->fail_bounds_check(Domain(r), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_ONLY);
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
@@ -2282,7 +2280,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region->fail_bounds_check(Domain(r), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_ONLY);
 #endif
           for (int i = 0; i < N; i++)
             strides[i] = accessor.strides[i] / sizeof(FT);
@@ -2295,7 +2293,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
 #endif
           return accessor[p]; 
         }
@@ -2311,7 +2309,6 @@ namespace Legion {
     public:
       Realm::AffineAccessor<FT,N,T> accessor;
       FieldID field;
-      const PhysicalRegion *field_region;
       AffineBounds::Tester<N,T> bounds;
     public:
       typedef FT value_type;
@@ -2487,7 +2484,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region) 
+        : field(fid) 
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -2511,7 +2508,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region) 
+        : field(fid) 
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -2536,7 +2533,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region) 
+        : field(fid) 
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -2563,7 +2560,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region) 
+        : field(fid) 
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -2585,7 +2582,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
 #endif
           return accessor.read(p); 
         }
@@ -2596,7 +2593,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
 #endif
           return accessor.ptr(p); 
         }
@@ -2607,7 +2604,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region->fail_bounds_check(Domain(r), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_ONLY);
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
@@ -2633,7 +2630,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region->fail_bounds_check(Domain(r), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_ONLY);
 #endif
           strides[0] = accessor.strides[0] / sizeof(FT);
           return accessor.ptr(r.lo);
@@ -2645,14 +2642,13 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
 #endif
           return accessor[p]; 
         }
     public:
       Realm::AffineAccessor<FT,1,T> accessor;
       FieldID field;
-      const PhysicalRegion *field_region;
       AffineBounds::Tester<1,T> bounds;
     public:
       typedef FT value_type;
@@ -2848,7 +2844,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -2872,7 +2868,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -2897,7 +2893,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -2924,7 +2920,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -2946,7 +2942,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
 #endif
           return accessor.read(p); 
         }
@@ -2957,7 +2953,8 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p),field,WRITE_DISCARD);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p),
+                                              field, WRITE_DISCARD);
 #endif
           accessor.write(p, val); 
         }
@@ -2968,7 +2965,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
 #endif
           return accessor.ptr(p); 
         }
@@ -2979,7 +2976,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region->fail_bounds_check(Domain(r), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_WRITE);
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
@@ -3005,7 +3002,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region->fail_bounds_check(Domain(r), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_WRITE);
 #endif
           for (int i = 0; i < N; i++)
             strides[i] = accessor.strides[i] / sizeof(FT);
@@ -3018,7 +3015,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
 #endif
           return accessor[p]; 
         }
@@ -3039,14 +3036,13 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, REDUCE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, REDUCE);
 #endif
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
       Realm::AffineAccessor<FT,N,T> accessor;
       FieldID field;
-      const PhysicalRegion *field_region;
       AffineBounds::Tester<N,T> bounds;
     public:
       typedef FT value_type;
@@ -3233,7 +3229,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -3257,7 +3253,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -3282,7 +3278,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -3309,7 +3305,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -3331,7 +3327,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
 #endif
           return accessor.read(p); 
         }
@@ -3342,7 +3338,8 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p),field,WRITE_DISCARD);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p),
+                                              field, WRITE_DISCARD);
 #endif
           accessor.write(p, val); 
         }
@@ -3353,7 +3350,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
 #endif
           return accessor.ptr(p); 
         }
@@ -3364,7 +3361,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region->fail_bounds_check(Domain(r), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_WRITE);
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
@@ -3390,7 +3387,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region->fail_bounds_check(Domain(r), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_WRITE);
 #endif
           strides[0] = accessor.strides[0] / sizeof(FT);
           return accessor.ptr(r.lo);
@@ -3402,7 +3399,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
 #endif
           return accessor[p]; 
         }
@@ -3414,14 +3411,13 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, REDUCE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, REDUCE);
 #endif
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
       Realm::AffineAccessor<FT,1,T> accessor;
       FieldID field;
-      const PhysicalRegion *field_region;
       AffineBounds::Tester<1,T> bounds;
     public:
       typedef FT value_type;
@@ -3611,7 +3607,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -3635,7 +3631,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -3660,7 +3656,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -3687,7 +3683,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -3709,7 +3705,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
 #endif
           return accessor.read(p); 
         }
@@ -3720,7 +3716,8 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p),field,WRITE_DISCARD);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p),
+                                              field, WRITE_DISCARD);
 #endif
           accessor.write(p, val); 
         }
@@ -3731,7 +3728,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
 #endif
           return accessor.ptr(p); 
         }
@@ -3742,7 +3739,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region->fail_bounds_check(Domain(r), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_WRITE);
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
@@ -3768,7 +3765,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region->fail_bounds_check(Domain(r), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_WRITE);
 #endif
           for (int i = 0; i < N; i++)
             strides[i] = accessor.strides[i] / sizeof(FT);
@@ -3781,7 +3778,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
 #endif
           return accessor[p]; 
         }
@@ -3797,7 +3794,6 @@ namespace Legion {
     public:
       Realm::AffineAccessor<FT,N,T> accessor;
       FieldID field;
-      const PhysicalRegion *field_region;
       AffineBounds::Tester<N,T> bounds;
     public:
       typedef FT value_type;
@@ -3978,7 +3974,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -4002,7 +3998,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -4027,7 +4023,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -4054,7 +4050,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -4076,7 +4072,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
 #endif
           return accessor.read(p); 
         }
@@ -4087,7 +4083,8 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p),field,WRITE_DISCARD);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p),
+                                              field, WRITE_DISCARD);
 #endif
           accessor.write(p, val); 
         }
@@ -4098,7 +4095,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
 #endif
           return accessor.ptr(p); 
         }
@@ -4109,7 +4106,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region->fail_bounds_check(Domain(r), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_WRITE);
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
@@ -4135,7 +4132,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region->fail_bounds_check(Domain(r), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_WRITE);
 #endif
           strides[0] = accessor.strides[0] / sizeof(FT);
           return accessor.ptr(r.lo);
@@ -4147,14 +4144,13 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
 #endif
           return accessor[p]; 
         }
     public:
       Realm::AffineAccessor<FT,1,T> accessor;
       FieldID field;
-      const PhysicalRegion *field_region;
       AffineBounds::Tester<1,T> bounds;
     public:
       typedef FT value_type;
@@ -4339,7 +4335,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -4363,7 +4359,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -4388,7 +4384,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -4412,7 +4408,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -4434,7 +4430,8 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p),field,WRITE_DISCARD);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p),
+                                              field, WRITE_DISCARD);
 #endif
           accessor.write(p, val); 
         }
@@ -4445,7 +4442,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
 #endif
           return accessor.ptr(p); 
         }
@@ -4456,7 +4453,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region->fail_bounds_check(Domain(r), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_WRITE);
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
@@ -4482,7 +4479,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region->fail_bounds_check(Domain(r), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_WRITE);
 #endif
           for (int i = 0; i < N; i++)
             strides[i] = accessor.strides[i] / sizeof(FT);
@@ -4495,7 +4492,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
 #endif
           return accessor[p]; 
         }
@@ -4511,7 +4508,6 @@ namespace Legion {
     public:
       Realm::AffineAccessor<FT,N,T> accessor;
       FieldID field;
-      const PhysicalRegion *field_region;
       AffineBounds::Tester<N,T> bounds;
     public:
       typedef FT value_type;
@@ -4687,7 +4683,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -4711,7 +4707,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -4736,7 +4732,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -4763,7 +4759,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -4785,7 +4781,8 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p),field,WRITE_DISCARD);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p),
+                                              field, WRITE_DISCARD);
 #endif
           accessor.write(p, val); 
         }
@@ -4796,7 +4793,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
 #endif
           return accessor.ptr(p); 
         }
@@ -4807,7 +4804,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region->fail_bounds_check(Domain(r), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_WRITE);
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
@@ -4833,7 +4830,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region->fail_bounds_check(Domain(r), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_WRITE);
 #endif
           strides[0] = accessor.strides[0] / sizeof(FT);
           return accessor.ptr(r.lo);
@@ -4845,14 +4842,13 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
 #endif
           return accessor[p]; 
         }
     public:
       Realm::AffineAccessor<FT,1,T> accessor;
       FieldID field;
-      const PhysicalRegion *field_region;
       AffineBounds::Tester<1,T> bounds;
     public:
       typedef FT value_type;
@@ -5024,7 +5020,7 @@ namespace Legion {
       ReductionAccessor(const PhysicalRegion &region, FieldID fid,
                         ReductionOpID redop, bool silence_warnings = false,
                         const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -5045,7 +5041,7 @@ namespace Legion {
                         const Rect<N,T> source_bounds,
                         bool silence_warnings = false,
                         const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -5067,7 +5063,7 @@ namespace Legion {
                         const AffineTransform<M,N,T> transform,
                         bool silence_warnings = false,
                         const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -5091,7 +5087,7 @@ namespace Legion {
                         const Rect<N,T> source_bounds,
                         bool silence_warnings = false,
                         const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -5115,7 +5111,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, REDUCE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, REDUCE);
 #endif
           REDOP::template fold<EXCLUSIVE>(accessor[p], val);
         }
@@ -5126,7 +5122,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, REDUCE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, REDUCE);
 #endif
           return accessor.ptr(p); 
         }
@@ -5137,7 +5133,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region->fail_bounds_check(Domain(r), field, REDUCE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, REDUCE);
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
@@ -5164,7 +5160,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region->fail_bounds_check(Domain(r), field, REDUCE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, REDUCE);
 #endif
           for (int i = 0; i < N; i++)
             strides[i] = accessor.strides[i] / sizeof(typename REDOP::RHS);
@@ -5194,7 +5190,6 @@ namespace Legion {
     public:
       Realm::AffineAccessor<typename REDOP::RHS,N,T> accessor;
       FieldID field;
-      const PhysicalRegion *field_region;
       AffineBounds::Tester<N,T> bounds;
     public:
       typedef typename REDOP::RHS value_type;
@@ -5356,7 +5351,7 @@ namespace Legion {
       ReductionAccessor(const PhysicalRegion &region, FieldID fid,
                         ReductionOpID redop, bool silence_warnings = false,
                         const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -5377,7 +5372,7 @@ namespace Legion {
                         const Rect<1,T> source_bounds,
                         bool silence_warnings = false,
                         const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -5399,7 +5394,7 @@ namespace Legion {
                         const AffineTransform<M,1,T> transform,
                         bool silence_warnings = false,
                         const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -5422,7 +5417,7 @@ namespace Legion {
                         const Rect<1,T> source_bounds,
                         bool silence_warnings = false,
                         const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -5446,7 +5441,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, REDUCE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, REDUCE);
 #endif
           REDOP::template fold<EXCLUSIVE>(accessor[p], val);
         }
@@ -5457,7 +5452,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, REDUCE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, REDUCE);
 #endif
           return accessor.ptr(p); 
         }
@@ -5468,7 +5463,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region->fail_bounds_check(Domain(r), field, REDUCE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, REDUCE);
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
@@ -5495,7 +5490,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region->fail_bounds_check(Domain(r), field, REDUCE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, REDUCE);
 #endif
           strides[0] = accessor.strides[0] / sizeof(typename REDOP::RHS);
           return accessor.ptr(r.lo);
@@ -5513,7 +5508,6 @@ namespace Legion {
     public:
       Realm::AffineAccessor<typename REDOP::RHS,1,T> accessor;
       FieldID field;
-      const PhysicalRegion *field_region;
       AffineBounds::Tester<1,T> bounds;
     public:
       typedef typename REDOP::RHS value_type;
