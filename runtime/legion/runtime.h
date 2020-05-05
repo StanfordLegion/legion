@@ -426,6 +426,8 @@ namespace Legion {
                                          ReductionOpID redop);
       void report_incompatible_accessor(const char *accessor_kind,
                              PhysicalInstance instance, FieldID fid);
+      void report_incompatible_multi_accessor(unsigned index, FieldID fid,
+                           PhysicalInstance inst1, PhysicalInstance inst2);
       static void fail_bounds_check(DomainPoint p, FieldID fid, 
                                     PrivilegeMode mode, bool multi);
       static void fail_bounds_check(Domain d, FieldID fid, 

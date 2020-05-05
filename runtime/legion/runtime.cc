@@ -2230,6 +2230,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalRegionImpl::report_incompatible_multi_accessor(unsigned index,
+                    FieldID fid, PhysicalInstance inst1, PhysicalInstance inst2)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_ACCESSOR_COMPATIBILITY_CHECK,
+          "Unable to create multi-region accessor for field %d because "
+          "instances " IDFMT " (index 0) and " IDFMT " (index %d) are "
+          "differnt. Multi-region accessors must always be for region "
+          "requirements with the same physical instance.", 
+          fid, inst1.id, inst2.id, index)
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void PhysicalRegionImpl::fail_bounds_check(DomainPoint p, 
                                     FieldID fid, PrivilegeMode mode, bool multi)
     //--------------------------------------------------------------------------
