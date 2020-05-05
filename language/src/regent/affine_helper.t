@@ -93,6 +93,7 @@ function convert_constant_expr(node)
   elseif node:is(ast.typed.expr.Unary) and node.op == "-" then
     return -convert_constant_expr(node.rhs)
   elseif node:is(ast.typed.expr.Binary) then
+    local op = node.op
     if op == "*" then
       return convert_constant_expr(node.lhs) * convert_constant_expr(node.rhs)
     elseif op == "/" then
