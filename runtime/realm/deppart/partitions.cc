@@ -302,10 +302,10 @@ namespace Realm {
 
   template <int N, typename T>
   Event IndexSpace<N,T>::create_weighted_subspaces(size_t count, size_t granularity,
-						    const std::vector<int>& weights,
-						    std::vector<IndexSpace<N,T> >& subspaces,
-						    const ProfilingRequestSet &reqs,
-						    Event wait_on /*= Event::NO_EVENT*/) const
+						   const std::vector<size_t>& weights,
+						   std::vector<IndexSpace<N,T> >& subspaces,
+						   const ProfilingRequestSet &reqs,
+						   Event wait_on /*= Event::NO_EVENT*/) const
   {
     // output vector should start out empty
     assert(subspaces.empty());
