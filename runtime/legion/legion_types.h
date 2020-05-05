@@ -142,6 +142,8 @@ namespace Legion {
     class FieldAccessor;
   template<typename, bool, int, typename, typename, bool>
     class ReductionAccessor;
+  template<typename, int,typename,typename,bool,bool,int>
+    class MultiRegionAccessor;
   template<typename,int,typename,typename>
     class UnsafeFieldAccessor;
   class IndexIterator;

@@ -550,10 +550,16 @@ namespace Legion {
                                          bool generic_accessor,
                                          bool check_field_size,
                                          ReductionOpID redop);
-      void fail_bounds_check(DomainPoint p, FieldID fid, PrivilegeMode mode);
-      void fail_bounds_check(Domain d, FieldID fid, PrivilegeMode mode);
       void report_incompatible_accessor(const char *accessor_kind,
                              PhysicalInstance instance, FieldID fid);
+      static void fail_bounds_check(DomainPoint p, FieldID fid, 
+                                    PrivilegeMode mode, bool multi);
+      static void fail_bounds_check(Domain d, FieldID fid, 
+                                    PrivilegeMode mode, bool multi);
+      static void fail_privilege_check(DomainPoint p, FieldID fid, 
+                                    PrivilegeMode mode);
+      static void fail_privilege_check(Domain d, FieldID fid, 
+                                    PrivilegeMode mode);
     public:
       Runtime *const runtime;
       TaskContext *const context;

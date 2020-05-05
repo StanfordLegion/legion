@@ -2929,8 +2929,18 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void PhysicalRegionImpl::fail_bounds_check(DomainPoint p, FieldID fid,
-                                               PrivilegeMode mode)
+    void PhysicalRegionImpl::report_incompatible_accessor(
+              const char *accessor_kind, PhysicalInstance instance, FieldID fid)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_ACCESSOR_COMPATIBILITY_CHECK,
+          "Unable to create Realm %s for field %d of instance %llx in task %s",
+          accessor_kind, fid, instance.id, context->get_task_name())
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalRegionImpl::fail_bounds_check(DomainPoint p, 
+                                    FieldID fid, PrivilegeMode mode, bool multi)
     //--------------------------------------------------------------------------
     {
       char point_string[128];
@@ -2951,16 +2961,18 @@ namespace Legion {
           {
             REPORT_LEGION_ERROR(ERROR_ACCESSOR_BOUNDS_CHECK, 
                           "Bounds check failure reading point %s from "
-                          "field %d in task %s\n", point_string, fid,
-                          context->get_task_name())
+                          "field %d in task %s%s\n", point_string, fid,
+                          implicit_context->get_task_name(),
+                          multi ? " for multi-region accessor" : "")
             break;
           }
         case READ_WRITE:
           {
             REPORT_LEGION_ERROR(ERROR_ACCESSOR_BOUNDS_CHECK, 
                           "Bounds check failure geting a reference to point %s "
-                          "from field %d in task %s\n", point_string, fid,
-                          context->get_task_name())
+                          "from field %d in task %s%s\n", point_string, fid,
+                          implicit_context->get_task_name(),
+                          multi ? " for multi-region accessor" : "")
             break;
           }
         case WRITE_ONLY:
@@ -2968,16 +2980,18 @@ namespace Legion {
           {
             REPORT_LEGION_ERROR(ERROR_ACCESSOR_BOUNDS_CHECK, 
                           "Bounds check failure writing to point %s in "
-                          "field %d in task %s\n", point_string, fid,
-                          context->get_task_name())
+                          "field %d in task %s%s\n", point_string, fid,
+                          implicit_context->get_task_name(),
+                          multi ? " for multi-region accessor" : "")
             break;
           }
         case REDUCE:
           {
             REPORT_LEGION_ERROR(ERROR_ACCESSOR_BOUNDS_CHECK, 
                           "Bounds check failure reducing to point %s in "
-                          "field %d in task %s\n", point_string, fid,
-                          context->get_task_name())
+                          "field %d in task %s%s\n", point_string, fid,
+                          implicit_context->get_task_name(),
+                          multi ? " for multi-region accessor" : "")
             break;
           }
         default:
@@ -2986,8 +3000,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalRegionImpl::fail_bounds_check(Domain dom, FieldID fid,
-                                               PrivilegeMode mode)
+    /*static*/ void PhysicalRegionImpl::fail_bounds_check(Domain dom, 
+                                    FieldID fid, PrivilegeMode mode, bool multi)
     //--------------------------------------------------------------------------
     {
       char rect_string[256];
@@ -3018,16 +3032,75 @@ namespace Legion {
           {
             REPORT_LEGION_ERROR(ERROR_ACCESSOR_BOUNDS_CHECK, 
                           "Bounds check failure getting a read-only reference "
-                          "to rect %s from field %d in task %s\n", 
-                          rect_string, fid, context->get_task_name())
+                          "to rect %s from field %d in task %s%s\n", 
+                          rect_string, fid, implicit_context->get_task_name(),
+                          multi ? " for multi-region accessor" : "")
             break;
           }
         case READ_WRITE:
           {
             REPORT_LEGION_ERROR(ERROR_ACCESSOR_BOUNDS_CHECK, 
                           "Bounds check failure geting a reference to rect %s "
-                          "from field %d in task %s\n", rect_string, fid,
-                          context->get_task_name())
+                          "from field %d in task %s%s\n", rect_string, fid,
+                          implicit_context->get_task_name(),
+                          multi ? " for multi-region accessor" : "")
+            break;
+          }
+        default:
+          assert(false);
+      }
+    } 
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalRegionImpl::fail_privilege_check(DomainPoint p, 
+                                                FieldID fid, PrivilegeMode mode)
+    //--------------------------------------------------------------------------
+    {
+      char point_string[128];
+      sprintf(point_string," (");
+      for (int d = 0; d < p.get_dim(); d++)
+      {
+        char buffer[32];
+        if (d == 0)
+          sprintf(buffer,"%lld", p[0]);
+        else
+          sprintf(buffer,",%lld", p[d]);
+        strcat(point_string, buffer);
+      }
+      strcat(point_string,")");
+      switch (mode)
+      {
+        case READ_ONLY:
+          {
+            REPORT_LEGION_ERROR(ERROR_ACCESSOR_PRIVILEGE_CHECK, 
+                          "Privilege check failure reading point %s from "
+                          "field %d in task %s\n", point_string, fid,
+                          implicit_context->get_task_name())
+            break;
+          }
+        case READ_WRITE:
+          {
+            REPORT_LEGION_ERROR(ERROR_ACCESSOR_PRIVILEGE_CHECK, 
+                          "Privilege check failure geting a reference to point "
+                          "%s from field %d in task %s\n", point_string, fid,
+                          implicit_context->get_task_name())
+            break;
+          }
+        case WRITE_ONLY:
+        case WRITE_DISCARD:
+          {
+            REPORT_LEGION_ERROR(ERROR_ACCESSOR_PRIVILEGE_CHECK, 
+                          "Privilege check failure writing to point %s in "
+                          "field %d in task %s\n", point_string, fid,
+                          implicit_context->get_task_name())
+            break;
+          }
+        case REDUCE:
+          {
+            REPORT_LEGION_ERROR(ERROR_ACCESSOR_PRIVILEGE_CHECK, 
+                          "Privilege check failure reducing to point %s in "
+                          "field %d in task %s\n", point_string, fid,
+                          implicit_context->get_task_name())
             break;
           }
         default:
@@ -3036,13 +3109,53 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalRegionImpl::report_incompatible_accessor(
-              const char *accessor_kind, PhysicalInstance instance, FieldID fid)
+    /*static*/ void PhysicalRegionImpl::fail_privilege_check(Domain dom, 
+                                                FieldID fid, PrivilegeMode mode)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_ACCESSOR_COMPATIBILITY_CHECK,
-          "Unable to create Realm %s for field %d of instance %llx in task %s",
-          accessor_kind, fid, instance.id, context->get_task_name())
+      char rect_string[256];
+      sprintf(rect_string," (");
+      for (int d = 0; d < dom.get_dim(); d++)
+      {
+        char buffer[32];
+        if (d == 0)
+          sprintf(buffer,"%lld", dom.lo()[0]);
+        else
+          sprintf(buffer,",%lld", dom.lo()[d]);
+        strcat(rect_string, buffer);
+      }
+      strcat(rect_string,") - (");
+      for (int d = 0; d < dom.get_dim(); d++)
+      {
+        char buffer[32];
+        if (d == 0)
+          sprintf(buffer,"%lld", dom.hi()[0]);
+        else
+          sprintf(buffer,",%lld", dom.hi()[d]);
+        strcat(rect_string, buffer);
+      }
+      strcat(rect_string,")");
+      switch (mode)
+      {
+        case READ_ONLY:
+          {
+            REPORT_LEGION_ERROR(ERROR_ACCESSOR_PRIVILEGE_CHECK, 
+                          "Privilege check failure getting a read-only "
+                          "reference to rect %s from field %d in task %s\n", 
+                          rect_string, fid, implicit_context->get_task_name())
+            break;
+          }
+        case READ_WRITE:
+          {
+            REPORT_LEGION_ERROR(ERROR_ACCESSOR_PRIVILEGE_CHECK, 
+                          "Privilege check failure geting a reference to rect "
+                          "%s from field %d in task %s\n", rect_string, fid,
+                          implicit_context->get_task_name())
+            break;
+          }
+        default:
+          assert(false);
+      }
     }
 
     /////////////////////////////////////////////////////////////

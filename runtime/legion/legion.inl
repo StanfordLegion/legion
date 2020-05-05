@@ -654,7 +654,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &bounds,
@@ -675,7 +675,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region), bounds(source_bounds)
+        : field(fid), bounds(source_bounds)
       {
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &bounds,
@@ -691,14 +691,14 @@ namespace Legion {
       inline FT read(const Point<N,T>& p) const 
         { 
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
           return accessor.read(p); 
         }
       inline const Realm::AccessorRefHelper<FT> 
           operator[](const Point<N,T>& p) const
         { 
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
           return accessor[p]; 
         }
       inline ArraySyntax::GenericSyntaxHelper<FieldAccessor<READ_ONLY,FT,N,T,
@@ -712,7 +712,6 @@ namespace Legion {
     public:
       mutable Realm::GenericAccessor<FT,N,T> accessor;
       FieldID field;
-      const PhysicalRegion *field_region;
       DomainT<N,T> bounds;
     public:
       typedef FT value_type;
@@ -805,7 +804,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &bounds,
@@ -826,7 +825,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &bounds,
@@ -842,20 +841,19 @@ namespace Legion {
       inline FT read(const Point<1,T>& p) const 
         { 
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
           return accessor.read(p); 
         }
       inline const Realm::AccessorRefHelper<FT> 
           operator[](const Point<1,T>& p) const
         { 
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
           return accessor[p]; 
         }
     public:
       mutable Realm::GenericAccessor<FT,1,T> accessor;
       FieldID field;
-      const PhysicalRegion *field_region;
       DomainT<1,T> bounds;
     public:
       typedef FT value_type;
@@ -959,7 +957,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &bounds,
@@ -980,7 +978,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &bounds,
@@ -996,20 +994,21 @@ namespace Legion {
       inline FT read(const Point<N,T>& p) const
         { 
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
           return accessor.read(p); 
         }
       inline void write(const Point<N,T>& p, FT val) const
         { 
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p),field,WRITE_DISCARD);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p),
+                                              field, WRITE_DISCARD);
           accessor.write(p, val); 
         }
       inline Realm::AccessorRefHelper<FT> 
           operator[](const Point<N,T>& p) const
         { 
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
           return accessor[p]; 
         }
       inline ArraySyntax::GenericSyntaxHelper<FieldAccessor<READ_WRITE,FT,N,T,
@@ -1024,7 +1023,6 @@ namespace Legion {
     public:
       mutable Realm::GenericAccessor<FT,N,T> accessor;
       FieldID field;
-      const PhysicalRegion *field_region;
       DomainT<N,T> bounds;
     public:
       typedef FT value_type;
@@ -1121,7 +1119,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &bounds,
@@ -1142,7 +1140,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &bounds,
@@ -1158,27 +1156,27 @@ namespace Legion {
       inline FT read(const Point<1,T>& p) const
         { 
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
           return accessor.read(p); 
         }
       inline void write(const Point<1,T>& p, FT val) const
         { 
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p),field,WRITE_DISCARD);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p),
+                                              field, WRITE_DISCARD);
           accessor.write(p, val); 
         }
       inline Realm::AccessorRefHelper<FT> 
           operator[](const Point<1,T>& p) const
         { 
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
           return accessor[p]; 
         }
       // No reduction since we can't handle atomicity correctly
     public:
       mutable Realm::GenericAccessor<FT,1,T> accessor;
       FieldID field;
-      const PhysicalRegion *field_region;
       DomainT<1,T> bounds;
     public:
       typedef FT value_type;
@@ -1282,7 +1280,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid,actual_field_size,&bounds,
@@ -1303,7 +1301,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid,actual_field_size,&bounds,
@@ -1319,20 +1317,21 @@ namespace Legion {
       inline FT read(const Point<N,T>& p) const
         { 
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
           return accessor.read(p); 
         }
       inline void write(const Point<N,T>& p, FT val) const
         { 
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p),field,WRITE_DISCARD);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p),
+                                              field, WRITE_DISCARD);
           accessor.write(p, val); 
         }
       inline Realm::AccessorRefHelper<FT> 
           operator[](const Point<N,T>& p) const
         { 
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
           return accessor[p]; 
         }
       inline ArraySyntax::GenericSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,N,
@@ -1346,7 +1345,6 @@ namespace Legion {
     public:
       mutable Realm::GenericAccessor<FT,N,T> accessor;
       FieldID field;
-      const PhysicalRegion *field_region;
       DomainT<N,T> bounds;
     public:
       typedef FT value_type;
@@ -1442,7 +1440,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid,actual_field_size,&bounds,
@@ -1463,7 +1461,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid,actual_field_size,&bounds,
@@ -1479,26 +1477,26 @@ namespace Legion {
       inline FT read(const Point<1,T>& p) const
         { 
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
           return accessor.read(p); 
         }
       inline void write(const Point<1,T>& p, FT val) const
         { 
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p),field,WRITE_DISCARD);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p),
+                                              field, WRITE_DISCARD);
           accessor.write(p, val); 
         }
       inline Realm::AccessorRefHelper<FT> 
           operator[](const Point<1,T>& p) const
         { 
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
           return accessor[p]; 
         }
     public:
       mutable Realm::GenericAccessor<FT,1,T> accessor;
       FieldID field;
-      const PhysicalRegion *field_region;
       DomainT<1,T> bounds;
     public:
       typedef FT value_type;
@@ -1598,7 +1596,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid,actual_field_size,&bounds,
@@ -1619,7 +1617,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid,actual_field_size,&bounds,
@@ -1635,14 +1633,15 @@ namespace Legion {
       inline void write(const Point<N,T>& p, FT val) const
         { 
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p),field,WRITE_DISCARD);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p),
+                                              field, WRITE_DISCARD);
           accessor.write(p, val); 
         }
       inline Realm::AccessorRefHelper<FT> 
           operator[](const Point<N,T>& p) const
         { 
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
           return accessor[p]; 
         }
       inline ArraySyntax::GenericSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,N,
@@ -1656,7 +1655,6 @@ namespace Legion {
     public:
       mutable Realm::GenericAccessor<FT,N,T> accessor;
       FieldID field;
-      const PhysicalRegion *field_region;
       DomainT<N,T> bounds;
     public:
       typedef FT value_type;
@@ -1748,7 +1746,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid,actual_field_size,&bounds,
@@ -1769,7 +1767,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid,actual_field_size,&bounds,
@@ -1785,20 +1783,20 @@ namespace Legion {
       inline void write(const Point<1,T>& p, FT val) const
         { 
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p),field,WRITE_DISCARD);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p),
+                                              field, WRITE_DISCARD);
           accessor.write(p, val); 
         }
       inline Realm::AccessorRefHelper<FT> 
           operator[](const Point<1,T>& p) const
         { 
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
           return accessor[p]; 
         }
     public:
       mutable Realm::GenericAccessor<FT,1,T> accessor;
       FieldID field;
-      const PhysicalRegion *field_region;
       DomainT<1,T> bounds;
     public:
       typedef FT value_type;
@@ -2136,7 +2134,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -2160,7 +2158,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -2185,7 +2183,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -2212,7 +2210,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -2234,9 +2232,9 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
 #endif
-          return accessor.read(p); 
+          return accessor.read(p);
         }
       __CUDA_HD__
       inline const FT* ptr(const Point<N,T>& p) const
@@ -2245,9 +2243,9 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
 #endif
-          return accessor.ptr(p); 
+          return accessor.ptr(p);
         }
       __CUDA_HD__
       inline const FT* ptr(const Rect<N,T>& r) const
@@ -2256,7 +2254,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region->fail_bounds_check(Domain(r), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_ONLY);
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
@@ -2282,7 +2280,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region->fail_bounds_check(Domain(r), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_ONLY);
 #endif
           for (int i = 0; i < N; i++)
             strides[i] = accessor.strides[i] / sizeof(FT);
@@ -2295,7 +2293,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
 #endif
           return accessor[p]; 
         }
@@ -2311,7 +2309,6 @@ namespace Legion {
     public:
       Realm::AffineAccessor<FT,N,T> accessor;
       FieldID field;
-      const PhysicalRegion *field_region;
       AffineBounds::Tester<N,T> bounds;
     public:
       typedef FT value_type;
@@ -2487,7 +2484,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region) 
+        : field(fid) 
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -2511,7 +2508,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region) 
+        : field(fid) 
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -2536,7 +2533,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region) 
+        : field(fid) 
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -2563,7 +2560,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region) 
+        : field(fid) 
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -2585,7 +2582,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
 #endif
           return accessor.read(p); 
         }
@@ -2596,7 +2593,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
 #endif
           return accessor.ptr(p); 
         }
@@ -2607,7 +2604,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region->fail_bounds_check(Domain(r), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_ONLY);
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
@@ -2633,7 +2630,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region->fail_bounds_check(Domain(r), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_ONLY);
 #endif
           strides[0] = accessor.strides[0] / sizeof(FT);
           return accessor.ptr(r.lo);
@@ -2645,14 +2642,13 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
 #endif
           return accessor[p]; 
         }
     public:
       Realm::AffineAccessor<FT,1,T> accessor;
       FieldID field;
-      const PhysicalRegion *field_region;
       AffineBounds::Tester<1,T> bounds;
     public:
       typedef FT value_type;
@@ -2848,7 +2844,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -2872,7 +2868,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -2897,7 +2893,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -2924,7 +2920,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -2946,7 +2942,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
 #endif
           return accessor.read(p); 
         }
@@ -2957,7 +2953,8 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p),field,WRITE_DISCARD);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p),
+                                              field, WRITE_DISCARD);
 #endif
           accessor.write(p, val); 
         }
@@ -2968,7 +2965,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
 #endif
           return accessor.ptr(p); 
         }
@@ -2979,7 +2976,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region->fail_bounds_check(Domain(r), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_WRITE);
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
@@ -3005,7 +3002,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region->fail_bounds_check(Domain(r), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_WRITE);
 #endif
           for (int i = 0; i < N; i++)
             strides[i] = accessor.strides[i] / sizeof(FT);
@@ -3018,7 +3015,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
 #endif
           return accessor[p]; 
         }
@@ -3039,14 +3036,13 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, REDUCE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, REDUCE);
 #endif
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
       Realm::AffineAccessor<FT,N,T> accessor;
       FieldID field;
-      const PhysicalRegion *field_region;
       AffineBounds::Tester<N,T> bounds;
     public:
       typedef FT value_type;
@@ -3233,7 +3229,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -3257,7 +3253,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -3282,7 +3278,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -3309,7 +3305,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -3331,7 +3327,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
 #endif
           return accessor.read(p); 
         }
@@ -3342,7 +3338,8 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p),field,WRITE_DISCARD);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p),
+                                              field, WRITE_DISCARD);
 #endif
           accessor.write(p, val); 
         }
@@ -3353,7 +3350,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
 #endif
           return accessor.ptr(p); 
         }
@@ -3364,7 +3361,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region->fail_bounds_check(Domain(r), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_WRITE);
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
@@ -3390,7 +3387,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region->fail_bounds_check(Domain(r), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_WRITE);
 #endif
           strides[0] = accessor.strides[0] / sizeof(FT);
           return accessor.ptr(r.lo);
@@ -3402,7 +3399,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
 #endif
           return accessor[p]; 
         }
@@ -3414,14 +3411,13 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, REDUCE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, REDUCE);
 #endif
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
       Realm::AffineAccessor<FT,1,T> accessor;
       FieldID field;
-      const PhysicalRegion *field_region;
       AffineBounds::Tester<1,T> bounds;
     public:
       typedef FT value_type;
@@ -3611,7 +3607,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -3635,7 +3631,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -3660,7 +3656,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -3687,7 +3683,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -3709,7 +3705,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
 #endif
           return accessor.read(p); 
         }
@@ -3720,7 +3716,8 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p),field,WRITE_DISCARD);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p),
+                                              field, WRITE_DISCARD);
 #endif
           accessor.write(p, val); 
         }
@@ -3731,7 +3728,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
 #endif
           return accessor.ptr(p); 
         }
@@ -3742,7 +3739,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region->fail_bounds_check(Domain(r), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_WRITE);
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
@@ -3768,7 +3765,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region->fail_bounds_check(Domain(r), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_WRITE);
 #endif
           for (int i = 0; i < N; i++)
             strides[i] = accessor.strides[i] / sizeof(FT);
@@ -3781,7 +3778,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
 #endif
           return accessor[p]; 
         }
@@ -3797,7 +3794,6 @@ namespace Legion {
     public:
       Realm::AffineAccessor<FT,N,T> accessor;
       FieldID field;
-      const PhysicalRegion *field_region;
       AffineBounds::Tester<N,T> bounds;
     public:
       typedef FT value_type;
@@ -3978,7 +3974,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -4002,7 +3998,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -4027,7 +4023,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -4054,7 +4050,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -4076,7 +4072,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
 #endif
           return accessor.read(p); 
         }
@@ -4087,7 +4083,8 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p),field,WRITE_DISCARD);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p),
+                                              field, WRITE_DISCARD);
 #endif
           accessor.write(p, val); 
         }
@@ -4098,7 +4095,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
 #endif
           return accessor.ptr(p); 
         }
@@ -4109,7 +4106,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region->fail_bounds_check(Domain(r), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_WRITE);
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
@@ -4135,7 +4132,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region->fail_bounds_check(Domain(r), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_WRITE);
 #endif
           strides[0] = accessor.strides[0] / sizeof(FT);
           return accessor.ptr(r.lo);
@@ -4147,14 +4144,13 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
 #endif
           return accessor[p]; 
         }
     public:
       Realm::AffineAccessor<FT,1,T> accessor;
       FieldID field;
-      const PhysicalRegion *field_region;
       AffineBounds::Tester<1,T> bounds;
     public:
       typedef FT value_type;
@@ -4339,7 +4335,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -4363,7 +4359,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -4388,7 +4384,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -4412,7 +4408,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -4434,7 +4430,8 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p),field,WRITE_DISCARD);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p),
+                                              field, WRITE_DISCARD);
 #endif
           accessor.write(p, val); 
         }
@@ -4445,7 +4442,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
 #endif
           return accessor.ptr(p); 
         }
@@ -4456,7 +4453,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region->fail_bounds_check(Domain(r), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_WRITE);
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
@@ -4482,7 +4479,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region->fail_bounds_check(Domain(r), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_WRITE);
 #endif
           for (int i = 0; i < N; i++)
             strides[i] = accessor.strides[i] / sizeof(FT);
@@ -4495,7 +4492,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
 #endif
           return accessor[p]; 
         }
@@ -4511,7 +4508,6 @@ namespace Legion {
     public:
       Realm::AffineAccessor<FT,N,T> accessor;
       FieldID field;
-      const PhysicalRegion *field_region;
       AffineBounds::Tester<N,T> bounds;
     public:
       typedef FT value_type;
@@ -4687,7 +4683,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -4711,7 +4707,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -4736,7 +4732,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -4763,7 +4759,7 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -4785,7 +4781,8 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p),field,WRITE_DISCARD);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p),
+                                              field, WRITE_DISCARD);
 #endif
           accessor.write(p, val); 
         }
@@ -4796,7 +4793,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
 #endif
           return accessor.ptr(p); 
         }
@@ -4807,7 +4804,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region->fail_bounds_check(Domain(r), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_WRITE);
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
@@ -4833,7 +4830,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region->fail_bounds_check(Domain(r), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_WRITE);
 #endif
           strides[0] = accessor.strides[0] / sizeof(FT);
           return accessor.ptr(r.lo);
@@ -4845,14 +4842,13 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
 #endif
           return accessor[p]; 
         }
     public:
       Realm::AffineAccessor<FT,1,T> accessor;
       FieldID field;
-      const PhysicalRegion *field_region;
       AffineBounds::Tester<1,T> bounds;
     public:
       typedef FT value_type;
@@ -5024,7 +5020,7 @@ namespace Legion {
       ReductionAccessor(const PhysicalRegion &region, FieldID fid,
                         ReductionOpID redop, bool silence_warnings = false,
                         const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -5045,7 +5041,7 @@ namespace Legion {
                         const Rect<N,T> source_bounds,
                         bool silence_warnings = false,
                         const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -5067,7 +5063,7 @@ namespace Legion {
                         const AffineTransform<M,N,T> transform,
                         bool silence_warnings = false,
                         const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -5091,7 +5087,7 @@ namespace Legion {
                         const Rect<N,T> source_bounds,
                         bool silence_warnings = false,
                         const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -5115,7 +5111,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, REDUCE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, REDUCE);
 #endif
           REDOP::template fold<EXCLUSIVE>(accessor[p], val);
         }
@@ -5126,7 +5122,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, REDUCE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, REDUCE);
 #endif
           return accessor.ptr(p); 
         }
@@ -5137,7 +5133,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region->fail_bounds_check(Domain(r), field, REDUCE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, REDUCE);
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
@@ -5164,7 +5160,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region->fail_bounds_check(Domain(r), field, REDUCE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, REDUCE);
 #endif
           for (int i = 0; i < N; i++)
             strides[i] = accessor.strides[i] / sizeof(typename REDOP::RHS);
@@ -5194,7 +5190,6 @@ namespace Legion {
     public:
       Realm::AffineAccessor<typename REDOP::RHS,N,T> accessor;
       FieldID field;
-      const PhysicalRegion *field_region;
       AffineBounds::Tester<N,T> bounds;
     public:
       typedef typename REDOP::RHS value_type;
@@ -5356,7 +5351,7 @@ namespace Legion {
       ReductionAccessor(const PhysicalRegion &region, FieldID fid,
                         ReductionOpID redop, bool silence_warnings = false,
                         const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -5377,7 +5372,7 @@ namespace Legion {
                         const Rect<1,T> source_bounds,
                         bool silence_warnings = false,
                         const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -5399,7 +5394,7 @@ namespace Legion {
                         const AffineTransform<M,1,T> transform,
                         bool silence_warnings = false,
                         const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -5422,7 +5417,7 @@ namespace Legion {
                         const Rect<1,T> source_bounds,
                         bool silence_warnings = false,
                         const char *warning_string = NULL)
-        : field(fid), field_region(&region)
+        : field(fid)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -5446,7 +5441,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, REDUCE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, REDUCE);
 #endif
           REDOP::template fold<EXCLUSIVE>(accessor[p], val);
         }
@@ -5457,7 +5452,7 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            field_region->fail_bounds_check(DomainPoint(p), field, REDUCE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, REDUCE);
 #endif
           return accessor.ptr(p); 
         }
@@ -5468,7 +5463,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region->fail_bounds_check(Domain(r), field, REDUCE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, REDUCE);
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
@@ -5495,7 +5490,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            field_region->fail_bounds_check(Domain(r), field, REDUCE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, REDUCE);
 #endif
           strides[0] = accessor.strides[0] / sizeof(typename REDOP::RHS);
           return accessor.ptr(r.lo);
@@ -5513,12 +5508,1869 @@ namespace Legion {
     public:
       Realm::AffineAccessor<typename REDOP::RHS,1,T> accessor;
       FieldID field;
-      const PhysicalRegion *field_region;
       AffineBounds::Tester<1,T> bounds;
     public:
       typedef typename REDOP::RHS value_type;
       typedef typename REDOP::RHS& reference;
       typedef const typename REDOP::RHS& const_reference;
+      static const int dim = 1;
+    };
+
+    ////////////////////////////////////////////////////////////
+    // Multi Region Accessor with Generic Accessors
+    ////////////////////////////////////////////////////////////
+
+    // Multi-Accessor, generic, N, bounds checks and/or privilege checks
+    template<typename FT, int N, typename T, bool CB, bool CP, int MR>
+    class MultiRegionAccessor<FT,N,T,Realm::GenericAccessor<FT,N,T>,CB,CP,MR> {
+    public:
+      MultiRegionAccessor(void) { }
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          FieldID fid, size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+        : field(fid), total_regions(regions.size())
+      {
+        if (regions.empty())
+          return;
+        assert(regions.size() <= MR);
+        assert(regions.size() == privileges.size());
+        const PhysicalRegion &region = regions.front();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(privileges.front(),fid,actual_field_size,
+              &region_bounds[0], Internal::NT_TemplateHelper::encode_tag<N,T>(),
+              warning_string, silence_warnings, true/*generic accessor*/, 
+              check_field_size);
+        region_privileges[0] = privileges.front(); 
+        Rect<N,T> bounds = region_bounds[0].bounds;
+        for (unsigned idx = 1; idx < regions.size(); idx++)
+        {
+          const Realm::RegionInstance inst = regions[idx].get_instance_info(
+                privileges[idx], fid, actual_field_size, &region_bounds[idx],
+                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+                silence_warnings, true/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          region_privileges[idx] = privileges[idx];
+          bounds = bounds.union_bbox(region_bounds[idx].bounds);
+        }
+        if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance,fid,bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
+        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, bounds);
+      }
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          const Rect<N,T> source_bounds, FieldID fid,
+                          size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+        : field(fid), total_regions(regions.size())
+      {
+        if (regions.empty())
+          return;
+        assert(regions.size() <= MR);
+        assert(regions.size() == privileges.size());
+        const PhysicalRegion &region = regions.front();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(privileges.front(),fid,actual_field_size,
+              &region_bounds[0], Internal::NT_TemplateHelper::encode_tag<N,T>(),
+              warning_string, silence_warnings, true/*generic accessor*/, 
+              check_field_size);
+        region_privileges[0] = privileges[0];
+        region_bounds[0].bounds = 
+          source_bounds.intersection(region_bounds[0].bounds); 
+        Rect<N,T> bounds = region_bounds[0].bounds;
+        for (unsigned idx = 1; idx < regions.size(); idx++)
+        {
+          const Realm::RegionInstance inst = regions[idx].get_instance_info(
+                privileges[idx], fid, actual_field_size, &region_bounds[idx],
+                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+                silence_warnings, true/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          region_privileges[idx] = privileges[idx];
+          region_bounds[idx].bounds = 
+            source_bounds.intersection(region_bounds[idx].bounds);
+          bounds = bounds.union_bbox(region_bounds[idx].bounds);
+        }
+        if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance,fid,bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
+        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, bounds);
+      }
+    public:
+      inline FT read(const Point<N,T>& p) const
+        {
+          bool found = false;
+          for (unsigned idx = 0; idx < total_regions; idx++)
+          {
+            if (!region_bounds[idx].contains(p))
+              continue;
+            if (CP && ((region_privileges[idx] & READ_ONLY) == 0))
+              PhysicalRegion::fail_privilege_check(DomainPoint(p), field,
+                                                   region_privileges[idx]);
+            found = true;
+            break;
+          }
+          if (!found)
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                region_privileges[0], true/*multi*/);
+          return accessor.read(p);
+        }
+      inline void write(const Point<N,T>& p, FT val) const
+        {
+          bool found = false;
+          for (unsigned idx = 0; idx < total_regions; idx++)
+          {
+            if (!region_bounds[idx].contains(p))
+              continue;
+            if (CP && ((region_privileges[idx] & WRITE_PRIV) == 0))
+              PhysicalRegion::fail_privilege_check(DomainPoint(p), field,
+                                                   region_privileges[idx]);
+            found = true;
+            break;
+          }
+          if (!found)
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                region_privileges[0], true/*multi*/);
+          return accessor.write(p, val);
+        }
+      inline Realm::AccessorRefHelper<FT> 
+          operator[](const Point<N,T>& p) const
+        { 
+          bool found = false;
+          for (unsigned idx = 0; idx < total_regions; idx++)
+          {
+            if (!region_bounds[idx].contains(p))
+              continue;
+            if (CP && ((region_privileges[idx] & READ_ONLY) == 0))
+              PhysicalRegion::fail_privilege_check(DomainPoint(p), field,
+                                                 region_privileges[idx]);
+            found = true;
+            break;
+          }
+          if (!found)
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                region_privileges[0], true/*multi*/);
+          return accessor[p]; 
+        }
+      inline ArraySyntax::GenericSyntaxHelper<MultiRegionAccessor<FT,N,T,
+             Realm::GenericAccessor<FT,N,T>,CB,CP>,FT,N,T,2,READ_WRITE>
+          operator[](T index) const
+      {
+        return ArraySyntax::GenericSyntaxHelper<MultiRegionAccessor<FT,N,T,
+              Realm::GenericAccessor<FT,N,T>,CB,CP>,FT,N,T,2,READ_WRITE>(
+              *this, Point<1,T>(index));
+      }
+    public:
+      mutable Realm::GenericAccessor<FT,N,T> accessor;
+      FieldID field;
+      PrivilegeMode region_privileges[MR]; 
+      DomainT<N,T> region_bounds[MR];
+      unsigned total_regions;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = N;
+    };
+
+    // Multi-Accessor, generic, 1, bounds checks and/or privilege checks
+    template<typename FT, typename T, bool CB, bool CP, int MR>
+    class MultiRegionAccessor<FT,1,T,Realm::GenericAccessor<FT,1,T>,CB,CP,MR> {
+    public:
+      MultiRegionAccessor(void) { }
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          FieldID fid, size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+        : field(fid), total_regions(regions.size())
+      {
+        if (regions.empty())
+          return;
+        assert(regions.size() <= MR);
+        assert(regions.size() == privileges.size());
+        const PhysicalRegion &region = regions.front();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(privileges.front(),fid,actual_field_size,
+              &region_bounds[0], Internal::NT_TemplateHelper::encode_tag<1,T>(),
+              warning_string, silence_warnings, true/*generic accessor*/, 
+              check_field_size);
+        region_privileges[0] = privileges.front();
+        Rect<1,T> bounds = region_bounds[0].bounds; 
+        for (unsigned idx = 1; idx < regions.size(); idx++)
+        {
+          const Realm::RegionInstance inst = regions[idx].get_instance_info(
+                privileges[idx], fid, actual_field_size, &region_bounds[idx],
+                Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+                silence_warnings, true/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          region_privileges[idx] = privileges[idx];
+          bounds = bounds.union_bbox(region_bounds[idx].bounds);
+        }
+        if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance,fid,bounds)) 
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
+        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, bounds);
+      }
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          const Rect<1,T> source_bounds, FieldID fid,
+                          size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+        : field(fid), total_regions(regions.size())
+      {
+        if (regions.empty())
+          return;
+        assert(regions.size() <= MR);
+        assert(regions.size() == privileges.size());
+        const PhysicalRegion &region = regions.front();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(privileges.front(),fid,actual_field_size,
+              &region_bounds[0], Internal::NT_TemplateHelper::encode_tag<1,T>(),
+              warning_string, silence_warnings, true/*generic accessor*/, 
+              check_field_size);
+        region_privileges[0] = privileges[0];
+        region_bounds[0].bounds = 
+          source_bounds.intersection(region_bounds[0].bounds);
+        Rect<1,T> bounds = region_bounds[0].bounds;
+        for (unsigned idx = 1; idx < regions.size(); idx++)
+        {
+          const Realm::RegionInstance inst = regions[idx].get_instance_info(
+                privileges[idx], fid, actual_field_size, &region_bounds[idx],
+                Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+                silence_warnings, true/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          region_privileges[idx] = privileges[idx];
+          region_bounds[idx].bounds = 
+            source_bounds.intersection(region_bounds[idx].bounds);
+          bounds = bounds.union_bbox(region_bounds[idx].bounds);
+        }
+        if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance,fid,bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
+        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, bounds);
+      }
+    public:
+      inline FT read(const Point<1,T>& p) const
+        {
+          bool found = false;
+          for (unsigned idx = 0; idx < total_regions; idx++)
+          {
+            if (!region_bounds[idx].contains(p))
+              continue;
+            if (CP && ((region_privileges[idx] & READ_ONLY) == 0))
+              PhysicalRegion::fail_privilege_check(DomainPoint(p), field,
+                                                   region_privileges[idx]);
+            found = true;
+            break;
+          }
+          if (!found)
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                region_privileges[0], true/*multi*/);
+          return accessor.read(p);
+        }
+      inline void write(const Point<1,T>& p, FT val) const
+        {
+          bool found = false;
+          for (unsigned idx = 0; idx < total_regions; idx++)
+          {
+            if (!region_bounds[idx].contains(p))
+              continue;
+            if (CP && ((region_privileges[idx] & WRITE_PRIV) == 0))
+              PhysicalRegion::fail_privilege_check(DomainPoint(p), field,
+                                                 region_privileges[idx]);
+            found = true;
+            break;
+          }
+          if (!found)
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                region_privileges[0], true/*multi*/);
+          return accessor.write(p, val);
+        }
+      inline Realm::AccessorRefHelper<FT> 
+          operator[](const Point<1,T>& p) const
+        { 
+          bool found = false;
+          for (unsigned idx = 0; idx < total_regions; idx++)
+          {
+            if (!region_bounds[idx].contains(p))
+              continue;
+            if (CP && ((region_privileges[idx] & READ_ONLY) == 0))
+              PhysicalRegion::fail_privilege_check(DomainPoint(p), field,
+                                                 region_privileges[idx]);
+            found = true;
+            break;
+          }
+          if (!found)
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                region_privileges[0], true/*multi*/);
+          return accessor[p]; 
+        }
+    public:
+      mutable Realm::GenericAccessor<FT,1,T> accessor;
+      FieldID field;
+      PrivilegeMode region_privileges[MR]; 
+      DomainT<1,T> region_bounds[MR];
+      unsigned total_regions;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = 1;
+    };
+
+    // Multi-Accessor, generic, N, no bounds, no privileges
+    template<typename FT, int N, typename T, int MR>
+    class MultiRegionAccessor<FT,N,T,Realm::GenericAccessor<FT,N,T>,
+                              false,false,MR> {
+    public:
+      MultiRegionAccessor(void) { }
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          FieldID fid, size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+      {
+        if (regions.empty())
+          return;
+        assert(regions.size() == privileges.size());
+        DomainT<N,T> is;
+        const PhysicalRegion &region = regions.front();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(privileges.front(),fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, true/*generic accessor*/, check_field_size);
+        Rect<N,T> bounds = is.bounds; 
+        for (unsigned idx = 1; idx < regions.size(); idx++)
+        {
+          const Realm::RegionInstance inst = regions[idx].get_instance_info(
+                privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+                silence_warnings, true/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          bounds = bounds.union_bbox(is.bounds);
+        }
+        if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance,fid,bounds)) 
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
+        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, bounds);
+      }
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          const Rect<N,T> source_bounds, FieldID fid,
+                          size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+      {
+        if (regions.empty())
+          return;
+        assert(regions.size() == privileges.size());
+        DomainT<N,T> is;
+        const PhysicalRegion &region = regions.front();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(privileges.front(),fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, true/*generic accessor*/, check_field_size);
+        Rect<N,T> bounds = source_bounds.intersection(is.bounds); 
+        for (unsigned idx = 1; idx < regions.size(); idx++)
+        {
+          const Realm::RegionInstance inst = regions[idx].get_instance_info(
+                privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+                silence_warnings, true/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          bounds = bounds.union_bbox(source_bounds.intersection(is.bounds));
+        }
+        if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance,fid,bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
+        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, bounds);
+      }
+    public:
+      inline FT read(const Point<N,T>& p) const
+        {
+          return accessor.read(p);
+        }
+      inline void write(const Point<N,T>& p, FT val) const
+        {
+          return accessor.write(p, val);
+        }
+      inline Realm::AccessorRefHelper<FT> 
+          operator[](const Point<N,T>& p) const
+        { 
+          return accessor[p]; 
+        }
+      inline ArraySyntax::GenericSyntaxHelper<MultiRegionAccessor<FT,N,T,
+             Realm::GenericAccessor<FT,N,T>,false,false>,FT,N,T,2,READ_WRITE>
+          operator[](T index) const
+      {
+        return ArraySyntax::GenericSyntaxHelper<MultiRegionAccessor<FT,N,T,
+              Realm::GenericAccessor<FT,N,T>,false,false>,FT,N,T,2,READ_WRITE>(
+              *this, Point<1,T>(index));
+      }
+    public:
+      mutable Realm::GenericAccessor<FT,N,T> accessor;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = N;
+    };
+
+    // Multi-Accessor, generic, 1, no bounds, no privileges
+    template<typename FT, typename T, int MR>
+    class MultiRegionAccessor<FT,1,T,Realm::GenericAccessor<FT,1,T>,
+                              false,false,MR> {
+    public:
+      MultiRegionAccessor(void) { }
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          FieldID fid, size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+      {
+        if (regions.empty())
+          return;
+        assert(regions.size() == privileges.size());
+        DomainT<1,T> is;
+        const PhysicalRegion &region = regions.front();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(privileges.front(),fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, true/*generic accessor*/, check_field_size);
+        Rect<1,T> bounds = is.bounds; 
+        for (unsigned idx = 1; idx < regions.size(); idx++)
+        {
+          const Realm::RegionInstance inst = regions[idx].get_instance_info(
+                privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+                silence_warnings, true/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          bounds = bounds.union_bbox(is.bounds);
+        }
+        if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance,fid,bounds)) 
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
+        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, bounds);
+      }
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          const Rect<1,T> source_bounds, FieldID fid,
+                          size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+      {
+        if (regions.empty())
+          return;
+        assert(regions.size() == privileges.size());
+        DomainT<1,T> is;
+        const PhysicalRegion &region = regions.front();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(privileges.front(),fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, true/*generic accessor*/, check_field_size);
+        Rect<1,T> bounds = source_bounds.intersection(is.bounds); 
+        for (unsigned idx = 1; idx < regions.size(); idx++)
+        {
+          const Realm::RegionInstance inst = regions[idx].get_instance_info(
+                privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+                silence_warnings, true/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          bounds = bounds.union_bbox(source_bounds.intersection(is.bounds));
+        }
+        if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance,fid,bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
+        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, bounds);
+      }
+    public:
+      inline FT read(const Point<1,T>& p) const
+        {
+          return accessor.read(p);
+        }
+      inline void write(const Point<1,T>& p, FT val) const
+        {
+          return accessor.write(p, val);
+        }
+      inline Realm::AccessorRefHelper<FT> 
+          operator[](const Point<1,T>& p) const
+        { 
+          return accessor[p]; 
+        }
+    public:
+      mutable Realm::GenericAccessor<FT,1,T> accessor;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = 1;
+    }; 
+
+    ////////////////////////////////////////////////////////////
+    // Multi Region Accessor with Affine Accessors
+    ////////////////////////////////////////////////////////////
+
+    // Multi-Accessor, affine, N, bounds checks and/or privilege checks
+    template<typename FT, int N, typename T, bool CB, bool CP, int MR>
+    class MultiRegionAccessor<FT,N,T,Realm::AffineAccessor<FT,N,T>,CB,CP,MR> {
+    public:
+      MultiRegionAccessor(void) { }
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          FieldID fid, size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+        : field(fid), total_regions(regions.size())
+      {
+        if (regions.empty())
+          return;
+        assert(regions.size() == privileges.size());
+        DomainT<N,T> is;
+        const PhysicalRegion &region = regions.front();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(privileges.front(),fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        region_privileges[0] = privileges.front();
+        region_bounds[0] = AffineBounds::Tester<N,T>(is); 
+        Rect<N,T> bounds = is.bounds;
+        for (unsigned idx = 1; idx < regions.size(); idx++)
+        {
+          const Realm::RegionInstance inst = regions[idx].get_instance_info(
+                privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          region_privileges[idx] = privileges[idx];
+          region_bounds[idx] = AffineBounds::Tester<N,T>(is);
+          bounds = bounds.union_bbox(is.bounds);
+        }
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,fid,bounds)) 
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, bounds);
+      }
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          const Rect<N,T> source_bounds, FieldID fid,
+                          size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+        : field(fid), total_regions(regions.size())
+      {
+        if (regions.empty())
+          return;
+        assert(regions.size() == privileges.size());
+        DomainT<N,T> is;
+        const PhysicalRegion &region = regions.front();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(privileges.front(),fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        region_privileges[0] = privileges.front();
+        region_bounds[0] = AffineBounds::Tester<N,T>(is, source_bounds);
+        Rect<N,T> bounds = source_bounds.intersection(is.bounds); 
+        for (unsigned idx = 1; idx < regions.size(); idx++)
+        {
+          const Realm::RegionInstance inst = regions[idx].get_instance_info(
+                privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          region_privileges[idx] = privileges[idx];
+          region_bounds[idx] = AffineBounds::Tester<N,T>(is, source_bounds);
+          bounds = bounds.union_bbox(source_bounds.inersection(is.bounds));
+        }
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,fid,bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, bounds);
+      }
+      template<int M>
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          const AffineTransform<M,N,T> transform,
+                          FieldID fid, size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+        : field(fid), total_regions(regions.size())
+      {
+        if (regions.empty())
+          return;
+        assert(regions.size() == privileges.size());
+        DomainT<N,T> is;
+        const PhysicalRegion &region = regions.front();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(privileges.front(),fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        region_privileges[0] = privileges.front();
+        region_bounds[0] = AffineBounds::Tester<N,T>(is, transform);
+        Rect<N,T> bounds = is.bounds;
+        for (unsigned idx = 1; idx < regions.size(); idx++)
+        {
+          const Realm::RegionInstance inst = regions[idx].get_instance_info(
+                privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          region_privileges[idx] = privileges[idx];
+          region_bounds[idx] = AffineBounds::Tester<N,T>(is, transform);
+          bounds = bounds.union_bbox(is.bounds);
+        }
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,
+              transform.transform, transform.offset, fid, bounds)) 
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
+            transform.offset, fid, bounds);
+      }
+      template<int M>
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          const AffineTransform<M,N,T> transform,
+                          const Rect<N,T> source_bounds, FieldID fid, 
+                          // The actual field size in case it is different from the
+                          // one being used in FT and we still want to check it
+                          size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+        : field(fid), total_regions(regions.size())
+      {
+        if (regions.empty())
+          return;
+        assert(regions.size() == privileges.size());
+        DomainT<N,T> is;
+        const PhysicalRegion &region = regions.front();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(privileges.front(),fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        region_privileges[0] = privileges.front();
+        region_bounds[0] =AffineBounds::Tester<N,T>(is,source_bounds,transform);
+        Rect<N,T> bounds = source_bounds.intersection(is.bounds); 
+        for (unsigned idx = 1; idx < regions.size(); idx++)
+        {
+          const Realm::RegionInstance inst = regions[idx].get_instance_info(
+                privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          region_privileges[idx] = privileges[idx];
+          region_bounds[idx] = 
+            AffineBounds::Tester<N,T>(is, transform, source_bounds);
+          bounds = bounds.union_bbox(source_bounds.inersection(is.bounds));
+        }
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,
+              transform.transform, transform.offset, fid, bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
+            transform.offset, fid, bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<N,T>& p) const
+        {
+          bool found = false;
+          for (unsigned idx = 0; idx < total_regions; idx++)
+          {
+            if (!region_bounds[idx].contains(p))
+              continue;
+            if (CP && ((region_privileges[idx] & READ_ONLY) == 0))
+            {
+#ifdef __CUDA_ARCH__
+              // bounds checks are not precise for CUDA so keep going to 
+              // see if there is another region that has it with the privileges
+              continue;
+#else
+              PhysicalRegion::fail_privilege_check(DomainPoint(p), field,
+                                                   region_privileges[idx]);
+#endif
+            }
+            found = true;
+            break;
+          }
+#ifdef __CUDA_ARCH__
+          assert(found);
+#else
+          if (!found)
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                region_privileges[0], true/*multi*/);
+#endif
+          return accessor.read(p);
+        }
+      __CUDA_HD__
+      inline void write(const Point<N,T>& p, FT val) const
+        {
+          bool found = false;
+          for (unsigned idx = 0; idx < total_regions; idx++)
+          {
+            if (!region_bounds[idx].contains(p))
+              continue;
+            if (CP && ((region_privileges[idx] & WRITE_PRIV) == 0))
+            {
+#ifdef __CUDA_ARCH__
+              // bounds checks are not precise for CUDA so keep going to 
+              // see if there is another region that has it with the privileges
+              continue;
+#else
+              PhysicalRegion::fail_privilege_check(DomainPoint(p), field,
+                                                   region_privileges[idx]);
+#endif
+            }
+            found = true;
+            break;
+          }
+#ifdef __CUDA_ARCH__
+          assert(found);
+#else
+          if (!found)
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                region_privileges[0], true/*multi*/);
+#endif
+          return accessor.write(p, val);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Point<N,T>& p) const
+        { 
+          bool found = false;
+          for (unsigned idx = 0; idx < total_regions; idx++)
+          {
+            if (!region_bounds[idx].contains(p))
+              continue;
+            if (CP && 
+                ((region_privileges[idx] & (READ_PRIV | WRITE_PRIV)) == 0))
+            {
+#ifdef __CUDA_ARCH__
+              // bounds checks are not precise for CUDA so keep going to 
+              // see if there is another region that has it with the privileges
+              continue;
+#else
+              PhysicalRegion::fail_privilege_check(DomainPoint(p), field,
+                                                   region_privileges[idx]);
+#endif
+            }
+            found = true;
+            break;
+          }
+#ifdef __CUDA_ARCH__
+          assert(found);
+#else
+          if (!found)
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                region_privileges[0], true/*multi*/);
+#endif
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<N,T>& r) const
+        {
+          bool found = false;
+          for (unsigned idx = 0; idx < total_regions; idx++)
+          {
+            if (!region_bounds[idx].contains_all(r))
+              continue;
+            if (CP && 
+                ((region_privileges[idx] & (READ_PRIV | WRITE_PRIV)) == 0))
+            {
+#ifdef __CUDA_ARCH__
+              // bounds checks are not precise for CUDA so keep going to 
+              // see if there is another region that has it with the privileges
+              continue;
+#else
+              PhysicalRegion::fail_privilege_check(Domain(r), field,
+                                                   region_privileges[idx]);
+#endif
+            }
+            found = true;
+            break;
+          }
+#ifdef __CUDA_ARCH__
+          assert(found);
+#else
+          if (!found)
+            PhysicalRegion::fail_bounds_check(Domain(r), field,
+                            region_privileges[0], true/*multi*/);
+#endif
+          if (!accessor.is_dense_arbitrary(r))
+          {
+#ifdef __CUDA_ARCH__
+            printf(
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+            assert(false);
+#else
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
+          }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<N,T>& r, size_t strides[N]) const
+        {
+          bool found = false;
+          for (unsigned idx = 0; idx < total_regions; idx++)
+          {
+            if (!region_bounds[idx].contains_all(r))
+              continue;
+            if (CP && 
+                ((region_privileges[idx] & (READ_PRIV | WRITE_PRIV)) == 0))
+            {
+#ifdef __CUDA_ARCH__
+              // bounds checks are not precise for CUDA so keep going to 
+              // see if there is another region that has it with the privileges
+              continue;
+#else
+              PhysicalRegion::fail_privilege_check(Domain(r), field,
+                                                   region_privileges[idx]);
+#endif
+            }
+            found = true;
+            break;
+          }
+#ifdef __CUDA_ARCH__
+          assert(found);
+#else
+          if (!found)
+            PhysicalRegion::fail_bounds_check(Domain(r), field,
+                          region_privileges[0], true/*multi*/);
+#endif
+          for (int i = 0; i < N; i++)
+            strides[i] = accessor.strides[i] / sizeof(FT);
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Point<N,T>& p) const
+        { 
+          bool found = false;
+          for (unsigned idx = 0; idx < total_regions; idx++)
+          {
+            if (!region_bounds[idx].contains(p))
+              continue;
+            if (CP && ((region_privileges[idx] & WRITE_PRIV) == 0))
+            {
+#ifdef __CUDA_ARCH__
+              // bounds checks are not precise for CUDA so keep going to 
+              // see if there is another region that has it with the privileges
+              continue;
+#else
+              PhysicalRegion::fail_privilege_check(DomainPoint(p), field,
+                                                   region_privileges[idx]);
+#endif
+            }
+            found = true;
+            break;
+          }
+#ifdef __CUDA_ARCH__
+          assert(found);
+#else
+          if (!found)
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                region_privileges[0], true/*multi*/);
+#endif
+          return accessor[p]; 
+        }
+      __CUDA_HD__
+      inline ArraySyntax::GenericSyntaxHelper<MultiRegionAccessor<FT,N,T,
+             Realm::AffineAccessor<FT,N,T>,CB,CP>,FT,N,T,2,READ_WRITE>
+          operator[](T index) const
+      {
+        return ArraySyntax::GenericSyntaxHelper<MultiRegionAccessor<FT,N,T,
+              Realm::AffineAccessor<FT,N,T>,CB,CP>,FT,N,T,2,READ_WRITE>(
+              *this, Point<1,T>(index));
+      }
+      template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
+      inline void reduce(const Point<N,T>& p, 
+                         typename REDOP::RHS val) const
+        { 
+          bool found = false;
+          for (unsigned idx = 0; idx < total_regions; idx++)
+          {
+            if (!region_bounds[idx].contains(p))
+              continue;
+            if (CP && ((region_privileges[idx] & WRITE_PRIV) == 0))
+            {
+#ifdef __CUDA_ARCH__
+              // bounds checks are not precise for CUDA so keep going to 
+              // see if there is another region that has it with the privileges
+              continue;
+#else
+              PhysicalRegion::fail_privilege_check(DomainPoint(p), field,
+                                                   region_privileges[idx]);
+#endif
+            }
+            found = true;
+            break;
+          }
+#ifdef __CUDA_ARCH__
+          assert(found);
+#else
+          if (!found)
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                region_privileges[0], true/*multi*/);
+#endif
+          REDOP::template apply<EXCLUSIVE>(accessor[p], val);
+        }
+    public:
+      mutable Realm::AffineAccessor<FT,N,T> accessor;
+      FieldID field;
+      PrivilegeMode region_privileges[MR];
+      AffineBounds::Tester<N,T> region_bounds[MR];
+      unsigned total_regions;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = N;
+    };
+
+    // Multi-Accessor, affine, 1, bounds checks and/or privilege checks
+    template<typename FT, typename T, bool CB, bool CP, int MR>
+    class MultiRegionAccessor<FT,1,T,Realm::AffineAccessor<FT,1,T>,CB,CP,MR> {
+    public:
+      MultiRegionAccessor(void) { }
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          FieldID fid, size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+        : field(fid), total_regions(regions.size())
+      {
+        if (regions.empty())
+          return;
+        assert(regions.size() == privileges.size());
+        DomainT<1,T> is;
+        const PhysicalRegion &region = regions.front();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(privileges.front(),fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        region_privileges[0] = privileges.front();
+        region_bounds[0] = AffineBounds::Tester<1,T>(is); 
+        Rect<1,T> bounds = is.bounds;
+        for (unsigned idx = 1; idx < regions.size(); idx++)
+        {
+          const Realm::RegionInstance inst = regions[idx].get_instance_info(
+                privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          region_privileges[idx] = privileges[idx];
+          region_bounds[idx] = AffineBounds::Tester<1,T>(is);
+          bounds = bounds.union_bbox(is.bounds);
+        }
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,fid,bounds)) 
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, bounds);
+      }
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          const Rect<1,T> source_bounds, FieldID fid,
+                          size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+        : field(fid), total_regions(regions.size())
+      {
+        if (regions.empty())
+          return;
+        assert(regions.size() == privileges.size());
+        DomainT<1,T> is;
+        const PhysicalRegion &region = regions.front();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(privileges.front(),fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        region_privileges[0] = privileges.front();
+        region_bounds[0] = AffineBounds::Tester<1,T>(is, source_bounds);
+        Rect<1,T> bounds = source_bounds.intersection(is.bounds); 
+        for (unsigned idx = 1; idx < regions.size(); idx++)
+        {
+          const Realm::RegionInstance inst = regions[idx].get_instance_info(
+                privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          region_privileges[idx] = privileges[idx];
+          region_bounds[idx] = AffineBounds::Tester<1,T>(is, source_bounds);
+          bounds = bounds.union_bbox(source_bounds.inersection(is.bounds));
+        }
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,fid,bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, bounds);
+      }
+      template<int M>
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          const AffineTransform<M,1,T> transform,
+                          FieldID fid, size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+        : field(fid), total_regions(regions.size())
+      {
+        if (regions.empty())
+          return;
+        assert(regions.size() == privileges.size());
+        DomainT<1,T> is;
+        const PhysicalRegion &region = regions.front();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(privileges.front(),fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        region_privileges[0] = privileges.front();
+        region_bounds[0] = AffineBounds::Tester<1,T>(is, transform);
+        Rect<1,T> bounds = is.bounds;
+        for (unsigned idx = 1; idx < regions.size(); idx++)
+        {
+          const Realm::RegionInstance inst = regions[idx].get_instance_info(
+                privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          region_privileges[idx] = privileges[idx];
+          region_bounds[idx] = AffineBounds::Tester<1,T>(is, transform);
+          bounds = bounds.union_bbox(is.bounds);
+        }
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,
+              transform.transform, transform.offset, fid, bounds)) 
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
+            transform.offset, fid, bounds);
+      }
+      template<int M>
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          const AffineTransform<M,1,T> transform,
+                          const Rect<1,T> source_bounds, FieldID fid, 
+                          // The actual field size in case it is different from the
+                          // one being used in FT and we still want to check it
+                          size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+        : field(fid), total_regions(regions.size())
+      {
+        if (regions.empty())
+          return;
+        assert(regions.size() == privileges.size());
+        DomainT<1,T> is;
+        const PhysicalRegion &region = regions.front();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(privileges.front(),fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        region_privileges[0] = privileges.front();
+        region_bounds[0] =AffineBounds::Tester<1,T>(is,source_bounds,transform);
+        Rect<1,T> bounds = source_bounds.intersection(is.bounds); 
+        for (unsigned idx = 1; idx < regions.size(); idx++)
+        {
+          const Realm::RegionInstance inst = regions[idx].get_instance_info(
+                privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          region_privileges[idx] = privileges[idx];
+          region_bounds[idx] = 
+            AffineBounds::Tester<1,T>(is, transform, source_bounds);
+          bounds = bounds.union_bbox(source_bounds.inersection(is.bounds));
+        }
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,
+              transform.transform, transform.offset, fid, bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
+            transform.offset, fid, bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<1,T>& p) const
+        {
+          bool found = false;
+          for (unsigned idx = 0; idx < total_regions; idx++)
+          {
+            if (!region_bounds[idx].contains(p))
+              continue;
+            if (CP && ((region_privileges[idx] & READ_ONLY) == 0))
+            {
+#ifdef __CUDA_ARCH__
+              // bounds checks are not precise for CUDA so keep going to 
+              // see if there is another region that has it with the privileges
+              continue;
+#else
+              PhysicalRegion::fail_privilege_check(DomainPoint(p), field,
+                                                   region_privileges[idx]);
+#endif
+            }
+            found = true;
+            break;
+          }
+#ifdef __CUDA_ARCH__
+          assert(found);
+#else
+          if (!found)
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                region_privileges[0], true/*multi*/);
+#endif
+          return accessor.read(p);
+        }
+      __CUDA_HD__
+      inline void write(const Point<1,T>& p, FT val) const
+        {
+          bool found = false;
+          for (unsigned idx = 0; idx < total_regions; idx++)
+          {
+            if (!region_bounds[idx].contains(p))
+              continue;
+            if (CP && ((region_privileges[idx] & WRITE_PRIV) == 0))
+            {
+#ifdef __CUDA_ARCH__
+              // bounds checks are not precise for CUDA so keep going to 
+              // see if there is another region that has it with the privileges
+              continue;
+#else
+              PhysicalRegion::fail_privilege_check(DomainPoint(p), field,
+                                                   region_privileges[idx]);
+#endif
+            }
+            found = true;
+            break;
+          }
+#ifdef __CUDA_ARCH__
+          assert(found);
+#else
+          if (!found)
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                region_privileges[0], true/*multi*/);
+#endif
+          return accessor.write(p, val);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Point<1,T>& p) const
+        { 
+          bool found = false;
+          for (unsigned idx = 0; idx < total_regions; idx++)
+          {
+            if (!region_bounds[idx].contains(p))
+              continue;
+            if (CP && 
+                ((region_privileges[idx] & (READ_PRIV | WRITE_PRIV)) == 0))
+            {
+#ifdef __CUDA_ARCH__
+              // bounds checks are not precise for CUDA so keep going to 
+              // see if there is another region that has it with the privileges
+              continue;
+#else
+              PhysicalRegion::fail_privilege_check(DomainPoint(p), field,
+                                                   region_privileges[idx]);
+#endif
+            }
+            found = true;
+            break;
+          }
+#ifdef __CUDA_ARCH__
+          assert(found);
+#else
+          if (!found)
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                region_privileges[0], true/*multi*/);
+#endif
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<1,T>& r) const
+        {
+          bool found = false;
+          for (unsigned idx = 0; idx < total_regions; idx++)
+          {
+            if (!region_bounds[idx].contains_all(r))
+              continue;
+            if (CP && 
+                ((region_privileges[idx] & (READ_PRIV | WRITE_PRIV)) == 0))
+            {
+#ifdef __CUDA_ARCH__
+              // bounds checks are not precise for CUDA so keep going to 
+              // see if there is another region that has it with the privileges
+              continue;
+#else
+              PhysicalRegion::fail_privilege_check(Domain(r), field,
+                                                   region_privileges[idx]);
+#endif
+            }
+            found = true;
+            break;
+          }
+#ifdef __CUDA_ARCH__
+          assert(found);
+#else
+          if (!found)
+            PhysicalRegion::fail_bounds_check(Domain(r), field,
+                          region_privileges[0], true/*multi*/);
+#endif
+          if (!accessor.is_dense_arbitrary(r))
+          {
+#ifdef __CUDA_ARCH__
+            printf(
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+            assert(false);
+#else
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
+          }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<1,T>& r, size_t strides[1]) const
+        {
+          bool found = false;
+          for (unsigned idx = 0; idx < total_regions; idx++)
+          {
+            if (!region_bounds[idx].contains_all(r))
+              continue;
+            if (CP && 
+                ((region_privileges[idx] & (READ_PRIV | WRITE_PRIV)) == 0))
+            {
+#ifdef __CUDA_ARCH__
+              // bounds checks are not precise for CUDA so keep going to 
+              // see if there is another region that has it with the privileges
+              continue;
+#else
+              PhysicalRegion::fail_privilege_check(Domain(r), field,
+                                                   region_privileges[idx]);
+#endif
+            }
+            found = true;
+            break;
+          }
+#ifdef __CUDA_ARCH__
+          assert(found);
+#else
+          if (!found)
+            PhysicalRegion::fail_bounds_check(Domain(r), field,
+                          region_privileges[0], true/*multi*/);
+#endif
+          for (int i = 0; i < 1; i++)
+            strides[i] = accessor.strides[i] / sizeof(FT);
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Point<1,T>& p) const
+        { 
+          bool found = false;
+          for (unsigned idx = 0; idx < total_regions; idx++)
+          {
+            if (!region_bounds[idx].contains(p))
+              continue;
+            if (CP && ((region_privileges[idx] & WRITE_PRIV) == 0))
+            {
+#ifdef __CUDA_ARCH__
+              // bounds checks are not precise for CUDA so keep going to 
+              // see if there is another region that has it with the privileges
+              continue;
+#else
+              PhysicalRegion::fail_privilege_check(DomainPoint(p), field,
+                                                   region_privileges[idx]);
+#endif
+            }
+            found = true;
+            break;
+          }
+#ifdef __CUDA_ARCH__
+          assert(found);
+#else
+          if (!found)
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                region_privileges[0], true/*multi*/);
+#endif
+          return accessor[p]; 
+        }
+      template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
+      inline void reduce(const Point<1,T>& p, 
+                         typename REDOP::RHS val) const
+        { 
+          bool found = false;
+          for (unsigned idx = 0; idx < total_regions; idx++)
+          {
+            if (!region_bounds[idx].contains(p))
+              continue;
+            if (CP && ((region_privileges[idx] & WRITE_PRIV) == 0))
+            {
+#ifdef __CUDA_ARCH__
+              // bounds checks are not precise for CUDA so keep going to 
+              // see if there is another region that has it with the privileges
+              continue;
+#else
+              PhysicalRegion::fail_privilege_check(DomainPoint(p), field,
+                                                   region_privileges[idx]);
+#endif
+            }
+            found = true;
+            break;
+          }
+#ifdef __CUDA_ARCH__
+          assert(found);
+#else
+          if (!found)
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                region_privileges[0], true/*multi*/);
+#endif
+          REDOP::template apply<EXCLUSIVE>(accessor[p], val);
+        }
+    public:
+      mutable Realm::AffineAccessor<FT,1,T> accessor;
+      FieldID field;
+      PrivilegeMode region_privileges[MR];
+      AffineBounds::Tester<1,T> region_bounds[MR];
+      unsigned total_regions;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = 1;
+    };
+
+    // Multi-Accessor, affine, N, no bounds, no privileges
+    template<typename FT, int N, typename T, int MR>
+    class MultiRegionAccessor<FT,N,T,Realm::AffineAccessor<FT,N,T>,
+                              false,false,MR> {
+    public:
+      MultiRegionAccessor(void) { }
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          FieldID fid, size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+      {
+        if (regions.empty())
+          return;
+        assert(regions.size() == privileges.size());
+        DomainT<N,T> is;
+        const PhysicalRegion &region = regions.front();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(privileges.front(),fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        Rect<N,T> bounds = is.bounds;
+        for (unsigned idx = 1; idx < regions.size(); idx++)
+        {
+          const Realm::RegionInstance inst = regions[idx].get_instance_info(
+                privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          bounds = bounds.union_bbox(is.bounds);
+        }
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,fid,bounds)) 
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, bounds);
+      }
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          const Rect<N,T> source_bounds, FieldID fid,
+                          size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+      {
+        if (regions.empty())
+          return;
+        assert(regions.size() == privileges.size());
+        DomainT<N,T> is;
+        const PhysicalRegion &region = regions.front();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(privileges.front(),fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        Rect<N,T> bounds = source_bounds.intersection(is.bounds); 
+        for (unsigned idx = 1; idx < regions.size(); idx++)
+        {
+          const Realm::RegionInstance inst = regions[idx].get_instance_info(
+                privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          bounds = bounds.union_bbox(source_bounds.inersection(is.bounds));
+        }
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,fid,bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, bounds);
+      }
+      template<int M>
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          const AffineTransform<M,N,T> transform,
+                          FieldID fid, size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+      {
+        if (regions.empty())
+          return;
+        assert(regions.size() == privileges.size());
+        DomainT<N,T> is;
+        const PhysicalRegion &region = regions.front();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(privileges.front(),fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        Rect<N,T> bounds = is.bounds;
+        for (unsigned idx = 1; idx < regions.size(); idx++)
+        {
+          const Realm::RegionInstance inst = regions[idx].get_instance_info(
+                privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          bounds = bounds.union_bbox(is.bounds);
+        }
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,
+              transform.transform, transform.offset, fid, bounds)) 
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
+            transform.offset, fid, bounds);
+      }
+      template<int M>
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          const AffineTransform<M,N,T> transform,
+                          const Rect<N,T> source_bounds, FieldID fid, 
+                          // The actual field size in case it is different from the
+                          // one being used in FT and we still want to check it
+                          size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+      {
+        if (regions.empty())
+          return;
+        assert(regions.size() == privileges.size());
+        DomainT<N,T> is;
+        const PhysicalRegion &region = regions.front();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(privileges.front(),fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        Rect<N,T> bounds = source_bounds.intersection(is.bounds); 
+        for (unsigned idx = 1; idx < regions.size(); idx++)
+        {
+          const Realm::RegionInstance inst = regions[idx].get_instance_info(
+                privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          bounds = bounds.union_bbox(source_bounds.inersection(is.bounds));
+        }
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,
+              transform.transform, transform.offset, fid, bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
+            transform.offset, fid, bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<N,T>& p) const
+        {
+          return accessor.read(p);
+        }
+      __CUDA_HD__
+      inline void write(const Point<N,T>& p, FT val) const
+        {
+          return accessor.write(p, val);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Point<N,T>& p) const
+        { 
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<N,T>& r) const
+        {
+          if (!accessor.is_dense_arbitrary(r))
+          {
+#ifdef __CUDA_ARCH__
+            printf(
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+            assert(false);
+#else
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
+          }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<N,T>& r, size_t strides[N]) const
+        {
+          for (int i = 0; i < N; i++)
+            strides[i] = accessor.strides[i] / sizeof(FT);
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Point<N,T>& p) const
+        { 
+          return accessor[p]; 
+        }
+      __CUDA_HD__
+      inline ArraySyntax::GenericSyntaxHelper<MultiRegionAccessor<FT,N,T,
+             Realm::AffineAccessor<FT,N,T>,false,false>,FT,N,T,2,READ_WRITE>
+          operator[](T index) const
+      {
+        return ArraySyntax::GenericSyntaxHelper<MultiRegionAccessor<FT,N,T,
+              Realm::AffineAccessor<FT,N,T>,false,false>,FT,N,T,2,READ_WRITE>(
+              *this, Point<1,T>(index));
+      }
+      template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
+      inline void reduce(const Point<N,T>& p, 
+                         typename REDOP::RHS val) const
+        { 
+          REDOP::template apply<EXCLUSIVE>(accessor[p], val);
+        }
+    public:
+      mutable Realm::AffineAccessor<FT,N,T> accessor;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = N;
+    };
+
+    // Multi-Accessor, affine, 1, no bounds, no privileges
+    template<typename FT, typename T, int MR>
+    class MultiRegionAccessor<FT,1,T,Realm::AffineAccessor<FT,1,T>,
+                              false,false,MR> {
+    public:
+      MultiRegionAccessor(void) { }
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          FieldID fid, size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+      {
+        if (regions.empty())
+          return;
+        assert(regions.size() == privileges.size());
+        DomainT<1,T> is;
+        const PhysicalRegion &region = regions.front();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(privileges.front(),fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        Rect<1,T> bounds = is.bounds;
+        for (unsigned idx = 1; idx < regions.size(); idx++)
+        {
+          const Realm::RegionInstance inst = regions[idx].get_instance_info(
+                privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          bounds = bounds.union_bbox(is.bounds);
+        }
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,fid,bounds)) 
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, bounds);
+      }
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          const Rect<1,T> source_bounds, FieldID fid,
+                          size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+      {
+        if (regions.empty())
+          return;
+        assert(regions.size() == privileges.size());
+        DomainT<1,T> is;
+        const PhysicalRegion &region = regions.front();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(privileges.front(),fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        Rect<1,T> bounds = source_bounds.intersection(is.bounds); 
+        for (unsigned idx = 1; idx < regions.size(); idx++)
+        {
+          const Realm::RegionInstance inst = regions[idx].get_instance_info(
+                privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          bounds = bounds.union_bbox(source_bounds.inersection(is.bounds));
+        }
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,fid,bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, bounds);
+      }
+      template<int M>
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          const AffineTransform<M,1,T> transform,
+                          FieldID fid, size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+      {
+        if (regions.empty())
+          return;
+        assert(regions.size() == privileges.size());
+        DomainT<1,T> is;
+        const PhysicalRegion &region = regions.front();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(privileges.front(),fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        Rect<1,T> bounds = is.bounds;
+        for (unsigned idx = 1; idx < regions.size(); idx++)
+        {
+          const Realm::RegionInstance inst = regions[idx].get_instance_info(
+                privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          bounds = bounds.union_bbox(is.bounds);
+        }
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,
+              transform.transform, transform.offset, fid, bounds)) 
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
+            transform.offset, fid, bounds);
+      }
+      template<int M>
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          const AffineTransform<M,1,T> transform,
+                          const Rect<1,T> source_bounds, FieldID fid, 
+                          // The actual field size in case it is different from the
+                          // one being used in FT and we still want to check it
+                          size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+      {
+        if (regions.empty())
+          return;
+        assert(regions.size() == privileges.size());
+        DomainT<1,T> is;
+        const PhysicalRegion &region = regions.front();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(privileges.front(),fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        Rect<1,T> bounds = source_bounds.intersection(is.bounds); 
+        for (unsigned idx = 1; idx < regions.size(); idx++)
+        {
+          const Realm::RegionInstance inst = regions[idx].get_instance_info(
+                privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          bounds = bounds.union_bbox(source_bounds.inersection(is.bounds));
+        }
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,
+              transform.transform, transform.offset, fid, bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
+            transform.offset, fid, bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<1,T>& p) const
+        {
+          return accessor.read(p);
+        }
+      __CUDA_HD__
+      inline void write(const Point<1,T>& p, FT val) const
+        {
+          return accessor.write(p, val);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Point<1,T>& p) const
+        { 
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<1,T>& r) const
+        {
+          if (!accessor.is_dense_arbitrary(r))
+          {
+#ifdef __CUDA_ARCH__
+            printf(
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+            assert(false);
+#else
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
+          }
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<1,T>& r, size_t strides[1]) const
+        {
+          for (int i = 0; i < 1; i++)
+            strides[i] = accessor.strides[i] / sizeof(FT);
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Point<1,T>& p) const
+        { 
+          return accessor[p]; 
+        }
+      template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
+      inline void reduce(const Point<1,T>& p, 
+                         typename REDOP::RHS val) const
+        { 
+          REDOP::template apply<EXCLUSIVE>(accessor[p], val);
+        }
+    public:
+      mutable Realm::AffineAccessor<FT,1,T> accessor;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
       static const int dim = 1;
     };
 
@@ -5536,6 +7388,7 @@ namespace Legion {
     public:
       UnsafeFieldAccessor(void) { }
       UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
+
                           bool silence_warnings = false,
                           const char *warning_string = NULL)
       {

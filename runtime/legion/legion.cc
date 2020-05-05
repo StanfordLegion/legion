@@ -2407,27 +2407,43 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalRegion::fail_bounds_check(DomainPoint p, FieldID fid,
-                                           PrivilegeMode mode) const
-    //--------------------------------------------------------------------------
-    {
-      impl->fail_bounds_check(p, fid, mode);
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalRegion::fail_bounds_check(Domain d, FieldID fid,
-                                           PrivilegeMode mode) const
-    //--------------------------------------------------------------------------
-    {
-      impl->fail_bounds_check(d, fid, mode);
-    }
-
-    //--------------------------------------------------------------------------
     void PhysicalRegion::report_incompatible_accessor(const char *accessor_kind,
                               Realm::RegionInstance instance, FieldID fid) const
     //--------------------------------------------------------------------------
     {
       impl->report_incompatible_accessor(accessor_kind, instance, fid);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalRegion::fail_bounds_check(DomainPoint p,FieldID fid,
+                                                 PrivilegeMode mode, bool multi)
+    //--------------------------------------------------------------------------
+    {
+      Internal::PhysicalRegionImpl::fail_bounds_check(p, fid, mode, multi);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalRegion::fail_bounds_check(Domain d, FieldID fid,
+                                                 PrivilegeMode mode, bool multi)
+    //--------------------------------------------------------------------------
+    {
+      Internal::PhysicalRegionImpl::fail_bounds_check(d, fid, mode, multi);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalRegion::fail_privilege_check(DomainPoint p, 
+                                                FieldID fid, PrivilegeMode mode)
+    //--------------------------------------------------------------------------
+    {
+      Internal::PhysicalRegionImpl::fail_privilege_check(p, fid, mode);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalRegion::fail_privilege_check(Domain d, FieldID fid, 
+                                                         PrivilegeMode mode)
+    //--------------------------------------------------------------------------
+    {
+      Internal::PhysicalRegionImpl::fail_privilege_check(d, fid, mode);
     }
 
 #ifdef __GNUC__
