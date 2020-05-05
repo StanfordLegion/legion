@@ -2331,7 +2331,9 @@ namespace Legion {
                                        bool preregistered = false);
       static void preregister_projection_functor(ProjectionID pid,
                                        ProjectionFunctor *func);
-      ProjectionFunction* find_projection_function(ProjectionID pid);
+      ProjectionFunction* find_projection_function(ProjectionID pid,
+                                                   bool can_fail = false);
+      static ProjectionFunctor* get_projection_functor(ProjectionID pid);
     public:
       ShardingID generate_dynamic_sharding_id(bool check_context = true);
       ShardingID generate_library_sharding_ids(const char *name, size_t count);

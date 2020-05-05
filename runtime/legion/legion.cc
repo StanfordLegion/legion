@@ -5936,6 +5936,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ ProjectionFunctor* Runtime::get_projection_functor(
+                                                               ProjectionID pid)
+    //--------------------------------------------------------------------------
+    {
+      return Internal::Runtime::get_projection_functor(pid);
+    }
+
+    //--------------------------------------------------------------------------
     ShardingID Runtime::generate_dynamic_sharding_id(void)
     //--------------------------------------------------------------------------
     {

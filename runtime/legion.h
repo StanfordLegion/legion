@@ -7053,6 +7053,14 @@ namespace Legion {
                                                  ProjectionFunctor *functor);
 
       /**
+       * Return a pointer to a given projection functor object.
+       * The runtime retains ownership of this object.
+       * @param pid ID of the projection functor to find
+       * @return a pointer to the projection functor if it exists
+       */
+      static ProjectionFunctor* get_projection_functor(ProjectionID pid);
+
+      /**
        * Dynamically generate a unique sharding ID for use across the machine
        * @return a ShardingID that is globally unique across the machine
        */

@@ -15640,17 +15640,46 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ProjectionFunction* Runtime::find_projection_function(ProjectionID pid)
+    ProjectionFunction* Runtime::find_projection_function(ProjectionID pid,
+                                                          bool can_fail)
     //--------------------------------------------------------------------------
     {
       AutoLock p_lock(projection_lock,1,false/*exclusive*/);
       std::map<ProjectionID,ProjectionFunction*>::
         const_iterator finder = projection_functions.find(pid);
       if (finder == projection_functions.end())
+      {
+        if (can_fail)
+          return NULL;
         REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_ID, 
                         "Unable to find registered region projection ID %d. "
                         "Please upgrade to using projection functors!", pid);
+      }
       return finder->second;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ ProjectionFunctor* Runtime::get_projection_functor(
+                                                               ProjectionID pid) 
+    //--------------------------------------------------------------------------
+    {
+      if (runtime_started)
+      {
+        ProjectionFunction *func = 
+          the_runtime->find_projection_function(pid, true/*can fail*/);
+        if (func != NULL)
+          return func->functor;
+      }
+      else
+      {
+        std::map<ProjectionID,ProjectionFunctor*> &pending_projection_functors =
+          get_pending_projection_table();
+        std::map<ProjectionID,ProjectionFunctor*>::const_iterator finder = 
+          pending_projection_functors.find(pid);
+        if (finder != pending_projection_functors.end())
+          return finder->second;
+      }
+      return NULL;
     }
 
     //--------------------------------------------------------------------------

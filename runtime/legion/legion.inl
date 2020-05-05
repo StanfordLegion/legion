@@ -590,6 +590,27 @@ namespace Legion {
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
         accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
       }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    const Rect<N,T> source_bounds,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, true/*generic accessor*/, check_field_size);
+        if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                           source_bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
+        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, source_bounds);
+      }
     public:
       inline FT read(const Point<N,T>& p) const 
         { 
@@ -633,18 +654,38 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region), 
-          bounds(region.template get_bounds<N,T>())
+        : field(fid), field_region(&region)
       {
-        DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
+          region.get_instance_info(READ_ONLY, fid, actual_field_size, &bounds,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                           is.bounds))
+                                                           bounds.bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
+        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, bounds.bounds);
+      }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    const Rect<N,T> source_bounds,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+        : field(fid), field_region(&region), bounds(source_bounds)
+      {
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(READ_ONLY, fid, actual_field_size, &bounds,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, true/*generic accessor*/, check_field_size);
+        if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                           source_bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
+        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, source_bounds);
+        bounds.bounds = source_bounds.intersection(bounds.bounds);
       }
     public:
       inline FT read(const Point<N,T>& p) const 
@@ -707,6 +748,27 @@ namespace Legion {
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
         accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
       }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    const Rect<1,T> source_bounds,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+      {
+        DomainT<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, true/*generic accessor*/, check_field_size);
+        if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                           source_bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
+        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, source_bounds);
+      }
     public:
       inline FT read(const Point<1,T>& p) const 
         { 
@@ -743,18 +805,38 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region), 
-          bounds(region.template get_bounds<1,T>()) 
+        : field(fid), field_region(&region)
       {
-        DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
+          region.get_instance_info(READ_ONLY, fid, actual_field_size, &bounds,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                           is.bounds))
+                                                           bounds.bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
+        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, bounds.bounds);
+      }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    const Rect<1,T> source_bounds,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+        : field(fid), field_region(&region)
+      {
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(READ_ONLY, fid, actual_field_size, &bounds,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, true/*generic accessor*/, check_field_size);
+        if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                           source_bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
+        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, source_bounds);
+        bounds.bounds = source_bounds.intersection(bounds.bounds);
       }
     public:
       inline FT read(const Point<1,T>& p) const 
@@ -808,6 +890,27 @@ namespace Legion {
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
         accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
       }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    const Rect<N,T> source_bounds,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, true/*generic accessor*/, check_field_size);
+        if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                           source_bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
+        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, source_bounds);
+      }
     public:
       inline FT read(const Point<N,T>& p) const
         { 
@@ -856,18 +959,38 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region), 
-          bounds(region.template get_bounds<N,T>())
+        : field(fid), field_region(&region)
       {
-        DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
+          region.get_instance_info(READ_WRITE, fid, actual_field_size, &bounds,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                           is.bounds))
+                                                           bounds.bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
+        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, bounds.bounds);
+      }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    const Rect<N,T> source_bounds,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+        : field(fid), field_region(&region)
+      {
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(READ_WRITE, fid, actual_field_size, &bounds,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, true/*generic accessor*/, check_field_size);
+        if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                           source_bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
+        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, source_bounds);
+        bounds.bounds = source_bounds.intersection(bounds.bounds);
       }
     public:
       inline FT read(const Point<N,T>& p) const
@@ -937,6 +1060,27 @@ namespace Legion {
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
         accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
       }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    const Rect<1,T> source_bounds,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+      {
+        DomainT<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, true/*generic accessor*/, check_field_size);
+        if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                           source_bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
+        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, source_bounds);
+      }
     public:
       inline FT read(const Point<1,T>& p) const
         { 
@@ -977,18 +1121,38 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region), 
-          bounds(region.template get_bounds<1,T>())
+        : field(fid), field_region(&region)
       {
-        DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
+          region.get_instance_info(READ_WRITE, fid, actual_field_size, &bounds,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                           is.bounds))
+                                                           bounds.bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
+        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, bounds.bounds);
+      }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    const Rect<1,T> source_bounds,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+        : field(fid), field_region(&region)
+      {
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(READ_WRITE, fid, actual_field_size, &bounds,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, true/*generic accessor*/, check_field_size);
+        if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                           source_bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
+        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, source_bounds);
+        bounds.bounds = source_bounds.intersection(bounds.bounds);
       }
     public:
       inline FT read(const Point<1,T>& p) const
@@ -1049,6 +1213,27 @@ namespace Legion {
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
         accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
       }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    const Rect<N,T> source_bounds,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, true/*generic accessor*/, check_field_size);
+        if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                           source_bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
+        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, source_bounds);
+      }
     public:
       inline FT read(const Point<N,T>& p) const
         { 
@@ -1097,18 +1282,38 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region), 
-          bounds(region.template get_bounds<N,T>())
+        : field(fid), field_region(&region)
       {
-        DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
+          region.get_instance_info(WRITE_DISCARD, fid,actual_field_size,&bounds,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                           is.bounds))
+                                                           bounds.bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
+        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, bounds.bounds);
+      }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    const Rect<N,T> source_bounds,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+        : field(fid), field_region(&region)
+      {
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(WRITE_DISCARD, fid,actual_field_size,&bounds,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, true/*generic accessor*/, check_field_size);
+        if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                           source_bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
+        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, source_bounds);
+        bounds.bounds = source_bounds.intersection(bounds.bounds);
       }
     public:
       inline FT read(const Point<N,T>& p) const
@@ -1177,6 +1382,27 @@ namespace Legion {
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
         accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
       }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    const Rect<1,T> source_bounds,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+      {
+        DomainT<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, true/*generic accessor*/, check_field_size);
+        if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                           source_bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
+        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, source_bounds);
+      }
     public:
       inline FT read(const Point<1,T>& p) const
         { 
@@ -1216,18 +1442,38 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region), 
-          bounds(region.template get_bounds<1,T>())
+        : field(fid), field_region(&region)
       {
-        DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
+          region.get_instance_info(WRITE_DISCARD, fid,actual_field_size,&bounds,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                           is.bounds))
+                                                           bounds.bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
+        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, bounds.bounds);
+      }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    const Rect<1,T> source_bounds,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+        : field(fid), field_region(&region)
+      {
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(WRITE_DISCARD, fid,actual_field_size,&bounds,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, true/*generic accessor*/, check_field_size);
+        if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                           bounds.bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
+        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, bounds.bounds);
+        bounds.bounds = source_bounds.intersection(bounds.bounds);
       }
     public:
       inline FT read(const Point<1,T>& p) const
@@ -1287,6 +1533,27 @@ namespace Legion {
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
         accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
       }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    const Rect<N,T> source_bounds,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, true/*generic accessor*/, check_field_size);
+        if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                           source_bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
+        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, source_bounds);
+      }
     public:
       inline void write(const Point<N,T>& p, FT val) const
         { 
@@ -1331,18 +1598,38 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region), 
-          bounds(region.template get_bounds<N,T>())
+        : field(fid), field_region(&region)
       {
-        DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
+          region.get_instance_info(WRITE_DISCARD, fid,actual_field_size,&bounds,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                           is.bounds))
+                                                           bounds.bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
+        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, bounds.bounds);
+      }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    const Rect<N,T> source_bounds,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+        : field(fid), field_region(&region)
+      {
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(WRITE_DISCARD, fid,actual_field_size,&bounds,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, true/*generic accessor*/, check_field_size);
+        if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                           source_bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
+        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, source_bounds);
+        bounds.bounds = source_bounds.intersection(bounds.bound);
       }
     public:
       inline void write(const Point<N,T>& p, FT val) const
@@ -1405,6 +1692,27 @@ namespace Legion {
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
         accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
       }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    const Rect<1,T> source_bounds,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+      {
+        DomainT<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, true/*generic accessor*/, check_field_size);
+        if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                           source_bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
+        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, source_bounds);
+      }
     public:
       inline void write(const Point<1,T>& p, FT val) const
         { 
@@ -1440,18 +1748,38 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL)
-        : field(fid), field_region(&region), 
-          bounds(region.template get_bounds<1,T>())
+        : field(fid), field_region(&region)
       {
-        DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
+          region.get_instance_info(WRITE_DISCARD, fid,actual_field_size,&bounds,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                           is.bounds))
+                                                           bounds.bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
+        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, bounds.bounds);
+      }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    const Rect<1,T> source_bounds,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+        : field(fid), field_region(&region)
+      {
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(WRITE_DISCARD, fid,actual_field_size,&bounds,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, true/*generic accessor*/, check_field_size);
+        if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                           source_bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
+        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, source_bounds);
+        bounds.bounds = source_bounds.intersection(bounds.bounds);
       }
     public:
       inline void write(const Point<1,T>& p, FT val) const
