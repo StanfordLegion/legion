@@ -2376,18 +2376,34 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void PhysicalRegion::fail_bounds_check(DomainPoint p,FieldID fid,
-                                                      PrivilegeMode mode)
+                                                 PrivilegeMode mode, bool multi)
     //--------------------------------------------------------------------------
     {
-      Internal::PhysicalRegionImpl::fail_bounds_check(p, fid, mode);
+      Internal::PhysicalRegionImpl::fail_bounds_check(p, fid, mode, multi);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ void PhysicalRegion::fail_bounds_check(Domain d, FieldID fid,
-                                                      PrivilegeMode mode)
+                                                 PrivilegeMode mode, bool multi)
     //--------------------------------------------------------------------------
     {
-      Internal::PhysicalRegionImpl::fail_bounds_check(d, fid, mode);
+      Internal::PhysicalRegionImpl::fail_bounds_check(d, fid, mode, multi);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalRegion::fail_privilege_check(DomainPoint p, 
+                                                FieldID fid, PrivilegeMode mode)
+    //--------------------------------------------------------------------------
+    {
+      Internal::PhysicalRegionImpl::fail_privilege_check(p, fid, mode);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalRegion::fail_privilege_check(Domain d, FieldID fid, 
+                                                         PrivilegeMode mode)
+    //--------------------------------------------------------------------------
+    {
+      Internal::PhysicalRegionImpl::fail_privilege_check(d, fid, mode);
     }
 
 #ifdef __GNUC__

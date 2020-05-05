@@ -427,8 +427,12 @@ namespace Legion {
       void report_incompatible_accessor(const char *accessor_kind,
                              PhysicalInstance instance, FieldID fid);
       static void fail_bounds_check(DomainPoint p, FieldID fid, 
-                                    PrivilegeMode mode);
+                                    PrivilegeMode mode, bool multi);
       static void fail_bounds_check(Domain d, FieldID fid, 
+                                    PrivilegeMode mode, bool multi);
+      static void fail_privilege_check(DomainPoint p, FieldID fid, 
+                                    PrivilegeMode mode);
+      static void fail_privilege_check(Domain d, FieldID fid, 
                                     PrivilegeMode mode);
     public:
       Runtime *const runtime;
