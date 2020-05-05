@@ -806,6 +806,23 @@ namespace Realm {
 		requests, wait_on);
   }
 
+  // integer version of weighted subspace is a wrapper around size_t version
+  template <int N, typename T>
+  inline Event IndexSpace<N,T>::create_weighted_subspaces(size_t count, size_t granularity,
+							  const std::vector<int>& weights,
+							  std::vector<IndexSpace<N,T> >& subspaces,
+							  const ProfilingRequestSet &reqs,
+							  Event wait_on /*= Event::NO_EVENT*/) const
+  {
+    std::vector<size_t> weights_size_t(weights.size());
+
+    // clamp negative values to 0
+    for(size_t i = 0; i < weights.size(); i++)
+      weights_size_t[i] = (weights[i] > 0) ? weights[i] : 0;
+
+    return create_weighted_subspaces(count, granularity, weights_size_t,
+				     subspaces, reqs, wait_on);
+  }
 
   // simple wrapper for the multiple subspace version
   template <int N, typename T>

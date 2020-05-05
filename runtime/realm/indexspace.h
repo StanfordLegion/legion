@@ -260,6 +260,12 @@ namespace Realm {
 				    const ProfilingRequestSet &reqs,
 				    Event wait_on = Event::NO_EVENT) const;
 
+    Event create_weighted_subspaces(size_t count, size_t granularity,
+				    const std::vector<size_t>& weights,
+				    std::vector<IndexSpace<N,T> >& subspaces,
+				    const ProfilingRequestSet &reqs,
+				    Event wait_on = Event::NO_EVENT) const;
+
     // field-based:
 
     template <typename FT>

@@ -2415,6 +2415,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalRegion::report_incompatible_multi_accessor(unsigned index,
+    FieldID fid, Realm::RegionInstance inst1, Realm::RegionInstance inst2) const
+    //--------------------------------------------------------------------------
+    {
+      impl->report_incompatible_multi_accessor(index, fid, inst1, inst2);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void PhysicalRegion::fail_bounds_check(DomainPoint p,FieldID fid,
                                                  PrivilegeMode mode, bool multi)
     //--------------------------------------------------------------------------
