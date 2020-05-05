@@ -252,6 +252,13 @@ namespace Realm {
     //  profiling has been requested
     long long inline_start_time = reqs.empty() ? 0 : Clock::current_time_in_nanoseconds();
 
+    // partitioning an empty space and/or making a single subspace is easy
+    if(empty() || (count == 1)) {
+      subspaces.resize(count, *this);
+      PartitioningOperation::do_inline_profiling(reqs, inline_start_time);
+      return wait_on;
+    }
+
     // dense case is easy(er)
     if(dense()) {
       subspaces.reserve(count);
@@ -307,12 +314,18 @@ namespace Realm {
     //  profiling has been requested
     long long inline_start_time = reqs.empty() ? 0 : Clock::current_time_in_nanoseconds();
 
+    // partitioning an empty space and/or making a single subspace is easy
+    if(empty() || (count == 1)) {
+      subspaces.resize(count, *this);
+      PartitioningOperation::do_inline_profiling(reqs, inline_start_time);
+      return wait_on;
+    }
+
     // determine the total weight
     size_t total_weight = 0;
     assert(weights.size() == count);
     for(size_t i = 0; i < count; i++)
       total_weight += weights[i];
-    if(total_weight == 0) total_weight = 1;
 
     // dense case is easy(er)
     if(dense()) {
