@@ -5589,7 +5589,7 @@ namespace Legion {
               check_field_size);
         region_privileges[0] = privileges[0];
         region_bounds[0].bounds = 
-          source_bounds.intersection(region_bounds.bounds[0]); 
+          source_bounds.intersection(region_bounds[0].bounds); 
         Rect<N,T> bounds = region_bounds[0].bounds;
         for (unsigned idx = 1; idx < regions.size(); idx++)
         {
@@ -5601,7 +5601,7 @@ namespace Legion {
             region.report_incompatible_multi_accessor(idx, fid, instance, inst);
           region_privileges[idx] = privileges[idx];
           region_bounds[idx].bounds = 
-            source_bounds.intersection(region_bounds.bounds[idx]);
+            source_bounds.intersection(region_bounds[idx].bounds);
           bounds = bounds.union_bbox(region_bounds[idx].bounds);
         }
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance,fid,bounds))
@@ -5754,7 +5754,7 @@ namespace Legion {
               check_field_size);
         region_privileges[0] = privileges[0];
         region_bounds[0].bounds = 
-          source_bounds.intersection(region_bounds.bounds[0]);
+          source_bounds.intersection(region_bounds[0].bounds);
         Rect<1,T> bounds = region_bounds[0].bounds;
         for (unsigned idx = 1; idx < regions.size(); idx++)
         {
@@ -5766,7 +5766,7 @@ namespace Legion {
             region.report_incompatible_multi_accessor(idx, fid, instance, inst);
           region_privileges[idx] = privileges[idx];
           region_bounds[idx].bounds = 
-            source_bounds.intersection(region_bounds.bounds[idx]);
+            source_bounds.intersection(region_bounds[idx].bounds);
           bounds = bounds.union_bbox(region_bounds[idx].bounds);
         }
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance,fid,bounds))
