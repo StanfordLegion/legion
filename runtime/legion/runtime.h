@@ -2016,7 +2016,9 @@ namespace Legion {
                                        bool preregistered = false);
       static void preregister_projection_functor(ProjectionID pid,
                                        ProjectionFunctor *func);
-      ProjectionFunction* find_projection_function(ProjectionID pid);
+      ProjectionFunction* find_projection_function(ProjectionID pid,
+                                                   bool can_fail = false);
+      static ProjectionFunctor* get_projection_functor(ProjectionID pid);
     public:
       void register_reduction(ReductionOpID redop_id,
                               ReductionOp *redop,
