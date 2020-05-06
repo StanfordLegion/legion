@@ -14405,6 +14405,9 @@ namespace Legion {
       if (flush_allocation)
       {
 #ifdef DEBUG_LEGION
+        if ((allocation_state != FIELD_ALLOC_EXCLUSIVE) &&
+            (allocation_state != FIELD_ALLOC_COLLECTIVE))
+          printf("BAD ALLOCATION STATE %d\n", allocation_state);
         assert((allocation_state == FIELD_ALLOC_EXCLUSIVE) ||
                (allocation_state == FIELD_ALLOC_COLLECTIVE));
 #endif
