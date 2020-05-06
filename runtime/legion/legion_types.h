@@ -148,6 +148,7 @@ namespace Legion {
     class UnsafeFieldAccessor;
   namespace ArraySyntax {
     template<typename, PrivilegeMode> class AccessorRefHelper;
+    template<typename> class AffineRefHelper;
   }
   class IndexIterator;
   template<typename T> struct ColoredPoints; 
