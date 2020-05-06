@@ -9865,8 +9865,8 @@ namespace Legion {
         ValueBroadcast<VariantID> collective(this, COLLECTIVE_LOC_17);
         // Have this shard do the registration, and then broadcast the
         // resulting variant to all the other shards
-        result = runtime->register_variant(registrar, user_data, 
-            user_data_size, desc, ret, vid, check_task_id);
+        result = runtime->register_variant(registrar, user_data, user_data_size,
+                         desc, ret, vid, check_task_id, false/*check context*/);
         collective.broadcast(result);
       }
       else
