@@ -489,6 +489,8 @@ namespace Realm {
       //const char *src_buf_base, *dst_buf_base;
     };
 
+    class GASNetChannel;
+
     class GASNetXferDes : public XferDes {
     public:
       GASNetXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
@@ -507,6 +509,8 @@ namespace Realm {
       void notify_request_read_done(Request* req);
       void notify_request_write_done(Request* req);
       void flush();
+
+      bool progress_xd(GASNetChannel *channel, TimeLimit work_until);
 
     private:
       GASNetRequest* gasnet_reqs;
@@ -848,15 +852,15 @@ namespace Realm {
       bool is_stopped;
     };
 
-    class GASNetChannel : public Channel {
+    class GASNetChannel : public SingleXDQChannel<GASNetChannel, GASNetXferDes> {
     public:
-      GASNetChannel(long max_nr, XferDesKind _kind);
+      GASNetChannel(BackgroundWorkManager *bgwork, XferDesKind _kind);
       ~GASNetChannel();
+
+      // no more than one GASNet xfer of each type at a time
+      static const bool is_ordered = true;
+      
       long submit(Request** requests, long nr);
-      void pull();
-      long available();
-    private:
-      atomic<long> capacity;
     };
 
     class RemoteWriteChannel : public SingleXDQChannel<RemoteWriteChannel, RemoteWriteXferDes> {
@@ -931,8 +935,8 @@ namespace Realm {
       }
       ~ChannelManager(void);
       MemcpyChannel* create_memcpy_channel(BackgroundWorkManager *bgwork);
-      GASNetChannel* create_gasnet_read_channel(long max_nr);
-      GASNetChannel* create_gasnet_write_channel(long max_nr);
+      GASNetChannel* create_gasnet_read_channel(BackgroundWorkManager *bgwork);
+      GASNetChannel* create_gasnet_write_channel(BackgroundWorkManager *bgwork);
       RemoteWriteChannel* create_remote_write_channel(BackgroundWorkManager *bgwork);
       DiskChannel* create_disk_channel(BackgroundWorkManager *bgwork);
       FileChannel* create_file_channel(BackgroundWorkManager *bgwork);

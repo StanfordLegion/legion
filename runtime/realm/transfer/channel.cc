@@ -1790,6 +1790,23 @@ namespace Realm {
         return new_nr;
       }
 
+      bool GASNetXferDes::progress_xd(GASNetChannel *channel,
+				      TimeLimit work_until)
+      {
+	Request *rq;
+	bool did_work = false;
+	do {
+	  long count = get_requests(&rq, 1);
+	  if(count > 0) {
+	    channel->submit(&rq, count);
+	    did_work = true;
+	  } else
+	    break;
+	} while(!work_until.is_expired());
+
+	return did_work;
+      }
+
       void GASNetXferDes::notify_request_read_done(Request* req)
       {
         default_notify_request_read_done(req);
@@ -3071,9 +3088,11 @@ namespace Realm {
       }
 
 
-      GASNetChannel::GASNetChannel(long max_nr, XferDesKind _kind)
-	: Channel(_kind)
-	, capacity(max_nr)
+      GASNetChannel::GASNetChannel(BackgroundWorkManager *bgwork,
+				   XferDesKind _kind)
+	: SingleXDQChannel<GASNetChannel, GASNetXferDes>(bgwork,
+							 _kind,
+							 stringbuilder() << "gasnet channel (kind= " << _kind << ")")
       {
 	unsigned bw = 0; // TODO
 	unsigned latency = 0;
@@ -3122,15 +3141,6 @@ namespace Realm {
           req->xd->notify_request_write_done(req);
         }
         return nr;
-      }
-
-      void GASNetChannel::pull()
-      {
-      }
-
-      long GASNetChannel::available()
-      {
-        return capacity.load();
       }
 
       RemoteWriteChannel::RemoteWriteChannel(BackgroundWorkManager *bgwork)
@@ -3600,14 +3610,14 @@ namespace Realm {
         memcpy_channel = new MemcpyChannel(bgwork);
         return memcpy_channel;
       }
-      GASNetChannel* ChannelManager::create_gasnet_read_channel(long max_nr) {
+      GASNetChannel* ChannelManager::create_gasnet_read_channel(BackgroundWorkManager *bgwork) {
         assert(gasnet_read_channel == NULL);
-        gasnet_read_channel = new GASNetChannel(max_nr, XFER_GASNET_READ);
+        gasnet_read_channel = new GASNetChannel(bgwork, XFER_GASNET_READ);
         return gasnet_read_channel;
       }
-      GASNetChannel* ChannelManager::create_gasnet_write_channel(long max_nr) {
+      GASNetChannel* ChannelManager::create_gasnet_write_channel(BackgroundWorkManager *bgwork) {
         assert(gasnet_write_channel == NULL);
-        gasnet_write_channel = new GASNetChannel(max_nr, XFER_GASNET_WRITE);
+        gasnet_write_channel = new GASNetChannel(bgwork, XFER_GASNET_WRITE);
         return gasnet_write_channel;
       }
       RemoteWriteChannel* ChannelManager::create_remote_write_channel(BackgroundWorkManager *bgwork) {
@@ -3788,12 +3798,12 @@ namespace Realm {
         std::vector<Channel*> channels;
 	// TODO: numa-specific channels
         MemcpyChannel* memcpy_channel = channel_manager->create_memcpy_channel(bgwork);
-	GASNetChannel* gasnet_read_channel = channel_manager->create_gasnet_read_channel(max_nr);
-	GASNetChannel* gasnet_write_channel = channel_manager->create_gasnet_write_channel(max_nr);
+	GASNetChannel* gasnet_read_channel = channel_manager->create_gasnet_read_channel(bgwork);
+	GASNetChannel* gasnet_write_channel = channel_manager->create_gasnet_write_channel(bgwork);
 	AddressSplitChannel *addr_split_channel = channel_manager->create_addr_split_channel();
         //channels.push_back(memcpy_channel);
-        channels.push_back(gasnet_read_channel);
-        channels.push_back(gasnet_write_channel);
+        //channels.push_back(gasnet_read_channel);
+        //channels.push_back(gasnet_write_channel);
 	channels.push_back(addr_split_channel);
 	r->add_dma_channel(memcpy_channel);
 	r->add_dma_channel(gasnet_read_channel);
