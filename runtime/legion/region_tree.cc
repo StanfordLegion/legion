@@ -14402,15 +14402,12 @@ namespace Legion {
              (allocation_state == FIELD_ALLOC_READ_ONLY));
 #endif
       Serializer rez;
-      if (flush_allocation)
+      // It's possible to be in the read-only state even with a flush because
+      // of ships passing in the night. We get sent an invalidation, but we
+      // already released our allocator and sent it back to the owner so we are
+      // in the read-only state and the messages pass like ships in the night
+      if (flush_allocation && (allocation_state != FIELD_ALLOC_READ_ONLY))
       {
-#ifdef DEBUG_LEGION
-        if ((allocation_state != FIELD_ALLOC_EXCLUSIVE) &&
-            (allocation_state != FIELD_ALLOC_COLLECTIVE))
-          printf("BAD ALLOCATION STATE %d\n", allocation_state);
-        assert((allocation_state == FIELD_ALLOC_EXCLUSIVE) ||
-               (allocation_state == FIELD_ALLOC_COLLECTIVE));
-#endif
         RezCheck z(rez);
         rez.serialize(handle);
         rez.serialize<bool>(true); // allocation meta data
