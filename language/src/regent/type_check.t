@@ -2043,6 +2043,8 @@ function type_check.expr_image(cx, node)
 end
 
 function type_check.expr_image_by_task(cx, node)
+  local disjointness = node.disjointness or std.aliased
+  local completeness = node.completeness or std.incomplete
   local parent = type_check.expr(cx, node.parent)
   local parent_type = std.check_read(cx, parent)
   local index_type = parent_type:ispace().index_type
@@ -2098,9 +2100,11 @@ function type_check.expr_image_by_task(cx, node)
   else
     parent_symbol = std.newsymbol()
   end
-  local expr_type = std.partition(std.aliased, parent_symbol, partition_type.colors_symbol)
+  local expr_type = std.partition(disjointness, completeness, parent_symbol, partition_type.colors_symbol)
 
   return ast.typed.expr.ImageByTask {
+    disjointness = node.disjointness,
+    completeness = node.completeness,
     parent = parent,
     partition = partition,
     task = task,
