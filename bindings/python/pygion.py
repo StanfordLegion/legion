@@ -2412,14 +2412,9 @@ class MustEpochLaunch(object):
     def launch(self):
         self.launcher.launch()
 
-@task(leaf=True)
-def _dummy_task():
-    return 1
-
 def execution_fence(block=False, future=False):
-    c.legion_runtime_issue_execution_fence(_my.ctx.runtime, _my.ctx.context)
+    f = Future(c.legion_runtime_issue_execution_fence(_my.ctx.runtime, _my.ctx.context), value_type=void)
     if block or future:
-        f = _dummy_task()
         if block:
             f.get()
         if future:
