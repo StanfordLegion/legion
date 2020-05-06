@@ -3672,25 +3672,15 @@ namespace Realm {
         channel_manager = new ChannelManager;
         xferDes_queue->start_worker(count, max_nr, channel_manager, bgwork);
       }
-      FileChannel* ChannelManager::create_file_read_channel(long max_nr) {
-        assert(file_read_channel == NULL);
-        file_read_channel = new FileChannel(max_nr, XFER_FILE_READ);
-        return file_read_channel;
+      FileChannel* ChannelManager::create_file_channel(BackgroundWorkManager *bgwork) {
+        assert(file_channel == NULL);
+        file_channel = new FileChannel(bgwork);
+        return file_channel;
       }
-      FileChannel* ChannelManager::create_file_write_channel(long max_nr) {
-        assert(file_write_channel == NULL);
-        file_write_channel = new FileChannel(max_nr, XFER_FILE_WRITE);
-        return file_write_channel;
-      }
-      DiskChannel* ChannelManager::create_disk_read_channel(long max_nr) {
-        assert(disk_read_channel == NULL);
-        disk_read_channel = new DiskChannel(max_nr, XFER_DISK_READ);
-        return disk_read_channel;
-      }
-      DiskChannel* ChannelManager::create_disk_write_channel(long max_nr) {
-        assert(disk_write_channel == NULL);
-        disk_write_channel = new DiskChannel(max_nr, XFER_DISK_WRITE);
-        return disk_write_channel;
+      DiskChannel* ChannelManager::create_disk_channel(BackgroundWorkManager *bgwork) {
+        assert(disk_channel == NULL);
+        disk_channel = new DiskChannel(bgwork);
+        return disk_channel;
       }
 
       bool XferDesQueue::enqueue_xferDes_local(XferDes* xd,
@@ -3817,20 +3807,16 @@ namespace Realm {
         }
         // dma thread #2: async xfer
 	RemoteWriteChannel *remote_channel = channel_manager->create_remote_write_channel(bgwork);
-	DiskChannel *disk_read_channel = channel_manager->create_disk_read_channel(max_nr);
-	DiskChannel *disk_write_channel = channel_manager->create_disk_write_channel(max_nr);
-	FileChannel *file_read_channel = channel_manager->create_file_read_channel(max_nr);
-	FileChannel *file_write_channel = channel_manager->create_file_write_channel(max_nr);
+	DiskChannel *disk_channel = channel_manager->create_disk_channel(bgwork);
+	FileChannel *file_channel = channel_manager->create_file_channel(bgwork);
         //channels.push_back(remote_channel);
-	channels.push_back(disk_read_channel);
-	channels.push_back(disk_write_channel);
-	channels.push_back(file_read_channel);
-	channels.push_back(file_write_channel);
+	//channels.push_back(disk_read_channel);
+	//channels.push_back(disk_write_channel);
+	//channels.push_back(file_read_channel);
+	//channels.push_back(file_write_channel);
         r->add_dma_channel(remote_channel);
-	r->add_dma_channel(disk_read_channel);
-	r->add_dma_channel(disk_write_channel);
-	r->add_dma_channel(file_read_channel);
-	r->add_dma_channel(file_write_channel);
+	r->add_dma_channel(disk_channel);
+	r->add_dma_channel(file_channel);
 #ifdef REALM_USE_HDF5
 	HDF5Channel *hdf5_channel = channel_manager->create_hdf5_channel(bgwork);
         //channels.push_back(hdf5_channel);

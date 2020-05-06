@@ -922,10 +922,8 @@ namespace Realm {
         memcpy_channel = NULL;
         gasnet_read_channel = gasnet_write_channel = NULL;
         remote_write_channel = NULL;
-        disk_read_channel = NULL;
-        disk_write_channel = NULL;
-        file_read_channel = NULL;
-        file_write_channel = NULL;
+        disk_channel = NULL;
+        file_channel = NULL;
 #ifdef REALM_USE_HDF5
         hdf5_channel = NULL;
 #endif
@@ -936,10 +934,8 @@ namespace Realm {
       GASNetChannel* create_gasnet_read_channel(long max_nr);
       GASNetChannel* create_gasnet_write_channel(long max_nr);
       RemoteWriteChannel* create_remote_write_channel(BackgroundWorkManager *bgwork);
-      DiskChannel* create_disk_read_channel(long max_nr);
-      DiskChannel* create_disk_write_channel(long max_nr);
-      FileChannel* create_file_read_channel(long max_nr);
-      FileChannel* create_file_write_channel(long max_nr);
+      DiskChannel* create_disk_channel(BackgroundWorkManager *bgwork);
+      FileChannel* create_file_channel(BackgroundWorkManager *bgwork);
       AddressSplitChannel *create_addr_split_channel();
 #ifdef REALM_USE_CUDA
       GPUChannel* create_gpu_to_fb_channel(Cuda::GPU* src_gpu,
@@ -967,17 +963,11 @@ namespace Realm {
       RemoteWriteChannel* get_remote_write_channel() {
         return remote_write_channel;
       }
-      DiskChannel* get_disk_read_channel() {
-        return disk_read_channel;
+      DiskChannel* get_disk_channel() {
+        return disk_channel;
       }
-      DiskChannel* get_disk_write_channel() {
-        return disk_write_channel;
-      }
-      FileChannel* get_file_read_channel() {
-        return file_read_channel;
-      }
-      FileChannel* get_file_write_channel() {
-        return file_write_channel;
+      FileChannel* get_file_channel() {
+        return file_channel;
       }
       AddressSplitChannel *get_address_split_channel() {
 	return addr_split_channel;
@@ -1017,8 +1007,8 @@ namespace Realm {
       MemcpyChannel* memcpy_channel;
       GASNetChannel *gasnet_read_channel, *gasnet_write_channel;
       RemoteWriteChannel* remote_write_channel;
-      DiskChannel *disk_read_channel, *disk_write_channel;
-      FileChannel *file_read_channel, *file_write_channel;
+      DiskChannel *disk_channel;
+      FileChannel *file_channel;
 #ifdef REALM_USE_CUDA
       std::map<Cuda::GPU*, GPUChannel*> gpu_to_fb_channels, gpu_in_fb_channels, gpu_from_fb_channels, gpu_peer_fb_channels;
 #endif

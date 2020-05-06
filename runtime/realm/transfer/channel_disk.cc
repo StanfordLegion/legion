@@ -37,13 +37,13 @@ namespace Realm {
 	kind = XFER_FILE_READ;
 	inst = inputs_info[0].inst;
 	assert(inst.exists());
-	channel = get_channel_manager()->get_file_read_channel();
+	channel = get_channel_manager()->get_file_channel();
       } else if((outputs_info.size() == 1) &&
 		(output_ports[0].mem->kind == MemoryImpl::MKIND_FILE)) {
 	kind = XFER_FILE_WRITE;
 	inst = outputs_info[0].inst;
 	assert(inst.exists());
-	channel = get_channel_manager()->get_file_write_channel();
+	channel = get_channel_manager()->get_file_channel();
       } else {
 	assert(0 && "neither source nor dest of FileXferDes is file!?");
       }
@@ -118,6 +118,23 @@ namespace Realm {
       return new_nr;
     }
 
+    bool FileXferDes::progress_xd(FileChannel *channel,
+				  TimeLimit work_until)
+    {
+      Request *rq;
+      bool did_work = false;
+      do {
+	long count = get_requests(&rq, 1);
+	if(count > 0) {
+	  channel->submit(&rq, count);
+	  did_work = true;
+	} else
+	  break;
+      } while(!work_until.is_expired());
+
+      return did_work;
+    }
+
     void FileXferDes::notify_request_read_done(Request* req)
     {
       default_notify_request_read_done(req);
@@ -152,7 +169,7 @@ namespace Realm {
       if((inputs_info.size() >= 1) &&
 	 (input_ports[0].mem->kind == MemoryImpl::MKIND_DISK)) {
 	kind = XFER_DISK_READ;
-	channel = get_channel_manager()->get_disk_read_channel();
+	channel = get_channel_manager()->get_disk_channel();
 	// all input ports should agree on which fd they target
 	fd = ((Realm::DiskMemory*)(input_ports[0].mem))->fd;
 	for(size_t i = 1; i < input_ports.size(); i++)
@@ -160,7 +177,7 @@ namespace Realm {
       } else if((outputs_info.size() >= 1) &&
 		(output_ports[0].mem->kind == MemoryImpl::MKIND_DISK)) {
 	kind = XFER_DISK_WRITE;
-	channel = get_channel_manager()->get_disk_write_channel();
+	channel = get_channel_manager()->get_disk_channel();
 	// all output ports should agree on which fd they target
 	fd = ((Realm::DiskMemory*)(output_ports[0].mem))->fd;
 	for(size_t i = 1; i < output_ports.size(); i++)
@@ -210,6 +227,23 @@ namespace Realm {
       return new_nr;
     }
 
+    bool DiskXferDes::progress_xd(DiskChannel *channel,
+				  TimeLimit work_until)
+    {
+      Request *rq;
+      bool did_work = false;
+      do {
+	long count = get_requests(&rq, 1);
+	if(count > 0) {
+	  channel->submit(&rq, count);
+	  did_work = true;
+	} else
+	  break;
+      } while(!work_until.is_expired());
+
+      return did_work;
+    }
+
     void DiskXferDes::notify_request_read_done(Request* req)
     {
       default_notify_request_read_done(req);
@@ -230,21 +264,23 @@ namespace Realm {
 						    Memory::Z_COPY_MEM };
       static const size_t num_cpu_mem_kinds = sizeof(cpu_mem_kinds) / sizeof(cpu_mem_kinds[0]);
 
-    FileChannel::FileChannel(long max_nr, XferDesKind _kind)
-      : Channel(_kind)
+    FileChannel::FileChannel(BackgroundWorkManager *bgwork)
+      : SingleXDQChannel<FileChannel, FileXferDes>(bgwork,
+						   XFER_NONE /*FIXME*/,
+						   "file channel")
     {
       unsigned bw = 0; // TODO
       unsigned latency = 0;
       // any combination of SYSTEM/REGDMA/Z_COPY_MEM
-      for(size_t i = 0; i < num_cpu_mem_kinds; i++)
-	if(_kind == XFER_FILE_READ)
-	  add_path(Memory::FILE_MEM, false,
-		   cpu_mem_kinds[i], false,
-		   bw, latency, false, false, XFER_FILE_READ);
-	else
-	  add_path(cpu_mem_kinds[i], false,
-		   Memory::FILE_MEM, false,
-		   bw, latency, false, false, XFER_FILE_WRITE);
+      for(size_t i = 0; i < num_cpu_mem_kinds; i++) {
+	add_path(Memory::FILE_MEM, false,
+		 cpu_mem_kinds[i], false,
+		 bw, latency, false, false, XFER_FILE_READ);
+
+	add_path(cpu_mem_kinds[i], false,
+		 Memory::FILE_MEM, false,
+		 bw, latency, false, false, XFER_FILE_WRITE);
+      }
     }
 
     FileChannel::~FileChannel()
@@ -259,7 +295,7 @@ namespace Realm {
 	// no serdez support
 	assert(req->xd->input_ports[req->src_port_idx].serdez_op == 0);
 	assert(req->xd->output_ports[req->dst_port_idx].serdez_op == 0);
-        switch (kind) {
+        switch (req->xd->kind) {
           case XFER_FILE_READ:
             aio_ctx->enqueue_read(req->fd, req->file_off,
                                   req->nbytes, req->mem_base, req);
@@ -275,31 +311,23 @@ namespace Realm {
       return nr;
     }
 
-    void FileChannel::pull()
-    {
-      AsyncFileIOContext::get_singleton()->make_progress();
-    }
-
-    long FileChannel::available()
-    {
-      return AsyncFileIOContext::get_singleton()->available();
-    }
-
-    DiskChannel::DiskChannel(long max_nr, XferDesKind _kind)
-      : Channel(_kind)
+    DiskChannel::DiskChannel(BackgroundWorkManager *bgwork)
+      : SingleXDQChannel<DiskChannel, DiskXferDes>(bgwork,
+						   XFER_NONE /*FIXME*/,
+						   "disk channel")
     {
       unsigned bw = 0; // TODO
       unsigned latency = 0;
       // any combination of SYSTEM/REGDMA/Z_COPY_MEM
-      for(size_t i = 0; i < num_cpu_mem_kinds; i++)
-	if(_kind == XFER_DISK_READ)
-	  add_path(Memory::DISK_MEM, false,
-		   cpu_mem_kinds[i], false,
-		   bw, latency, false, false, XFER_DISK_READ);
-	else
-	  add_path(cpu_mem_kinds[i], false,
-		   Memory::DISK_MEM, false,
-		   bw, latency, false, false, XFER_DISK_WRITE);
+      for(size_t i = 0; i < num_cpu_mem_kinds; i++) {
+	add_path(Memory::DISK_MEM, false,
+		 cpu_mem_kinds[i], false,
+		 bw, latency, false, false, XFER_DISK_READ);
+
+	add_path(cpu_mem_kinds[i], false,
+		 Memory::DISK_MEM, false,
+		 bw, latency, false, false, XFER_DISK_WRITE);
+      }
     }
 
     DiskChannel::~DiskChannel()
@@ -314,7 +342,7 @@ namespace Realm {
 	// no serdez support
 	assert(req->xd->input_ports[req->src_port_idx].serdez_op == 0);
 	assert(req->xd->output_ports[req->dst_port_idx].serdez_op == 0);
-        switch (kind) {
+        switch (req->xd->kind) {
           case XFER_DISK_READ:
             aio_ctx->enqueue_read(req->fd, req->disk_off,
                                   req->nbytes, req->mem_base, req);
@@ -328,16 +356,6 @@ namespace Realm {
         }
       }
       return nr;
-    }
-
-    void DiskChannel::pull()
-    {
-      AsyncFileIOContext::get_singleton()->make_progress();
-    }
-
-    long DiskChannel::available()
-    {
-      return AsyncFileIOContext::get_singleton()->available();
     }
 
 }; // namespace Realm

@@ -1393,7 +1393,8 @@ namespace Realm {
     }
 
     AsyncFileIOContext::AsyncFileIOContext(int _max_depth)
-      : max_depth(_max_depth)
+      : BackgroundWorkItem("async file IO")
+      , max_depth(_max_depth)
     {
 #ifdef REALM_USE_KERNEL_AIO
       aio_ctx = 0;
@@ -1428,8 +1429,10 @@ namespace Realm {
 #else
       PosixAIOWrite *op = new PosixAIOWrite(fd, offset, bytes, buffer, req);
 #endif
+      bool was_empty;
       {
 	AutoLock<> al(mutex);
+	was_empty = launched_operations.empty();
 	if(launched_operations.size() < (size_t)max_depth) {
 	  op->launch();
 	  launched_operations.push_back(op);
@@ -1437,6 +1440,8 @@ namespace Realm {
 	  pending_operations.push_back(op);
 	}
       }
+      if(was_empty)
+	make_active();
     }
 
     void AsyncFileIOContext::enqueue_read(int fd, size_t offset, 
@@ -1449,8 +1454,10 @@ namespace Realm {
 #else
       PosixAIORead *op = new PosixAIORead(fd, offset, bytes, buffer, req);
 #endif
+      bool was_empty;
       {
 	AutoLock<> al(mutex);
+	was_empty = launched_operations.empty();
 	if(launched_operations.size() < (size_t)max_depth) {
 	  op->launch();
 	  launched_operations.push_back(op);
@@ -1458,13 +1465,17 @@ namespace Realm {
 	  pending_operations.push_back(op);
 	}
       }
+      if(was_empty)
+	make_active();
     }
 
     void AsyncFileIOContext::enqueue_fence(DmaRequest *req)
     {
       AIOFenceOp *op = new AIOFenceOp(req);
+      bool was_empty;
       {
 	AutoLock<> al(mutex);
+	was_empty = launched_operations.empty();
 	if(launched_operations.size() < (size_t)max_depth) {
 	  op->launch();
 	  launched_operations.push_back(op);
@@ -1472,6 +1483,8 @@ namespace Realm {
 	  pending_operations.push_back(op);
 	}
       }
+      if(was_empty)
+	make_active();
     }
 
     bool AsyncFileIOContext::empty(void)
@@ -1532,6 +1545,77 @@ namespace Realm {
 	op->launch();
 	launched_operations.push_back(op);
       }
+    }
+
+    void AsyncFileIOContext::do_work(TimeLimit work_until)
+    {
+      // first, reap as many events as we can - oldest first
+#ifdef REALM_USE_KERNEL_AIO
+      assert(!launched_operations.empty());
+      while {
+	struct io_event events[8];
+	struct timespec ts;
+	ts.tv_sec = 0;
+	ts.tv_nsec = 0;  // no delay
+	int ret = io_getevents(aio_ctx, 1, 8, events, &ts);
+	if(ret == 0) break;
+	log_aio.debug("io_getevents returned %d events", ret);
+	for(int i = 0; i < ret; i++) {
+	  AIOOperation *op = (AIOOperation *)(events[i].data);
+	  log_aio.debug("io_getevents: event[%d] = %p", i, op);
+	  op->completed = true;
+	}
+	// only try again if we got a full set the time before
+	if(ret < 8) break;
+      } while(!work_until.is_expired());
+#endif
+
+      // have to check for completed ops even if we didn't get any this
+      //  time - there may have been some last time that we didn't have
+      //  enough time to notify
+      {
+	AutoLock<> al(mutex);
+
+	// now actually mark events completed in oldest-first order
+	while(!work_until.is_expired()) {
+	  AIOOperation *op = launched_operations.front();
+	  if(!op->check_completion()) break;
+	  log_aio.debug("aio op completed: op=%p", op);
+	  // <NEW_DMA>
+	  if (op->req != NULL) {
+	    Request* request = (Request*)(op->req);
+	    request->xd->notify_request_read_done(request);
+	    request->xd->notify_request_write_done(request);
+	  }
+	  // </NEW_DMA>
+	  delete op;
+	  launched_operations.pop_front();
+	  if(launched_operations.empty()) {
+	    if(pending_operations.empty()) {
+	      // finished work - we can return without requeuing ourselves
+	      return;
+	    } else {
+	      // launch some pending work below
+	      break;
+	    }
+	  }
+	}
+
+	// finally, if there are any pending ops, and room for them, and
+	//   time left, launch them
+	while((launched_operations.size() < (size_t)max_depth) &&
+	      !pending_operations.empty() &&
+	      !work_until.is_expired()) {
+	  AIOOperation *op = pending_operations.front();
+	  pending_operations.pop_front();
+	  op->launch();
+	  launched_operations.push_back(op);
+	}
+      }
+
+      // if we fall through to here, there's still polling for either old
+      //  or newly launched work to do
+      make_active();
     }
 
     /*static*/
@@ -3138,8 +3222,9 @@ namespace Realm {
       log_dma.info("dma worker thread created");
 
       while(!shutdown_flag) {
-	aio_context->make_progress();
-	bool aio_idle = aio_context->empty();
+	//aio_context->make_progress();
+	//bool aio_idle = aio_context->empty();
+	bool aio_idle = true;  // not polling here anymore
 
 	// get a request, sleeping as necessary
 	DmaRequest *r = dequeue_request(aio_idle);
@@ -3192,6 +3277,7 @@ namespace Realm {
     {
       //log_dma.add_stream(&std::cerr, Logger::LEVEL_DEBUG, false, false);
       aio_context = new AsyncFileIOContext(256);
+      aio_context->add_to_manager(bgwork);
       start_channel_manager(count, pinned, max_nr, crs, bgwork);
       ib_req_queue = new PendingIBQueue();
     }
@@ -3201,6 +3287,9 @@ namespace Realm {
       stop_channel_manager();
       delete ib_req_queue;
       ib_req_queue = 0;
+#ifdef DEBUG_REALM
+      aio_context->shutdown_work_item();
+#endif
       delete aio_context;
       aio_context = 0;
     }

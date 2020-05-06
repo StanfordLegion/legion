@@ -505,7 +505,7 @@ namespace Realm {
 
     class Request;
 
-    class AsyncFileIOContext {
+    class AsyncFileIOContext : public BackgroundWorkItem {
     public:
       AsyncFileIOContext(int _max_depth);
       ~AsyncFileIOContext(void);
@@ -516,9 +516,10 @@ namespace Realm {
 
       bool empty(void);
       long available(void);
-      void make_progress(void);
 
       static AsyncFileIOContext* get_singleton(void);
+
+      virtual void do_work(TimeLimit work_until);
 
       class AIOOperation {
       public:
@@ -528,6 +529,9 @@ namespace Realm {
 	bool completed;
         void* req;
       };
+
+    protected:
+      void make_progress(void);
 
       int max_depth;
       std::deque<AIOOperation *> launched_operations, pending_operations;
