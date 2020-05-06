@@ -370,6 +370,7 @@ class Future(object):
             if value_type.size > 0:
                 value_ptr = ffi.new(ffi.getctype(value_type.cffi_type, '*'), value)
             else:
+                assert value is None
                 value_ptr = ffi.NULL
             value_size = value_type.size
             self.handle = c.legion_future_from_untyped_pointer(_my.ctx.runtime, value_ptr, value_size)
@@ -2413,7 +2414,9 @@ class MustEpochLaunch(object):
         self.launcher.launch()
 
 def execution_fence(block=False, future=False):
-    f = Future(c.legion_runtime_issue_execution_fence(_my.ctx.runtime, _my.ctx.context), value_type=void)
+    f = Future.from_cdata(
+        c.legion_runtime_issue_execution_fence(_my.ctx.runtime, _my.ctx.context),
+        value_type=void)
     if block or future:
         if block:
             f.get()
