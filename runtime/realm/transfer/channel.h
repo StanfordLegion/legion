@@ -909,15 +909,17 @@ namespace Realm {
     class FileChannel;
     class DiskChannel;
 
-    class AddressSplitChannel : public Channel {
+    class AddressSplitXferDesBase;
+
+    class AddressSplitChannel : public SingleXDQChannel<AddressSplitChannel, AddressSplitXferDesBase> {
     public:
-      AddressSplitChannel();
+      AddressSplitChannel(BackgroundWorkManager *bgwork);
       virtual ~AddressSplitChannel();
+
+      // do as many of these concurrently as we like
+      static const bool is_ordered = false;
       
-      virtual long progress_xd(XferDes *xd, long max_nr);
-      virtual long submit(Request** requests, long nr);
-      virtual void pull();
-      virtual long available();
+      virtual long submit(Request** requests, long nr) { assert(0); return 0; }
     };
   
     class ChannelManager {
@@ -940,7 +942,7 @@ namespace Realm {
       RemoteWriteChannel* create_remote_write_channel(BackgroundWorkManager *bgwork);
       DiskChannel* create_disk_channel(BackgroundWorkManager *bgwork);
       FileChannel* create_file_channel(BackgroundWorkManager *bgwork);
-      AddressSplitChannel *create_addr_split_channel();
+      AddressSplitChannel *create_addr_split_channel(BackgroundWorkManager *bgwork);
 #ifdef REALM_USE_CUDA
       GPUChannel* create_gpu_to_fb_channel(Cuda::GPU* src_gpu,
 					   BackgroundWorkManager *bgwork);

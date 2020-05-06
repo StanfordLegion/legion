@@ -3662,9 +3662,9 @@ namespace Realm {
         return hdf5_channel;
       }
 #endif
-      AddressSplitChannel *ChannelManager::create_addr_split_channel() {
+      AddressSplitChannel *ChannelManager::create_addr_split_channel(BackgroundWorkManager *bgwork) {
 	assert(addr_split_channel == 0);
-	addr_split_channel = new AddressSplitChannel;
+	addr_split_channel = new AddressSplitChannel(bgwork);
 	return addr_split_channel;
       }
 
@@ -3800,11 +3800,11 @@ namespace Realm {
         MemcpyChannel* memcpy_channel = channel_manager->create_memcpy_channel(bgwork);
 	GASNetChannel* gasnet_read_channel = channel_manager->create_gasnet_read_channel(bgwork);
 	GASNetChannel* gasnet_write_channel = channel_manager->create_gasnet_write_channel(bgwork);
-	AddressSplitChannel *addr_split_channel = channel_manager->create_addr_split_channel();
+	AddressSplitChannel *addr_split_channel = channel_manager->create_addr_split_channel(bgwork);
         //channels.push_back(memcpy_channel);
         //channels.push_back(gasnet_read_channel);
         //channels.push_back(gasnet_write_channel);
-	channels.push_back(addr_split_channel);
+	//channels.push_back(addr_split_channel);
 	r->add_dma_channel(memcpy_channel);
 	r->add_dma_channel(gasnet_read_channel);
 	r->add_dma_channel(gasnet_write_channel);

@@ -1426,7 +1426,7 @@ namespace Realm {
 						 element_size,
 						 spaces);
 
-      get_xdq_singleton()->enqueue_xferDes_local(xd);
+      xd->channel->enqueue_ready_xd(xd);
     }
   };
   
@@ -1479,7 +1479,7 @@ namespace Realm {
 			    XferDesFence* _complete_fence);
 
   public:
-    virtual bool progress() = 0;
+    virtual bool progress_xd(AddressSplitChannel *channel, TimeLimit work_until) = 0;
 
     long get_requests(Request** requests, long nr);
     void notify_request_read_done(Request* req);
@@ -1507,7 +1507,7 @@ namespace Realm {
 
     virtual Event request_metadata();
 
-    virtual bool progress();
+    virtual bool progress_xd(AddressSplitChannel *channel, TimeLimit work_until);
 
   protected:
     int find_point_in_spaces(Point<N,T> p, int guess_idx) const;
@@ -1561,7 +1561,7 @@ namespace Realm {
 						 bytes_per_element,
 						 spaces);
 
-      get_xdq_singleton()->enqueue_xferDes_local(xd);
+      xd->channel->enqueue_ready_xd(xd);
     } else {
       // marking the transfer started has to happen locally
       if(mark_started)
@@ -1685,7 +1685,8 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  bool AddressSplitXferDes<N,T>::progress()
+  bool AddressSplitXferDes<N,T>::progress_xd(AddressSplitChannel *channel,
+					     TimeLimit work_until)
   {
     assert(!iteration_completed);
 
@@ -1809,39 +1810,14 @@ namespace Realm {
   // class AddressSplitChannel
   //
 
-  AddressSplitChannel::AddressSplitChannel()
-    : Channel(XFER_ADDR_SPLIT)
+  AddressSplitChannel::AddressSplitChannel(BackgroundWorkManager *bgwork)
+    : SingleXDQChannel<AddressSplitChannel, AddressSplitXferDesBase>(bgwork,
+								     XFER_ADDR_SPLIT,
+								     "address split")
   {}
 
   AddressSplitChannel::~AddressSplitChannel()
   {}
-
-  long AddressSplitChannel::progress_xd(XferDes *xd, long max_nr)
-  {
-    AddressSplitXferDesBase *asxd = checked_cast<AddressSplitXferDesBase *>(xd);
-    long count = 0;
-    while(count < max_nr) {
-      if(!asxd->progress()) break;
-      count++;
-    }
-    return count;
-  }
-
-  long AddressSplitChannel::submit(Request** requests, long nr)
-  {
-    // unused
-    assert(0);
-  }
-  
-  void AddressSplitChannel::pull()
-  {
-    // do nothing
-  }
-  
-  long AddressSplitChannel::available()
-  {
-    return 100; // always claim to have space
-  }
 
   
   ////////////////////////////////////////////////////////////////////////
