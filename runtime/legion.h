@@ -2255,6 +2255,8 @@ namespace Legion {
       friend class UnsafeFieldAccessor;
       template<typename, PrivilegeMode>
       friend class ArraySyntax::AccessorRefHelper;
+      template<typename>
+      friend class ArraySyntax::AffineRefHelper;
       Realm::RegionInstance get_instance_info(PrivilegeMode mode, 
                                               FieldID fid, size_t field_size,
                                               void *realm_is, TypeTag type_tag,
