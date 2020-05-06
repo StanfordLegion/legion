@@ -2237,7 +2237,7 @@ namespace Legion {
       template<int DIM, typename COORD_T>
       operator Rect<DIM,COORD_T>(void) const;
     protected:
-      // These methods can only be accessed by the FieldAccessor class
+      // These methods can only be accessed by accessor classes
       template<PrivilegeMode, typename, int, typename, typename, bool>
       friend class FieldAccessor;
       template<typename, bool, int, typename, typename, bool>
@@ -2246,6 +2246,8 @@ namespace Legion {
       friend class MultiRegionAccessor;
       template<typename, int, typename, typename>
       friend class UnsafeFieldAccessor;
+      template<typename, PrivilegeMode>
+      friend class ArraySyntax::AccessorRefHelper;
       Realm::RegionInstance get_instance_info(PrivilegeMode mode, 
                                               FieldID fid, size_t field_size,
                                               void *realm_is, TypeTag type_tag,
@@ -2452,9 +2454,6 @@ namespace Legion {
      *
      *  - FT read(const Point<N,T>&) const
      *  - void write(const Point<N,T>&, FT val) const
-     *  - FT* ptr(const Point<N,T>&) const (Affine Accessor only)
-     *  - FT* ptr(const Rect<N,T>&) const (Affine Accessor only, must be dense)
-     *  - FT* ptr(const Rect<N,T>&, size_t strides[N]) const (Affine only)
      *  - FT& operator[](const Point<N,T>&) const (Affine Accessor only)
      *  - template<typename REDOP, bool EXCLUSIVE> 
      *      void reduce(const Point<N,T>&, REDOP::RHS); (Affine Accessor only)

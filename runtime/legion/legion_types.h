@@ -146,6 +146,9 @@ namespace Legion {
     class MultiRegionAccessor;
   template<typename,int,typename,typename>
     class UnsafeFieldAccessor;
+  namespace ArraySyntax {
+    template<typename, PrivilegeMode> class AccessorRefHelper;
+  }
   class IndexIterator;
   template<typename T> struct ColoredPoints; 
   struct InputArgs;
