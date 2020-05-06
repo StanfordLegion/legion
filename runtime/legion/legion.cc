@@ -3686,6 +3686,24 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_partition_by_weights(Context ctx,
+                                    IndexSpace parent,
+                                    const std::map<DomainPoint,size_t> &weights,
+                                    IndexSpace color_space,
+                                    size_t granularity, Color color)
+    //--------------------------------------------------------------------------
+    {
+      ArgumentMap argmap;
+      for (std::map<DomainPoint,size_t>::const_iterator it = 
+            weights.begin(); it != weights.end(); it++)
+        argmap.set_point(it->first,
+            TaskArgument(&it->second, sizeof(it->second)));
+      FutureMap future_map(argmap.impl->freeze(ctx));
+      return ctx->create_partition_by_weights(parent, future_map, color_space,
+                                              granularity, color);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition Runtime::create_partition_by_weights(Context ctx,
                                                 IndexSpace parent,
                                                 const FutureMap &weights,
                                                 IndexSpace color_space,

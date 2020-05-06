@@ -83,21 +83,6 @@ local function convert_ctor_to_constant(node)
   end)))
 end
 
-local evaluate_cache = data.newmap()
-local function evaluate(node)
-  assert(node.lhs:is(ast.typed.expr.Constant) and node.rhs:is(ast.typed.expr.Constant))
-  local key = data.newtuple(node.lhs.value, node.op, node.rhs.value)
-  local value = evaluate_cache[key]
-  if value == nil then
-    value = (terra()
-      return [base.quote_binary_op(node.op, node.lhs.value, node.rhs.value)]
-    end)()
-    evaluate_cache[key] = value
-  end
-  assert(value ~= nil)
-  return value
-end
-
 function convert_constant_expr(node)
   if node:is(ast.typed.expr.Constant) then
     return convert_terra_constant(node.value)
@@ -108,7 +93,48 @@ function convert_constant_expr(node)
   elseif node:is(ast.typed.expr.Unary) and node.op == "-" then
     return -convert_constant_expr(node.rhs)
   elseif node:is(ast.typed.expr.Binary) then
-    return evaluate(node)
+    local op = node.op
+    if op == "*" then
+      return convert_constant_expr(node.lhs) * convert_constant_expr(node.rhs)
+    elseif op == "/" then
+      return convert_constant_expr(node.lhs) / convert_constant_expr(node.rhs)
+    elseif op == "%" then
+      return convert_constant_expr(node.lhs) % convert_constant_expr(node.rhs)
+    elseif op == "+" then
+      return convert_constant_expr(node.lhs) + convert_constant_expr(node.rhs)
+    elseif op == "-" then
+      return convert_constant_expr(node.lhs) - convert_constant_expr(node.rhs)
+    elseif op == "<" then
+      return convert_constant_expr(node.lhs) < convert_constant_expr(node.rhs)
+    elseif op == ">" then
+      return convert_constant_expr(node.lhs) > convert_constant_expr(node.rhs)
+    elseif op == "<=" then
+      return convert_constant_expr(node.lhs) <= convert_constant_expr(node.rhs)
+    elseif op == ">=" then
+      return convert_constant_expr(node.lhs) >= convert_constant_expr(node.rhs)
+    elseif op == "==" then
+      return convert_constant_expr(node.lhs) == convert_constant_expr(node.rhs)
+    elseif op == "~=" then
+      return convert_constant_expr(node.lhs) ~= convert_constant_expr(node.rhs)
+    elseif op == "and" then
+      return convert_constant_expr(node.lhs) and convert_constant_expr(node.rhs)
+    elseif op == "or" then
+      return convert_constant_expr(node.lhs) or convert_constant_expr(node.rhs)
+    elseif op == "max" then
+      local lhs, rhs = convert_constant_expr(node.lhs), convert_constant_expr(node.rhs)
+      if lhs < rhs then
+        return rhs
+      end
+      return lhs
+    elseif op == "min" then
+      local lhs, rhs = convert_constant_expr(node.lhs), convert_constant_expr(node.rhs)
+      if lhs < rhs then
+        return lhs
+      end
+      return rhs
+    else
+      assert(false)
+    end
   else
     assert(false)
   end

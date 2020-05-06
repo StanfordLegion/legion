@@ -2244,7 +2244,7 @@ namespace Legion {
       template<int DIM, typename COORD_T>
       operator Rect<DIM,COORD_T>(void) const;
     protected:
-      // These methods can only be accessed by the FieldAccessor class
+      // These methods can only be accessed by accessor classes
       template<PrivilegeMode, typename, int, typename, typename, bool>
       friend class FieldAccessor;
       template<typename, bool, int, typename, typename, bool>
@@ -2253,6 +2253,8 @@ namespace Legion {
       friend class MultiRegionAccessor;
       template<typename, int, typename, typename>
       friend class UnsafeFieldAccessor;
+      template<typename, PrivilegeMode>
+      friend class ArraySyntax::AccessorRefHelper;
       Realm::RegionInstance get_instance_info(PrivilegeMode mode, 
                                               FieldID fid, size_t field_size,
                                               void *realm_is, TypeTag type_tag,
@@ -2459,9 +2461,6 @@ namespace Legion {
      *
      *  - FT read(const Point<N,T>&) const
      *  - void write(const Point<N,T>&, FT val) const
-     *  - FT* ptr(const Point<N,T>&) const (Affine Accessor only)
-     *  - FT* ptr(const Rect<N,T>&) const (Affine Accessor only, must be dense)
-     *  - FT* ptr(const Rect<N,T>&, size_t strides[N]) const (Affine only)
      *  - FT& operator[](const Point<N,T>&) const (Affine Accessor only)
      *  - template<typename REDOP, bool EXCLUSIVE> 
      *      void reduce(const Point<N,T>&, REDOP::RHS); (Affine Accessor only)
@@ -4024,8 +4023,21 @@ namespace Legion {
                     const std::map<Point<COLOR_DIM,COLOR_COORD_T>,int> &weights,
                     IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
                     size_t granularity = 1, Color color = AUTO_GENERATE_ID);
+      // 64-bit versions
+      IndexPartition create_partition_by_weights(Context ctx, IndexSpace parent,
+                                    const std::map<DomainPoint,size_t> &weights,
+                                    IndexSpace color_space,
+                                    size_t granularity = 1,
+                                    Color color = AUTO_GENERATE_ID);
+      template<int DIM, typename COORD_T, int COLOR_DIM, typename COLOR_COORD_T>
+      IndexPartitionT<DIM,COORD_T> create_partition_by_weights(Context ctx,
+                 IndexSpaceT<DIM,COORD_T> parent,
+                 const std::map<Point<COLOR_DIM,COLOR_COORD_T>,size_t> &weights,
+                 IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
+                 size_t granularity = 1, Color color = AUTO_GENERATE_ID);
       // Alternate versions of the above method that take a future map where
-      // the values in the future map will be interpretted as a integer weights
+      // the values in the future map will be interpretted as integer weights
+      // You can use this method with both 32 and 64 bit weights
       IndexPartition create_partition_by_weights(Context ctx, IndexSpace parent,
                                                  const FutureMap &weights,
                                                  IndexSpace color_space,

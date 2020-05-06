@@ -384,6 +384,78 @@ namespace Legion {
         const Point<N,T> point;
       };
 
+      template<typename FT, PrivilegeMode P>
+      class AccessorRefHelper {
+      public:
+        AccessorRefHelper(const Realm::AccessorRefHelper<FT> &h) : helper(h) { }
+      public:
+        // read
+        inline operator FT(void) const { return helper; }
+        // writes
+        inline AccessorRefHelper<FT,P>& operator=(const FT &newval)
+          { helper = newval; return *this; }
+        template<PrivilegeMode P2>
+        inline AccessorRefHelper<FT,P>& operator=(
+                const AccessorRefHelper<FT,P2> &rhs)
+          { helper = rhs.helper; return *this; }
+      protected:
+        Realm::AccessorRefHelper<FT> helper;
+      };
+
+      template<typename FT>
+      class AccessorRefHelper<FT,READ_ONLY> {
+      public:
+        AccessorRefHelper(const Realm::AccessorRefHelper<FT> &h) : helper(h) { }
+        // read
+        inline operator FT(void) const { return helper; }
+      private:
+        // no writes allowed
+        inline AccessorRefHelper<FT,READ_ONLY>& operator=(
+                const AccessorRefHelper<FT,READ_ONLY> &rhs)
+          { helper = rhs.helper; return *this; }
+      protected:
+        Realm::AccessorRefHelper<FT> helper;
+      };
+
+      // NO_ACCESS means we dynamically check the privilege
+      template<typename FT>
+      class AccessorRefHelper<FT,NO_ACCESS> {
+      public:
+        AccessorRefHelper(const Realm::AccessorRefHelper<FT> &h, FieldID fid,
+                          const DomainPoint &pt, PrivilegeMode p)
+          : helper(h), point(pt), field(fid), privilege(p) { }
+      public:
+        // read
+        inline operator FT(void) const 
+          { 
+            if ((privilege & READ_PRIV) == 0)
+              PhysicalRegion::fail_privilege_check(point, field, privilege);
+            return helper; 
+          }
+        // writes
+        inline AccessorRefHelper<FT,NO_ACCESS>& operator=(const FT &newval)
+          { 
+            if ((privilege & WRITE_PRIV) == 0)
+              PhysicalRegion::fail_privilege_check(point, field, privilege);
+            helper = newval; 
+            return *this; 
+          }
+        template<PrivilegeMode P2>
+        inline AccessorRefHelper<FT,NO_ACCESS>& operator=(
+                const AccessorRefHelper<FT,P2> &rhs)
+          { 
+            if ((privilege & WRITE_PRIV) == 0)
+              PhysicalRegion::fail_privilege_check(point, field, privilege);
+            helper = rhs.helper; 
+            return *this; 
+          }
+      protected:
+        Realm::AccessorRefHelper<FT> helper;
+        DomainPoint point;
+        FieldID field;
+        PrivilegeMode privilege;
+      };
+
       // A small helper class that helps provide some syntactic sugar for
       // indexing accessors like a multi-dimensional array for generic accessors
       template<typename A, typename FT, int N, typename T, 
@@ -417,7 +489,7 @@ namespace Legion {
             point[i] = p[i];
         }
       public:
-        inline Realm::AccessorRefHelper<FT> operator[](T val)
+        inline AccessorRefHelper<FT,P> operator[](T val)
         {
           point[N-1] = val;
           return accessor[point];
@@ -437,7 +509,7 @@ namespace Legion {
             point[i] = p[i];
         }
       public:
-        inline const Realm::AccessorRefHelper<FT> operator[](T val)
+        inline AccessorRefHelper<FT,READ_ONLY> operator[](T val)
         {
           point[N-1] = val;
           return accessor[point];
@@ -491,6 +563,7 @@ namespace Legion {
         const A &accessor;
         Point<M,T> point;
       };
+
       // Specialization for M = N
       template<typename A, typename FT, int N, typename T, PrivilegeMode P>
       class AffineSyntaxHelper<A,FT,N,T,N,P> {
@@ -513,6 +586,7 @@ namespace Legion {
         const A &accessor;
         Point<N,T> point;
       };
+
       // Further specialization for M = N and read-only
       template<typename A, typename FT, int N, typename T>
       class AffineSyntaxHelper<A,FT,N,T,N,READ_ONLY> {
@@ -553,6 +627,110 @@ namespace Legion {
         {
           point[N-1] = val;
           return ReductionHelper<A,FT,N,T>(accessor, point);
+        }
+      public:
+        const A &accessor;
+        Point<N,T> point;
+      };
+
+      // Helper class for affine syntax that behaves like a
+      // pointer/reference, but does dynamic privilege checks
+      template<typename FT>
+      class AffineRefHelper {
+      public:
+        __CUDA_HD__
+        AffineRefHelper(FT &r,FieldID fid,const DomainPoint &pt,PrivilegeMode p)
+          : ref(r),
+#ifndef __CUDA_ARCH__
+            point(pt), field(fid), 
+#endif
+            privilege(p) { }
+      public:
+        // read
+        __CUDA_HD__
+        inline operator FT(void) const 
+          { 
+#ifdef __CUDA_ARCH__
+            assert(privilege & READ_PRIV);
+#else
+            if ((privilege & READ_PRIV) == 0)
+              PhysicalRegion::fail_privilege_check(point, field, privilege);
+#endif
+            return ref;
+          }
+        __CUDA_HD__
+        inline operator const FT&(void) const
+          {
+#ifdef __CUDA_ARCH__
+            assert(privilege & READ_PRIV);
+#else
+            if ((privilege & READ_PRIV) == 0)
+              PhysicalRegion::fail_privilege_check(point, field, privilege);
+#endif
+            return ref;
+          }
+        // writes
+        __CUDA_HD__
+        inline operator FT&(void)
+          {
+#ifdef __CUDA_ARCH__
+            assert(privilege & WRITE_PRIV);
+#else
+            if ((privilege & WRITE_PRIV) == 0)
+              PhysicalRegion::fail_privilege_check(point, field, privilege);
+#endif
+            return ref;
+          }
+        __CUDA_HD__
+        inline AffineRefHelper<FT>& operator=(const FT &newval)
+          { 
+#ifdef __CUDA_ARCH__
+            assert(privilege & WRITE_PRIV);
+#else
+            if ((privilege & WRITE_PRIV) == 0)
+              PhysicalRegion::fail_privilege_check(point, field, privilege);
+#endif
+            ref = newval;
+            return *this; 
+          }
+        __CUDA_HD__
+        inline AffineRefHelper<FT>& operator=(const AffineRefHelper<FT> &rhs)
+          {
+#ifdef __CUDA_ARCH__
+            assert(privilege & WRITE_PRIV);
+#else
+            if ((privilege & WRITE_PRIV) == 0)
+              PhysicalRegion::fail_privilege_check(point, field, privilege);
+#endif
+            ref = rhs.ref;
+            return *this; 
+          }
+      protected:
+        FT &ref;
+#ifndef __CUDA_ARCH__
+        DomainPoint point;
+        FieldID field;
+#endif
+        PrivilegeMode privilege;
+      };
+
+      // Further specialization for M = N and NO_ACCESS (dynamic privilege)
+      template<typename A, typename FT, int N, typename T>
+      class AffineSyntaxHelper<A,FT,N,T,N,NO_ACCESS> {
+      public:
+        __CUDA_HD__
+        AffineSyntaxHelper(const A &acc, const Point<N-1,T> &p)
+          : accessor(acc)
+        {
+          for (int i = 0; i < (N-1); i++)
+            point[i] = p[i];
+        }
+      public:
+        __CUDA_HD__
+        inline AffineRefHelper<FT> operator[](T val)
+        {
+          point[N-1] = val;
+          return accessor[point];
         }
       public:
         const A &accessor;
@@ -616,10 +794,10 @@ namespace Legion {
         { 
           return accessor.read(p); 
         }
-      inline const Realm::AccessorRefHelper<FT> 
+      inline const ArraySyntax::AccessorRefHelper<FT,READ_ONLY> 
           operator[](const Point<N,T>& p) const
         { 
-          return accessor[p]; 
+          return ArraySyntax::AccessorRefHelper<FT,READ_ONLY>(accessor[p]);
         }
       inline ArraySyntax::GenericSyntaxHelper<FieldAccessor<READ_ONLY,FT,N,T,
             Realm::GenericAccessor<FT,N,T>,CB>,FT,N,T,2,READ_ONLY>
@@ -694,12 +872,12 @@ namespace Legion {
             PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
           return accessor.read(p); 
         }
-      inline const Realm::AccessorRefHelper<FT> 
+      inline const ArraySyntax::AccessorRefHelper<FT,READ_ONLY>
           operator[](const Point<N,T>& p) const
         { 
           if (!bounds.contains(p)) 
             PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
-          return accessor[p]; 
+          return ArraySyntax::AccessorRefHelper<FT,READ_ONLY>(accessor[p]);
         }
       inline ArraySyntax::GenericSyntaxHelper<FieldAccessor<READ_ONLY,FT,N,T,
              Realm::GenericAccessor<FT,N,T>,true>,FT,N,T,2,READ_ONLY>
@@ -773,10 +951,10 @@ namespace Legion {
         { 
           return accessor.read(p); 
         }
-      inline const Realm::AccessorRefHelper<FT>
+      inline const ArraySyntax::AccessorRefHelper<FT,READ_ONLY>
           operator[](const Point<1,T>& p) const
         { 
-          return accessor[p]; 
+          return ArraySyntax::AccessorRefHelper<FT,READ_ONLY>(accessor[p]);
         }
     public:
       mutable Realm::GenericAccessor<FT,1,T> accessor;
@@ -844,12 +1022,12 @@ namespace Legion {
             PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
           return accessor.read(p); 
         }
-      inline const Realm::AccessorRefHelper<FT> 
+      inline const ArraySyntax::AccessorRefHelper<FT,READ_ONLY> 
           operator[](const Point<1,T>& p) const
         { 
           if (!bounds.contains(p)) 
             PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
-          return accessor[p]; 
+          return ArraySyntax::AccessorRefHelper<FT,READ_ONLY>(accessor[p]);
         }
     public:
       mutable Realm::GenericAccessor<FT,1,T> accessor;
@@ -918,10 +1096,10 @@ namespace Legion {
         { 
           accessor.write(p, val); 
         }
-      inline Realm::AccessorRefHelper<FT> 
+      inline ArraySyntax::AccessorRefHelper<FT,READ_WRITE> 
           operator[](const Point<N,T>& p) const
         { 
-          return accessor[p]; 
+          return ArraySyntax::AccessorRefHelper<FT,READ_WRITE>(accessor[p]);
         }
       inline ArraySyntax::GenericSyntaxHelper<FieldAccessor<READ_WRITE,FT,N,T,
              Realm::GenericAccessor<FT,N,T>,CB>,FT,N,T,2,READ_WRITE>
@@ -1004,12 +1182,12 @@ namespace Legion {
                                               field, WRITE_DISCARD);
           accessor.write(p, val); 
         }
-      inline Realm::AccessorRefHelper<FT> 
+      inline ArraySyntax::AccessorRefHelper<FT,READ_WRITE> 
           operator[](const Point<N,T>& p) const
         { 
           if (!bounds.contains(p)) 
             PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
-          return accessor[p]; 
+          return ArraySyntax::AccessorRefHelper<FT,READ_WRITE>(accessor[p]);
         }
       inline ArraySyntax::GenericSyntaxHelper<FieldAccessor<READ_WRITE,FT,N,T,
               Realm::GenericAccessor<FT,N,T>,true>,FT,N,T,2,READ_WRITE>
@@ -1088,10 +1266,10 @@ namespace Legion {
         { 
           accessor.write(p, val); 
         }
-      inline Realm::AccessorRefHelper<FT> 
+      inline ArraySyntax::AccessorRefHelper<FT,READ_WRITE> 
           operator[](const Point<1,T>& p) const
         { 
-          return accessor[p]; 
+          return ArraySyntax::AccessorRefHelper<FT,READ_WRITE>(accessor[p]);
         }
       // No reductions since we can't handle atomicity correctly
     public:
@@ -1166,12 +1344,12 @@ namespace Legion {
                                               field, WRITE_DISCARD);
           accessor.write(p, val); 
         }
-      inline Realm::AccessorRefHelper<FT> 
+      inline ArraySyntax::AccessorRefHelper<FT,READ_WRITE> 
           operator[](const Point<1,T>& p) const
         { 
           if (!bounds.contains(p)) 
             PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
-          return accessor[p]; 
+          return ArraySyntax::AccessorRefHelper<FT,READ_WRITE>(accessor[p]);
         }
       // No reduction since we can't handle atomicity correctly
     public:
@@ -1241,10 +1419,10 @@ namespace Legion {
         { 
           accessor.write(p, val); 
         }
-      inline Realm::AccessorRefHelper<FT> 
+      inline ArraySyntax::AccessorRefHelper<FT,WRITE_DISCARD> 
           operator[](const Point<N,T>& p) const
         { 
-          return accessor[p]; 
+          return ArraySyntax::AccessorRefHelper<FT,WRITE_DISCARD>(accessor[p]);
         }
       inline ArraySyntax::GenericSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,N,
            T,Realm::GenericAccessor<FT,N,T>,CB>,FT,N,T,2,WRITE_DISCARD>
@@ -1327,12 +1505,12 @@ namespace Legion {
                                               field, WRITE_DISCARD);
           accessor.write(p, val); 
         }
-      inline Realm::AccessorRefHelper<FT> 
+      inline ArraySyntax::AccessorRefHelper<FT,WRITE_DISCARD>
           operator[](const Point<N,T>& p) const
         { 
           if (!bounds.contains(p)) 
             PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
-          return accessor[p]; 
+          return ArraySyntax::AccessorRefHelper<FT,WRITE_DISCARD>(accessor[p]);
         }
       inline ArraySyntax::GenericSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,N,
            T,Realm::GenericAccessor<FT,N,T>,true>,FT,N,T,2,WRITE_DISCARD>
@@ -1410,10 +1588,10 @@ namespace Legion {
         { 
           accessor.write(p, val); 
         }
-      inline Realm::AccessorRefHelper<FT> 
+      inline ArraySyntax::AccessorRefHelper<FT,WRITE_DISCARD> 
           operator[](const Point<1,T>& p) const
         { 
-          return accessor[p]; 
+          return ArraySyntax::AccessorRefHelper<FT,WRITE_DISCARD>(accessor[p]);
         }
     public:
       mutable Realm::GenericAccessor<FT,1,T> accessor;
@@ -1487,12 +1665,12 @@ namespace Legion {
                                               field, WRITE_DISCARD);
           accessor.write(p, val); 
         }
-      inline Realm::AccessorRefHelper<FT> 
+      inline ArraySyntax::AccessorRefHelper<FT,WRITE_DISCARD> 
           operator[](const Point<1,T>& p) const
         { 
           if (!bounds.contains(p)) 
             PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
-          return accessor[p]; 
+          return ArraySyntax::AccessorRefHelper<FT,WRITE_DISCARD>(accessor[p]);
         }
     public:
       mutable Realm::GenericAccessor<FT,1,T> accessor;
@@ -1557,10 +1735,10 @@ namespace Legion {
         { 
           accessor.write(p, val); 
         }
-      inline Realm::AccessorRefHelper<FT> 
+      inline ArraySyntax::AccessorRefHelper<FT,WRITE_DISCARD> 
           operator[](const Point<N,T>& p) const
         { 
-          return accessor[p]; 
+          return ArraySyntax::AccessorRefHelper<FT,WRITE_DISCARD>(accessor[p]);
         }
       inline ArraySyntax::GenericSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,N,
            T,Realm::GenericAccessor<FT,N,T>,CB>,FT,N,T,2,WRITE_DISCARD>
@@ -1637,12 +1815,12 @@ namespace Legion {
                                               field, WRITE_DISCARD);
           accessor.write(p, val); 
         }
-      inline Realm::AccessorRefHelper<FT> 
+      inline ArraySyntax::AccessorRefHelper<FT,WRITE_DISCARD>
           operator[](const Point<N,T>& p) const
         { 
           if (!bounds.contains(p)) 
             PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
-          return accessor[p]; 
+          return ArraySyntax::AccessorRefHelper<FT,WRITE_DISCARD>(accessor[p]);
         }
       inline ArraySyntax::GenericSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,N,
            T,Realm::GenericAccessor<FT,N,T>,true>,FT,N,T,2,WRITE_DISCARD>
@@ -1716,10 +1894,10 @@ namespace Legion {
         { 
           accessor.write(p, val); 
         }
-      inline Realm::AccessorRefHelper<FT> 
+      inline ArraySyntax::AccessorRefHelper<FT,WRITE_DISCARD>
           operator[](const Point<1,T>& p) const
         { 
-          return accessor[p]; 
+          return ArraySyntax::AccessorRefHelper<FT,WRITE_DISCARD>(accessor[p]);
         }
     public:
       mutable Realm::GenericAccessor<FT,1,T> accessor;
@@ -1787,12 +1965,12 @@ namespace Legion {
                                               field, WRITE_DISCARD);
           accessor.write(p, val); 
         }
-      inline Realm::AccessorRefHelper<FT> 
+      inline ArraySyntax::AccessorRefHelper<FT,WRITE_DISCARD>
           operator[](const Point<1,T>& p) const
         { 
           if (!bounds.contains(p)) 
             PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
-          return accessor[p]; 
+          return ArraySyntax::AccessorRefHelper<FT,WRITE_DISCARD>(accessor[p]);
         }
     public:
       mutable Realm::GenericAccessor<FT,1,T> accessor;
@@ -5645,10 +5823,10 @@ namespace Legion {
                                 region_privileges[0], true/*multi*/);
           return accessor.write(p, val);
         }
-      inline Realm::AccessorRefHelper<FT> 
+      inline ArraySyntax::AccessorRefHelper<FT,NO_ACCESS> 
           operator[](const Point<N,T>& p) const
         { 
-          bool found = false;
+          int index = -1;
           for (unsigned idx = 0; idx < total_regions; idx++)
           {
             if (!region_bounds[idx].contains(p))
@@ -5656,20 +5834,21 @@ namespace Legion {
             if (CP && ((region_privileges[idx] & READ_ONLY) == 0))
               PhysicalRegion::fail_privilege_check(DomainPoint(p), field,
                                                  region_privileges[idx]);
-            found = true;
+            index = idx;
             break;
           }
-          if (!found)
+          if (index < 0)
             PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
                                 region_privileges[0], true/*multi*/);
-          return accessor[p]; 
+          return ArraySyntax::AccessorRefHelper<FT,NO_ACCESS>(accessor[p], 
+                          field, DomainPoint(p), region_privileges[index]);
         }
       inline ArraySyntax::GenericSyntaxHelper<MultiRegionAccessor<FT,N,T,
-             Realm::GenericAccessor<FT,N,T>,CB,CP>,FT,N,T,2,READ_WRITE>
+             Realm::GenericAccessor<FT,N,T>,CB,CP>,FT,N,T,2,NO_ACCESS>
           operator[](T index) const
       {
         return ArraySyntax::GenericSyntaxHelper<MultiRegionAccessor<FT,N,T,
-              Realm::GenericAccessor<FT,N,T>,CB,CP>,FT,N,T,2,READ_WRITE>(
+              Realm::GenericAccessor<FT,N,T>,CB,CP>,FT,N,T,2,NO_ACCESS>(
               *this, Point<1,T>(index));
       }
     public:
@@ -5810,10 +5989,10 @@ namespace Legion {
                                 region_privileges[0], true/*multi*/);
           return accessor.write(p, val);
         }
-      inline Realm::AccessorRefHelper<FT> 
+      inline ArraySyntax::AccessorRefHelper<FT,NO_ACCESS> 
           operator[](const Point<1,T>& p) const
         { 
-          bool found = false;
+          int index = -1;
           for (unsigned idx = 0; idx < total_regions; idx++)
           {
             if (!region_bounds[idx].contains(p))
@@ -5821,13 +6000,14 @@ namespace Legion {
             if (CP && ((region_privileges[idx] & READ_ONLY) == 0))
               PhysicalRegion::fail_privilege_check(DomainPoint(p), field,
                                                  region_privileges[idx]);
-            found = true;
+            index = idx;
             break;
           }
-          if (!found)
+          if (index < 0)
             PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
                                 region_privileges[0], true/*multi*/);
-          return accessor[p]; 
+          return ArraySyntax::AccessorRefHelper<FT,NO_ACCESS>(accessor[p],
+                          field, DomainPoint(p), region_privileges[index]);
         }
     public:
       mutable Realm::GenericAccessor<FT,1,T> accessor;
@@ -5928,10 +6108,10 @@ namespace Legion {
         {
           return accessor.write(p, val);
         }
-      inline Realm::AccessorRefHelper<FT> 
+      inline ArraySyntax::AccessorRefHelper<FT,READ_WRITE>
           operator[](const Point<N,T>& p) const
         { 
-          return accessor[p]; 
+          return ArraySyntax::AccessorRefHelper<FT,READ_WRITE>(accessor[p]);
         }
       inline ArraySyntax::GenericSyntaxHelper<MultiRegionAccessor<FT,N,T,
              Realm::GenericAccessor<FT,N,T>,false,false>,FT,N,T,2,READ_WRITE>
@@ -6036,10 +6216,10 @@ namespace Legion {
         {
           return accessor.write(p, val);
         }
-      inline Realm::AccessorRefHelper<FT> 
+      inline ArraySyntax::AccessorRefHelper<FT,READ_WRITE>
           operator[](const Point<1,T>& p) const
         { 
-          return accessor[p]; 
+          return ArraySyntax::AccessorRefHelper<FT,READ_WRITE>(accessor[p]);
         }
     public:
       mutable Realm::GenericAccessor<FT,1,T> accessor;
@@ -6296,122 +6476,10 @@ namespace Legion {
           return accessor.write(p, val);
         }
       __CUDA_HD__
-      inline FT* ptr(const Point<N,T>& p) const
+      inline ArraySyntax::AffineRefHelper<FT> 
+                operator[](const Point<N,T>& p) const
         { 
-          bool found = false;
-          for (unsigned idx = 0; idx < total_regions; idx++)
-          {
-            if (!region_bounds[idx].contains(p))
-              continue;
-            if (CP && 
-                ((region_privileges[idx] & (READ_PRIV | WRITE_PRIV)) == 0))
-            {
-#ifdef __CUDA_ARCH__
-              // bounds checks are not precise for CUDA so keep going to 
-              // see if there is another region that has it with the privileges
-              continue;
-#else
-              PhysicalRegion::fail_privilege_check(DomainPoint(p), field,
-                                                   region_privileges[idx]);
-#endif
-            }
-            found = true;
-            break;
-          }
-#ifdef __CUDA_ARCH__
-          assert(found);
-#else
-          if (!found)
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
-                                region_privileges[0], true/*multi*/);
-#endif
-          return accessor.ptr(p); 
-        }
-      __CUDA_HD__
-      inline FT* ptr(const Rect<N,T>& r) const
-        {
-          bool found = false;
-          for (unsigned idx = 0; idx < total_regions; idx++)
-          {
-            if (!region_bounds[idx].contains_all(r))
-              continue;
-            if (CP && 
-                ((region_privileges[idx] & (READ_PRIV | WRITE_PRIV)) == 0))
-            {
-#ifdef __CUDA_ARCH__
-              // bounds checks are not precise for CUDA so keep going to 
-              // see if there is another region that has it with the privileges
-              continue;
-#else
-              PhysicalRegion::fail_privilege_check(Domain(r), field,
-                                                   region_privileges[idx]);
-#endif
-            }
-            found = true;
-            break;
-          }
-#ifdef __CUDA_ARCH__
-          assert(found);
-#else
-          if (!found)
-            PhysicalRegion::fail_bounds_check(Domain(r), field,
-                            region_privileges[0], true/*multi*/);
-#endif
-          if (!accessor.is_dense_arbitrary(r))
-          {
-#ifdef __CUDA_ARCH__
-            printf(
-                "ERROR: Illegal request for pointer of non-dense rectangle\n");
-            assert(false);
-#else
-            fprintf(stderr, 
-                "ERROR: Illegal request for pointer of non-dense rectangle\n");
-#ifdef DEBUG_LEGION
-            assert(false);
-#endif
-            exit(ERROR_NON_DENSE_RECTANGLE);
-#endif
-          }
-          return accessor.ptr(r.lo);
-        }
-      __CUDA_HD__
-      inline FT* ptr(const Rect<N,T>& r, size_t strides[N]) const
-        {
-          bool found = false;
-          for (unsigned idx = 0; idx < total_regions; idx++)
-          {
-            if (!region_bounds[idx].contains_all(r))
-              continue;
-            if (CP && 
-                ((region_privileges[idx] & (READ_PRIV | WRITE_PRIV)) == 0))
-            {
-#ifdef __CUDA_ARCH__
-              // bounds checks are not precise for CUDA so keep going to 
-              // see if there is another region that has it with the privileges
-              continue;
-#else
-              PhysicalRegion::fail_privilege_check(Domain(r), field,
-                                                   region_privileges[idx]);
-#endif
-            }
-            found = true;
-            break;
-          }
-#ifdef __CUDA_ARCH__
-          assert(found);
-#else
-          if (!found)
-            PhysicalRegion::fail_bounds_check(Domain(r), field,
-                          region_privileges[0], true/*multi*/);
-#endif
-          for (int i = 0; i < N; i++)
-            strides[i] = accessor.strides[i] / sizeof(FT);
-          return accessor.ptr(r.lo);
-        }
-      __CUDA_HD__
-      inline FT& operator[](const Point<N,T>& p) const
-        { 
-          bool found = false;
+          int index = -1;
           for (unsigned idx = 0; idx < total_regions; idx++)
           {
             if (!region_bounds[idx].contains(p))
@@ -6427,25 +6495,26 @@ namespace Legion {
                                                    region_privileges[idx]);
 #endif
             }
-            found = true;
+            index = idx;
             break;
           }
 #ifdef __CUDA_ARCH__
-          assert(found);
+          assert(index >= 0);
 #else
-          if (!found)
+          if (index < 0)
             PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
                                 region_privileges[0], true/*multi*/);
 #endif
-          return accessor[p]; 
+          return ArraySyntax::AffineRefHelper<FT>(accessor[p], field,
+                            DomainPoint(p), region_privileges[index]); 
         }
       __CUDA_HD__
       inline ArraySyntax::GenericSyntaxHelper<MultiRegionAccessor<FT,N,T,
-             Realm::AffineAccessor<FT,N,T>,CB,CP>,FT,N,T,2,READ_WRITE>
+             Realm::AffineAccessor<FT,N,T>,CB,CP>,FT,N,T,2,NO_ACCESS>
           operator[](T index) const
       {
         return ArraySyntax::GenericSyntaxHelper<MultiRegionAccessor<FT,N,T,
-              Realm::AffineAccessor<FT,N,T>,CB,CP>,FT,N,T,2,READ_WRITE>(
+              Realm::AffineAccessor<FT,N,T>,CB,CP>,FT,N,T,2,NO_ACCESS>(
               *this, Point<1,T>(index));
       }
       template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
@@ -6735,122 +6804,10 @@ namespace Legion {
           return accessor.write(p, val);
         }
       __CUDA_HD__
-      inline FT* ptr(const Point<1,T>& p) const
+      inline ArraySyntax::AffineRefHelper<FT> 
+                operator[](const Point<1,T>& p) const
         { 
-          bool found = false;
-          for (unsigned idx = 0; idx < total_regions; idx++)
-          {
-            if (!region_bounds[idx].contains(p))
-              continue;
-            if (CP && 
-                ((region_privileges[idx] & (READ_PRIV | WRITE_PRIV)) == 0))
-            {
-#ifdef __CUDA_ARCH__
-              // bounds checks are not precise for CUDA so keep going to 
-              // see if there is another region that has it with the privileges
-              continue;
-#else
-              PhysicalRegion::fail_privilege_check(DomainPoint(p), field,
-                                                   region_privileges[idx]);
-#endif
-            }
-            found = true;
-            break;
-          }
-#ifdef __CUDA_ARCH__
-          assert(found);
-#else
-          if (!found)
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
-                                region_privileges[0], true/*multi*/);
-#endif
-          return accessor.ptr(p); 
-        }
-      __CUDA_HD__
-      inline FT* ptr(const Rect<1,T>& r) const
-        {
-          bool found = false;
-          for (unsigned idx = 0; idx < total_regions; idx++)
-          {
-            if (!region_bounds[idx].contains_all(r))
-              continue;
-            if (CP && 
-                ((region_privileges[idx] & (READ_PRIV | WRITE_PRIV)) == 0))
-            {
-#ifdef __CUDA_ARCH__
-              // bounds checks are not precise for CUDA so keep going to 
-              // see if there is another region that has it with the privileges
-              continue;
-#else
-              PhysicalRegion::fail_privilege_check(Domain(r), field,
-                                                   region_privileges[idx]);
-#endif
-            }
-            found = true;
-            break;
-          }
-#ifdef __CUDA_ARCH__
-          assert(found);
-#else
-          if (!found)
-            PhysicalRegion::fail_bounds_check(Domain(r), field,
-                          region_privileges[0], true/*multi*/);
-#endif
-          if (!accessor.is_dense_arbitrary(r))
-          {
-#ifdef __CUDA_ARCH__
-            printf(
-                "ERROR: Illegal request for pointer of non-dense rectangle\n");
-            assert(false);
-#else
-            fprintf(stderr, 
-                "ERROR: Illegal request for pointer of non-dense rectangle\n");
-#ifdef DEBUG_LEGION
-            assert(false);
-#endif
-            exit(ERROR_NON_DENSE_RECTANGLE);
-#endif
-          }
-          return accessor.ptr(r.lo);
-        }
-      __CUDA_HD__
-      inline FT* ptr(const Rect<1,T>& r, size_t strides[1]) const
-        {
-          bool found = false;
-          for (unsigned idx = 0; idx < total_regions; idx++)
-          {
-            if (!region_bounds[idx].contains_all(r))
-              continue;
-            if (CP && 
-                ((region_privileges[idx] & (READ_PRIV | WRITE_PRIV)) == 0))
-            {
-#ifdef __CUDA_ARCH__
-              // bounds checks are not precise for CUDA so keep going to 
-              // see if there is another region that has it with the privileges
-              continue;
-#else
-              PhysicalRegion::fail_privilege_check(Domain(r), field,
-                                                   region_privileges[idx]);
-#endif
-            }
-            found = true;
-            break;
-          }
-#ifdef __CUDA_ARCH__
-          assert(found);
-#else
-          if (!found)
-            PhysicalRegion::fail_bounds_check(Domain(r), field,
-                          region_privileges[0], true/*multi*/);
-#endif
-          for (int i = 0; i < 1; i++)
-            strides[i] = accessor.strides[i] / sizeof(FT);
-          return accessor.ptr(r.lo);
-        }
-      __CUDA_HD__
-      inline FT& operator[](const Point<1,T>& p) const
-        { 
-          bool found = false;
+          int index = -1;
           for (unsigned idx = 0; idx < total_regions; idx++)
           {
             if (!region_bounds[idx].contains(p))
@@ -6866,17 +6823,18 @@ namespace Legion {
                                                    region_privileges[idx]);
 #endif
             }
-            found = true;
+            index = idx;
             break;
           }
 #ifdef __CUDA_ARCH__
-          assert(found);
+          assert(index >= 0);
 #else
-          if (!found)
+          if (index < 0)
             PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
                                 region_privileges[0], true/*multi*/);
 #endif
-          return accessor[p]; 
+          return ArraySyntax::AffineRefHelper<FT>(accessor[p], field, 
+                        DomainPoint(p), region_privileges[index]); 
         }
       template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
       inline void reduce(const Point<1,T>& p, 
@@ -7093,38 +7051,6 @@ namespace Legion {
           return accessor.write(p, val);
         }
       __CUDA_HD__
-      inline FT* ptr(const Point<N,T>& p) const
-        { 
-          return accessor.ptr(p); 
-        }
-      __CUDA_HD__
-      inline FT* ptr(const Rect<N,T>& r) const
-        {
-          if (!accessor.is_dense_arbitrary(r))
-          {
-#ifdef __CUDA_ARCH__
-            printf(
-                "ERROR: Illegal request for pointer of non-dense rectangle\n");
-            assert(false);
-#else
-            fprintf(stderr, 
-                "ERROR: Illegal request for pointer of non-dense rectangle\n");
-#ifdef DEBUG_LEGION
-            assert(false);
-#endif
-            exit(ERROR_NON_DENSE_RECTANGLE);
-#endif
-          }
-          return accessor.ptr(r.lo);
-        }
-      __CUDA_HD__
-      inline FT* ptr(const Rect<N,T>& r, size_t strides[N]) const
-        {
-          for (int i = 0; i < N; i++)
-            strides[i] = accessor.strides[i] / sizeof(FT);
-          return accessor.ptr(r.lo);
-        }
-      __CUDA_HD__
       inline FT& operator[](const Point<N,T>& p) const
         { 
           return accessor[p]; 
@@ -7323,38 +7249,6 @@ namespace Legion {
           return accessor.write(p, val);
         }
       __CUDA_HD__
-      inline FT* ptr(const Point<1,T>& p) const
-        { 
-          return accessor.ptr(p); 
-        }
-      __CUDA_HD__
-      inline FT* ptr(const Rect<1,T>& r) const
-        {
-          if (!accessor.is_dense_arbitrary(r))
-          {
-#ifdef __CUDA_ARCH__
-            printf(
-                "ERROR: Illegal request for pointer of non-dense rectangle\n");
-            assert(false);
-#else
-            fprintf(stderr, 
-                "ERROR: Illegal request for pointer of non-dense rectangle\n");
-#ifdef DEBUG_LEGION
-            assert(false);
-#endif
-            exit(ERROR_NON_DENSE_RECTANGLE);
-#endif
-          }
-          return accessor.ptr(r.lo);
-        }
-      __CUDA_HD__
-      inline FT* ptr(const Rect<1,T>& r, size_t strides[1]) const
-        {
-          for (int i = 0; i < 1; i++)
-            strides[i] = accessor.strides[i] / sizeof(FT);
-          return accessor.ptr(r.lo);
-        }
-      __CUDA_HD__
       inline FT& operator[](const Point<1,T>& p) const
         { 
           return accessor[p]; 
@@ -7411,10 +7305,10 @@ namespace Legion {
         {
           accessor.write(p, val);
         }
-      inline Realm::AccessorRefHelper<FT> 
+      inline ArraySyntax::AccessorRefHelper<FT,READ_WRITE>
               operator[](const Point<N,T> &p) const
         {
-          return accessor[p];
+          return ArraySyntax::AccessorRefHelper<FT,READ_WRITE>(accessor[p]);
         }
       inline ArraySyntax::GenericSyntaxHelper<UnsafeFieldAccessor<FT,N,T,A>,
                                                 FT,N,T,2,READ_WRITE>
@@ -7460,10 +7354,10 @@ namespace Legion {
         {
           accessor.write(p, val);
         }
-      inline Realm::AccessorRefHelper<FT> 
+      inline ArraySyntax::AccessorRefHelper<FT,READ_WRITE>
               operator[](const Point<1,T> &p) const
         {
-          return accessor[p];
+          return ArraySyntax::AccessorRefHelper<FT,READ_WRITE>(accessor[p]);
         }
     public:
       mutable Realm::GenericAccessor<FT,1,T> accessor;
@@ -11443,8 +11337,26 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::map<DomainPoint,int> untyped_weights;
-      for (std::map<DomainPoint,int>::const_iterator it = 
+      for (typename std::map<Point<COLOR_DIM,COLOR_T>,int>::const_iterator it =
             weights.begin(); it != weights.end(); it++)
+        untyped_weights[DomainPoint(it->first)] = it->second;
+      return IndexPartitionT<DIM,T>(create_partition_by_weights(ctx,
+                                IndexSpace(parent), untyped_weights, 
+                                IndexSpace(color_space), granularity, color));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    IndexPartitionT<DIM,T> Runtime::create_partition_by_weights(Context ctx,
+                       IndexSpaceT<DIM,T> parent,
+                       const std::map<Point<COLOR_DIM,COLOR_T>,size_t> &weights,
+                       IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
+                       size_t granularity, Color color)
+    //--------------------------------------------------------------------------
+    {
+      std::map<DomainPoint,size_t> untyped_weights;
+      for (typename std::map<Point<COLOR_DIM,COLOR_T>,size_t>::const_iterator
+            it = weights.begin(); it != weights.end(); it++)
         untyped_weights[DomainPoint(it->first)] = it->second;
       return IndexPartitionT<DIM,T>(create_partition_by_weights(ctx,
                                 IndexSpace(parent), untyped_weights, 
