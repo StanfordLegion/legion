@@ -497,10 +497,8 @@ namespace Realm {
       clear_profiling();
     }
 
-    void DmaRequest::Waiter::sleep_on_event(Event e, 
-					    Reservation l /*= Reservation::NO_RESERVATION*/)
+    void DmaRequest::Waiter::sleep_on_event(Event e) 
     {
-      current_lock = l;
       wait_on = e;
       EventImpl::add_waiter(e, this);
     }
@@ -513,17 +511,12 @@ namespace Realm {
 	return;
       }
 
-      log_dma.debug("request %p triggered in state %d (lock = " IDFMT ")",
-		    req, req->state, current_lock.id);
-
-      if(current_lock.exists()) {
-	current_lock.release();
-	current_lock = Reservation::NO_RESERVATION;
-      }
+      log_dma.debug("request %p triggered in state %d",
+		    req, req->state);
 
       // this'll enqueue the DMA if it can, or wait on another event if it 
       //  can't
-      req->check_readiness(false, queue);
+      req->check_readiness();
     }
 
     void DmaRequest::Waiter::print(std::ostream& os) const
@@ -679,7 +672,7 @@ namespace Realm {
       if(remaining == 0) {
 	// all IB responses have been retrieved, so advance the copy request
 	log_ib_alloc.info() << "all responses received: req=" << ((void *)this);
-	check_readiness(false, dma_queue);
+	check_readiness();
       }
 #if 0
       Event event_to_trigger = Event::NO_EVENT;
@@ -795,14 +788,13 @@ namespace Realm {
     outputs[0].indirect_inst = RegionInstance::NO_INST;
   }
   
-    bool CopyRequest::check_readiness(bool just_check, DmaRequestQueue *rq)
+    bool CopyRequest::check_readiness(void)
     {
       if(state == STATE_INIT)
 	state = STATE_METADATA_FETCH;
 
       // remember which queue we're going to be assigned to if we sleep
       waiter.req = this;
-      waiter.queue = rq;
 
       // make sure our node has all the meta data it needs, but don't take more than one lock
       //  at a time
@@ -821,10 +813,6 @@ namespace Realm {
 	    RegionInstanceImpl *src_impl = get_runtime()->get_instance_impl(it->first.first);
 	    Event e = src_impl->request_metadata();
 	    if(!e.has_triggered()) {
-	      if(just_check) {
-		log_dma.debug("dma request %p - no src instance (" IDFMT ") metadata yet", this, src_impl->me.id);
-		return false;
-	      }
 	      log_dma.debug() << "request " << (void *)this << " - src instance metadata invalid - sleeping on event " << e;
 	      waiter.sleep_on_event(e);
 	      return false;
@@ -835,10 +823,6 @@ namespace Realm {
 	    RegionInstanceImpl *dst_impl = get_runtime()->get_instance_impl(it->first.second);
 	    Event e = dst_impl->request_metadata();
 	    if(!e.has_triggered()) {
-	      if(just_check) {
-		log_dma.debug("dma request %p - no dst instance (" IDFMT ") metadata yet", this, dst_impl->me.id);
-		return false;
-	      }
 	      log_dma.debug() << "request " << (void *)this << " - dst instance metadata invalid - sleeping on event " << e;
 	      waiter.sleep_on_event(e);
 	      return false;
@@ -850,10 +834,6 @@ namespace Realm {
 	if(gather_info) {
 	  Event e = gather_info->request_metadata();
 	  if(!e.has_triggered()) {
-	    if(just_check) {
-	      log_dma.debug() << "dma request " << ((void *)this) << " - no gather info metadata yet";
-	      return false;
-	    }
 	    log_dma.debug() << "request " << (void *)this << " - gather info metadata invalid - sleeping on event " << e;
 	    waiter.sleep_on_event(e);
 	    return false;
@@ -863,10 +843,6 @@ namespace Realm {
 	if(scatter_info) {
 	  Event e = scatter_info->request_metadata();
 	  if(!e.has_triggered()) {
-	    if(just_check) {
-	      log_dma.debug() << "dma request " << ((void *)this) << " - no scatter info metadata yet";
-	      return false;
-	    }
 	    log_dma.debug() << "request " << (void *)this << " - scatter info metadata invalid - sleeping on event " << e;
 	    waiter.sleep_on_event(e);
 	    return false;
@@ -1037,7 +1013,6 @@ namespace Realm {
 	  }
 	} else {
 	  log_dma.debug("request %p - before event not triggered", this);
-	  if(just_check) return false;
 
 	  log_dma.debug("request %p - sleeping on before event", this);
 	  waiter.sleep_on_event(before_copy);
@@ -1104,25 +1079,17 @@ namespace Realm {
 
       if(state == STATE_READY) {
 	log_dma.debug("request %p ready", this);
-	if(just_check) return true;
 
 	state = STATE_QUEUED;
-	// <NEWDMA>
-	mark_ready();
-	perform_dma();
-	return true;
-	// </NEWDMA>
-	assert(rq != 0);
-	log_dma.debug("request %p enqueued", this);
 
-	// once we're enqueued, we may be deleted at any time, so no more
-	//  references
-	rq->enqueue_request(this);
+	// copy requests are directly executed, since they just create
+	//  transfer descriptors which do deferred work
+	if(mark_ready())
+	  perform_dma();
+	else
+	  mark_finished(false /*!successful*/);  // was cancelled
 	return true;
       }
-
-      if(state == STATE_QUEUED)
-	return true;
 
       assert(0);
       return false;
@@ -2079,7 +2046,7 @@ namespace Realm {
 	    (serializer << tentative_valid));
   }
 
-    void CopyRequest::perform_new_dma(Memory src_mem, Memory dst_mem)
+    void CopyRequest::create_xfer_descriptors(void)
     {
       // SJT: this code is pretty broken if there are multiple instance pairs
       assert(oas_by_inst->size() == 1);
@@ -2188,7 +2155,7 @@ namespace Realm {
 	    ii.serdez_id = serdez_id;
 	    ii.ib_offset = 0;
 	    ii.ib_size = 0;
-	    mark_started = true;
+	    //mark_started = true;
 	  } else if(xdt.inputs[j].edge_id <= XDTemplate::INDIRECT_BASE) {
 	    int ind_idx = XDTemplate::INDIRECT_BASE - xdt.inputs[j].edge_id;
 	    assert(xdt.inputs[j].indirect_inst.exists());
@@ -2294,6 +2261,11 @@ namespace Realm {
 
     void CopyRequest::perform_dma(void)
     {
+      // ensure that we actually want to run (i.e. not cancelled)
+      bool ok_to_run = this->mark_started();
+      if(!ok_to_run)
+	return;
+
       log_dma.debug("request %p executing", this);
 
       DetailedTimer::ScopedPush sp(TIME_COPY);
@@ -2315,9 +2287,7 @@ namespace Realm {
         measurements.add_measurement(usage);
       }
 
-      Memory src_mem = oas_by_inst->begin()->first.first.get_location();
-      Memory dst_mem = oas_by_inst->begin()->first.second.get_location();
-      perform_new_dma(src_mem, dst_mem);
+      create_xfer_descriptors();
 
       // make sure logging precedes the call to mark_finished below
       log_dma.info() << "dma request " << (void *)this << " finished - is="
@@ -2336,7 +2306,8 @@ namespace Realm {
       : DmaRequest(_priority, _after_copy, _after_gen),
 	inst_lock_event(Event::NO_EVENT),
 	redop_id(_redop_id), red_fold(_red_fold),
-	before_copy(_before_copy)
+	before_copy(_before_copy),
+	dma_queue(0)
     {
       Serialization::FixedBufferDeserializer deserializer(data, datalen);
 
@@ -2374,7 +2345,8 @@ namespace Realm {
 	dst(_dst), 
 	inst_lock_needed(_inst_lock_needed), inst_lock_event(Event::NO_EVENT),
 	redop_id(_redop_id), red_fold(_red_fold),
-	before_copy(_before_copy)
+	before_copy(_before_copy),
+	dma_queue(0)
     {
       srcs.insert(srcs.end(), _srcs.begin(), _srcs.end());
 
@@ -2411,14 +2383,18 @@ namespace Realm {
       clear_profiling();
     }
 
-    bool ReduceRequest::check_readiness(bool just_check, DmaRequestQueue *rq)
+    void ReduceRequest::set_dma_queue(DmaRequestQueue *queue)
+    {
+      dma_queue = queue;
+    }
+
+    bool ReduceRequest::check_readiness(void)
     {
       if(state == STATE_INIT)
 	state = STATE_METADATA_FETCH;
 
       // remember which queue we're going to be assigned to if we sleep
       waiter.req = this;
-      waiter.queue = rq;
 
       // make sure our node has all the meta data it needs, but don't take more than one lock
       //  at a time
@@ -2440,10 +2416,6 @@ namespace Realm {
 	  {
 	    Event e = src_impl->request_metadata();
 	    if(!e.has_triggered()) {
-	      if(just_check) {
-		log_dma.debug("dma request %p - no src instance (" IDFMT ") metadata yet", this, src_impl->me.id);
-		return false;
-	      }
 	      log_dma.debug("request %p - src instance metadata invalid - sleeping on event " IDFMT, this, e.id);
 	      waiter.sleep_on_event(e);
 	      return false;
@@ -2457,10 +2429,6 @@ namespace Realm {
 	  {
 	    Event e = dst_impl->request_metadata();
 	    if(!e.has_triggered()) {
-	      if(just_check) {
-		log_dma.debug("dma request %p - no dst instance (" IDFMT ") metadata yet", this, dst_impl->me.id);
-		return false;
-	      }
 	      log_dma.debug("request %p - dst instance metadata invalid - sleeping on event " IDFMT, this, e.id);
 	      waiter.sleep_on_event(e);
 	      return false;
@@ -2496,7 +2464,6 @@ namespace Realm {
 	  }
 	} else {
 	  log_dma.debug("request %p - before event not triggered", this);
-	  if(just_check) return false;
 
 	  log_dma.debug("request %p - sleeping on before event", this);
 	  waiter.sleep_on_event(before_copy);
@@ -2517,7 +2484,6 @@ namespace Realm {
 
       if(state == STATE_READY) {
 	log_dma.debug("request %p ready", this);
-	if(just_check) return true;
 
 	state = STATE_QUEUED;
 #ifdef REDUCE_IN_NEW_DMA
@@ -2533,12 +2499,12 @@ namespace Realm {
 	return true;
 	// </NEWDMA>
 #endif
-	assert(rq != 0);
+	assert(dma_queue != 0);
 	log_dma.debug("request %p enqueued", this);
 
 	// once we're enqueued, we may be deleted at any time, so no more
 	//  references
-	rq->enqueue_request(this);
+	dma_queue->enqueue_request(this);
 	return true;
       }
 
@@ -2729,6 +2695,7 @@ namespace Realm {
                              int _priority)
       : DmaRequest(_priority, _after_fill, _after_gen)
       , before_fill(_before_fill)
+      , dma_queue(0)
     {
       dst.inst = inst;
       dst.field_id = field_id;
@@ -2766,6 +2733,7 @@ namespace Realm {
       , domain(_domain->clone())
       , dst(_dst)
       , before_fill(_before_fill)
+      , dma_queue(0)
     {
       fill_size = _fill_size;
       fill_buffer = malloc(fill_size);
@@ -2812,14 +2780,18 @@ namespace Realm {
       clear_profiling();
     }
 
-    bool FillRequest::check_readiness(bool just_check, DmaRequestQueue *rq)
+    void FillRequest::set_dma_queue(DmaRequestQueue *queue)
+    {
+      dma_queue = queue;
+    }
+
+    bool FillRequest::check_readiness(void)
     {
       if(state == STATE_INIT)
 	state = STATE_METADATA_FETCH;
 
       // remember which queue we're going to be assigned to if we sleep
       waiter.req = this;
-      waiter.queue = rq;
 
       // make sure our node has all the meta data it needs, but don't take more than one lock
       //  at a time
@@ -2839,10 +2811,6 @@ namespace Realm {
 	  {
 	    Event e = dst_impl->request_metadata();
 	    if(!e.has_triggered()) {
-	      if(just_check) {
-		log_dma.debug("dma request %p - no dst instance (" IDFMT ") metadata yet", this, dst_impl->me.id);
-		return false;
-	      }
 	      log_dma.debug("request %p - dst instance metadata invalid - sleeping on event " IDFMT, this, e.id);
 	      waiter.sleep_on_event(e);
 	      return false;
@@ -2868,7 +2836,6 @@ namespace Realm {
           }
 	} else {
 	  log_dma.debug("request %p - before event not triggered", this);
-	  if(just_check) return false;
 
 	  log_dma.debug("request %p - sleeping on before event", this);
 	  waiter.sleep_on_event(before_fill);
@@ -2878,7 +2845,6 @@ namespace Realm {
 
       if(state == STATE_READY) {
 	log_dma.debug("request %p ready", this);
-	if(just_check) return true;
 
 	state = STATE_QUEUED;
 #ifdef FILL_IN_NEW_DMA
@@ -2894,12 +2860,12 @@ namespace Realm {
 	return true;
 	// </NEWDMA>
 #endif
-	assert(rq != 0);
+	assert(dma_queue != 0);
 	log_dma.debug("request %p enqueued", this);
 
 	// once we're enqueued, we may be deleted at any time, so no more
 	//  references
-	rq->enqueue_request(this);
+	dma_queue->enqueue_request(this);
 	return true;
       }
 
@@ -3311,7 +3277,7 @@ namespace Realm {
 					 args.priority);
 	get_runtime()->optable.add_local_operation(args.after_copy, r);
 
-	r->check_readiness(false, dma_queue);
+	r->check_readiness();
       } else {
 	// a reduction
 	ReduceRequest *r = new ReduceRequest(data, msglen,
@@ -3323,7 +3289,8 @@ namespace Realm {
 					     args.priority);
 	get_runtime()->optable.add_local_operation(args.after_copy, r);
 
-	r->check_readiness(false, dma_queue);
+	r->set_dma_queue(dma_queue);
+	r->check_readiness();
       }
     }
 
@@ -3341,7 +3308,8 @@ namespace Realm {
                                        0 /* no room for args.priority */);
       get_runtime()->optable.add_local_operation(args.after_fill, r);
 
-      r->check_readiness(false, dma_queue);
+      r->set_dma_queue(dma_queue);
+      r->check_readiness();
     }
 
   ActiveMessageHandlerReg<RemoteFillMessage> remote_fill_message_handler;

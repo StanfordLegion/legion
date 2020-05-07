@@ -2652,7 +2652,7 @@ namespace Realm {
       log_dma.debug("performing copy on local node");
 
       get_runtime()->optable.add_local_operation(ev, r);
-      r->check_readiness(false, dma_queue);
+      r->check_readiness();
     } else {
       r->forward_request(dma_node);
       get_runtime()->optable.add_remote_operation(ev, dma_node);
@@ -2713,8 +2713,9 @@ namespace Realm {
     if(src_node == Network::my_node_id) {
       log_dma.debug("performing reduction on local node");
 
-      get_runtime()->optable.add_local_operation(ev, r);	  
-      r->check_readiness(false, dma_queue);
+      get_runtime()->optable.add_local_operation(ev, r);
+      r->set_dma_queue(dma_queue);
+      r->check_readiness();
     } else {
       r->forward_request(src_node);
       get_runtime()->optable.add_remote_operation(ev, src_node);
@@ -2767,7 +2768,8 @@ namespace Realm {
     NodeID tgt_node = ID(inst).instance_owner_node();
     if(tgt_node == Network::my_node_id) {
       get_runtime()->optable.add_local_operation(ev, r);
-      r->check_readiness(false, dma_queue);
+      r->set_dma_queue(dma_queue);
+      r->check_readiness();
     } else {
       r->forward_request(tgt_node);
       get_runtime()->optable.add_remote_operation(ev, tgt_node);
