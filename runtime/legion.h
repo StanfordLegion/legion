@@ -2452,13 +2452,19 @@ namespace Legion {
      * noticing. Users can enable privilege checks on an accessor by 
      * setting the CHECK_PRIVILEGES template parameter to true or by
      * enabling PRIVILEGE_CHECKS throughout the entire application build.
-     * The following methods are supported:
+     * Note that even in the affine case, in general you cannot directly 
+     * get a reference or a pointer to any elements so that we can enable
+     * dynamic privilege checks to work. If you want to get a pointer or a 
+     * direct reference we encourage you to use the FieldAccessor for each 
+     * individual region at which point you can do any unsafe things you want. 
+     * If you do not use privilege checks then you can assume that auto == FT& 
+     * for operator[] methods. The following methods are supported:
      *
      *  - FT read(const Point<N,T>&) const
      *  - void write(const Point<N,T>&, FT val) const
-     *  - FT& operator[](const Point<N,T>&) const (Affine Accessor only)
+     *  - auto operator[](const Point<N,T>&) const
      *  - template<typename REDOP, bool EXCLUSIVE> 
-     *      void reduce(const Point<N,T>&, REDOP::RHS); (Affine Accessor only)
+     *      void reduce(const Point<N,T>&, REDOP::RHS) (Affine Accessor only)
      */
     template<typename FT, int N, typename COORD_T = coord_t,
              typename A = Realm::GenericAccessor<FT,N,COORD_T>,
