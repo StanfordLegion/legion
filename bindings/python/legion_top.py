@@ -331,10 +331,40 @@ def legion_python_main(raw_args, user_data, proc):
     elif args[start] == '-':
         sys.argv = args[start:]
         run_repl()
+    elif args[start] == '-h':
+        print('usage: legion_python [--nocr] [-c cmd | -m mod | file | -] [arg] ...')
+        print('--nocr : disable control replication for multi-node execution')
+        print('-c cmd : program passed in as string (terminates option list)')
+        print('-h     : print this help message and exit')
+        print('-m mod : run library module as a script (terminates option list)')
+        print('file   : program read from script file')
+        print('-      : program read from stdin (default; interactive mode if a tty)')
+        print('arg ...: arguments passed to program in sys.argv[1:]')
     elif args[start] == '-c':
-        assert len(args) >= 3
-        sys.argv = ['-c'] + list(args[start+2:])
-        run_cmd(args[start+1], run_name='__main__')
+        if len(args) > (start+1):
+            sys.argv = ['-c'] + list(args[start+2:])
+            run_cmd(args[start+1], run_name='__main__')
+        else:
+            print('Argument expected for the -c option')
+    elif args[start] == '-m':
+        if len(args) > (start+1):
+            filename = args[start+1] + '.py'
+            found = False
+            for path in sys.path:
+                for root,dirs,files in os.walk(path):
+                    if filename not in files:
+                        continue
+                    module = os.path.join(root, filename)
+                    sys.argv = [module] + list(args[start+2:])
+                    run_path(module, run_name='__main__')
+                    found = True
+                    break
+                if found:
+                    break
+            if not found:
+                print('No module named '+args[start+1])
+        else:
+            print('Argument expected for the -m option')
     else:
         assert start < len(args)
         sys.argv = list(args[start:])
