@@ -999,11 +999,15 @@ namespace Legion {
     {
       if (!empty)
       {
-        valid = future_complete.has_triggered();
+        valid = !subscription_internal.exists() || 
+                  subscription_internal.has_triggered();
         return *((const bool*)result); 
       }
-      valid = false;
-      return false; 
+      else
+      {
+        valid = false;
+        return false; 
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1019,6 +1023,13 @@ namespace Legion {
         if (!subscription_event.exists())
         {
           subscription_event = Runtime::create_ap_user_event();
+          if (!is_owner())
+          {
+#ifdef DEBUG_LEGION
+            assert(!future_complete.exists());
+#endif
+            future_complete = subscription_event;
+          }
           if (!subscription_internal.exists())
           {
             // Add a reference to prevent us from being collected
@@ -1026,10 +1037,6 @@ namespace Legion {
             add_base_resource_ref(RUNTIME_REF);
             if (!is_owner())
             {
-#ifdef DEBUG_LEGION
-              assert(!future_complete.exists());
-#endif
-              future_complete = subscription_event;
               // Send a request to the owner node to subscribe
               Serializer rez;
               rez.serialize(did);
@@ -1065,10 +1072,6 @@ namespace Legion {
             add_base_resource_ref(RUNTIME_REF);
             if (!is_owner())
             {
-#ifdef DEBUG_LEGION
-              assert(!future_complete.exists());
-#endif
-              future_complete = subscription_event;
               // Send a request to the owner node to subscribe
               Serializer rez;
               rez.serialize(did);

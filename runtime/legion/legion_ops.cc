@@ -11349,9 +11349,7 @@ namespace Legion {
       // See if we have a value
       bool valid;
       bool value = future.impl->get_boolean_value(valid);
-      if (valid)
-        set_resolved_value(get_generation(), value);
-      else
+      if (!valid)
       {
         // Launch a task to get the value
         add_predicate_reference();
@@ -11359,6 +11357,8 @@ namespace Legion {
         runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
                                          future.impl->subscribe_internal());
       }
+      else
+        set_resolved_value(get_generation(), value);
 #ifdef LEGION_SPY
       // Still have to do this call to let Legion Spy know we're done
       LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
