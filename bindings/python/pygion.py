@@ -1254,8 +1254,11 @@ def attach_hdf5(region, filename, field_map, mode, restricted=True, mapped=False
     filename = filename.encode('utf-8')
 
     raw_field_map = c.legion_field_map_create()
+    encoded_values = [] # make sure these don't get deleted before the launcher
     for field_name, value in field_map.items():
-        c.legion_field_map_insert(raw_field_map, region.fspace.field_ids[field_name], value.encode('utf-8'))
+        encoded_value = value.encode('utf-8')
+        encoded_values.append(encoded_value)
+        c.legion_field_map_insert(raw_field_map, region.fspace.field_ids[field_name], encoded_value)
         region._clear_instance(field_name)
 
     assert(isinstance(mode, FileMode))
