@@ -7370,11 +7370,6 @@ namespace Legion {
               runtime->handle_field_size_update(derez, remote_address_space);
               break;
             }
-          case SEND_FIELD_SPACE_TOP_ALLOC:
-            {
-              runtime->handle_field_space_top_alloc(derez,remote_address_space);
-              break;
-            }
           case SEND_FIELD_FREE:
             {
               runtime->handle_field_free(derez, remote_address_space);
@@ -7425,32 +7420,22 @@ namespace Legion {
             }
           case INDEX_SPACE_DESTRUCTION_MESSAGE:
             {
-              runtime->handle_index_space_destruction(derez, 
-                                                      remote_address_space);
+              runtime->handle_index_space_destruction(derez); 
               break;
             }
           case INDEX_PARTITION_DESTRUCTION_MESSAGE:
             {
-              runtime->handle_index_partition_destruction(derez, 
-                                                          remote_address_space);
+              runtime->handle_index_partition_destruction(derez); 
               break;
             }
           case FIELD_SPACE_DESTRUCTION_MESSAGE:
             {
-              runtime->handle_field_space_destruction(derez, 
-                                                      remote_address_space);
+              runtime->handle_field_space_destruction(derez); 
               break;
             }
           case LOGICAL_REGION_DESTRUCTION_MESSAGE:
             {
-              runtime->handle_logical_region_destruction(derez, 
-                                                         remote_address_space);
-              break;
-            }
-          case LOGICAL_PARTITION_DESTRUCTION_MESSAGE:
-            {
-              runtime->handle_logical_partition_destruction(derez, 
-                                                          remote_address_space);
+              runtime->handle_logical_region_destruction(derez); 
               break;
             }
           case INDIVIDUAL_REMOTE_COMPLETE:
@@ -15547,18 +15532,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_field_space_top_alloc(AddressSpaceID target,
-                                             Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      // put this on the reference virtual channel since it has no effects
-      // tracking and we need to make sure it is handled before references
-      // are removed from the remote copies
-      find_messenger(target)->send_message(rez, SEND_FIELD_SPACE_TOP_ALLOC,
-                                  REFERENCE_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_field_free(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -15709,21 +15682,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void Runtime::send_logical_region_destruction(LogicalRegion handle, 
                                                   AddressSpaceID target,
-                                                  std::set<RtEvent> *applied)
+                                                  std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
       Serializer rez;
       {
         RezCheck z(rez);
         rez.serialize(handle);
-        if (applied != NULL)
-        {
-          const RtUserEvent done = create_rt_user_event();
-          rez.serialize(done);
-          applied->insert(done);
-        }
-        else
-          rez.serialize(RtUserEvent::NO_RT_USER_EVENT);
+        const RtUserEvent done = create_rt_user_event();
+        rez.serialize(done);
+        applied.insert(done);
       }
       // Put this message on the same virtual channel as the unregister
       // messages for distributed collectables to make sure that they 
@@ -15731,33 +15699,6 @@ namespace Legion {
       find_messenger(target)->send_message(rez, 
           LOGICAL_REGION_DESTRUCTION_MESSAGE, REFERENCE_VIRTUAL_CHANNEL,
                                                               true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_logical_partition_destruction(
-                              LogicalPartition handle, AddressSpaceID target,
-                              std::set<RtEvent> *applied)
-    //--------------------------------------------------------------------------
-    {
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(handle);
-        if (applied != NULL)
-        {
-          const RtUserEvent done = create_rt_user_event();
-          rez.serialize(done);
-          applied->insert(done);
-        }
-        else
-          rez.serialize(RtUserEvent::NO_RT_USER_EVENT);
-      }
-      // Put this message on the same virtual channel as the unregister
-      // messages for distributed collectables to make sure that they 
-      // are properly ordered
-      find_messenger(target)->send_message(rez, 
-          LOGICAL_PARTITION_DESTRUCTION_MESSAGE, REFERENCE_VIRTUAL_CHANNEL,
-                                                                true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -17226,14 +17167,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_field_space_top_alloc(Deserializer &derez,
-                                                AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      FieldSpaceNode::handle_top_alloc(forest, derez, source);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::handle_field_free(Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -17301,8 +17234,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_space_destruction(Deserializer &derez,
-                                                 AddressSpaceID source)
+    void Runtime::handle_index_space_destruction(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -17314,7 +17246,7 @@ namespace Legion {
       assert(done.exists());
 #endif
       std::set<RtEvent> applied;
-      forest->destroy_index_space(handle, source, applied);
+      forest->destroy_index_space(handle, applied);
       if (!applied.empty())
         Runtime::trigger_event(done, Runtime::merge_events(applied));
       else
@@ -17322,8 +17254,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_partition_destruction(Deserializer &derez,
-                                                     AddressSpaceID source)
+    void Runtime::handle_index_partition_destruction(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -17335,7 +17266,7 @@ namespace Legion {
       assert(done.exists());
 #endif
       std::set<RtEvent> applied;
-      forest->destroy_index_partition(handle, source, applied);
+      forest->destroy_index_partition(handle, applied);
       if (!applied.empty())
         Runtime::trigger_event(done, Runtime::merge_events(applied));
       else
@@ -17343,8 +17274,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_field_space_destruction(Deserializer &derez,
-                                                 AddressSpaceID source)
+    void Runtime::handle_field_space_destruction(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -17356,7 +17286,7 @@ namespace Legion {
       assert(done.exists());
 #endif
       std::set<RtEvent> applied;
-      forest->destroy_field_space(handle, source, applied);
+      forest->destroy_field_space(handle, applied);
       if (!applied.empty())
         Runtime::trigger_event(done, Runtime::merge_events(applied));
       else
@@ -17364,8 +17294,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_logical_region_destruction(Deserializer &derez,
-                                                    AddressSpaceID source)
+    void Runtime::handle_logical_region_destruction(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -17374,28 +17303,7 @@ namespace Legion {
       RtUserEvent done;
       derez.deserialize(done);
       std::set<RtEvent> applied;
-      forest->destroy_logical_region(handle, source, applied);
-      if (done.exists())
-      {
-        if (!applied.empty())
-          Runtime::trigger_event(done, Runtime::merge_events(applied));
-        else
-          Runtime::trigger_event(done);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_logical_partition_destruction(Deserializer &derez,
-                                                       AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      LogicalPartition handle;
-      derez.deserialize(handle);
-      RtUserEvent done;
-      derez.deserialize(done);
-      std::set<RtEvent> applied;
-      forest->destroy_logical_partition(handle, source, applied);
+      forest->destroy_logical_region(handle, applied);
       if (done.exists())
       {
         if (!applied.empty())
@@ -19524,7 +19432,7 @@ namespace Legion {
       std::set<RtEvent> applied;
       for (std::map<std::pair<Domain,TypeTag>,IndexSpace>::const_iterator it =
             index_slice_spaces.begin(); it != index_slice_spaces.end(); it++)
-        forest->destroy_index_space(it->second, address_space, applied);
+        forest->destroy_index_space(it->second, applied);
       // If there are still any layout constraints that the application
       // failed to remove its references to then we can remove the reference
       // for them and make sure it's effects propagate
@@ -23666,6 +23574,11 @@ namespace Legion {
         case LG_DEFER_EQ_RESPONSE_TASK_ID:
           {
             EquivalenceSet::handle_deferred_response(args, runtime);
+            break;
+          }
+        case LG_DEFER_REMOVE_EQ_REF_TASK_ID:
+          {
+            EquivalenceSet::handle_deferred_remove_refs(args);
             break;
           }
         case LG_DEFER_REMOTE_REF_UPDATE_TASK_ID:

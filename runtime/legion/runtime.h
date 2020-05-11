@@ -2183,7 +2183,6 @@ namespace Legion {
       void send_field_space_infos_response(AddressSpaceID, Serializer &rez);
       void send_field_alloc_request(AddressSpaceID target, Serializer &rez);
       void send_field_size_update(AddressSpaceID target, Serializer &rez);
-      void send_field_space_top_alloc(AddressSpaceID target, Serializer &rez);
       void send_field_free(AddressSpaceID target, Serializer &rez);
       void send_field_space_layout_invalidation(AddressSpaceID target, 
                                                 Serializer &rez);
@@ -2207,10 +2206,7 @@ namespace Legion {
                                         std::set<RtEvent> &applied);
       void send_logical_region_destruction(LogicalRegion handle, 
                                            AddressSpaceID target,
-                                           std::set<RtEvent> *applied);
-      void send_logical_partition_destruction(LogicalPartition handle,
-                                              AddressSpaceID target,
-                                              std::set<RtEvent> *applied);
+                                           std::set<RtEvent> &applied);
       void send_individual_remote_complete(Processor target, Serializer &rez);
       void send_individual_remote_commit(Processor target, Serializer &rez);
       void send_slice_remote_mapped(Processor target, Serializer &rez);
@@ -2432,8 +2428,6 @@ namespace Legion {
       void handle_field_space_infos_response(Deserializer &derez);
       void handle_field_alloc_request(Deserializer &derez);
       void handle_field_size_update(Deserializer &derez, AddressSpaceID source);
-      void handle_field_space_top_alloc(Deserializer &derez,
-                                        AddressSpaceID source);
       void handle_field_free(Deserializer &derez, AddressSpaceID source);
       void handle_field_space_layout_invalidation(Deserializer &derez,
                                                   AddressSpaceID source);
@@ -2447,16 +2441,10 @@ namespace Legion {
       void handle_top_level_region_return(Deserializer &derez);
       void handle_logical_region_node(Deserializer &derez, 
                                       AddressSpaceID source);
-      void handle_index_space_destruction(Deserializer &derez,
-                                          AddressSpaceID source);
-      void handle_index_partition_destruction(Deserializer &derez,
-                                              AddressSpaceID source);
-      void handle_field_space_destruction(Deserializer &derez,
-                                          AddressSpaceID source);
-      void handle_logical_region_destruction(Deserializer &derez,
-                                             AddressSpaceID source);
-      void handle_logical_partition_destruction(Deserializer &derez,
-                                                AddressSpaceID source);
+      void handle_index_space_destruction(Deserializer &derez);
+      void handle_index_partition_destruction(Deserializer &derez);
+      void handle_field_space_destruction(Deserializer &derez);
+      void handle_logical_region_destruction(Deserializer &derez);
       void handle_individual_remote_complete(Deserializer &derez);
       void handle_individual_remote_commit(Deserializer &derez);
       void handle_slice_remote_mapped(Deserializer &derez, 

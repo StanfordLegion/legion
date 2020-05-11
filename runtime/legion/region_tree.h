@@ -189,10 +189,9 @@ namespace Legion {
                                         std::set<RtEvent> &safe_events);
       void compute_partition_disjointness(IndexPartition handle,
                                           RtUserEvent ready_event);
-      void destroy_index_space(IndexSpace handle, AddressSpaceID source,
+      void destroy_index_space(IndexSpace handle,
                                std::set<RtEvent> &preconditions);
       void destroy_index_partition(IndexPartition handle, 
-                                   AddressSpaceID source,
                                    std::set<RtEvent> &preconditions);
     public:
       ApEvent create_equal_partition(Operation *op, 
@@ -305,7 +304,7 @@ namespace Legion {
     public:
       void create_field_space(FieldSpace handle, DistributedID did,
                               std::set<RtEvent> *applied = NULL);
-      void destroy_field_space(FieldSpace handle, AddressSpaceID source,
+      void destroy_field_space(FieldSpace handle,
                                std::set<RtEvent> &preconditions);
       void create_field_space_allocator(FieldSpace handle);
       void destroy_field_space_allocator(FieldSpace handle);
@@ -354,11 +353,7 @@ namespace Legion {
       void create_logical_region(LogicalRegion handle,
                                  std::set<RtEvent> *applied = NULL);
       void destroy_logical_region(LogicalRegion handle, 
-                                  AddressSpaceID source,
                                   std::set<RtEvent> &preconditions);
-      void destroy_logical_partition(LogicalPartition handle,
-                                     AddressSpaceID source,
-                                     std::set<RtEvent> &preconditions);
     public:
       LogicalPartition get_logical_partition(LogicalRegion parent, 
                                              IndexPartition handle);
@@ -1617,7 +1612,6 @@ namespace Legion {
     public:
       RtEvent initialized;
       NodeSet child_creation;
-      bool destroyed;
     protected:
       mutable LocalLock node_lock;
     protected:
@@ -1689,19 +1683,6 @@ namespace Legion {
         const AddressSpaceID source;
         Serializer &rez;
       };
-      class DestroyNodeFunctor {
-      public:
-        DestroyNodeFunctor(IndexSpace h, AddressSpaceID src, Runtime *rt,
-                           std::set<RtEvent> &ap)
-          : handle(h), source(src), runtime(rt), applied(ap) { }
-      public:
-        void apply(AddressSpaceID target);
-      public:
-        const IndexSpace handle;
-        const AddressSpaceID source;
-        Runtime *const runtime;
-        std::set<RtEvent> &applied;
-      };
       class DestructionFunctor {
       public:
         DestructionFunctor(IndexSpaceNode *n, ReferenceMutator *m)
@@ -1724,6 +1705,7 @@ namespace Legion {
     public:
       virtual void notify_valid(ReferenceMutator *mutator);
       virtual void notify_invalid(ReferenceMutator *mutator);
+      virtual void notify_inactive(ReferenceMutator *mutator);
     public:
       virtual bool is_index_space_node(void) const;
 #ifdef DEBUG_LEGION
@@ -1761,10 +1743,6 @@ namespace Legion {
       void record_disjointness(bool disjoint, 
                                LegionColor c1, LegionColor c2);
       void record_remote_child(IndexPartition pid, LegionColor part_color);
-    public:
-      void add_instance(RegionNode *inst);
-      bool has_instance(RegionTreeID tid);
-      void remove_instance(RegionNode *inst);
     public:
       static void handle_disjointness_test(IndexSpaceNode *parent,
                                            IndexPartNode *left,
@@ -1822,8 +1800,6 @@ namespace Legion {
       virtual size_t get_volume(void) = 0;
       virtual size_t get_num_dims(void) const = 0;
       virtual bool contains_point(const void *realm_point,TypeTag type_tag) = 0;
-      virtual bool destroy_node(AddressSpaceID source,
-                                std::set<RtEvent> &applied) = 0;
     public:
       virtual LegionColor get_max_linearized_color(void) = 0;
       virtual LegionColor linearize_color(const void *realm_color,
@@ -1941,6 +1917,9 @@ namespace Legion {
       // Keep track of whether we've tightened these bounds
       RtUserEvent               tight_index_space_set;
       bool                      tight_index_space;
+#ifdef DEBUG_LEGION
+      bool                      first_valid;                      
+#endif
       // Must hold the node lock when accessing the
       // remaining data structures
       std::map<LegionColor,IndexPartNode*> color_map;
@@ -2003,8 +1982,6 @@ namespace Legion {
       virtual size_t get_volume(void);
       virtual size_t get_num_dims(void) const;
       virtual bool contains_point(const void *realm_point, TypeTag type_tag);
-      virtual bool destroy_node(AddressSpaceID source,
-                                std::set<RtEvent> &applied);
     public:
       virtual LegionColor get_max_linearized_color(void);
       virtual LegionColor linearize_color(const void *realm_color,
@@ -2474,6 +2451,27 @@ namespace Legion {
     };
 
     /**
+     * \class PartitionTracker
+     * This is a small helper class that is used for figuring out
+     * when to remove references to LogicalPartition objects. We
+     * want to remove the references as soon as either the index
+     * partition is destroyed or the logical region is destroyed.
+     * We use this class to detect which one occurs first.
+     */
+    class PartitionTracker : public Collectable {
+    public:
+      PartitionTracker(PartitionNode *part);
+      PartitionTracker(const PartitionTracker &rhs);
+      ~PartitionTracker(void) { }
+    public:
+      PartitionTracker& operator=(const PartitionTracker &rhs);
+    public:
+      bool remove_partition_reference(ReferenceMutator *mutator);
+    private:
+      PartitionNode *volatile partition;
+    };
+
+    /**
      * \class IndexPartNode
      * A node for representing a generic index partition.
      */
@@ -2570,6 +2568,7 @@ namespace Legion {
     public:
       virtual void notify_valid(ReferenceMutator *mutator);
       virtual void notify_invalid(ReferenceMutator *mutator);
+      virtual void notify_inactive(ReferenceMutator *mutator);
     public:
       virtual bool is_index_space_node(void) const;
 #ifdef DEBUG_LEGION
@@ -2598,6 +2597,7 @@ namespace Legion {
       IndexSpaceNode* get_child(const LegionColor c, RtEvent *defer = NULL);
       void add_child(IndexSpaceNode *child, ReferenceMutator *mutator);
       void remove_child(const LegionColor c);
+      void add_tracker(PartitionTracker *tracker); 
       size_t get_num_children(void) const;
       void get_subspace_preconditions(std::set<ApEvent> &preconditions);
     public:
@@ -2611,10 +2611,6 @@ namespace Legion {
       IndexSpaceExpression* get_union_expression(bool check_complete=true);
       void record_remote_disjoint_ready(RtUserEvent ready);
       void record_remote_disjoint_result(const bool disjoint_result);
-    public:
-      void add_instance(PartitionNode *inst);
-      bool has_instance(RegionTreeID tid);
-      void remove_instance(PartitionNode *inst);
     public:
       void add_pending_child(const LegionColor child_color,
                             ApUserEvent domain_ready);
@@ -2642,8 +2638,6 @@ namespace Legion {
       bool intersects_with(IndexPartNode *other, bool compute = true); 
       bool dominates(IndexSpaceNode *other);
       bool dominates(IndexPartNode *other);
-      virtual bool destroy_node(AddressSpaceID source, bool top,
-                                std::set<RtEvent> &applied) = 0;
     public:
       static void handle_disjointness_test(IndexPartNode *parent,
                                            IndexSpaceNode *left,
@@ -2679,15 +2673,18 @@ namespace Legion {
       bool disjoint;
     protected:
       bool has_complete, complete;
+#ifdef DEBUG_LEGION
+      bool first_valid;
+#endif
       volatile IndexSpaceExpression *union_expr;
     protected:
       // Must hold the node lock when accessing
       // the remaining data structures
       std::map<LegionColor,IndexSpaceNode*> color_map;
       std::map<LegionColor,RtUserEvent> pending_child_map;
-      std::set<PartitionNode*> logical_nodes;
       std::set<std::pair<LegionColor,LegionColor> > disjoint_subspaces;
       std::set<std::pair<LegionColor,LegionColor> > aliased_subspaces;
+      std::vector<PartitionTracker*> partition_trackers;
     protected:
       // Support for pending child spaces that still need to be computed
       std::map<LegionColor,ApUserEvent> pending_children;
@@ -2718,9 +2715,6 @@ namespace Legion {
       virtual ~IndexPartNodeT(void);
     public:
       IndexPartNodeT& operator=(const IndexPartNodeT &rhs);
-    public:
-      virtual bool destroy_node(AddressSpaceID source, bool top,
-                                std::set<RtEvent> &applied); 
     };
 
     /**
@@ -2963,12 +2957,6 @@ namespace Legion {
       void get_field_set(const FieldMask &mask,
           const std::set<FieldID> &basis, std::set<FieldID> &to_set) const;
     public:
-      void add_instance(RegionNode *inst, ReferenceMutator *mutator);
-      RtEvent add_instance(LogicalRegion inst, AddressSpaceID source);
-      bool has_instance(RegionTreeID tid);
-      void remove_instance(RegionNode *inst);
-      bool destroy_node(AddressSpaceID source, std::set<RtEvent> &applied);
-    public:
       FieldMask get_field_mask(const std::set<FieldID> &fields) const;
       unsigned get_field_index(FieldID fid) const;
       void get_field_indexes(const std::vector<FieldID> &fields,
@@ -3039,8 +3027,6 @@ namespace Legion {
     public:
       static void handle_alloc_request(RegionTreeForest *forest,
                                        Deserializer &derez);
-      static void handle_top_alloc(RegionTreeForest *forest,
-                                   Deserializer &derez, AddressSpaceID source);
       static void handle_field_free(RegionTreeForest *forest,
                                     Deserializer &derez, AddressSpaceID source);
       static void handle_layout_invalidation(RegionTreeForest *forest,
@@ -3086,9 +3072,6 @@ namespace Legion {
       RtEvent initialized;
     private:
       mutable LocalLock node_lock;
-      // Top nodes in the trees for which this field space is used
-      std::set<LogicalRegion> logical_trees; // valid on every node currently
-      std::set<RegionNode*> local_trees; // valid on the local node
       std::map<FieldID,FieldInfo> field_infos; // depends on allocation_state
       // Local field sizes
       std::vector<std::pair<size_t,CustomSerdezID> > local_index_infos;
@@ -3121,8 +3104,6 @@ namespace Legion {
       unsigned outstanding_allocators;
       // Total number of outstanding invalidations (owner node only)
       unsigned outstanding_invalidations;
-    public:
-      bool destroyed;
     };
  
     /**
@@ -3341,7 +3322,6 @@ namespace Legion {
     public:
       NodeSet remote_instances;
       bool registered;
-      bool destroyed;
 #ifdef DEBUG_LEGION
     protected:
       bool currently_active; // should be monotonic
@@ -3376,16 +3356,13 @@ namespace Legion {
       };
       class DestructionFunctor {
       public:
-        DestructionFunctor(LogicalRegion h, Runtime *rt, AddressSpaceID src,
-                           std::set<RtEvent> &ap)
-          : handle(h), runtime(rt), source(src), applied(ap) { }
+        DestructionFunctor(RegionNode *n, ReferenceMutator *m)
+          : node(n), mutator(m) { }
       public:
         void apply(AddressSpaceID target);
       public:
-        const LogicalRegion handle;
-        Runtime *const runtime;
-        const AddressSpaceID source;
-        std::set<RtEvent> &applied;
+        RegionNode *const node;
+        ReferenceMutator *const mutator;
       };
     public:
       RegionNode(LogicalRegion r, PartitionNode *par, IndexSpaceNode *row_src,
@@ -3396,16 +3373,17 @@ namespace Legion {
     public:
       RegionNode& operator=(const RegionNode &rhs);
     public:
+      virtual void notify_valid(ReferenceMutator *mutator);
+      virtual void notify_invalid(ReferenceMutator *mutator);
       virtual void notify_inactive(ReferenceMutator *mutator);
     public:
-      void record_registered(ReferenceMutator *mutator);
+      void record_registered(void);
     public:
       bool has_color(const LegionColor p);
       PartitionNode* get_child(const LegionColor p);
       void add_child(PartitionNode *child);
       void remove_child(const LegionColor p);
-    public:
-      bool destroy_node(AddressSpaceID source, std::set<RtEvent> &applied);
+      void add_tracker(PartitionTracker *tracker);
     public:
       virtual unsigned get_depth(void) const;
       virtual LegionColor get_color(void) const;
@@ -3491,6 +3469,10 @@ namespace Legion {
       IndexSpaceNode *const row_source;
     protected:
       std::map<LegionColor,PartitionNode*> color_map;
+      std::vector<PartitionTracker*> partition_trackers;
+#ifdef DEBUG_LEGION
+      bool currently_valid;
+#endif
     };
 
     /**
@@ -3513,19 +3495,6 @@ namespace Legion {
         const SemanticTag tag;
         const AddressSpaceID source;
       };
-      class DestructionFunctor {
-      public:
-        DestructionFunctor(LogicalPartition h, Runtime *rt, AddressSpaceID src,
-                           std::set<RtEvent> &ap)
-          : handle(h), runtime(rt), source(src), applied(ap) { }
-      public:
-        void apply(AddressSpaceID target);
-      public:
-        const LogicalPartition handle;
-        Runtime *const runtime;
-        const AddressSpaceID source;
-        std::set<RtEvent> &applied;
-      };
     public:
       PartitionNode(LogicalPartition p, RegionNode *par, 
                     IndexPartNode *row_src, FieldSpaceNode *col_src,
@@ -3537,14 +3506,12 @@ namespace Legion {
     public:
       virtual void notify_inactive(ReferenceMutator *mutator);
     public:
-      void record_registered(ReferenceMutator *mutator);
+      void record_registered(void);
     public:
       bool has_color(const LegionColor c);
       RegionNode* get_child(const LegionColor c);
       void add_child(RegionNode *child);
       void remove_child(const LegionColor c);
-      bool destroy_node(AddressSpaceID source, bool top, 
-                        std::set<RtEvent> &applied);
     public:
       virtual unsigned get_depth(void) const;
       virtual LegionColor get_color(void) const;

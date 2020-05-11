@@ -3801,9 +3801,11 @@ namespace Legion {
        * @param handle the index space to destroy
        * @param unordered set to true if this is performed by a different
        *          thread than the one for the task (e.g a garbage collector)
+       * @param recurse delete the full index tree
        */
       void destroy_index_space(Context ctx, IndexSpace handle,
-                               const bool unordered = false);
+                               const bool unordered = false,
+                               const bool recurse = true);
     public:
       //------------------------------------------------------------------------
       // Index Partition Operations Based on Coloring
@@ -3963,9 +3965,11 @@ namespace Legion {
        * @param handle index partition to be destroyed
        * @param unordered set to true if this is performed by a different
        *          thread than the one for the task (e.g a garbage collector)
+       * @param recurse destroy the full sub-tree below this partition
        */
       void destroy_index_partition(Context ctx, IndexPartition handle,
-                                   const bool unordered = false);
+                                   const bool unordered = false,
+                                   const bool recurse = true);
     public:
       //------------------------------------------------------------------------
       // Dependent Partitioning Operations

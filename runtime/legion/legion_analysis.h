@@ -2105,6 +2105,16 @@ namespace Legion {
         const IndexSpaceExprID expr_id;
         const IndexSpace handle;
       };
+      struct DeferRemoveRefArgs : public LgTaskArgs<DeferRemoveRefArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_REMOVE_EQ_REF_TASK_ID;
+      public:
+        DeferRemoveRefArgs(std::vector<IndexSpaceExpression*> *refs)
+          : LgTaskArgs<DeferRemoveRefArgs>(implicit_provenance),
+            references(refs) { }
+      public:
+        std::vector<IndexSpaceExpression*> *const references;
+      };
     protected:
       enum EqState {
         // Owner starts in the mapping state, goes to pending refinement
@@ -2367,6 +2377,7 @@ namespace Legion {
       static void handle_make_owner(const void *args);
       static void handle_merge_or_forward(const void *args);
       static void handle_deferred_response(const void *args, Runtime *runtime);
+      static void handle_deferred_remove_refs(const void *args);
       static void handle_equivalence_set_request(Deserializer &derez,
                             Runtime *runtime, AddressSpaceID source);
       static void handle_equivalence_set_response(Deserializer &derez,

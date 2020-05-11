@@ -358,6 +358,7 @@ namespace Legion {
       LG_DEFER_MAKE_OWNER_TASK_ID,
       LG_DEFER_MERGE_OR_FORWARD_TASK_ID,
       LG_DEFER_EQ_RESPONSE_TASK_ID,
+      LG_DEFER_REMOVE_EQ_REF_TASK_ID,
       LG_DEFER_REMOTE_REF_UPDATE_TASK_ID,
       LG_COPY_FILL_AGGREGATION_TASK_ID,
       LG_COPY_FILL_DELETION_TASK_ID,
@@ -487,6 +488,7 @@ namespace Legion {
         "Defer Make Owner",                                       \
         "Defer Merge or Forward",                                 \
         "Defer Equivalence Set Response",                         \
+        "Defer Remove Equivalence Set Expression References",     \
         "Defer Remote Reference Update",                          \
         "Copy Fill Aggregation",                                  \
         "Copy Fill Deletion",                                     \
@@ -707,7 +709,6 @@ namespace Legion {
       SEND_FIELD_SPACE_INFOS_RESPONSE,
       SEND_FIELD_ALLOC_REQUEST,
       SEND_FIELD_SIZE_UPDATE,
-      SEND_FIELD_SPACE_TOP_ALLOC,
       SEND_FIELD_FREE,
       SEND_FIELD_SPACE_LAYOUT_INVALIDATION,
       SEND_LOCAL_FIELD_ALLOC_REQUEST,
@@ -721,7 +722,6 @@ namespace Legion {
       INDEX_PARTITION_DESTRUCTION_MESSAGE,
       FIELD_SPACE_DESTRUCTION_MESSAGE,
       LOGICAL_REGION_DESTRUCTION_MESSAGE,
-      LOGICAL_PARTITION_DESTRUCTION_MESSAGE,
       INDIVIDUAL_REMOTE_COMPLETE,
       INDIVIDUAL_REMOTE_COMMIT,
       SLICE_REMOTE_MAPPED,
@@ -885,7 +885,6 @@ namespace Legion {
         "Send Field Space Infos Response",                            \
         "Send Field Alloc Request",                                   \
         "Send Field Size Update",                                     \
-        "Send Field Space Top Alloc",                                 \
         "Send Field Free",                                            \
         "Send Field Space Layout Invalidation",                       \
         "Send Local Field Alloc Request",                             \
@@ -899,7 +898,6 @@ namespace Legion {
         "Index Partition Destruction",                                \
         "Field Space Destruction",                                    \
         "Logical Region Destruction",                                 \
-        "Logical Partition Destruction",                              \
         "Individual Remote Complete",                                 \
         "Individual Remote Commit",                                   \
         "Slice Remote Mapped",                                        \

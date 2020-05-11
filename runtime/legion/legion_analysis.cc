@@ -8217,7 +8217,11 @@ namespace Legion {
             {
               for (std::vector<IndexSpaceExpression*>::const_iterator it = 
                     to_delete.begin(); it != to_delete.end(); it++)
+              {
                 unrefined_remainders.erase(*it);
+                if ((*it)->remove_expression_reference())
+                  delete (*it);
+              }
               unrefined_remainders.tighten_valid_mask();
             }
           }
@@ -8431,7 +8435,8 @@ namespace Legion {
                         assert(unrefined_remainders.get_valid_mask() * 
                                 it->second);
 #endif
-                        unrefined_remainders.insert(diff_expr, it->second);
+                        if (unrefined_remainders.insert(diff_expr, it->second))
+                          diff_expr->add_expression_reference();
                       }
                     }
                     // Remove these fields from the overlap indicating
@@ -8610,7 +8615,8 @@ namespace Legion {
                       assert(unrefined_remainders.get_valid_mask() * 
                               it->set_mask);
 #endif
-                      unrefined_remainders.insert(remainder, it->set_mask);
+                      if (unrefined_remainders.insert(remainder, it->set_mask))
+                        remainder->add_expression_reference();
                     }
                   }
                 }
@@ -8653,7 +8659,8 @@ namespace Legion {
                     assert(unrefined_remainders.get_valid_mask() * 
                             to_filter);
 #endif
-                    unrefined_remainders.insert(remainder, to_filter);
+                    if (unrefined_remainders.insert(remainder, to_filter))
+                      remainder->add_expression_reference();
                   }
                 }
               }
@@ -8748,7 +8755,8 @@ namespace Legion {
               IndexSpaceExpression *diff =
                 forest->subtract_index_spaces(set_expr, expr);
 #endif
-              unrefined_remainders.insert(diff, ray_mask);
+              if (unrefined_remainders.insert(diff, ray_mask))
+                diff->add_expression_reference();
               ray_mask.clear();
             }
           }
@@ -9384,14 +9392,23 @@ namespace Legion {
       rez.serialize<size_t>(unrefined_remainders.size());
       if (!unrefined_remainders.empty())
       {
+        std::vector<IndexSpaceExpression*> *references = 
+          new std::vector<IndexSpaceExpression*>();
+        references->reserve(unrefined_remainders.size());
         for (FieldMaskSet<IndexSpaceExpression>::const_iterator it = 
               unrefined_remainders.begin(); it != 
               unrefined_remainders.end(); it++)
         {
           it->first->pack_expression(rez, logical_owner_space);
           rez.serialize(it->second);
+          references->push_back(it->first);
         }
         unrefined_remainders.clear();
+        // Defer removing the references on these expressions until
+        // the migration has been done
+        DeferRemoveRefArgs args(references);
+        runtime->issue_runtime_meta_task(args, 
+            LG_THROUGHPUT_WORK_PRIORITY, done_migration);
       }
       // Pack disjoint partition refinements
       rez.serialize<size_t>(disjoint_partition_refinements.size());
@@ -9569,7 +9586,8 @@ namespace Legion {
           IndexSpaceExpression::unpack_expression(derez,runtime->forest,source);
         FieldMask mask;
         derez.deserialize(mask);
-        unrefined_remainders.insert(expr, mask);
+        if (unrefined_remainders.insert(expr, mask))
+          expr->add_expression_reference();
       }
       size_t num_disjoint_refinements;
       derez.deserialize(num_disjoint_refinements);
@@ -12426,7 +12444,8 @@ namespace Legion {
         assert((diff_expr != NULL) && !diff_expr->is_empty());
         assert(unrefined_remainders.get_valid_mask() * finalize_mask);
 #endif
-        unrefined_remainders.insert(diff_expr, finalize_mask);
+        if (unrefined_remainders.insert(diff_expr, finalize_mask))
+          diff_expr->add_expression_reference();
       }
     }
 
@@ -12467,13 +12486,18 @@ namespace Legion {
       {
         for (std::vector<IndexSpaceExpression*>::const_iterator 
               it = to_delete.begin(); it != to_delete.end(); it++)
+        {
           unrefined_remainders.erase(*it);
+          if ((*it)->remove_expression_reference())
+            delete (*it);
+        }
       }
       if (!to_add.empty())
       {
         for (FieldMaskSet<IndexSpaceExpression>::const_iterator
               it = to_add.begin(); it != to_add.end(); it++)
-          unrefined_remainders.insert(it->first, it->second);
+          if (unrefined_remainders.insert(it->first, it->second))
+            it->first->add_expression_reference();
       }
     }
 
@@ -13109,6 +13133,18 @@ namespace Legion {
       // Remove our expression reference too
       if (dargs->is_local && dargs->expr->remove_expression_reference())
         delete dargs->expr;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/void EquivalenceSet::handle_deferred_remove_refs(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferRemoveRefArgs *dargs = (const DeferRemoveRefArgs*)args;
+      for (std::vector<IndexSpaceExpression*>::const_iterator it = 
+            dargs->references->begin(); it != dargs->references->end(); it++)
+        if ((*it)->remove_expression_reference())
+          delete (*it);
+      delete dargs->references;
     }
 
     //--------------------------------------------------------------------------

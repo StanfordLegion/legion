@@ -3302,10 +3302,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::destroy_index_space(Context ctx, IndexSpace handle,
-                                      const bool unordered)
+                                      const bool unordered, const bool recurse)
     //--------------------------------------------------------------------------
     {
-      ctx->destroy_index_space(handle, unordered);
+      ctx->destroy_index_space(handle, unordered, recurse);
     } 
 
     //--------------------------------------------------------------------------
@@ -3595,10 +3595,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::destroy_index_partition(Context ctx, IndexPartition handle,
-                                          const bool unordered)
+                                       const bool unordered, const bool recurse)
     //--------------------------------------------------------------------------
     {
-      ctx->destroy_index_partition(handle, unordered);
+      ctx->destroy_index_partition(handle, unordered, recurse);
     }
 
     //--------------------------------------------------------------------------
