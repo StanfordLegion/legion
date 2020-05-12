@@ -13721,6 +13721,8 @@ namespace Legion {
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
         complete_mapping();
+      if (!acquired_instances.empty())
+        release_acquired_instances(acquired_instances);
 #ifdef LEGION_SPY
       if (runtime->legion_spy_enabled)
         LegionSpy::log_operation_events(unique_op_id, done_event,
