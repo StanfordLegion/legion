@@ -277,7 +277,6 @@ namespace Legion {
         DistributedID did = runtime->get_available_distributed_id();
         future_map = FutureMap(new FutureMapImpl(ctx, runtime, did,
             runtime->address_space, RtEvent::NO_RT_EVENT));
-        future_map.impl->add_base_gc_ref(FUTURE_HANDLE_REF);
         future_map.impl->set_all_futures(arguments);
       }
       else
