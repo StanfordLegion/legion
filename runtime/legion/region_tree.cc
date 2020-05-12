@@ -6362,14 +6362,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IntermediateExpression::add_expression_reference(void)
+    void IntermediateExpression::add_expression_reference(bool expr_tree)
     //--------------------------------------------------------------------------
     {
       add_reference();
     }
 
     //--------------------------------------------------------------------------
-    bool IntermediateExpression::remove_expression_reference(void)
+    bool IntermediateExpression::remove_expression_reference(bool expr_tree)
     //--------------------------------------------------------------------------
     {
       return remove_reference();
@@ -6400,7 +6400,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // We always keep a reference on ourself until we get invalidated
-      add_expression_reference();
+      add_expression_reference(true/*expr tree*/);
     }
 
     //--------------------------------------------------------------------------
@@ -6413,7 +6413,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // We always keep a reference on ourself until we get invalidated
-      add_expression_reference();
+      add_expression_reference(true/*expr tree*/);
     }
 
     //--------------------------------------------------------------------------
@@ -6423,7 +6423,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool IndexSpaceOperation::remove_expression_reference(void)
+    bool IndexSpaceOperation::remove_expression_reference(bool expr_tree)
     //--------------------------------------------------------------------------
     {
       return remove_reference();
@@ -8116,24 +8116,33 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexSpaceNode::add_expression_reference(void)
+    void IndexSpaceNode::add_expression_reference(bool expr_tree)
     //--------------------------------------------------------------------------
     {
-      add_base_resource_ref(IS_EXPR_REF);
+      if (!expr_tree)
+      {
+        LocalReferenceMutator mutator;
+        add_base_gc_ref(IS_EXPR_REF, &mutator);
+      }
+      else
+        add_base_resource_ref(IS_EXPR_REF);
     }
 
     //--------------------------------------------------------------------------
-    bool IndexSpaceNode::remove_expression_reference(void)
+    bool IndexSpaceNode::remove_expression_reference(bool expr_tree)
     //--------------------------------------------------------------------------
     {
-      return remove_base_resource_ref(IS_EXPR_REF);
+      if (expr_tree)
+        return remove_base_resource_ref(IS_EXPR_REF);
+      else
+        return remove_base_gc_ref(IS_EXPR_REF);
     }
 
     //--------------------------------------------------------------------------
     bool IndexSpaceNode::remove_operation(RegionTreeForest *forest)
     //--------------------------------------------------------------------------
     {
-      return remove_expression_reference();
+      return remove_expression_reference(true/*expr tree*/);
     }
 
     //--------------------------------------------------------------------------
@@ -8373,9 +8382,15 @@ namespace Legion {
     IndexPartNode::~IndexPartNode(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(partition_trackers.empty());
-#endif
+      // The reason we would be here is if we were leaked
+      if (!partition_trackers.empty())
+      {
+        for (std::vector<PartitionTracker*>::const_iterator it = 
+              partition_trackers.begin(); it != partition_trackers.end(); it++)
+          if ((*it)->remove_partition_reference(NULL))
+            delete (*it);
+        partition_trackers.clear();
+      }
       // Lastly we can unregister ourselves with the context
       if (registered_with_runtime)
       {
@@ -16064,9 +16079,15 @@ namespace Legion {
     RegionNode::~RegionNode(void)
     //--------------------------------------------------------------------------
     { 
-#ifdef DEBUG_LEGION
-      assert(partition_trackers.empty());
-#endif
+      // The reason we would be here is if we were leaked
+      if (!partition_trackers.empty())
+      {
+        for (std::vector<PartitionTracker*>::const_iterator it = 
+              partition_trackers.begin(); it != partition_trackers.end(); it++)
+          if ((*it)->remove_partition_reference(NULL))
+            delete (*it);
+        partition_trackers.clear();
+      }
       if (registered)
       {
         // Only need to unregister ourselves with the column if we're the top

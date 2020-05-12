@@ -7952,6 +7952,14 @@ namespace Legion {
               disjoint_partition_refinements.end(); it++)
           delete it->first;
       }
+      if (!unrefined_remainders.empty())
+      {
+        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+              unrefined_remainders.begin(); it != 
+              unrefined_remainders.end(); it++)
+          if (it->first->remove_expression_reference())
+            delete it->first;
+      }
       if (subset_exprs != NULL)
         delete subset_exprs;
     }
