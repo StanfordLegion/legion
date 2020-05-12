@@ -992,7 +992,11 @@ namespace Legion {
       // have been detached while still holding valid references so they
       // have to go through the full path every time
       if (!is_external_instance() && check_valid_and_increment(source))
+      {
+        // Always need to add a valid reference if we return true
+        add_base_valid_ref(source, mutator);
         return true;
+      }
       // If we're not the owner, we're not going to succeed past this
       // since we aren't on the same node as where the instance lives
       // which is where the point of serialization is for garbage collection
