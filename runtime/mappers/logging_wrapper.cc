@@ -32,21 +32,24 @@ class MessageBuffer {
     // Do nothing;
   }
   ~MessageBuffer() {
-    for (const std::stringstream& ss : lines) {
-      log_mapper.info() << ss.str();
+    for (std::vector<std::stringstream*>::iterator it = lines.begin();
+         it != lines.end(); ++it) {
+      log_mapper.info() << (*it)->str();
+      delete(*it);
     }
   }
  public:
   std::stringstream& line() {
-    lines.emplace_back();
-    return lines.back();
+    lines.push_back(new std::stringstream());
+    return *(lines.back());
   }
   void report(const RegionRequirement& req,
               const std::vector<PhysicalInstance>& instances,
               unsigned req_idx) {
     line() << "    " << to_string(runtime, ctx, req, req_idx);
-    for (PhysicalInstance inst : instances) {
-      line() << "      " << to_string(runtime, ctx, inst);
+    for (std::vector<PhysicalInstance>::const_iterator it = instances.begin();
+         it != instances.end(); ++it) {
+      line() << "      " << to_string(runtime, ctx, *it);
     }
   }
   void report(const std::vector<RegionRequirement>& reqs,
@@ -58,8 +61,9 @@ class MessageBuffer {
   void report(const Task& task, const Mapper::MapTaskOutput& output) {
     std::stringstream& ss = line();
     ss << "  TARGET PROCS:";
-    for (Processor proc : output.target_procs) {
-      ss << " " << proc;
+    for (std::vector<Processor>::const_iterator it =
+           output.target_procs.begin(); it != output.target_procs.end(); ++it) {
+      ss << " " << *it;
     }
     const char *variant =
       runtime->find_task_variant_name(ctx, task.task_id, output.chosen_variant);
@@ -70,7 +74,7 @@ class MessageBuffer {
  private:
   MapperRuntime* const runtime;
   const MapperContext ctx;
-  std::vector<std::stringstream> lines;
+  std::vector<std::stringstream*> lines;
 };
 
 LoggingWrapper::LoggingWrapper(Mapper* mapper)
@@ -80,21 +84,24 @@ LoggingWrapper::LoggingWrapper(Mapper* mapper)
   std::cout << "Memories on rank " << rank << ":" << std::endl;
   Machine::MemoryQuery mem_query(machine);
   mem_query.local_address_space();
-  for (Memory mem : mem_query) {
-    std::cout << "  " << mem << " (" << to_string(mem.kind()) << ")"
+  for (Machine::MemoryQuery::iterator it = mem_query.begin();
+       it != mem_query.end(); ++it) {
+    std::cout << "  " << *it << " (" << to_string(it->kind()) << ")"
               << std::endl;
   }
   std::cout << "Processors on rank " << rank << ":" << std::endl;
   Machine::ProcessorQuery proc_query(machine);
   proc_query.local_address_space();
-  for (Processor proc : proc_query) {
-    std::cout << "  " << proc << " (" << to_string(proc.kind()) << ") can see";
+  for (Machine::ProcessorQuery::iterator pit = proc_query.begin();
+       pit != proc_query.end(); ++pit) {
+    std::cout << "  " << *pit << " (" << to_string(pit->kind()) << ") can see";
     Machine::MemoryQuery mem_query(Machine::get_machine());
-    mem_query.has_affinity_to(proc);
-    for (Memory mem : mem_query) {
+    mem_query.has_affinity_to(*pit);
+    for (Machine::MemoryQuery::iterator mit = mem_query.begin();
+         mit != mem_query.end(); ++mit) {
       Machine::AffinityDetails details;
-      machine.has_affinity(proc, mem, &details);
-      std::cout << " " << mem << "(bw=" << details.bandwidth << ")";
+      machine.has_affinity(*pit, *mit, &details);
+      std::cout << " " << *mit << "(bw=" << details.bandwidth << ")";
     }
     std::cout << std::endl;
   }
@@ -137,9 +144,10 @@ void LoggingWrapper::slice_task(const MapperContext ctx,
   buf.line() << "  INPUT: " << to_string(runtime, ctx, input.domain);
   mapper->slice_task(ctx, task, input, output);
   buf.line() << "  OUTPUT:";
-  for (const TaskSlice& slice : output.slices) {
-    buf.line() << "    " << to_string(runtime, ctx, slice.domain)
-               << " -> " << slice.proc;
+  for (std::vector<TaskSlice>::const_iterator it = output.slices.begin();
+       it != output.slices.end(); ++it) {
+    buf.line() << "    " << to_string(runtime, ctx, it->domain)
+               << " -> " << it->proc;
   }
 }
 
@@ -167,8 +175,10 @@ void LoggingWrapper::select_task_sources(const MapperContext ctx,
              input.region_req_index);
   mapper->select_task_sources(ctx, task, input, output);
   buf.line() << "  OUTPUT:";
-  for (PhysicalInstance inst : output.chosen_ranking) {
-    buf.line() << "      " << to_string(runtime, ctx, inst);
+  for (std::deque<PhysicalInstance>::iterator it =
+         output.chosen_ranking.begin();
+       it != output.chosen_ranking.end(); ++it) {
+    buf.line() << "      " << to_string(runtime, ctx, *it);
   }
 }
 

@@ -1156,13 +1156,14 @@ namespace Legion {
         runtime->get_index_space_domains(ctx, is, domains);
         std::stringstream ss;
         bool past_first = false;
-        for (const Domain& dom : domains) {
+        for (std::vector<Domain>::iterator it = domains.begin();
+             it != domains.end(); ++it) {
           if (past_first) {
             ss << "+";
           } else {
             past_first = true;
           }
-          ss << dom;
+          ss << *it;
         }
         return ss.str();
       }
@@ -1173,7 +1174,8 @@ namespace Legion {
                             const LayoutConstraintSet& constraints)
       //------------------------------------------------------------------------
       {
-        const std::vector<DimensionKind>& dims = constraints.ordering_constraint.ordering;
+        const std::vector<DimensionKind>& dims =
+          constraints.ordering_constraint.ordering;
         std::stringstream ss;
         if (dims.front() == DIM_F) {
           ss << "AoS:";
@@ -1182,7 +1184,8 @@ namespace Legion {
         } else {
           return "other";
         }
-        for (auto rit = dims.rbegin(); rit != dims.rend(); ++rit) {
+        for (std::vector<DimensionKind>::const_reverse_iterator rit =
+               dims.rbegin(); rit != dims.rend(); ++rit) {
           switch(*rit) {
             case DIM_X: ss << "X"; break;
             case DIM_Y: ss << "Y"; break;
@@ -1203,7 +1206,8 @@ namespace Legion {
       {
         std::stringstream ss;
         bool past_first = false;
-        for (FieldID fid : fields) {
+        for (std::set<FieldID>::const_iterator it = fields.begin();
+             it != fields.end(); ++it) {
           if (past_first) {
             ss << "+";
           } else {
@@ -1212,11 +1216,11 @@ namespace Legion {
           const void* name;
           size_t name_size;
           if (runtime->retrieve_semantic_information(
-                  ctx, fs, fid, NAME_SEMANTIC_TAG, name, name_size,
+                  ctx, fs, *it, NAME_SEMANTIC_TAG, name, name_size,
                   true/*can_fail*/, false/*wait_until_ready*/)) {
             ss << static_cast<const char*>(name);
           } else {
-            ss << fid;
+            ss << *it;
           }
         }
         return ss.str();
@@ -1294,7 +1298,6 @@ namespace Legion {
         ss << "(index_point=" << task.index_point << ")";
         return ss.str();
       }
-
 
     }; // namespace Utilities
   }; // namespace Mapping
