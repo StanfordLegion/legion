@@ -21,6 +21,47 @@
 
 namespace Realm {
 
+  class LoopSchedule {
+  public:
+    // sets the number of workers and initializes the barrier for usage
+    //  by a work item
+    void initialize(int _num_workers);
+
+    // starts a static loop, blocking if the previous loop in the
+    //  work item has any stragglers - returns true if there's work
+    //  to do, false if not
+    bool start_static(int64_t start, int64_t end,
+		      int64_t incr, int64_t chunk,
+		      int thread_id,
+		      int64_t& span_start, int64_t& span_end);
+
+    // continues a static loop - span_{start,end} must contain what
+    //  they were given from the previous call to start/next_static
+    bool next_static(int64_t& span_start, int64_t& span_end);
+
+    // starts a dynamic loop, blocking if the previous loop in the
+    //  work item has any stragglers - does not actually request any
+    //  work - use next_dynamic for that
+    void start_dynamic(int64_t start, int64_t end,
+		       int64_t incr, int64_t chunk);
+
+    // continues a dynamic loop
+    bool next_dynamic(int64_t& span_start, int64_t& span_end,
+		      int64_t& stride);
+
+    // indicates this thread is done with the current loop - blocks
+    //  if other threads haven't even entered the loop yet
+    void end_loop(void);
+
+  protected:
+    int num_workers;
+    // loop bounds and position are done with unsigned values to
+    //  allow detection of overflow
+    atomic<uint64_t> loop_pos, loop_limit;
+    atomic<int64_t> loop_base, loop_incr, loop_chunk;
+    atomic<int> loop_barrier;
+  };
+
   class ThreadPool {
   public:
     ThreadPool(int _num_workers);
@@ -39,6 +80,7 @@ namespace Realm {
       atomic<int> remaining_workers;
       atomic<int> single_winner;  // worker currently assigned as the "single" one
       atomic<int> barrier_count;
+      LoopSchedule schedule;
     };
 
     struct WorkerInfo {
