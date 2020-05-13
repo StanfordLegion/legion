@@ -3465,21 +3465,18 @@ namespace Legion {
         }
         index_nodes[sp] = result;
         index_space_requests.erase(sp);
-        // If we have a parent, we always have a GC ref from it and
-        // not from anyone else, otherwise we get a valid ref on 
-        // the owner and gc ref on remote root nodes
-        if (parent == NULL)
-        {
-          if (result->is_owner())
-            result->add_base_valid_ref(APPLICATION_REF, &mutator);
-          else
-            result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
-        }
+        // If we are remote we always have a GC ref from the owner
+        // If we are the root then the valid ref comes from the application
+        // Otherwise the valid ref comes from parent partition
+        if (!result->is_owner())
+          result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
+        else if (parent == NULL)
+          result->add_base_valid_ref(APPLICATION_REF, &mutator);
         else
-          result->add_nested_gc_ref(parent->did, &mutator);
+          result->add_nested_valid_ref(parent->did, &mutator);
         result->register_with_runtime(&mutator);
         if (parent != NULL)
-          parent->add_child(result, &mutator);
+          parent->add_child(result);
       } 
       if (local_initialized.exists())
       {
@@ -3549,21 +3546,18 @@ namespace Legion {
         }
         index_nodes[sp] = result;
         index_space_requests.erase(sp);
-        // If we have a parent, we always have a GC ref from it and
-        // not from anyone else, otherwise we get a valid ref on 
-        // the owner and gc ref on remote root nodes
-        if (parent == NULL)
-        {
-          if (result->is_owner())
-            result->add_base_valid_ref(APPLICATION_REF, &mutator);
-          else
-            result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
-        }
+        // If we are remote we always have a GC ref from the owner
+        // If we are the root then the valid ref comes from the application
+        // Otherwise the valid ref comes from parent partition
+        if (!result->is_owner())
+          result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
+        else if (parent == NULL)
+          result->add_base_valid_ref(APPLICATION_REF, &mutator);
         else
-          result->add_nested_gc_ref(parent->did, &mutator);
+          result->add_nested_valid_ref(parent->did, &mutator);
         result->register_with_runtime(&mutator);
         if (parent != NULL)
-          parent->add_child(result, &mutator);
+          parent->add_child(result);
       } 
       if (local_initialized.exists())
       {
@@ -3643,7 +3637,7 @@ namespace Legion {
         else
           result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
         result->register_with_runtime(&mutator);
-        parent->add_child(result, &mutator);
+        parent->add_child(result);
       }
       if (local_initialized.exists())
       {
@@ -3718,7 +3712,7 @@ namespace Legion {
         else
           result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
         result->register_with_runtime(&mutator);
-        parent->add_child(result, &mutator);
+        parent->add_child(result);
       }
       if (local_initialized.exists())
       {
@@ -3777,8 +3771,6 @@ namespace Legion {
         // safely collected
         if (result->is_owner())
           result->add_base_valid_ref(APPLICATION_REF, &mutator);
-        else
-          result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
         result->register_with_runtime(&mutator);
       }
       if (local_initialized.exists())
@@ -3834,8 +3826,6 @@ namespace Legion {
         // safely collected
         if (result->is_owner())
           result->add_base_valid_ref(APPLICATION_REF, &mutator);
-        else
-          result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
         result->register_with_runtime(&mutator);
       }
       if (!local_applied.empty())
@@ -7089,13 +7079,8 @@ namespace Legion {
         realm_index_space_set(Runtime::create_rt_user_event()), 
         tight_index_space_set(Runtime::create_rt_user_event()),
         tight_index_space(false)
-#ifdef DEBUG_LEGION
-        , first_valid(true)
-#endif
     //--------------------------------------------------------------------------
     {
-      if (parent != NULL)
-        parent->add_nested_resource_ref(did);
 #ifdef DEBUG_LEGION
       if (parent != NULL)
         assert(handle.get_type_tag() == parent->handle.get_type_tag());
@@ -7125,13 +7110,7 @@ namespace Legion {
     {
       // Remove ourselves from the context
       if (registered_with_runtime)
-      {
-        if (parent != NULL)
-          parent->remove_child(color);
         context->remove_node(handle);
-      } 
-      if ((parent != NULL) && parent->remove_nested_resource_ref(did))
-        delete parent;
       // Clean-up any untriggered events
       if (!realm_index_space_set.has_triggered())
         Runtime::trigger_event(realm_index_space_set);
@@ -7153,27 +7132,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // If we're not the owner, we add a valid reference to the owner
-      if (is_owner())
-      {
-#ifdef DEBUG_LEGION
-        // should only become valid once on the owner node root
-        // non-root nodes can be color spaces which can become valid
-        // and then invalid multiple times
-        if (parent == NULL)
-        {
-          assert(first_valid);
-          first_valid = false;
-        }
-#endif
-        if (parent != NULL)
-          parent->add_nested_valid_ref(did, mutator);
-      }
-      else
+      if (!is_owner())
         send_remote_valid_increment(owner_space, mutator);
     }
 
     //--------------------------------------------------------------------------
-    void IndexSpaceNode::DestructionFunctor::apply(AddressSpaceID target)
+    void IndexSpaceNode::InvalidFunctor::apply(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
       node->send_remote_gc_decrement(target, mutator);
@@ -7185,20 +7149,14 @@ namespace Legion {
     {
       if (is_owner())
       {
-        // No need to check for deletion, we're holding a resource reference
-        if (parent == NULL)
+        // Remove gc references from remote nodes for the root
+        if (has_remote_instances())
         {
-          // Remove gc references from remote nodes for the root
-          if (has_remote_instances())
-          {
-            DestructionFunctor functor(this, mutator);
-            map_over_remote_instances(functor);
-          }
+          InvalidFunctor functor(this, mutator);
+          map_over_remote_instances(functor);
         }
-        else
-          parent->remove_nested_valid_ref(did, mutator);
       }
-      else // Remove the valid reference that we have on the owner
+      else
         send_remote_valid_decrement(owner_space, mutator); 
     }
 
@@ -7573,8 +7531,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexSpaceNode::add_child(IndexPartNode *child, 
-                                   ReferenceMutator *mutator)
+    void IndexSpaceNode::add_child(IndexPartNode *child) 
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(node_lock);
@@ -8122,7 +8079,7 @@ namespace Legion {
       if (!expr_tree)
       {
         LocalReferenceMutator mutator;
-        add_base_gc_ref(IS_EXPR_REF, &mutator);
+        add_base_valid_ref(IS_EXPR_REF, &mutator);
       }
       else
         add_base_resource_ref(IS_EXPR_REF);
@@ -8135,7 +8092,7 @@ namespace Legion {
       if (expr_tree)
         return remove_base_resource_ref(IS_EXPR_REF);
       else
-        return remove_base_gc_ref(IS_EXPR_REF);
+        return remove_base_valid_ref(IS_EXPR_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -8401,6 +8358,10 @@ namespace Legion {
         delete parent;
       if (color_space->remove_nested_resource_ref(did))
         delete color_space;
+      for (std::map<LegionColor,IndexSpaceNode*>::const_iterator it =
+            color_map.begin(); it != color_map.end(); it++)
+        if (it->second->remove_nested_resource_ref(did))
+          delete it->second;
     }
 
     //--------------------------------------------------------------------------
@@ -8410,6 +8371,13 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexPartNode::InvalidFunctor::apply(AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      node->send_remote_gc_decrement(target, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -8424,8 +8392,13 @@ namespace Legion {
         assert(first_valid);
         first_valid = false;
 #endif
-        // Always add references to our color space
-        color_space->add_nested_valid_ref(did, mutator);
+        // Check to see if the color space has a parent partition, if so we
+        // add the valid reference there since valid references on index spaces
+        // that are not the root mean it is a valid expression
+        if (color_space->parent != NULL)
+          color_space->parent->add_nested_valid_ref(did, mutator);
+        else
+          color_space->add_nested_valid_ref(did, mutator);
         // Add it to the partition of our parent if it exists, otherwise
         // our parent index space is a root so we add the reference there
         if (parent->parent != NULL)
@@ -8438,13 +8411,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexPartNode::DestructionFunctor::apply(AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      node->send_remote_gc_decrement(target, mutator);
-    }
-
-    //--------------------------------------------------------------------------
     void IndexPartNode::notify_invalid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
@@ -8453,11 +8419,14 @@ namespace Legion {
         // Remove gc references from our remote nodes
         if (has_remote_instances())
         {
-          DestructionFunctor functor(this, mutator);
+          InvalidFunctor functor(this, mutator);
           map_over_remote_instances(functor);
         }
         // Remove the valid reference that we hold on the color space
-        color_space->remove_nested_valid_ref(did, mutator);
+        if (color_space->parent != NULL)
+          color_space->parent->remove_nested_valid_ref(did, mutator);
+        else
+          color_space->remove_nested_valid_ref(did, mutator);
         // Remove valid ref on partition of parent if it exists, otherwise
         // our parent index space is a root so we remove the reference there
         if (parent->parent != NULL)
@@ -8473,18 +8442,15 @@ namespace Legion {
     void IndexPartNode::notify_inactive(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      // Finally remove gc references on all children and any trackers
+      // Finally remove valid references on all owner children and any trackers
       // We should not need a lock at this point since nobody else should
       // be modifying these data structures at this point
+      // We still hold resource references to the node so we don't need to
+      // worry about the child nodes being deleted
       for (std::map<LegionColor,IndexSpaceNode*>::const_iterator it = 
-            color_map.begin(); it != color_map.end(); /*nothing*/)
-      {
-        IndexSpaceNode *node = it->second;
-        // Next operation could invalidate the iterater so advance it now
-        it++;
-        if (node->remove_nested_gc_ref(did, mutator))
-          delete node;
-      }
+            color_map.begin(); it != color_map.end(); it++)
+        if (it->second->is_owner())
+          it->second->remove_nested_valid_ref(did, mutator);
       if (!partition_trackers.empty())
       {
         for (std::vector<PartitionTracker*>::const_iterator it = 
@@ -8818,10 +8784,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexPartNode::add_child(IndexSpaceNode *child, 
-                                  ReferenceMutator *mutator)
+    void IndexPartNode::add_child(IndexSpaceNode *child) 
     //--------------------------------------------------------------------------
     {
+      // This child should live as long as we are alive
+      child->add_nested_resource_ref(did);
       RtUserEvent to_trigger;
       {
         AutoLock n_lock(node_lock);
@@ -8837,19 +8804,6 @@ namespace Legion {
         pending_child_map.erase(finder);
       }
       Runtime::trigger_event(to_trigger);
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexPartNode::remove_child(const LegionColor c)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock n_lock(node_lock);
-      std::map<LegionColor,IndexSpaceNode*>::iterator finder = 
-        color_map.find(c);
-#ifdef DEBUG_LEGION
-      assert(finder != color_map.end());
-#endif
-      color_map.erase(finder);
     }
 
     //--------------------------------------------------------------------------
@@ -9867,26 +9821,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FieldSpaceNode::DestructionFunctor::apply(AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      node->send_remote_gc_decrement(target, mutator);
-    }
-
-    //--------------------------------------------------------------------------
     void FieldSpaceNode::notify_invalid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      if (is_owner())
-      {
-        // Remove gc references from our remote nodes
-        if (has_remote_instances())
-        {
-          DestructionFunctor functor(this, mutator);
-          map_over_remote_instances(functor);
-        }
-      }
-      else // Remove the valid reference that we have on the owner
+      if (!is_owner())
         send_remote_valid_decrement(owner_space, mutator);
     }
 
@@ -16096,12 +16034,6 @@ namespace Legion {
           if (column_source->remove_nested_resource_ref(did))
             delete column_source;
         }
-        else
-        {
-          parent->remove_child(row_source->color);
-          if (parent->remove_nested_resource_ref(did))
-            delete parent;
-        }
         // Unregister oursleves with the row source
         if (row_source->remove_nested_resource_ref(did))
           delete row_source;
@@ -16135,7 +16067,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionNode::DestructionFunctor::apply(AddressSpaceID target)
+    void RegionNode::InvalidFunctor::apply(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
       node->send_remote_gc_decrement(target, mutator);
@@ -16158,7 +16090,7 @@ namespace Legion {
       // Send deletion messages to each of our remote instances
       if (has_remote_instances())
       {
-        DestructionFunctor functor(this, mutator);
+        InvalidFunctor functor(this, mutator);
         map_over_remote_instances(functor);
       }
     }
@@ -16195,10 +16127,7 @@ namespace Legion {
       assert(!registered);
 #endif
       if (parent != NULL)
-      {
-        parent->add_nested_resource_ref(did);
         parent->add_child(this);
-      }
       else
         column_source->add_nested_resource_ref(did);
       row_source->add_nested_resource_ref(did);
@@ -17339,6 +17268,10 @@ namespace Legion {
     PartitionNode::~PartitionNode(void)
     //--------------------------------------------------------------------------
     {
+      for (std::map<LegionColor,RegionNode*>::const_iterator it =   
+            color_map.begin(); it != color_map.end(); it++)
+        if (it->second->remove_nested_resource_ref(did))
+          delete it->second;
       if (registered)
       {
         parent->remove_child(row_source->color);
@@ -17373,15 +17306,10 @@ namespace Legion {
       // Remove gc references on all of our child nodes
       // We should not need a lock at this point since nobody else should
       // be modifying these data structures at this point
+      // No need to check for deletion since we hold resource references
       for (std::map<LegionColor,RegionNode*>::const_iterator it = 
-            color_map.begin(); it != color_map.end(); /*nothing*/)
-      {
-        RegionNode *node = it->second;
-        // Next operation could invalidate the iterater so advance it now
-        it++;
-        if (node->remove_nested_gc_ref(did, mutator))
-          delete node;
-      }
+            color_map.begin(); it != color_map.end(); it++)
+        it->second->remove_nested_gc_ref(did, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -17441,25 +17369,12 @@ namespace Legion {
     void PartitionNode::add_child(RegionNode *child)
     //--------------------------------------------------------------------------
     {
+      child->add_nested_resource_ref(did);
       AutoLock n_lock(node_lock);
 #ifdef DEBUG_LEGION
       assert(color_map.find(child->row_source->color) == color_map.end());
 #endif
       color_map[child->row_source->color] = child;
-    }
-
-    //--------------------------------------------------------------------------
-    void PartitionNode::remove_child(const LegionColor c)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock n_lock(node_lock);
-#ifdef DEBUG_LEGION
-      std::map<LegionColor,RegionNode*>::iterator finder = color_map.find(c);
-      assert(finder != color_map.end());
-      color_map.erase(finder);
-#else
-      color_map.erase(c);
-#endif
     }
 
     //--------------------------------------------------------------------------

@@ -1683,9 +1683,9 @@ namespace Legion {
         const AddressSpaceID source;
         Serializer &rez;
       };
-      class DestructionFunctor {
+      class InvalidFunctor {
       public:
-        DestructionFunctor(IndexSpaceNode *n, ReferenceMutator *m)
+        InvalidFunctor(IndexSpaceNode *n, ReferenceMutator *m)
           : node(n), mutator(m) { }
       public:
         void apply(AddressSpaceID target);
@@ -1735,7 +1735,7 @@ namespace Legion {
       void release_color(LegionColor color);
       IndexPartNode* get_child(const LegionColor c, 
                                RtEvent *defer = NULL, bool can_fail = false);
-      void add_child(IndexPartNode *child, ReferenceMutator *mutator);
+      void add_child(IndexPartNode *child);
       void remove_child(const LegionColor c);
       size_t get_num_children(void) const;
     public:
@@ -1917,9 +1917,6 @@ namespace Legion {
       // Keep track of whether we've tightened these bounds
       RtUserEvent               tight_index_space_set;
       bool                      tight_index_space;
-#ifdef DEBUG_LEGION
-      bool                      first_valid;                      
-#endif
       // Must hold the node lock when accessing the
       // remaining data structures
       std::map<LegionColor,IndexPartNode*> color_map;
@@ -2540,9 +2537,9 @@ namespace Legion {
         Serializer &rez;
         Runtime *const runtime;
       };
-      class DestructionFunctor {
+      class InvalidFunctor {
       public:
-        DestructionFunctor(IndexPartNode *n, ReferenceMutator *m)
+        InvalidFunctor(IndexPartNode *n, ReferenceMutator *m)
           : node(n), mutator(m) { }
       public:
         void apply(AddressSpaceID target);
@@ -2595,8 +2592,7 @@ namespace Legion {
     public:
       bool has_color(const LegionColor c);
       IndexSpaceNode* get_child(const LegionColor c, RtEvent *defer = NULL);
-      void add_child(IndexSpaceNode *child, ReferenceMutator *mutator);
-      void remove_child(const LegionColor c);
+      void add_child(IndexSpaceNode *child);
       void add_tracker(PartitionTracker *tracker); 
       size_t get_num_children(void) const;
       void get_subspace_preconditions(std::set<ApEvent> &preconditions);
@@ -2674,7 +2670,7 @@ namespace Legion {
     protected:
       bool has_complete, complete;
 #ifdef DEBUG_LEGION
-      bool first_valid;
+      bool first_valid;                      
 #endif
       volatile IndexSpaceExpression *union_expr;
     protected:
@@ -2840,16 +2836,6 @@ namespace Legion {
         const FieldID fid;
         const SemanticTag tag;
         const AddressSpaceID source;
-      };
-      class DestructionFunctor {
-      public:
-        DestructionFunctor(FieldSpaceNode *n, ReferenceMutator *m)
-          : node(n), mutator(m) { }
-      public:
-        void apply(AddressSpaceID target);
-      public:
-        FieldSpaceNode *const node;
-        ReferenceMutator *const mutator;
       };
       struct DeferRequestFieldInfoArgs : 
         public LgTaskArgs<DeferRequestFieldInfoArgs> {
@@ -3354,9 +3340,9 @@ namespace Legion {
         const SemanticTag tag;
         const AddressSpaceID source;
       };
-      class DestructionFunctor {
+      class InvalidFunctor {
       public:
-        DestructionFunctor(RegionNode *n, ReferenceMutator *m)
+        InvalidFunctor(RegionNode *n, ReferenceMutator *m)
           : node(n), mutator(m) { }
       public:
         void apply(AddressSpaceID target);
@@ -3511,7 +3497,6 @@ namespace Legion {
       bool has_color(const LegionColor c);
       RegionNode* get_child(const LegionColor c);
       void add_child(RegionNode *child);
-      void remove_child(const LegionColor c);
     public:
       virtual unsigned get_depth(void) const;
       virtual LegionColor get_color(void) const;
