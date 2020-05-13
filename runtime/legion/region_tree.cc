@@ -13802,7 +13802,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       sanity_check_logical_state(state);
 #endif
-      LegionDeque<FieldState>::aligned new_states;
+      FieldStateDeque new_states;
       // Before looking at any child states, first check to see if we need
       // to do any closes to flush open reductions. This should be a pretty
       // rare operation since we often won't have lots of reductions going
@@ -13882,8 +13882,11 @@ namespace Legion {
                                          already_open);
                 open_below |= already_open;
                 if (needs_upgrade && !!already_open)
-                  new_states.push_back(
-                      FieldState(closer.user, already_open, next_child));
+                {
+                  FieldState new_state(closer.user, already_open, next_child);
+                  new_states.resize(new_states.size() + 1);
+                  new_states.back() = new_state;
+                }
                 // See if there are still any valid open fields
                 if (!it->valid_fields)
                   it = state.field_states.erase(it);
@@ -13951,7 +13954,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
                       assert(!!new_state.valid_fields);
 #endif
-                      new_states.push_back(new_state);
+                      new_states.emplace(new_state);
                       // Update the current child, mark that we need to
                       // recompute the valid fields for the state
                       cit->second -= already_open;
@@ -14018,7 +14021,7 @@ namespace Legion {
                     FieldState new_state(closer.user, already_open, next_child);
                     // We always have to go to read-write mode here
                     new_state.open_state = OPEN_READ_WRITE;
-                    new_states.push_back(new_state);
+                    new_states.emplace(new_state);
                   }
                 }
               }
@@ -14173,7 +14176,10 @@ namespace Legion {
       // a new field state and add it into the set of new states
       FieldMask open_mask = current_mask - open_below;
       if ((next_child != INVALID_COLOR) && !!open_mask)
-        new_states.push_back(FieldState(closer.user, open_mask, next_child));
+      {
+        FieldState new_state(closer.user, open_mask, next_child);
+        new_states.emplace(new_state);
+      }
       merge_new_field_states(state, new_states);
 #ifdef DEBUG_LEGION
       sanity_check_logical_state(state);
@@ -14194,7 +14200,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       sanity_check_logical_state(state);
 #endif
-      LegionDeque<FieldState>::aligned new_states;
+      FieldStateDeque new_states;
       // First let's see if we need to flush any reductions
       LegionColor no_next_child = INVALID_COLOR; // never a next child here
       if (!!state.reduction_fields)
@@ -14309,9 +14315,10 @@ namespace Legion {
                   // Record that some fields are already open
                   open_below |= overlap;
                   // Make the new state to add
-                  new_states.push_back(FieldState(closer.user.usage, overlap, 
+                  FieldState new_state(closer.user.usage, overlap, 
                            proj_info.projection, proj_info.projection_space, 
-                           are_all_children_disjoint(), true/*dirty reduce*/));
+                           are_all_children_disjoint(), true/*dirty reduce*/);
+                  new_states.emplace(new_state);
                   // If we are a reduction, we can go straight there
                   it->valid_fields -= overlap;
                   if (!it->valid_fields)
@@ -14350,9 +14357,10 @@ namespace Legion {
                     RegionUsage close_usage(READ_WRITE, EXCLUSIVE, 0);
                     IndexSpaceNode *color_space = 
                       as_partition_node()->row_source->color_space;
-                    new_states.push_back(FieldState(close_usage, overlap,
+                    FieldState new_state(close_usage, overlap,
                         context->runtime->find_projection_function(0),
-                        color_space, true/*disjoint*/));
+                        color_space, true/*disjoint*/);
+                    new_states.emplace(new_state);
                   }
                   else
                     closer.record_close_operation(overlap);
@@ -14378,9 +14386,10 @@ namespace Legion {
                 // Record that some fields are already open
                 open_below |= overlap;
                 // Make the new state to add
-                new_states.push_back(FieldState(closer.user.usage, overlap, 
+                FieldState new_state(closer.user.usage, overlap, 
                          proj_info.projection, proj_info.projection_space, 
-                         are_all_children_disjoint(), true/*dirty reduce*/));
+                         are_all_children_disjoint(), true/*dirty reduce*/);
+                new_states.emplace(new_state);
                 // If we are a reduction, we can go straight there
                 it->valid_fields -= overlap;
                 if (!it->valid_fields)
@@ -14457,9 +14466,10 @@ namespace Legion {
                     RegionUsage close_usage(READ_WRITE, EXCLUSIVE, 0);
                     IndexSpaceNode *color_space = 
                       as_partition_node()->row_source->color_space;
-                    new_states.push_back(FieldState(close_usage, overlap,
+                    FieldState new_state(close_usage, overlap,
                         context->runtime->find_projection_function(0),
-                        color_space, true/*disjoint*/));
+                        color_space, true/*disjoint*/);
+                    new_states.emplace(new_state);
                   }
                   else
                     closer.record_close_operation(overlap);
@@ -14487,9 +14497,10 @@ namespace Legion {
       // are guaranteed to project down below
       if (!!open_mask)
       {
-        new_states.push_back(FieldState(closer.user.usage, open_mask, 
+        FieldState new_state(closer.user.usage, open_mask, 
               proj_info.projection, proj_info.projection_space, 
-              are_all_children_disjoint()));
+              are_all_children_disjoint());
+        new_states.emplace(new_state);
       }
       merge_new_field_states(state, new_states);
 #ifdef DEBUG_LEGION
@@ -14503,7 +14514,7 @@ namespace Legion {
                                               FieldMask &reduction_flush_fields,
                                                   bool record_close_operations,
                                                   const LegionColor next_child,
-                                   LegionDeque<FieldState>::aligned &new_states)
+                                                  FieldStateDeque &new_states)
     //--------------------------------------------------------------------------
     {
       // If we are doing a reduction too, check to see if they are 
@@ -14862,7 +14873,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::merge_new_field_state(LogicalState &state,
-                                               const FieldState &new_state)
+                                               FieldState &new_state)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -14878,19 +14889,17 @@ namespace Legion {
         }
       }
       // Otherwise just push it on the back
-      state.field_states.push_back(new_state);
+      state.field_states.resize(state.field_states.size() + 1);
+      state.field_states.back() = new_state;
     }
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::merge_new_field_states(LogicalState &state,
-                             const LegionDeque<FieldState>::aligned &new_states)
+                                                FieldStateDeque &new_states)
     //--------------------------------------------------------------------------
     {
       for (unsigned idx = 0; idx < new_states.size(); idx++)
-      {
-        const FieldState &next = new_states[idx];
-        merge_new_field_state(state, next);
-      }
+        merge_new_field_state(state, new_states[idx]);
 #ifdef DEBUG_LEGION
       sanity_check_logical_state(state);
 #endif
@@ -15282,7 +15291,7 @@ namespace Legion {
       assert(next_child != INVALID_COLOR);
       sanity_check_logical_state(state);
 #endif
-      LegionDeque<FieldState>::aligned new_states;
+      FieldStateDeque new_states;
       for (LegionList<FieldState>::aligned::iterator it = 
             state.field_states.begin(); it != 
             state.field_states.end(); /*nothing*/)

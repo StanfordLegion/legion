@@ -596,41 +596,12 @@ namespace Legion {
     };  
 
     /**
-     * \struct ChildState
-     * Tracks the which fields have open children
-     * and then which children are open for each
-     * field. We also keep track of the children
-     * that are in the process of being closed
-     * to avoid races on two different operations
-     * trying to close the same child.
-     */
-    struct ChildState {
-    public:
-      ChildState(void) { }
-      ChildState(const FieldMask &m)
-        : valid_fields(m) { }
-      ChildState(const ChildState &rhs) 
-        : valid_fields(rhs.valid_fields),
-          open_children(rhs.open_children) { }
-    public:
-      ChildState& operator=(const ChildState &rhs)
-      {
-        valid_fields = rhs.valid_fields;
-        open_children = rhs.open_children;
-        return *this;
-      }
-    public:
-      FieldMask valid_fields;
-      LegionMap<LegionColor,FieldMask>::aligned open_children;
-    };
-
-    /**
      * \struct FieldState
      * Track the field state more accurately
      * for logical traversals to figure out 
      * which tasks can run in parallel.
      */
-    struct FieldState : public ChildState {
+    struct FieldState {
     public:
       FieldState(void);
       FieldState(const GenericUser &u, const FieldMask &m, 
@@ -638,6 +609,10 @@ namespace Legion {
       FieldState(const RegionUsage &u, const FieldMask &m,
                  ProjectionFunction *proj, IndexSpaceNode *proj_space, 
                  bool dis, bool dirty_reduction = false);
+      // This is effectively a move constructor
+      FieldState(FieldState &rhs);
+      // This is effectively a move assignment
+      FieldState& operator=(FieldState &rhs);
     public:
       inline bool is_projection_state(void) const 
         { return (open_state >= OPEN_READ_ONLY_PROJ); } 
@@ -654,12 +629,24 @@ namespace Legion {
                        const FieldMask &capture_mask,
                        PartitionNode *node) const;
     public:
+      FieldMask valid_fields;
+      LegionMap<LegionColor,FieldMask>::aligned open_children;
       OpenState open_state;
       ReductionOpID redop;
       ProjectionFunction *projection;
       IndexSpaceNode *projection_space;
       unsigned rebuild_timeout;
     };  
+
+    // A helper class for containing field states
+    class FieldStateDeque : public LegionDeque<FieldState>::aligned {
+    public:
+      inline void emplace(FieldState &rhs)
+      {
+        this->resize(this->size() + 1);
+        this->back() = rhs;
+      }
+    };
 
     /**
      * \class ProjectionEpoch

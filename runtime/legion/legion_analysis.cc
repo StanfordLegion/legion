@@ -2299,7 +2299,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FieldState::FieldState(const GenericUser &user, const FieldMask &m, 
                            const LegionColor c)
-      : ChildState(m), redop(0), projection(NULL), 
+      : valid_fields(m), redop(0), projection(NULL), 
         projection_space(NULL), rebuild_timeout(1)
     //--------------------------------------------------------------------------
     {
@@ -2319,7 +2319,7 @@ namespace Legion {
     FieldState::FieldState(const RegionUsage &usage, const FieldMask &m,
                            ProjectionFunction *proj, IndexSpaceNode *proj_space,
                            bool disjoint, bool dirty_reduction)
-      : ChildState(m), redop(0), projection(proj), 
+      : valid_fields(m), redop(0), projection(proj), 
         projection_space(proj_space), rebuild_timeout(1)
     //--------------------------------------------------------------------------
     {
@@ -2340,6 +2340,34 @@ namespace Legion {
         open_state = OPEN_READ_WRITE_PROJ_DISJOINT_SHALLOW;
       else
         open_state = OPEN_READ_WRITE_PROJ;
+    }
+
+    //--------------------------------------------------------------------------
+    FieldState::FieldState(FieldState &rhs)
+      : valid_fields(rhs.valid_fields), open_state(rhs.open_state),
+        redop(rhs.redop), projection(rhs.projection), 
+        projection_space(rhs.projection_space), 
+        rebuild_timeout(rhs.rebuild_timeout)
+    //--------------------------------------------------------------------------
+    {
+      open_children.swap(rhs.open_children);
+    }
+
+    //--------------------------------------------------------------------------
+    FieldState& FieldState::operator=(FieldState &rhs)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(open_children.empty());
+#endif
+      valid_fields = rhs.valid_fields;
+      open_children.swap(rhs.open_children);
+      open_state = rhs.open_state;
+      redop = rhs.redop;
+      projection = rhs.projection;
+      projection_space = rhs.projection_space;
+      rebuild_timeout = rhs.rebuild_timeout;
+      return *this;
     }
 
     //--------------------------------------------------------------------------

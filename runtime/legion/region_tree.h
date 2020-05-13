@@ -3177,7 +3177,7 @@ namespace Legion {
                                     FieldMask &reduction_flush_fields,
                                     bool record_close_operations,
                                     const LegionColor next_child,
-                              LegionDeque<FieldState>::aligned &new_states);
+                                    FieldStateDeque &new_states);
       // Note that 'allow_next_child' and 
       // 'record_closed_fields' are mutually exclusive
       void perform_close_operations(LogicalCloser &closer,
@@ -3192,10 +3192,9 @@ namespace Legion {
                                     bool record_close_operations,
                                     bool record_closed_fields,
                                     FieldMask &output_mask); 
-      void merge_new_field_state(LogicalState &state, 
-                                 const FieldState &new_state);
+      void merge_new_field_state(LogicalState &state, FieldState &new_state);
       void merge_new_field_states(LogicalState &state, 
-                            const LegionDeque<FieldState>::aligned &new_states);
+                                  FieldStateDeque &new_states);
       void filter_prev_epoch_users(LogicalState &state, const FieldMask &mask);
       void filter_curr_epoch_users(LogicalState &state, const FieldMask &mask);
       void report_uninitialized_usage(Operation *op, unsigned index,
