@@ -39,12 +39,14 @@ namespace Realm {
 						 MemoryImpl *_mem,
 						 size_t _bytes,
 						 size_t _align,
+						 bool _need_alloc_result,
  						 Event wait_on)
   {
     inst = _inst;
     mem = _mem;
     bytes = _bytes;
     align = _align;
+    need_alloc_result = _need_alloc_result;
     EventImpl::add_waiter(wait_on, this);
   }
 
@@ -53,7 +55,8 @@ namespace Realm {
     if(poisoned)
       log_poison.info() << "poisoned deferred instance creation skipped - inst=" << inst;
     
-    mem->deferred_creation_triggered(inst, bytes, align, poisoned);
+    mem->deferred_creation_triggered(inst, bytes, align,
+				     need_alloc_result, poisoned);
   }
 
   void RegionInstanceImpl::DeferredCreate::print(std::ostream& os) const
@@ -148,6 +151,11 @@ namespace Realm {
 	  pmc.add_measurement(stat);
 	  reported = true;
 	}
+	if(pmc.wants_measurement<ProfilingMeasurements::InstanceAllocResult>()) {
+	  ProfilingMeasurements::InstanceAllocResult result;
+	  result.success = false;
+	  pmc.add_measurement(result);
+	}
 	if(!reported) {
 	  // fatal error
 	  log_inst.fatal() << "FATAL: instance count exceeded for memory " << memory;
@@ -165,30 +173,36 @@ namespace Realm {
       inst = impl->me;
 
       impl->metadata.layout = ilg;
-      
+
+      bool need_alloc_result = false;
       if (!prs.empty()) {
         impl->requests = prs;
         impl->measurements.import_requests(impl->requests);
         if(impl->measurements.wants_measurement<ProfilingMeasurements::InstanceTimeline>())
           impl->timeline.record_create_time();
+	need_alloc_result = impl->measurements.wants_measurement<ProfilingMeasurements::InstanceAllocResult>();
       }
+
+      impl->metadata.need_alloc_result = need_alloc_result;
+      impl->metadata.need_notify_dealloc = false;
 
       log_inst.debug() << "instance layout: inst=" << inst << " layout=" << *ilg;
 
-      // request allocation of storage - a true response means it was serviced right
-      //  away
+      // request allocation of storage - note that due to the asynchronous
+      //  nature of any profiling responses, it is not safe to refer to the
+      //  instance metadata (whether the allocation succeeded or not) after
+      //  this point)
       Event ready_event;
       switch(m_impl->allocate_instance_storage(impl->me,
 					       ilg->bytes_used,
 					       ilg->alignment_reqd,
+					       need_alloc_result,
 					       wait_on)) {
       case MemoryImpl::ALLOC_INSTANT_SUCCESS:
 	{
 	  // successful allocation
 	  assert(impl->metadata.inst_offset <= RegionInstanceImpl::INSTOFFSET_MAXVALID);
 	  ready_event = Event::NO_EVENT;
-	  if(impl->measurements.wants_measurement<ProfilingMeasurements::InstanceTimeline>())
-	    impl->timeline.record_ready_time();
 	  break;
 	}
 
@@ -243,8 +257,6 @@ namespace Realm {
 	    // lost the race to the notification callback, so we trigger the
 	    //  ready event ourselves
 	    if(alloc_successful) {
-	      if(impl->measurements.wants_measurement<ProfilingMeasurements::InstanceTimeline>())
-		impl->timeline.record_ready_time();
 	      GenEventImpl::trigger(ready_event, false /*!poisoned*/);
 	      ready_event = Event::NO_EVENT;
 	    } else {
@@ -252,7 +264,13 @@ namespace Realm {
 	      GenEventImpl::trigger(ready_event, true /*poisoned*/);
 	    }
 	  }
+	  break;
 	}
+
+      case MemoryImpl::ALLOC_EVENTUAL_SUCCESS:
+      case MemoryImpl::ALLOC_EVENTUAL_FAILURE:
+	// should not occur
+	assert(0);
       }
 
       log_inst.info() << "instance created: inst=" << inst << " bytes=" << ilg->bytes_used << " ready=" << ready_event;
@@ -272,12 +290,17 @@ namespace Realm {
       ilg->bytes_used = 0;
       impl->metadata.layout = ilg;
       
+      bool need_alloc_result = false;
       if (!prs.empty()) {
         impl->requests = prs;
         impl->measurements.import_requests(impl->requests);
         if(impl->measurements.wants_measurement<ProfilingMeasurements::InstanceTimeline>())
           impl->timeline.record_create_time();
+	need_alloc_result = impl->measurements.wants_measurement<ProfilingMeasurements::InstanceAllocResult>();
       }
+
+      impl->metadata.need_alloc_result = need_alloc_result;
+      impl->metadata.need_notify_dealloc = false;
 
       // This is a little scary because the result could be negative, but we know
       // that unsigned undeflow produces correct results mod 2^64 so its ok
@@ -291,6 +314,7 @@ namespace Realm {
         m_impl->allocate_instance_storage(impl->me,
 					  ilg->bytes_used,
 					  ilg->alignment_reqd,
+					  need_alloc_result,
 					  wait_on, 
                                           inst_offset);
       assert(result == MemoryImpl::ALLOC_INSTANT_SUCCESS);
@@ -517,15 +541,21 @@ namespace Realm {
 					     size_t offset)
     {
       using namespace ProfilingMeasurements;
-      
-      if(result != MemoryImpl::ALLOC_INSTANT_SUCCESS) {
+
+      if((result == MemoryImpl::ALLOC_INSTANT_FAILURE) ||
+	 (result == MemoryImpl::ALLOC_EVENTUAL_FAILURE) ||
+	 (result == MemoryImpl::ALLOC_CANCELLED)) {
 	// if somebody is listening to profiling measurements, we report
 	//  a failed allocation through that channel - if not, we explode
+	// exception: InstanceAllocResult is not enough for EVENTUAL_FAILURE,
+	//  since we would have already said we thought it would succeed
 	bool report_failure = (measurements.wants_measurement<InstanceStatus>() ||
 			       measurements.wants_measurement<InstanceAbnormalStatus>() ||
-			       measurements.wants_measurement<InstanceAllocResult>());
+			       (measurements.wants_measurement<InstanceAllocResult>() &&
+				(result != MemoryImpl::ALLOC_EVENTUAL_FAILURE)));
 	if(!report_failure) {
-	  if(result == MemoryImpl::ALLOC_INSTANT_FAILURE) {
+	  if((result == MemoryImpl::ALLOC_INSTANT_FAILURE) ||
+	     (result == MemoryImpl::ALLOC_EVENTUAL_FAILURE)) {
 	    log_inst.fatal() << "instance allocation failed - out of memory in mem " << memory;
 	    abort();
 	  }
@@ -545,30 +575,41 @@ namespace Realm {
 	  ready_event = metadata.ready_event;
 	  metadata.ready_event = Event::NO_EVENT;
 	  metadata.inst_offset = (size_t)-2;
-	}
 
-	if(measurements.wants_measurement<InstanceStatus>()) {
-	  InstanceStatus stat;
-	  stat.result = ((result == MemoryImpl::ALLOC_INSTANT_FAILURE) ?
-  			   InstanceStatus::FAILED_ALLOCATION :
+	  // adding measurements is not thread safe w.r.t. a deferral
+	  //  message, so do it with lock held
+	  if(measurements.wants_measurement<InstanceStatus>()) {
+	    InstanceStatus stat;
+	    stat.result = ((result == MemoryImpl::ALLOC_INSTANT_FAILURE) ?
+                           InstanceStatus::FAILED_ALLOCATION :
 			   InstanceStatus::CANCELLED_ALLOCATION);
-	  stat.error_code = 0;
-	  measurements.add_measurement(stat);
-	}
+	    stat.error_code = 0;
+	    measurements.add_measurement(stat);
+	  }
 
-	if(measurements.wants_measurement<InstanceAbnormalStatus>()) {
-	  InstanceAbnormalStatus stat;
-	  stat.result = ((result == MemoryImpl::ALLOC_INSTANT_FAILURE) ?
-  			   InstanceStatus::FAILED_ALLOCATION :
-			   InstanceStatus::CANCELLED_ALLOCATION);
-	  stat.error_code = 0;
-	  measurements.add_measurement(stat);
-	}
+	  if(measurements.wants_measurement<InstanceAbnormalStatus>()) {
+	    InstanceAbnormalStatus stat;
+	    stat.result = ((result == MemoryImpl::ALLOC_INSTANT_FAILURE) ?
+                             InstanceStatus::FAILED_ALLOCATION :
+			     InstanceStatus::CANCELLED_ALLOCATION);
+	    stat.error_code = 0;
+	    measurements.add_measurement(stat);
+	  }
 
-	if(measurements.wants_measurement<InstanceAllocResult>()) {
-	  InstanceAllocResult result;
-	  result.success = false;
-	  measurements.add_measurement(result);
+	  if(metadata.need_alloc_result) {
+#ifdef DEBUG_REALM
+	    assert(measurements.wants_measurement<InstanceAllocResult>());
+	    assert(!metadata.need_notify_dealloc);
+#endif
+
+	    // this is either the only result we will get or has raced ahead of
+	    //  the deferral message
+	    metadata.need_alloc_result = false;
+
+	    InstanceAllocResult result;
+	    result.success = false;
+	    measurements.add_measurement(result);
+	  }
 	}
 	  
 	// send any remaining incomplete profiling responses
@@ -579,6 +620,38 @@ namespace Realm {
 
 	if(ready_event.exists())
 	  GenEventImpl::trigger(ready_event, true /*poisoned*/);
+	return;
+      }
+
+      if(result == MemoryImpl::ALLOC_DEFERRED) {
+	// this should only be received if an InstanceAllocRequest measurement
+	//  was requested, but we have to be careful about recording the
+	//  expected-future-success because it may race with the actual success
+	//  (or unexpected failure), so use the mutex
+	bool need_notify_dealloc = false;
+	{
+	  AutoLock<> al(mutex);
+
+	  if(metadata.need_alloc_result) {
+#ifdef DEBUG_REALM
+	    assert(measurements.wants_measurement<ProfilingMeasurements::InstanceAllocResult>());
+#endif
+	    ProfilingMeasurements::InstanceAllocResult result;
+	    result.success = true;
+	    measurements.add_measurement(result);
+
+	    metadata.need_alloc_result = false;
+
+	    // if we were super-slow, notification of the subsequent
+	    //  deallocation may have been delayed
+	    need_notify_dealloc = metadata.need_notify_dealloc;
+	    metadata.need_notify_dealloc = false;
+	  }
+	}
+
+	if(need_notify_dealloc)
+	  notify_deallocation();
+
 	return;
       }
 
@@ -596,6 +669,33 @@ namespace Realm {
 	ready_event = metadata.ready_event;
 	metadata.ready_event = Event::NO_EVENT;
 	metadata.inst_offset = offset;
+
+	// adding measurements is not thread safe w.r.t. a deferral
+	//  message, so do it with lock held
+	if(metadata.need_alloc_result) {
+#ifdef DEBUG_REALM
+	  assert(measurements.wants_measurement<InstanceAllocResult>());
+	  assert(!metadata.need_notify_dealloc);
+#endif
+
+	  // this is either the only result we will get or has raced ahead of
+	  //  the deferral message
+	  metadata.need_alloc_result = false;
+
+	  ProfilingMeasurements::InstanceAllocResult result;
+	  result.success = true;
+	  measurements.add_measurement(result);
+	}
+
+	// the InstanceMemoryUsage measurement is added at creation time for
+	//  profilers that want that before instance deletion occurs
+	if(measurements.wants_measurement<ProfilingMeasurements::InstanceMemoryUsage>()) {
+	  ProfilingMeasurements::InstanceMemoryUsage usage;
+	  usage.instance = me;
+	  usage.memory = memory;
+	  usage.bytes = metadata.layout->bytes_used;
+	  measurements.add_measurement(usage);
+	}
       }
       if(ready_event.exists())
 	GenEventImpl::trigger(ready_event, false /*!poisoned*/);
@@ -611,29 +711,25 @@ namespace Realm {
 	amsg.commit();
       }
 
-      if(measurements.wants_measurement<ProfilingMeasurements::InstanceAllocResult>()) {
-	ProfilingMeasurements::InstanceAllocResult result;
-	result.success = true;
-	measurements.add_measurement(result);
-      }
-
       if(measurements.wants_measurement<ProfilingMeasurements::InstanceTimeline>()) {
 	timeline.record_ready_time();
       }
 
-      // the InstanceMemoryUsage measurement is added at creation time for
-      //  profilers that want that before instance deletion occurs
-      if(measurements.wants_measurement<ProfilingMeasurements::InstanceMemoryUsage>()) {
-	ProfilingMeasurements::InstanceMemoryUsage usage;
-	usage.instance = me;
-	usage.memory = memory;
-	usage.bytes = metadata.layout->bytes_used;
-	measurements.add_measurement(usage);
-      }
     }
 
     void RegionInstanceImpl::notify_deallocation(void)
     {
+      // handle race with a slow DEFERRED notification
+      bool notification_delayed = false;
+      {
+	AutoLock<> al(mutex);
+	if(metadata.need_alloc_result) {
+	  metadata.need_notify_dealloc = true;
+	  notification_delayed = true;
+	}
+      }
+      if(notification_delayed) return;
+
       log_inst.debug() << "deallocation completed: inst=" << me;
 
       // our instance better not be in the unallocated state...

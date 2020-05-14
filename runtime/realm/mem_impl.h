@@ -126,11 +126,14 @@ namespace Realm {
 	ALLOC_INSTANT_SUCCESS,
 	ALLOC_INSTANT_FAILURE,
 	ALLOC_DEFERRED,
+	ALLOC_EVENTUAL_SUCCESS, // i.e. after a DEFERRED
+	ALLOC_EVENTUAL_FAILURE,
 	ALLOC_CANCELLED
       };
       virtual AllocationResult allocate_instance_storage(RegionInstance i,
 							 size_t bytes,
 							 size_t alignment,
+							 bool need_alloc_result,
 							 Event precondition, 
 							 // this will be used for zero-size allocs
                     // TODO: ideally use something like (size_t)-2 here, but that will
@@ -170,6 +173,7 @@ namespace Realm {
       // should only be called by RegionInstance::DeferredCreate
       void deferred_creation_triggered(RegionInstanceImpl *inst,
 				       size_t bytes, size_t alignment,
+				       bool need_alloc_result,
 				       bool poisoned);
 
       // should only be called by RegionInstance::DeferredDestroy
@@ -333,7 +337,8 @@ namespace Realm {
       Memory memory;
       RegionInstance inst;
       size_t bytes;
-      size_t alignment;
+      unsigned alignment;
+      bool need_alloc_result;
       Event precondition;
 
       static void handle_message(NodeID sender, const MemStorageAllocRequest &msg,
