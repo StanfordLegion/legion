@@ -39,6 +39,7 @@ list(APPEND REALM_TESTS
   deferred_allocs
   test_nodeset
   subgraphs
+  large_tls
   )
 
 # TODO: build memspeed properly with cuda enabled...
