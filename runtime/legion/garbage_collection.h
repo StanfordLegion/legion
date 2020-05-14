@@ -862,7 +862,12 @@ namespace Legion {
         const int prev_cnt = 
           __sync_val_compare_and_swap(&valid_references, current_cnt, next_cnt);
         if (prev_cnt == current_cnt)
+        {
+#ifdef LEGION_GC
+          log_base_ref<true>(VALID_REF_KIND, did, local_space, source, cnt);
+#endif
           return true;
+        }
         // Update the current count
         current_cnt = prev_cnt;
       }

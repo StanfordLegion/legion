@@ -709,7 +709,8 @@ namespace Legion {
     public:
       virtual void record_mapper_output(Memoizable *memo,
                              const Mapper::MapTaskOutput &output,
-                             const std::deque<InstanceSet> &physical_instances);
+                             const std::deque<InstanceSet> &physical_instances,
+                             std::set<RtEvent> &applied_events);
       void get_mapper_output(SingleTask *task,
                              VariantID &chosen_variant,
                              TaskPriority &task_priority,

@@ -1669,8 +1669,7 @@ namespace Legion {
       ReplMapOp& operator=(const ReplMapOp &rhs);
     public:
       void initialize_replication(ReplicateContext *ctx, RtBarrier &inline_bar);
-      RtEvent complete_inline_mapping(RtEvent mapping_applied,
-                                      const InstanceSet &mapped_insts);
+      RtEvent complete_inline_mapping(RtEvent mapping_applied);
     public:
       virtual void activate(void);
       virtual void deactivate(void);

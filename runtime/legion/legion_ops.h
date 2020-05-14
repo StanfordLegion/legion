@@ -213,6 +213,18 @@ namespace Legion {
         Operation *proxy_this;
         bool deactivate;
       };
+      struct DeferReleaseAcquiredArgs : 
+        public LgTaskArgs<DeferReleaseAcquiredArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_RELEASE_ACQUIRED_TASK_ID;
+      public:
+        DeferReleaseAcquiredArgs(Operation *op, 
+            std::vector<std::pair<PhysicalManager*,unsigned> > *insts)
+          : LgTaskArgs<DeferReleaseAcquiredArgs>(op->get_unique_op_id()),
+            instances(insts) { }
+      public:
+        std::vector<std::pair<PhysicalManager*,unsigned> > *const instances;
+      };
     public:
       class MappingDependenceTracker {
       public:
@@ -308,8 +320,20 @@ namespace Legion {
       // This means that region == parent and the
       // coherence mode is exclusive
       static void localize_region_requirement(RegionRequirement &req);
-      void release_acquired_instances(std::map<PhysicalManager*,
-                        std::pair<unsigned,bool> > &acquired_instances);
+      // We want to release our valid references for mapping as soon as
+      // possible after mapping is done so the garbage collector can do
+      // deferred collection ASAP if it needs to. However, there is a catch:
+      // instances which are empty have no GC references from the physical
+      // analysis to protect them from collection. That's not a problem for
+      // the GC, but it is for keeping their meta-data structures alive.
+      // Our solution is just to keep the valid references on the emtpy
+      // acquired instances until the very end of the operation as they
+      // will not hurt anything.
+      RtEvent release_nonempty_acquired_instances(RtEvent precondition,
+          std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired_insts);
+      static void release_acquired_instances(
+          std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired_insts);
+      static void handle_deferred_release(const void *args);
     public:
       // Initialize this operation in a new parent context
       // along with the number of regions this task has

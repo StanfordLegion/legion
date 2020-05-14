@@ -437,7 +437,6 @@ namespace Legion {
         future_map = FutureMap(new FutureMapImpl(ctx, runtime, point_set, did,
           runtime->address_space, RtEvent::NO_RT_EVENT, true/*reg now*/,
           deletion_precondition));
-        future_map.impl->add_base_gc_ref(FUTURE_HANDLE_REF);
         future_map.impl->set_all_futures(arguments);
       }
       else
@@ -2310,7 +2309,7 @@ namespace Legion {
         Runtime::trigger_event(termination_event);
       }
       if (!references.empty() && !replaying)
-        references.remove_valid_references(PHYSICAL_REGION_REF);
+        references.remove_resource_references(PHYSICAL_REGION_REF);
       if ((sharded_view != NULL) && 
           sharded_view->remove_base_resource_ref(PHYSICAL_REGION_REF))
         delete sharded_view;
@@ -2662,7 +2661,7 @@ namespace Legion {
       assert(ref.has_ref());
 #endif
       references.add_instance(ref);
-      ref.add_valid_reference(PHYSICAL_REGION_REF);
+      ref.add_resource_reference(PHYSICAL_REGION_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -2671,10 +2670,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!references.empty())
-        references.remove_valid_references(PHYSICAL_REGION_REF);
+        references.remove_resource_references(PHYSICAL_REGION_REF);
       references = refs;
       if (!references.empty())
-        references.add_valid_references(PHYSICAL_REGION_REF);
+        references.add_resource_references(PHYSICAL_REGION_REF);
       termination_event = term_event;
       trigger_on_unmap = true;
       wait_for_unmap = wait_for;
@@ -26719,6 +26718,11 @@ namespace Legion {
         case LG_DEFER_VERIFY_PARTITION_TASK_ID:
           {
             InnerContext::handle_partition_verification(args);
+            break;
+          }
+        case LG_DEFER_RELEASE_ACQUIRED_TASK_ID:
+          {
+            Operation::handle_deferred_release(args);
             break;
           }
 #ifdef LEGION_MALLOC_INSTANCES

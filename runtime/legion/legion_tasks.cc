@@ -3455,10 +3455,11 @@ namespace Legion {
                ((remote_trace_info != NULL) && remote_trace_info->recording));
 #endif
         if (tpl != NULL)
-          tpl->record_mapper_output(this, output, physical_instances);
+          tpl->record_mapper_output(this, output, 
+              physical_instances, map_applied_conditions);
         else
           remote_trace_info->record_mapper_output(this, output, 
-                                                  physical_instances);
+              physical_instances, map_applied_conditions);
       }
     }
 
@@ -5208,7 +5209,6 @@ namespace Legion {
       privilege_paths.clear();
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances); 
-      acquired_instances.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -5671,6 +5671,9 @@ namespace Legion {
 #endif
       }
       // Mark that we have completed mapping
+      if (!acquired_instances.empty())
+        applied_condition = release_nonempty_acquired_instances(
+                          applied_condition, acquired_instances);
       complete_mapping(applied_condition);
       return RtEvent::NO_RT_EVENT;
     }
@@ -5748,9 +5751,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDIVIDUAL_TRIGGER_COMPLETE_CALL);
-      // Release any acquired instances that we have
-      if (!acquired_instances.empty())
-        release_acquired_instances(acquired_instances);
       // Invalidate any state that we had if we didn't already
       // Do this before sending the complete message to avoid the
       // race condition in the remote case where the top-level
@@ -7751,13 +7751,13 @@ namespace Legion {
           free(profiling_info[idx].buffer);
         profiling_info.clear();
       }
+      if (!acquired_instances.empty())
+        release_acquired_instances(acquired_instances);
 #ifdef DEBUG_LEGION
       interfering_requirements.clear();
       point_requirements.clear();
-      assert(acquired_instances.empty());
       assert(pending_intra_space_dependences.empty());
 #endif
-      acquired_instances.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -8284,7 +8284,18 @@ namespace Legion {
       {
         early_map_regions(map_applied_conditions, early_map_indexes);
         if (!acquired_instances.empty())
-          release_acquired_instances(acquired_instances);
+        {
+          RtEvent precondition;
+          if (!map_applied_conditions.empty())
+          {
+            precondition = Runtime::merge_events(map_applied_conditions);
+            map_applied_conditions.clear();
+          }
+          precondition = release_nonempty_acquired_instances(precondition, 
+                                                      acquired_instances);
+          if (precondition.exists())
+            map_applied_conditions.insert(precondition);
+        }
       }
     }
 
@@ -9800,7 +9811,6 @@ namespace Legion {
       assert(local_regions.empty());
       assert(local_fields.empty());
 #endif
-      acquired_instances.clear();
       map_applied_conditions.clear();
       complete_preconditions.clear();
       commit_preconditions.clear();
@@ -10521,6 +10531,9 @@ namespace Legion {
       RtEvent applied_condition;
       if (!map_applied_conditions.empty())
         applied_condition = Runtime::merge_events(map_applied_conditions);
+      if (!acquired_instances.empty())
+        applied_condition = release_nonempty_acquired_instances(
+                          applied_condition, acquired_instances);
       // Include all the points in the effects postcondition
       // since they all need to be merged into the summary for the index task
       for (unsigned idx = 0; idx < points.size(); idx++)
@@ -10611,8 +10624,6 @@ namespace Legion {
       {
         index_owner->return_slice_complete(points.size(),complete_precondition);
       }
-      if (!acquired_instances.empty())
-        release_acquired_instances(acquired_instances);
       complete_operation();
     }
 
@@ -10636,10 +10647,7 @@ namespace Legion {
         // futures already sent back
         index_owner->return_slice_commit(points.size(), commit_precondition);
       }
-      if (!commit_preconditions.empty())
-        commit_operation(true/*deactivate*/, commit_precondition);
-      else
-        commit_operation(true/*deactivate*/);
+      commit_operation(true/*deactivate*/, commit_precondition);
     }
 
     //--------------------------------------------------------------------------

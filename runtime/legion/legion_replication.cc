@@ -3217,7 +3217,12 @@ namespace Legion {
       if (!map_applied_conditions.empty())
         precondition = Runtime::merge_events(map_applied_conditions);
       Runtime::phase_barrier_arrive(mapping_barrier, 1/*count*/, precondition);
-      complete_mapping(mapping_barrier);
+      if (!acquired_instances.empty())
+        precondition = release_nonempty_acquired_instances(mapping_barrier, 
+                                                           acquired_instances);
+      else
+        precondition = mapping_barrier;
+      complete_mapping(precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -4883,14 +4888,13 @@ namespace Legion {
         Runtime::trigger_event(profiling_reported);
       // Now we can trigger the mapping event and indicate
       // to all our mapping dependences that we are mapped.
+      RtEvent mapping_applied;
       if (!map_applied_conditions.empty())
-        complete_mapping(complete_inline_mapping(
-              Runtime::merge_events(map_applied_conditions), mapped_instances));
-      else
-        complete_mapping(
-            complete_inline_mapping(RtEvent::NO_RT_EVENT, mapped_instances));
+        mapping_applied = Runtime::merge_events(map_applied_conditions);
       if (!acquired_instances.empty())
-        release_acquired_instances(acquired_instances);
+        mapping_applied = release_nonempty_acquired_instances(mapping_applied, 
+                                                          acquired_instances);
+      complete_mapping(complete_inline_mapping(mapping_applied));
       if (!map_complete_event.has_triggered())
       {
         // Issue a deferred trigger on our completion event
@@ -4929,8 +4933,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent ReplMapOp::complete_inline_mapping(RtEvent mapping_applied,
-                                               const InstanceSet &mapped_insts)
+    RtEvent ReplMapOp::complete_inline_mapping(RtEvent mapping_applied)
     //--------------------------------------------------------------------------
     {
       Runtime::phase_barrier_arrive(inline_barrier, 1/*count*/,mapping_applied);
