@@ -736,7 +736,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RemoteTraceRecorder::record_mapper_output(Memoizable *memo,
                               const Mapper::MapTaskOutput &output,
-                              const std::deque<InstanceSet> &physical_instances)
+                              const std::deque<InstanceSet> &physical_instances,
+                              std::set<RtEvent> &external_applied)
     //--------------------------------------------------------------------------
     {
       if (local_space != origin_space)
@@ -766,7 +767,8 @@ namespace Legion {
         applied_events.insert(applied);
       }
       else
-        remote_tpl->record_mapper_output(memo, output, physical_instances);
+        remote_tpl->record_mapper_output(memo, output, 
+                physical_instances, external_applied);
     }
 
     //--------------------------------------------------------------------------
@@ -1255,8 +1257,14 @@ namespace Legion {
               if (wait_on.exists() && !wait_on.has_triggered())
                 wait_on.wait();
             }
-            tpl->record_mapper_output(memo, output, physical_instances);
-            Runtime::trigger_event(applied);
+            std::set<RtEvent> applied_events;
+            tpl->record_mapper_output(memo, output, 
+                physical_instances, applied_events);
+            if (!applied_events.empty())
+              Runtime::trigger_event(applied, 
+                  Runtime::merge_events(applied_events));
+            else
+              Runtime::trigger_event(applied);
             if (memo->get_origin_space() != runtime->address_space)
               delete memo;
             break;
@@ -13925,23 +13933,46 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InstanceRef::add_valid_reference(ReferenceSource source) const
+    void InstanceRef::add_resource_reference(ReferenceSource source) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(manager != NULL);
 #endif
-      manager->add_base_valid_ref(source);
+      manager->add_base_resource_ref(source);
     }
 
     //--------------------------------------------------------------------------
-    void InstanceRef::remove_valid_reference(ReferenceSource source) const
+    void InstanceRef::remove_resource_reference(ReferenceSource source) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(manager != NULL);
 #endif
-      if (manager->remove_base_valid_ref(source))
+      if (manager->remove_base_resource_ref(source))
+        delete manager;
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceRef::add_valid_reference(ReferenceSource source,
+                                          ReferenceMutator *mutator) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(manager != NULL);
+#endif
+      manager->add_base_valid_ref(source, mutator);
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceRef::remove_valid_reference(ReferenceSource source,
+                                             ReferenceMutator *mutator) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(manager != NULL);
+#endif
+      if (manager->remove_base_valid_ref(source, mutator))
         delete manager;
     }
 
@@ -14552,34 +14583,68 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InstanceSet::add_valid_references(ReferenceSource source) const
+    void InstanceSet::add_resource_references(ReferenceSource source) const
     //--------------------------------------------------------------------------
     {
       if (single)
       {
         if (refs.single != NULL)
-          refs.single->add_valid_reference(source);
+          refs.single->add_resource_reference(source);
       }
       else
       {
         for (unsigned idx = 0; idx < refs.multi->vector.size(); idx++)
-          refs.multi->vector[idx].add_valid_reference(source);
+          refs.multi->vector[idx].add_resource_reference(source);
       }
     }
 
     //--------------------------------------------------------------------------
-    void InstanceSet::remove_valid_references(ReferenceSource source) const
+    void InstanceSet::remove_resource_references(ReferenceSource source) const
     //--------------------------------------------------------------------------
     {
       if (single)
       {
         if (refs.single != NULL)
-          refs.single->remove_valid_reference(source);
+          refs.single->remove_resource_reference(source);
       }
       else
       {
         for (unsigned idx = 0; idx < refs.multi->vector.size(); idx++)
-          refs.multi->vector[idx].remove_valid_reference(source);
+          refs.multi->vector[idx].remove_resource_reference(source);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceSet::add_valid_references(ReferenceSource source,
+                                           ReferenceMutator *mutator) const
+    //--------------------------------------------------------------------------
+    {
+      if (single)
+      {
+        if (refs.single != NULL)
+          refs.single->add_valid_reference(source, mutator);
+      }
+      else
+      {
+        for (unsigned idx = 0; idx < refs.multi->vector.size(); idx++)
+          refs.multi->vector[idx].add_valid_reference(source, mutator);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceSet::remove_valid_references(ReferenceSource source,
+                                              ReferenceMutator *mutator) const
+    //--------------------------------------------------------------------------
+    {
+      if (single)
+      {
+        if (refs.single != NULL)
+          refs.single->remove_valid_reference(source, mutator);
+      }
+      else
+      {
+        for (unsigned idx = 0; idx < refs.multi->vector.size(); idx++)
+          refs.multi->vector[idx].remove_valid_reference(source, mutator);
       }
     }
 

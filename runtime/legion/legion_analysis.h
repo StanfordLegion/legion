@@ -193,7 +193,8 @@ namespace Legion {
       virtual void record_set_op_sync_event(ApEvent &lhs, Memoizable *memo) = 0;
       virtual void record_mapper_output(Memoizable *memo,
                          const Mapper::MapTaskOutput &output,
-                         const std::deque<InstanceSet> &physical_instances) = 0;
+                         const std::deque<InstanceSet> &physical_instances,
+                         std::set<RtEvent> &applied_events) = 0;
       virtual void get_reduction_ready_events(Memoizable *memo,
                                            std::set<ApEvent> &ready_events) = 0;
       virtual void record_set_effects(Memoizable *memo, ApEvent &rhs) = 0;
@@ -298,7 +299,8 @@ namespace Legion {
       virtual void record_set_op_sync_event(ApEvent &lhs, Memoizable *memo);
       virtual void record_mapper_output(Memoizable *memo,
                           const Mapper::MapTaskOutput &output,
-                          const std::deque<InstanceSet> &physical_instances);
+                          const std::deque<InstanceSet> &physical_instances,
+                          std::set<RtEvent> &applied_events);
       virtual void get_reduction_ready_events(Memoizable *memo,
                                               std::set<ApEvent> &ready_events);
       virtual void record_set_effects(Memoizable *memo, ApEvent &rhs);
@@ -377,10 +379,11 @@ namespace Legion {
         }
       inline void record_mapper_output(Memoizable *local, 
                           const Mapper::MapTaskOutput &output,
-                          const std::deque<InstanceSet> &physical_instances)
+                          const std::deque<InstanceSet> &physical_instances,
+                          std::set<RtEvent> &applied)
         {
           base_sanity_check();
-          rec->record_mapper_output(local, output, physical_instances);
+          rec->record_mapper_output(local, output, physical_instances, applied);
         }
       inline void get_reduction_ready_events(Memoizable *local,
                                              std::set<ApEvent> &ready_events)
@@ -913,10 +916,12 @@ namespace Legion {
       MappingInstance get_mapping_instance(void) const;
       bool is_virtual_ref(void) const; 
     public:
-      // These methods are used by PhysicalRegion::Impl to hold
-      // valid references to avoid premature collection
-      void add_valid_reference(ReferenceSource source) const;
-      void remove_valid_reference(ReferenceSource source) const;
+      void add_resource_reference(ReferenceSource source) const;
+      void remove_resource_reference(ReferenceSource source) const;
+      void add_valid_reference(ReferenceSource source, 
+                               ReferenceMutator *mutator) const;
+      void remove_valid_reference(ReferenceSource source,
+                                  ReferenceMutator *mutator) const;
     public:
       Memory get_memory(void) const;
     public:
@@ -996,8 +1001,12 @@ namespace Legion {
       void unpack_references(Runtime *runtime, Deserializer &derez, 
                              std::set<RtEvent> &ready_events);
     public:
-      void add_valid_references(ReferenceSource source) const;
-      void remove_valid_references(ReferenceSource source) const;
+      void add_resource_references(ReferenceSource source) const;
+      void remove_resource_references(ReferenceSource source) const;
+      void add_valid_references(ReferenceSource source,
+                                ReferenceMutator *mutator) const;
+      void remove_valid_references(ReferenceSource source,
+                                   ReferenceMutator *mutator) const;
     public:
       void update_wait_on_events(std::set<ApEvent> &wait_on_events) const;
     public:
