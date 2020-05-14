@@ -250,6 +250,7 @@ def itervalues(obj):
     return obj.values() if sys.version_info > (3,) else obj.viewvalues()
 
 class PathRange(object):
+    __slots__ = ['start', 'stop', 'path']
     def __init__(self, start, stop, path):
         assert start <= stop
         self.start = start
@@ -279,6 +280,10 @@ class PathRange(object):
         return "(" + str(self.start) + "," + str(self.stop) + ")"
 
 class HasDependencies(object):
+    __slots__ = []
+    _abstract_slots = [
+        'deps', 'initiation_op', 'initiation', 'path', 'visited'
+    ]
     def __init__(self):
         self.deps = {"in": set(), "out": set(), "parents": set(), "children" : set()}
         self.initiation_op = None
@@ -304,6 +309,8 @@ class HasDependencies(object):
         return (self.proc.node_id, self.proc.proc_in_node, self.prof_uid)
 
 class HasInitiationDependencies(HasDependencies):
+    __slots__ = []
+    _abstract_slots = HasDependencies._abstract_slots + ['initialization_op', 'initialization']
     def __init__(self, initiation_op):
         HasDependencies.__init__(self)
         self.initiation_op = initiation_op
@@ -348,6 +355,8 @@ class HasInitiationDependencies(HasDependencies):
         return self.initiation_op.get_color()
 
 class HasNoDependencies(HasDependencies):
+    __slots__ = []
+    _abstract_slots = HasDependencies._abstract_slots
     def __init__(self):
         HasDependencies.__init__(self)
     
@@ -358,6 +367,8 @@ class HasNoDependencies(HasDependencies):
         pass
 
 class TimeRange(object):
+    __slots__ = []
+    _abstract_slots = ['create', 'ready', 'start', 'stop', 'trimmed', 'was_removed']
     def __init__(self, create, ready, start, stop):
         assert create is None or create <= ready
         assert ready is None or ready <= start
@@ -540,6 +551,11 @@ class TimeRange(object):
         return True
 
 class Processor(object):
+    __slots__ = [
+        'proc_id', 'node_id', 'proc_in_node', 'kind', 'app_ranges',
+        'last_time', 'tasks', 'max_levels', 'max_levels_ready', 'time_points',
+        'util_time_points'
+    ]
     def __init__(self, proc_id, kind):
         self.proc_id = proc_id
         # PROCESSOR:   tag:8 = 0x1d, owner_node:16,   (unused):28, proc_idx: 12
@@ -733,6 +749,7 @@ class Processor(object):
         return self.__cmp__(other) > 0
 
 class TimePoint(object):
+    __slots__ = ['time', 'thing', 'first', 'time_key']
     def __init__(self, time, thing, first):
         assert time != None
         self.time = time
@@ -752,6 +769,10 @@ class TimePoint(object):
         return self.__cmp__(other) > 0
 
 class Memory(object):
+    __slots__ = [
+        'mem_id', 'node_id', 'mem_in_node', 'kind', 'capacity', 'instances',
+        'time_points', 'max_live_instances', 'last_time', 'affinity'
+    ]
     def __init__(self, mem_id, kind, capacity):
         self.mem_id = mem_id
         # MEMORY:      tag:8 = 0x1e, owner_node:16,   (unused):28, mem_idx: 12
@@ -884,6 +905,7 @@ class Memory(object):
         return self.__cmp__(other) > 0
 
 class MemProcAffinity(object):
+    __slots__ = ['mem', 'proc']
     def __init__(self, mem, proc):
         self.mem = mem
         self.proc = list()
@@ -904,6 +926,9 @@ class MemProcAffinity(object):
             return ""
 
 class Channel(object):
+    __slots__ = [
+        'src', 'dst', 'copies', 'time_points', 'max_live_copies', 'last_time'
+    ]
     def __init__(self, src, dst):
         self.src = src
         self.dst = dst
@@ -1067,12 +1092,14 @@ class Channel(object):
         return self.__cmp__(other) > 0
 
 class WaitInterval(object):
+    __slots__ = ['start', 'ready', 'end']
     def __init__(self, start, ready, end):
         self.start = start
         self.ready = ready
         self.end = end
 
 class TaskKind(object):
+    __slots__ = ['task_id', 'name']
     def __init__(self, task_id, name):
         self.task_id = task_id
         self.name = name
@@ -1081,6 +1108,10 @@ class TaskKind(object):
         return self.name
 
 class StatObject(object):
+    __slots__ = [
+        'total_calls', 'total_execution_time', 'all_calls', 'max_call',
+        'min_call'
+    ]
     def __init__(self):
         self.total_calls = collections.defaultdict(int)
         self.total_execution_time = collections.defaultdict(int)
@@ -1163,6 +1194,7 @@ class StatObject(object):
                 print()
 
 class Variant(StatObject):
+    __slots__ = ['variant_id', 'name', 'op', 'task_kind', 'color']
     def __init__(self, variant_id, name):
         StatObject.__init__(self)
         self.variant_id = variant_id
@@ -1196,6 +1228,7 @@ class Variant(StatObject):
         return title
 
 class Base(object):
+    __slots__ = ['prof_uid', 'level', 'level_ready']
     def __init__(self):
         self.prof_uid = get_prof_uid()
         self.level = None
@@ -1216,6 +1249,10 @@ class Base(object):
         return self.proc
 
 class Operation(Base):
+    __slots__ = [
+        'op_id', 'kind_num', 'kind', 'is_task', 'is_meta', 'is_multi',
+        'is_proftask', 'name', 'variant', 'task_kind', 'color', 'owner', 'proc'
+    ]
     def __init__(self, op_id):
         Base.__init__(self)
         self.op_id = op_id
@@ -1281,6 +1318,8 @@ class Operation(Base):
                 return self.kind+' Operation '+self.get_info()
 
 class HasWaiters(object):
+    __slots__ = []
+    _abstract_slots = ['wait_intervals']
     def __init__(self):
         self.wait_intervals = list()
 
@@ -1407,6 +1446,7 @@ class HasWaiters(object):
             tsv_file.write(line)
 
 class Task(Operation, TimeRange, HasDependencies, HasWaiters):
+    __slots__ = TimeRange._abstract_slots + HasDependencies._abstract_slots + HasWaiters._abstract_slots + ['base_op', 'initiation', 'proc']
     def __init__(self, variant, op, create, ready, start, stop):
         Operation.__init__(self, op.op_id)
         HasDependencies.__init__(self)
@@ -1461,6 +1501,7 @@ class Task(Operation, TimeRange, HasDependencies, HasWaiters):
         return str(self.variant)+' '+self.get_info()
 
 class MetaTask(Base, TimeRange, HasInitiationDependencies, HasWaiters):
+    __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + HasWaiters._abstract_slots + ['variant', 'is_task', 'is_meta', 'proc']
     def __init__(self, variant, initiation_op, create, ready, start, stop):
         Base.__init__(self)
         HasInitiationDependencies.__init__(self, initiation_op)
@@ -1500,6 +1541,7 @@ class MetaTask(Base, TimeRange, HasInitiationDependencies, HasWaiters):
         return self.variant.name
 
 class ProfTask(Base, TimeRange, HasNoDependencies):
+    __slots__ = TimeRange._abstract_slots + HasNoDependencies._abstract_slots + ['proftask_id', 'color', 'is_task', 'proc']
     def __init__(self, op, create, ready, start, stop):
         Base.__init__(self)
         HasNoDependencies.__init__(self)
@@ -1549,6 +1591,7 @@ class ProfTask(Base, TimeRange, HasNoDependencies):
         return 'ProfTask' + (' <{:d}>'.format(self.proftask_id) if self.proftask_id > 0 else '')
 
 class UserMarker(Base, TimeRange, HasNoDependencies):
+    __slots__ = TimeRange._abstract_slots + HasNoDependencies._abstract_slots + ['name', 'color', 'is_task']
     def __init__(self, name, start, stop):
         Base.__init__(self)
         HasNoDependencies.__init__(self)
@@ -1598,6 +1641,7 @@ class UserMarker(Base, TimeRange, HasNoDependencies):
         return 'User Marker "'+self.name+'"'
 
 class Copy(Base, TimeRange, HasInitiationDependencies):
+    __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['src', 'dst', 'size', 'chan']
     def __init__(self, src, dst, initiation_op, size, create, ready, start, stop):
         Base.__init__(self)
         HasInitiationDependencies.__init__(self, initiation_op)
@@ -1650,6 +1694,7 @@ class Copy(Base, TimeRange, HasInitiationDependencies):
         tsv_file.write(tsv_line)
 
 class Fill(Base, TimeRange, HasInitiationDependencies):
+    __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['dst', 'chan']
     def __init__(self, dst, initiation_op, create, ready, start, stop):
         Base.__init__(self)
         HasInitiationDependencies.__init__(self, initiation_op)
@@ -1693,6 +1738,7 @@ class Fill(Base, TimeRange, HasInitiationDependencies):
         tsv_file.write(tsv_line)
 
 class DepPart(Base, TimeRange, HasInitiationDependencies):
+    __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['part_op', 'chan']
     def __init__(self, part_op, initiation_op, create, ready, start, stop):
         Base.__init__(self)
         HasInitiationDependencies.__init__(self, initiation_op)
@@ -1737,6 +1783,10 @@ class DepPart(Base, TimeRange, HasInitiationDependencies):
         tsv_file.write(tsv_line)
 
 class Instance(Base, TimeRange, HasInitiationDependencies):
+    __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + [
+        'inst_id', 'mem', 'size', 'ispace', 'fspace', 'tree_id', 'fields',
+        'align_desc', 'dim_order_desc'
+    ]
     def __init__(self, inst_id, initiation_op):
         Base.__init__(self)
         HasInitiationDependencies.__init__(self, initiation_op)
@@ -1906,6 +1956,7 @@ class Instance(Base, TimeRange, HasInitiationDependencies):
 
 
 class MessageKind(StatObject):
+    __slots__ = ['message_id', 'name', 'color']
     def __init__(self, message_id, name):
         StatObject.__init__(self)
         self.message_id = message_id
@@ -1923,6 +1974,7 @@ class MessageKind(StatObject):
         return self.name
 
 class Message(Base, TimeRange, HasNoDependencies):
+    __slots__ = TimeRange._abstract_slots + HasNoDependencies._abstract_slots + ['kind']
     def __init__(self, kind, start, stop):
         Base.__init__(self)
         TimeRange.__init__(self, None, None, start, stop)
@@ -1966,6 +2018,7 @@ class Message(Base, TimeRange, HasNoDependencies):
         return 'Message '+str(self.kind)
 
 class MapperCallKind(StatObject):
+    __slots__ = ['mapper_call_kind', 'name', 'color']
     def __init__(self, mapper_call_kind, name):
         StatObject.__init__(self)
         self.mapper_call_kind = mapper_call_kind
@@ -1983,6 +2036,7 @@ class MapperCallKind(StatObject):
         self.color = color
 
 class MapperCall(Base, TimeRange, HasInitiationDependencies):
+    __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['kind', 'proc']
     def __init__(self, kind, initiation_op, start, stop):
         Base.__init__(self)
         TimeRange.__init__(self, None, None, start, stop)
@@ -2041,6 +2095,7 @@ class MapperCall(Base, TimeRange, HasInitiationDependencies):
             return 'Mapper Call '+str(self.kind)+' for '+str(self.initiation)
 
 class RuntimeCallKind(StatObject):
+    __slots__ = ['runtime_call_kind', 'name', 'color']
     def __init__(self, runtime_call_kind, name):
         StatObject.__init__(self)
         self.runtime_call_kind = runtime_call_kind
@@ -2058,6 +2113,7 @@ class RuntimeCallKind(StatObject):
         return self.name
 
 class Field(StatObject):
+    __slots__ = ['unique_id', 'field_id', 'size', 'name']
     def __init__(self, unique_id, field_id, size, name):
         StatObject.__init__(self)
         self.unique_id = unique_id
@@ -2071,6 +2127,7 @@ class Field(StatObject):
         return 'fid:' + str(self.field_id)
 
 class Align(StatObject):
+    __slots__ = ['field_id', 'eqk', 'align_desc', 'has_align']
     def __init__(self, field_id, eqk, align_desc, has_align):
         StatObject.__init__(self)
         self.field_id = field_id
@@ -2084,6 +2141,7 @@ class Align(StatObject):
         return ''
 
 class FieldSpace(StatObject):
+    __slots__ = ['fspace_id', 'name']
     def __init__(self, fspace_id, name):
         StatObject.__init__(self)
         self.fspace_id = fspace_id
@@ -2095,6 +2153,7 @@ class FieldSpace(StatObject):
         return 'fspace:' + str(self.fspace_id)
 
 class LogicalRegion(StatObject):
+    __slots__ = ['ispace_id', 'fspace_id', 'tree_id', 'name']
     def __init__(self, ispace_id, fspace_id, tree_id, name):
         StatObject.__init__(self)
         self.ispace_id = ispace_id
@@ -2106,6 +2165,7 @@ class LogicalRegion(StatObject):
         return self.name
 
 class Partition(StatObject):
+    __slots__ = ['unique_id', 'parent', 'disjoint', 'point', 'name']
     def __init__(self, unique_id, name):
         StatObject.__init__(self)
         self.unique_id = unique_id
@@ -2135,6 +2195,10 @@ class Partition(StatObject):
         self.point = point
 
 class IndexSpace(StatObject):
+    __slots__ = [
+        'is_type', 'unique_id', 'dim', 'point', 'rect_lo', 'rect_hi',
+        'name', 'parent'
+    ]
     def __init__(self, is_type, unique_id, dim, values, max_dim):
         StatObject.__init__(self)
         self.is_type = is_type
@@ -2233,6 +2297,7 @@ class IndexSpace(StatObject):
         return stext
 
 class RuntimeCall(Base, TimeRange, HasNoDependencies):
+    __slots__ = TimeRange._abstract_slots + HasNoDependencies._abstract_slots + ['kind']
     def __init__(self, kind, start, stop):
         Base.__init__(self)
         TimeRange.__init__(self, None, None, start, stop)
@@ -2282,6 +2347,7 @@ class RuntimeCall(Base, TimeRange, HasNoDependencies):
         return 'Runtime Call '+str(self.kind)
 
 class LFSR(object):
+    __slots__ = ['register', 'max_value', 'taps']
     def __init__(self, size):
         self.register = ''
         # Initialize the register with all zeros
@@ -2328,6 +2394,10 @@ class LFSR(object):
         return int(self.register,2)
 
 class StatGatherer(object):
+    __slots__ = [
+        'state', 'application_tasks', 'meta_tasks', 'mapper_tasks',
+        'runtime_tasks', 'message_tasks'
+    ]
     def __init__(self, state):
         self.state = state
         self.application_tasks = set()
@@ -2395,6 +2465,15 @@ class StatGatherer(object):
 
 
 class State(object):
+    __slots__ = [
+        'max_dim', 'processors', 'memories', 'mem_proc_affinity', 'channels',
+        'task_kinds', 'variants', 'meta_variants', 'op_kinds', 'operations',
+        'prof_uid_map', 'multi_tasks', 'first_times', 'last_times',
+        'last_time', 'message_kinds', 'messages', 'mapper_call_kinds',
+        'mapper_calls', 'runtime_call_kinds', 'runtime_calls', 'instances',
+        'index_spaces', 'partitions', 'logical_regions', 'field_spaces',
+        'fields', 'has_spy_data', 'spy_state', 'callbacks'
+    ]
     def __init__(self):
         self.max_dim = 3
         self.processors = {}

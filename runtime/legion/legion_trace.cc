@@ -2269,7 +2269,7 @@ namespace Legion {
             {
               const InstanceRef &ref = (*pit)[idx];
               if (!ref.is_virtual_ref())
-                ref.remove_valid_reference(MAPPING_ACQUIRE_REF);
+                ref.remove_valid_reference(MAPPING_ACQUIRE_REF,NULL/*mutator*/);
             }
             pit->clear();
           }
@@ -3396,7 +3396,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_mapper_output(Memoizable *memo,
                                             const Mapper::MapTaskOutput &output,
-                              const std::deque<InstanceSet> &physical_instances)
+                              const std::deque<InstanceSet> &physical_instances,
+                                              std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       const TraceLocalID op_key = memo->get_trace_local_id();
@@ -3413,6 +3414,7 @@ namespace Legion {
       mapping.task_priority = output.task_priority;
       mapping.postmap_task = output.postmap_task;
       mapping.physical_instances = physical_instances;
+      WrapperReferenceMutator mutator(applied_events);
       for (std::deque<InstanceSet>::iterator it =
            mapping.physical_instances.begin(); it !=
            mapping.physical_instances.end(); ++it)
@@ -3423,7 +3425,7 @@ namespace Legion {
           if (ref.is_virtual_ref())
             has_virtual_mapping = true;
           else
-            ref.add_valid_reference(MAPPING_ACQUIRE_REF);
+            ref.add_valid_reference(MAPPING_ACQUIRE_REF, &mutator);
         }
       }
     }

@@ -254,25 +254,33 @@ namespace Realm {
 #if REALM_CXX_STANDARD >= 11
   using std::is_integral;
   using std::enable_if;
+  using std::make_signed;
+  using std::make_unsigned;
 #else
   // roll our own...
   template <typename T> struct is_integral { static const bool value = false; };
+  template <typename T> struct make_signed;
+  template <typename T> struct make_unsigned;
   // we need to cover both const and non-const, so some macro helpers
 #define IS_INTEGRAL(T) \
   template <> struct is_integral<T> { static const bool value = true; }; \
   template <> struct is_integral<const T> { static const bool value = true; }
+#define IS_SIGNED_UNSIGNED_PAIR(T1, T2) \
+  IS_INTEGRAL(T1); \
+  IS_INTEGRAL(T2); \
+  template <> struct make_signed<T1> { typedef T1 type; }; \
+  template <> struct make_signed<T2> { typedef T1 type; }; \
+  template <> struct make_unsigned<T1> { typedef T2 type; }; \
+  template <> struct make_unsigned<T2> { typedef T2 type; };
+
   IS_INTEGRAL(bool);
-  IS_INTEGRAL(char);
-  IS_INTEGRAL(unsigned char);
-  IS_INTEGRAL(short);
-  IS_INTEGRAL(unsigned short);
-  IS_INTEGRAL(int);
-  IS_INTEGRAL(unsigned int);
-  IS_INTEGRAL(long);
-  IS_INTEGRAL(unsigned long);
-  IS_INTEGRAL(long long);
-  IS_INTEGRAL(unsigned long long);
+  IS_SIGNED_UNSIGNED_PAIR(char, unsigned char);
+  IS_SIGNED_UNSIGNED_PAIR(short, unsigned short);
+  IS_SIGNED_UNSIGNED_PAIR(int, unsigned int);
+  IS_SIGNED_UNSIGNED_PAIR(long, unsigned long);
+  IS_SIGNED_UNSIGNED_PAIR(long long, unsigned long long);
 #undef IS_INTEGRAL
+#undef IS_SIGNED_UNSIGNED_PAIR
 
   template <bool B, typename T> struct enable_if {};
   template <typename T> struct enable_if<true, T> { typedef T type; };

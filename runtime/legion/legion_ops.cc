@@ -270,18 +270,83 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::release_acquired_instances(
+    RtEvent Operation::release_nonempty_acquired_instances(RtEvent perform,
+       std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired_instances)
+    //--------------------------------------------------------------------------
+    {
+      if (perform.exists() && !perform.has_triggered())
+      {
+        std::vector<std::pair<PhysicalManager*,unsigned> > *to_release = NULL;
+        for (std::map<PhysicalManager*,std::pair<unsigned,bool> >::iterator
+              it = acquired_instances.begin(); it != acquired_instances.end(); )
+        {
+          if (it->first->instance_footprint > 0)
+          {
+            if (to_release == NULL)
+              to_release = 
+                new std::vector<std::pair<PhysicalManager*,unsigned> >();
+            to_release->push_back(std::make_pair(it->first, it->second.first));
+            std::map<PhysicalManager*,std::pair<unsigned,bool> >::iterator
+              to_delete = it++;
+            acquired_instances.erase(to_delete);
+          }
+          else
+            it++;
+        }
+        if (to_release != NULL)
+        {
+          DeferReleaseAcquiredArgs args(this, to_release);
+          return runtime->issue_runtime_meta_task(args, 
+              LG_LATENCY_DEFERRED_PRIORITY, perform); 
+        }
+        else
+          return perform;
+      }
+      for (std::map<PhysicalManager*,std::pair<unsigned,bool> >::iterator it = 
+            acquired_instances.begin(); it != acquired_instances.end(); )
+      {
+        if (it->first->instance_footprint > 0)
+        {
+          if (it->first->remove_base_valid_ref(MAPPING_ACQUIRE_REF, 
+                                NULL/*mutator*/, it->second.first))
+            delete it->first;
+          std::map<PhysicalManager*,std::pair<unsigned,bool> >::iterator
+            to_delete = it++;
+          acquired_instances.erase(to_delete);
+        }
+        else
+          it++;
+      }
+      return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Operation::release_acquired_instances(
        std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired_instances)
     //--------------------------------------------------------------------------
     {
       for (std::map<PhysicalManager*,std::pair<unsigned,bool> >::iterator it = 
             acquired_instances.begin(); it != acquired_instances.end(); it++)
+        if (it->first->remove_base_valid_ref(MAPPING_ACQUIRE_REF, 
+                              NULL/*mutator*/, it->second.first))
+          delete it->first;
+      acquired_instances.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Operation::handle_deferred_release(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferReleaseAcquiredArgs *dargs = 
+        (const DeferReleaseAcquiredArgs*)args;
+      for (std::vector<std::pair<PhysicalManager*,unsigned> >::const_iterator 
+            it = dargs->instances->begin(); it != dargs->instances->end(); it++)
       {
         if (it->first->remove_base_valid_ref(MAPPING_ACQUIRE_REF, 
-                                             NULL/*mutator*/, it->second.first))
+                                    NULL/*mutator*/, it->second))
           delete it->first;
       }
-      acquired_instances.clear();
+      delete dargs->instances;
     }
 
     //--------------------------------------------------------------------------
@@ -2711,10 +2776,8 @@ namespace Legion {
       arrive_barriers.clear();
       privilege_path.clear();
       version_info.clear();
-#ifdef DEBUG_LEGION
-      assert(acquired_instances.empty());
-#endif
-      acquired_instances.clear();
+      if (!acquired_instances.empty())
+        release_acquired_instances(acquired_instances);
       atomic_locks.clear();
       map_applied_conditions.clear();
       profiling_requests.clear();
@@ -2941,12 +3004,13 @@ namespace Legion {
       }
       // Now we can trigger the mapping event and indicate
       // to all our mapping dependences that we are mapped.
+      RtEvent mapping_applied;
       if (!map_applied_conditions.empty())
-        complete_mapping(Runtime::merge_events(map_applied_conditions));
-      else
-        complete_mapping();
+        mapping_applied = Runtime::merge_events(map_applied_conditions);
       if (!acquired_instances.empty())
-        release_acquired_instances(acquired_instances);
+        mapping_applied = release_nonempty_acquired_instances(mapping_applied, 
+                                                          acquired_instances);
+      complete_mapping(mapping_applied);
       
       if (!map_complete_event.has_triggered())
       {
@@ -4120,10 +4184,8 @@ namespace Legion {
       scatter_versions.clear();
       gather_is_range.clear();
       scatter_is_range.clear();
-#ifdef DEBUG_LEGION
-      assert(acquired_instances.empty());
-#endif
-      acquired_instances.clear();
+      if (!acquired_instances.empty())
+        release_acquired_instances(acquired_instances);
       atomic_locks.clear();
       map_applied_conditions.clear();
       profiling_requests.clear();
@@ -4842,12 +4904,13 @@ namespace Legion {
       if (is_recording())
         tpl->record_complete_replay(this, copy_complete_event);
       // Mark that we completed mapping
+      RtEvent mapping_applied;
       if (!map_applied_conditions.empty())
-        complete_mapping(Runtime::merge_events(map_applied_conditions));
-      else
-        complete_mapping();
+        mapping_applied = Runtime::merge_events(map_applied_conditions);
       if (!acquired_instances.empty())
-        release_acquired_instances(acquired_instances);
+        mapping_applied = release_nonempty_acquired_instances(mapping_applied, 
+                                                          acquired_instances);
+      complete_mapping(mapping_applied);
       // Handle the case for marking when the copy completes
       request_early_complete(copy_complete_event);
       complete_execution(Runtime::protect_event(copy_complete_event));
@@ -8782,10 +8845,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_close();
-#ifdef DEBUG_LEGION
-      assert(acquired_instances.empty());
-#endif
-      acquired_instances.clear();
+      if (!acquired_instances.empty())
+        release_acquired_instances(acquired_instances);
       map_applied_conditions.clear();
       profiling_requests.clear();
       if (!profiling_info.empty())
@@ -8896,12 +8957,13 @@ namespace Legion {
 #endif
       }
       // No need to apply our mapping because we are done!
+      RtEvent mapping_applied;
       if (!map_applied_conditions.empty())
-        complete_mapping(Runtime::merge_events(map_applied_conditions));
-      else
-        complete_mapping();
+        mapping_applied = Runtime::merge_events(map_applied_conditions);
       if (!acquired_instances.empty())
-        release_acquired_instances(acquired_instances);
+        mapping_applied = release_nonempty_acquired_instances(mapping_applied, 
+                                                          acquired_instances);
+      complete_mapping(mapping_applied);
       request_early_complete(close_event);
       complete_execution(Runtime::protect_event(close_event));
     }
@@ -9410,10 +9472,8 @@ namespace Legion {
       grants.clear();
       wait_barriers.clear();
       arrive_barriers.clear();
-#ifdef DEBUG_LEGION
-      assert(acquired_instances.empty());
-#endif
-      acquired_instances.clear();
+      if (!acquired_instances.empty())
+        release_acquired_instances(acquired_instances);
       map_applied_conditions.clear();
       profiling_requests.clear();
       if (!profiling_info.empty())
@@ -9621,12 +9681,13 @@ namespace Legion {
       if (is_recording())
         tpl->record_complete_replay(this, acquire_complete);
       // Mark that we completed mapping
+      RtEvent mapping_applied;
       if (!map_applied_conditions.empty())
-        complete_mapping(Runtime::merge_events(map_applied_conditions));
-      else
-        complete_mapping();
+        mapping_applied = Runtime::merge_events(map_applied_conditions);
       if (!acquired_instances.empty())
-        release_acquired_instances(acquired_instances);
+        mapping_applied = release_nonempty_acquired_instances(mapping_applied, 
+                                                          acquired_instances);
+      complete_mapping(mapping_applied);
       request_early_complete(acquire_complete);
       complete_execution(Runtime::protect_event(acquire_complete));
     }
@@ -10272,10 +10333,8 @@ namespace Legion {
       grants.clear();
       wait_barriers.clear();
       arrive_barriers.clear();
-#ifdef DEBUG_LEGION
-      assert(acquired_instances.empty());
-#endif
-      acquired_instances.clear();
+      if (!acquired_instances.empty())
+        release_acquired_instances(acquired_instances);
       map_applied_conditions.clear();
       profiling_requests.clear();
       if (!profiling_info.empty())
@@ -10484,12 +10543,13 @@ namespace Legion {
       if (is_recording())
         tpl->record_complete_replay(this, release_complete);
       // Mark that we completed mapping
+      RtEvent mapping_applied;
       if (!map_applied_conditions.empty())
-        complete_mapping(Runtime::merge_events(map_applied_conditions));
-      else
-        complete_mapping();
+        mapping_applied = Runtime::merge_events(map_applied_conditions);
       if (!acquired_instances.empty())
-        release_acquired_instances(acquired_instances);
+        mapping_applied = release_nonempty_acquired_instances(mapping_applied, 
+                                                          acquired_instances);
+      complete_mapping(mapping_applied);
       request_early_complete(release_complete);
       complete_execution(Runtime::protect_event(release_complete));
     }
@@ -11942,10 +12002,8 @@ namespace Legion {
       // Remove our reference on the future map
       result_map = FutureMap();
       task_sets.clear();
-#ifdef DEBUG_LEGION
-      assert(acquired_instances.empty());
-#endif
-      acquired_instances.clear();
+      if (!acquired_instances.empty())
+        release_acquired_instances(acquired_instances);
       dependence_map.clear();
       for (std::vector<DependenceRecord*>::iterator it = dependences.begin();
             it != dependences.end(); it++)
@@ -12167,9 +12225,10 @@ namespace Legion {
       // Mark that we are done mapping and executing this operation
       RtEvent all_mapped = Runtime::merge_events(tasks_all_mapped);
       RtEvent all_complete = Runtime::protect_merge_events(tasks_all_complete);
-      complete_mapping(all_mapped);
       if (!acquired_instances.empty())
-        release_acquired_instances(acquired_instances);
+        all_mapped = 
+          release_nonempty_acquired_instances(all_mapped, acquired_instances);
+      complete_mapping(all_mapped);
       complete_execution(all_complete);
     }
 
@@ -13816,10 +13875,13 @@ namespace Legion {
                                      mapped_instances, trace_info, index_point);
       // Once we are done running these routines, we can mark
       // that the handles have all been completed
+      RtEvent mapping_applied;
       if (!map_applied_conditions.empty())
-        complete_mapping(Runtime::merge_events(map_applied_conditions));
-      else
-        complete_mapping();
+        mapping_applied = Runtime::merge_events(map_applied_conditions);
+      if (!acquired_instances.empty())
+        mapping_applied = release_nonempty_acquired_instances(mapping_applied, 
+                                                          acquired_instances);
+      complete_mapping(mapping_applied);
 #ifdef LEGION_SPY
       if (runtime->legion_spy_enabled)
         LegionSpy::log_operation_events(unique_op_id, done_event,
@@ -14331,7 +14393,8 @@ namespace Legion {
       privilege_path = RegionTreePath();
       version_info.clear();
       map_applied_conditions.clear();
-      acquired_instances.clear();
+      if (!acquired_instances.empty())
+        release_acquired_instances(acquired_instances);
       // We deactivate all of our point operations
       for (std::vector<PointDepPartOp*>::const_iterator it = 
             points.begin(); it != points.end(); it++)

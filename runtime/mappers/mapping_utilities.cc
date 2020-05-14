@@ -83,7 +83,7 @@ namespace Legion {
                           std::vector<Memory> &stack, bool latency)
       //------------------------------------------------------------------------
       {
-        std::map<Processor,std::vector<Memory> >::iterator finder = 
+        std::map<Processor,std::vector<Memory> >::iterator finder =
                                                   proc_mem_stacks.find(proc);
         if (finder != proc_mem_stacks.end())
         {
@@ -92,15 +92,15 @@ namespace Legion {
             MachineQueryInterface::sort_memories(machine, proc, stack, latency);
           return;
         }
-        MachineQueryInterface::find_memory_stack(machine, proc, stack, latency); 
+        MachineQueryInterface::find_memory_stack(machine, proc, stack, latency);
         proc_mem_stacks[proc] = stack;
         if (!latency)
-          MachineQueryInterface::sort_memories(machine, proc, 
+          MachineQueryInterface::sort_memories(machine, proc,
                                                proc_mem_stacks[proc], latency);
       }
 
       //------------------------------------------------------------------------
-      /*static*/ void MachineQueryInterface::find_memory_stack(Machine machine, 
+      /*static*/ void MachineQueryInterface::find_memory_stack(Machine machine,
                                                                Processor proc,
                                       std::vector<Memory> &stack, bool latency)
       //------------------------------------------------------------------------
@@ -123,7 +123,7 @@ namespace Legion {
                           std::vector<Memory> &stack, bool latency)
       //------------------------------------------------------------------------
       {
-        std::map<Memory,std::vector<Memory> >::iterator finder = 
+        std::map<Memory,std::vector<Memory> >::iterator finder =
                                                       mem_mem_stacks.find(mem);
         if (finder != mem_mem_stacks.end())
         {
@@ -132,15 +132,15 @@ namespace Legion {
             MachineQueryInterface::sort_memories(machine, mem, stack, latency);
           return;
         }
-        MachineQueryInterface::find_memory_stack(machine, mem, stack, latency); 
+        MachineQueryInterface::find_memory_stack(machine, mem, stack, latency);
         mem_mem_stacks[mem] = stack;
         if (!latency)
-          MachineQueryInterface::sort_memories(machine, mem, 
+          MachineQueryInterface::sort_memories(machine, mem,
                                                mem_mem_stacks[mem], latency);
       }
 
       //------------------------------------------------------------------------
-      /*static*/ void MachineQueryInterface::find_memory_stack(Machine machine, 
+      /*static*/ void MachineQueryInterface::find_memory_stack(Machine machine,
                                                                Memory mem,
                                       std::vector<Memory> &stack, bool latency)
       //------------------------------------------------------------------------
@@ -159,16 +159,16 @@ namespace Legion {
       }
 
       //------------------------------------------------------------------------
-      Memory MachineQueryInterface::find_memory_kind(Processor proc, 
+      Memory MachineQueryInterface::find_memory_kind(Processor proc,
                                                      Memory::Kind kind)
       //------------------------------------------------------------------------
       {
         std::pair<Processor,Memory::Kind> key(proc,kind);
-        std::map<std::pair<Processor,Memory::Kind>,Memory>::const_iterator 
+        std::map<std::pair<Processor,Memory::Kind>,Memory>::const_iterator
           finder = proc_mem_table.find(key);
         if (finder != proc_mem_table.end())
           return finder->second;
-        Memory result = MachineQueryInterface::find_memory_kind(machine, 
+        Memory result = MachineQueryInterface::find_memory_kind(machine,
                                                                 proc, kind);
         proc_mem_table[key] = result;
         return result;
@@ -191,17 +191,17 @@ namespace Legion {
       }
 
       //------------------------------------------------------------------------
-      Memory MachineQueryInterface::find_memory_kind(Memory mem, 
+      Memory MachineQueryInterface::find_memory_kind(Memory mem,
                                                      Memory::Kind kind)
       //------------------------------------------------------------------------
       {
         std::pair<Memory,Memory::Kind> key(mem,kind);
-        std::map<std::pair<Memory,Memory::Kind>,Memory>::const_iterator 
+        std::map<std::pair<Memory,Memory::Kind>,Memory>::const_iterator
           finder = mem_mem_table.find(key);
         if (finder != mem_mem_table.end())
           return finder->second;
-        Memory result = MachineQueryInterface::find_memory_kind(machine, 
-                                                                mem, kind); 
+        Memory result = MachineQueryInterface::find_memory_kind(machine,
+                                                                mem, kind);
         mem_mem_table[key] = result;
         return result;
       }
@@ -223,16 +223,16 @@ namespace Legion {
       }
 
       //------------------------------------------------------------------------
-      Processor MachineQueryInterface::find_processor_kind(Memory mem, 
+      Processor MachineQueryInterface::find_processor_kind(Memory mem,
                                                            Processor::Kind kind)
       //------------------------------------------------------------------------
       {
         std::pair<Memory,Processor::Kind> key(mem,kind);
-        std::map<std::pair<Memory,Processor::Kind>,Processor>::const_iterator 
+        std::map<std::pair<Memory,Processor::Kind>,Processor>::const_iterator
           finder = mem_proc_table.find(key);
         if (finder != mem_proc_table.end())
           return finder->second;
-        Processor result = MachineQueryInterface::find_processor_kind(machine, 
+        Processor result = MachineQueryInterface::find_processor_kind(machine,
                                                                     mem, kind);
         mem_proc_table[key] = result;
         return result;
@@ -259,17 +259,17 @@ namespace Legion {
                                                           Processor::Kind kind)
       //------------------------------------------------------------------------
       {
-        std::map<Processor::Kind,std::set<Processor> >::const_iterator 
-          finder = proc_kinds.find(kind); 
+        std::map<Processor::Kind,std::set<Processor> >::const_iterator
+          finder = proc_kinds.find(kind);
         if (finder != proc_kinds.end())
           return finder->second;
         std::set<Processor> &result = proc_kinds[kind];
         MachineQueryInterface::filter_processors(machine, kind, result);
         return result;
       }
-      
+
       //------------------------------------------------------------------------
-      /*static*/ void MachineQueryInterface::filter_processors(Machine machine, 
+      /*static*/ void MachineQueryInterface::filter_processors(Machine machine,
                                                            Processor::Kind kind,
                                                      std::set<Processor> &procs)
       //------------------------------------------------------------------------
@@ -307,7 +307,7 @@ namespace Legion {
                                                               Memory::Kind kind)
       //------------------------------------------------------------------------
       {
-        std::map<Memory::Kind,std::set<Memory> >::const_iterator finder = 
+        std::map<Memory::Kind,std::set<Memory> >::const_iterator finder =
           mem_kinds.find(kind);
         if (finder != mem_kinds.end())
           return finder->second;
@@ -317,7 +317,7 @@ namespace Legion {
       }
 
       //------------------------------------------------------------------------
-      /*static*/ void MachineQueryInterface::filter_memories(Machine machine, 
+      /*static*/ void MachineQueryInterface::filter_memories(Machine machine,
                                                              Memory::Kind kind,
                                                         std::set<Memory> &mems)
       //------------------------------------------------------------------------
@@ -351,32 +351,32 @@ namespace Legion {
       }
 
       //------------------------------------------------------------------------
-      /*static*/ void MachineQueryInterface::sort_memories(Machine machine, 
-                                                           Processor proc, 
-                                                  std::vector<Memory> &memories, 
+      /*static*/ void MachineQueryInterface::sort_memories(Machine machine,
+                                                           Processor proc,
+                                                  std::vector<Memory> &memories,
                                                             bool latency)
       //------------------------------------------------------------------------
       {
-        std::list<std::pair<Memory,unsigned/*bandwidth or latency*/> > 
+        std::list<std::pair<Memory,unsigned/*bandwidth or latency*/> >
           temp_stack;
         for (std::vector<Memory>::const_iterator it = memories.begin();
               it != memories.end(); it++)
         {
-          std::vector<Machine::ProcessorMemoryAffinity> affinity; 
+          std::vector<Machine::ProcessorMemoryAffinity> affinity;
 #ifndef NDEBUG
-          bool result = 
+          bool result =
 #endif
           machine.get_proc_mem_affinity(affinity, proc, *it);
           assert(result == 1);
           bool inserted = false;
           if (latency)
           {
-            for (std::list<std::pair<Memory,unsigned> >::iterator stack_it = 
+            for (std::list<std::pair<Memory,unsigned> >::iterator stack_it =
                   temp_stack.begin(); stack_it != temp_stack.end(); stack_it++)
             {
               if (affinity[0].latency < stack_it->second)
               {
-                temp_stack.insert(stack_it, 
+                temp_stack.insert(stack_it,
                     std::pair<Memory,unsigned>(*it,affinity[0].latency));
                 inserted = true;
                 break;
@@ -388,12 +388,12 @@ namespace Legion {
           }
           else /*bandwidth*/
           {
-            for (std::list<std::pair<Memory,unsigned> >::iterator stack_it = 
+            for (std::list<std::pair<Memory,unsigned> >::iterator stack_it =
                   temp_stack.begin(); stack_it != temp_stack.end(); stack_it++)
             {
               if (affinity[0].bandwidth > stack_it->second)
               {
-                temp_stack.insert(stack_it, 
+                temp_stack.insert(stack_it,
                     std::pair<Memory,unsigned>(*it,affinity[0].bandwidth));
                 inserted = true;
                 break;
@@ -407,7 +407,7 @@ namespace Legion {
         // Now put the temp stack onto the real stack
         assert(temp_stack.size() == memories.size());
         unsigned idx = 0;
-        for (std::list<std::pair<Memory,unsigned> >::const_iterator it = 
+        for (std::list<std::pair<Memory,unsigned> >::const_iterator it =
               temp_stack.begin(); it != temp_stack.end(); it++, idx++)
         {
           memories[idx] = it->first;
@@ -415,21 +415,21 @@ namespace Legion {
       }
 
       //------------------------------------------------------------------------
-      /*static*/ void MachineQueryInterface::sort_memories(Machine machine, 
-                                                           Memory mem, 
-                                                  std::vector<Memory> &memories, 
+      /*static*/ void MachineQueryInterface::sort_memories(Machine machine,
+                                                           Memory mem,
+                                                  std::vector<Memory> &memories,
                                                            bool latency)
       //------------------------------------------------------------------------
       {
-        std::list<std::pair<Memory,unsigned/*bandwidth or latency*/> > 
+        std::list<std::pair<Memory,unsigned/*bandwidth or latency*/> >
           temp_stack;
         for (std::vector<Memory>::const_iterator it = memories.begin();
               it != memories.end(); it++)
         {
-          std::vector<Machine::MemoryMemoryAffinity> affinity; 
+          std::vector<Machine::MemoryMemoryAffinity> affinity;
           int size = machine.get_mem_mem_affinity(affinity, mem, *it);
 	  if(size == 0) {
-	    // insert a dummy (bad) affinity for when two memories don't 
+	    // insert a dummy (bad) affinity for when two memories don't
             // actually have affinity (i.e. a multi-hop copy would be necessary)
 	    Machine::MemoryMemoryAffinity mma;
 	    mma.m1 = mem;
@@ -443,12 +443,12 @@ namespace Legion {
           bool inserted = false;
           if (latency)
           {
-            for (std::list<std::pair<Memory,unsigned> >::iterator stack_it = 
+            for (std::list<std::pair<Memory,unsigned> >::iterator stack_it =
                   temp_stack.begin(); stack_it != temp_stack.end(); stack_it++)
             {
               if (affinity[0].latency < stack_it->second)
               {
-                temp_stack.insert(stack_it, 
+                temp_stack.insert(stack_it,
                     std::pair<Memory,unsigned>(*it,affinity[0].latency));
                 inserted = true;
                 break;
@@ -460,12 +460,12 @@ namespace Legion {
           }
           else /*bandwidth*/
           {
-            for (std::list<std::pair<Memory,unsigned> >::iterator stack_it = 
+            for (std::list<std::pair<Memory,unsigned> >::iterator stack_it =
                   temp_stack.begin(); stack_it != temp_stack.end(); stack_it++)
             {
               if (affinity[0].bandwidth > stack_it->second)
               {
-                temp_stack.insert(stack_it, 
+                temp_stack.insert(stack_it,
                     std::pair<Memory,unsigned>(*it,affinity[0].bandwidth));
                 inserted = true;
                 break;
@@ -479,7 +479,7 @@ namespace Legion {
         // Now put the temp stack onto the real stack
         assert(temp_stack.size() == memories.size());
         unsigned idx = 0;
-        for (std::list<std::pair<Memory,unsigned> >::const_iterator it = 
+        for (std::list<std::pair<Memory,unsigned> >::const_iterator it =
               temp_stack.begin(); it != temp_stack.end(); it++, idx++)
         {
           memories[idx] = it->first;
@@ -497,12 +497,12 @@ namespace Legion {
       }
 
       //------------------------------------------------------------------------
-      bool MappingMemoizer::has_mapping(Processor target, const Task *task, 
+      bool MappingMemoizer::has_mapping(Processor target, const Task *task,
                                         unsigned index) const
       //------------------------------------------------------------------------
       {
         MappingKey key(target,task->task_id);
-        std::map<MappingKey,MemoizedMapping>::const_iterator finder = 
+        std::map<MappingKey,MemoizedMapping>::const_iterator finder =
           permanent_mappings.find(key);
         if (finder == permanent_mappings.end())
           return false;
@@ -512,13 +512,13 @@ namespace Legion {
       }
 
       //------------------------------------------------------------------------
-      bool MappingMemoizer::recall_mapping(Processor target, const Task *task, 
+      bool MappingMemoizer::recall_mapping(Processor target, const Task *task,
                                            unsigned index,
                                            std::vector<Memory> &ranking) const
       //------------------------------------------------------------------------
       {
         MappingKey key(target,task->task_id);
-        std::map<MappingKey,MemoizedMapping>::const_iterator finder = 
+        std::map<MappingKey,MemoizedMapping>::const_iterator finder =
           permanent_mappings.find(key);
         if (finder == permanent_mappings.end())
           return false;
@@ -531,12 +531,12 @@ namespace Legion {
       }
 
       //------------------------------------------------------------------------
-      Memory MappingMemoizer::recall_chosen(Processor target, const Task *task, 
+      Memory MappingMemoizer::recall_chosen(Processor target, const Task *task,
                                             unsigned index) const
       //------------------------------------------------------------------------
       {
         MappingKey key(target,task->task_id);
-        std::map<MappingKey,MemoizedMapping>::const_iterator finder = 
+        std::map<MappingKey,MemoizedMapping>::const_iterator finder =
           permanent_mappings.find(key);
         if (finder == permanent_mappings.end())
           return Memory::NO_MEMORY;
@@ -546,13 +546,13 @@ namespace Legion {
       }
 
       //------------------------------------------------------------------------
-      void MappingMemoizer::record_mapping(Processor target, const Task *task, 
+      void MappingMemoizer::record_mapping(Processor target, const Task *task,
                                            unsigned index,
-                                           const std::vector<Memory> &ranking) 
+                                           const std::vector<Memory> &ranking)
       //------------------------------------------------------------------------
       {
         MappingKey key(target,task->task_id);
-        std::map<MappingKey,MemoizedMapping>::iterator finder = 
+        std::map<MappingKey,MemoizedMapping>::iterator finder =
           temporary_mappings.find(key);
         if (finder == temporary_mappings.end())
         {
@@ -564,12 +564,12 @@ namespace Legion {
       }
 
       //------------------------------------------------------------------------
-      void MappingMemoizer::notify_mapping(Processor target, const Task *task, 
+      void MappingMemoizer::notify_mapping(Processor target, const Task *task,
                                            unsigned index, Memory result)
       //------------------------------------------------------------------------
       {
         MappingKey key(target,task->task_id);
-        std::map<MappingKey,MemoizedMapping>::iterator finder = 
+        std::map<MappingKey,MemoizedMapping>::iterator finder =
           temporary_mappings.find(key);
         if (finder == temporary_mappings.end())
         {
@@ -579,13 +579,13 @@ namespace Legion {
         if (index < finder->second.chosen.size())
           finder->second.chosen[index] = result;
       }
-      
+
       //------------------------------------------------------------------------
       void MappingMemoizer::commit_mapping(Processor target, const Task *task)
       //------------------------------------------------------------------------
       {
         MappingKey key(target,task->task_id);
-        std::map<MappingKey,MemoizedMapping>::const_iterator finder = 
+        std::map<MappingKey,MemoizedMapping>::const_iterator finder =
           temporary_mappings.find(key);
         if (finder == temporary_mappings.end())
           return;
@@ -605,7 +605,7 @@ namespace Legion {
       //------------------------------------------------------------------------
       {
       }
-    
+
       /************************
        * Mapping Profiler
        ************************/
@@ -1036,6 +1036,7 @@ namespace Legion {
       {
       }
 
+      //------------------------------------------------------------------------
       MappingProfiler::ProfilingOption::ProfilingOption(
                                 unsigned needed_samples_, unsigned max_samples_)
         : needed_samples(needed_samples_), max_samples(max_samples_),
@@ -1043,9 +1044,263 @@ namespace Legion {
       //------------------------------------------------------------------------
       {
       }
+
+      //------------------------------------------------------------------------
+      const char* to_string(Processor::Kind kind)
+      //------------------------------------------------------------------------
+      {
+        switch (kind) {
+          case Processor::NO_KIND: return "NO_KIND";
+          case Processor::TOC_PROC: return "TOC_PROC";
+          case Processor::LOC_PROC: return "LOC_PROC";
+          case Processor::UTIL_PROC: return "UTIL_PROC";
+          case Processor::IO_PROC: return "IO_PROC";
+          case Processor::PROC_GROUP: return "PROC_GROUP";
+          case Processor::PROC_SET: return "PROC_SET";
+          case Processor::OMP_PROC: return "OMP_PROC";
+          case Processor::PY_PROC: return "PY_PROC";
+          default: assert(false); return "";
+        }
+      }
+
+      //------------------------------------------------------------------------
+      const char* to_string(Memory::Kind kind)
+      //------------------------------------------------------------------------
+      {
+        switch (kind) {
+          case Memory::GLOBAL_MEM: return "GLOBAL_MEM";
+          case Memory::SYSTEM_MEM: return "SYSTEM_MEM";
+          case Memory::REGDMA_MEM: return "REGDMA_MEM";
+          case Memory::SOCKET_MEM: return "SOCKET_MEM";
+          case Memory::Z_COPY_MEM: return "Z_COPY_MEM";
+          case Memory::GPU_FB_MEM: return "GPU_FB_MEM";
+          case Memory::DISK_MEM: return "DISK_MEM";
+          case Memory::HDF_MEM: return "HDF_MEM";
+          case Memory::FILE_MEM: return "FILE_MEM";
+          case Memory::LEVEL3_CACHE: return "LEVEL3_CACHE";
+          case Memory::LEVEL2_CACHE: return "LEVEL2_CACHE";
+          case Memory::LEVEL1_CACHE: return "LEVEL1_CACHE";
+          default: assert(false); return "";
+        }
+      }
+
+      //------------------------------------------------------------------------
+      const char* to_string(PrivilegeMode priv)
+      //------------------------------------------------------------------------
+      {
+        switch (priv) {
+          case NO_ACCESS: return "NO_ACCESS";
+          case READ_ONLY: return "READ_ONLY";
+          case WRITE_PRIV: return "WRITE_PRIV";
+          case REDUCE: return "REDUCE";
+          case READ_WRITE: return "READ_WRITE";
+          case WRITE_ONLY: return "WRITE_ONLY";
+          case WRITE_DISCARD: return "WRITE_DISCARD";
+          default: assert(false); return "";
+        }
+      }
+
+      //------------------------------------------------------------------------
+      const char* to_string(CoherenceProperty prop)
+      //------------------------------------------------------------------------
+      {
+        switch (prop) {
+          case EXCLUSIVE: return "EXCLUSIVE";
+          case ATOMIC: return "ATOMIC";
+          case SIMULTANEOUS: return "SIMULTANEOUS";
+          case RELAXED: return "RELAXED";
+          default: assert(false); return "";
+        }
+      }
+
+      //------------------------------------------------------------------------
+      template<int DIM>
+      static std::string to_string(const DomainT<DIM>& dom)
+      //------------------------------------------------------------------------
+      {
+        std::stringstream ss;
+        bool past_first = false;
+        for (RectInDomainIterator<DIM> it(dom); it.valid(); it.step()) {
+          if (past_first) {
+            ss << "+";
+          } else {
+            past_first = true;
+          }
+          ss << *it;
+        }
+        return ss.str();
+      }
+
+      //------------------------------------------------------------------------
+      std::string to_string(MapperRuntime* runtime,
+                            const MapperContext ctx,
+                            const Domain& dom)
+      //------------------------------------------------------------------------
+      {
+        switch (dom.get_dim()) {
+          case 1: return to_string<1>(dom);
+          case 2: return to_string<2>(dom);
+          case 3: return to_string<3>(dom);
+          default: assert(false);
+        }
+        return "";
+      }
+
+      //------------------------------------------------------------------------
+      std::string to_string(MapperRuntime* runtime,
+                            const MapperContext ctx,
+                            IndexSpace is)
+      //------------------------------------------------------------------------
+      {
+        std::vector<Domain> domains;
+        runtime->get_index_space_domains(ctx, is, domains);
+        std::stringstream ss;
+        bool past_first = false;
+        for (std::vector<Domain>::iterator it = domains.begin();
+             it != domains.end(); ++it) {
+          if (past_first) {
+            ss << "+";
+          } else {
+            past_first = true;
+          }
+          ss << *it;
+        }
+        return ss.str();
+      }
+
+      //------------------------------------------------------------------------
+      std::string to_string(MapperRuntime* runtime,
+                            const MapperContext ctx,
+                            const LayoutConstraintSet& constraints)
+      //------------------------------------------------------------------------
+      {
+        const std::vector<DimensionKind>& dims =
+          constraints.ordering_constraint.ordering;
+        std::stringstream ss;
+        if (dims.front() == DIM_F) {
+          ss << "AoS:";
+        } else if (dims.back() == DIM_F) {
+          ss << "SoA:";
+        } else {
+          return "other";
+        }
+        for (std::vector<DimensionKind>::const_reverse_iterator rit =
+               dims.rbegin(); rit != dims.rend(); ++rit) {
+          switch(*rit) {
+            case DIM_X: ss << "X"; break;
+            case DIM_Y: ss << "Y"; break;
+            case DIM_Z: ss << "Z"; break;
+            case DIM_F: break;
+            default: return "other";
+          }
+        }
+        return ss.str();
+      }
+
+      //------------------------------------------------------------------------
+      std::string to_string(MapperRuntime* runtime,
+                            const MapperContext ctx,
+                            FieldSpace fs,
+                            const std::set<FieldID>& fields)
+      //------------------------------------------------------------------------
+      {
+        std::stringstream ss;
+        bool past_first = false;
+        for (std::set<FieldID>::const_iterator it = fields.begin();
+             it != fields.end(); ++it) {
+          if (past_first) {
+            ss << "+";
+          } else {
+            past_first = true;
+          }
+          const void* name;
+          size_t name_size;
+          if (runtime->retrieve_semantic_information(
+                  ctx, fs, *it, NAME_SEMANTIC_TAG, name, name_size,
+                  true/*can_fail*/, false/*wait_until_ready*/)) {
+            ss << static_cast<const char*>(name);
+          } else {
+            ss << *it;
+          }
+        }
+        return ss.str();
+      }
+
+      //------------------------------------------------------------------------
+      std::string to_string(MapperRuntime* runtime,
+                            const MapperContext ctx,
+                            PhysicalInstance inst)
+      //------------------------------------------------------------------------
+      {
+        std::stringstream ss;
+        ss << "PhysicalInstance";
+        if (inst.is_virtual_instance()) {
+          ss << "(type=VIRTUAL)";
+          return ss.str();
+        }
+        ss << "[" << std::hex << inst.get_instance_id() << std::dec << "]";
+        ss << "(type=";
+        if (inst.is_normal_instance()) { ss << "NORMAL"; }
+        else if (inst.is_reduction_instance()) { ss << "REDUCTION"; }
+        else if (inst.is_external_instance()) { ss << "EXTERNAL"; }
+        else { assert(false); }
+        ss << ",memory=" << inst.get_location();
+        ss << ",domain=" << to_string(runtime, ctx, inst.get_instance_domain());
+        std::set<FieldID> fields;
+        inst.get_fields(fields);
+        ss << ",fields=" << to_string(runtime, ctx, inst.get_field_space(), fields);
+        const LayoutConstraintSet& constraints =
+            runtime->find_layout_constraints(ctx, inst.get_layout_id());
+        ss << ",layout=" << to_string(runtime, ctx, constraints);
+        ss << ")";
+        return ss.str();
+      }
+
+      //------------------------------------------------------------------------
+      std::string to_string(MapperRuntime* runtime,
+                            const MapperContext ctx,
+                            const RegionRequirement& req,
+                            unsigned req_idx)
+      //------------------------------------------------------------------------
+      {
+        std::stringstream ss;
+        ss << "RegionRequirement";
+        ss << "[" << req_idx << "]";
+        ss << "(privilege=" << to_string(req.privilege);
+        ss << ",restricted="
+           << std::boolalpha << req.is_restricted() << std::noboolalpha;
+        ss << ",prop=" << to_string(req.prop);
+        IndexSpace is;
+        FieldSpace fs;
+        if (req.region.exists()) {
+          is = req.region.get_index_space();
+          fs = req.region.get_field_space();
+        } else {
+          assert(req.partition.exists());
+          is = runtime->get_parent_index_space(
+              ctx, req.partition.get_index_partition());
+          fs = req.partition.get_field_space();
+        }
+        ss << ",domain=" << to_string(runtime, ctx, is);
+        ss << ",fields=" << to_string(runtime, ctx, fs, req.privilege_fields);
+        ss << ")";
+        return ss.str();
+      }
+
+      //------------------------------------------------------------------------
+      std::string to_string(MapperRuntime* runtime,
+                            const MapperContext ctx,
+                            const Task& task)
+      //------------------------------------------------------------------------
+      {
+        std::stringstream ss;
+        ss << task.get_task_name();
+        ss << "(index_point=" << task.index_point << ")";
+        return ss.str();
+      }
+
     }; // namespace Utilities
   }; // namespace Mapping
 }; // namespace Legion
 
 // EOF
-

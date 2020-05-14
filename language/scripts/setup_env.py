@@ -139,17 +139,7 @@ def build_terra(terra_dir, terra_branch, use_cmake, cmake_exe, llvm_dir, cache, 
         subprocess.check_call(['make', 'download'], cwd=terra_dir)
         return
 
-    env = {}
-    if terra_branch.startswith('luajit2.1'):
-        # https://github.com/LuaJIT/LuaJIT/issues/484
-
-        # Note: you *can't* set MACOSX_DEPLOYMENT_TARGET globally,
-        # because it will break Terra build outright. It must be set
-        # for LuaJIT and *only* LuaJIT, so to do that we use the PR
-        # branch directly.
-        env['LUAJIT_URL'] = 'https://github.com/elliottslaughter/LuaJIT.git'
-        env['LUAJIT_BRANCH'] = 'patch-1'
-    env.update(dict(list(os.environ.items())))
+    env = dict(list(os.environ.items()))
     if is_cray:
         env.update(dict([
             ('CC', os.environ['HOST_CC']),

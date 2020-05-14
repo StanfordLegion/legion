@@ -1392,8 +1392,8 @@ namespace Legion {
     TaskLauncher::TaskLauncher(void)
       : task_id(0), argument(TaskArgument()), predicate(Predicate::TRUE_PRED),
         map_id(0), tag(0), point(DomainPoint()), static_dependences(NULL),
-        enable_inlining(false), independent_requirements(false), 
-        silence_warnings(false)
+        enable_inlining(false), local_function_task(false),
+        independent_requirements(false), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1403,7 +1403,8 @@ namespace Legion {
                                Predicate pred /*= Predicate::TRUE_PRED*/,
                                MapperID mid /*=0*/, MappingTagID t /*=0*/)
       : task_id(tid), argument(arg), predicate(pred), map_id(mid), tag(t), 
-        point(DomainPoint()), static_dependences(NULL), enable_inlining(false),
+        point(DomainPoint()), static_dependences(NULL), 
+        enable_inlining(false), local_function_task(false),
         independent_requirements(false), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
@@ -2366,27 +2367,51 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalRegion::fail_bounds_check(DomainPoint p, FieldID fid,
-                                           PrivilegeMode mode) const
-    //--------------------------------------------------------------------------
-    {
-      impl->fail_bounds_check(p, fid, mode);
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalRegion::fail_bounds_check(Domain d, FieldID fid,
-                                           PrivilegeMode mode) const
-    //--------------------------------------------------------------------------
-    {
-      impl->fail_bounds_check(d, fid, mode);
-    }
-
-    //--------------------------------------------------------------------------
     void PhysicalRegion::report_incompatible_accessor(const char *accessor_kind,
                               Realm::RegionInstance instance, FieldID fid) const
     //--------------------------------------------------------------------------
     {
       impl->report_incompatible_accessor(accessor_kind, instance, fid);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalRegion::report_incompatible_multi_accessor(unsigned index,
+    FieldID fid, Realm::RegionInstance inst1, Realm::RegionInstance inst2) const
+    //--------------------------------------------------------------------------
+    {
+      impl->report_incompatible_multi_accessor(index, fid, inst1, inst2);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalRegion::fail_bounds_check(DomainPoint p,FieldID fid,
+                                                 PrivilegeMode mode, bool multi)
+    //--------------------------------------------------------------------------
+    {
+      Internal::PhysicalRegionImpl::fail_bounds_check(p, fid, mode, multi);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalRegion::fail_bounds_check(Domain d, FieldID fid,
+                                                 PrivilegeMode mode, bool multi)
+    //--------------------------------------------------------------------------
+    {
+      Internal::PhysicalRegionImpl::fail_bounds_check(d, fid, mode, multi);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalRegion::fail_privilege_check(DomainPoint p, 
+                                                FieldID fid, PrivilegeMode mode)
+    //--------------------------------------------------------------------------
+    {
+      Internal::PhysicalRegionImpl::fail_privilege_check(p, fid, mode);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalRegion::fail_privilege_check(Domain d, FieldID fid, 
+                                                         PrivilegeMode mode)
+    //--------------------------------------------------------------------------
+    {
+      Internal::PhysicalRegionImpl::fail_privilege_check(d, fid, mode);
     }
 
 #ifdef __GNUC__
@@ -3597,6 +3622,24 @@ namespace Legion {
     {
       ArgumentMap argmap;
       for (std::map<DomainPoint,int>::const_iterator it = 
+            weights.begin(); it != weights.end(); it++)
+        argmap.set_point(it->first,
+            TaskArgument(&it->second, sizeof(it->second)));
+      FutureMap future_map(argmap.impl->freeze(ctx));
+      return ctx->create_partition_by_weights(parent, future_map, color_space,
+                                              granularity, color);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition Runtime::create_partition_by_weights(Context ctx,
+                                    IndexSpace parent,
+                                    const std::map<DomainPoint,size_t> &weights,
+                                    IndexSpace color_space,
+                                    size_t granularity, Color color)
+    //--------------------------------------------------------------------------
+    {
+      ArgumentMap argmap;
+      for (std::map<DomainPoint,size_t>::const_iterator it = 
             weights.begin(); it != weights.end(); it++)
         argmap.set_point(it->first,
             TaskArgument(&it->second, sizeof(it->second)));
@@ -5884,6 +5927,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Internal::Runtime::preregister_projection_functor(pid, func);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ ProjectionFunctor* Runtime::get_projection_functor(
+                                                               ProjectionID pid)
+    //--------------------------------------------------------------------------
+    {
+      return Internal::Runtime::get_projection_functor(pid);
     }
 
     //--------------------------------------------------------------------------

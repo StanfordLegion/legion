@@ -424,10 +424,18 @@ namespace Legion {
                                          bool generic_accessor,
                                          bool check_field_size,
                                          ReductionOpID redop);
-      void fail_bounds_check(DomainPoint p, FieldID fid, PrivilegeMode mode);
-      void fail_bounds_check(Domain d, FieldID fid, PrivilegeMode mode);
       void report_incompatible_accessor(const char *accessor_kind,
                              PhysicalInstance instance, FieldID fid);
+      void report_incompatible_multi_accessor(unsigned index, FieldID fid,
+                           PhysicalInstance inst1, PhysicalInstance inst2);
+      static void fail_bounds_check(DomainPoint p, FieldID fid, 
+                                    PrivilegeMode mode, bool multi);
+      static void fail_bounds_check(Domain d, FieldID fid, 
+                                    PrivilegeMode mode, bool multi);
+      static void fail_privilege_check(DomainPoint p, FieldID fid, 
+                                    PrivilegeMode mode);
+      static void fail_privilege_check(Domain d, FieldID fid, 
+                                    PrivilegeMode mode);
     public:
       Runtime *const runtime;
       TaskContext *const context;
@@ -2016,7 +2024,9 @@ namespace Legion {
                                        bool preregistered = false);
       static void preregister_projection_functor(ProjectionID pid,
                                        ProjectionFunctor *func);
-      ProjectionFunction* find_projection_function(ProjectionID pid);
+      ProjectionFunction* find_projection_function(ProjectionID pid,
+                                                   bool can_fail = false);
+      static ProjectionFunctor* get_projection_functor(ProjectionID pid);
     public:
       void register_reduction(ReductionOpID redop_id,
                               ReductionOp *redop,

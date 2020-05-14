@@ -2768,6 +2768,13 @@ extern "C" {
                                            bool enable_inlining);
 
   /**
+   * @see Legion::TaskLauncher::local_task_function
+   */
+  void
+  legion_task_launcher_set_local_function_task(legion_task_launcher_t launcher,
+                                               bool local_function_task);
+
+  /**
    * @return Caller takes ownership of return value.
    *
    * @see Legion::IndexTaskLauncher::IndexTaskLauncher()

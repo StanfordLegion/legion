@@ -252,6 +252,13 @@ namespace Realm {
     //  profiling has been requested
     long long inline_start_time = reqs.empty() ? 0 : Clock::current_time_in_nanoseconds();
 
+    // partitioning an empty space and/or making a single subspace is easy
+    if(empty() || (count == 1)) {
+      subspaces.resize(count, *this);
+      PartitioningOperation::do_inline_profiling(reqs, inline_start_time);
+      return wait_on;
+    }
+
     // dense case is easy(er)
     if(dense()) {
       subspaces.reserve(count);
@@ -295,10 +302,10 @@ namespace Realm {
 
   template <int N, typename T>
   Event IndexSpace<N,T>::create_weighted_subspaces(size_t count, size_t granularity,
-						    const std::vector<int>& weights,
-						    std::vector<IndexSpace<N,T> >& subspaces,
-						    const ProfilingRequestSet &reqs,
-						    Event wait_on /*= Event::NO_EVENT*/) const
+						   const std::vector<size_t>& weights,
+						   std::vector<IndexSpace<N,T> >& subspaces,
+						   const ProfilingRequestSet &reqs,
+						   Event wait_on /*= Event::NO_EVENT*/) const
   {
     // output vector should start out empty
     assert(subspaces.empty());
@@ -307,12 +314,18 @@ namespace Realm {
     //  profiling has been requested
     long long inline_start_time = reqs.empty() ? 0 : Clock::current_time_in_nanoseconds();
 
+    // partitioning an empty space and/or making a single subspace is easy
+    if(empty() || (count == 1)) {
+      subspaces.resize(count, *this);
+      PartitioningOperation::do_inline_profiling(reqs, inline_start_time);
+      return wait_on;
+    }
+
     // determine the total weight
     size_t total_weight = 0;
     assert(weights.size() == count);
     for(size_t i = 0; i < count; i++)
       total_weight += weights[i];
-    if(total_weight == 0) total_weight = 1;
 
     // dense case is easy(er)
     if(dense()) {

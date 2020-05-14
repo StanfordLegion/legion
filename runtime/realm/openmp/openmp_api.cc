@@ -113,10 +113,7 @@ namespace Realm {
       wi->pool->claim_workers(nthreads - 1, worker_ids);
       int act_threads = 1 + worker_ids.size();
 
-      ThreadPool::WorkItem *work = new ThreadPool::WorkItem;
-      work->remaining_workers = act_threads;
-      work->single_winner = -1;
-      work->barrier_count = 0;
+      ThreadPool::WorkItem *work = new ThreadPool::WorkItem(act_threads);
       wi->push_work_item(work);
 
       wi->thread_id = 0;
@@ -223,6 +220,198 @@ namespace Realm {
 
       //log_omp.print() << "barrier exit: id=" << wi->thread_id;
     }
+
+    bool GOMP_loop_static_start(long start, long end, long incr, long chunk,
+				long *istart, long *iend)
+    {
+      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+      if(!wi) {
+	log_omp.warning() << "OpenMP-parallelized loop on non-OpenMP Realm processor!";
+	// give back the whole loop and hope for the best
+	*istart = start;
+	*iend = end;
+	return (start < end);
+      }
+
+      // loops must be inside work items
+      assert(wi->work_item != 0);
+
+      log_omp.debug() << "loop static start: start=" << start
+		      << " end=" << end << " incr=" << incr
+		      << " chunk=" << chunk;
+
+      int64_t span_start, span_end;
+      bool more = wi->work_item->schedule.start_static(start, end,
+						       incr, chunk,
+						       wi->thread_id,
+						       span_start,
+						       span_end);
+      if(more) {
+	*istart = span_start;
+	*iend = span_end;
+      }
+      return more;
+    }
+
+    bool GOMP_loop_dynamic_start(long start, long end, long incr, long chunk,
+				 long *istart, long *iend)
+    {
+      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+      if(!wi) {
+	log_omp.warning() << "OpenMP-parallelized loop on non-OpenMP Realm processor!";
+	// give back the whole loop and hope for the best
+	*istart = start;
+	*iend = end;
+	return (start < end);
+      }
+
+      // loops must be inside work items
+      assert(wi->work_item != 0);
+
+      log_omp.debug() << "loop dynamic start: start=" << start
+		      << " end=" << end << " incr=" << incr
+		      << " chunk=" << chunk;
+
+      wi->work_item->schedule.start_dynamic(start, end, incr, chunk);
+      int64_t span_start, span_end;
+      long stride = 0; // not used
+      bool more = wi->work_item->schedule.next_dynamic(span_start, span_end, stride);
+      if(more) {
+	*istart = span_start;
+	*iend = span_end;
+      }
+      return more;
+    }
+
+    void GOMP_loop_end_nowait(void)
+    {
+      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+      if(!wi) return;  // complained already above
+
+      // loops must be inside work items
+      assert(wi->work_item != 0);
+
+      log_omp.debug() << "loop end nowait";
+
+      wi->work_item->schedule.end_loop(false /*!wait*/);
+    }
+
+    void GOMP_loop_end(void)
+    {
+      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+      if(!wi) return;  // complained already above
+
+      // loops must be inside work items
+      assert(wi->work_item != 0);
+
+      log_omp.debug() << "loop end";
+
+      wi->work_item->schedule.end_loop(true /*wait*/);
+    }
+
+    bool GOMP_loop_static_next(long *istart, long *iend)
+    { 
+      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+      if(!wi) return false;  // complained already above
+
+      // loops must be inside work items
+      assert(wi->work_item != 0);
+
+
+      int64_t span_start, span_end;
+      bool more = wi->work_item->schedule.next_static(span_start, span_end);
+
+      if(more) {
+	*istart = span_start;
+	*iend = span_end;
+	log_omp.debug() << "loop static next: start=" << *istart
+			<< " end=" << *iend;
+      } else
+	log_omp.debug() << "loop static next: done";
+
+      return more;
+    }
+
+    bool GOMP_loop_dynamic_next(long *istart, long *iend)
+    {
+      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+      if(!wi) return false;  // complained already above
+
+      // loops must be inside work items
+      assert(wi->work_item != 0);
+
+      log_omp.debug() << "loop dynamic next: pstart=" << *istart
+		      << " pend=" << *iend;
+
+      int64_t span_start, span_end, stride;
+      bool more = wi->work_item->schedule.next_dynamic(span_start, span_end,
+						       stride);
+
+      if(more) {
+	*istart = span_start;
+	*iend = span_end;
+	log_omp.debug() << "loop dynamic next: start=" << *istart
+			<< " end=" << *iend;
+      } else
+	log_omp.debug() << "loop dynamic next: done";
+
+      return more;
+    }
+
+    static unsigned hash_gomp_critical_name(void **pptr)
+    {
+      uintptr_t v = reinterpret_cast<uintptr_t>(pptr);
+      // two hashes pushes 24 bits worth of address into the bottom 6
+      v ^= (v >> 6);
+      v ^= (v >> 12);
+      // return bottom 6 bits
+      return (v & 63);
+    }
+
+    void GOMP_critical_name_start(void **pptr)
+    {
+      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+      if(!wi || !wi->work_item || (wi->num_threads == 1)) {
+	// already single-threaded, so no further effort needed
+	return;
+      }
+
+      unsigned bit = hash_gomp_critical_name(pptr);
+      uint64_t mask = uint64_t(1) << bit;
+
+      // try to set the bit in the critical flags - repeat until success
+      while(true) {
+	uint64_t orig = wi->work_item->critical_flags.fetch_or(mask);
+	if((orig & mask) == 0) break;
+	Thread::yield();
+      }
+    }
+
+    void GOMP_critical_name_end(void **pptr)
+    {
+      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+      if(!wi || !wi->work_item || (wi->num_threads == 1)) {
+	// already single-threaded, so no further effort needed
+	return;
+      }
+
+      unsigned bit = hash_gomp_critical_name(pptr);
+      uint64_t mask = uint64_t(1) << bit;
+
+      // clear the bit - it had better already be set
+      uint64_t orig = wi->work_item->critical_flags.fetch_and(~mask);
+      assert((orig & mask) != 0);
+    }
+
+    void GOMP_critical_start(void)
+    {
+      GOMP_critical_name_start(0);
+    }
+
+    void GOMP_critical_end(void)
+    {
+      GOMP_critical_name_end(0);
+    }
   };
 #endif
 
@@ -258,7 +447,7 @@ namespace Realm {
 				   kmp_int32 *plastiter,
 				   kmp_uint32 *plower, kmp_uint32 *pupper,
 				   kmp_uint32 *pstride,
-				   kmp_uint32 incr, kmp_uint32 chunk);
+				   kmp_int32 incr, kmp_int32 chunk);
     void __kmpc_for_static_init_8(ident_t *loc, kmp_int32 global_tid,
 				  kmp_int32 schedtype,
 				  kmp_int32 *plastiter,
@@ -270,8 +459,38 @@ namespace Realm {
 				   kmp_int32 *plastiter,
 				   kmp_uint64 *plower, kmp_uint64 *pupper,
 				   kmp_uint64 *pstride,
-				   kmp_uint64 incr, kmp_uint64 chunk);
+				   kmp_int64 incr, kmp_int64 chunk);
     void __kmpc_for_static_fini(ident_t *loc, kmp_int32 global_tid);
+
+    void __kmpc_dispatch_init_4(ident_t *loc, kmp_int32 global_tid,
+				kmp_int32 schedtype,
+				kmp_int32 lb, kmp_int32 ub,
+				kmp_int32 st, kmp_int32 chunk);
+    void __kmpc_dispatch_init_4u(ident_t *loc, kmp_int32 global_tid,
+				 kmp_int32 schedtype,
+				 kmp_uint32 lb, kmp_uint32 ub,
+				 kmp_int32 st, kmp_int32 chunk);
+    void __kmpc_dispatch_init_8(ident_t *loc, kmp_int32 global_tid,
+				kmp_int32 schedtype,
+				kmp_int64 lb, kmp_int64 ub,
+				kmp_int64 st, kmp_int64 chunk);
+    void __kmpc_dispatch_init_8u(ident_t *loc, kmp_int32 global_tid,
+				 kmp_int32 schedtype,
+				 kmp_uint64 lb, kmp_uint64 ub,
+				 kmp_int64 st, kmp_int64 chunk);
+    int __kmpc_dispatch_next_4(ident_t *loc, kmp_int32 global_tid,
+			       kmp_int32 *p_last, kmp_int32 *p_lb,
+			       kmp_int32 *p_ub, kmp_int32 *p_st);
+    int __kmpc_dispatch_next_4u(ident_t *loc, kmp_int32 global_tid,
+				kmp_int32 *p_last, kmp_uint32 *p_lb,
+				kmp_uint32 *p_ub, kmp_int32 *p_st);
+    int __kmpc_dispatch_next_8(ident_t *loc, kmp_int32 global_tid,
+			       kmp_int32 *p_last, kmp_int64 *p_lb,
+			       kmp_int64 *p_ub, kmp_int64 *p_st);
+    int __kmpc_dispatch_next_8u(ident_t *loc, kmp_int32 global_tid,
+				kmp_int32 *p_last, kmp_uint64 *p_lb,
+				kmp_uint64 *p_ub, kmp_int64 *p_st);
+    
     kmp_int32 __kmpc_reduce_nowait(ident_t *loc, kmp_int32 global_tid,
 				   kmp_int32 nvars, size_t reduce_size,
 				   void *reduce_data, kmpc_reduce reduce_func,
@@ -286,6 +505,11 @@ namespace Realm {
     void __kmpc_end_single(ident_t *loc, kmp_int32 global_tid);
 
     void __kmpc_barrier(ident_t *loc, kmp_int32 global_tid);
+
+    void __kmpc_critical(ident_t *loc, kmp_int32 global_tid,
+			 kmp_critical_name *lck);
+    void __kmpc_end_critical(ident_t *loc, kmp_int32 global_tid,
+			     kmp_critical_name *lck);
   };
 
   struct kmp_thunk {
@@ -501,8 +725,7 @@ namespace Realm {
       wi->pool->claim_workers(wi->app_num_threads - 1, worker_ids);
     int act_threads = 1 + worker_ids.size();
 
-    ThreadPool::WorkItem *work = new ThreadPool::WorkItem;
-    work->remaining_workers = act_threads;
+    ThreadPool::WorkItem *work = new ThreadPool::WorkItem(act_threads);
     wi->push_work_item(work);
 
     wi->thread_id = 0;
@@ -529,7 +752,7 @@ namespace Realm {
     }
     delete work;
   }
-
+  
   // templated code for __kmpc_for_static_init_{4,4u,8,8u}
   template <typename T>
   static inline void kmpc_for_static_init(ident_t *loc, kmp_int32 global_tid,
@@ -537,7 +760,8 @@ namespace Realm {
 					  kmp_int32 *plastiter,
 					  T *plower, T *pupper,
 					  T *pstride,
-					  T incr, T chunk)
+					  typename make_signed<T>::type incr,
+					  typename make_signed<T>::type chunk)
   {
     Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
     // if running sequentially, or bounds are inside-out,
@@ -592,7 +816,7 @@ namespace Realm {
 				 kmp_int32 *plastiter,
 				 kmp_uint32 *plower, kmp_uint32 *pupper,
 				 kmp_uint32 *pstride,
-				 kmp_uint32 incr, kmp_uint32 chunk)
+				 kmp_int32 incr, kmp_int32 chunk)
   {
     kmpc_for_static_init<kmp_uint32>(loc, global_tid, schedtype, plastiter,
 				     plower, pupper, pstride, incr, chunk);
@@ -614,7 +838,7 @@ namespace Realm {
 				 kmp_int32 *plastiter,
 				 kmp_uint64 *plower, kmp_uint64 *pupper,
 				 kmp_uint64 *pstride,
-				 kmp_uint64 incr, kmp_uint64 chunk)
+				 kmp_int64 incr, kmp_int64 chunk)
   {
     kmpc_for_static_init<kmp_uint64>(loc, global_tid, schedtype, plastiter,
 				     plower, pupper, pstride, incr, chunk);
@@ -623,6 +847,147 @@ namespace Realm {
   void __kmpc_for_static_fini(ident_t *loc, kmp_int32 global_tid)
   {
     //printf("static_fini(%p, %d)\n", loc, global_tid);
+  }
+
+  // templated code for __kmpc_dispatch_init_{4,4u,8,8u}
+  template <typename T>
+  void kmpc_dispatch_init(ident_t *loc, kmp_int32 global_tid,
+			  kmp_int32 schedtype,
+			  T lb, T ub,
+			  typename make_signed<T>::type st,
+			  typename make_signed<T>::type chunk)
+  {
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+    if(!wi) {
+      // no place to store the loop information, so this is a fatal error
+      log_omp.fatal() << "OpenMP loop with dynamic scheduling on non-OpenMP Realm processor!";
+      abort();
+    }
+
+    // loops must be inside work items
+    assert(wi->work_item != 0);
+
+    // kmp uses an inclusive upper bound, so add the increment to get
+    //  the exclusive form
+    ub += st;
+      
+    log_omp.debug() << "loop dynamic start: start=" << lb
+		    << " end=" << ub << " incr=" << st
+		    << " chunk=" << chunk;
+
+    wi->work_item->schedule.start_dynamic(lb, ub, st, chunk);
+  }
+
+  void __kmpc_dispatch_init_4(ident_t *loc, kmp_int32 global_tid,
+			      kmp_int32 schedtype,
+			      kmp_int32 lb, kmp_int32 ub,
+			      kmp_int32 st, kmp_int32 chunk)
+  {
+    kmpc_dispatch_init<kmp_int32>(loc, global_tid, schedtype,
+				  lb, ub, st, chunk);
+  }
+
+  void __kmpc_dispatch_init_4u(ident_t *loc, kmp_int32 global_tid,
+			       kmp_int32 schedtype,
+			       kmp_uint32 lb, kmp_uint32 ub,
+			       kmp_int32 st, kmp_int32 chunk)
+  {
+    kmpc_dispatch_init<kmp_uint32>(loc, global_tid, schedtype,
+				   lb, ub, st, chunk);
+  }
+
+  void __kmpc_dispatch_init_8(ident_t *loc, kmp_int32 global_tid,
+			      kmp_int32 schedtype,
+			      kmp_int64 lb, kmp_int64 ub,
+			      kmp_int64 st, kmp_int64 chunk)
+  {
+    kmpc_dispatch_init<kmp_int64>(loc, global_tid, schedtype,
+				  lb, ub, st, chunk);
+  }
+
+  void __kmpc_dispatch_init_8u(ident_t *loc, kmp_int32 global_tid,
+			       kmp_int32 schedtype,
+			       kmp_uint64 lb, kmp_uint64 ub,
+			       kmp_int64 st, kmp_int64 chunk)
+  {
+    // map between uint64_t and int64_t by flipping the upper bit
+    kmp_int64 lb_signed = lb ^ (uint64_t(1) << 63);
+    kmp_int64 ub_signed = ub ^ (uint64_t(1) << 63);
+
+    kmpc_dispatch_init<kmp_int64>(loc, global_tid, schedtype,
+				  lb_signed, ub_signed, st, chunk);
+  }
+
+  // templated code for __kmpc_dispatch_init_{4,4u,8,8u}
+  template <typename T>
+  int kmpc_dispatch_next(ident_t *loc, kmp_int32 global_tid,
+			 kmp_int32 *p_last,
+			 T *p_lb, T *p_ub,
+			 typename make_signed<T>::type *p_st)
+  {
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+    if(!wi) return false;  // complained already above
+
+    // loops must be inside work items
+    assert(wi->work_item != 0);
+
+    int64_t span_start, span_end, stride;
+    if(wi->work_item->schedule.next_dynamic(span_start, span_end,
+					    stride)) {
+      log_omp.debug() << "loop dynamic next: start=" << span_start
+		      << " end=" << span_end;
+
+      *p_last = 0; // no detection of last block
+      *p_lb = span_start;
+      *p_ub = span_end - stride;  // back to inclusive upper bound
+      *p_st = stride;
+      return 1;
+    } else {
+      log_omp.debug() << "loop dynamic next: done";
+
+      // no explicit call to end the loop, so do it here
+      // if the loop construct requires a wait, an explicit barrier is
+      //  inserted by the compiler
+      wi->work_item->schedule.end_loop(false /*!wait*/);
+      return 0;
+    }
+  }
+    
+  int __kmpc_dispatch_next_4(ident_t *loc, kmp_int32 global_tid,
+			     kmp_int32 *p_last, kmp_int32 *p_lb,
+			     kmp_int32 *p_ub, kmp_int32 *p_st)
+  {
+    return kmpc_dispatch_next<kmp_int32>(loc, global_tid,
+					 p_last, p_lb, p_ub, p_st);
+  }
+
+  int __kmpc_dispatch_next_4u(ident_t *loc, kmp_int32 global_tid,
+			      kmp_int32 *p_last, kmp_uint32 *p_lb,
+			      kmp_uint32 *p_ub, kmp_int32 *p_st)
+  {
+    return kmpc_dispatch_next<kmp_uint32>(loc, global_tid,
+					  p_last, p_lb, p_ub, p_st);
+  }
+
+  int __kmpc_dispatch_next_8(ident_t *loc, kmp_int32 global_tid,
+			     kmp_int32 *p_last, kmp_int64 *p_lb,
+			     kmp_int64 *p_ub, kmp_int64 *p_st)
+  {
+    return kmpc_dispatch_next<kmp_int64>(loc, global_tid,
+					 p_last, p_lb, p_ub, p_st);
+  }
+
+  int __kmpc_dispatch_next_8u(ident_t *loc, kmp_int32 global_tid,
+			      kmp_int32 *p_last, kmp_uint64 *p_lb,
+			      kmp_uint64 *p_ub, kmp_int64 *p_st)
+  {
+    // map between uint64_t and int64_t by flipping the upper bit
+    kmp_int64 lb_signed, ub_signed;
+    int ret = kmpc_dispatch_next<kmp_int64>(loc, global_tid, p_last,
+					    &lb_signed, &ub_signed, p_st);
+    *p_lb = lb_signed ^ (uint64_t(1) << 63);
+    *p_ub = ub_signed ^ (uint64_t(1) << 63);
+    return ret;
   }
 
   kmp_int32 __kmpc_reduce_nowait(ident_t *loc, kmp_int32 global_tid,
@@ -649,8 +1014,7 @@ namespace Realm {
     }
 
     // create a new work item that is just this thread
-    ThreadPool::WorkItem *work = new ThreadPool::WorkItem;
-    work->remaining_workers = 1;
+    ThreadPool::WorkItem *work = new ThreadPool::WorkItem(1);
     wi->push_work_item(work);
     wi->thread_id = 0;
     wi->num_threads = 1;
@@ -742,6 +1106,53 @@ namespace Realm {
     }
     
     //log_omp.print() << "barrier exit: id=" << wi->thread_id;
+  }
+
+  static unsigned hash_kmp_critical_name(kmp_critical_name *lck)
+  {
+    uintptr_t v = reinterpret_cast<uintptr_t>(lck);
+    // two hashes pushes 24 bits worth of address into the bottom 6
+    v ^= (v >> 6);
+    v ^= (v >> 12);
+    // return bottom 6 bits
+    return (v & 63);
+  }
+
+  void __kmpc_critical(ident_t *loc, kmp_int32 global_tid,
+		       kmp_critical_name *lck)
+  {
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+    if(!wi || !wi->work_item || (wi->num_threads == 1)) {
+      // already single-threaded, so no further effort needed
+      return;
+    }
+
+    unsigned bit = hash_kmp_critical_name(lck);
+    uint64_t mask = uint64_t(1) << bit;
+
+    // try to set the bit in the critical flags - repeat until success
+    while(true) {
+      uint64_t orig = wi->work_item->critical_flags.fetch_or(mask);
+      if((orig & mask) == 0) break;
+      Thread::yield();
+    }
+  }
+
+  void __kmpc_end_critical(ident_t *loc, kmp_int32 global_tid,
+			   kmp_critical_name *lck)
+  {
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+    if(!wi || !wi->work_item || (wi->num_threads == 1)) {
+      // already single-threaded, so no further effort needed
+      return;
+    }
+
+    unsigned bit = hash_kmp_critical_name(lck);
+    uint64_t mask = uint64_t(1) << bit;
+
+    // clear the bit - it had better already be set
+    uint64_t orig = wi->work_item->critical_flags.fetch_and(~mask);
+    assert((orig & mask) != 0);
   }
 #endif
 

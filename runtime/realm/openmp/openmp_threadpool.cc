@@ -28,6 +28,233 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class LoopSchedule
+
+  void LoopSchedule::initialize(int _num_workers)
+  {
+    num_workers = _num_workers;
+    loop_pos.store(0);
+    loop_barrier.store(0);
+  }
+
+  static inline uint64_t index_to_pos(int64_t index,
+				      int64_t base, int64_t incr)
+  {
+    if(incr > 0) {
+      uint64_t delta = (uint64_t)index - (uint64_t)base;
+      if(incr != 1)
+	delta /= incr;
+      return delta;
+    } else {
+      uint64_t delta = (uint64_t)base - (uint64_t)index;
+      if(incr != -1)
+	delta /= -incr;
+      return delta;
+    }
+  }
+
+  static inline int64_t pos_to_index(uint64_t pos,
+				     int64_t base, int64_t incr)
+  {
+    if(incr > 0)
+      return (base + (pos * incr));
+    else
+      return (base - (pos * -incr));
+  }
+  
+  bool LoopSchedule::start_static(int64_t start, int64_t end,
+				  int64_t incr, int64_t chunk,
+				  int thread_id,
+				  int64_t& span_start, int64_t& span_end)
+  {
+    // make sure nobody's still on the previous loop
+    while(loop_barrier.load() >= num_workers) Thread::yield();
+
+    // compute the loop limit, dealing with the negative stride cases
+    uint64_t limit;
+    if(incr > 0) {
+      limit = ((end >= start) ?
+	         index_to_pos(end, start, incr) :
+	         0);
+    } else {
+      limit = ((end <= start) ?
+	         index_to_pos(end, start, incr) :
+	         0);
+    }
+
+    // if the chunk wasn't specified, divide the work as evenly as
+    //  possible into a single chunk per thread
+    if(chunk <= 0) {
+      chunk = limit / num_workers;
+      if((uint64_t(chunk) * num_workers) < limit)
+	chunk++;
+    }
+
+    // the compiler promises all threads will have the same value, so
+    //  everybody can just store knowing that either they're first or
+    //  they're writing the same thing as everybody else
+    loop_limit.store(limit);
+    loop_base.store(start);
+    loop_incr.store(incr);
+    loop_chunk.store(chunk);
+
+    // signal that we're in the loop
+    loop_barrier.fetch_add(1);
+
+    // and now give this thread its first chunk
+    uint64_t pos = thread_id * chunk;
+    if(pos < limit) {
+      uint64_t count = std::min((uint64_t)chunk,
+				(limit - pos));
+      span_start = pos_to_index(pos, start, incr);
+      span_end = pos_to_index(pos + count, start, incr);
+      return true;
+    } else
+      return false;
+  }
+
+  bool LoopSchedule::next_static(int64_t& span_start, int64_t& span_end)
+  {
+    // we use these a bunch, and it's ok to cache them
+    int64_t base = loop_base.load();
+    int64_t incr = loop_incr.load();
+    int64_t chunk = loop_chunk.load();
+    uint64_t limit = loop_limit.load();
+      
+    // don't need to know thread id because we just step by num_workers
+    //  chunks
+    uint64_t old_pos = index_to_pos(span_start, base, incr);
+    uint64_t new_pos = old_pos + (num_workers * chunk);
+
+    // if we wrap around, new_pos will be less than old_pos
+    if((new_pos > old_pos) && (new_pos < limit)) {
+      uint64_t count = std::min((uint64_t)chunk,
+				(limit - new_pos));
+      span_start = pos_to_index(new_pos, base, incr);
+      span_end = pos_to_index(new_pos + count, base, incr);
+      return true;
+    } else
+      return false;
+  }
+
+  void LoopSchedule::start_dynamic(int64_t start, int64_t end,
+				   int64_t incr, int64_t chunk)
+  {
+    // make sure nobody's still on the previous loop
+    while(loop_barrier.load() >= num_workers) Thread::yield();
+
+    // compute the loop limit, dealing with the negative stride cases
+    uint64_t limit;
+    if(incr > 0) {
+      limit = ((end >= start) ?
+	         index_to_pos(end, start, incr) :
+	         0);
+    } else {
+      limit = ((end <= start) ?
+	         index_to_pos(end, start, incr) :
+	         0);
+    }
+
+    // if the chunk wasn't specified, pick a value that aims for ~8
+    //  chunks per thread to get some dynamic scheduling goodness
+    if(chunk <= 0) {
+      chunk = limit / (8 * num_workers);
+      if(chunk == 0) chunk = 1;
+    }
+
+    // if the chunk size is so large that n-1 of the workers can
+    //  cause an overshoot that wraps around, we have a problem
+    uint64_t limit_overshoot = (limit + ((num_workers - 1) *
+					 (uint64_t)chunk));
+    assert(limit_overshoot > limit);
+
+    // the compiler promises all threads will have the same value, so
+    //  everybody can just store knowing that either they're first or
+    //  they're writing the same thing as everybody else
+    // (loop_pos was reset to 0 at the end of the previous loop)
+    loop_limit.store(limit);
+    loop_base.store(start);
+    loop_incr.store(incr);
+    loop_chunk.store(chunk);
+
+    // signal that we're in the loop
+    loop_barrier.fetch_add(1);
+  }
+
+  bool LoopSchedule::next_dynamic(int64_t& span_start, int64_t& span_end,
+				  int64_t& stride)
+  {
+    // we use these a bunch, and it's ok to cache them
+    int64_t base = loop_base.load();
+    int64_t incr = loop_incr.load();
+    int64_t chunk = loop_chunk.load();
+    uint64_t limit = loop_limit.load();
+      
+    // atomic increment to claim a new chunk
+    uint64_t new_pos = loop_pos.fetch_add(chunk);
+
+    if(new_pos < limit) {
+      uint64_t count = std::min((uint64_t)chunk,
+				(limit - new_pos));
+      span_start = pos_to_index(new_pos, base, incr);
+      span_end = pos_to_index(new_pos + count, base, incr);
+      stride = incr;
+      return true;
+    } else
+      return false;
+  }
+
+  void LoopSchedule::end_loop(bool wait)
+  {
+    // stall unless all threads have entered the current loop
+    while(loop_barrier.load() < num_workers) Thread::yield();
+
+    // increment the barrier to indicate we're done, and see if we're the
+    //  last
+    int prev_count = loop_barrier.fetch_add(1);
+    bool last_ender = (prev_count == (2 * num_workers - 1));
+
+    if(wait) {
+      if(last_ender) {
+	// we don't need to contribute again, and can return unless there was
+	//  only one worker
+	if(num_workers > 1) return;
+      } else {
+	// we need to observe the count reach 2x num_workers
+	while(loop_barrier.load() < (2 * num_workers)) Thread::yield();
+
+	// signal our observation and return if we're not the last to do so
+	prev_count = loop_barrier.fetch_add(1);
+	if(prev_count < (3 * num_workers - 2)) return;
+      }
+    } else {
+      // if we weren't the last to end, we're done - no waiting
+      if(!last_ender)
+	return;
+    }
+
+    // exactly one thread gets here, and resets loop_pos and then the barrier
+    loop_pos.store(0);
+    loop_barrier.store_release(0);
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class ThreadPool::WorkItem
+
+  ThreadPool::WorkItem::WorkItem(int _num_threads)
+    : remaining_workers(_num_threads)
+    , single_winner(-1)
+    , barrier_count(0)
+    , critical_flags(0)
+  {
+    schedule.initialize(_num_threads);
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class ThreadPool::WorkerInfo
 
   void ThreadPool::WorkerInfo::push_work_item(ThreadPool::WorkItem *new_work)

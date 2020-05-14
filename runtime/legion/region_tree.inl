@@ -3563,7 +3563,8 @@ namespace Legion {
       color_space->get_realm_index_space(realm_color_space, true/*tight*/); 
       const size_t count = realm_color_space.volume();
       // Unpack the futures and fill in the weights appropriately
-      std::vector<int> weights(count);
+      std::vector<int> weights;
+      std::vector<size_t> long_weights;
       std::vector<LegionColor> child_colors(count);
       unsigned color_index = 0;
       // Make all the entries for the color space
@@ -3579,12 +3580,37 @@ namespace Legion {
             REPORT_LEGION_ERROR(ERROR_MISSING_PARTITION_BY_WEIGHT_COLOR,
                 "A partition by weight call is missing an entry for a "
                 "color in the color space. All colors must be present.")
-          if (future->get_untyped_size(true/*internal*/) != sizeof(int))
+          const size_t future_size = future->get_untyped_size(true/*internal*/);
+          if (future_size == sizeof(int))
+          {
+            if (weights.empty())
+            {
+              if (!long_weights.empty())
+                REPORT_LEGION_ERROR(ERROR_INVALID_PARTITION_BY_WEIGHT_VALUE,
+                  "An invalid future size was found in a partition by weight "
+                  "call. All futures must be consistent int or size_t values.")
+              weights.resize(count);
+            }
+            weights[color_index] = *(static_cast<int*>(
+              future->get_untyped_result(true, NULL, true/*internal*/)));
+          }
+          else if (future_size == sizeof(size_t))
+          {
+            if (long_weights.empty())
+            {
+              if (!weights.empty())
+                REPORT_LEGION_ERROR(ERROR_INVALID_PARTITION_BY_WEIGHT_VALUE,
+                  "An invalid future size was found in a partition by weight "
+                  "call. All futures must be consistent int or size_t values.")
+              long_weights.resize(count);
+            }
+            long_weights[color_index] = *(static_cast<size_t*>(
+              future->get_untyped_result(true, NULL, true/*internal*/)));
+          }
+          else
             REPORT_LEGION_ERROR(ERROR_INVALID_PARTITION_BY_WEIGHT_VALUE,
                   "An invalid future size was found in a partition by weight "
-                  "call. All futures must contain int values.")
-          weights[color_index] = *(static_cast<int*>(
-                future->get_untyped_result(true, NULL, true/*internal*/)));
+                  "call. All futures must contain int or size_t values.")
           child_colors[color_index++] = color_space->linearize_color(&itr.p,
                                           color_space->handle.get_type_tag());
         }
@@ -3599,7 +3625,10 @@ namespace Legion {
         ready = Runtime::merge_events(NULL, ready, 
                   op->get_execution_fence_event());
       std::vector<Realm::IndexSpace<DIM,T> > subspaces;
-      ApEvent result(local_space.create_weighted_subspaces(count,
+      ApEvent result(weights.empty() ?
+          local_space.create_weighted_subspaces(count,
+            granularity, long_weights, subspaces, requests, ready) :
+          local_space.create_weighted_subspaces(count,
             granularity, weights, subspaces, requests, ready));
 #ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!result.exists() || (result == ready))

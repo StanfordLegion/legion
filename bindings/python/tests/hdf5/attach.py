@@ -25,7 +25,7 @@ import numpy
 def generate_hdf5_file(filename, dims):
     with h5py.File(filename, 'w') as f:
         f.create_dataset('x', dims, dtype='i4')
-        f.create_dataset('y', dims, dtype='i4')
+        f.create_dataset('uu', dims, dtype='i4')
         f.create_dataset('z', dims, dtype='i4')
         f.create_dataset('w', dims, dtype='i4')
 
@@ -35,12 +35,12 @@ def print_region(R):
 
 @task
 def main():
-    R = Region([4, 4], {'x': pygion.int32, 'y': pygion.int32, 'z': pygion.int32, 'w': pygion.int32})
+    R = Region([4, 4], {'x': pygion.int32, 'uu': pygion.int32, 'z': pygion.int32, 'w': pygion.int32})
 
     generate_hdf5_file('test.h5', [4, 4])
 
-    with attach_hdf5(R, 'test.h5', {'x': 'x', 'y': 'y', 'z': 'z', 'w': 'w'}, pygion.file_read_only):
-        with acquire(R, ['x', 'y', 'z']):
+    with attach_hdf5(R, 'test.h5', {'x': 'x', 'uu': 'uu', 'z': 'z', 'w': 'w'}, pygion.file_read_only):
+        with acquire(R, ['x', 'uu', 'z']):
             print_region(R)
 
 if __name__ == '__main__':

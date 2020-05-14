@@ -142,8 +142,14 @@ namespace Legion {
     class FieldAccessor;
   template<typename, bool, int, typename, typename, bool>
     class ReductionAccessor;
+  template<typename, int,typename,typename,bool,bool,int>
+    class MultiRegionAccessor;
   template<typename,int,typename,typename>
     class UnsafeFieldAccessor;
+  namespace ArraySyntax {
+    template<typename, PrivilegeMode> class AccessorRefHelper;
+    template<typename> class AffineRefHelper;
+  }
   class IndexIterator;
   template<typename T> struct ColoredPoints; 
   struct InputArgs;
@@ -373,6 +379,7 @@ namespace Legion {
       LG_DEFER_INDIVIDUAL_MANAGER_TASK_ID,
       LG_DEFER_COLLECTIVE_MANAGER_TASK_ID,
       LG_DEFER_VERIFY_PARTITION_TASK_ID,
+      LG_DEFER_RELEASE_ACQUIRED_TASK_ID,
       LG_MALLOC_INSTANCE_TASK_ID,
       LG_FREE_INSTANCE_TASK_ID,
       LG_YIELD_TASK_ID,
@@ -502,6 +509,7 @@ namespace Legion {
         "Defer Instance Manager Registration",                    \
         "Defer Reduction Manager Registration",                   \
         "Defer Verify Partition",                                 \
+        "Defer Release Acquired Instances",                       \
         "Malloc Instance",                                        \
         "Free Instance",                                          \
         "Yield",                                                  \

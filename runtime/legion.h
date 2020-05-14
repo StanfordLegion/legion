@@ -1483,6 +1483,15 @@ namespace Legion {
       // gets scheduled on the processor that launched this task.
       bool                               enable_inlining;
     public:
+      // In some cases users (most likely compilers) will want
+      // to run a light-weight function (e.g. a continuation)
+      // as a task that just depends on futures once those futures 
+      // are ready on a local processor where the parent task
+      // is executing. We call this a local function task and it 
+      // must not have any region requirements. This task will
+      // not have the option of being distributed to remote nodes.
+      bool                               local_function_task;
+    public:
       // Users can inform the runtime that all region requirements
       // are independent of each other in this task. Independent
       // means that either field sets are independent or region
@@ -2228,13 +2237,19 @@ namespace Legion {
       template<int DIM, typename COORD_T>
       operator Rect<DIM,COORD_T>(void) const;
     protected:
-      // These methods can only be accessed by the FieldAccessor class
+      // These methods can only be accessed by accessor classes
       template<PrivilegeMode, typename, int, typename, typename, bool>
       friend class FieldAccessor;
       template<typename, bool, int, typename, typename, bool>
       friend class ReductionAccessor;
+      template<typename, int, typename, typename, bool, bool, int>
+      friend class MultiRegionAccessor;
       template<typename, int, typename, typename>
       friend class UnsafeFieldAccessor;
+      template<typename, PrivilegeMode>
+      friend class ArraySyntax::AccessorRefHelper;
+      template<typename>
+      friend class ArraySyntax::AffineRefHelper;
       Realm::RegionInstance get_instance_info(PrivilegeMode mode, 
                                               FieldID fid, size_t field_size,
                                               void *realm_is, TypeTag type_tag,
@@ -2243,12 +2258,19 @@ namespace Legion {
                                               bool generic_accessor,
                                               bool check_field_size,
                                               ReductionOpID redop = 0) const;
-      void fail_bounds_check(DomainPoint p, FieldID fid,
-                             PrivilegeMode mode) const;
-      void fail_bounds_check(Domain d, FieldID fid,
-                             PrivilegeMode mode) const;
       void report_incompatible_accessor(const char *accessor_kind,
                              Realm::RegionInstance instance, FieldID fid) const;
+      void report_incompatible_multi_accessor(unsigned index, FieldID fid,
+                             Realm::RegionInstance inst1, 
+                             Realm::RegionInstance inst2) const;
+      static void fail_bounds_check(DomainPoint p, FieldID fid,
+                                    PrivilegeMode mode, bool multi = false);
+      static void fail_bounds_check(Domain d, FieldID fid,
+                                    PrivilegeMode mode, bool multi = false);
+      static void fail_privilege_check(DomainPoint p, FieldID fid,
+                                       PrivilegeMode mode);
+      static void fail_privilege_check(Domain d, FieldID fid,
+                                       PrivilegeMode mode); 
     protected:
       void get_bounds(void *realm_is, TypeTag type_tag) const;
     };
@@ -2412,6 +2434,118 @@ namespace Legion {
       typedef typename REDOP::RHS value_type;
       typedef typename REDOP::RHS& reference;
       typedef const typename REDOP::RHS& const_reference;
+      static const int dim = N;
+    };
+
+    /**
+     * \class MultiRegionAccessor
+     * A multi-region accessor is a generalization of the field accessor class
+     * to allow programs to access the same field for a common instance of
+     * multiple logical region requirements. This is useful for performance
+     * in cases where a task variant uses co-location constraints to 
+     * guarantee that data for certains region requirements are in the
+     * same physical instance. This can avoid branching in application
+     * code which rely on dynamic indexing into multiple logical regions.
+     * There can be a productivity cost to using this accessor: it does
+     * not capture privileges as part of its template parameters, so it
+     * is easier to violate privileges without the C++ type checker
+     * noticing. Users can enable privilege checks on an accessor by 
+     * setting the CHECK_PRIVILEGES template parameter to true or by
+     * enabling PRIVILEGE_CHECKS throughout the entire application build.
+     * Note that even in the affine case, in general you cannot directly 
+     * get a reference or a pointer to any elements so that we can enable
+     * dynamic privilege checks to work. If you want to get a pointer or a 
+     * direct reference we encourage you to use the FieldAccessor for each 
+     * individual region at which point you can do any unsafe things you want. 
+     * If you do not use privilege checks then you can assume that auto == FT& 
+     * for operator[] methods. The following methods are supported:
+     *
+     *  - FT read(const Point<N,T>&) const
+     *  - void write(const Point<N,T>&, FT val) const
+     *  - auto operator[](const Point<N,T>&) const
+     *  - template<typename REDOP, bool EXCLUSIVE> 
+     *      void reduce(const Point<N,T>&, REDOP::RHS) (Affine Accessor only)
+     */
+    template<typename FT, int N, typename COORD_T = coord_t,
+             typename A = Realm::GenericAccessor<FT,N,COORD_T>,
+#ifdef BOUNDS_CHECKS
+             bool CHECK_BOUNDS = true,
+#else
+             bool CHECK_BOUNDS = false,
+#endif
+#ifdef PRIVILEGE_CHECKS
+             bool CHECK_PRIVILEGES = true,
+#else
+             bool CHECK_PRIVILEGES = false,
+#endif
+             // Only used if bounds/privilege checks enabled
+             // Can safely over-approximate, but may cost space
+             // Especially GPU parameter space
+             int MAX_REGIONS = 4>
+    class MultiRegionAccessor {
+    public:
+      MultiRegionAccessor(void) { }
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          // The actual field size in case it is different from 
+                          // the one being used in FT and we still want to check
+                          FieldID fid, size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL) { }
+      // Specify a specific bounds rectangle to use for the accessor
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          const Rect<N,COORD_T> bounds, FieldID fid,
+                          // The actual field size in case it is different from 
+                          // the one being used in FT and we still want to check
+                          size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL) { }
+      // Specify a specific Affine transform to use for interpreting points
+      template<int M>
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          const AffineTransform<M,N,COORD_T> transform,
+                          // The actual field size in case it is different from 
+                          // the one being used in FT and we still want to check
+                          FieldID fid, size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL) { }
+      // Specify both a transform and a bounds to use
+      template<int M>
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          const AffineTransform<M,N,COORD_T> transform,
+                          const Rect<N,COORD_T> bounds, FieldID fid, 
+                          // The actual field size in case it is different from the
+                          // one being used in FT and we still want to check it
+                          size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL) { }
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
       static const int dim = N;
     };
 
@@ -3888,8 +4022,21 @@ namespace Legion {
                     const std::map<Point<COLOR_DIM,COLOR_COORD_T>,int> &weights,
                     IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
                     size_t granularity = 1, Color color = AUTO_GENERATE_ID);
+      // 64-bit versions
+      IndexPartition create_partition_by_weights(Context ctx, IndexSpace parent,
+                                    const std::map<DomainPoint,size_t> &weights,
+                                    IndexSpace color_space,
+                                    size_t granularity = 1,
+                                    Color color = AUTO_GENERATE_ID);
+      template<int DIM, typename COORD_T, int COLOR_DIM, typename COLOR_COORD_T>
+      IndexPartitionT<DIM,COORD_T> create_partition_by_weights(Context ctx,
+                 IndexSpaceT<DIM,COORD_T> parent,
+                 const std::map<Point<COLOR_DIM,COLOR_COORD_T>,size_t> &weights,
+                 IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
+                 size_t granularity = 1, Color color = AUTO_GENERATE_ID);
       // Alternate versions of the above method that take a future map where
-      // the values in the future map will be interpretted as a integer weights
+      // the values in the future map will be interpretted as integer weights
+      // You can use this method with both 32 and 64 bit weights
       IndexPartition create_partition_by_weights(Context ctx, IndexSpace parent,
                                                  const FutureMap &weights,
                                                  IndexSpace color_space,
@@ -7033,6 +7180,14 @@ namespace Legion {
        */
       static void preregister_projection_functor(ProjectionID pid,
                                                  ProjectionFunctor *functor);
+
+      /**
+       * Return a pointer to a given projection functor object.
+       * The runtime retains ownership of this object.
+       * @param pid ID of the projection functor to find
+       * @return a pointer to the projection functor if it exists
+       */
+      static ProjectionFunctor* get_projection_functor(ProjectionID pid);
 
       /**
        * Dynamically generate a unique sharding ID for use across the machine

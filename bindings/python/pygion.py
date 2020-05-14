@@ -370,6 +370,7 @@ class Future(object):
             if value_type.size > 0:
                 value_ptr = ffi.new(ffi.getctype(value_type.cffi_type, '*'), value)
             else:
+                assert value is None
                 value_ptr = ffi.NULL
             value_size = value_type.size
             self.handle = c.legion_future_from_untyped_pointer(_my.ctx.runtime, value_ptr, value_size)
@@ -1253,8 +1254,11 @@ def attach_hdf5(region, filename, field_map, mode, restricted=True, mapped=False
     filename = filename.encode('utf-8')
 
     raw_field_map = c.legion_field_map_create()
+    encoded_values = [] # make sure these don't get deleted before the launcher
     for field_name, value in field_map.items():
-        c.legion_field_map_insert(raw_field_map, region.fspace.field_ids[field_name], value.encode('utf-8'))
+        encoded_value = value.encode('utf-8')
+        encoded_values.append(encoded_value)
+        c.legion_field_map_insert(raw_field_map, region.fspace.field_ids[field_name], encoded_value)
         region._clear_instance(field_name)
 
     assert(isinstance(mode, FileMode))
@@ -2412,14 +2416,11 @@ class MustEpochLaunch(object):
     def launch(self):
         self.launcher.launch()
 
-@task(leaf=True)
-def _dummy_task():
-    return 1
-
 def execution_fence(block=False, future=False):
-    c.legion_runtime_issue_execution_fence(_my.ctx.runtime, _my.ctx.context)
+    f = Future.from_cdata(
+        c.legion_runtime_issue_execution_fence(_my.ctx.runtime, _my.ctx.context),
+        value_type=void)
     if block or future:
-        f = _dummy_task()
         if block:
             f.get()
         if future:

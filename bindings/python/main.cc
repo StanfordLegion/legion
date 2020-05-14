@@ -132,11 +132,6 @@ static void python_main_callback(Machine machine, Runtime *runtime,
       new LegionPyMapper(runtime->get_mapper_runtime(), machine, top_task_id));
 }
 
-static void print_usage(FILE *out)
-{
-  fprintf(out,"legion_python [--nocr] [-c cmd | -m mod | file | -] [arg] ...\n");
-}
-
 int main(int argc, char **argv)
 {
   // Make sure argc and argv are valid before we look at them
@@ -181,30 +176,13 @@ int main(int argc, char **argv)
 #undef str
 #endif
 
-  const char *module_name = NULL;
   int start = 1;
   if ((argc > start) && (strcmp(argv[start],"--nocr") == 0)) {
     control_replicate = false;
     start++;
   }
   if ((argc > start) && argv[start][0] == '-') {
-    if (strcmp(argv[start],"-m") == 0) {
-      if (argc < (start+2))
-      {
-        fprintf(stderr,"Argument expected for the -m option\n");
-        print_usage(stderr);
-        return 1;
-      }
-      else
-        module_name = argv[start+1];
-    } else if (strcmp(argv[start],"-c") == 0) {
-      if (argc < (start+2))
-      {
-        fprintf(stderr,"Argument expected for the -c option\n");
-        print_usage(stderr);
-        return 1;
-      }
-    } else if (argv[start][1] == '\0')
+    if (argv[start][1] == '\0')
       // Interactive console means no control replication
       control_replicate = false;
   // Note this check is safe because we filtered all the 
@@ -214,11 +192,7 @@ int main(int argc, char **argv)
     control_replicate = false;
   }
 
-  if ((module_name != NULL) && (strrchr(module_name, '.') == NULL)) {
-    Realm::Python::PythonModule::import_python_module(module_name);
-  } else {
-    Runtime::add_registration_callback(python_main_callback);
-  }
+  Runtime::add_registration_callback(python_main_callback);
 
   return Runtime::start(argc, argv);
 }
