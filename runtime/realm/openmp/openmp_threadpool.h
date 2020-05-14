@@ -51,7 +51,8 @@ namespace Realm {
 
     // indicates this thread is done with the current loop - blocks
     //  if other threads haven't even entered the loop yet
-    void end_loop(void);
+    // if wait is set, blocks until all threads enter end_loop
+    void end_loop(bool wait);
 
   protected:
     int num_workers;
@@ -74,12 +75,15 @@ namespace Realm {
     void worker_entry(void);
 
     struct WorkItem {
+      WorkItem(int _num_threads);
+
       int prev_thread_id;
       int prev_num_threads;
       WorkItem *parent_work_item;
       atomic<int> remaining_workers;
       atomic<int> single_winner;  // worker currently assigned as the "single" one
       atomic<int> barrier_count;
+      atomic<uint64_t> critical_flags;
       LoopSchedule schedule;
     };
 

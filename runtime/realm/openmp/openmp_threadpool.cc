@@ -68,7 +68,7 @@ namespace Realm {
 				  int64_t& span_start, int64_t& span_end)
   {
     // make sure nobody's still on the previous loop
-    while(loop_barrier.load() >= num_workers) {}
+    while(loop_barrier.load() >= num_workers) Thread::yield();
 
     // compute the loop limit, dealing with the negative stride cases
     uint64_t limit;
@@ -141,7 +141,7 @@ namespace Realm {
 				   int64_t incr, int64_t chunk)
   {
     // make sure nobody's still on the previous loop
-    while(loop_barrier.load() >= num_workers) {}
+    while(loop_barrier.load() >= num_workers) Thread::yield();
 
     // compute the loop limit, dealing with the negative stride cases
     uint64_t limit;
@@ -204,20 +204,52 @@ namespace Realm {
       return false;
   }
 
-  void LoopSchedule::end_loop(void)
+  void LoopSchedule::end_loop(bool wait)
   {
     // stall unless all threads have entered the current loop
-    while(loop_barrier.load() < num_workers) {}
+    while(loop_barrier.load() < num_workers) Thread::yield();
 
     // increment the barrier to indicate we're done, and see if we're the
     //  last
     int prev_count = loop_barrier.fetch_add(1);
+    bool last_ender = (prev_count == (2 * num_workers - 1));
 
-    // if we are, we reset loop_pos and then the barrier
-    if(prev_count == (2 * num_workers - 1)) {
-      loop_pos.store(0);
-      loop_barrier.store_release(0);
+    if(wait) {
+      if(last_ender) {
+	// we don't need to contribute again, and can return unless there was
+	//  only one worker
+	if(num_workers > 1) return;
+      } else {
+	// we need to observe the count reach 2x num_workers
+	while(loop_barrier.load() < (2 * num_workers)) Thread::yield();
+
+	// signal our observation and return if we're not the last to do so
+	prev_count = loop_barrier.fetch_add(1);
+	if(prev_count < (3 * num_workers - 2)) return;
+      }
+    } else {
+      // if we weren't the last to end, we're done - no waiting
+      if(!last_ender)
+	return;
     }
+
+    // exactly one thread gets here, and resets loop_pos and then the barrier
+    loop_pos.store(0);
+    loop_barrier.store_release(0);
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class ThreadPool::WorkItem
+
+  ThreadPool::WorkItem::WorkItem(int _num_threads)
+    : remaining_workers(_num_threads)
+    , single_winner(-1)
+    , barrier_count(0)
+    , critical_flags(0)
+  {
+    schedule.initialize(_num_threads);
   }
 
 

@@ -113,11 +113,7 @@ namespace Realm {
       wi->pool->claim_workers(nthreads - 1, worker_ids);
       int act_threads = 1 + worker_ids.size();
 
-      ThreadPool::WorkItem *work = new ThreadPool::WorkItem;
-      work->remaining_workers = act_threads;
-      work->single_winner = -1;
-      work->barrier_count = 0;
-      work->schedule.initialize(act_threads);
+      ThreadPool::WorkItem *work = new ThreadPool::WorkItem(act_threads);
       wi->push_work_item(work);
 
       wi->thread_id = 0;
@@ -295,9 +291,22 @@ namespace Realm {
       // loops must be inside work items
       assert(wi->work_item != 0);
 
+      log_omp.debug() << "loop end nowait";
+
+      wi->work_item->schedule.end_loop(false /*!wait*/);
+    }
+
+    void GOMP_loop_end(void)
+    {
+      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+      if(!wi) return;  // complained already above
+
+      // loops must be inside work items
+      assert(wi->work_item != 0);
+
       log_omp.debug() << "loop end";
 
-      wi->work_item->schedule.end_loop();
+      wi->work_item->schedule.end_loop(true /*wait*/);
     }
 
     bool GOMP_loop_static_next(long *istart, long *iend)
@@ -347,6 +356,61 @@ namespace Realm {
 	log_omp.debug() << "loop dynamic next: done";
 
       return more;
+    }
+
+    static unsigned hash_gomp_critical_name(void **pptr)
+    {
+      uintptr_t v = reinterpret_cast<uintptr_t>(pptr);
+      // two hashes pushes 24 bits worth of address into the bottom 6
+      v ^= (v >> 6);
+      v ^= (v >> 12);
+      // return bottom 6 bits
+      return (v & 63);
+    }
+
+    void GOMP_critical_name_start(void **pptr)
+    {
+      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+      if(!wi || !wi->work_item || (wi->num_threads == 1)) {
+	// already single-threaded, so no further effort needed
+	return;
+      }
+
+      unsigned bit = hash_gomp_critical_name(pptr);
+      uint64_t mask = uint64_t(1) << bit;
+
+      // try to set the bit in the critical flags - repeat until success
+      while(true) {
+	uint64_t orig = wi->work_item->critical_flags.fetch_or(mask);
+	if((orig & mask) == 0) break;
+	Thread::yield();
+      }
+    }
+
+    void GOMP_critical_name_end(void **pptr)
+    {
+      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+      if(!wi || !wi->work_item || (wi->num_threads == 1)) {
+	// already single-threaded, so no further effort needed
+	return;
+      }
+
+      unsigned bit = hash_gomp_critical_name(pptr);
+      uint64_t mask = uint64_t(1) << bit;
+
+      // clear the bit - it had better already be set
+      uint64_t orig = wi->work_item->critical_flags.fetch_and(~mask);
+      assert((orig & mask) != 0);
+    }
+
+    void GOMP_critical_start(void)
+    {
+      GOMP_critical_name_start(0);
+    }
+
+    void GOMP_critical_end(void)
+    {
+      GOMP_critical_name_end(0);
     }
   };
 #endif
@@ -441,6 +505,11 @@ namespace Realm {
     void __kmpc_end_single(ident_t *loc, kmp_int32 global_tid);
 
     void __kmpc_barrier(ident_t *loc, kmp_int32 global_tid);
+
+    void __kmpc_critical(ident_t *loc, kmp_int32 global_tid,
+			 kmp_critical_name *lck);
+    void __kmpc_end_critical(ident_t *loc, kmp_int32 global_tid,
+			     kmp_critical_name *lck);
   };
 
   struct kmp_thunk {
@@ -656,9 +725,7 @@ namespace Realm {
       wi->pool->claim_workers(wi->app_num_threads - 1, worker_ids);
     int act_threads = 1 + worker_ids.size();
 
-    ThreadPool::WorkItem *work = new ThreadPool::WorkItem;
-    work->remaining_workers = act_threads;
-    work->schedule.initialize(act_threads);
+    ThreadPool::WorkItem *work = new ThreadPool::WorkItem(act_threads);
     wi->push_work_item(work);
 
     wi->thread_id = 0;
@@ -879,7 +946,9 @@ namespace Realm {
       log_omp.debug() << "loop dynamic next: done";
 
       // no explicit call to end the loop, so do it here
-      wi->work_item->schedule.end_loop();
+      // if the loop construct requires a wait, an explicit barrier is
+      //  inserted by the compiler
+      wi->work_item->schedule.end_loop(false /*!wait*/);
       return 0;
     }
   }
@@ -945,9 +1014,7 @@ namespace Realm {
     }
 
     // create a new work item that is just this thread
-    ThreadPool::WorkItem *work = new ThreadPool::WorkItem;
-    work->remaining_workers = 1;
-    work->schedule.initialize(1);
+    ThreadPool::WorkItem *work = new ThreadPool::WorkItem(1);
     wi->push_work_item(work);
     wi->thread_id = 0;
     wi->num_threads = 1;
@@ -1039,6 +1106,53 @@ namespace Realm {
     }
     
     //log_omp.print() << "barrier exit: id=" << wi->thread_id;
+  }
+
+  static unsigned hash_kmp_critical_name(kmp_critical_name *lck)
+  {
+    uintptr_t v = reinterpret_cast<uintptr_t>(lck);
+    // two hashes pushes 24 bits worth of address into the bottom 6
+    v ^= (v >> 6);
+    v ^= (v >> 12);
+    // return bottom 6 bits
+    return (v & 63);
+  }
+
+  void __kmpc_critical(ident_t *loc, kmp_int32 global_tid,
+		       kmp_critical_name *lck)
+  {
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+    if(!wi || !wi->work_item || (wi->num_threads == 1)) {
+      // already single-threaded, so no further effort needed
+      return;
+    }
+
+    unsigned bit = hash_kmp_critical_name(lck);
+    uint64_t mask = uint64_t(1) << bit;
+
+    // try to set the bit in the critical flags - repeat until success
+    while(true) {
+      uint64_t orig = wi->work_item->critical_flags.fetch_or(mask);
+      if((orig & mask) == 0) break;
+      Thread::yield();
+    }
+  }
+
+  void __kmpc_end_critical(ident_t *loc, kmp_int32 global_tid,
+			   kmp_critical_name *lck)
+  {
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+    if(!wi || !wi->work_item || (wi->num_threads == 1)) {
+      // already single-threaded, so no further effort needed
+      return;
+    }
+
+    unsigned bit = hash_kmp_critical_name(lck);
+    uint64_t mask = uint64_t(1) << bit;
+
+    // clear the bit - it had better already be set
+    uint64_t orig = wi->work_item->critical_flags.fetch_and(~mask);
+    assert((orig & mask) != 0);
   }
 #endif
 
