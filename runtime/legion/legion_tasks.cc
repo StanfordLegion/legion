@@ -9624,10 +9624,7 @@ namespace Legion {
         // futures already sent back
         index_owner->return_slice_commit(points.size(), commit_precondition);
       }
-      if (!commit_preconditions.empty())
-        commit_operation(true/*deactivate*/, commit_precondition);
-      else
-        commit_operation(true/*deactivate*/);
+      commit_operation(true/*deactivate*/, commit_precondition);
     }
 
     //--------------------------------------------------------------------------
