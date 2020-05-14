@@ -48,59 +48,59 @@ namespace Legion {
          * Get the memory stack for a given processor sorted
          * by either throughput or latency.
          */
-        void find_memory_stack(Processor proc, 
+        void find_memory_stack(Processor proc,
             std::vector<Memory> &stack, bool latency);
-        static void find_memory_stack(Machine machine, Processor proc, 
+        static void find_memory_stack(Machine machine, Processor proc,
                               std::vector<Memory> &stack, bool latency);
         /**
          * Get the memory stack for a given memory sorted by either
          * throughput or latency.
          */
-        void find_memory_stack(Memory mem, std::vector<Memory> &stack, 
+        void find_memory_stack(Memory mem, std::vector<Memory> &stack,
                                bool latency);
-        static void find_memory_stack(Machine machine, Memory mem, 
+        static void find_memory_stack(Machine machine, Memory mem,
                             std::vector<Memory> &stack, bool latency);
         /**
-         * Find the memory of a given kind that is visible from 
+         * Find the memory of a given kind that is visible from
          * the specified processor.
          */
         Memory find_memory_kind(Processor proc, Memory::Kind kind);
-        static Memory find_memory_kind(Machine machine, Processor proc, 
+        static Memory find_memory_kind(Machine machine, Processor proc,
                                        Memory::Kind kind);
         /**
          * Find the memory of a given kind that is visible from
          * the specified memory.
          */
         Memory find_memory_kind(Memory mem, Memory::Kind kind);
-        static Memory find_memory_kind(Machine machine, Memory mem, 
+        static Memory find_memory_kind(Machine machine, Memory mem,
                                        Memory::Kind kind);
         /**
          * Find the processor of a given kind that is is visible
          * from the specified memory.
          */
         Processor find_processor_kind(Memory mem, Processor::Kind kind);
-        static Processor find_processor_kind(Machine machine, Memory mem, 
+        static Processor find_processor_kind(Machine machine, Memory mem,
                                              Processor::Kind kind);
         /**
-         * Return a set of processors filtered on the given type.  
-         * If an empty set is passed in then the set will be populated 
+         * Return a set of processors filtered on the given type.
+         * If an empty set is passed in then the set will be populated
          * with all processors of the given kind.
          */
         const std::set<Processor>& filter_processors(Processor::Kind kind);
-        static void filter_processors(Machine machine, Processor::Kind kind, 
-                                      std::set<Processor> &procs); 
+        static void filter_processors(Machine machine, Processor::Kind kind,
+                                      std::set<Processor> &procs);
         /**
-         * Return a set of memories filtered on the given type.  
-         * If an empty set is passed in then the set will be populated 
+         * Return a set of memories filtered on the given type.
+         * If an empty set is passed in then the set will be populated
          * with all processors of the given kind.
          */
         const std::set<Memory>& filter_memories(Memory::Kind kind);
-        static void filter_memories(Machine machine, Memory::Kind kind, 
+        static void filter_memories(Machine machine, Memory::Kind kind,
                                     std::set<Memory> &mems);
       protected:
-        static void sort_memories(Machine machine, Processor proc, 
+        static void sort_memories(Machine machine, Processor proc,
                                   std::vector<Memory> &memories, bool latency);
-        static void sort_memories(Machine machine, Memory mem, 
+        static void sort_memories(Machine machine, Memory mem,
                                   std::vector<Memory> &memories, bool latency);
       protected:
         const Machine machine;
@@ -115,13 +115,13 @@ namespace Legion {
       };
 
       /**
-       * A mapping memoizer class for storing mappings for (processor,task_id) 
-       * pairs.  There is a two-phase process with the memoizer.  All calls 
-       * to record and notify mapping will update a temporary memoized mapping.  
-       * If the performance of the mapping is good, then the programmer can 
-       * commit the mapping as the permanent mapping for the pair.  Otherwise 
-       * the next calls to record and notify will overwrite the temporary 
-       * mapping.  If no temporary mapping is commited then the mapping 
+       * A mapping memoizer class for storing mappings for (processor,task_id)
+       * pairs.  There is a two-phase process with the memoizer.  All calls
+       * to record and notify mapping will update a temporary memoized mapping.
+       * If the performance of the mapping is good, then the programmer can
+       * commit the mapping as the permanent mapping for the pair.  Otherwise
+       * the next calls to record and notify will overwrite the temporary
+       * mapping.  If no temporary mapping is commited then the mapping
        * memoizer will continue to return false for calls to has_mapping.
        */
       class MappingMemoizer {
@@ -129,32 +129,32 @@ namespace Legion {
         MappingMemoizer(void);
       public:
         /**
-         * Check to see if there is a memoized mapping for this task on 
+         * Check to see if there is a memoized mapping for this task on
          * the given processor.
          */
-        bool has_mapping(Processor target, const Task *task, 
+        bool has_mapping(Processor target, const Task *task,
                          unsigned index) const;
         /**
-         * Get back the mapping for this task on the given processor. 
+         * Get back the mapping for this task on the given processor.
          * Returns true on success.
          */
-        bool recall_mapping(Processor target, const Task *task, 
+        bool recall_mapping(Processor target, const Task *task,
             unsigned index, std::vector<Memory> &ranking) const;
         /**
-         * Get the memory chosen for this mapping.  Returns NO_MEMORY 
+         * Get the memory chosen for this mapping.  Returns NO_MEMORY
          * if it can't find it.
          */
-        Memory recall_chosen(Processor target, const Task *task, 
+        Memory recall_chosen(Processor target, const Task *task,
                              unsigned index) const;
         /**
          * Store a temporary mapping for this task on the given processor
          */
-        void record_mapping(Processor target, const Task *task, 
+        void record_mapping(Processor target, const Task *task,
               unsigned index, const std::vector<Memory> &ranking);
         /**
          * Remember exactly which memory was chosen for the temporary mapping
          */
-        void notify_mapping(Processor target, const Task *task, 
+        void notify_mapping(Processor target, const Task *task,
                             unsigned index, Memory result);
         /**
          * Commit the mapping as the permanent mapping
@@ -176,9 +176,9 @@ namespace Legion {
       };
 
       /**
-       * The Mapping Profiler will cycle through all the different 
-       * variants of the task until it has reached the required 
-       * number of records for selecting the best execution kind 
+       * The Mapping Profiler will cycle through all the different
+       * variants of the task until it has reached the required
+       * number of records for selecting the best execution kind
        * for the processor.
        */
       class MappingProfiler {
@@ -186,15 +186,15 @@ namespace Legion {
         MappingProfiler(void);
       public:
         /**
-         * Set the required number of profiling samples required 
-         * for each variant before profiling can be considered 
+         * Set the required number of profiling samples required
+         * for each variant before profiling can be considered
          * complete for that variant. The default number is one.
          */
         void set_needed_profiling_samples(unsigned num_samples);
         void set_needed_profiling_samples(Processor::TaskFuncID task_id,
                                           unsigned num_samples);
         /**
-         * Set the maximum number of profiling samples to keep 
+         * Set the maximum number of profiling samples to keep
          * around for any variant. By default it is 32.
          */
         void set_max_profiling_samples(unsigned max_samples);
@@ -208,13 +208,13 @@ namespace Legion {
                                               bool flag);
 
         /**
-         * Check to see if profiling is complete for all the 
+         * Check to see if profiling is complete for all the
          * variants of this task.
          */
         bool profiling_complete(const Task *task) const;
         bool profiling_complete(const Task *task, Processor::Kind kind) const;
         /**
-         * Return the processor kind for the best performing 
+         * Return the processor kind for the best performing
          * variant of this task.
          */
         Processor::Kind best_processor_kind(const Task *task) const;
@@ -282,6 +282,47 @@ namespace Legion {
         OptionMap profiling_options;
       };
 
+      // Functions for printing various runtime objects to strings from inside a
+      // mapper.
+
+      const char* to_string(Processor::Kind kind);
+
+      const char* to_string(Memory::Kind kind);
+
+      const char* to_string(PrivilegeMode priv);
+
+      const char* to_string(CoherenceProperty prop);
+
+      std::string to_string(MapperRuntime* runtime,
+                            const MapperContext ctx,
+                            const Domain& dom);
+
+      std::string to_string(MapperRuntime* runtime,
+                            const MapperContext ctx,
+                            IndexSpace is);
+
+      std::string to_string(MapperRuntime* runtime,
+                            const MapperContext ctx,
+                            const LayoutConstraintSet& constraints);
+
+      std::string to_string(MapperRuntime* runtime,
+                            const MapperContext ctx,
+                            FieldSpace fs,
+                            const std::set<FieldID>& fields);
+
+      std::string to_string(MapperRuntime* runtime,
+                            const MapperContext ctx,
+                            PhysicalInstance inst);
+
+      std::string to_string(MapperRuntime* runtime,
+                            const MapperContext ctx,
+                            const RegionRequirement& req,
+                            unsigned req_idx);
+
+      std::string to_string(MapperRuntime* runtime,
+                            const MapperContext ctx,
+                            const Task& task);
+
     }; // namespace Utilities
   }; // namespace Mapping
 }; // namespace Legion
@@ -290,7 +331,7 @@ namespace Legion {
 namespace LegionRuntime {
   namespace HighLevel {
     namespace MappingUtilities {
-      typedef Legion::Mapping::Utilities::MachineQueryInterface 
+      typedef Legion::Mapping::Utilities::MachineQueryInterface
         MachineQueryInterface;
       typedef Legion::Mapping::Utilities::MappingMemoizer MappingMemoizer;
       typedef Legion::Mapping::Utilities::MappingProfiler MappingProfiler;
@@ -299,4 +340,3 @@ namespace LegionRuntime {
 };
 
 #endif // __MAPPING_UTILITIES__
-

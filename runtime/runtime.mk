@@ -1,5 +1,5 @@
 # Copyright 2020 Stanford University, NVIDIA Corporation
-# Copyright 2020 Los Alamos National Laboratory 
+# Copyright 2020 Los Alamos National Laboratory
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -197,7 +197,7 @@ ifeq ($(strip $(USE_COMPLEX)),1)
 endif
 
 ifeq ($(strip $(USE_HWLOC)),1)
-  ifndef HWLOC 
+  ifndef HWLOC
     $(error HWLOC variable is not defined, aborting build)
   endif
   REALM_CC_FLAGS += -DREALM_USE_HWLOC
@@ -272,13 +272,13 @@ ifeq ($(strip $(USE_OPENMP)),1)
   REALM_CC_FLAGS += -DREALM_USE_OPENMP
   # Add the -fopenmp flag for Linux, but not for Mac as clang doesn't need it
   #ifneq ($(strip $(DARWIN)),1)
-  OMP_FLAGS += -fopenmp 
+  OMP_FLAGS += -fopenmp
   #endif
   REALM_OPENMP_GOMP_SUPPORT ?= 1
   ifeq ($(strip $(REALM_OPENMP_GOMP_SUPPORT)),1)
     REALM_CC_FLAGS += -DREALM_OPENMP_GOMP_SUPPORT
   endif
-  REALM_OPENMP_KMP_SUPPORT ?= 1	
+  REALM_OPENMP_KMP_SUPPORT ?= 1
   ifeq ($(strip $(REALM_OPENMP_KMP_SUPPORT)),1)
     REALM_CC_FLAGS += -DREALM_OPENMP_KMP_SUPPORT
   endif
@@ -765,7 +765,9 @@ MAPPER_SRC	+= $(LG_RT_DIR)/mappers/default_mapper.cc \
 		   $(LG_RT_DIR)/mappers/null_mapper.cc \
 		   $(LG_RT_DIR)/mappers/replay_mapper.cc \
 		   $(LG_RT_DIR)/mappers/debug_mapper.cc \
-		   $(LG_RT_DIR)/mappers/wrapper_mapper.cc
+		   $(LG_RT_DIR)/mappers/wrapper_mapper.cc \
+		   $(LG_RT_DIR)/mappers/forwarding_mapper.cc \
+		   $(LG_RT_DIR)/mappers/logging_wrapper.cc
 
 LEGION_SRC 	+= $(LG_RT_DIR)/legion/legion.cc \
 		    $(LG_RT_DIR)/legion/legion_c.cc \
@@ -825,6 +827,8 @@ INSTALL_HEADERS += legion.h \
 		   mappers/shim_mapper.h \
 		   mappers/test_mapper.h \
 		   mappers/wrapper_mapper.h \
+		   mappers/forwarding_mapper.h \
+		   mappers/logging_wrapper.h \
 		   realm/realm_config.h \
 		   realm/realm_c.h \
 		   realm/profiling.h \
@@ -926,7 +930,7 @@ REALM_OBJS	:= $(REALM_SRC:.cc=.cc.o)
 LEGION_OBJS	:= $(LEGION_SRC:.cc=.cc.o)
 MAPPER_OBJS	:= $(MAPPER_SRC:.cc=.cc.o)
 ASM_OBJS	:= $(ASM_SRC:.S=.S.o)
-# Only compile the gpu objects if we need to 
+# Only compile the gpu objects if we need to
 ifeq ($(strip $(USE_CUDA)),1)
 GEN_GPU_OBJS	:= $(GEN_GPU_SRC:.cu=.cu.o)
 LEGION_GPU_OBJS := $(LEGION_GPU_SRC:.cu=.cu.o)
