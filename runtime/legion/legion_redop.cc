@@ -32,7 +32,7 @@ namespace Legion {
   /*static*/ const float DiffReduction<float>::identity = 0.f;
   /*static*/ const float ProdReduction<float>::identity = 1.f;
   /*static*/ const float DivReduction<float>::identity = 1.f;
-  /*static*/ const float MaxReduction<float>::identity = FLT_MIN;
+  /*static*/ const float MaxReduction<float>::identity = -FLT_MAX;
   /*static*/ const float MinReduction<float>::identity = FLT_MAX;
 
 
@@ -40,7 +40,7 @@ namespace Legion {
   /*static*/ const double DiffReduction<double>::identity = 0.0;
   /*static*/ const double ProdReduction<double>::identity = 1.0;
   /*static*/ const double DivReduction<double>::identity = 1.0;
-  /*static*/ const double MaxReduction<double>::identity = DBL_MIN;
+  /*static*/ const double MaxReduction<double>::identity = -DBL_MAX;
   /*static*/ const double MinReduction<double>::identity = DBL_MAX;
 
 #ifdef LEGION_REDOP_COMPLEX
