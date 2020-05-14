@@ -405,6 +405,7 @@ namespace Realm {
     payload_size = _max_payload_size;
     args.msgid = _msgid;
     header_base = &args.msg_header;
+    assert((sizeof(BaseMedium) + 8 + header_size) <= 16 * sizeof(handlerarg_t));
   }
 
   GASNet1MessageImpl::GASNet1MessageImpl(const Realm::NodeSet &_targets,
@@ -424,6 +425,7 @@ namespace Realm {
     payload_size = _max_payload_size;
     args.msgid = _msgid;
     header_base = &args.msg_header;
+    assert((sizeof(BaseMedium) + 8 + header_size) <= 16 * sizeof(handlerarg_t));
   }
   
   GASNet1MessageImpl::~GASNet1MessageImpl()
