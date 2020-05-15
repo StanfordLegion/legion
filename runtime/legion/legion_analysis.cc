@@ -2333,13 +2333,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldState::FieldState(FieldState &rhs)
+    FieldState::FieldState(const FieldState &rhs)
       : open_state(rhs.open_state), redop(rhs.redop), 
         projection(rhs.projection), projection_space(rhs.projection_space), 
         rebuild_timeout(rhs.rebuild_timeout)
     //--------------------------------------------------------------------------
     {
-      open_children.swap(rhs.open_children);
+#ifdef DEBUG_LEGION
+      assert(rhs.open_children.empty());
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -2353,13 +2355,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldState& FieldState::operator=(FieldState &rhs)
+    FieldState& FieldState::operator=(const FieldState &rhs)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(open_children.empty());
+      assert(rhs.open_children.empty());
 #endif
-      open_children.swap(rhs.open_children);
       open_state = rhs.open_state;
       redop = rhs.redop;
       projection = rhs.projection;

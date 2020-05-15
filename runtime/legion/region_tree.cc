@@ -13893,8 +13893,7 @@ namespace Legion {
                 {
                   FieldState new_state(closer.user, already_open, 
                                        next_child, applied_events);
-                  new_states.resize(new_states.size() + 1);
-                  new_states.back() = new_state;
+                  new_states.emplace(new_state);
                 }
                 // See if there are still any valid open fields
                 if (!it->valid_fields())
@@ -14879,7 +14878,7 @@ namespace Legion {
       }
       // Otherwise just push it on the back
       state.field_states.resize(state.field_states.size() + 1);
-      state.field_states.back() = new_state;
+      new_state.move_to(state.field_states.back());
     }
 
     //--------------------------------------------------------------------------

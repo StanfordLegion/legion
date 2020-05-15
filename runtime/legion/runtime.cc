@@ -10698,11 +10698,7 @@ namespace Legion {
           log_garbage.info("GC Source Kind %d %s", idx, reference_names[idx]);
         }
       }
-#endif
-      // Pull in any static registrations that were done
-      register_static_variants();
-      register_static_constraints();
-      register_static_projections();
+#endif 
 #ifdef DEBUG_LEGION
       if (logging_region_tree_state)
       {
@@ -11531,13 +11527,17 @@ namespace Legion {
     void Runtime::initialize_runtime(void)
     //--------------------------------------------------------------------------
     {  
-      // Initialize our virtual manager and our mappers
-      initialize_virtual_manager();
       // If we have an MPI rank table do the exchanges before initializing
       // the mappers as they may want to look at the rank table
       if (mpi_rank_table != NULL)
         mpi_rank_table->perform_rank_exchange();
       initialize_mappers(); 
+      // Pull in any static registrations that were done
+      register_static_variants();
+      register_static_constraints();
+      register_static_projections();
+      // Initialize our virtual manager and our mappers
+      initialize_virtual_manager();
       // Finally perform the registration callback methods
       const std::vector<RegistrationCallbackFnptr> &registration_callbacks
         = get_pending_registration_callbacks();
