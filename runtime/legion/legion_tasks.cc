@@ -3183,8 +3183,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       InnerContext *inner_ctx = new InnerContext(runtime, this, 
-          get_depth(), false/*is inner*/, regions, 
-          parent_req_indexes, virtual_mapped, unique_op_id);
+          get_depth(), false/*is inner*/, regions, parent_req_indexes,
+          virtual_mapped, unique_op_id, ApEvent::NO_AP_EVENT);
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id);
       inner_ctx->configure_context(mapper, task_priority);
@@ -4647,7 +4647,7 @@ namespace Legion {
     {
       InnerContext *inner_ctx = new InnerContext(runtime, this, 
           get_depth(), v->is_inner(), regions, parent_req_indexes, 
-          virtual_mapped, unique_op_id);
+          virtual_mapped, unique_op_id, execution_fence_event);
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id);
       inner_ctx->configure_context(mapper, task_priority);
@@ -7386,7 +7386,7 @@ namespace Legion {
         // If we have a control replication context then we do the special path
         ReplicateContext *repl_ctx = new ReplicateContext(runtime, this,
             get_depth(), v->is_inner(), regions, parent_req_indexes,
-            virtual_mapped, unique_op_id, shard_manager);
+            virtual_mapped, unique_op_id, execution_fence_event, shard_manager);
         if (mapper == NULL)
           mapper = runtime->find_mapper(current_proc, map_id);
         repl_ctx->configure_context(mapper, task_priority);
@@ -7413,7 +7413,7 @@ namespace Legion {
     {
       ReplicateContext *repl_ctx = new ReplicateContext(runtime, this,
           get_depth(), false/*is inner*/, regions, parent_req_indexes,
-          virtual_mapped, unique_op_id, shard_manager);
+          virtual_mapped, unique_op_id, execution_fence_event, shard_manager);
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id);
       repl_ctx->configure_context(mapper, task_priority);

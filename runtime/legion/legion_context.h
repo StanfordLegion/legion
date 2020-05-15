@@ -864,8 +864,8 @@ namespace Legion {
       InnerContext(Runtime *runtime, TaskOp *owner, int depth, bool full_inner,
                    const std::vector<RegionRequirement> &reqs,
                    const std::vector<unsigned> &parent_indexes,
-                   const std::vector<bool> &virt_mapped,
-                   UniqueID context_uid, bool remote = false);
+                   const std::vector<bool> &virt_mapped, UniqueID context_uid, 
+                   ApEvent execution_fence, bool remote = false);
       InnerContext(const InnerContext &rhs);
       virtual ~InnerContext(void);
     public:
@@ -1511,7 +1511,8 @@ namespace Legion {
                        const std::vector<RegionRequirement> &reqs,
                        const std::vector<unsigned> &parent_indexes,
                        const std::vector<bool> &virt_mapped,
-                       UniqueID context_uid, ShardManager *manager);
+                       UniqueID context_uid, ApEvent execution_fence_event,
+                       ShardManager *manager);
       ReplicateContext(const ReplicateContext &rhs);
       virtual ~ReplicateContext(void);
     public:

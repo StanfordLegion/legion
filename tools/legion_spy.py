@@ -4938,7 +4938,7 @@ class EquivalenceSet(object):
                       " of region requirement "+str(req.index)+" of "+str(op)+
                       " (UID "+str(op.uid)+") on previous "+str(bad))
                 if self.tree.state.eq_graph_on_error:
-                    self.tree.state.dump_eq_graph((self.point, self.field, self.tree))
+                    self.tree.state.dump_eq_graph((self.point, self.field, self.tree.tree_id))
                 if self.tree.state.assert_on_error:
                     assert False
                 return False
@@ -4998,7 +4998,7 @@ class EquivalenceSet(object):
                         "region requirements "+str(src_req.index)+" and "+
                         str(dst_req.index)+" of "+str(op))
                     if op.state.eq_graph_on_error:
-                        op.state.dump_eq_graph((self.point, self.field, self.tree))
+                        op.state.dump_eq_graph((self.point, self.field, self.tree.tree_id))
                     if op.state.assert_on_error:
                         assert False
                     return False
@@ -5016,7 +5016,7 @@ class EquivalenceSet(object):
                           " on field "+str(src_field)+" for "+str(op)+
                           " on "+str(bad))
                     if op.state.eq_graph_on_error:
-                        op.state.dump_eq_graph((self.point, self.field, self.tree))
+                        op.state.dump_eq_graph((self.point, src_field, self.tree.tree_id))
                     if op.state.assert_on_error:
                         assert False
                     return False
@@ -5029,7 +5029,7 @@ class EquivalenceSet(object):
                           " on field "+str(dst_field)+" for "+str(op)+
                           " on "+str(bad))
                     if op.state.eq_graph_on_error:
-                        op.state.dump_eq_graph((self.point, self.field, self.tree))
+                        op.state.dump_eq_graph((self.point, dst_field, self.tree.tree_id))
                     if op.state.assert_on_error:
                         assert False
                     return False
@@ -5115,7 +5115,7 @@ class EquivalenceSet(object):
                     print("ERROR: Missing indirect precondition for "+str(copy)+
                           " on field "+str(field)+" for "+str(op)+" on "+str(bad))
                     if op.state.eq_graph_on_error:
-                        op.state.dump_eq_graph((self.point, self.field, self.tree))
+                        op.state.dump_eq_graph((self.point, self.field, self.tree.tree_id))
                     if op.state.assert_on_error:
                         assert False
                     return False

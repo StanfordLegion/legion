@@ -3367,7 +3367,7 @@ namespace Legion {
                                const std::vector<RegionRequirement> &reqs,
                                const std::vector<unsigned> &parent_indexes,
                                const std::vector<bool> &virt_mapped,
-                               UniqueID uid, bool remote)
+                               UniqueID uid, ApEvent exec_fence, bool remote)
       : TaskContext(rt, owner, d, reqs),
         tree_context(rt->allocate_region_tree_context()), context_uid(uid), 
         remote_context(remote), full_inner_context(full_inner),
@@ -3380,6 +3380,7 @@ namespace Legion {
         outstanding_subtasks(0), pending_subtasks(0), pending_frames(0), 
         currently_active_context(false), current_mapping_fence(NULL), 
         mapping_fence_gen(0), current_mapping_fence_index(0), 
+        current_execution_fence_event(exec_fence), 
         current_execution_fence_index(0), last_implicit(NULL),
         last_implicit_gen(0)
     //--------------------------------------------------------------------------
@@ -9466,15 +9467,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     TopLevelContext::TopLevelContext(Runtime *rt, UniqueID ctx_id)
       : InnerContext(rt, NULL, -1, false/*full inner*/, dummy_requirements, 
-                     dummy_indexes, dummy_mapped, ctx_id)
+                     dummy_indexes, dummy_mapped, ctx_id, ApEvent::NO_AP_EVENT)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     TopLevelContext::TopLevelContext(const TopLevelContext &rhs)
-      : InnerContext(NULL, NULL, -1, false,
-                     dummy_requirements, dummy_indexes, dummy_mapped, 0)
+      : InnerContext(NULL, NULL, -1, false, dummy_requirements, dummy_indexes, 
+                     dummy_mapped, 0, ApEvent::NO_AP_EVENT)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -9572,9 +9573,10 @@ namespace Legion {
                                    const std::vector<RegionRequirement> &reqs,
                                    const std::vector<unsigned> &parent_indexes,
                                    const std::vector<bool> &virt_mapped,
-                                   UniqueID ctx_uid, ShardManager *manager)
+                                   UniqueID ctx_uid, ApEvent exec_fence,
+                                   ShardManager *manager)
       : InnerContext(rt, owner, d, full, reqs, parent_indexes, virt_mapped, 
-          ctx_uid), owner_shard(owner), shard_manager(manager),
+          ctx_uid, exec_fence), owner_shard(owner), shard_manager(manager),
         total_shards(shard_manager->total_shards),
         next_close_mapped_bar_index(0), next_indirection_bar_index(0),
         next_future_map_bar_index(0), index_space_allocator_shard(0), 
@@ -15957,7 +15959,7 @@ namespace Legion {
     RemoteContext::RemoteContext(Runtime *rt, UniqueID context_uid)
       : InnerContext(rt, NULL, -1, false/*full inner*/, remote_task.regions, 
           local_parent_req_indexes, local_virtual_mapped, 
-          context_uid, true/*remote*/),
+          context_uid, ApEvent::NO_AP_EVENT, true/*remote*/),
         parent_ctx(NULL), shard_manager(NULL),
         top_level_context(false), remote_task(RemoteTask(this)), repl_id(0)
     //--------------------------------------------------------------------------
@@ -15967,7 +15969,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RemoteContext::RemoteContext(const RemoteContext &rhs)
       : InnerContext(NULL, NULL, 0, false, rhs.regions,local_parent_req_indexes,
-          local_virtual_mapped, 0, true), remote_task(RemoteTask(this))
+          local_virtual_mapped, 0, ApEvent::NO_AP_EVENT, true), 
+        remote_task(RemoteTask(this))
     //--------------------------------------------------------------------------
     {
       // should never be called
