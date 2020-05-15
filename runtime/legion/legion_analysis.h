@@ -608,7 +608,7 @@ namespace Legion {
     public:
       FieldState(void);
       FieldState(const GenericUser &u, const FieldMask &m, 
-                 LegionColor child);
+                 RegionTreeNode *child, std::set<RtEvent> &applied);
       FieldState(const RegionUsage &u, const FieldMask &m,
                  ProjectionFunction *proj, IndexSpaceNode *proj_space, 
                  bool dis, bool dirty_reduction = false);
@@ -616,12 +616,19 @@ namespace Legion {
       FieldState(FieldState &rhs);
       // This is effectively a move assignment
       FieldState& operator=(FieldState &rhs);
+      ~FieldState(void);
     public:
       inline bool is_projection_state(void) const 
         { return (open_state >= OPEN_READ_ONLY_PROJ); } 
+      inline const FieldMask& valid_fields(void) const 
+        { return open_children.get_valid_mask(); }
     public:
       bool overlaps(const FieldState &rhs) const;
-      void merge(const FieldState &rhs, RegionTreeNode *node);
+      void merge(FieldState &rhs, RegionTreeNode *node);
+      bool filter(const FieldMask &mask);
+      void add_child(RegionTreeNode *child,
+          const FieldMask &mask, std::set<RtEvent> &applied);
+      void remove_child(RegionTreeNode *child);
     public:
       bool projection_domain_dominates(IndexSpaceNode *next_space) const;
     public:
@@ -632,8 +639,7 @@ namespace Legion {
                        const FieldMask &capture_mask,
                        PartitionNode *node) const;
     public:
-      FieldMask valid_fields;
-      LegionMap<LegionColor,FieldMask>::aligned open_children;
+      FieldMaskSet<RegionTreeNode> open_children;
       OpenState open_state;
       ReductionOpID redop;
       ProjectionFunction *projection;

@@ -389,10 +389,12 @@ namespace Legion {
       void perform_dependence_analysis(Operation *op, unsigned idx,
                                        RegionRequirement &req,
                                        const ProjectionInfo &projection_info,
-                                       RegionTreePath &path);
+                                       RegionTreePath &path,
+                                       std::set<RtEvent> &applied_events);
       void perform_deletion_analysis(DeletionOp *op, unsigned idx,
                                      RegionRequirement &req,
-                                     RegionTreePath &path);
+                                     RegionTreePath &path,
+                                     std::set<RtEvent> &applied_events);
       // Used by dependent partition operations
       void find_open_complete_partitions(Operation *op, unsigned idx,
                                          const RegionRequirement &req,
@@ -3108,8 +3110,8 @@ namespace Legion {
     public:
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_inactive(ReferenceMutator *mutator) = 0;
-      virtual void notify_valid(ReferenceMutator *mutator) { assert(false); }
-      virtual void notify_invalid(ReferenceMutator *mutator) { assert(false); }
+      virtual void notify_valid(ReferenceMutator *mutator) = 0;
+      virtual void notify_invalid(ReferenceMutator *mutator) = 0;
     public:
       static AddressSpaceID get_owner_space(RegionTreeID tid, Runtime *rt);
     public:
@@ -3147,7 +3149,8 @@ namespace Legion {
                                  const LogicalTraceInfo &trace_info,
                                  const ProjectionInfo &projection_info,
                                  FieldMask &unopened_field_mask,
-                                 FieldMask &already_closed_mask);
+                                 FieldMask &already_closed_mask,
+                                 std::set<RtEvent> &applied_events);
       void register_local_user(LogicalState &state,
                                const LogicalUser &user,
                                const LogicalTraceInfo &trace_info);
@@ -3155,7 +3158,8 @@ namespace Legion {
                                 const ProjectionInfo &projection_info,
                                 const LogicalUser &user,
                                 const FieldMask &open_mask,
-                                const LegionColor next_child);
+                                RegionTreeNode *next_child,
+                                std::set<RtEvent> &applied_events);
       void close_logical_node(LogicalCloser &closer,
                               const FieldMask &closing_mask,
                               const bool read_only_close);
@@ -3164,26 +3168,28 @@ namespace Legion {
                                    const FieldMask &closing_mask,
                                    const FieldMask *aliased_children,
                                    bool record_close_operations,
-                                   const LegionColor next_child,
-                                   FieldMask &open_below);
+                                   RegionTreeNode *next_child,
+                                   FieldMask &open_below,
+                                   std::set<RtEvent> &applied_events);
       void siphon_logical_projection(LogicalCloser &closer,
                                      LogicalState &state,
                                      const FieldMask &closing_mask,
                                      const ProjectionInfo &proj_info,
                                      bool record_close_operations,
-                                     FieldMask &open_below);
+                                     FieldMask &open_below,
+                                     std::set<RtEvent> &applied_events);
       void flush_logical_reductions(LogicalCloser &closer,
                                     LogicalState &state,
                                     FieldMask &reduction_flush_fields,
                                     bool record_close_operations,
-                                    const LegionColor next_child,
+                                    RegionTreeNode *next_child,
                                     FieldStateDeque &new_states);
       // Note that 'allow_next_child' and 
       // 'record_closed_fields' are mutually exclusive
       void perform_close_operations(LogicalCloser &closer,
                                     const FieldMask &closing_mask,
                                     FieldState &closing_state,
-                                    const LegionColor next_child, 
+                                    RegionTreeNode *next_child,
                                     bool allow_next_child,
                                     const FieldMask *aliased_children,
                                     bool upgrade_next_child, 
@@ -3214,13 +3220,15 @@ namespace Legion {
                                      const FieldMask &check_mask,
                                      RegionTreePath &path,
                                      const LogicalTraceInfo &trace_info,
-                                     FieldMask &already_closed_mask);
+                                     FieldMask &already_closed_mask,
+                                     std::set<RtEvent> &applied_events);
       void siphon_logical_deletion(LogicalCloser &closer,
                                    LogicalState &state,
                                    const FieldMask &current_mask,
-                                   const LegionColor next_child,
+                                   RegionTreeNode *next_child,
                                    FieldMask &open_below,
-                                   bool force_close_next);
+                                   bool force_close_next,
+                                   std::set<RtEvent> &applied_events);
     public:
       void send_back_logical_state(ContextID ctx, UniqueID context_uid,
                                    AddressSpaceID target);
@@ -3234,6 +3242,7 @@ namespace Legion {
       void invalidate_deleted_state(ContextID ctx, 
                                     const FieldMask &deleted_mask);
       bool invalidate_version_state(ContextID ctx);
+      void invalidate_logical_states(void);
       void invalidate_version_managers(void);
     public:
       virtual unsigned get_depth(void) const = 0;
@@ -3425,7 +3434,7 @@ namespace Legion {
       virtual void print_context_header(TreeStateLogger *logger);
       void print_logical_state(LogicalState &state,
                                const FieldMask &capture_mask,
-                         LegionMap<LegionColor,FieldMask>::aligned &to_traverse,
+                               FieldMaskSet<PartitionNode> &to_traverse,
                                TreeStateLogger *logger);
 #ifdef DEBUG_LEGION
     public:
@@ -3489,6 +3498,8 @@ namespace Legion {
     public:
       PartitionNode& operator=(const PartitionNode &rhs);
     public:
+      virtual void notify_valid(ReferenceMutator *mutator);
+      virtual void notify_invalid(ReferenceMutator *mutator);
       virtual void notify_inactive(ReferenceMutator *mutator);
     public:
       void record_registered(void);
@@ -3547,7 +3558,7 @@ namespace Legion {
       virtual void print_context_header(TreeStateLogger *logger);
       void print_logical_state(LogicalState &state,
                                const FieldMask &capture_mask,
-                         LegionMap<LegionColor,FieldMask>::aligned &to_traverse,
+                               FieldMaskSet<RegionNode> &to_traverse,
                                TreeStateLogger *logger);
 #ifdef DEBUG_LEGION
     public:

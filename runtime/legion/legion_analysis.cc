@@ -2177,31 +2177,10 @@ namespace Legion {
       for (LegionList<FieldState>::aligned::iterator it = field_states.begin();
             it != field_states.end(); /*nothing*/)
       {
-        it->valid_fields -= deleted_mask;
-        if (!it->valid_fields)
-        {
+        if (it->filter(deleted_mask))
           it = field_states.erase(it);
-          continue;
-        }
-        std::vector<LegionColor> to_delete;
-        for (LegionMap<LegionColor,FieldMask>::aligned::iterator child_it = 
-              it->open_children.begin(); child_it != 
-              it->open_children.end(); child_it++)
-        {
-          child_it->second -= deleted_mask;
-          if (!child_it->second)
-            to_delete.push_back(child_it->first);
-        }
-        if (!to_delete.empty())
-        {
-          for (std::vector<LegionColor>::const_iterator cit = to_delete.begin();
-                cit != to_delete.end(); cit++)
-            it->open_children.erase(*cit);
-        }
-        if (!it->open_children.empty())
-          it++;
         else
-          it = field_states.erase(it);
+          it++;
       }
       reduction_fields -= deleted_mask;
       if (!outstanding_reductions.empty())
@@ -2306,9 +2285,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FieldState::FieldState(const GenericUser &user, const FieldMask &m, 
-                           const LegionColor c)
-      : valid_fields(m), redop(0), projection(NULL), 
-        projection_space(NULL), rebuild_timeout(1)
+                           RegionTreeNode *child, std::set<RtEvent> &applied)
+      : redop(0), projection(NULL), projection_space(NULL), rebuild_timeout(1)
     //--------------------------------------------------------------------------
     {
       if (IS_READ_ONLY(user.usage))
@@ -2320,20 +2298,24 @@ namespace Legion {
         open_state = OPEN_SINGLE_REDUCE;
         redop = user.usage.redop;
       }
-      open_children[c] = m;
+      if (open_children.insert(child, m))
+      {
+        WrapperReferenceMutator mutator(applied);
+        child->add_base_valid_ref(FIELD_STATE_REF, &mutator);
+      }
     }
 
     //--------------------------------------------------------------------------
     FieldState::FieldState(const RegionUsage &usage, const FieldMask &m,
                            ProjectionFunction *proj, IndexSpaceNode *proj_space,
                            bool disjoint, bool dirty_reduction)
-      : valid_fields(m), redop(0), projection(proj), 
-        projection_space(proj_space), rebuild_timeout(1)
+     : redop(0),projection(proj),projection_space(proj_space),rebuild_timeout(1)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(projection != NULL);
 #endif
+      open_children.relax_valid_mask(m);
       if (IS_READ_ONLY(usage))
         open_state = OPEN_READ_ONLY_PROJ;
       else if (IS_REDUCE(usage))
@@ -2352,13 +2334,22 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FieldState::FieldState(FieldState &rhs)
-      : valid_fields(rhs.valid_fields), open_state(rhs.open_state),
-        redop(rhs.redop), projection(rhs.projection), 
-        projection_space(rhs.projection_space), 
+      : open_state(rhs.open_state), redop(rhs.redop), 
+        projection(rhs.projection), projection_space(rhs.projection_space), 
         rebuild_timeout(rhs.rebuild_timeout)
     //--------------------------------------------------------------------------
     {
       open_children.swap(rhs.open_children);
+    }
+
+    //--------------------------------------------------------------------------
+    FieldState::~FieldState(void)
+    //--------------------------------------------------------------------------
+    {
+      for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
+            open_children.begin(); it != open_children.end(); it++)
+        if (it->first->remove_base_valid_ref(FIELD_STATE_REF))
+          delete it->first;
     }
 
     //--------------------------------------------------------------------------
@@ -2368,7 +2359,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(open_children.empty());
 #endif
-      valid_fields = rhs.valid_fields;
       open_children.swap(rhs.open_children);
       open_state = rhs.open_state;
       redop = rhs.redop;
@@ -2405,25 +2395,20 @@ namespace Legion {
 #endif
         // Only support merging reduction fields with exactly the
         // same mask which should be single fields for reductions
-        return (valid_fields == rhs.valid_fields);
+        return (valid_fields() == rhs.valid_fields());
       }
     }
 
     //--------------------------------------------------------------------------
-    void FieldState::merge(const FieldState &rhs, RegionTreeNode *node)
+    void FieldState::merge(FieldState &rhs, RegionTreeNode *node)
     //--------------------------------------------------------------------------
     {
-      valid_fields |= rhs.valid_fields;
-      for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator it = 
+      for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
             rhs.open_children.begin(); it != rhs.open_children.end(); it++)
-      {
-        LegionMap<LegionColor,FieldMask>::aligned::iterator finder = 
-                                      open_children.find(it->first);
-        if (finder == open_children.end())
-          open_children[it->first] = it->second;
-        else
-          finder->second |= it->second;
-      }
+        // Remove duplicate references if we already had it
+        if (!open_children.insert(it->first, it->second))
+          it->first->remove_base_valid_ref(FIELD_STATE_REF);
+      rhs.open_children.clear();
 #ifdef DEBUG_LEGION
       assert(redop == rhs.redop);
       assert(projection == rhs.projection);
@@ -2449,6 +2434,79 @@ namespace Legion {
             open_state = OPEN_MULTI_REDUCE;
         }
       }
+    }
+
+    //--------------------------------------------------------------------------
+    bool FieldState::filter(const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      if (is_projection_state())
+      {
+#ifdef DEBUG_LEGION
+        assert(projection != NULL);
+        assert(open_children.empty());
+#endif
+        open_children.filter_valid_mask(mask);
+        return !open_children.get_valid_mask();
+      }
+      else
+      {
+        std::vector<RegionTreeNode*> to_delete;
+        for (FieldMaskSet<RegionTreeNode>::iterator it = 
+              open_children.begin(); it != open_children.end(); it++)
+        {
+          it.filter(mask);
+          if (!it->second)
+            to_delete.push_back(it->first);
+        }
+        if (to_delete.size() < open_children.size())
+        {
+          for (std::vector<RegionTreeNode*>::const_iterator it = 
+                to_delete.begin(); it != to_delete.end(); it++)
+          {
+            open_children.erase(*it);
+            if ((*it)->remove_base_valid_ref(FIELD_STATE_REF))
+              delete (*it);
+          }
+        }
+        else
+        {
+          open_children.clear();
+          for (std::vector<RegionTreeNode*>::const_iterator it = 
+                to_delete.begin(); it != to_delete.end(); it++)
+            if ((*it)->remove_base_valid_ref(FIELD_STATE_REF))
+              delete (*it);
+        }
+        open_children.tighten_valid_mask();
+        return open_children.empty();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldState::add_child(RegionTreeNode *child, const FieldMask &mask, 
+                               std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      if (open_children.insert(child, mask))
+      {
+        WrapperReferenceMutator mutator(applied_events);
+        child->add_base_valid_ref(FIELD_STATE_REF, &mutator);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldState::remove_child(RegionTreeNode *child)
+    //--------------------------------------------------------------------------
+    {
+      FieldMaskSet<RegionTreeNode>::iterator finder = 
+        open_children.find(child);
+#ifdef DEBUG_LEGION
+      assert(finder != open_children.end());
+      assert(!finder->second);
+#endif
+      open_children.erase(finder);
+      if (child->remove_base_valid_ref(FIELD_STATE_REF))
+        delete child;
     }
 
     //--------------------------------------------------------------------------
@@ -2540,14 +2598,14 @@ namespace Legion {
           assert(false);
       }
       logger->down();
-      for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator it = 
+      for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
             open_children.begin(); it != open_children.end(); it++)
       {
         FieldMask overlap = it->second & capture_mask;
         if (!overlap)
           continue;
         char *mask_buffer = overlap.to_string();
-        logger->log("Color %d   Mask %s", it->first, mask_buffer);
+        logger->log("Color %d   Mask %s", it->first->get_color(), mask_buffer);
         free(mask_buffer);
       }
       logger->up();
@@ -2625,11 +2683,12 @@ namespace Legion {
           assert(false);
       }
       logger->down();
-      for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator it = 
+      for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
             open_children.begin(); it != open_children.end(); it++)
       {
+        IndexSpaceNode *color_space = node->row_source->color_space;
         DomainPoint color =
-          node->row_source->color_space->delinearize_color_to_point(it->first);
+          color_space->delinearize_color_to_point(it->first->get_color());
         FieldMask overlap = it->second & capture_mask;
         if (!overlap)
           continue;

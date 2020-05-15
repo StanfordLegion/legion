@@ -5176,7 +5176,8 @@ namespace Legion {
       {
         runtime->forest->perform_dependence_analysis(this, idx, regions[idx], 
                                                      projection_info,
-                                                     privilege_paths[idx]);
+                                                     privilege_paths[idx],
+                                                     map_applied_conditions);
       }
     }
 
@@ -7220,7 +7221,8 @@ namespace Legion {
         ProjectionInfo projection_info(runtime, regions[idx], launch_space);
         runtime->forest->perform_dependence_analysis(this, idx, regions[idx], 
                                                      projection_info,
-                                                     privilege_paths[idx]);
+                                                     privilege_paths[idx],
+                                                     map_applied_conditions);
       }
     }
 

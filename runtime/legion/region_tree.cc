@@ -1375,7 +1375,8 @@ namespace Legion {
                                         Operation *op, unsigned idx,
                                         RegionRequirement &req,
                                         const ProjectionInfo &projection_info,
-                                        RegionTreePath &path)
+                                        RegionTreePath &path,
+                                        std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_LOGICAL_ANALYSIS_CALL);
@@ -1409,7 +1410,7 @@ namespace Legion {
         FieldMask unopened_mask = user_mask;
         FieldMask already_closed_mask;
         parent_node->register_logical_user(ctx.get_id(), user, path, trace_info,
-                           projection_info, unopened_mask, already_closed_mask);
+           projection_info, unopened_mask, already_closed_mask, applied_events);
       }
 #ifdef DEBUG_LEGION
       TreeStateLogger::capture_state(runtime, &req, idx, op->get_logging_name(),
@@ -1427,7 +1428,8 @@ namespace Legion {
     void RegionTreeForest::perform_deletion_analysis(DeletionOp *op, 
                                                      unsigned idx,
                                                      RegionRequirement &req,
-                                                     RegionTreePath &path)
+                                                     RegionTreePath &path,
+                                                     std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_LOGICAL_ANALYSIS_CALL);
@@ -1454,7 +1456,7 @@ namespace Legion {
       // Do the traversal
       FieldMask already_closed_mask;
       parent_node->register_logical_deletion(ctx.get_id(), user, user_mask, 
-                                     path, trace_info, already_closed_mask);
+                           path, trace_info, already_closed_mask, applied);
       // Once we are done we can clear out the list of recorded dependences
       op->clear_logical_records();
 #ifdef DEBUG_LEGION
@@ -8430,7 +8432,10 @@ namespace Legion {
         // Remove valid ref on partition of parent if it exists, otherwise
         // our parent index space is a root so we remove the reference there
         if (parent->parent != NULL)
-          parent->parent->remove_nested_valid_ref(did, mutator);
+        {
+          if (parent->parent->remove_nested_valid_ref(did, mutator))
+            delete parent->parent;
+        }
         else
           parent->remove_nested_valid_ref(did, mutator);
       }
@@ -13525,7 +13530,8 @@ namespace Legion {
                                              const LogicalTraceInfo &trace_info,
                                              const ProjectionInfo &proj_info,
                                              FieldMask &unopened_field_mask,
-                                             FieldMask &already_closed_mask)
+                                             FieldMask &already_closed_mask,
+                                             std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
@@ -13537,9 +13543,9 @@ namespace Legion {
       const unsigned depth = get_depth();
       const bool arrived = !path.has_child(depth);
       FieldMask open_below;
-      LegionColor next_child = INVALID_COLOR;
+      RegionTreeNode *next_child = NULL;
       if (!arrived)
-        next_child = path.get_child(depth);
+        next_child = get_tree_child(path.get_child(depth));
       // Now check to see if we need to do any close operations
       if (!!unopened_field_mask)
       {
@@ -13550,13 +13556,14 @@ namespace Legion {
         if (arrived && proj_info.is_projecting())
         {
           siphon_logical_projection(closer, state, unopened_field_mask,
-                                    proj_info, captures_closes, open_below);
+                      proj_info, captures_closes, open_below, applied_events);
         }
         else
         {
           const FieldMask *aliased_children = path.get_aliased_children(depth);
           siphon_logical_children(closer, state, unopened_field_mask, 
-              aliased_children, captures_closes, next_child, open_below);
+                                  aliased_children, captures_closes, next_child,
+                                  open_below, applied_events);
         }
         // We always need to create and register close operations
         // regardless of whether we are tracing or not
@@ -13586,15 +13593,15 @@ namespace Legion {
         {
           FieldMask open_only = user.field_mask - unopened_field_mask;
           if (!!open_only)
-            add_open_field_state(state, arrived, proj_info, 
-                                 user, open_only, next_child);
+            add_open_field_state(state, arrived, proj_info, user, 
+                                 open_only, next_child, applied_events);
         }
       }
       else if (!arrived || proj_info.is_projecting())
       {
         // Everything is open-only so make a state and merge it in
-        add_open_field_state(state, arrived, proj_info, 
-                             user, user.field_mask, next_child);
+        add_open_field_state(state, arrived, proj_info, user, 
+                             user.field_mask, next_child, applied_events);
       }
       // We also always do our dependence analysis even if we have
       // already traced because we need to pick up dependences on 
@@ -13652,7 +13659,6 @@ namespace Legion {
       else 
       {
         // Haven't arrived, yet, so keep going down the tree
-        RegionTreeNode *child = get_tree_child(next_child);
         // Get our set of fields which are being opened for
         // the first time at the next level
         if (!!unopened_field_mask)
@@ -13669,8 +13675,8 @@ namespace Legion {
         else // if they weren't open here, they shouldn't be open below
           assert(!open_below);
 #endif
-        child->register_logical_user(ctx, user, path, trace_info,
-             proj_info, unopened_field_mask, already_closed_mask);
+        next_child->register_logical_user(ctx, user, path, trace_info,
+           proj_info, unopened_field_mask, already_closed_mask, applied_events);
       }
     }
 
@@ -13697,7 +13703,8 @@ namespace Legion {
                                               const ProjectionInfo &proj_info,
                                               const LogicalUser &user,
                                               const FieldMask &open_mask,
-                                              const LegionColor next_child)
+                                              RegionTreeNode *next_child,
+                                              std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -13709,9 +13716,9 @@ namespace Legion {
            proj_info.projection_space, are_all_children_disjoint());
         merge_new_field_state(state, new_state);
       }
-      else if (next_child != INVALID_COLOR)
+      else if (next_child != NULL)
       {
-        FieldState new_state(user, open_mask, next_child);
+        FieldState new_state(user, open_mask, next_child, applied_events);
         merge_new_field_state(state, new_state);
       }
 #ifdef DEBUG_LEGION
@@ -13739,7 +13746,7 @@ namespace Legion {
         for (std::list<FieldState>::iterator it = state.field_states.begin();
               it != state.field_states.end(); /*nothing*/)
         {
-          FieldMask overlap = it->valid_fields & closing_mask;
+          FieldMask overlap = it->valid_fields() & closing_mask;
           if (!overlap)
           {
             it++;
@@ -13751,14 +13758,14 @@ namespace Legion {
             // advance the epoch version numbers
             // If this is a writing or reducing 
             state.advance_projection_epochs(overlap);
-            it->valid_fields -= overlap;
+            it->filter(overlap);
           }
           else
           {
             // Recursively perform any close operations
             FieldMask already_open;
             perform_close_operations(closer, overlap, *it,
-                                     INVALID_COLOR/*next child*/,
+                                     NULL/*next child*/,
                                      false/*allow next*/,
                                      NULL/*aliased children*/,
                                      false/*upgrade*/,
@@ -13769,7 +13776,7 @@ namespace Legion {
                                      already_open);
           }
           // Remove the state if it is now empty
-          if (!it->valid_fields)
+          if (!it->valid_fields())
             it = state.field_states.erase(it);
           else
             it++;
@@ -13793,8 +13800,9 @@ namespace Legion {
                                               const FieldMask &current_mask,
                                               const FieldMask *aliased_children,
                                               bool record_close_operations,
-                                              const LegionColor next_child,
-                                              FieldMask &open_below)
+                                              RegionTreeNode *next_child,
+                                              FieldMask &open_below,
+                                              std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
@@ -13824,14 +13832,14 @@ namespace Legion {
       // generate two close operations: a read-only one for the predicate
       // true case, and normal close operation for the predicate false case
       const bool overwriting = HAS_WRITE_DISCARD(closer.user.usage) && 
-        (next_child == INVALID_COLOR) && !closer.user.op->is_predicated_op();
+          (next_child == NULL) && !closer.user.op->is_predicated_op();
       // Now we can look at all the children
       for (LegionList<FieldState>::aligned::iterator it = 
             state.field_states.begin(); it != 
             state.field_states.end(); /*nothing*/)
       {
         // Quick check for disjointness, in which case we can continue
-        if (it->valid_fields * current_mask)
+        if (it->valid_fields() * current_mask)
         {
           it++;
           continue;
@@ -13845,10 +13853,10 @@ namespace Legion {
               {
                 // Everything is read-only
                 // See if the child that we want is already open
-                if (next_child != INVALID_COLOR)
+                if (next_child != NULL)
                 {
-                  LegionMap<LegionColor,FieldMask>::aligned::const_iterator 
-                    finder = it->open_children.find(next_child);
+                  FieldMaskSet<RegionTreeNode>::const_iterator finder =
+                    it->open_children.find(next_child);
                   if (finder != it->open_children.end())
                   {
                     // Remove the child's open fields from the
@@ -13883,12 +13891,13 @@ namespace Legion {
                 open_below |= already_open;
                 if (needs_upgrade && !!already_open)
                 {
-                  FieldState new_state(closer.user, already_open, next_child);
+                  FieldState new_state(closer.user, already_open, 
+                                       next_child, applied_events);
                   new_states.resize(new_states.size() + 1);
                   new_states.back() = new_state;
                 }
                 // See if there are still any valid open fields
-                if (!it->valid_fields)
+                if (!it->valid_fields())
                   it = state.field_states.erase(it);
                 else
                   it++;
@@ -13908,7 +13917,7 @@ namespace Legion {
                                        record_close_operations,
                                        false/*record closed fields*/,
                                        open_below);
-              if (!it->valid_fields)
+              if (!it->valid_fields())
                 it = state.field_states.erase(it);
               else
                 it++;
@@ -13917,7 +13926,7 @@ namespace Legion {
           case OPEN_SINGLE_REDUCE:
             {
               // Check to see if we have a child we want to go down
-              if (next_child != INVALID_COLOR)
+              if (next_child != NULL)
               {
                 // There are four cases here:
                 //   1. Same reduction, same child -> everything stays the same
@@ -13929,16 +13938,17 @@ namespace Legion {
                 {
                   // Cases 1 and 2
                   bool needs_recompute = false;
-                  std::vector<LegionColor> to_delete;
+                  std::vector<RegionTreeNode*> to_delete;
                   // Go through all the children and see if there is any overlap
-                  for (LegionMap<LegionColor,FieldMask>::aligned::iterator 
-                        cit = it->open_children.begin(); cit !=
+                  for (FieldMaskSet<RegionTreeNode>::iterator cit = 
+                        it->open_children.begin(); cit !=
                         it->open_children.end(); cit++)
                   {
                     FieldMask already_open = cit->second & current_mask;
                     // If disjoint children, nothing to do
                     if (!already_open || 
-                        are_children_disjoint(cit->first, next_child))
+                        are_children_disjoint(cit->first->get_color(), 
+                                              next_child->get_color()))
                       continue;
                     // Case 2
                     if (cit->first != (next_child))
@@ -13946,18 +13956,19 @@ namespace Legion {
                       // Different child so we need to create a new
                       // FieldState in MULTI_REDUCE mode with two
                       // children open
-                      FieldState new_state(closer.user,already_open,cit->first);
+                      FieldState new_state(closer.user, already_open,
+                                           cit->first, applied_events);
                       // Add the next child as well
-                      new_state.open_children[next_child] = 
-                        already_open;
+                      new_state.add_child(next_child, already_open, 
+                                          applied_events);
                       new_state.open_state = OPEN_MULTI_REDUCE;
 #ifdef DEBUG_LEGION
-                      assert(!!new_state.valid_fields);
+                      assert(!!new_state.valid_fields());
 #endif
                       new_states.emplace(new_state);
                       // Update the current child, mark that we need to
                       // recompute the valid fields for the state
-                      cit->second -= already_open;
+                      cit.filter(already_open);
                       if (!cit->second)
                         to_delete.push_back(cit->first);
                       needs_recompute = true;
@@ -13972,31 +13983,11 @@ namespace Legion {
                   if (needs_recompute)
                   {
                     // Remove all the empty children
-                    for (std::vector<LegionColor>::const_iterator cit = 
+                    for (std::vector<RegionTreeNode*>::const_iterator cit =
                           to_delete.begin(); cit != to_delete.end(); cit++)
-                    {
-                      LegionMap<LegionColor,FieldMask>::aligned::iterator 
-                        finder = it->open_children.find(*cit);
-#ifdef DEBUG_LEGION
-                      assert(finder != it->open_children.end());
-                      assert(!finder->second);
-#endif
-                      it->open_children.erase(finder);
-                    }
+                      it->remove_child(*cit);
                     // Then recompute the valid mask for the current state
-                    FieldMask new_valid_mask;
-                    for (LegionMap<LegionColor,FieldMask>::aligned::
-                          const_iterator cit = it->open_children.begin(); 
-                          cit != it->open_children.end(); cit++)
-                    {
-#ifdef DEBUG_LEGION
-                      assert(!!cit->second);
-#endif
-                      new_valid_mask |= cit->second;
-                    }
-                    // Update the valid mask on the field state, we'll
-                    // check to see fi we need to delete it at the end
-                    it->valid_fields = new_valid_mask;
+                    it->open_children.tighten_valid_mask();
                   }
                 }
                 else
@@ -14018,7 +14009,8 @@ namespace Legion {
                   {
                     // Create a new FieldState open in whatever mode is
                     // appropriate based on the usage
-                    FieldState new_state(closer.user, already_open, next_child);
+                    FieldState new_state(closer.user, already_open, 
+                                         next_child, applied_events);
                     // We always have to go to read-write mode here
                     new_state.open_state = OPEN_READ_WRITE;
                     new_states.emplace(new_state);
@@ -14042,7 +14034,7 @@ namespace Legion {
                 open_below |= already_open;
               }
               // Now see if the current field state is still valid
-              if (!it->valid_fields)
+              if (!it->valid_fields())
                 it = state.field_states.erase(it);
               else
                 it++;
@@ -14054,10 +14046,10 @@ namespace Legion {
               if (IS_REDUCE(closer.user.usage) &&
                   (closer.user.usage.redop == it->redop))
               {
-                if (next_child != INVALID_COLOR)
+                if (next_child != NULL)
                 {
-                  LegionMap<LegionColor,FieldMask>::aligned::const_iterator
-                    finder = it->open_children.find(next_child);
+                  FieldMaskSet<RegionTreeNode>::const_iterator finder = 
+                    it->open_children.find(next_child);
                   if (finder != it->open_children.end())
                   {
                     // Already open, so add the open fields
@@ -14084,7 +14076,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
                 assert(!already_open); // should all be closed now
 #endif
-                if (!it->valid_fields)
+                if (!it->valid_fields())
                   it = state.field_states.erase(it);
                 else
                   it++;
@@ -14095,12 +14087,11 @@ namespace Legion {
             {
               // If we are reading at this level, we can
               // leave it open otherwise we need a read-only close
-              if (!IS_READ_ONLY(closer.user.usage) ||
-                  (next_child != INVALID_COLOR))
+              if (!IS_READ_ONLY(closer.user.usage) || (next_child != NULL))
               {
                 if (record_close_operations)
                 {
-                  const FieldMask overlap = current_mask & it->valid_fields;
+                  const FieldMask overlap = current_mask & it->valid_fields();
 #ifdef DEBUG_LEGION
                   assert(!!overlap);
 #endif
@@ -14108,8 +14099,8 @@ namespace Legion {
                   // Advance the projection epochs
                   state.advance_projection_epochs(overlap);
                 }
-                it->valid_fields -= current_mask;
-                if (!it->valid_fields)
+                it->filter(current_mask);
+                if (!it->valid_fields())
                   it = state.field_states.erase(it);
                 else
                   it++;
@@ -14124,7 +14115,7 @@ namespace Legion {
               // Have to close up this sub-tree no matter what
               if (record_close_operations)
               {
-                const FieldMask overlap = current_mask & it->valid_fields;
+                const FieldMask overlap = current_mask & it->valid_fields();
 #ifdef DEBUG_LEGION
                 assert(!!overlap);
 #endif
@@ -14132,8 +14123,8 @@ namespace Legion {
                 // Advance the projection epochs
                 state.advance_projection_epochs(overlap);
               }
-              it->valid_fields -= current_mask;
-              if (!it->valid_fields)
+              it->filter(current_mask);
+              if (!it->valid_fields())
                 it = state.field_states.erase(it);
               else
                 it++;
@@ -14144,13 +14135,12 @@ namespace Legion {
             {
               // If we are reducing at this level we can 
               // leave it open otherwise we need a close
-              if (!IS_REDUCE(closer.user.usage) || 
-                  (next_child != INVALID_COLOR) ||
+              if (!IS_REDUCE(closer.user.usage) || (next_child != NULL) ||
                   (closer.user.usage.redop != it->redop))
               {
                 if (record_close_operations)
                 {
-                  const FieldMask overlap = current_mask & it->valid_fields;
+                  const FieldMask overlap = current_mask & it->valid_fields();
 #ifdef DEBUG_LEGION
                   assert(!!overlap);
 #endif
@@ -14158,8 +14148,8 @@ namespace Legion {
                   // Advance the projection epochs
                   state.advance_projection_epochs(overlap);
                 }
-                it->valid_fields -= current_mask;
-                if (!it->valid_fields)
+                it->filter(current_mask);
+                if (!it->valid_fields())
                   it = state.field_states.erase(it);
                 else
                   it++;
@@ -14175,9 +14165,9 @@ namespace Legion {
       // If we had any fields that still need to be opened, create
       // a new field state and add it into the set of new states
       FieldMask open_mask = current_mask - open_below;
-      if ((next_child != INVALID_COLOR) && !!open_mask)
+      if ((next_child != NULL) && !!open_mask)
       {
-        FieldState new_state(closer.user, open_mask, next_child);
+        FieldState new_state(closer.user, open_mask, next_child,applied_events);
         new_states.emplace(new_state);
       }
       merge_new_field_states(state, new_states);
@@ -14188,11 +14178,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::siphon_logical_projection(LogicalCloser &closer,
-                                                LogicalState &state,
-                                                const FieldMask &current_mask,
-                                                const ProjectionInfo &proj_info,
-                                                bool record_close_operations,
-                                                FieldMask &open_below)
+                                              LogicalState &state,
+                                              const FieldMask &current_mask,
+                                              const ProjectionInfo &proj_info,
+                                              bool record_close_operations,
+                                              FieldMask &open_below,
+                                              std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
@@ -14202,7 +14193,7 @@ namespace Legion {
 #endif
       FieldStateDeque new_states;
       // First let's see if we need to flush any reductions
-      LegionColor no_next_child = INVALID_COLOR; // never a next child here
+      RegionTreeNode *no_next_child = NULL; // never a next child here
       if (!!state.reduction_fields)
       {
         FieldMask reduction_flush_fields = 
@@ -14226,7 +14217,7 @@ namespace Legion {
             state.field_states.end(); /*nothing*/)
       {
         // Quick check for disjointness, in which case we can continue
-        if (it->valid_fields * current_mask)
+        if (it->valid_fields() * current_mask)
         {
           it++;
           continue;
@@ -14248,7 +14239,7 @@ namespace Legion {
                                        false/*record closed fields*/,
                                        already_open);
               open_below |= already_open;
-              if (!it->valid_fields)
+              if (!it->valid_fields())
                 it = state.field_states.erase(it);
               else
                 it++;
@@ -14269,7 +14260,7 @@ namespace Legion {
                                        false/*record closed fields*/,
                                        already_open);
               open_below |= already_open;
-              if (!it->valid_fields)
+              if (!it->valid_fields())
                 it = state.field_states.erase(it);
               else
                 it++;
@@ -14280,7 +14271,7 @@ namespace Legion {
               if (IS_READ_ONLY(closer.user.usage))
               {
                 // These fields are already open below
-                open_below |= (it->valid_fields & current_mask);
+                open_below |= (it->valid_fields() & current_mask);
                 // Keep going
                 it++;
               }
@@ -14290,8 +14281,8 @@ namespace Legion {
                 // no need to do a close since we're staying in
                 // projection mode, but we do need to advance
                 // the projection epochs.
-                it->valid_fields -= current_mask;
-                if (!it->valid_fields)
+                it->filter(current_mask);
+                if (!it->valid_fields())
                   it = state.field_states.erase(it);
                 else
                   it++;
@@ -14311,7 +14302,7 @@ namespace Legion {
                 if (IS_REDUCE(closer.user.usage)) 
                 {
                   // Go to the dirty reduction mode
-                  const FieldMask overlap = it->valid_fields & current_mask;
+                  const FieldMask overlap = it->valid_fields() & current_mask;
                   // Record that some fields are already open
                   open_below |= overlap;
                   // Make the new state to add
@@ -14320,8 +14311,8 @@ namespace Legion {
                            are_all_children_disjoint(), true/*dirty reduce*/);
                   new_states.emplace(new_state);
                   // If we are a reduction, we can go straight there
-                  it->valid_fields -= overlap;
-                  if (!it->valid_fields)
+                  it->filter(overlap);
+                  if (!it->valid_fields())
                     it = state.field_states.erase(it);
                   else
                     it++;
@@ -14330,7 +14321,7 @@ namespace Legion {
                 {
                   // Update the domain  
                   it->projection_space = proj_info.projection_space;
-                  open_below |= (it->valid_fields & current_mask);
+                  open_below |= (it->valid_fields() & current_mask);
                   it++;
                 }
               }
@@ -14339,7 +14330,7 @@ namespace Legion {
                 // Now we need the close operation
                 if (record_close_operations)
                 {
-                  const FieldMask overlap = current_mask & it->valid_fields;
+                  const FieldMask overlap = current_mask & it->valid_fields();
 #ifdef DEBUG_LEGION
                   assert(!!overlap);
 #endif
@@ -14365,8 +14356,8 @@ namespace Legion {
                   else
                     closer.record_close_operation(overlap);
                 }
-                it->valid_fields -= current_mask;
-                if (!it->valid_fields)
+                it->filter(current_mask);
+                if (!it->valid_fields())
                   it = state.field_states.erase(it);
                 else
                   it++;
@@ -14382,7 +14373,7 @@ namespace Legion {
               if (IS_REDUCE(closer.user.usage) &&
                   it->projection_domain_dominates(proj_info.projection_space))
               {
-                const FieldMask overlap = it->valid_fields & current_mask;
+                const FieldMask overlap = it->valid_fields() & current_mask;
                 // Record that some fields are already open
                 open_below |= overlap;
                 // Make the new state to add
@@ -14391,8 +14382,8 @@ namespace Legion {
                          are_all_children_disjoint(), true/*dirty reduce*/);
                 new_states.emplace(new_state);
                 // If we are a reduction, we can go straight there
-                it->valid_fields -= overlap;
-                if (!it->valid_fields)
+                it->filter(overlap);
+                if (!it->valid_fields())
                   it = state.field_states.erase(it);
                 else
                   it++;
@@ -14413,7 +14404,7 @@ namespace Legion {
                 // Exception: reductions that are larger than the current
                 // domain are bad cause we can't do advances properly for
                 // our projection epoch
-                open_below |= (it->valid_fields & current_mask);
+                open_below |= (it->valid_fields() & current_mask);
                 it++;
               }
               else
@@ -14421,7 +14412,7 @@ namespace Legion {
                 // Otherwise we need a close operation
                 if (record_close_operations)
                 {
-                  const FieldMask overlap = current_mask & it->valid_fields;
+                  const FieldMask overlap = current_mask & it->valid_fields();
 #ifdef DEBUG_LEGION
                   assert(!!overlap);
                   //assert(!disjoint_close);
@@ -14430,8 +14421,8 @@ namespace Legion {
                   // Advance the projection epochs
                   state.advance_projection_epochs(overlap);
                 }
-                it->valid_fields -= current_mask;
-                if (!it->valid_fields)
+                it->filter(current_mask);
+                if (!it->valid_fields())
                   it = state.field_states.erase(it);
                 else
                   it++;
@@ -14448,7 +14439,7 @@ namespace Legion {
                 // We need a close operation here
                 if (record_close_operations)
                 {
-                  const FieldMask overlap = current_mask & it->valid_fields;
+                  const FieldMask overlap = current_mask & it->valid_fields();
 #ifdef DEBUG_LEGION
                   assert(!!overlap);
 #endif
@@ -14474,15 +14465,15 @@ namespace Legion {
                   else
                     closer.record_close_operation(overlap);
                 }
-                it->valid_fields -= current_mask;
-                if (!it->valid_fields)
+                it->filter(current_mask);
+                if (!it->valid_fields())
                   it = state.field_states.erase(it);
                 else
                   it++;
               }
               else
               {
-                open_below |= (it->valid_fields & current_mask);
+                open_below |= (it->valid_fields() & current_mask);
                 it++;
               }
               break;
@@ -14513,7 +14504,7 @@ namespace Legion {
                                                   LogicalState &state,
                                               FieldMask &reduction_flush_fields,
                                                   bool record_close_operations,
-                                                  const LegionColor next_child,
+                                                  RegionTreeNode *next_child,
                                                   FieldStateDeque &new_states)
     //--------------------------------------------------------------------------
     {
@@ -14537,7 +14528,7 @@ namespace Legion {
               state.field_states.begin(); it != 
               state.field_states.end(); /*nothing*/)
         {
-          FieldMask overlap = it->valid_fields & reduction_flush_fields;
+          FieldMask overlap = it->valid_fields() & reduction_flush_fields;
           if (!overlap)
           {
             it++;
@@ -14547,7 +14538,7 @@ namespace Legion {
           {
             closer.record_close_operation(overlap);
             state.advance_projection_epochs(overlap);
-            it->valid_fields -= overlap;
+            it->filter(overlap);
             flushed_fields |= overlap;
           }
           else
@@ -14565,7 +14556,7 @@ namespace Legion {
             // We only really flushed fields that were actually closed
             flushed_fields |= closed_child_fields;
           }
-          if (!it->valid_fields)
+          if (!it->valid_fields())
             it = state.field_states.erase(it);
           else
             it++;
@@ -14586,7 +14577,7 @@ namespace Legion {
     void RegionTreeNode::perform_close_operations(LogicalCloser &closer,
                                             const FieldMask &closing_mask,
                                             FieldState &state,
-                                            const LegionColor next_child, 
+                                            RegionTreeNode *next_child, 
                                             bool allow_next_child,
                                             const FieldMask *aliased_children,
                                             bool upgrade_next_child,
@@ -14608,7 +14599,7 @@ namespace Legion {
       // are disjoint, then we can skip a lot of this
       bool removed_fields = false;
       const bool all_children_disjoint = are_all_children_disjoint();
-      if ((next_child != INVALID_COLOR) && all_children_disjoint)
+      if ((next_child != NULL) && all_children_disjoint)
       {
         // If we have a next child and all the children are disjoint
         // then there are never any close operations, all we have to
@@ -14618,8 +14609,8 @@ namespace Legion {
         assert(aliased_children == NULL);
 #endif
         // Check to see if we have any open fields already 
-        LegionMap<LegionColor,FieldMask>::aligned::iterator finder = 
-                              state.open_children.find(next_child);
+        FieldMaskSet<RegionTreeNode>::iterator finder = 
+          state.open_children.find(next_child);
         if (finder != state.open_children.end())
         {
           FieldMask overlap = finder->second & closing_mask;
@@ -14629,10 +14620,14 @@ namespace Legion {
             // See if we need to upgrade them
             if (upgrade_next_child)
             {
-              finder->second -= overlap;
+              finder.filter(overlap);
               removed_fields = true;
               if (!finder->second)
+              {
+                if (next_child->remove_base_valid_ref(FIELD_STATE_REF))
+                  delete next_child;
                 state.open_children.erase(finder);
+              }
             }
           }
         }
@@ -14643,8 +14638,8 @@ namespace Legion {
         // any issues, so we can selectively filter what we need to close
         // Overwriting closes are the same as read-only closes, but 
         // they actually do need to close all the children
-        std::vector<LegionColor> to_delete;
-        for (LegionMap<LegionColor,FieldMask>::aligned::iterator it = 
+        std::vector<RegionTreeNode*> to_delete;
+        for (FieldMaskSet<RegionTreeNode>::iterator it = 
               state.open_children.begin(); it != 
               state.open_children.end(); it++)
         {
@@ -14652,7 +14647,7 @@ namespace Legion {
           if (!close_mask)
             continue;
           // Check for same child, only allow
-          if (allow_next_child && (next_child != INVALID_COLOR) && 
+          if (allow_next_child && (next_child != NULL) && 
               (next_child == it->first))
           {
             if (aliased_children == NULL)
@@ -14661,7 +14656,7 @@ namespace Legion {
               output_mask |= close_mask;
               if (upgrade_next_child)
               {
-                it->second -= close_mask;
+                it.filter(close_mask);
                 removed_fields = true;
                 if (!it->second)
                   to_delete.push_back(it->first);
@@ -14678,7 +14673,7 @@ namespace Legion {
                 output_mask |= already_open_mask;
                 if (upgrade_next_child)
                 {
-                  it->second -= already_open_mask;
+                  it.filter(already_open_mask);
                   removed_fields = true;
                   if (!it->second)
                     to_delete.push_back(it->first);
@@ -14692,18 +14687,17 @@ namespace Legion {
             }
           }
           // Check for child disjointness
-          if (!overwriting_close && (next_child != INVALID_COLOR) && 
+          if (!overwriting_close && (next_child != NULL) && 
               (it->first != next_child) && (all_children_disjoint || 
-               are_children_disjoint(it->first, next_child)))
+               are_children_disjoint(it->first->get_color(), 
+                                     next_child->get_color())))
             continue;
           // Perform the close operation
-          RegionTreeNode *child_node = get_tree_child(it->first);
-          child_node->close_logical_node(closer, close_mask, 
-                                         true/*read only*/);
+          it->first->close_logical_node(closer, close_mask, true/*read only*/);
           if (record_close_operations)
             closer.record_close_operation(close_mask);
           // Remove the close fields
-          it->second -= close_mask;
+          it.filter(close_mask);
           removed_fields = true;
           if (!it->second)
             to_delete.push_back(it->first);
@@ -14711,9 +14705,9 @@ namespace Legion {
             output_mask |= close_mask;
         }
         // Remove the children that can be deleted
-        for (std::vector<LegionColor>::const_iterator it = to_delete.begin();
-              it != to_delete.end(); it++)
-          state.open_children.erase(*it);
+        for (std::vector<RegionTreeNode*>::const_iterator it = 
+              to_delete.begin(); it != to_delete.end(); it++)
+          state.remove_child(*it);
       }
       else
       {
@@ -14722,10 +14716,10 @@ namespace Legion {
         // If there is no next_child, then we have to close all
         // children, otherwise figure out which fields need closes
         FieldMask full_close;
-        if (next_child != INVALID_COLOR)
+        if (next_child != NULL)
         {
           // Figure what if any children need to be closed
-          for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator it =
+          for (FieldMaskSet<RegionTreeNode>::const_iterator it =
                 state.open_children.begin(); it !=
                 state.open_children.end(); it++)
           {
@@ -14763,8 +14757,8 @@ namespace Legion {
             else
             {
               // Different child from next_child, check for child disjointness
-              if (all_children_disjoint || 
-                  are_children_disjoint(it->first, next_child))
+              if (all_children_disjoint || are_children_disjoint(
+                    it->first->get_color(), next_child->get_color()))
                 continue;
               // Now we definitely have to close it
               full_close |= close_mask;
@@ -14778,7 +14772,7 @@ namespace Legion {
           // We need to do a full close, but the closing mask
           // can be an overapproximation, so find all the fields
           // for the actual children that are here
-          for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator it =
+          for (FieldMaskSet<RegionTreeNode>::const_iterator it =
                 state.open_children.begin(); it !=
                 state.open_children.end(); it++)
           {
@@ -14798,9 +14792,9 @@ namespace Legion {
             closer.record_close_operation(full_close);
           if (record_closed_fields)
             output_mask |= full_close;
-          std::vector<LegionColor> to_delete;
+          std::vector<RegionTreeNode*> to_delete;
           // Go through and delete all the children which are to be closed
-          for (LegionMap<LegionColor,FieldMask>::aligned::iterator it = 
+          for (FieldMaskSet<RegionTreeNode>::iterator it = 
                 state.open_children.begin(); it !=
                 state.open_children.end(); it++)
           {
@@ -14808,26 +14802,25 @@ namespace Legion {
             if (!child_close)
               continue;
             // Perform the close operation
-            RegionTreeNode *child_node = get_tree_child(it->first);
-            child_node->close_logical_node(closer, child_close, 
-                                           false/*read only close*/);
+            it->first->close_logical_node(closer, child_close, 
+                                          false/*read only close*/);
             // Remove the close fields
-            it->second -= child_close;
+            it.filter(child_close);
             removed_fields = true;
             if (!it->second)
               to_delete.push_back(it->first);
           }
           // Remove the children that can be deleted
-          for (std::vector<LegionColor>::const_iterator it = 
+          for (std::vector<RegionTreeNode*>::const_iterator it = 
                 to_delete.begin(); it != to_delete.end(); it++)
-            state.open_children.erase(*it);
+            state.remove_child(*it);
         }
         // If we allow the next child, we need to see if the next
         // child is already open or not
-        if (allow_next_child && (next_child != INVALID_COLOR))
+        if (allow_next_child && (next_child != NULL))
         {
-          LegionMap<LegionColor,FieldMask>::aligned::iterator finder = 
-                                state.open_children.find(next_child);
+          FieldMaskSet<RegionTreeNode>::iterator finder = 
+            state.open_children.find(next_child);
           if (finder != state.open_children.end())
           {
             FieldMask overlap = finder->second & closing_mask;
@@ -14837,10 +14830,14 @@ namespace Legion {
               // See if we need to upgrade them
               if (upgrade_next_child)
               {
-                finder->second -= overlap;
+                finder.filter(overlap);
                 removed_fields = true;
                 if (!finder->second)
+                {
+                  if (next_child->remove_base_valid_ref(FIELD_STATE_REF))
+                    delete next_child;
                   state.open_children.erase(finder);
+                }
               }
             }
           }
@@ -14848,21 +14845,13 @@ namespace Legion {
       }
       // If we have no children, we can clear our fields
       if (state.open_children.empty())
-        state.valid_fields.clear();
+        state.open_children.tighten_valid_mask();
       // See if it is time to rebuild the valid mask 
       else if (removed_fields)
       {
         if (state.rebuild_timeout == 0)
         {
-          // Rebuild the valid fields mask
-          FieldMask new_valid_mask;
-          for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator it = 
-                state.open_children.begin(); it != 
-                state.open_children.end(); it++)
-          {
-            new_valid_mask |= it->second;
-          }
-          state.valid_fields = new_valid_mask;    
+          state.open_children.tighten_valid_mask();
           // Reset the timeout to the order of the number of open children
           state.rebuild_timeout = state.open_children.size();
         }
@@ -14877,7 +14866,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!!new_state.valid_fields);
+      assert(!!new_state.valid_fields());
 #endif
       for (std::list<FieldState>::iterator it = state.field_states.begin();
             it != state.field_states.end(); it++)
@@ -15036,29 +15025,28 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // For every child and every field, it should only be open in one mode
-      LegionMap<LegionColor,FieldMask>::aligned previous_children;
+      FieldMaskSet<RegionTreeNode> previous_children;
       for (std::list<FieldState>::const_iterator fit = 
             state.field_states.begin(); fit != state.field_states.end(); fit++)
       {
         FieldMask actually_valid;
-        for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator it =
+        for (FieldMaskSet<RegionTreeNode>::const_iterator it =
               fit->open_children.begin(); it != 
               fit->open_children.end(); it++)
         {
           actually_valid |= it->second;
-          if (previous_children.find(it->first) == previous_children.end())
+          FieldMaskSet<RegionTreeNode>::iterator finder = 
+            previous_children.find(it->first);
+          if (finder != previous_children.end())
           {
-            previous_children[it->first] = it->second;
+            assert(!(finder->second & it->second));
+            finder.merge(it->second);
           }
           else
-          {
-            FieldMask &previous = previous_children[it->first];
-            assert(!(previous & it->second));
-            previous |= it->second;
-          }
+            previous_children.insert(it->first, it->second);
         }
         // Actually valid should be greater than or equal
-        assert(!(actually_valid - fit->valid_fields));
+        assert(!(actually_valid - fit->valid_fields()));
       }
       // Also check that for each field it is either only open in one mode
       // or two children in different modes are disjoint
@@ -15075,21 +15063,21 @@ namespace Legion {
             continue;
           const FieldState &f1 = *it1;
           const FieldState &f2 = *it2;
-          for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator 
-                cit1 = f1.open_children.begin(); cit1 != 
+          for (FieldMaskSet<RegionTreeNode>::const_iterator cit1 = 
+                f1.open_children.begin(); cit1 != 
                 f1.open_children.end(); cit1++)
           {
-            for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator 
-                  cit2 = f2.open_children.begin(); 
-                  cit2 != f2.open_children.end(); cit2++)
+            for (FieldMaskSet<RegionTreeNode>::const_iterator cit2 =
+                  f2.open_children.begin(); cit2 != 
+                  f2.open_children.end(); cit2++)
             {
               
               // Disjointness check on fields
               if (cit1->second * cit2->second)
                 continue;
 #ifndef NDEBUG
-              LegionColor c1 = cit1->first;
-              LegionColor c2 = cit2->first;
+              LegionColor c1 = cit1->first->get_color();
+              LegionColor c2 = cit2->first->get_color();
 #endif
               // Some aliasing in the fields, so do the check 
               // for child disjointness
@@ -15181,7 +15169,8 @@ namespace Legion {
                                              const FieldMask &check_mask,
                                              RegionTreePath &path,
                                              const LogicalTraceInfo &trace_info,
-                                             FieldMask &already_closed_mask)
+                                             FieldMask &already_closed_mask,
+                                             std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
@@ -15195,13 +15184,13 @@ namespace Legion {
       if (!arrived)
       {
         FieldMask open_below;
-        LegionColor next_child = path.get_child(depth);
+        RegionTreeNode *next_child = get_tree_child(path.get_child(depth));
         if (!!check_mask)
         {
           // Perform any close operations
           LogicalCloser closer(ctx, user, this, false/*validates*/);
           siphon_logical_deletion(closer, state, check_mask, next_child, 
-                              open_below, ((depth+1) == path.get_max_depth()));
+              open_below, ((depth+1) == path.get_max_depth()), applied_events);
           if (closer.has_close_operations(already_closed_mask))
           {
             // Generate the close operations         
@@ -15240,10 +15229,9 @@ namespace Legion {
           }
         }
         // Continue the traversal
-        RegionTreeNode *child = get_tree_child(next_child);
         // Only continue checking the fields that are open below
-        child->register_logical_deletion(ctx, user, open_below, path,
-                                         trace_info, already_closed_mask);
+        next_child->register_logical_deletion(ctx, user, open_below, path,
+                         trace_info, already_closed_mask, applied_events);
       }
       else
       {
@@ -15280,15 +15268,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::siphon_logical_deletion(LogicalCloser &closer,
-                                                 LogicalState &state,
-                                                 const FieldMask &current_mask,
-                                                 const LegionColor next_child,
-                                                 FieldMask &open_below,
-                                                 bool force_close_next)
+                                              LogicalState &state,
+                                              const FieldMask &current_mask,
+                                              RegionTreeNode *next_child,
+                                              FieldMask &open_below,
+                                              bool force_close_next,
+                                              std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(next_child != INVALID_COLOR);
+      assert(next_child != NULL);
       sanity_check_logical_state(state);
 #endif
       FieldStateDeque new_states;
@@ -15297,16 +15286,15 @@ namespace Legion {
             state.field_states.end(); /*nothing*/)
       {
         // Quick check for disjointness, in which case we can continue
-        if (it->valid_fields * current_mask)
+        if (it->valid_fields() * current_mask)
         {
           it++;
           continue;
         }
         // See if our child is open, if it's not then we can keep going
-        LegionMap<LegionColor,FieldMask>::aligned::const_iterator finder = 
+        FieldMaskSet<RegionTreeNode>::const_iterator finder = 
           it->open_children.find(next_child);
-        if (it->is_projection_state() ||
-            (finder == it->open_children.end()))
+        if (it->is_projection_state() || (finder == it->open_children.end()))
         {
           it++;
           continue;
@@ -15342,7 +15330,7 @@ namespace Legion {
                                          true/*record close operations*/,
                                          true/*record closed fields*/,
                                          open_below);
-                if (!it->valid_fields)
+                if (!it->valid_fields())
                   it = state.field_states.erase(it);
                 else
                   it++;
@@ -15368,7 +15356,7 @@ namespace Legion {
                                          true/*record close operations*/,
                                          true/*record closed fields*/,
                                          open_below);
-                if (!it->valid_fields)
+                if (!it->valid_fields())
                   it = state.field_states.erase(it);
                 else
                   it++;
@@ -15392,7 +15380,7 @@ namespace Legion {
                                        true/*record close operations*/,
                                        true/*record closed fields*/,
                                        open_below);
-              if (!it->valid_fields)
+              if (!it->valid_fields())
                 it = state.field_states.erase(it);
               else
                 it++;
@@ -15404,8 +15392,8 @@ namespace Legion {
               closer.record_close_operation(overlap);
               // Advance the projection epochs
               state.advance_projection_epochs(overlap);
-              it->valid_fields -= current_mask;
-              if (!it->valid_fields)
+              it->filter(current_mask);
+              if (!it->valid_fields())
                 it = state.field_states.erase(it);
               else
                 it++;
@@ -15419,8 +15407,8 @@ namespace Legion {
               closer.record_close_operation(overlap);
               // Advance the projection epochs
               state.advance_projection_epochs(overlap);
-              it->valid_fields -= current_mask;
-              if (!it->valid_fields)
+              it->filter(current_mask);
+              if (!it->valid_fields())
                 it = state.field_states.erase(it);
               else
                 it++;
@@ -15491,7 +15479,7 @@ namespace Legion {
               state.field_states.begin(); fit != 
               state.field_states.end(); fit++)
         {
-          rez.serialize(fit->valid_fields);
+          rez.serialize(fit->valid_fields());
           rez.serialize(fit->open_state);
           rez.serialize(fit->redop);
           if (fit->open_state >= OPEN_READ_ONLY_PROJ)
@@ -15507,13 +15495,17 @@ namespace Legion {
             assert(fit->projection == NULL);
 #endif
           rez.serialize<size_t>(fit->open_children.size());
-          for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator it =
+          for (FieldMaskSet<RegionTreeNode>::const_iterator it =
                 fit->open_children.begin(); it != 
                 fit->open_children.end(); it++)
           {
-            rez.serialize(it->first);
+            // Add a remote valid reference on these nodes to keep
+            // them live until we can add on remotely. No need for 
+            // a mutator since we know that they are already valid
+            it->first->add_base_valid_ref(REMOTE_DID_REF); 
+            rez.serialize(it->first->get_color());
             rez.serialize(it->second);
-            to_traverse.insert(get_tree_child(it->first));
+            to_traverse.insert(it->first);
           }
         }
       }
@@ -15576,7 +15568,9 @@ namespace Legion {
       for (LegionList<FieldState>::aligned::iterator fit = 
             state.field_states.begin(); fit != state.field_states.end(); fit++)
       {
-        derez.deserialize(fit->valid_fields);
+        FieldMask valid_fields;
+        derez.deserialize(valid_fields);
+        fit->open_children.relax_valid_mask(valid_fields);
         derez.deserialize(fit->open_state);
         derez.deserialize(fit->redop);
         if (fit->open_state >= OPEN_READ_ONLY_PROJ)
@@ -15590,12 +15584,23 @@ namespace Legion {
         }
         size_t num_open_children;
         derez.deserialize(num_open_children);
+        std::set<RtEvent> applied_events;
         for (unsigned idx = 0; idx < num_open_children; idx++)
         {
           LegionColor color;
           derez.deserialize(color);
-          derez.deserialize(fit->open_children[color]);
+          RegionTreeNode *child = get_tree_child(color);
+          FieldMask mask;
+          derez.deserialize(mask);
+          fit->add_child(child, mask, applied_events);
         }
+        // Remove the valid references once all our current referenes are added
+        RtEvent applied;
+        if (!applied_events.empty())
+          applied = Runtime::merge_events(applied_events);
+        for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
+              fit->open_children.begin(); it != fit->open_children.end(); it++) 
+          it->first->send_remote_valid_decrement(source, NULL, applied);
       }
     }
 
@@ -15671,6 +15676,17 @@ namespace Legion {
       VersionManager &manager = get_current_version_manager(ctx);
       manager.reset();
       return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::invalidate_logical_states(void)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned ctx = 0; ctx < logical_states.max_entries(); ctx++)
+      {
+        if (logical_states.has_entry(ctx))
+          invalidate_current_state(ctx, false/*users only*/);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -16065,14 +16081,25 @@ namespace Legion {
     void RegionNode::notify_valid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
+      if (parent == NULL)
+      {
+        if (is_owner())
+        {
 #ifdef DEBUG_LEGION
-      assert(is_owner());
-      assert(parent == NULL);
-      assert(currently_valid);
+          assert(currently_valid);
 #endif
-      // Add valid references on our index space and our field space
-      column_source->add_nested_valid_ref(did, mutator);
-      row_source->add_nested_valid_ref(did, mutator);
+          // Add valid references on our index space and our field space
+          column_source->add_nested_valid_ref(did, mutator);
+          row_source->add_nested_valid_ref(did, mutator);
+        }
+        else
+          send_remote_valid_increment(owner_space, mutator);     
+      }
+      else
+      {
+        column_source->add_nested_valid_ref(did, mutator);
+        row_source->parent->add_nested_valid_ref(did, mutator);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -16086,21 +16113,32 @@ namespace Legion {
     void RegionNode::notify_invalid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(is_owner());
-      assert(parent == NULL);
-      assert(currently_valid);
-      currently_valid = false;
-#endif
-      // Remove our valid references, no need to check for deletion
-      // since we know that we are holding resource references too
-      column_source->remove_nested_valid_ref(did, mutator);
-      row_source->remove_nested_valid_ref(did, mutator);
-      // Send deletion messages to each of our remote instances
-      if (has_remote_instances())
+      if (parent == NULL)
       {
-        InvalidFunctor functor(this, mutator);
-        map_over_remote_instances(functor);
+        if (is_owner())
+        {
+#ifdef DEBUG_LEGION
+          assert(currently_valid);
+          currently_valid = false;
+#endif
+          // Remove our valid references, no need to check for deletion
+          // since we know that we are holding resource references too
+          column_source->remove_nested_valid_ref(did, mutator);
+          row_source->remove_nested_valid_ref(did, mutator);
+          // Send deletion messages to each of our remote instances
+          if (has_remote_instances())
+          {
+            InvalidFunctor functor(this, mutator);
+            map_over_remote_instances(functor);
+          }
+        }
+        else
+          send_remote_valid_decrement(owner_space, mutator);
+      }
+      else
+      {
+        column_source->remove_nested_valid_ref(did, mutator);
+        row_source->parent->remove_nested_valid_ref(did, mutator);
       }
     }
 
@@ -16112,6 +16150,7 @@ namespace Legion {
       assert(currently_active);
       currently_active = false;
 #endif
+      invalidate_logical_states();
       invalidate_version_managers();
       if (parent == NULL)
         context->runtime->release_tree_instances(handle.get_tree_id());
@@ -16557,14 +16596,14 @@ namespace Legion {
       for (LegionList<FieldState>::aligned::const_iterator sit = 
             state.field_states.begin(); sit != state.field_states.end(); sit++)
       {
-        if ((sit->valid_fields * mask) || (sit->is_projection_state()))
+        if ((sit->valid_fields() * mask) || (sit->is_projection_state()))
           continue;
-        for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator it = 
+        for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
               sit->open_children.begin(); it != sit->open_children.end(); it++)
         {
           if (it->second * mask)
             continue;
-          PartitionNode *child = get_child(it->first);
+          PartitionNode *child = it->first->as_partition_node();
           if (child->is_complete())
             unique_partitions.insert(child->handle);
         }
@@ -16741,7 +16780,7 @@ namespace Legion {
       logger->log("==========");
       print_context_header(logger);
       logger->down();
-      LegionMap<LegionColor,FieldMask>::aligned to_traverse;
+      FieldMaskSet<PartitionNode> to_traverse;
       if (logical_states.has_entry(ctx))
       {
         LogicalState &state = get_logical_state(ctx);
@@ -16754,14 +16793,9 @@ namespace Legion {
       logger->log("");
       if (!to_traverse.empty())
       {
-        for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator it =
+        for (FieldMaskSet<PartitionNode>::const_iterator it = 
               to_traverse.begin(); it != to_traverse.end(); it++)
-        {
-          std::map<LegionColor,PartitionNode*>::const_iterator finder = 
-            color_map.find(it->first);
-          if (finder != color_map.end())
-            finder->second->print_logical_context(ctx, logger, it->second);
-        }
+          it->first->print_logical_context(ctx, logger, it->second);
       }
       logger->up();
     }
@@ -16901,7 +16935,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionNode::print_logical_state(LogicalState &state,
                                          const FieldMask &capture_mask,
-                         LegionMap<LegionColor,FieldMask>::aligned &to_traverse,
+                                       FieldMaskSet<PartitionNode> &to_traverse,
                                          TreeStateLogger *logger)
     //--------------------------------------------------------------------------
     {
@@ -16934,19 +16968,16 @@ namespace Legion {
               state.field_states.end(); it++)
         {
           it->print_state(logger, capture_mask, this);
-          if (it->valid_fields * capture_mask)
+          if (it->valid_fields() * capture_mask)
             continue;
-          for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator 
-                cit = it->open_children.begin(); cit != 
+          for (FieldMaskSet<RegionTreeNode>::const_iterator cit = 
+                it->open_children.begin(); cit != 
                 it->open_children.end(); cit++)
           {
             FieldMask overlap = cit->second & capture_mask;
             if (!overlap)
               continue;
-            if (to_traverse.find(cit->first) == to_traverse.end())
-              to_traverse[cit->first] = overlap;
-            else
-              to_traverse[cit->first] |= overlap;
+            to_traverse.insert(cit->first->as_partition_node(), overlap);
           }
         }
         logger->up();
@@ -17060,7 +17091,7 @@ namespace Legion {
           assert(false);
       }
       logger->down();
-      LegionMap<LegionColor,FieldMask>::aligned to_traverse;
+      FieldMaskSet<PartitionNode> to_traverse;
       if (logical_states.has_entry(ctx))
         print_logical_state(get_logical_state(ctx), capture_mask,
                             to_traverse, logger);
@@ -17069,14 +17100,9 @@ namespace Legion {
       logger->log("");
       if (!to_traverse.empty())
       {
-        for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator it =  
+        for (FieldMaskSet<PartitionNode>::const_iterator it = 
               to_traverse.begin(); it != to_traverse.end(); it++)
-        {
-          std::map<LegionColor,PartitionNode*>::const_iterator finder = 
-            color_map.find(it->first);
-          if (finder != color_map.end())
-            finder->second->dump_logical_context(ctx, logger, it->second);
-        }
+          it->first->dump_logical_context(ctx, logger, it->second);
       }
       logger->up();
     }
@@ -17304,6 +17330,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PartitionNode::notify_valid(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      column_source->add_nested_valid_ref(did, mutator);
+      row_source->add_nested_valid_ref(did, mutator);
+    }
+
+    //--------------------------------------------------------------------------
+    void PartitionNode::notify_invalid(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      // No need to check for deletion since we hold resource references 
+      column_source->remove_nested_valid_ref(did, mutator);
+      row_source->remove_nested_valid_ref(did, mutator);
+    }
+
+    //--------------------------------------------------------------------------
     void PartitionNode::notify_inactive(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
@@ -17311,6 +17354,7 @@ namespace Legion {
       assert(currently_active);
       currently_active = false;
 #endif
+      invalidate_logical_states();
       invalidate_version_managers();
       // Remove gc references on all of our child nodes
       // We should not need a lock at this point since nobody else should
@@ -17777,7 +17821,7 @@ namespace Legion {
       logger->log("==========");
       print_context_header(logger);
       logger->down();
-      LegionMap<LegionColor,FieldMask>::aligned to_traverse;
+      FieldMaskSet<RegionNode> to_traverse;
       if (logical_states.has_entry(ctx))
       {
         LogicalState &state = get_logical_state(ctx);
@@ -17790,15 +17834,9 @@ namespace Legion {
       logger->log("");
       if (!to_traverse.empty())
       {
-        AutoLock n_lock(node_lock,1,false/*exclusive*/);
-        for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator it =
+        for (FieldMaskSet<RegionNode>::const_iterator it = 
               to_traverse.begin(); it != to_traverse.end(); it++)
-        {
-          std::map<LegionColor,RegionNode*>::const_iterator finder = 
-            color_map.find(it->first);
-          if (finder != color_map.end())
-            finder->second->print_logical_context(ctx, logger, it->second);
-        }
+          it->first->print_logical_context(ctx, logger, it->second);
       }
       logger->up();
     }
@@ -17847,7 +17885,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void PartitionNode::print_logical_state(LogicalState &state,
                                         const FieldMask &capture_mask,
-                   LegionMap<LegionColor,FieldMask>::aligned &to_traverse,
+                                        FieldMaskSet<RegionNode> &to_traverse,
                                         TreeStateLogger *logger)
     //--------------------------------------------------------------------------
     {
@@ -17881,19 +17919,16 @@ namespace Legion {
               state.field_states.end(); it++)
         {
           it->print_state(logger, capture_mask, this);
-          if (it->valid_fields * capture_mask)
+          if (it->valid_fields() * capture_mask)
             continue;
-          for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator 
-                cit = it->open_children.begin(); cit != 
+          for (FieldMaskSet<RegionTreeNode>::const_iterator cit =
+                it->open_children.begin(); cit != 
                 it->open_children.end(); cit++)
           {
             FieldMask overlap = cit->second & capture_mask;
             if (!overlap)
               continue;
-            if (to_traverse.find(cit->first) == to_traverse.end())
-              to_traverse[cit->first] = overlap;
-            else
-              to_traverse[cit->first] |= overlap;
+            to_traverse.insert(cit->first->as_region_node(), overlap);
           }
         }
         logger->up();
@@ -17909,7 +17944,7 @@ namespace Legion {
     {
       print_context_header(logger);
       logger->down();
-      LegionMap<LegionColor,FieldMask>::aligned to_traverse;
+      FieldMaskSet<RegionNode> to_traverse;
       if (logical_states.has_entry(ctx))
       {
         LogicalState &state = get_logical_state(ctx);
@@ -17922,14 +17957,9 @@ namespace Legion {
       logger->log("");
       if (!to_traverse.empty())
       {
-        for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator it =
+        for (FieldMaskSet<RegionNode>::const_iterator it = 
               to_traverse.begin(); it != to_traverse.end(); it++)
-        {
-          std::map<LegionColor,RegionNode*>::const_iterator finder = 
-            color_map.find(it->first);
-          if (finder != color_map.end())
-            finder->second->dump_logical_context(ctx, logger, it->second);
-        }
+          it->first->dump_logical_context(ctx, logger, it->second);
       }
       logger->up();
     }

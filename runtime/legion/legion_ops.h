@@ -1585,6 +1585,7 @@ namespace Legion {
       std::vector<bool> returnable_privileges;
       std::vector<RegionRequirement> deletion_requirements;
       LegionVector<VersionInfo>::aligned version_infos;
+      std::set<RtEvent> map_applied_conditions;
     }; 
 
     /**
@@ -1815,11 +1816,13 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
     public:
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_mapping(void);
       virtual unsigned find_parent_index(unsigned idx);
 #ifdef LEGION_SPY
       virtual void trigger_complete(void);
 #endif
     protected:
+      std::set<RtEvent> map_applied_conditions;
       unsigned parent_idx;
     };
 
