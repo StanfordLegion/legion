@@ -1951,7 +1951,7 @@ namespace Legion {
         else
           transition_event = Runtime::create_rt_user_event();
       }
-      else
+      else if (!external_implicit_task)
       {
 #ifdef DEBUG_LEGION
         assert(!reentrant_event.exists());
