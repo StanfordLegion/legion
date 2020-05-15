@@ -8231,7 +8231,6 @@ namespace Legion {
     void InnerContext::initialize_region_tree_contexts(
                       const std::vector<RegionRequirement> &clone_requirements,
                       const std::vector<ApUserEvent> &unmap_events,
-                      std::set<ApEvent> &preconditions,
                       std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
@@ -18127,9 +18126,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LeafContext::initialize_region_tree_contexts(
-            const std::vector<RegionRequirement> &clone_requirements,
-            const std::vector<ApUserEvent> &unmap_events,
-            std::set<ApEvent> &preconditions, std::set<RtEvent> &applied_events)
+                       const std::vector<RegionRequirement> &clone_requirements,
+                       const std::vector<ApUserEvent> &unmap_events,
+                       std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       // Nothing to do
@@ -19491,9 +19490,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InlineContext::initialize_region_tree_contexts(
-            const std::vector<RegionRequirement> &clone_requirements,
-            const std::vector<ApUserEvent> &unmap_events,
-            std::set<ApEvent> &preconditions, std::set<RtEvent> &applied_events)
+                       const std::vector<RegionRequirement> &clone_requirements,
+                       const std::vector<ApUserEvent> &unmap_events,
+                       std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       assert(false);

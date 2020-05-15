@@ -4254,7 +4254,7 @@ namespace Legion {
         }
         // Initialize any region tree contexts
         execution_context->initialize_region_tree_contexts(clone_requirements,
-            unmap_events, wait_on_events, map_applied_conditions);
+                                        unmap_events, map_applied_conditions);
       }
       // Merge together all the events for the start condition 
       ApEvent start_condition = Runtime::merge_events(NULL, wait_on_events);

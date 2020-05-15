@@ -456,7 +456,6 @@ namespace Legion {
       virtual void initialize_region_tree_contexts(
           const std::vector<RegionRequirement> &clone_requirements,
           const std::vector<ApUserEvent> &unmap_events,
-          std::set<ApEvent> &preconditions,
           std::set<RtEvent> &applied_events) = 0;
       virtual void invalidate_region_tree_contexts(void) = 0;
       virtual void send_back_created_state(AddressSpaceID target) = 0;
@@ -1217,7 +1216,6 @@ namespace Legion {
       virtual void initialize_region_tree_contexts(
           const std::vector<RegionRequirement> &clone_requirements,
           const std::vector<ApUserEvent> &unmap_events,
-          std::set<ApEvent> &preconditions,
           std::set<RtEvent> &applied_events);
       virtual void invalidate_region_tree_contexts(void);
       void invalidate_created_requirement_contexts(void);
@@ -2511,7 +2509,6 @@ namespace Legion {
       virtual void initialize_region_tree_contexts(
           const std::vector<RegionRequirement> &clone_requirements,
           const std::vector<ApUserEvent> &unmap_events,
-          std::set<ApEvent> &preconditions,
           std::set<RtEvent> &applied_events);
       virtual void invalidate_region_tree_contexts(void);
       virtual void send_back_created_state(AddressSpaceID target);
@@ -2891,7 +2888,6 @@ namespace Legion {
       virtual void initialize_region_tree_contexts(
           const std::vector<RegionRequirement> &clone_requirements,
           const std::vector<ApUserEvent> &unmap_events,
-          std::set<ApEvent> &preconditions,
           std::set<RtEvent> &applied_events);
       virtual void invalidate_region_tree_contexts(void);
       virtual void send_back_created_state(AddressSpaceID target);
