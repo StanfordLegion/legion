@@ -1917,10 +1917,10 @@ namespace Legion {
       // If we already have a transition event then return it
       if (transition_event.exists())
       {
+        // external tasks can't handle reentrant cases
+        if (external_implicit_task)
+          return transition_event;
         // Check for whether we are reentrant
-#ifdef DEBUG_LEGION
-        assert(reentrant_event.exists());
-#endif
         const RtEvent finish_event(Processor::get_current_finish_event());
         if (finish_event == reentrant_event)
         {
@@ -1938,10 +1938,13 @@ namespace Legion {
           (current_state == PENDING_ACTIVE_VALID_STATE) ||
           (current_state == PENDING_INACTIVE_INVALID_STATE))
       {
+        // external implicit tasks can't handle being reentrant
+        if (external_implicit_task)
+        {
+          transition_event = Runtime::create_rt_user_event();
+          return transition_event;
+        }
         // Check to see if we are reentrant
-#ifdef DEBUG_LEGION
-        assert(reentrant_event.exists());
-#endif
         const RtEvent finish_event(Processor::get_current_finish_event());
         if (finish_event == reentrant_event)
         {
