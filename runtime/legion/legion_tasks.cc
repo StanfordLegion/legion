@@ -3096,8 +3096,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       InnerContext *inner_ctx = new InnerContext(runtime, this, 
-          get_depth(), false/*is inner*/, regions, 
-          parent_req_indexes, virtual_mapped, unique_op_id);
+          get_depth(), false/*is inner*/, regions, parent_req_indexes,
+          virtual_mapped, unique_op_id, ApEvent::NO_AP_EVENT);
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id);
       inner_ctx->configure_context(mapper, task_priority);
@@ -3932,8 +3932,8 @@ namespace Legion {
         if (!variant->is_leaf())
         {
           InnerContext *inner_ctx = new InnerContext(runtime, this, 
-              get_depth(), variant->is_inner(), regions, 
-              parent_req_indexes, virtual_mapped, unique_op_id);
+              get_depth(), variant->is_inner(), regions, parent_req_indexes,
+              virtual_mapped, unique_op_id, execution_fence_event);
           if (mapper == NULL)
             mapper = runtime->find_mapper(current_proc, map_id);
           inner_ctx->configure_context(mapper, task_priority);
@@ -4006,7 +4006,7 @@ namespace Legion {
         }
         // Initialize any region tree contexts
         execution_context->initialize_region_tree_contexts(clone_requirements,
-            unmap_events, wait_on_events, map_applied_conditions);
+                                        unmap_events, map_applied_conditions);
       }
       // Merge together all the events for the start condition 
       ApEvent start_condition = Runtime::merge_events(NULL, wait_on_events);

@@ -21,6 +21,8 @@
 #include "philox.h"
 
 #include <math.h>
+#include <time.h>
+#include <unistd.h>
 
 using namespace Realm;
 
@@ -46,6 +48,7 @@ protected:
 enum {
   TOP_LEVEL_TASK = Processor::TASK_ID_FIRST_AVAILABLE+0,
   WORKER_TASK,
+  ALLOC_RESULT_TASK,
 };
 
 struct TestConfig {
@@ -56,11 +59,13 @@ struct TestConfig {
   int buckets_min;
   int buckets_max;
   bool all_memories;
+  bool check_alloc_result;
 };
 
 struct InstanceInfo {
   RegionInstance inst;
   Event create_event;
+  bool alloc_result;
   UserEvent destroy_event;
   enum State {
     ALLOC_PENDING,
@@ -71,13 +76,31 @@ struct InstanceInfo {
   };
   State state;
 
-  InstanceInfo(RegionInstance _inst, Event _create_event)
-    : inst(_inst), create_event(_create_event)
+  InstanceInfo(RegionInstance _inst, Event _create_event, bool _alloc_result)
+    : inst(_inst), create_event(_create_event), alloc_result(_alloc_result)
     , destroy_event(UserEvent::NO_USER_EVENT), state(ALLOC_PENDING)
   {}
 };
 
-void directed_test_memory(Memory m, const char *name, const char *testdesc)
+void alloc_result_task(const void *args, size_t arglen,
+		       const void *userdata, size_t userlen, Processor p)
+{
+  // args is a ProfilingResponse whose user_data is a UserEvent
+  ProfilingResponse pr(args, arglen);
+  UserEvent alloc_result_event = *static_cast<const UserEvent *>(pr.user_data());
+
+  ProfilingMeasurements::InstanceAllocResult result;
+  bool ok = pr.get_measurement(result);
+  assert(ok);
+
+  if(result.success)
+    alloc_result_event.trigger();
+  else
+    alloc_result_event.cancel();
+}
+
+void directed_test_memory(const TestConfig& config, Memory m, Processor p,
+			  const char *name, const char *testdesc)
 {
   log_app.info() << "directed test: " << name << " memory=" << m;
   
@@ -96,11 +119,6 @@ void directed_test_memory(Memory m, const char *name, const char *testdesc)
   std::map<FieldID, size_t> field_sizes;
   field_sizes[fid] = field_size;
 
-  // we need a profiling request set that ignores failures
-  ProfilingRequestSet prs;
-  prs.add_request(Processor::NO_PROC, 0 /*ignore*/)
-    .add_measurement<ProfilingMeasurements::InstanceStatus>();
-
   while(*pos) {
     if(*pos == ' ') {
       pos++;
@@ -115,12 +133,38 @@ void directed_test_memory(Memory m, const char *name, const char *testdesc)
       {
 	size_t idx = insts.size();
 	Rect<1> rect(1, amt * bucket_size);
+
+	// we need a profiling request set that ignores failures
+	ProfilingRequestSet prs;
+	prs.add_request(Processor::NO_PROC, 0 /*ignore*/)
+	  .add_measurement<ProfilingMeasurements::InstanceStatus>();
+	UserEvent alloc_result_event = UserEvent::NO_USER_EVENT;
+	if(config.check_alloc_result) {
+	  alloc_result_event = UserEvent::create_user_event();
+	  prs.add_request(p, ALLOC_RESULT_TASK,
+			  &alloc_result_event, sizeof(alloc_result_event))
+	    .add_measurement<ProfilingMeasurements::InstanceAllocResult>();
+	}
+
 	RegionInstance inst;
 	Event e = RegionInstance::create_instance(inst, m, rect,
 						  field_sizes, 0 /*SOA*/, prs);
-	insts.push_back(InstanceInfo(inst, e));
+
+	bool alloc_result = true;
+	if(config.check_alloc_result) {
+	  // alloc result should be delivered without any further activity
+	  // use alarm since we need to yield to a profiling task
+	  alarm(10);
+	  bool poisoned = false;
+          alloc_result_event.wait_faultaware(poisoned);
+	  alarm(0);
+	  alloc_result = !poisoned;
+        }
+
+	insts.push_back(InstanceInfo(inst, e, alloc_result));
 	log_app.debug() << "alloc #" << idx << ": size=" << amt
-			<< " inst=" << inst << " ready=" << e;
+			<< " inst=" << inst << " ready=" << e << " result=" << alloc_result;
+
 	break;
       }
 
@@ -129,6 +173,8 @@ void directed_test_memory(Memory m, const char *name, const char *testdesc)
 	InstanceInfo& ii = insts[amt];
 	assert(ii.state == InstanceInfo::ALLOC_PENDING);
 	log_app.debug() << "success #" << amt << " inst=" << ii.inst;
+	if(config.check_alloc_result)
+	  assert(ii.alloc_result);
 	bool poisoned = false;
 	// normal apps should not call external_wait, but we do it here to
 	//  detect hangs more easily and we know nothing else wants to run
@@ -148,11 +194,14 @@ void directed_test_memory(Memory m, const char *name, const char *testdesc)
 	break;
       }
 
-    case 'f': // failed allocation
+    case 'f': // failed allocation (expected)
+    case 'u': // failed allocation (unexpected)
       {
 	InstanceInfo& ii = insts[amt];
 	assert(ii.state == InstanceInfo::ALLOC_PENDING);
 	log_app.debug() << "failed #" << amt << " inst=" << ii.inst;
+	if(config.check_alloc_result)
+	  assert(ii.alloc_result == (cmd == 'u'));
 	bool poisoned = false;
 	// normal apps should not call external_wait, but we do it here to
 	//  detect hangs more easily and we know nothing else wants to run
@@ -457,34 +506,34 @@ void top_level_task(const void *args, size_t arglen,
 
     // directed tests
     if(config.directed_tests) {
-      directed_test_memory(m, "simple capacity limit",
+      directed_test_memory(config, m, p, "simple capacity limit",
 			   "3 a1 s0 a1 s1 a1 s2 a1 f3");
 
-      directed_test_memory(m, "simple reuse",
+      directed_test_memory(config, m, p, "simple reuse",
 			   "1 a1 s0 i0 a1 s1 d1 c1 d1 t1 a1 s2");
 
-      directed_test_memory(m, "capacity limit despite pending free",
+      directed_test_memory(config, m, p, "capacity limit despite pending free",
 			   "3 a1 s0 a1 s1 a1 s2 d1 a2 f3");
 
-      directed_test_memory(m, "future capacity limit",
+      directed_test_memory(config, m, p, "future capacity limit",
 			   "2 a1 s0 a1 s1 d1 a1 a1 f3 t1 s2");
 
-      directed_test_memory(m, "in order triggers",
+      directed_test_memory(config, m, p, "in order triggers",
 			   "2 a1 s0 a1 s1 d0 a1 t0 s2");
 
-      directed_test_memory(m, "alloc pass with capacity",
+      directed_test_memory(config, m, p, "alloc pass with capacity",
                            "2 a1 s0 d0 a1 s1 t0");
 
-      directed_test_memory(m, "out of order deletes",
+      directed_test_memory(config, m, p, "out of order deletes",
 			   "2 a1 s0 a1 s1 d0 d1 c1 d1 t1 a1 s2");
 
-      directed_test_memory(m, "out of order triggers",
+      directed_test_memory(config, m, p, "out of order triggers",
 			   "2 a1 s0 a1 s1 d0 d1 a2 t1 t0 s2");
 
-      directed_test_memory(m, "using later free",
+      directed_test_memory(config, m, p, "using later free",
 			   "2 a1 s0 a1 s1 d0 a1 d1 t1 s2");
 
-      directed_test_memory(m, "reordered by later free",
+      directed_test_memory(config, m, p, "reordered by later free",
 			   "5 a1 s0 a1 s1 a2 s2 a1 s3" // 01223
 			   "  d0 a1"                   // 01223   41223
 			   "  d1 a1"                   // 01223   45223
@@ -494,30 +543,30 @@ void top_level_task(const void *args, size_t arglen,
 			   "  t0 t1 s6 t3 s7"          // 66457
 			   );
 
-      directed_test_memory(m, "avoid fragmentation failures",
+      directed_test_memory(config, m, p, "avoid fragmentation failures",
 			   "3 a1 s0 a1 s1 a1 s2 d0 a1 d1 d2 a2 t1 n3 t0 s3 t2 s4");
 
-      directed_test_memory(m, "deferred instant destroy",
+      directed_test_memory(config, m, p, "deferred instant destroy",
 			   "2 a1 s0 a1 s1 d0 a1 i1 n2 t0 s2");
 
-      directed_test_memory(m, "rebuild release allocator",
+      directed_test_memory(config, m, p, "rebuild release allocator",
 			   "3 a1 s0 a1 s1 a1 s2 d0 a1 d2 d1 a2 t1 n3 t0 s3 t2 s4");
 
-      directed_test_memory(m, "recover from benign failure",
+      directed_test_memory(config, m, p, "recover from benign failure",
 			   "3 a1 s0 a1 s1 a1 s2 d2 d0 d1 a2 c0 t1 t2 s3");
 
-      directed_test_memory(m, "recover with collateral damage",
+      directed_test_memory(config, m, p, "recover with collateral damage",
 			   "4 a1 s0 a1 s1 a1 s2 a1 s3"  // 0123
 			   "  d0 a1"                    // 0123  4123
 			   "  d1 d2 a2"                 // 0123  4553
 			   "  d3 a1"                    // 0123  4556
-			   "  c1 f5"                    // 0123  416.
+			   "  c1 u5"                    // 0123  416.
 			   "  a1"                       // 0123  4167
 			   "  t0 s4 t2 s6 t3 s7"        // 4167
 			   );
       
 #ifdef REALM_REORDER_DEFERRED_ALLOCATIONS
-      directed_test_memory(m, "out of order success",
+      directed_test_memory(config, m, p, "out of order success",
 			   "3 a1 s0 a2 s1 d0 d1 a2 a1 t1 s3 t0 s2");
 #endif
 
@@ -557,6 +606,7 @@ int main(int argc, const char **argv)
   config.buckets_min = 4;
   config.buckets_max = 4;
   config.all_memories = false;
+  config.check_alloc_result = true;
 
   CommandLineParser clp;
   clp.add_option_int("-seed", config.seed);
@@ -586,6 +636,11 @@ int main(int argc, const char **argv)
   Processor::register_task_by_kind(p.kind(), false /*!global*/,
 				   WORKER_TASK,
 				   CodeDescriptor(worker_task),
+				   ProfilingRequestSet()).external_wait();
+
+  Processor::register_task_by_kind(p.kind(), false /*!global*/,
+				   ALLOC_RESULT_TASK,
+				   CodeDescriptor(alloc_result_task),
 				   ProfilingRequestSet()).external_wait();
 
   // collective launch of a single top level task

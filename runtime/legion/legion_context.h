@@ -416,7 +416,6 @@ namespace Legion {
       virtual void initialize_region_tree_contexts(
           const std::vector<RegionRequirement> &clone_requirements,
           const std::vector<ApUserEvent> &unmap_events,
-          std::set<ApEvent> &preconditions,
           std::set<RtEvent> &applied_events) = 0;
       virtual void invalidate_region_tree_contexts(void) = 0;
       virtual void send_back_created_state(AddressSpaceID target) = 0;
@@ -764,8 +763,8 @@ namespace Legion {
       InnerContext(Runtime *runtime, TaskOp *owner, int depth, bool full_inner,
                    const std::vector<RegionRequirement> &reqs,
                    const std::vector<unsigned> &parent_indexes,
-                   const std::vector<bool> &virt_mapped,
-                   UniqueID context_uid, bool remote = false);
+                   const std::vector<bool> &virt_mapped, UniqueID context_uid, 
+                   ApEvent execution_fence, bool remote = false);
       InnerContext(const InnerContext &rhs);
       virtual ~InnerContext(void);
     public:
@@ -1115,7 +1114,6 @@ namespace Legion {
       virtual void initialize_region_tree_contexts(
           const std::vector<RegionRequirement> &clone_requirements,
           const std::vector<ApUserEvent> &unmap_events,
-          std::set<ApEvent> &preconditions,
           std::set<RtEvent> &applied_events);
       virtual void invalidate_region_tree_contexts(void);
       virtual void invalidate_remote_tree_contexts(Deserializer &derez);
@@ -1789,7 +1787,6 @@ namespace Legion {
       virtual void initialize_region_tree_contexts(
           const std::vector<RegionRequirement> &clone_requirements,
           const std::vector<ApUserEvent> &unmap_events,
-          std::set<ApEvent> &preconditions,
           std::set<RtEvent> &applied_events);
       virtual void invalidate_region_tree_contexts(void);
       virtual void send_back_created_state(AddressSpaceID target);
@@ -2174,7 +2171,6 @@ namespace Legion {
       virtual void initialize_region_tree_contexts(
           const std::vector<RegionRequirement> &clone_requirements,
           const std::vector<ApUserEvent> &unmap_events,
-          std::set<ApEvent> &preconditions,
           std::set<RtEvent> &applied_events);
       virtual void invalidate_region_tree_contexts(void);
       virtual void send_back_created_state(AddressSpaceID target);

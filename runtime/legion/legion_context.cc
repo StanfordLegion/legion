@@ -2420,7 +2420,7 @@ namespace Legion {
                                const std::vector<RegionRequirement> &reqs,
                                const std::vector<unsigned> &parent_indexes,
                                const std::vector<bool> &virt_mapped,
-                               UniqueID uid, bool remote)
+                               UniqueID uid, ApEvent exec_fence, bool remote)
       : TaskContext(rt, owner, d, reqs),
         tree_context(rt->allocate_region_tree_context()), context_uid(uid), 
         remote_context(remote), full_inner_context(full_inner),
@@ -2433,6 +2433,7 @@ namespace Legion {
         outstanding_subtasks(0), pending_subtasks(0), pending_frames(0), 
         currently_active_context(false), current_mapping_fence(NULL), 
         mapping_fence_gen(0), current_mapping_fence_index(0), 
+        current_execution_fence_event(exec_fence),
         current_execution_fence_index(0), last_implicit(NULL),
         last_implicit_gen(0)
     //--------------------------------------------------------------------------
@@ -7831,7 +7832,6 @@ namespace Legion {
     void InnerContext::initialize_region_tree_contexts(
                       const std::vector<RegionRequirement> &clone_requirements,
                       const std::vector<ApUserEvent> &unmap_events,
-                      std::set<ApEvent> &preconditions,
                       std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
@@ -9057,15 +9057,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     TopLevelContext::TopLevelContext(Runtime *rt, UniqueID ctx_id)
       : InnerContext(rt, NULL, -1, false/*full inner*/, dummy_requirements, 
-                     dummy_indexes, dummy_mapped, ctx_id)
+                     dummy_indexes, dummy_mapped, ctx_id, ApEvent::NO_AP_EVENT)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     TopLevelContext::TopLevelContext(const TopLevelContext &rhs)
-      : InnerContext(NULL, NULL, -1, false,
-                     dummy_requirements, dummy_indexes, dummy_mapped, 0)
+      : InnerContext(NULL, NULL, -1, false, dummy_requirements, dummy_indexes, 
+                     dummy_mapped, 0, ApEvent::NO_AP_EVENT)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -9239,7 +9239,7 @@ namespace Legion {
     RemoteContext::RemoteContext(Runtime *rt, UniqueID context_uid)
       : InnerContext(rt, NULL, -1, false/*full inner*/, remote_task.regions, 
           local_parent_req_indexes, local_virtual_mapped, 
-          context_uid, true/*remote*/),
+          context_uid, ApEvent::NO_AP_EVENT, true/*remote*/),
         parent_ctx(NULL), top_level_context(false), 
         remote_task(RemoteTask(this))
     //--------------------------------------------------------------------------
@@ -9249,7 +9249,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RemoteContext::RemoteContext(const RemoteContext &rhs)
       : InnerContext(NULL, NULL, 0, false, rhs.regions,local_parent_req_indexes,
-          local_virtual_mapped, 0, true), remote_task(RemoteTask(this))
+          local_virtual_mapped, 0, ApEvent::NO_AP_EVENT, true), 
+        remote_task(RemoteTask(this))
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -11363,9 +11364,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LeafContext::initialize_region_tree_contexts(
-            const std::vector<RegionRequirement> &clone_requirements,
-            const std::vector<ApUserEvent> &unmap_events,
-            std::set<ApEvent> &preconditions, std::set<RtEvent> &applied_events)
+                       const std::vector<RegionRequirement> &clone_requirements,
+                       const std::vector<ApUserEvent> &unmap_events,
+                       std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       // Nothing to do
@@ -12749,9 +12750,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InlineContext::initialize_region_tree_contexts(
-            const std::vector<RegionRequirement> &clone_requirements,
-            const std::vector<ApUserEvent> &unmap_events,
-            std::set<ApEvent> &preconditions, std::set<RtEvent> &applied_events)
+                       const std::vector<RegionRequirement> &clone_requirements,
+                       const std::vector<ApUserEvent> &unmap_events,
+                       std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       assert(false);

@@ -1974,7 +1974,7 @@ class MessageKind(StatObject):
         return self.name
 
 class Message(Base, TimeRange, HasNoDependencies):
-    __slots__ = TimeRange._abstract_slots + HasNoDependencies._abstract_slots + ['kind']
+    __slots__ = TimeRange._abstract_slots + HasNoDependencies._abstract_slots + ['kind', 'proc']
     def __init__(self, kind, start, stop):
         Base.__init__(self)
         TimeRange.__init__(self, None, None, start, stop)
