@@ -63,11 +63,6 @@ namespace Legion {
 
     class LegionProfDesc {
     public:
-      struct MessageDesc {
-      public:
-        unsigned kind;
-        const char *name;
-      };
       struct MapperCallDesc {
       public:
         unsigned kind;
@@ -290,12 +285,6 @@ namespace Legion {
         DepPartOpKind part_op;
         unsigned long long create, ready, start, stop;
       };
-      struct MessageInfo {
-      public:
-        MessageKind kind;
-        timestamp_t start, stop;
-        ProcID proc_id;
-      };
       struct MapperCallInfo {
       public:
         MappingCallKind kind;
@@ -375,7 +364,7 @@ namespace Legion {
             const Realm::ProfilingMeasurements::OperationTimeline &timeline,
             const Realm::ProfilingMeasurements::OperationProcessorUsage &usage,
             const Realm::ProfilingMeasurements::OperationEventWaits &waits);
-      void process_message(UniqueID op_id,
+      void process_message(size_t id, UniqueID op_id,
             const Realm::ProfilingMeasurements::OperationTimeline &timeline,
             const Realm::ProfilingMeasurements::OperationProcessorUsage &usage,
             const Realm::ProfilingMeasurements::OperationEventWaits &waits);
@@ -394,8 +383,6 @@ namespace Legion {
       void process_partition(UniqueID op_id, DepPartOpKind part_op,
             const Realm::ProfilingMeasurements::OperationTimeline &timeline);
     public:
-      void record_message(Processor proc, MessageKind kind, timestamp_t start,
-                          timestamp_t stop);
       void record_mapper_call(Processor proc, MappingCallKind kind, 
                               UniqueID uid, timestamp_t start,
                               timestamp_t stop);
@@ -440,7 +427,6 @@ namespace Legion {
       std::deque<InstTimelineInfo> inst_timeline_infos;
       std::deque<PartitionInfo> partition_infos;
     private:
-      std::deque<MessageInfo> message_infos;
       std::deque<MapperCallInfo> mapper_call_infos;
       std::deque<RuntimeCallInfo> runtime_call_infos;
 #ifdef LEGION_PROF_SELF_PROFILE
@@ -477,6 +463,8 @@ namespace Legion {
       LegionProfiler(Processor target_proc, const Machine &machine,
                      Runtime *rt, unsigned num_meta_tasks,
                      const char *const *const meta_task_descriptions,
+                     unsigned num_message_kinds,
+                     const char *const *const message_decriptions,
                      unsigned num_operation_kinds,
                      const char *const *const operation_kind_descriptions,
                      const char *serializer_type,
@@ -518,7 +506,7 @@ namespace Legion {
       // Adding a message profiling request is a static method
       // because we might not have a profiler on the local node
       static void add_message_request(Realm::ProfilingRequestSet &requests,
-                                      Processor remote_target);
+                                      MessageKind kind,Processor remote_target);
     public:
       // Alternate versions of the one above with op ids
       void add_task_request(Realm::ProfilingRequestSet &requests, 
@@ -567,11 +555,6 @@ namespace Legion {
       void record_index_part(UniqueID id, const char* name);
       void record_index_partition(UniqueID parent_id, UniqueID id, 
                                   bool disjoint, LegionColor c);
-    public:
-      void record_message_kinds(const char *const *const message_names,
-                                unsigned int num_message_kinds);
-      void record_message(MessageKind kind, timestamp_t start,
-                          timestamp_t stop);
     public:
       void record_mapper_call_kinds(const char *const *const mapper_call_names,
                                     unsigned int num_mapper_call_kinds);

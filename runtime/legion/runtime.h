@@ -969,7 +969,7 @@ namespace Legion {
       };
     public:
       VirtualChannel(VirtualChannelKind kind,AddressSpaceID local_address_space,
-                     size_t max_message_size, LegionProfiler *profiler);
+               size_t max_message_size, bool profile, LegionProfiler *profiler);
       VirtualChannel(const VirtualChannel &rhs);
       ~VirtualChannel(void);
     public:
@@ -982,8 +982,8 @@ namespace Legion {
                         Runtime *runtime, AddressSpaceID remote_address_space);
       void confirm_shutdown(ShutdownManager *shutdown_manager, bool phase_one);
     private:
-      void send_message(bool complete, Runtime *runtime, 
-                        Processor target, bool response, bool shutdown);
+      void send_message(bool complete, Runtime *runtime, Processor target, 
+                        MessageKind kind, bool response, bool shutdown);
       bool handle_messages(unsigned num_messages, Runtime *runtime, 
                            AddressSpaceID remote_address_space,
                            const char *args, size_t arglen) const;
@@ -1009,6 +1009,7 @@ namespace Legion {
       bool partial;
     private:
       const bool ordered_channel;
+      const bool profile_outgoing_messages;
       const LgPriority request_priority;
       const LgPriority response_priority;
       static const unsigned MAX_UNORDERED_EVENTS = 32;
@@ -1064,14 +1065,14 @@ namespace Legion {
       void receive_message(const void *args, size_t arglen);
       void confirm_shutdown(ShutdownManager *shutdown_manager,
                             bool phase_one);
-    public:
-      const AddressSpaceID remote_address_space;
+    private:
+      VirtualChannel *const channels;
     public:
       Runtime *const runtime;
       // State for sending messages
+      const AddressSpaceID remote_address_space;
       const Processor target;
-    private:
-      VirtualChannel *const channels; 
+      const bool always_flush;
     };
 
     /**
@@ -3451,10 +3452,10 @@ namespace Legion {
       // If this is not a task directly related to shutdown or is a message, 
       // to a remote node then increment the number of outstanding tasks
 #ifdef DEBUG_LEGION
-      if (T::TASK_ID < LG_MESSAGE_ID)
+      if (T::TASK_ID < LG_BEGIN_SHUTDOWN_TASK_IDS)
         increment_total_outstanding_tasks(args.lg_task_id, true/*meta*/);
 #else
-      if (T::TASK_ID < LG_MESSAGE_ID)
+      if (T::TASK_ID < LG_BEGIN_SHUTDOWN_TASK_IDS)
         increment_total_outstanding_tasks();
 #endif
 #ifdef DEBUG_SHUTDOWN_HANG
@@ -3470,7 +3471,7 @@ namespace Legion {
       assert(target.exists());
 #endif
       DETAILED_PROFILER(this, REALM_SPAWN_META_CALL);
-      if ((T::TASK_ID < LG_MESSAGE_ID) && (profiler != NULL))
+      if ((T::TASK_ID < LG_BEGIN_SHUTDOWN_TASK_IDS) && (profiler != NULL))
       {
         Realm::ProfilingRequestSet requests;
         profiler->add_meta_request(requests, T::TASK_ID, args.provenance);

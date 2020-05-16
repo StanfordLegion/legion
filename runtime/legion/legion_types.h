@@ -383,8 +383,12 @@ namespace Legion {
       LG_MALLOC_INSTANCE_TASK_ID,
       LG_FREE_INSTANCE_TASK_ID,
       LG_YIELD_TASK_ID,
-      LG_MESSAGE_ID, // These two must be the last two
-      LG_RETRY_SHUTDOWN_TASK_ID,
+      // this marks the beginning of task IDs tracked by the shutdown algorithm
+      LG_BEGIN_SHUTDOWN_TASK_IDS,
+      LG_RETRY_SHUTDOWN_TASK_ID = LG_BEGIN_SHUTDOWN_TASK_IDS,
+      // Message ID goes at the end so we can append additional 
+      // message IDs here for the profiler
+      LG_MESSAGE_ID,
       LG_LAST_TASK_ID, // This one should always be last
     }; 
 
@@ -513,8 +517,8 @@ namespace Legion {
         "Malloc Instance",                                        \
         "Free Instance",                                          \
         "Yield",                                                  \
-        "Remote Message",                                         \
         "Retry Shutdown",                                         \
+        "Remote Message",                                         \
       };
 
     enum MappingCallKind {
