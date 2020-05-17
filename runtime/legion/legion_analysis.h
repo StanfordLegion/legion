@@ -2134,11 +2134,13 @@ namespace Legion {
       struct DisjointPartitionRefinement {
       public:
         DisjointPartitionRefinement(IndexPartNode *p);
+        DisjointPartitionRefinement(const DisjointPartitionRefinement &rhs);
       public:
         inline const std::map<IndexSpaceNode*,EquivalenceSet*>& 
           get_children(void) const { return children; }
         inline bool is_refined(void) const 
           { return (total_child_volume == partition_volume); } 
+        inline size_t get_volume(void) const { return partition_volume; }
       public:
         void add_child(IndexSpaceNode *node, EquivalenceSet *child);
         EquivalenceSet* find_child(IndexSpaceNode *node) const;

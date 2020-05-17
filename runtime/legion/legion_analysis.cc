@@ -7840,6 +7840,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    EquivalenceSet::DisjointPartitionRefinement::DisjointPartitionRefinement(
+                                         const DisjointPartitionRefinement &rhs)
+      : partition(rhs.partition), children(rhs.get_children()),
+        total_child_volume(children.size()), partition_volume(rhs.get_volume())
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
     void EquivalenceSet::DisjointPartitionRefinement::add_child(
                                     IndexSpaceNode *node, EquivalenceSet *child)
     //--------------------------------------------------------------------------
@@ -8373,6 +8382,7 @@ namespace Legion {
             disjoint_partition_refinements.get_valid_mask();
           if (!!disjoint_overlap)
           {
+            FieldMaskSet<DisjointPartitionRefinement> to_add;
             std::vector<DisjointPartitionRefinement*> to_delete;
             // Iterate over the disjoint partition refinements and see 
             // which ones we overlap with
@@ -8404,10 +8414,29 @@ namespace Legion {
                   // If child is NULL then we haven't made it yet
                   if (child == NULL)
                   {
+                    // We want to maintain the invariant that a disjoint
+                    // partition refinement represents all the children
+                    // being refined for all the same fields, so we need
+                    // to split this disjoint partition refinement into
+                    // two if there is a difference in fields
+                    const FieldMask non_overlap = it->second - overlap;
+                    if (!!non_overlap)
+                    {
+                      // Make a new disjoint partition refinement that is
+                      // a copy of the old one up to this point
+                      DisjointPartitionRefinement *copy_refinement = 
+                        new DisjointPartitionRefinement(*(it->first));
+                      to_add.insert(copy_refinement, non_overlap);
+                      // Filter the fields down to just the overlap
+                      it.filter(non_overlap);
+                    }
+#ifdef DEBUG_LEGION
+                    assert(it->second == overlap);
+#endif
                     // Refine this for all the fields in the disjoint 
                     // partition refinement to maintain the invariant that
                     // all these chidren have been refined for all fields
-                    child = add_pending_refinement(expr,it->second,node,source);
+                    child = add_pending_refinement(expr, overlap, node, source);
                     pending_to_traverse.insert(child, overlap);
                     to_traverse_exprs[child] = expr;
                     // If this is a pending refinement then we'll need to
@@ -8436,10 +8465,9 @@ namespace Legion {
                               it->first->partition->get_union_expression());
 #ifdef DEBUG_LEGION
                         assert((diff_expr != NULL) && !diff_expr->is_empty());
-                        assert(unrefined_remainders.get_valid_mask() * 
-                                it->second);
+                        assert(unrefined_remainders.get_valid_mask() * overlap);
 #endif
-                        unrefined_remainders.insert(diff_expr, it->second);
+                        unrefined_remainders.insert(diff_expr, overlap);
                       }
                     }
                     // Remove these fields from the overlap indicating
@@ -8464,7 +8492,7 @@ namespace Legion {
                       }
                     }
                     // If we couldn't find it in the already valid set, check
-                    // also in the pending refineemnts
+                    // also in the pending refinements
                     if (!!overlap)
                     {
                       finder = pending_refinements.find(child);
@@ -8517,6 +8545,15 @@ namespace Legion {
                 delete (*it);
               }
               disjoint_partition_refinements.tighten_valid_mask();
+            }
+            if (!to_add.empty())
+            {
+              if (!disjoint_partition_refinements.empty())
+                for (FieldMaskSet<DisjointPartitionRefinement>::const_iterator
+                      it = to_add.begin(); it != to_add.end(); it++)
+                  disjoint_partition_refinements.insert(it->first, it->second);
+              else
+                disjoint_partition_refinements.swap(to_add);
             }
           }
         }
