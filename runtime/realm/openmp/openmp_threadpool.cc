@@ -288,7 +288,8 @@ namespace Realm {
     worker_infos.resize(num_workers + 1);
     for(int i = 0; i <= num_workers; i++) {
       WorkerInfo& wi = worker_infos[i];
-      wi.status = i ? WorkerInfo::WORKER_STARTING : WorkerInfo::WORKER_MASTER;
+      wi.status.store(i ? WorkerInfo::WORKER_STARTING :
+		          WorkerInfo::WORKER_MASTER);
       wi.pool = this;
       wi.thread_id = 0;
       wi.num_threads = 1;

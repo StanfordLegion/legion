@@ -1187,7 +1187,7 @@ namespace Realm {
       sampling_profiler.configure_from_cmdline(cmdline, *core_reservations);
 
       // initialize barrier timestamp
-      BarrierImpl::barrier_adjustment_timestamp = (((Barrier::timestamp_t)(Network::my_node_id)) << BarrierImpl::BARRIER_TIMESTAMP_NODEID_SHIFT) + 1;
+      BarrierImpl::barrier_adjustment_timestamp.store((((Barrier::timestamp_t)(Network::my_node_id)) << BarrierImpl::BARRIER_TIMESTAMP_NODEID_SHIFT) + 1);
 
       nodes = new Node[Network::max_node_id + 1];
 
@@ -1222,17 +1222,19 @@ namespace Realm {
 
 	local_sparsity_map_free_lists.resize(Network::max_node_id + 1);
 	for(NodeID i = 0; i <= Network::max_node_id; i++) {
-	  nodes[i].sparsity_maps.resize(Network::max_node_id + 1, 0);
+	  nodes[i].sparsity_maps.resize(Network::max_node_id + 1,
+					atomic<DynamicTable<SparsityMapTableAllocator> *>(0));
 	  DynamicTable<SparsityMapTableAllocator> *m = new DynamicTable<SparsityMapTableAllocator>;
-	  nodes[i].sparsity_maps[Network::my_node_id] = m;
+	  nodes[i].sparsity_maps[Network::my_node_id].store(m);
 	  local_sparsity_map_free_lists[i] = new SparsityMapTableAllocator::FreeList(*m, i /*owner_node*/);
 	}
 
 	local_subgraph_free_lists.resize(Network::max_node_id + 1);
 	for(NodeID i = 0; i <= Network::max_node_id; i++) {
-	  nodes[i].subgraphs.resize(Network::max_node_id + 1, 0);
+	  nodes[i].subgraphs.resize(Network::max_node_id + 1,
+				    atomic<DynamicTable<SubgraphTableAllocator> *>(0));
 	  DynamicTable<SubgraphTableAllocator> *m = new DynamicTable<SubgraphTableAllocator>;
-	  nodes[i].subgraphs[Network::my_node_id] = m;
+	  nodes[i].subgraphs[Network::my_node_id].store(m);
 	  local_subgraph_free_lists[i] = new SubgraphTableAllocator::FreeList(*m, i /*owner_node*/);
 	}
       }

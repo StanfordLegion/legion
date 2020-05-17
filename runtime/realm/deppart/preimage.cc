@@ -346,7 +346,7 @@ namespace Realm {
       ComputeOverlapMicroOp<N2,T2> *uop = new ComputeOverlapMicroOp<N2,T2>(this);
 
       remaining_sparse_images.store(ptr_data.size() + range_data.size());
-      contrib_counts.resize(preimages.size(), 0);
+      contrib_counts.resize(preimages.size(), atomic<int>(0));
 
       // create a dummy async microop that lives until we've received all the sparse images
       dummy_overlap_uop = new AsyncMicroOp(this, 0);
