@@ -9303,19 +9303,16 @@ class RealmBase(object):
         # Indirection copies are never spurious so we do not check this currently
         if self.indirections is not None:
             return True
-        if versions is None:
-            print('ERROR: '+str(self.creator)+' generated spurious '+str(self)) 
-            if self.state.assert_on_error:
-                assert False
-            return False
         point_set = self.index_expr.get_point_set()
         for point in point_set.iterator():
             for field in fields:
                 eq_key = (point, field, tree)
-                if eq_key not in versions:
+                if versions is None or eq_key not in versions:
                     print('ERROR: '+str(self.creator)+' generated spurious '+
                             str(self)+' for point '+str(point)+' of '+str(field)+
                             ' in tree '+str(tree))
+                    if self.state.eq_graph_on_error:
+                        self.state.dump_eq_graph((point, field, tree))
                     if self.state.assert_on_error:
                         assert False
                     return False
