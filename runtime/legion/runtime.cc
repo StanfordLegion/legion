@@ -11256,7 +11256,8 @@ namespace Legion {
         Processor::create_group(prof_procs) : prof_procs.front();
       LG_TASK_DESCRIPTIONS(lg_task_descriptions);
       LG_MESSAGE_DESCRIPTIONS(lg_message_descriptions);
-      LEGION_STATIC_ASSERT((LG_MESSAGE_ID+1) == LG_LAST_TASK_ID);
+      LEGION_STATIC_ASSERT((LG_MESSAGE_ID+1) == LG_LAST_TASK_ID,
+          "LG_MESSAGE_ID must always be the last meta-task ID");
       profiler = new LegionProfiler(target_proc_for_profiler,
                                     machine, this, LG_MESSAGE_ID,
                                     lg_task_descriptions, LAST_SEND_KIND, 
@@ -21570,13 +21571,23 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Some static asserts that need to hold true for the runtime to work
-      LEGION_STATIC_ASSERT(LEGION_MAX_RETURN_SIZE > 0);
-      LEGION_STATIC_ASSERT((1 << LEGION_FIELD_LOG2) == LEGION_MAX_FIELDS);
-      LEGION_STATIC_ASSERT(LEGION_MAX_NUM_NODES > 0);
-      LEGION_STATIC_ASSERT(LEGION_MAX_NUM_PROCS > 0);
-      LEGION_STATIC_ASSERT(LEGION_DEFAULT_MAX_TASK_WINDOW > 0);
-      LEGION_STATIC_ASSERT(LEGION_DEFAULT_MIN_TASKS_TO_SCHEDULE > 0);
-      LEGION_STATIC_ASSERT(LEGION_DEFAULT_MAX_MESSAGE_SIZE > 0); 
+      LEGION_STATIC_ASSERT(LEGION_MAX_RETURN_SIZE > 0, 
+          "Need a positive and non-zero value for LEGION_MAX_RETURN_SIZE");
+      LEGION_STATIC_ASSERT((1 << LEGION_FIELD_LOG2) == LEGION_MAX_FIELDS,
+          "LEGION_MAX_FIELDS must be a pwoer of 2");
+      LEGION_STATIC_ASSERT(LEGION_MAX_NUM_NODES > 0,
+          "Need a positive and non-zero value for LEGION_MAX_NUM_NODES");
+      LEGION_STATIC_ASSERT(LEGION_MAX_NUM_PROCS > 0,
+          "Need a positive and non-zero value for LEGION_MAX_NUM_PROCS");
+      LEGION_STATIC_ASSERT(LEGION_DEFAULT_MAX_TASK_WINDOW > 0,
+          "Need a positive and non-zero value for "
+          "LEGION_DEFAULT_MAX_TASK_WINDOW");
+      LEGION_STATIC_ASSERT(LEGION_DEFAULT_MIN_TASKS_TO_SCHEDULE > 0,
+          "Need a positive and non-zero value for "
+          "LEGION_DEFAULT_MIN_TASKS_TO_SCHEDULE");
+      LEGION_STATIC_ASSERT(LEGION_DEFAULT_MAX_MESSAGE_SIZE > 0,
+          "Need a positive and non-zero value for "
+          "LEGION_DEFAULT_MAX_MESSAGE_SIZE"); 
 
       // Register builtin reduction operators
       register_builtin_reduction_operators();

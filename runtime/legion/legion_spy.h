@@ -247,7 +247,8 @@ namespace Legion {
       static inline void log_index_space_point(IDType handle,
                                     const Point<DIM,T> &point)
       {
-        LEGION_STATIC_ASSERT(DIM <= LEGION_MAX_DIM);
+        LEGION_STATIC_ASSERT(DIM <= LEGION_MAX_DIM, 
+                      "DIM exceeds LEGION_MAX_DIM");
 #if LEGION_MAX_DIM == 1
         log_spy.print("Index Space Point " IDFMT " %d %lld", handle,
                       DIM, (long long)(point[0])); 
@@ -320,7 +321,8 @@ namespace Legion {
       static inline void log_index_space_rect(IDType handle, 
                                               const Rect<DIM,T> &rect)
       {
-        LEGION_STATIC_ASSERT(DIM <= LEGION_MAX_DIM);
+        LEGION_STATIC_ASSERT(DIM <= LEGION_MAX_DIM,
+                      "DIM exceeds LEGION_MAX_DIM");
 #if LEGION_MAX_DIM == 1
         log_spy.print("Index Space Rect " IDFMT " %d "
                       "%lld %lld", handle, DIM, 
@@ -1019,7 +1021,8 @@ namespace Legion {
       static inline void log_launch_index_space_rect(UniqueID unique_id, 
                                                      const Rect<DIM,T> &rect)
       {
-        LEGION_STATIC_ASSERT(DIM <= LEGION_MAX_DIM);
+        LEGION_STATIC_ASSERT(DIM <= LEGION_MAX_DIM,
+                      "DIM exceeds LEGION_MAX DIM");
 #if LEGION_MAX_DIM == 1
         log_spy.print() << "Index Launch Rect " << unique_id << " "
                         << DIM << " " << rect.lo[0] << " " << rect.hi[0];
