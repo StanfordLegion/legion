@@ -116,9 +116,11 @@ namespace Legion {
                            const std::vector<IndexSpace> &spaces);
       virtual IndexSpace subtract_index_spaces(
                            IndexSpace left, IndexSpace right);
+      virtual void create_shared_ownership(IndexSpace handle);
       virtual void destroy_index_space(IndexSpace handle,
                                        const bool unordered,
                                        const bool recurse) = 0;
+      virtual void create_shared_ownership(IndexPartition handle);
       virtual void destroy_index_partition(IndexPartition handle,
                                            const bool unordered,
                                            const bool recurse) = 0;
@@ -262,6 +264,7 @@ namespace Legion {
                                             IndexSpace initial,
                                 const std::vector<IndexSpace> &handles) = 0;
       virtual FieldSpace create_field_space(RegionTreeForest *forest);
+      virtual void create_shared_ownership(FieldSpace handle);
       virtual void destroy_field_space(FieldSpace handle,
                                        const bool unordered) = 0;
       virtual FieldID allocate_field(FieldSpace space, size_t field_size,
@@ -296,10 +299,9 @@ namespace Legion {
                                             IndexSpace index_space,
                                             FieldSpace field_space,
                                             bool task_local);
+      virtual void create_shared_ownership(LogicalRegion handle);
       virtual void destroy_logical_region(LogicalRegion handle,
                                           const bool unordered) = 0;
-      virtual void destroy_logical_partition(LogicalPartition handle,
-                                             const bool unordered) = 0;
       virtual FieldAllocatorImpl* create_field_allocator(FieldSpace handle);
       virtual void destroy_field_allocator(FieldSpace handle);
       virtual void get_local_field_set(const FieldSpace handle,
@@ -1002,8 +1004,6 @@ namespace Legion {
                                const bool unordered);
       virtual void destroy_logical_region(LogicalRegion handle,
                                           const bool unordered);
-      virtual void destroy_logical_partition(LogicalPartition handle,
-                                             const bool unordered);
       virtual void get_local_field_set(const FieldSpace handle,
                                        const std::set<unsigned> &indexes,
                                        std::set<FieldID> &to_set) const;
@@ -1681,8 +1681,6 @@ namespace Legion {
                                const bool unordered);
       virtual void destroy_logical_region(LogicalRegion handle,
                                           const bool unordered);
-      virtual void destroy_logical_partition(LogicalPartition handle,
-                                             const bool unordered);
       virtual void get_local_field_set(const FieldSpace handle,
                                        const std::set<unsigned> &indexes,
                                        std::set<FieldID> &to_set) const;
@@ -1808,7 +1806,7 @@ namespace Legion {
       virtual Future get_dynamic_collective_result(DynamicCollective dc);
     protected:
       mutable LocalLock                            leaf_lock;
-      std::set<RtEvent>                            deletion_events;
+      std::set<RtEvent>                            execution_events;
     public:
       virtual TaskPriority get_current_priority(void) const;
       virtual void set_current_priority(TaskPriority priority);
@@ -1882,9 +1880,11 @@ namespace Legion {
                            const std::vector<IndexSpace> &spaces);
       virtual IndexSpace subtract_index_spaces(
                            IndexSpace left, IndexSpace right);
+      virtual void create_shared_ownership(IndexSpace handle);
       virtual void destroy_index_space(IndexSpace handle, 
                                        const bool unordered,
                                        const bool recurse);
+      virtual void create_shared_ownership(IndexPartition handle);
       virtual void destroy_index_partition(IndexPartition handle,
                                            const bool unordered,
                                            const bool recurse);
@@ -2028,6 +2028,7 @@ namespace Legion {
                                             IndexSpace initial,
                                 const std::vector<IndexSpace> &handles);
       virtual FieldSpace create_field_space(RegionTreeForest *forest);
+      virtual void create_shared_ownership(FieldSpace handle);
       virtual void destroy_field_space(FieldSpace handle, const bool unordered);
       virtual FieldID allocate_field(FieldSpace space, size_t field_size,
                                      FieldID fid, bool local,
@@ -2060,10 +2061,9 @@ namespace Legion {
                                             IndexSpace index_space,
                                             FieldSpace field_space,
                                             bool task_local);
+      virtual void create_shared_ownership(LogicalRegion handle);
       virtual void destroy_logical_region(LogicalRegion handle,
                                           const bool unordered);
-      virtual void destroy_logical_partition(LogicalPartition handle,
-                                             const bool unordered);
       virtual FieldAllocatorImpl* create_field_allocator(FieldSpace handle);
       virtual void destroy_field_allocator(FieldSpace handle);
       virtual void get_local_field_set(const FieldSpace handle,

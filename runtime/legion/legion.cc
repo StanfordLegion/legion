@@ -3301,6 +3301,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::create_shared_ownership(Context ctx, IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      ctx->create_shared_ownership(handle);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::destroy_index_space(Context ctx, IndexSpace handle,
                                       const bool unordered, const bool recurse)
     //--------------------------------------------------------------------------
@@ -3591,6 +3598,13 @@ namespace Legion {
                     ctx->get_task_name(), ctx->get_unique_id());
       assert(false);
       return IndexPartition::NO_PART;
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::create_shared_ownership(Context ctx, IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      ctx->create_shared_ownership(handle);
     }
 
     //--------------------------------------------------------------------------
@@ -4670,11 +4684,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::create_shared_ownership(Context ctx, FieldSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      ctx->create_shared_ownership(handle);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::destroy_field_space(Context ctx, FieldSpace handle,
                                       const bool unordered)
     //--------------------------------------------------------------------------
     {
-      runtime->destroy_field_space(ctx, handle, unordered);
+      ctx->destroy_field_space(handle, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -4737,11 +4758,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::create_shared_ownership(Context ctx, LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+      ctx->create_shared_ownership(handle);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::destroy_logical_region(Context ctx, LogicalRegion handle,
                                          const bool unordered)
     //--------------------------------------------------------------------------
     {
-      runtime->destroy_logical_region(ctx, handle, unordered);
+      ctx->destroy_logical_region(handle, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -4749,7 +4777,7 @@ namespace Legion {
                                             const bool unordered)
     //--------------------------------------------------------------------------
     {
-      runtime->destroy_logical_partition(ctx, handle, unordered);
+      // This is a no-op now
     }
 
     //--------------------------------------------------------------------------

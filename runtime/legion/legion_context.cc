@@ -233,6 +233,31 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void TaskContext::create_shared_ownership(IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (!handle.exists())
+        return;
+      // Check to see if this is a top-level index space, if not then
+      // we shouldn't even be destroying it
+      if (!runtime->forest->is_top_level_index_space(handle))
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARED_OWNERSHIP,
+            "Illegal call to create shared ownership for index space %x in " 
+            "task %s (UID %lld) which is not a top-level index space. Legion "
+            "only permits top-level index spaces to have shared ownership.", 
+            handle.get_id(), get_task_name(), get_unique_id())
+      runtime->create_shared_ownership(handle);
+      AutoLock priv_lock(privilege_lock);
+      std::map<IndexSpace,unsigned>::iterator finder = 
+        created_index_spaces.find(handle);
+      if (finder != created_index_spaces.end())
+        finder->second++;
+      else
+        created_index_spaces[handle] = 1;
+    }
+
+    //--------------------------------------------------------------------------
     IndexSpace TaskContext::union_index_spaces(
                                           const std::vector<IndexSpace> &spaces)
     //--------------------------------------------------------------------------
@@ -320,6 +345,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void TaskContext::create_shared_ownership(IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (!handle.exists())
+        return;
+      runtime->create_shared_ownership(handle);
+      AutoLock priv_lock(privilege_lock);
+      std::map<IndexPartition,unsigned>::iterator finder = 
+        created_index_partitions.find(handle);
+      if (finder != created_index_partitions.end())
+        finder->second++;
+      else
+        created_index_partitions[handle] = 1;
+    }
+
+    //--------------------------------------------------------------------------
     FieldSpace TaskContext::create_field_space(RegionTreeForest *forest)
     //--------------------------------------------------------------------------
     {
@@ -336,6 +378,23 @@ namespace Legion {
       forest->create_field_space(space, did);
       register_field_space_creation(space);
       return space;
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskContext::create_shared_ownership(FieldSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (!handle.exists())
+        return;
+      runtime->create_shared_ownership(handle);
+      AutoLock priv_lock(privilege_lock);
+      std::map<FieldSpace,unsigned>::iterator finder = 
+        created_field_spaces.find(handle);
+      if (finder != created_field_spaces.end())
+        finder->second++;
+      else
+        created_field_spaces[handle] = 1;
     }
 
     //--------------------------------------------------------------------------
@@ -472,6 +531,30 @@ namespace Legion {
       // Register the creation of a top-level region with the context
       register_region_creation(region, task_local);
       return region;
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskContext::create_shared_ownership(LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (!handle.exists())
+        return;
+      if (!runtime->forest->is_top_level_region(handle))
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARED_OWNERSHIP,
+            "Illegal call to create shared ownership for logical region "
+            "(%x,%x,%x in task %s (UID %lld) which is not a top-level logical "
+            "region. Legion only permits top-level logical regions to have "
+            "shared ownerships.", handle.index_space.id, handle.field_space.id,
+            handle.tree_id, get_task_name(), get_unique_id())
+      runtime->create_shared_ownership(handle);
+      AutoLock priv_lock(privilege_lock);
+      std::map<LogicalRegion,unsigned>::iterator finder = 
+        created_regions.find(handle);
+      if (finder != created_regions.end())
+        finder->second++;
+      else
+        created_regions[handle] = 1;
     }
 
     //--------------------------------------------------------------------------
@@ -5407,22 +5490,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::destroy_logical_partition(LogicalPartition handle,
-                                                 const bool unordered)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-      // For now we just trust that this has never been deleted before
-#ifdef DEBUG_LEGION
-      log_region.debug("Deleting logical partition (%x,%x) in task %s "
-                       "(ID %lld)", handle.index_partition.id, 
-                       handle.field_space.id, get_task_name(), get_unique_id());
-#endif
-      // These are no-ops now as logical partitions will be deleted once
-      // either their index partition or the region are destroyed
-    } 
-
-    //--------------------------------------------------------------------------
     void InnerContext::get_local_field_set(const FieldSpace handle,
                                            const std::set<unsigned> &indexes,
                                            std::set<FieldID> &to_set) const
@@ -9979,7 +10046,7 @@ namespace Legion {
         "Illegal index space from future creation performed in leaf "
                      "task %s (ID %lld)", get_task_name(), get_unique_id())
       return IndexSpace::NO_SPACE;
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void LeafContext::destroy_index_space(IndexSpace handle, 
@@ -10032,9 +10099,9 @@ namespace Legion {
       if (!preconditions.empty())
       {
         AutoLock l_lock(leaf_lock);
-        deletion_events.insert(preconditions.begin(), preconditions.end());
+        execution_events.insert(preconditions.begin(), preconditions.end());
       }
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void LeafContext::destroy_index_partition(IndexPartition handle,
@@ -10105,7 +10172,7 @@ namespace Legion {
       if (!preconditions.empty())
       {
         AutoLock l_lock(leaf_lock);
-        deletion_events.insert(preconditions.begin(), preconditions.end());
+        execution_events.insert(preconditions.begin(), preconditions.end());
       }
     }
 
@@ -10425,7 +10492,7 @@ namespace Legion {
         "Illegal create index space difference performed in leaf "
                      "task %s (ID %lld)", get_task_name(), get_unique_id())
       return IndexSpace::NO_SPACE;
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void LeafContext::destroy_field_space(FieldSpace handle, 
@@ -10468,7 +10535,7 @@ namespace Legion {
       if (!preconditions.empty())
       {
         AutoLock l_lock(leaf_lock);
-        deletion_events.insert(preconditions.begin(), preconditions.end());
+        execution_events.insert(preconditions.begin(), preconditions.end());
       }
     }
 
@@ -10502,7 +10569,7 @@ namespace Legion {
       if (!preconditions.empty())
       {
         AutoLock l_lock(leaf_lock);
-        deletion_events.insert(preconditions.begin(), preconditions.end());
+        execution_events.insert(preconditions.begin(), preconditions.end());
       }
     }
 
@@ -10547,7 +10614,7 @@ namespace Legion {
       if (!preconditions.empty())
       {
         AutoLock l_lock(leaf_lock);
-        deletion_events.insert(preconditions.begin(), preconditions.end());
+        execution_events.insert(preconditions.begin(), preconditions.end());
       }
     }
 
@@ -10598,7 +10665,7 @@ namespace Legion {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_NONLOCAL_FIELD_ALLOCATION2,
           "Illegal local field allocations performed in leaf task %s (ID %lld)",
           get_task_name(), get_unique_id())
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void LeafContext::destroy_logical_region(LogicalRegion handle,
@@ -10652,24 +10719,8 @@ namespace Legion {
       if (!preconditions.empty())
       {
         AutoLock l_lock(leaf_lock);
-        deletion_events.insert(preconditions.begin(), preconditions.end());
+        execution_events.insert(preconditions.begin(), preconditions.end());
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::destroy_logical_partition(LogicalPartition handle,
-                                                const bool unordered)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-      // For now we just trust that this has never been deleted before
-#ifdef DEBUG_LEGION
-      log_region.debug("Deleting logical partition (%x,%x) in task %s "
-                       "(ID %lld)", handle.index_partition.id, 
-                       handle.field_space.id, get_task_name(), get_unique_id());
-#endif
-      // These are no-ops now as logical partitions will be deleted once
-      // either their index partition or the region are destroyed
     }
 
     //--------------------------------------------------------------------------
@@ -11417,9 +11468,9 @@ namespace Legion {
         if (it->is_mapped())
           it->impl->unmap_region();
       }
-      if (!deletion_events.empty())
+      if (!execution_events.empty())
       {
-        const RtEvent wait_on = Runtime::merge_events(deletion_events);
+        const RtEvent wait_on = Runtime::merge_events(execution_events);
         wait_on.wait();
       }
       // Mark that we are done executing this operation
@@ -11814,11 +11865,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void InlineContext::create_shared_ownership(IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->create_shared_ownership(handle);
+    }
+
+    //--------------------------------------------------------------------------
     void InlineContext::destroy_index_space(IndexSpace handle, 
                                        const bool unordered, const bool recurse)
     //--------------------------------------------------------------------------
     {
       enclosing->destroy_index_space(handle, unordered, recurse);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::create_shared_ownership(IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->create_shared_ownership(handle);
     }
 
     //--------------------------------------------------------------------------
@@ -12124,6 +12189,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void InlineContext::create_shared_ownership(FieldSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->create_shared_ownership(handle);
+    }
+
+    //--------------------------------------------------------------------------
     void InlineContext::destroy_field_space(FieldSpace handle,
                                             const bool unordered)
     //--------------------------------------------------------------------------
@@ -12222,19 +12294,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void InlineContext::create_shared_ownership(LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->create_shared_ownership(handle);
+    }
+
+    //--------------------------------------------------------------------------
     void InlineContext::destroy_logical_region(LogicalRegion handle,
                                                const bool unordered)
     //--------------------------------------------------------------------------
     {
       return enclosing->destroy_logical_region(handle, unordered);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::destroy_logical_partition(LogicalPartition handle,
-                                                  const bool unordered)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->destroy_logical_partition(handle, unordered);
     }
 
     //--------------------------------------------------------------------------

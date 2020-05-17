@@ -682,6 +682,7 @@ namespace Legion {
       SEND_REGISTRATION_CALLBACK,
       SEND_REMOTE_TASK_REPLAY,
       SEND_REMOTE_TASK_PROFILING_RESPONSE,
+      SEND_SHARED_OWNERSHIP,
       SEND_INDEX_SPACE_NODE,
       SEND_INDEX_SPACE_REQUEST,
       SEND_INDEX_SPACE_RETURN,
@@ -858,6 +859,7 @@ namespace Legion {
         "Send Registration Callback",                                 \
         "Send Remote Task Replay",                                    \
         "Send Remote Task Profiling Response",                        \
+        "Send Shared Ownership",                                      \
         "Send Index Space Node",                                      \
         "Send Index Space Request",                                   \
         "Send Index Space Return",                                    \

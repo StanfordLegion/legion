@@ -7192,6 +7192,11 @@ namespace Legion {
               runtime->handle_remote_task_profiling_response(derez);
               break;
             }
+          case SEND_SHARED_OWNERSHIP:
+            {
+              runtime->handle_shared_ownership(derez);
+              break;
+            }
           case SEND_INDEX_SPACE_NODE:
             {
               runtime->handle_index_space_node(derez, remote_address_space);
@@ -11806,6 +11811,112 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::create_shared_ownership(IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      const AddressSpaceID owner_space = 
+        IndexSpaceNode::get_owner_space(handle, this);
+      if (owner_space != address_space)
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize<int>(0);
+          rez.serialize(handle);
+        }
+        send_shared_ownership(owner_space, rez);
+      }
+      else
+      {
+        IndexSpaceNode *node = forest->get_node(handle);
+        if (!node->check_valid_and_increment(APPLICATION_REF))
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARED_OWNERSHIP,
+              "Illegal call to add shared ownership to index space %x "
+              "which has already been deleted", handle.get_id())
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::create_shared_ownership(IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      const AddressSpaceID owner_space = 
+        IndexPartNode::get_owner_space(handle, this);
+      if (owner_space != address_space)
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize<int>(1);
+          rez.serialize(handle);
+        }
+        send_shared_ownership(owner_space, rez);
+      }
+      else
+      {
+        IndexPartNode *node = forest->get_node(handle);
+        if (!node->check_valid_and_increment(APPLICATION_REF))
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARED_OWNERSHIP,
+              "Illegal call to add shared ownership to index partition %x "
+              "which has already been deleted", handle.get_id())
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::create_shared_ownership(FieldSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      const AddressSpaceID owner_space = 
+        FieldSpaceNode::get_owner_space(handle, this);
+      if (owner_space != address_space)
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize<int>(2);
+          rez.serialize(handle);
+        }
+        send_shared_ownership(owner_space, rez);
+      }
+      else
+      {
+        FieldSpaceNode *node = forest->get_node(handle);
+        if (!node->check_valid_and_increment(APPLICATION_REF))
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARED_OWNERSHIP,
+              "Illegal call to add shared ownership to field space %x "
+              "which has already been deleted", handle.get_id())
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::create_shared_ownership(LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+      const AddressSpaceID owner_space = 
+        RegionNode::get_owner_space(handle, this);
+      if (owner_space != address_space)
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize<int>(3);
+          rez.serialize(handle);
+        }
+        send_shared_ownership(owner_space, rez);
+      }
+      else
+      {
+        RegionNode *node = forest->get_node(handle);
+        if (!node->check_valid_and_increment(APPLICATION_REF))
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARED_OWNERSHIP,
+              "Illegal call to add shared ownership to logical region "
+              "(%x,%x,%x) which has already been deleted", 
+              handle.index_space.get_id(), handle.field_space.get_id(),
+              handle.tree_id)
+      }
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition Runtime::get_index_partition(Context ctx, 
                                                 IndexSpace parent, Color color)
     //--------------------------------------------------------------------------
@@ -12221,16 +12332,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::destroy_field_space(Context ctx, FieldSpace handle,
-                                      const bool unordered)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context destroy field space!");
-      ctx->destroy_field_space(handle, unordered);
-    }
-
-    //--------------------------------------------------------------------------
     size_t Runtime::get_field_size(Context ctx, FieldSpace handle, FieldID fid)
     //--------------------------------------------------------------------------
     {
@@ -12279,28 +12380,6 @@ namespace Legion {
             "Illegal dummy context create logical region!");
       return ctx->create_logical_region(forest, index_space, field_space,
                                         task_local); 
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::destroy_logical_region(Context ctx, LogicalRegion handle,
-                                         const bool unordered)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context destroy logical region!");
-      ctx->destroy_logical_region(handle, unordered); 
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::destroy_logical_partition(Context ctx,LogicalPartition handle,
-                                            const bool unordered)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context destroy logical partition!");
-      ctx->destroy_logical_partition(handle, unordered); 
     }
 
     //--------------------------------------------------------------------------
@@ -15182,6 +15261,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_shared_ownership(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_SHARED_OWNERSHIP,
+          REFERENCE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_index_space_node(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -16881,6 +16968,48 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       SingleTask::process_remote_profiling_response(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_shared_ownership(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      int kind;
+      derez.deserialize(kind);
+      switch (kind)
+      {
+        case 0:
+          {
+            IndexSpace handle;
+            derez.deserialize(handle);
+            create_shared_ownership(handle);
+            break;
+          }
+        case 1:
+          {
+            IndexPartition handle;
+            derez.deserialize(handle);
+            create_shared_ownership(handle);
+            break;
+          }
+        case 2:
+          {
+            FieldSpace handle;
+            derez.deserialize(handle);
+            create_shared_ownership(handle);
+            break;
+          }
+        case 3:
+          {
+            LogicalRegion handle;
+            derez.deserialize(handle);
+            create_shared_ownership(handle);
+            break;
+          }
+        default:
+          assert(false);
+      }
     }
 
     //--------------------------------------------------------------------------

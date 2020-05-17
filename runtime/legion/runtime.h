@@ -1771,6 +1771,11 @@ namespace Legion {
                                  const TaskArgument &arg, MapperID map_id);
       void process_mapper_task_result(const MapperTaskArgs *args); 
     public:
+      void create_shared_ownership(IndexSpace handle);
+      void create_shared_ownership(IndexPartition handle);
+      void create_shared_ownership(FieldSpace handle);
+      void create_shared_ownership(LogicalRegion handle);
+    public:
       IndexPartition get_index_partition(Context ctx, IndexSpace parent, 
                                          Color color);
       IndexPartition get_index_partition(IndexSpace parent, Color color);
@@ -1826,8 +1831,6 @@ namespace Legion {
                      const void *realm_point, TypeTag type_tag);
     public:
       FieldSpace create_field_space(Context ctx);
-      void destroy_field_space(Context ctx, FieldSpace handle,
-                               const bool unordered);
       size_t get_field_size(Context ctx, FieldSpace handle, FieldID fid);
       size_t get_field_size(FieldSpace handle, FieldID fid);
       void get_field_space_fields(Context ctx, FieldSpace handle,
@@ -1837,10 +1840,6 @@ namespace Legion {
     public:
       LogicalRegion create_logical_region(Context ctx, IndexSpace index,
                                           FieldSpace fields, bool task_local);
-      void destroy_logical_region(Context ctx, LogicalRegion handle,
-                                  const bool unordered);
-      void destroy_logical_partition(Context ctx, LogicalPartition handle,
-                                     const bool unordered);
     public:
       LogicalPartition get_logical_partition(Context ctx, LogicalRegion parent, 
                                              IndexPartition handle);
@@ -2132,6 +2131,7 @@ namespace Legion {
                               MapperID map_id, Processor source);
       void send_remote_task_replay(AddressSpaceID target, Serializer &rez);
       void send_remote_task_profiling_response(Processor tar, Serializer &rez);
+      void send_shared_ownership(AddressSpaceID target, Serializer &rez);
       void send_index_space_node(AddressSpaceID target, Serializer &rez);
       void send_index_space_request(AddressSpaceID target, Serializer &rez);
       void send_index_space_return(AddressSpaceID target, Serializer &rez);
@@ -2383,6 +2383,7 @@ namespace Legion {
       void handle_registration_callback(Deserializer &derez);
       void handle_remote_task_replay(Deserializer &derez);
       void handle_remote_task_profiling_response(Deserializer &derez);
+      void handle_shared_ownership(Deserializer &derez);
       void handle_index_space_node(Deserializer &derez, AddressSpaceID source);
       void handle_index_space_request(Deserializer &derez, 
                                       AddressSpaceID source);
