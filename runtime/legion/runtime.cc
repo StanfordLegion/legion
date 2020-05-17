@@ -6613,12 +6613,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     VirtualChannel::VirtualChannel(VirtualChannelKind kind, 
-        AddressSpaceID local_address_space, 
-        size_t max_message_size, LegionProfiler *prof)
+        AddressSpaceID local_address_space, size_t max_message_size, 
+        bool profile_outgoing, LegionProfiler *prof)
       : sending_buffer((char*)malloc(max_message_size)), 
         sending_buffer_size(max_message_size), 
         ordered_channel((kind != DEFAULT_VIRTUAL_CHANNEL) &&
                         (kind != THROUGHPUT_VIRTUAL_CHANNEL)), 
+        profile_outgoing_messages(profile_outgoing),
         request_priority((kind == THROUGHPUT_VIRTUAL_CHANNEL) ?
             LG_THROUGHPUT_MESSAGE_PRIORITY : (kind == UPDATE_VIRTUAL_CHANNEL) ?
             LG_LATENCY_DEFERRED_PRIORITY : LG_LATENCY_MESSAGE_PRIORITY),
@@ -6669,7 +6670,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     VirtualChannel::VirtualChannel(const VirtualChannel &rhs)
       : sending_buffer(NULL), sending_buffer_size(0), 
-        ordered_channel(false), request_priority(rhs.request_priority),
+        ordered_channel(false), profile_outgoing_messages(false),
+        request_priority(rhs.request_priority),
         response_priority(rhs.response_priority), profiler(NULL)
     //--------------------------------------------------------------------------
     {
@@ -6708,7 +6710,7 @@ namespace Legion {
         // Make sure we can at least get the meta-data into the buffer
         // Since there is no partial data we can fake the flush
         if ((sending_buffer_size - sending_index) <= header_size)
-          send_message(true/*complete*/, runtime, target, response, shutdown);
+          send_message(true/*complete*/, runtime, target, k, response,shutdown);
         // Now can package up the meta data
         packaged_messages++;
         *((MessageKind*)(sending_buffer+sending_index)) = k;
@@ -6722,7 +6724,7 @@ namespace Legion {
           unsigned remaining = sending_buffer_size - sending_index;
           if (remaining == 0)
             send_message(false/*complete*/, runtime, 
-                         target, response, shutdown);
+                         target, k, response, shutdown);
           remaining = sending_buffer_size - sending_index;
 #ifdef DEBUG_LEGION
           assert(remaining > 0); // should be space after the send
@@ -6751,12 +6753,12 @@ namespace Legion {
         sending_index += buffer_size;
       }
       if (flush)
-        send_message(true/*complete*/, runtime, target, response, shutdown);
+        send_message(true/*complete*/, runtime, target, k, response, shutdown);
     }
 
     //--------------------------------------------------------------------------
     void VirtualChannel::send_message(bool complete, Runtime *runtime,
-                                 Processor target, bool response, bool shutdown)
+               Processor target, MessageKind kind, bool response, bool shutdown)
     //--------------------------------------------------------------------------
     {
       // See if we need to switch the header file
@@ -6800,11 +6802,10 @@ namespace Legion {
       // see waits on message handlers
       // Note that we don't profile on shutdown messages or we would 
       // never actually finish running
-      if (!shutdown && (runtime->num_profiling_nodes > 0) && 
-          (runtime->find_address_space(target) < runtime->num_profiling_nodes))
+      if (profile_outgoing_messages && !shutdown)
       {
         Realm::ProfilingRequestSet requests;
-        LegionProfiler::add_message_request(requests, target);
+        LegionProfiler::add_message_request(requests, kind, target);
         last_message_event = RtEvent(target.spawn(
 #ifdef LEGION_SEPARATE_META_TASKS
               LG_TASK_ID + LG_MESSAGE_ID,
@@ -7134,8 +7135,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       bool has_shutdown = false;
-      // For profiling if we are doing it
-      unsigned long long start = 0, stop = 0;
       for (unsigned idx = 0; idx < num_messages; idx++)
       {
         // Pull off the message kind and the size of the message
@@ -7159,8 +7158,6 @@ namespace Legion {
         if (idx == (num_messages-1))
           assert(message_size == arglen);
 #endif
-        if (profiler != NULL)
-          start = Realm::Clock::current_time_in_nanoseconds();
         // Build the deserializer
         Deserializer derez(args,message_size);
         switch (kind)
@@ -8089,11 +8086,6 @@ namespace Legion {
           default:
             assert(false); // should never get here
         }
-        if (profiler != NULL)
-        {
-          stop = Realm::Clock::current_time_in_nanoseconds();
-          profiler->record_message(kind, start, stop);
-        }
         // Update the args and arglen
         args += message_size;
         arglen -= message_size;
@@ -8149,9 +8141,10 @@ namespace Legion {
     MessageManager::MessageManager(AddressSpaceID remote,
                                    Runtime *rt, size_t max_message_size,
                                    const Processor remote_util_group)
-      : remote_address_space(remote), runtime(rt), target(remote_util_group), 
-        channels((VirtualChannel*)
-                  malloc(MAX_NUM_VIRTUAL_CHANNELS*sizeof(VirtualChannel))) 
+      : channels((VirtualChannel*)
+                  malloc(MAX_NUM_VIRTUAL_CHANNELS*sizeof(VirtualChannel))), 
+        runtime(rt), remote_address_space(remote), target(remote_util_group), 
+        always_flush(remote < rt->num_profiling_nodes)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8161,13 +8154,14 @@ namespace Legion {
       for (unsigned idx = 0; idx < MAX_NUM_VIRTUAL_CHANNELS; idx++)
       {
         new (channels+idx) VirtualChannel((VirtualChannelKind)idx,
-            rt->address_space, max_message_size, runtime->profiler);
+          rt->address_space, max_message_size, always_flush, runtime->profiler);
       }
     }
 
     //--------------------------------------------------------------------------
     MessageManager::MessageManager(const MessageManager &rhs)
-      : remote_address_space(0), runtime(NULL),target(rhs.target),channels(NULL)
+      : channels(NULL), runtime(NULL), remote_address_space(0), 
+        target(rhs.target), always_flush(false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -8199,6 +8193,9 @@ namespace Legion {
            VirtualChannelKind channel, bool flush, bool response, bool shutdown)
     //--------------------------------------------------------------------------
     {
+      // Always flush for the profiler if we're doing that
+      if (!flush && always_flush)
+        flush = true;
       channels[channel].package_message(rez, kind, flush, runtime, 
                                         target, response, shutdown);
     }
@@ -8336,7 +8333,7 @@ namespace Legion {
       {
         LG_TASK_DESCRIPTIONS(task_descs);
         // Only need to see tasks less than this 
-        for (unsigned idx = 0; idx < LG_MESSAGE_ID; idx++)
+        for (unsigned idx = 0; idx < LG_BEGIN_SHUTDOWN_TASK_IDS; idx++)
         {
           if (runtime->outstanding_counts[idx] == 0)
             continue;
@@ -11188,7 +11185,6 @@ namespace Legion {
     void Runtime::initialize_legion_prof(const LegionConfiguration &config)
     //--------------------------------------------------------------------------
     {
-      LG_TASK_DESCRIPTIONS(lg_task_descriptions);
       // For the profiler we want to find as many "holes" in the execution
       // as possible in which to run profiler tasks so we can minimize the
       // overhead on the application. To do this we want profiler tasks to
@@ -11207,9 +11203,14 @@ namespace Legion {
 #endif
       const Processor target_proc_for_profiler = prof_procs.size() > 1 ?
         Processor::create_group(prof_procs) : prof_procs.front();
+      LG_TASK_DESCRIPTIONS(lg_task_descriptions);
+      LG_MESSAGE_DESCRIPTIONS(lg_message_descriptions);
+      LEGION_STATIC_ASSERT((LG_MESSAGE_ID+1) == LG_LAST_TASK_ID,
+          "LG_MESSAGE_ID must always be the last meta-task ID");
       profiler = new LegionProfiler(target_proc_for_profiler,
-                                    machine, this, LG_LAST_TASK_ID,
-                                    lg_task_descriptions,
+                                    machine, this, LG_MESSAGE_ID,
+                                    lg_task_descriptions, LAST_SEND_KIND, 
+                                    lg_message_descriptions,
                                     Operation::LAST_OP_KIND,
                                     Operation::op_names,
                                     config.serializer_type.c_str(),
@@ -11217,8 +11218,6 @@ namespace Legion {
                                     total_address_spaces,
                                     config.prof_footprint_threshold << 20,
                                     config.prof_target_latency);
-      LG_MESSAGE_DESCRIPTIONS(lg_message_descriptions);
-      profiler->record_message_kinds(lg_message_descriptions, LAST_SEND_KIND);
       MAPPER_CALL_NAMES(lg_mapper_calls);
       profiler->record_mapper_call_kinds(lg_mapper_calls, LAST_MAPPER_CALL);
 #ifdef DETAILED_LEGION_PROF
@@ -21448,13 +21447,23 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Some static asserts that need to hold true for the runtime to work
-      LEGION_STATIC_ASSERT(LEGION_MAX_RETURN_SIZE > 0);
-      LEGION_STATIC_ASSERT((1 << LEGION_FIELD_LOG2) == LEGION_MAX_FIELDS);
-      LEGION_STATIC_ASSERT(LEGION_MAX_NUM_NODES > 0);
-      LEGION_STATIC_ASSERT(LEGION_MAX_NUM_PROCS > 0);
-      LEGION_STATIC_ASSERT(LEGION_DEFAULT_MAX_TASK_WINDOW > 0);
-      LEGION_STATIC_ASSERT(LEGION_DEFAULT_MIN_TASKS_TO_SCHEDULE > 0);
-      LEGION_STATIC_ASSERT(LEGION_DEFAULT_MAX_MESSAGE_SIZE > 0); 
+      LEGION_STATIC_ASSERT(LEGION_MAX_RETURN_SIZE > 0, 
+          "Need a positive and non-zero value for LEGION_MAX_RETURN_SIZE");
+      LEGION_STATIC_ASSERT((1 << LEGION_FIELD_LOG2) == LEGION_MAX_FIELDS,
+          "LEGION_MAX_FIELDS must be a pwoer of 2");
+      LEGION_STATIC_ASSERT(LEGION_MAX_NUM_NODES > 0,
+          "Need a positive and non-zero value for LEGION_MAX_NUM_NODES");
+      LEGION_STATIC_ASSERT(LEGION_MAX_NUM_PROCS > 0,
+          "Need a positive and non-zero value for LEGION_MAX_NUM_PROCS");
+      LEGION_STATIC_ASSERT(LEGION_DEFAULT_MAX_TASK_WINDOW > 0,
+          "Need a positive and non-zero value for "
+          "LEGION_DEFAULT_MAX_TASK_WINDOW");
+      LEGION_STATIC_ASSERT(LEGION_DEFAULT_MIN_TASKS_TO_SCHEDULE > 0,
+          "Need a positive and non-zero value for "
+          "LEGION_DEFAULT_MIN_TASKS_TO_SCHEDULE");
+      LEGION_STATIC_ASSERT(LEGION_DEFAULT_MAX_MESSAGE_SIZE > 0,
+          "Need a positive and non-zero value for "
+          "LEGION_DEFAULT_MAX_MESSAGE_SIZE"); 
 
       // Register builtin reduction operators
       register_builtin_reduction_operators();
@@ -23645,10 +23654,10 @@ namespace Legion {
           assert(false); // should never get here
       }
 #ifdef DEBUG_LEGION
-      if (tid < LG_MESSAGE_ID)
+      if (tid < LG_BEGIN_SHUTDOWN_TASK_IDS)
         runtime->decrement_total_outstanding_tasks(tid, true/*meta*/);
 #else
-      if (tid < LG_MESSAGE_ID)
+      if (tid < LG_BEGIN_SHUTDOWN_TASK_IDS)
         runtime->decrement_total_outstanding_tasks();
 #endif
 #ifdef DEBUG_SHUTDOWN_HANG

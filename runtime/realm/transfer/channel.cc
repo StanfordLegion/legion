@@ -241,8 +241,8 @@ namespace Realm {
 	  p.indirect_port_idx = ii.indirect_port_idx;
 	  p.is_indirect_port = false;  // we'll set these below as needed
 	  p.local_bytes_total = 0;
-	  p.local_bytes_cons = 0;
-	  p.remote_bytes_total = size_t(-1);
+	  p.local_bytes_cons.store(0);
+	  p.remote_bytes_total.store(size_t(-1));
 	  p.ib_offset = ii.ib_offset;
 	  p.ib_size = ii.ib_size;
 	  switch(ii.port_type) {
@@ -297,8 +297,8 @@ namespace Realm {
 	    input_ports[p.indirect_port_idx].is_indirect_port = true;
 	  }
 	  p.local_bytes_total = 0;
-	  p.local_bytes_cons = 0;
-	  p.remote_bytes_total = size_t(-1);
+	  p.local_bytes_cons.store(0);
+	  p.remote_bytes_total.store(size_t(-1));
 	  p.ib_offset = oi.ib_offset;
 	  p.ib_size = oi.ib_size;
 
@@ -820,7 +820,7 @@ namespace Realm {
 	    write_seq = out_port->local_bytes_total;
 	    write_bytes = dst_bytes;
 	    out_port->local_bytes_total += dst_bytes;
-	    out_port->local_bytes_cons = out_port->local_bytes_total; // completion detection uses this
+	    out_port->local_bytes_cons.store(out_port->local_bytes_total); // completion detection uses this
 	  } else {
 	    // either no serialization or simultaneous serdez
 
@@ -1090,7 +1090,7 @@ namespace Realm {
 	    write_seq = out_port->local_bytes_total;
 	    write_bytes = act_bytes + write_pad_bytes;
 	    out_port->local_bytes_total += write_bytes;
-	    out_port->local_bytes_cons = out_port->local_bytes_total; // completion detection uses this
+	    out_port->local_bytes_cons.store(out_port->local_bytes_total); // completion detection uses this
 	  }
 
 	  Request* new_req = dequeue_request();
@@ -3641,7 +3641,7 @@ namespace Realm {
 	    for(std::map<int, size_t>::const_iterator it = git->second.pre_bytes_total.begin();
 		it != git->second.pre_bytes_total.end();
 		++it)
-	      xd->input_ports[it->first].remote_bytes_total = it->second;
+	      xd->input_ports[it->first].remote_bytes_total.store(it->second);
 	    for(std::map<int, SequenceAssembler>::iterator it = git->second.seq_pre_write.begin();
 		it != git->second.seq_pre_write.end();
 		++it)

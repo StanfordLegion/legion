@@ -460,7 +460,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LegionProfInstance::process_message(UniqueID op_id,
+    void LegionProfInstance::process_message(size_t id, UniqueID op_id,
             const Realm::ProfilingMeasurements::OperationTimeline &timeline,
             const Realm::ProfilingMeasurements::OperationProcessorUsage &usage,
             const Realm::ProfilingMeasurements::OperationEventWaits &waits)
@@ -472,7 +472,7 @@ namespace Legion {
       meta_infos.push_back(MetaInfo());
       MetaInfo &info = meta_infos.back();
       info.op_id = op_id;
-      info.lg_id = LG_MESSAGE_ID;
+      info.lg_id = id;
       info.proc_id = usage.proc.id;
       info.create = timeline.create_time;
       info.ready = timeline.ready_time;
@@ -597,21 +597,6 @@ namespace Legion {
       // use complete_time instead of end_time to include async work
       info.stop = timeline.complete_time;
       owner->update_footprint(sizeof(PartitionInfo), this);
-    }
-
-    //--------------------------------------------------------------------------
-    void LegionProfInstance::record_message(Processor proc, MessageKind kind, 
-                                            unsigned long long start,
-                                            unsigned long long stop)
-    //--------------------------------------------------------------------------
-    {
-      message_infos.push_back(MessageInfo());
-      MessageInfo &info = message_infos.back();
-      info.kind = kind;
-      info.start = start;
-      info.stop = stop;
-      info.proc_id = proc.id;
-      owner->update_footprint(sizeof(MessageInfo), this);
     }
 
     //--------------------------------------------------------------------------
@@ -823,11 +808,6 @@ namespace Legion {
       {
         serializer->serialize(*it);
       }
-      for (std::deque<MessageInfo>::const_iterator it = message_infos.begin();
-            it != message_infos.end(); it++)
-      {
-        serializer->serialize(*it);
-      }
       for (std::deque<MapperCallInfo>::const_iterator it = 
             mapper_call_infos.begin(); it != mapper_call_infos.end(); it++)
       {
@@ -871,7 +851,6 @@ namespace Legion {
       inst_usage_infos.clear();
       inst_timeline_infos.clear();
       partition_infos.clear();
-      message_infos.clear();
       mapper_call_infos.clear();
     }
 
@@ -1154,16 +1133,6 @@ namespace Legion {
         if (t_curr >= t_stop)
           return diff;
       }
-      while (!message_infos.empty())
-      {
-        MessageInfo &front = message_infos.front();
-        serializer->serialize(front);
-        diff += sizeof(front);
-        message_infos.pop_front();
-        const long long t_curr = Realm::Clock::current_time_in_microseconds();
-        if (t_curr >= t_stop)
-          return diff;
-      }
       while (!mapper_call_infos.empty())
       {
         MapperCallInfo &front = mapper_call_infos.front();
@@ -1204,6 +1173,9 @@ namespace Legion {
     LegionProfiler::LegionProfiler(Processor target, const Machine &machine,
                                    Runtime *rt, unsigned num_meta_tasks,
                                    const char *const *const task_descriptions,
+                                   unsigned num_message_kinds,
+                                   const char *const *const 
+                                                         message_descriptions,
                                    unsigned num_operation_kinds,
                                    const char *const *const 
                                                   operation_kind_descriptions,
@@ -1270,6 +1242,14 @@ namespace Legion {
         LegionProfDesc::MetaDesc meta_desc;
         meta_desc.kind = idx;
         meta_desc.name = task_descriptions[idx];
+        serializer->serialize(meta_desc);
+      }
+      // Messages are appended as kinds of meta descriptions
+      for (unsigned idx = 0; idx < num_message_kinds; idx++)
+      {
+        LegionProfDesc::MetaDesc meta_desc;
+        meta_desc.kind = num_meta_tasks + idx;
+        meta_desc.name = message_descriptions[idx];
         serializer->serialize(meta_desc);
       }
       for (unsigned idx = 0; idx < num_operation_kinds; idx++)
@@ -1665,12 +1645,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void LegionProfiler::add_message_request(
-                  Realm::ProfilingRequestSet &requests, Processor remote_target)
+     Realm::ProfilingRequestSet &requests,MessageKind k,Processor remote_target)
     //--------------------------------------------------------------------------
     {
       // Don't increment here, we'll increment on the remote side since we
       // that is where we know the profiler is going to handle the results
       ProfilingInfo info(NULL, LEGION_PROF_MESSAGE);
+      info.id = LG_MESSAGE_ID + k;
       info.op_id = implicit_provenance;
       Realm::ProfilingRequest &req = requests.add_request(remote_target,
                 LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
@@ -2021,8 +2002,8 @@ namespace Legion {
             response.get_measurement<
                   Realm::ProfilingMeasurements::OperationEventWaits>(waits);
             if (has_usage)
-              thread_local_profiling_instance->process_message(info->op_id,
-                  timeline, usage, waits);
+              thread_local_profiling_instance->process_message(info->id,
+                  info->op_id, timeline, usage, waits);
             break;
           }
 
@@ -2145,33 +2126,6 @@ namespace Legion {
       if (thread_local_profiling_instance == NULL)
         create_thread_local_profiling_instance();
       thread_local_profiling_instance->process_inst_create(op_id, inst, create);
-    }
-
-    //--------------------------------------------------------------------------
-    void LegionProfiler::record_message_kinds(const char *const *const
-                                  message_names, unsigned int num_message_kinds)
-    //--------------------------------------------------------------------------
-    {
-      for (unsigned idx = 0; idx < num_message_kinds; idx++)
-      {
-        LegionProfDesc::MessageDesc message_desc;
-        message_desc.kind = idx;
-        message_desc.name = message_names[idx];
-        serializer->serialize(message_desc);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void LegionProfiler::record_message(MessageKind kind, 
-                                        unsigned long long start,
-                                        unsigned long long stop)
-    //--------------------------------------------------------------------------
-    {
-      Processor current = Processor::get_executing_processor();
-      if (thread_local_profiling_instance == NULL)
-        create_thread_local_profiling_instance();
-      thread_local_profiling_instance->record_message(current, kind, 
-                                                      start, stop);
     }
 
     //--------------------------------------------------------------------------

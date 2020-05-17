@@ -48,12 +48,6 @@ namespace Legion {
 
       std::string delim = ", ";
 
-      ss << "MessageDesc {" 
-         << "id:" << MESSAGE_DESC_ID                << delim
-         << "kind:unsigned:"     << sizeof(unsigned) << delim
-         << "name:string:" << "-1"
-         << "}" << std::endl;
-
       ss << "MapperCallDesc {" 
          << "id:" << MAPPER_CALL_DESC_ID            << delim
          << "kind:unsigned:"     << sizeof(unsigned) << delim
@@ -340,14 +334,6 @@ namespace Legion {
          << "stop:timestamp_t:"       << sizeof(timestamp_t)
          << "}" << std::endl;
 
-      ss << "MessageInfo {"
-         << "id:" << MESSAGE_INFO_ID                           << delim
-         << "kind:MessageKind:"  << sizeof(MessageKind)        << delim
-         << "start:timestamp_t:" << sizeof(timestamp_t)        << delim
-         << "stop:timestamp_t:"  << sizeof(timestamp_t)        << delim
-         << "proc_id:ProcID:"    << sizeof(ProcID)
-         << "}" << std::endl;
-
       ss << "MapperCallInfo {"
          << "id:" << MAPPER_CALL_INFO_ID                          << delim
          << "kind:MappingCallKind:" << sizeof(MappingCallKind)    << delim
@@ -382,18 +368,6 @@ namespace Legion {
       lp_fwrite(f, preamble.c_str(), strlen(preamble.c_str()));
     }
 
-
-    //--------------------------------------------------------------------------
-    void LegionProfBinarySerializer::serialize(
-                                const LegionProfDesc::MessageDesc &message_desc)
-    //--------------------------------------------------------------------------
-    {
-      // XXX: For now, we will assume little endian
-      int ID = MESSAGE_DESC_ID;
-      lp_fwrite(f, (char*)&ID, sizeof(ID));
-      lp_fwrite(f, (char*)&(message_desc.kind), sizeof(message_desc.kind));
-      lp_fwrite(f, message_desc.name, strlen(message_desc.name) + 1);
-    }
 
     //--------------------------------------------------------------------------
     void LegionProfBinarySerializer::serialize(
@@ -944,19 +918,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfBinarySerializer::serialize(
-                            const LegionProfInstance::MessageInfo& message_info)
-    //--------------------------------------------------------------------------
-    {
-      int ID = MESSAGE_INFO_ID;
-      lp_fwrite(f, (char*)&ID, sizeof(ID));
-      lp_fwrite(f, (char*)&(message_info.kind),   sizeof(message_info.kind));
-      lp_fwrite(f, (char*)&(message_info.start),  sizeof(message_info.start));
-      lp_fwrite(f, (char*)&(message_info.stop),   sizeof(message_info.stop));
-      lp_fwrite(f, (char*)&(message_info.proc_id),sizeof(message_info.proc_id));
-    }
-
-    //--------------------------------------------------------------------------
-    void LegionProfBinarySerializer::serialize(
                      const LegionProfInstance::MapperCallInfo& mapper_call_info)
     //--------------------------------------------------------------------------
     {
@@ -1398,15 +1359,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfASCIISerializer::serialize(
-                                const LegionProfDesc::MessageDesc &message_desc)
-    //--------------------------------------------------------------------------
-    {
-      log_prof.print("Prof Message Desc %u %s", 
-                      message_desc.kind, message_desc.name);
-    }
-
-    //--------------------------------------------------------------------------
-    void LegionProfASCIISerializer::serialize(
                          const LegionProfDesc::MapperCallDesc &mapper_call_desc)
     //--------------------------------------------------------------------------
     {
@@ -1647,16 +1599,6 @@ namespace Legion {
                      partition_info.op_id, partition_info.part_op, 
                      partition_info.create, partition_info.create,
                      partition_info.start, partition_info.stop);
-    }
-
-    //--------------------------------------------------------------------------
-    void LegionProfASCIISerializer::serialize(
-                            const LegionProfInstance::MessageInfo& message_info)
-    //--------------------------------------------------------------------------
-    {
-      log_prof.print("Prof Message Info %u " IDFMT " %llu %llu",
-                     message_info.kind, message_info.proc_id, 
-                     message_info.start, message_info.stop);
     }
 
     //--------------------------------------------------------------------------

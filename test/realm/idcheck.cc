@@ -152,6 +152,17 @@ int main(int argc, const char *argv[])
     assert(hi.is_compqueue());
   }
 
+  // subgraph
+  {
+    ID lo = ID::make_subgraph(0, 0, 0);
+    ID hi = ID::make_subgraph(-1U, -1U, -1U);
+    assert(ranges.count(lo.id) == 0);
+    ranges[lo.id] = hi.id;
+    names[lo.id] = "subgraph";
+    assert(lo.is_subgraph());
+    assert(hi.is_subgraph());
+  }
+
   ID::IDType prev = 0;
   for(std::map<ID::IDType, ID::IDType>::const_iterator it = ranges.begin(); it != ranges.end(); it++) {
     if(verbose)

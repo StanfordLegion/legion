@@ -950,7 +950,7 @@ namespace Realm {
     }
 
     // creates an event that won't trigger until all input events have
-    /*static*/ Event GenEventImpl::merge_events(const std::vector<Event>& wait_for,
+    /*static*/ Event GenEventImpl::merge_events(span<const Event> wait_for,
 						bool ignore_faults)
     {
       if (wait_for.empty())
@@ -959,60 +959,40 @@ namespace Realm {
       //  interested in counts of 0, 1, or 2+ - also remember the first
       //  event we saw for the count==1 case
       int wait_count = 0;
-      Event first_wait;
-      for(std::vector<Event>::const_iterator it = wait_for.begin();
-	  (it != wait_for.end()) && (wait_count < 2);
-	  it++) {
+      size_t first_wait = 0;
+      for(size_t i = 0; (i < wait_for.size()) && (wait_count < 2); i++) {
 	bool poisoned = false;
-	if((*it).has_triggered_faultaware(poisoned)) {
+	if(wait_for[i].has_triggered_faultaware(poisoned)) {
           if(poisoned) {
 	    // if we're not ignoring faults, we need to propagate this fault, and can do
 	    //  so by just returning this poisoned event
 	    if(!ignore_faults) {
-	      log_poison.info() << "merging events - " << (*it) << " already poisoned";
-	      return *it;
+	      log_poison.info() << "merging events - " << wait_for[i] << " already poisoned";
+	      return wait_for[i];
 	    }
           }
 	} else {
-	  if(!wait_count) first_wait = *it;
+	  if(!wait_count) first_wait = i;
 	  wait_count++;
 	}
       }
       log_event.debug() << "merging events - at least " << wait_count << " not triggered";
 
-      // Avoid these optimizations if we are doing event graph tracing
-      // we also cannot return an input event directly in the (wait_count == 1) case
-      //  if we're ignoring faults
-#ifndef EVENT_GRAPH_TRACE
       // counts of 0 or 1 don't require any merging
       if(wait_count == 0) return Event::NO_EVENT;
-      if((wait_count == 1) && !ignore_faults) return first_wait;
-#else
-      if((wait_for.size() == 1) && !ignore_faults)
-        return *(wait_for.begin());
-#endif
+      if((wait_count == 1) && !ignore_faults) return wait_for[first_wait];
+
       // counts of 2+ require building a new event and a merger to trigger it
       GenEventImpl *event_impl = GenEventImpl::create_genevent();
       Event finish_event = event_impl->current_event();
       EventMerger *m = &(event_impl->merger);
 
-      m->prepare_merger(finish_event, ignore_faults, wait_for.size());
+      m->prepare_merger(finish_event, ignore_faults,
+			wait_for.size() - first_wait);
 
-#ifdef EVENT_GRAPH_TRACE
-      log_event_graph.info("Event Merge: (" IDFMT ",%d) %ld", 
-			   finish_event.id, finish_event.gen, wait_for.size());
-#endif
-
-      for(std::vector<Event>::const_iterator it = wait_for.begin();
-	  it != wait_for.end();
-	  it++) {
-	log_event.info() << "event merging: event=" << finish_event << " wait_on=" << *it;
-	m->add_precondition(*it);
-#ifdef EVENT_GRAPH_TRACE
-        log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ",%d)",
-                             finish_event.id, finish_event.gen,
-                             it->id, it->gen);
-#endif
+      for(size_t i = first_wait; i < wait_for.size(); i++) {
+	log_event.info() << "event merging: event=" << finish_event << " wait_on=" << wait_for[i];
+	m->add_precondition(wait_for[i]);
       }
 
       // once they're all added - arm the thing (it might go off immediately)

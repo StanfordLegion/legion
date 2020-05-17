@@ -159,7 +159,8 @@ namespace Legion {
     inline void* legion_alloc_aligned(size_t cnt)
     //--------------------------------------------------------------------------
     {
-      LEGION_STATIC_ASSERT((SIZE % ALIGNMENT) == 0);
+      LEGION_STATIC_ASSERT((SIZE % ALIGNMENT) == 0, 
+          "SIZE must be evenly divisible by ALIGNMENT");
       size_t alloc_size = cnt;
       if (!BYTES)
         alloc_size *= SIZE;

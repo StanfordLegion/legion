@@ -20,6 +20,7 @@
 
 #include "realm/realm_config.h"
 #include "realm/bytearray.h"
+#include "realm/utils.h"
 
 #include <stddef.h>
 #include <vector>
@@ -206,6 +207,10 @@ namespace Realm {
       static bool serialize_vector(S& s, const std::vector<T>& v);
       template <typename S>
       static bool deserialize_vector(S& s, std::vector<T>& v);
+      template <typename S, size_t Extent>
+      static bool serialize_span(S& s, span<T, Extent> sp);
+      template <typename S, size_t Extent>
+      static bool deserialize_span(S& s, span<T, Extent>& sp);
     };
 
     template <typename T>
@@ -219,6 +224,9 @@ namespace Realm {
       static bool serialize_vector(S& s, const std::vector<T>& v);
       template <typename S>
       static bool deserialize_vector(S& s, std::vector<T>& v);
+      template <typename S, size_t Extent>
+      static bool serialize_span(S& s, span<T, Extent> sp);
+      // no deserialization of spans for non-copy-serializable types
     };
 
     // support for static arrays
@@ -264,6 +272,12 @@ namespace Realm {
 
     template <typename S>
       bool deserialize(S& s, std::string& str);
+
+    template <typename S, typename T, size_t Extent>
+      bool serialize(S& s, span<T, Extent> sp);
+
+    template <typename S, typename T, size_t Extent>
+      bool deserialize(S& s, span<T, Extent>& sp);
 
     template <typename T>
     class PolymorphicSerdezIntfc;

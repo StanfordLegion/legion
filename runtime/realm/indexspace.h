@@ -490,6 +490,52 @@ namespace Realm {
   template <int N, typename T>
   std::ostream& operator<<(std::ostream& os, const IndexSpace<N,T>& p);
 
+  // a type-erased IndexSpace that can be used to avoid template explosion
+  //  at the cost of run-time indirection - avoid using this in
+  //  performance-critical code
+  class IndexSpaceGenericImpl;
+
+  class IndexSpaceGeneric {
+  public:
+    IndexSpaceGeneric();
+    IndexSpaceGeneric(const IndexSpaceGeneric& copy_from);
+
+    template <int N, typename T>
+    IndexSpaceGeneric(const IndexSpace<N,T>& copy_from);
+
+    ~IndexSpaceGeneric();
+
+    IndexSpaceGeneric& operator=(const IndexSpaceGeneric& copy_from);
+
+    template <int N, typename T>
+    IndexSpaceGeneric& operator=(const IndexSpace<N,T>& copy_from);
+
+    template <int N, typename T>
+    const IndexSpace<N,T>& as_index_space() const;
+
+    // only IndexSpace method exposed directly is copy
+    Event copy(const std::vector<CopySrcDstField> &srcs,
+	       const std::vector<CopySrcDstField> &dsts,
+	       const ProfilingRequestSet &requests,
+	       Event wait_on = Event::NO_EVENT) const;
+
+    template <int N, typename T>
+    Event copy(const std::vector<CopySrcDstField> &srcs,
+	       const std::vector<CopySrcDstField> &dsts,
+	       const std::vector<const typename CopyIndirection<N,T>::Base *> &indirects,
+	       const ProfilingRequestSet &requests,
+	       Event wait_on = Event::NO_EVENT) const;
+
+  protected:
+    IndexSpaceGenericImpl *impl;
+
+    // would like to use sizeof(IndexSpace<REALM_MAX_DIM, size_t>) here,
+    //  but that requires the specializations that are defined in the
+    //  include of indexspace.inl below...
+    static const size_t STORAGE_BYTES = (2*REALM_MAX_DIM + 2) * sizeof(size_t);
+    char raw_storage[STORAGE_BYTES] __attribute((aligned(__alignof__(size_t))));
+  };
+
   // instances are based around the concept of a "linearization" of some index space, which is
   //  responsible for mapping (valid) points in the index space into a hopefully-fairly-dense
   //  subset of [0,size) (for some size)
