@@ -1249,7 +1249,7 @@ namespace Legion {
       {
         LegionProfDesc::MetaDesc meta_desc;
         meta_desc.kind = num_meta_tasks + idx;
-        meta_desc.name = task_descriptions[idx];
+        meta_desc.name = message_descriptions[idx];
         serializer->serialize(meta_desc);
       }
       for (unsigned idx = 0; idx < num_operation_kinds; idx++)
