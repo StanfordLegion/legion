@@ -2143,8 +2143,11 @@ namespace Legion {
     protected:
       struct DisjointPartitionRefinement {
       public:
-        DisjointPartitionRefinement(IndexPartNode *p);
-        DisjointPartitionRefinement(const DisjointPartitionRefinement &rhs);
+        DisjointPartitionRefinement(EquivalenceSet *owner, IndexPartNode *p,
+                                    std::set<RtEvent> &applied_events);
+        DisjointPartitionRefinement(const DisjointPartitionRefinement &rhs,
+                                    std::set<RtEvent> &applied_events);
+        ~DisjointPartitionRefinement(void);
       public:
         inline const std::map<IndexSpaceNode*,EquivalenceSet*>& 
           get_children(void) const { return children; }
@@ -2155,6 +2158,7 @@ namespace Legion {
         void add_child(IndexSpaceNode *node, EquivalenceSet *child);
         EquivalenceSet* find_child(IndexSpaceNode *node) const;
       public:
+        const DistributedID owner_did;
         IndexPartNode *const partition;
       private:
         std::map<IndexSpaceNode*,EquivalenceSet*> children;

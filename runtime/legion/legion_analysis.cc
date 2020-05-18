@@ -7918,23 +7918,37 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     EquivalenceSet::DisjointPartitionRefinement::DisjointPartitionRefinement(
-                                                               IndexPartNode *p)
-      : partition(p), total_child_volume(0),
+     EquivalenceSet *owner, IndexPartNode *p, std::set<RtEvent> &applied_events)
+      : owner_did(owner->did), partition(p), total_child_volume(0),
         partition_volume(partition->get_union_expression()->get_volume())
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(partition->is_disjoint());
 #endif
+      WrapperReferenceMutator mutator(applied_events);
+      partition->add_nested_valid_ref(owner_did, &mutator);
     }
 
     //--------------------------------------------------------------------------
     EquivalenceSet::DisjointPartitionRefinement::DisjointPartitionRefinement(
-                                         const DisjointPartitionRefinement &rhs)
-      : partition(rhs.partition), children(rhs.get_children()),
-        total_child_volume(children.size()), partition_volume(rhs.get_volume())
+      const DisjointPartitionRefinement &rhs, std::set<RtEvent> &applied_events)
+      : owner_did(rhs.owner_did), partition(rhs.partition), 
+        children(rhs.get_children()), total_child_volume(children.size()), 
+        partition_volume(rhs.get_volume())
     //--------------------------------------------------------------------------
     {
+      WrapperReferenceMutator mutator(applied_events);
+      partition->add_nested_valid_ref(owner_did, &mutator);
+    }
+
+    //--------------------------------------------------------------------------
+    EquivalenceSet::DisjointPartitionRefinement::~DisjointPartitionRefinement(
+                                                                           void)
+    //--------------------------------------------------------------------------
+    {
+      if (partition->remove_nested_valid_ref(owner_did))
+        delete partition;
     }
 
     //--------------------------------------------------------------------------
@@ -8373,6 +8387,7 @@ namespace Legion {
       //assert(forest->subtract_index_spaces(expr, set_expr)->is_empty());
 #endif
       RtEvent refinement_done;
+      std::set<RtEvent> done_events;
       FieldMaskSet<EquivalenceSet> to_traverse, pending_to_traverse;
       std::map<EquivalenceSet*,IndexSpaceExpression*> to_traverse_exprs;
       {
@@ -8526,7 +8541,8 @@ namespace Legion {
                       // Make a new disjoint partition refinement that is
                       // a copy of the old one up to this point
                       DisjointPartitionRefinement *copy_refinement = 
-                        new DisjointPartitionRefinement(*(it->first));
+                        new DisjointPartitionRefinement(*(it->first),
+                                                        done_events);
                       to_add.insert(copy_refinement, non_overlap);
                       // Filter the fields down to just the overlap
                       it.filter(non_overlap);
@@ -8842,7 +8858,8 @@ namespace Legion {
                   node->parent->is_disjoint())
               {
                 DisjointPartitionRefinement *dis = 
-                  new DisjointPartitionRefinement(node->parent);
+                  new DisjointPartitionRefinement(this, 
+                            node->parent, done_events);
                 EquivalenceSet *child = 
                   add_pending_refinement(expr, disjoint_mask, node, source);
                 pending_to_traverse.insert(child, disjoint_mask);
@@ -8910,7 +8927,6 @@ namespace Legion {
       // trigger it now to signal to the next user that they can start
       if (deferral_event.exists())
         Runtime::trigger_event(deferral_event);
-      std::set<RtEvent> done_events;
       // Any fields which are still valid should be recorded
       if (!!ray_mask)
       {
@@ -9738,7 +9754,8 @@ namespace Legion {
         IndexPartition handle;
         derez.deserialize(handle);
         IndexPartNode *part = runtime->forest->get_node(handle);
-        DisjointPartitionRefinement *dis = new DisjointPartitionRefinement(part);
+        DisjointPartitionRefinement *dis = 
+          new DisjointPartitionRefinement(this, part, owner_preconditions);
         size_t num_children;
         derez.deserialize(num_children);
         for (unsigned idx2 = 0; idx2 < num_children; idx2++)
