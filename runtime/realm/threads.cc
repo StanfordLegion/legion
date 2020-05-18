@@ -46,10 +46,22 @@
 #include <sched.h>
 #endif
 
-#ifdef REALM_ON_WINWDOWS
+#ifdef REALM_ON_WINDOWS
 #include <windows.h>
 #include <processthreadsapi.h>
 #include <process.h>
+
+// Windows API uses DWORD_PTR for affinity masks
+#define HAVE_CPUSET
+typedef DWORD_PTR cpu_set_t;
+static void CPU_ZERO(DWORD_PTR *set)
+{
+  *set = 0;
+}
+static void CPU_SET(int index, DWORD_PTR *set)
+{
+  *set |= DWORD_PTR(1) << index;
+}
 #endif
 
 #ifdef REALM_USE_USER_THREADS
@@ -840,7 +852,7 @@ namespace Realm {
     // allocation better exist...
     assert(rsrv.allocation);
 
-#ifdef HAVE_CPUSET
+#if defined(HAVE_CPUSET) && !defined(REALM_ON_WINDOWS)
     if(rsrv.allocation->restrict_cpus)
       CHECK_PTHREAD( pthread_attr_setaffinity_np(&attr, 
 						 sizeof(rsrv.allocation->allowed_cpus),
@@ -916,6 +928,13 @@ namespace Realm {
 			  (stack_size +
 			   KernelThread::static_tls_size),
 			  winthread_entry, this, 0, 0);
+#ifdef HAVE_CPUSET
+    if(rsrv.allocation->restrict_cpus)
+      if(SetThreadAffinityMask(thread, rsrv.allocation->allowed_cpus) == 0)
+        log_thread.warning() << "failed to set affinity: thread=" << thread
+                             << " mask=" << std::hex << rsrv.allocation->allowed_cpus << std::dec
+                             << " error=" << GetLastError();
+#endif
 
     log_thread.info() << "thread created:" << this << " (" << rsrv.name << ") - handle " << thread;
 #endif
@@ -1824,6 +1843,101 @@ namespace Realm {
   }
 #endif
 
+#ifdef REALM_ON_WINDOWS
+  static CoreMap *extract_core_map_from_windows_api(bool hyperthread_sharing)
+  {
+    DWORD_PTR process_mask, system_mask;
+    GetProcessAffinityMask(GetCurrentProcess(), &process_mask, &system_mask);
+    if(process_mask == 0) {
+      log_thread.warning() << "process affinity mask is empty? (system = " << system_mask << ")";
+      return 0;
+    }
+    log_thread.debug() << "affinity_mask = " << process_mask << " system=" << system_mask;
+
+    PSYSTEM_LOGICAL_PROCESSOR_INFORMATION proc_info = NULL;
+    DWORD proc_info_size = 0;
+    DWORD rc;
+    rc = GetLogicalProcessorInformation(proc_info, &proc_info_size);
+    if((rc == TRUE) || (GetLastError() != ERROR_INSUFFICIENT_BUFFER) || (proc_info_size == 0)) {
+      log_thread.warning() << "unable to query processor info size";
+      return 0;
+    }
+    proc_info = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION)malloc(proc_info_size);
+    assert(proc_info != 0);
+    rc = GetLogicalProcessorInformation(proc_info, &proc_info_size);
+    assert(rc == TRUE);
+
+    // populate all_procs map
+    CoreMap *cm = new CoreMap;
+
+    for(int i = 0; (i < sizeof(DWORD_PTR)*8) && ((DWORD_PTR(1) << i) <= process_mask); i++)
+      if((process_mask & (DWORD_PTR(1) << i)) != 0) {
+        CoreMap::Proc *p = new CoreMap::Proc;
+        p->id = i;
+        p->domain = -1;  // fill in below
+        p->kernel_proc_ids.insert(i);
+        cm->all_procs[i] = p;
+      }
+
+    size_t num_infos = proc_info_size / sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION);
+    for(size_t i = 0; i < num_infos; i++) {
+      DWORD_PTR eff_mask = process_mask & proc_info[i].ProcessorMask;
+      if(eff_mask == 0) continue;
+
+      switch(proc_info[i].Relationship) {
+        case RelationNumaNode:
+        {
+          log_thread.debug() << "info[" << i << "]: eff_mask=" << proc_info[i].ProcessorMask << " numa node=" << proc_info[i].NumaNode.NodeNumber;
+          CoreMap::ProcMap& dm = cm->by_domain[proc_info[i].NumaNode.NodeNumber];
+          for(int i = 0; (i < sizeof(DWORD_PTR)*8) && ((DWORD_PTR(1) << i) <= eff_mask); i++)
+            if((eff_mask & (DWORD_PTR(1) << i)) != 0) {
+              CoreMap::Proc *p = cm->all_procs[i];
+              assert(p != 0);
+              p->domain = proc_info[i].NumaNode.NodeNumber;
+              dm[p->id] = p;
+            }
+          break;
+        }
+
+        case RelationProcessorCore:
+        {
+          log_thread.debug() << "info[" << i << "]: eff_mask=" << proc_info[i].ProcessorMask << " hyperthreads";
+
+          // these are hyperthreads - do we care?
+          if(hyperthread_sharing) {
+            for(int i = 0; (i < sizeof(DWORD_PTR)*8) && ((DWORD_PTR(1) << i) <= eff_mask); i++)
+              if((eff_mask & (DWORD_PTR(1) << i)) != 0) {
+                CoreMap::Proc *p1 = cm->all_procs[i];
+                for(int j = i + 1; (i < sizeof(DWORD_PTR)*8) && ((DWORD_PTR(1) << j) <= eff_mask); j++)
+                  if((eff_mask & (DWORD_PTR(1) << j)) != 0) {
+                    CoreMap::Proc *p2 = cm->all_procs[j];
+                    p1->shares_alu.insert(p2);
+                    p1->shares_fpu.insert(p2);
+                    p1->shares_ldst.insert(p2);
+
+                    p2->shares_alu.insert(p1);
+                    p2->shares_fpu.insert(p1);
+                    p2->shares_ldst.insert(p1);
+                  }
+              }
+          }
+          break;
+        }
+
+        default:
+        {
+          log_thread.debug() << "info[" << i << "]: eff_mask=" << proc_info[i].ProcessorMask << " rel=" << proc_info[i].Relationship;
+          break;
+        }
+      }
+    }
+
+    free(proc_info);
+
+    return cm;
+  }
+#endif
+
   /*static*/ CoreMap *CoreMap::discover_core_map(bool hyperthread_sharing)
   {
     // we'll try a number of different strategies to discover the local cores:
@@ -1877,7 +1991,15 @@ namespace Realm {
     }
 #endif
 
-    // 4) as a final fallback a single-core synthetic map
+    // 4) windows has an API for this
+#ifdef REALM_ON_WINDOWS
+    {
+      CoreMap *cm = extract_core_map_from_windows_api(hyperthread_sharing);
+      if(cm) return cm;
+    }
+#endif
+
+    // 5) as a final fallback a single-core synthetic map
     {
       CoreMap *cm = create_synthetic(1, 1);
       return cm;
