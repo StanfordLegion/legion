@@ -1141,7 +1141,9 @@ namespace Realm {
   //
 
   LocalCPUProcessor::LocalCPUProcessor(Processor _me, CoreReservationSet& crs,
-				       size_t _stack_size, bool _force_kthreads)
+				       size_t _stack_size, bool _force_kthreads,
+				       BackgroundWorkManager *bgwork,
+				       long long bgwork_timeslice)
     : LocalTaskProcessor(_me, Processor::LOC_PROC)
   {
     CoreReservationParameters params;
@@ -1158,13 +1160,18 @@ namespace Realm {
 #ifdef REALM_USE_USER_THREADS
     if(!_force_kthreads) {
       UserThreadTaskScheduler *sched = new UserThreadTaskScheduler(me, *core_rsrv);
-      // no config settings we want to tweak yet
+      if(bgwork_timeslice > 0)
+	sched->configure_bgworker(bgwork, bgwork_timeslice, -1 /*numa domain*/);
+
       set_scheduler(sched);
     } else
 #endif
     {
       KernelThreadTaskScheduler *sched = new KernelThreadTaskScheduler(me, *core_rsrv);
       sched->cfg_max_idle_workers = 3; // keep a few idle threads around
+      if(bgwork_timeslice > 0)
+	sched->configure_bgworker(bgwork, bgwork_timeslice, -1 /*numa domain*/);
+
       set_scheduler(sched);
     }
   }
@@ -1181,7 +1188,9 @@ namespace Realm {
   //
 
   LocalUtilityProcessor::LocalUtilityProcessor(Processor _me, CoreReservationSet& crs,
-					       size_t _stack_size, bool _force_kthreads, bool _pin_util_proc)
+					       size_t _stack_size, bool _force_kthreads, bool _pin_util_proc,
+					       BackgroundWorkManager *bgwork,
+					       long long bgwork_timeslice)
     : LocalTaskProcessor(_me, Processor::UTIL_PROC)
   {
     CoreReservationParameters params;
@@ -1206,13 +1215,17 @@ namespace Realm {
 #ifdef REALM_USE_USER_THREADS
     if(!_force_kthreads) {
       UserThreadTaskScheduler *sched = new UserThreadTaskScheduler(me, *core_rsrv);
-      // no config settings we want to tweak yet
+      if(bgwork_timeslice > 0)
+	sched->configure_bgworker(bgwork, bgwork_timeslice, -1 /*numa domain*/);
+
       set_scheduler(sched);
     } else
 #endif
     {
       KernelThreadTaskScheduler *sched = new KernelThreadTaskScheduler(me, *core_rsrv);
-      // no config settings we want to tweak yet
+      if(bgwork_timeslice > 0)
+	sched->configure_bgworker(bgwork, bgwork_timeslice, -1 /*numa domain*/);
+
       set_scheduler(sched);
     }
   }

@@ -699,6 +699,8 @@ namespace Realm {
     , concurrent_io_threads(1)  // Legion does not support values > 1 right now
     , sysmem_size(512 << 20), stack_size(2 << 20)
     , pin_util_procs(false)
+    , cpu_bgwork_timeslice(0)
+    , util_bgwork_timeslice(100 /*microseconds*/)
   {}
 
   CoreModule::~CoreModule(void)
@@ -718,6 +720,8 @@ namespace Realm {
       .add_option_int_units("-ll:csize", m->sysmem_size, 'm')
       .add_option_int_units("-ll:stacksize", m->stack_size, 'm', true /*binary*/, true /*keep*/)
       .add_option_bool("-ll:pin_util", m->pin_util_procs)
+      .add_option_int("-ll:cpu_bgwork", m->cpu_bgwork_timeslice)
+      .add_option_int("-ll:util_bgwork", m->util_bgwork_timeslice)
       .parse_command_line(cmdline);
 
     return m;
@@ -749,7 +753,9 @@ namespace Realm {
       ProcessorImpl *pi = new LocalUtilityProcessor(p, runtime->core_reservation_set(),
 						    stack_size,
 						    Config::force_kernel_threads,
-                                                    pin_util_procs);
+                                                    pin_util_procs,
+						    &runtime->bgwork,
+						    util_bgwork_timeslice);
       runtime->add_processor(pi);
     }
 
@@ -765,7 +771,9 @@ namespace Realm {
       Processor p = runtime->next_local_processor_id();
       ProcessorImpl *pi = new LocalCPUProcessor(p, runtime->core_reservation_set(),
 						stack_size,
-						Config::force_kernel_threads);
+						Config::force_kernel_threads,
+						&runtime->bgwork,
+						cpu_bgwork_timeslice);
       runtime->add_processor(pi);
     }
   }
@@ -2142,6 +2150,16 @@ namespace Realm {
 
       // Shutdown all the threads
 
+      // stop processors before most other things, as they may be helping with
+      //  background work
+      {
+	std::vector<ProcessorImpl *>& local_procs = nodes[Network::my_node_id].processors;
+	for(std::vector<ProcessorImpl *>::const_iterator it = local_procs.begin();
+	    it != local_procs.end();
+	    it++)
+	  (*it)->shutdown();
+      }
+
       // threads that cause inter-node communication have to stop first
       PartitioningOpQueue::stop_worker_threads();
       stop_dma_worker_threads();
@@ -2167,14 +2185,6 @@ namespace Realm {
 
       if(Config::profile_activemsg_handlers)
 	activemsg_handler_table.report_message_handler_stats();
-
-      {
-	std::vector<ProcessorImpl *>& local_procs = nodes[Network::my_node_id].processors;
-	for(std::vector<ProcessorImpl *>::const_iterator it = local_procs.begin();
-	    it != local_procs.end();
-	    it++)
-	  (*it)->shutdown();
-      }
 
 #ifdef EVENT_TRACING
       if(event_trace_file) {

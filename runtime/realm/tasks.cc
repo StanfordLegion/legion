@@ -465,14 +465,23 @@ namespace Realm {
   //
 
   ThreadedTaskScheduler::WorkCounter::WorkCounter(void)
-    : counter(0), wait_value(-1), condvar(mutex)
+    : counter(0), wait_value(-1), interrupt_flag(0), condvar(mutex)
   {}
 
   ThreadedTaskScheduler::WorkCounter::~WorkCounter(void)
   {}
 
+  void ThreadedTaskScheduler::WorkCounter::set_interrupt_flag(atomic<bool> *_interrupt_flag)
+  {
+    interrupt_flag = _interrupt_flag;
+  }
+
   void ThreadedTaskScheduler::WorkCounter::increment_counter(void)
   {
+    // set the interrupt flag if we have one
+    if(interrupt_flag)
+      interrupt_flag->store(true);
+
     // common case is that we'll bump the counter and nobody cares, so do
     //  this without a lock - if the LSB is set, we'll need to look at the
     //  wait value (and the RMW on counter makes that read synchronize
@@ -599,6 +608,8 @@ namespace Realm {
     , unassigned_worker_count(0)
     , wcu_task_queues(this)
     , wcu_resume_queue(this)
+    , bgworker_interrupt(false)
+    , max_bgwork_timeslice(0)
     , cfg_reuse_workers(true)
     , cfg_max_idle_workers(1)
     , cfg_min_active_workers(1)
@@ -639,6 +650,22 @@ namespace Realm {
     
     // un-hook up the work counter updates for this queue
     queue->remove_subscription(&wcu_task_queues);
+  }
+
+  void ThreadedTaskScheduler::configure_bgworker(BackgroundWorkManager *manager,
+						 long long max_timeslice,
+						 int numa_domain)
+  {
+    if(max_timeslice > 0) {
+      bgworker.set_manager(manager);
+      // convert from us to ns
+      bgworker.set_max_timeslice(max_timeslice * 1000);
+      bgworker.set_numa_domain(numa_domain);
+
+      work_counter.set_interrupt_flag(&bgworker_interrupt);
+    }
+
+    max_bgwork_timeslice = max_timeslice;
   }
 
   // helper for tracking/sanity-checking worker counts
@@ -1072,6 +1099,11 @@ namespace Realm {
 
   void ThreadedTaskScheduler::wait_for_work(long long old_work_counter)
   {
+    // clear the interrupt flag (if we use it) before we check the work counter
+    //  to avoid a missed interrupt
+    if(max_bgwork_timeslice > 0)
+      bgworker_interrupt.store(false);
+
     // try a check without letting go of our lock first
     if(work_counter.check_for_work(old_work_counter))
       return;
@@ -1079,7 +1111,13 @@ namespace Realm {
     // drop our scheduler lock while we wait
     lock.unlock();
 
-    work_counter.wait_for_work(old_work_counter);
+    if(max_bgwork_timeslice > 0) {
+      // try to be productive while we're waiting
+      bgworker.do_work(max_bgwork_timeslice, &bgworker_interrupt);
+    } else {
+      // just let the work counter wake us up when there's stuff to do
+      work_counter.wait_for_work(old_work_counter);
+    }
 
     lock.lock();
   }

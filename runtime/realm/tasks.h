@@ -29,6 +29,7 @@
 #include "realm/bytearray.h"
 #include "realm/atomics.h"
 #include "realm/mutex.h"
+#include "realm/bgwork.h"
 
 namespace Realm {
 
@@ -178,6 +179,10 @@ namespace Realm {
 
       virtual void remove_task_queue(TaskQueue *queue);
 
+      virtual void configure_bgworker(BackgroundWorkManager *manager,
+				      long long max_timeslice,
+				      int numa_domain);
+
       virtual void start(void) = 0;
       virtual void shutdown(void) = 0;
 
@@ -243,6 +248,8 @@ namespace Realm {
 	WorkCounter(void);
 	~WorkCounter(void);
 
+	void set_interrupt_flag(atomic<bool> *_interrupt_flag);
+
 	// called whenever new work is available
 	void increment_counter(void);
 
@@ -260,6 +267,7 @@ namespace Realm {
 	// 64-bit counters are used to avoid dealing with wrap-around cases
 	// consider trying to fit in 32 to use futexes?
 	atomic<long long> counter, wait_value;
+	atomic<bool> *interrupt_flag;
 	Mutex mutex;
 	CondVar condvar;
       };
@@ -295,6 +303,10 @@ namespace Realm {
 
       WorkCounterUpdater<TaskQueue> wcu_task_queues;
       WorkCounterUpdater<ResumableQueue> wcu_resume_queue;
+
+      BackgroundWorkManager::Worker bgworker;
+      atomic<bool> bgworker_interrupt;
+      long long max_bgwork_timeslice;
 
     public:
       // various configurable settings

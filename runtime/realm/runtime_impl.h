@@ -191,6 +191,7 @@ namespace Realm {
       int concurrent_io_threads;
       size_t sysmem_size, stack_size;
       bool pin_util_procs;
+      long long cpu_bgwork_timeslice, util_bgwork_timeslice;
     };
 
     REGISTER_REALM_MODULE(CoreModule);
