@@ -700,8 +700,8 @@ namespace Realm {
 
       void print(std::ostream& os) const;
 
-      virtual void enqueue_ready_xd(XferDes *xd);
-      virtual void wakeup_xd(XferDes *xd);
+      virtual void enqueue_ready_xd(XferDes *xd) = 0;
+      virtual void wakeup_xd(XferDes *xd) = 0;
 
     protected:
       void add_path(Memory src_mem, Memory dst_mem,
@@ -776,6 +776,9 @@ namespace Realm {
 				 XferDesKind *kind_ret = 0,
 				 unsigned *bw_ret = 0,
 				 unsigned *lat_ret = 0);
+
+      virtual void enqueue_ready_xd(XferDes *xd) { assert(0); }
+      virtual void wakeup_xd(XferDes *xd) { assert(0); }
     };
 
     template <typename S>
@@ -1036,66 +1039,6 @@ namespace Realm {
     //typedef std::priority_queue<XferDes*, std::vector<XferDes*>, CompareXferDes> PriorityXferDesQueue;
     typedef std::set<XferDes*, CompareXferDes> PriorityXferDesQueue;
 
-    class DMAThread {
-    public:
-      DMAThread(long _max_nr, XferDesQueue* _xd_queue, std::vector<Channel*>& _channels)
-	: enqueue_cond(enqueue_lock)
-      {
-        for (std::vector<Channel*>::iterator it = _channels.begin(); it != _channels.end(); it ++) {
-          channel_to_xd_pool[*it] = new PriorityXferDesQueue;
-        }
-        xd_queue = _xd_queue;
-        max_nr = _max_nr;
-        is_stopped = false;
-        requests = (Request**) calloc(max_nr, sizeof(Request*));
-        sleep = false;
-      }
-      DMAThread(long _max_nr, XferDesQueue* _xd_queue, Channel* _channel) 
-	: enqueue_cond(enqueue_lock)
-      {
-        channel_to_xd_pool[_channel] = new PriorityXferDesQueue;
-        xd_queue = _xd_queue;
-        max_nr = _max_nr;
-        is_stopped = false;
-        requests = (Request**) calloc(max_nr, sizeof(Request*));
-        sleep = false;
-      }
-      ~DMAThread() {
-        std::map<Channel*, PriorityXferDesQueue*>::iterator it;
-        for (it = channel_to_xd_pool.begin(); it != channel_to_xd_pool.end(); it++) {
-          delete it->second;
-        }
-        free(requests);
-      }
-      void dma_thread_loop();
-      // Thread start function that takes an input of DMAThread
-      // instance, and start to execute the requests from XferDes
-      // by using its channels.
-      static void* start(void* arg) {
-        DMAThread* dma_thread = (DMAThread*) arg;
-        dma_thread->dma_thread_loop();
-        return NULL;
-      }
-
-      void stop() {
-	enqueue_lock.lock();
-        is_stopped = true;
-	enqueue_cond.signal();
-	enqueue_lock.unlock();
-      }
-    public:
-      Mutex enqueue_lock;
-      CondVar enqueue_cond;
-      std::map<Channel*, PriorityXferDesQueue*> channel_to_xd_pool;
-      bool sleep;
-      bool is_stopped;
-    private:
-      // maximum allowed num of requests for a single
-      long max_nr;
-      Request** requests;
-      XferDesQueue* xd_queue;
-    };
-
     struct NotifyXferDesCompleteMessage {
       XferDesFence* fence;
 
@@ -1318,35 +1261,14 @@ namespace Realm {
         NODE_BITS = 16,
         INDEX_BITS = 32
       };
-      XferDesQueue(int num_dma_threads, bool pinned, CoreReservationSet& crs)
+      XferDesQueue()
       //: core_rsrv("DMA request queue", crs, CoreReservationParameters())
       {
-        if (pinned) {
-          CoreReservationParameters params;
-          params.set_num_cores(num_dma_threads);
-          params.set_alu_usage(params.CORE_USAGE_EXCLUSIVE);
-          params.set_fpu_usage(params.CORE_USAGE_EXCLUSIVE);
-          params.set_ldst_usage(params.CORE_USAGE_SHARED);
-          core_rsrv = new CoreReservation("DMA threads", crs, params);
-        } else {
-          core_rsrv = new CoreReservation("DMA threads", crs, CoreReservationParameters());
-        }
         // reserve the first several guid
         next_to_assign_idx.store(10);
-        num_threads = 0;
-        num_memcpy_threads = 0;
-        dma_threads = NULL;
       }
 
       ~XferDesQueue() {
-        delete core_rsrv;
-        // clean up the priority queues
-	queues_lock.lock();  // probably don't need lock here
-        std::map<Channel*, PriorityXferDesQueue*>::iterator it2;
-        for (it2 = queues.begin(); it2 != queues.end(); it2++) {
-          delete it2->second;
-        }
-	queues_lock.unlock();
       }
 
       XferDesID get_guid(NodeID execution_node)
@@ -1423,17 +1345,6 @@ namespace Realm {
         }
       }
 
-      void register_dma_thread(DMAThread* dma_thread)
-      {
-        std::map<Channel*, PriorityXferDesQueue*>::iterator it;
-        queues_lock.lock();
-        for(it = dma_thread->channel_to_xd_pool.begin(); it != dma_thread->channel_to_xd_pool.end(); it++) {
-          channel_to_dma_thread[it->first] = dma_thread;
-          queues[it->first] = new PriorityXferDesQueue;
-        }
-	queues_lock.unlock();
-      }
-
       void destroy_xferDes(XferDesID guid) {
 	XferDes *xd;
 	{
@@ -1450,25 +1361,16 @@ namespace Realm {
       // returns true if xd is ready, false if enqueue has been deferred
       bool enqueue_xferDes_local(XferDes* xd, bool add_to_queue = true);
 
-      bool dequeue_xferDes(DMAThread* dma_thread, bool wait_on_empty);
-
-      void start_worker(int count, int max_nr, ChannelManager* channel_manager,
+      void start_worker(ChannelManager* channel_manager,
 			BackgroundWorkManager *bgwork);
 
       void stop_worker();
 
     protected:
-      std::map<Channel*, DMAThread*> channel_to_dma_thread;
-      std::map<Channel*, PriorityXferDesQueue*> queues;
       std::map<XferDesID, XferDesWithUpdates> guid_to_xd;
       Mutex queues_lock;
       RWLock guid_lock;
       atomic<XferDesID> next_to_assign_idx;
-      CoreReservation* core_rsrv;
-      int num_threads, num_memcpy_threads;
-      DMAThread** dma_threads;
-      //MemcpyThread** memcpy_threads;
-      std::vector<Thread*> worker_threads;
     };
 
     XferDesQueue* get_xdq_singleton();
@@ -1476,9 +1378,7 @@ namespace Realm {
 #ifdef REALM_USE_CUDA
     void register_gpu_in_dma_systems(Cuda::GPU* gpu);
 #endif
-    void start_channel_manager(int count, bool pinned, int max_nr,
-			       CoreReservationSet& crs,
-			       BackgroundWorkManager *bgwork);
+    void start_channel_manager(BackgroundWorkManager *bgwork);
     void stop_channel_manager();
 
     void destroy_xfer_des(XferDesID _guid);

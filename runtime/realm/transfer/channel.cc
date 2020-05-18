@@ -2400,16 +2400,6 @@ namespace Realm {
 	os << "] }";
       }
 
-      void Channel::enqueue_ready_xd(XferDes *xd)
-      {
-	xferDes_queue->enqueue_xferDes_local(xd);
-      }
-
-      void Channel::wakeup_xd(XferDes *xd)
-      {
-	// do nothing - most channels didn't take xd off the list
-      }
-
       const std::vector<Channel::SupportedPath>& Channel::get_paths(void) const
       {
 	return paths;
@@ -3528,69 +3518,6 @@ namespace Realm {
 					      args.span_size);
       }
 
-      void DMAThread::dma_thread_loop()
-      {
-        log_new_dma.info("start dma thread loop");
-        while (!is_stopped) {
-          bool is_empty = true;
-          std::map<Channel*, PriorityXferDesQueue*>::iterator it;
-          for (it = channel_to_xd_pool.begin(); it != channel_to_xd_pool.end(); it++) {
-            if(!it->second->empty()) {
-              is_empty = false;
-              break;
-            }
-          }
-          xd_queue->dequeue_xferDes(this, is_empty);
-
-          for (it = channel_to_xd_pool.begin(); it != channel_to_xd_pool.end(); it++) {
-            it->first->pull();
-            long nr = it->first->available();
-            if (nr == 0)
-              continue;
-            std::vector<XferDes*> finish_xferdes;
-            PriorityXferDesQueue::iterator it2;
-            for (it2 = it->second->begin(); it2 != it->second->end(); it2++) {
-              assert((*it2)->channel == it->first);
-              // If we haven't mark started and we are the first xd, mark start
-              if ((*it2)->mark_start) {
-                (*it2)->dma_request->mark_started();
-                (*it2)->mark_start = false;
-              }
-              // Do nothing for empty copies
-              // if ((*it2)->bytes_total ==0) {
-              //   finish_xferdes.push_back(*it2);
-              //   continue;
-              // }
-	      long nr_submitted = it->first->progress_xd(*it2,
-							 std::min(nr, max_nr));
-              nr -= nr_submitted;
-              if ((*it2)->is_completed()) {
-                finish_xferdes.push_back(*it2);
-                //printf("finish_xferdes.size() = %lu\n", finish_xferdes.size());
-		continue;
-              }
-              if (nr == 0)
-                break;
-            }
-            while(!finish_xferdes.empty()) {
-              XferDes *xd = finish_xferdes.back();
-              finish_xferdes.pop_back();
-              it->second->erase(xd);
-              // We flush all changes into destination before mark this XferDes as completed
-              xd->flush();
-              log_new_dma.info("Finish XferDes : id(" IDFMT ")", xd->guid);
-              xd->mark_completed();
-              /*bool need_to_delete_dma_request = xd->mark_completed();
-              if (need_to_delete_dma_request) {
-                DmaRequest* dma_request = xd->dma_request;
-                delete dma_request;
-              }*/
-            }
-          }
-        }
-        log_new_dma.info("finish dma thread loop");
-      }
-
       XferDesQueue* get_xdq_singleton()
       {
         return xferDes_queue;
@@ -3674,13 +3601,11 @@ namespace Realm {
         dma_all_gpus.push_back(gpu);
       }
 #endif
-      void start_channel_manager(int count, bool pinned, int max_nr,
-                                 Realm::CoreReservationSet& crs,
-				 BackgroundWorkManager *bgwork)
+      void start_channel_manager(BackgroundWorkManager *bgwork)
       {
-        xferDes_queue = new XferDesQueue(count, pinned, crs);
+        xferDes_queue = new XferDesQueue;
         channel_manager = new ChannelManager;
-        xferDes_queue->start_worker(count, max_nr, channel_manager, bgwork);
+        xferDes_queue->start_worker(channel_manager, bgwork);
       }
       FileChannel* ChannelManager::create_file_channel(BackgroundWorkManager *bgwork) {
         assert(file_channel == NULL);
@@ -3726,117 +3651,37 @@ namespace Realm {
 	}
 
 	if(!add_to_queue) return true;
-
-        std::map<Channel*, DMAThread*>::iterator it;
-        it = channel_to_dma_thread.find(xd->channel);
-        assert(it != channel_to_dma_thread.end());
-        DMAThread* dma_thread = it->second;
-	dma_thread->enqueue_lock.lock();
-	queues_lock.lock();
-        std::map<Channel*, PriorityXferDesQueue*>::iterator it2;
-        it2 = queues.find(xd->channel);
-        assert(it2 != queues.end());
-        // push ourself into the priority queue
-        it2->second->insert(xd);
-	queues_lock.unlock();
-        if (dma_thread->sleep) {
-          dma_thread->sleep = false;
-	  dma_thread->enqueue_cond.broadcast();
-        }
-	dma_thread->enqueue_lock.unlock();
+	assert(0);
 
 	return true;
       }
 
-      bool XferDesQueue::dequeue_xferDes(DMAThread* dma_thread, bool wait_on_empty) {
-	dma_thread->enqueue_lock.lock();
-        std::map<Channel*, PriorityXferDesQueue*>::iterator it;
-        if (wait_on_empty) {
-          bool empty = true;
-          for(it = dma_thread->channel_to_xd_pool.begin(); it != dma_thread->channel_to_xd_pool.end(); it++) {
-	    queues_lock.lock();
-            std::map<Channel*, PriorityXferDesQueue*>::iterator it2;
-            it2 = queues.find(it->first);
-            assert(it2 != queues.end());
-            if (it2->second->size() > 0)
-              empty = false;
-	    queues_lock.unlock();
-          }
-
-          if (empty && !dma_thread->is_stopped) {
-            dma_thread->sleep = true;
-	    dma_thread->enqueue_cond.wait();
-          }
-        }
-
-        for(it = dma_thread->channel_to_xd_pool.begin(); it != dma_thread->channel_to_xd_pool.end(); it++) {
-	  queues_lock.lock();
-          std::map<Channel*, PriorityXferDesQueue*>::iterator it2;
-          it2 = queues.find(it->first);
-          assert(it2 != queues.end());
-          it->second->insert(it2->second->begin(), it2->second->end());
-          it2->second->clear();
-	  queues_lock.unlock();
-        }
-	dma_thread->enqueue_lock.unlock();
-        return true;
-      }
-
-      void XferDesQueue::start_worker(int count, int max_nr,
-				      ChannelManager* channel_manager,
+      void XferDesQueue::start_worker(ChannelManager* channel_manager,
 				      BackgroundWorkManager *bgwork)
       {
-        log_new_dma.info("XferDesQueue: start_workers");
-        // num_memcpy_threads = 0;
-#ifdef REALM_USE_CUDA
-        // num_threads ++;
-#endif
 	RuntimeImpl *r = get_runtime();
-        int idx = 0;
-        dma_threads = (DMAThread**) calloc(count, sizeof(DMAThread*));
-        // dma thread #1: memcpy
-        std::vector<Channel*> channels;
+
 	// TODO: numa-specific channels
         MemcpyChannel* memcpy_channel = channel_manager->create_memcpy_channel(bgwork);
 	GASNetChannel* gasnet_read_channel = channel_manager->create_gasnet_read_channel(bgwork);
 	GASNetChannel* gasnet_write_channel = channel_manager->create_gasnet_write_channel(bgwork);
 	AddressSplitChannel *addr_split_channel = channel_manager->create_addr_split_channel(bgwork);
-        //channels.push_back(memcpy_channel);
-        //channels.push_back(gasnet_read_channel);
-        //channels.push_back(gasnet_write_channel);
-	//channels.push_back(addr_split_channel);
 	r->add_dma_channel(memcpy_channel);
 	r->add_dma_channel(gasnet_read_channel);
 	r->add_dma_channel(gasnet_write_channel);
 	r->add_dma_channel(addr_split_channel);
 
-        if (count > 1) {
-          dma_threads[idx++] = new DMAThread(max_nr, xferDes_queue, channels);
-          channels.clear();
-          count --;
-        }
-        // dma thread #2: async xfer
 	RemoteWriteChannel *remote_channel = channel_manager->create_remote_write_channel(bgwork);
 	DiskChannel *disk_channel = channel_manager->create_disk_channel(bgwork);
 	FileChannel *file_channel = channel_manager->create_file_channel(bgwork);
-        //channels.push_back(remote_channel);
-	//channels.push_back(disk_read_channel);
-	//channels.push_back(disk_write_channel);
-	//channels.push_back(file_read_channel);
-	//channels.push_back(file_write_channel);
         r->add_dma_channel(remote_channel);
 	r->add_dma_channel(disk_channel);
 	r->add_dma_channel(file_channel);
 #ifdef REALM_USE_HDF5
 	HDF5Channel *hdf5_channel = channel_manager->create_hdf5_channel(bgwork);
-        //channels.push_back(hdf5_channel);
 	r->add_dma_channel(hdf5_channel);
 #endif
-        if (count > 1) {
-          dma_threads[idx++] = new DMAThread(max_nr, xferDes_queue, channels);
-          channels.clear();
-          count --;
-        }
+
 #ifdef REALM_USE_CUDA
         std::vector<Cuda::GPU*>::iterator it;
         for (it = dma_all_gpus.begin(); it != dma_all_gpus.end(); it ++) {
@@ -3844,10 +3689,6 @@ namespace Realm {
 	  GPUChannel *gpu_from_fb_channel = channel_manager->create_gpu_from_fb_channel(*it, bgwork);
 	  GPUChannel *gpu_in_fb_channel = channel_manager->create_gpu_in_fb_channel(*it, bgwork);
 	  GPUChannel *gpu_peer_fb_channel = channel_manager->create_gpu_peer_fb_channel(*it, bgwork);
-          //channels.push_back(gpu_to_fb_channel);
-          //channels.push_back(gpu_from_fb_channel);
-          //channels.push_back(gpu_in_fb_channel);
-          //channels.push_back(gpu_peer_fb_channel);
           r->add_dma_channel(gpu_to_fb_channel);
           r->add_dma_channel(gpu_from_fb_channel);
           r->add_dma_channel(gpu_in_fb_channel);
@@ -3855,26 +3696,6 @@ namespace Realm {
         }
 #endif
 
-        dma_threads[idx++] = new DMAThread(max_nr, xferDes_queue, channels);
-        num_threads = idx;
-        for (int i = 0; i < num_threads; i++) {
-          // register dma thread to XferDesQueue
-          register_dma_thread(dma_threads[i]);
-        }
-
-        Realm::ThreadLaunchParameters tlp;
-
-        for(int i = 0; i < num_threads; i++) {
-          log_new_dma.info("Create a DMA worker thread");
-          Realm::Thread *t = Realm::Thread::create_kernel_thread<DMAThread,
-                                            &DMAThread::dma_thread_loop>(dma_threads[i],
-  						                         tlp,
-  					                                 *core_rsrv,
-  					                                 0 /* default scheduler*/);
-          worker_threads.push_back(t);
-        }
-
-        assert(worker_threads.size() == (size_t)(num_threads));
       }
 
       void stop_channel_manager()
@@ -3885,19 +3706,6 @@ namespace Realm {
       }
 
       void XferDesQueue::stop_worker() {
-        for (int i = 0; i < num_threads; i++)
-          dma_threads[i]->stop();
-        // reap all the threads
-        for(std::vector<Realm::Thread *>::iterator it = worker_threads.begin();
-            it != worker_threads.end();
-            it++) {
-          (*it)->join();
-          delete (*it);
-        }
-        worker_threads.clear();
-        for (int i = 0; i < num_threads; i++)
-          delete dma_threads[i];
-        free(dma_threads);
       }
 
       void XferDes::DeferredXDEnqueue::defer(XferDesQueue *_xferDes_queue,

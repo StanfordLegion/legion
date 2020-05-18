@@ -3244,7 +3244,7 @@ namespace Realm {
       //log_dma.add_stream(&std::cerr, Logger::LEVEL_DEBUG, false, false);
       aio_context = new AsyncFileIOContext(256);
       aio_context->add_to_manager(bgwork);
-      start_channel_manager(count, pinned, max_nr, crs, bgwork);
+      start_channel_manager(bgwork);
       ib_req_queue = new PendingIBQueue();
     }
 
