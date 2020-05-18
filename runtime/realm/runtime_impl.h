@@ -33,6 +33,7 @@
 //  so we need their definitions here (not just declarations)
 #include "realm/event_impl.h"
 #include "realm/rsrv_impl.h"
+#include "realm/subgraph_impl.h"
 
 #include "realm/machine_impl.h"
 
@@ -73,6 +74,7 @@ namespace Realm {
       static Processor make_id(const ProcessorGroup& dummy, int owner, int index) { return ID::make_procgroup(owner, 0, index).convert<Processor>(); }
       static ID make_id(const SparsityMapImplWrapper& dummy, int owner, int index) { return ID::make_sparsity(owner, 0, index); }
       static CompletionQueue make_id(const CompQueueImpl& dummy, int owner, int index) { return ID::make_compqueue(owner, index).convert<CompletionQueue>(); }
+      static ID make_id(const SubgraphImpl& dummy, int owner, int index) { return ID::make_subgraph(owner, 0, index); }
       
       static LEAF_TYPE *new_leaf_node(IT first_index, IT last_index, 
 				      int owner, FreeList *free_list)
@@ -110,6 +112,7 @@ namespace Realm {
     typedef DynamicTableAllocator<ProcessorGroup, 10, 4> ProcessorGroupTableAllocator;
     typedef DynamicTableAllocator<SparsityMapImplWrapper, 10, 4> SparsityMapTableAllocator;
     typedef DynamicTableAllocator<CompQueueImpl, 10, 4> CompQueueTableAllocator;
+    typedef DynamicTableAllocator<SubgraphImpl, 10, 4> SubgraphTableAllocator;
 
     // for each of the ID-based runtime objects, we're going to have an
     //  implementation class and a table to look them up in
@@ -131,6 +134,7 @@ namespace Realm {
       // sparsity maps can be created by other nodes, so keep a
       //  map per-creator_node
       std::vector<atomic<DynamicTable<SparsityMapTableAllocator> *> > sparsity_maps;
+      std::vector<atomic<DynamicTable<SubgraphTableAllocator> *> > subgraphs;
     };
 
     class RemoteIDAllocator {
@@ -278,6 +282,7 @@ namespace Realm {
       SparsityMapImplWrapper *get_sparsity_impl(ID id);
       SparsityMapImplWrapper *get_available_sparsity_impl(NodeID target_node);
       CompQueueImpl *get_compqueue_impl(ID id);
+      SubgraphImpl *get_subgraph_impl(ID id);
 
 #ifdef DEADLOCK_TRACE
       void add_thread(const pthread_t *thread);
@@ -305,6 +310,7 @@ namespace Realm {
       // keep a free list for each node we allocate maps on (i.e. indexed
       //   by owner_node)
       std::vector<SparsityMapTableAllocator::FreeList *> local_sparsity_map_free_lists;
+      std::vector<SubgraphTableAllocator::FreeList *> local_subgraph_free_lists;
       RemoteIDAllocator remote_id_allocator;
 
       // legacy behavior if Runtime::run() is used

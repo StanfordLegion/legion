@@ -578,11 +578,6 @@ class Processor(object):
         task.proc = self
         self.tasks.append(task)
 
-    def add_message(self, message):
-        # treating messages like any other task
-        message.proc = self
-        self.tasks.append(message)
-
     def add_mapper_call(self, call):
         # treating mapper calls like any other task
         call.proc = self
@@ -1955,68 +1950,6 @@ class Instance(Base, TimeRange, HasInitiationDependencies):
         return output_str.format(str(hex(self.inst_id)),size_pretty)
 
 
-class MessageKind(StatObject):
-    __slots__ = ['message_id', 'name', 'color']
-    def __init__(self, message_id, name):
-        StatObject.__init__(self)
-        self.message_id = message_id
-        self.name = name
-        self.color = None
-
-    def __eq__(self, other):
-        return self.message_id == other.message_id
-
-    def assign_color(self, color):
-        assert self.color is None
-        self.color = color
-
-    def __repr__(self):
-        return self.name
-
-class Message(Base, TimeRange, HasNoDependencies):
-    __slots__ = TimeRange._abstract_slots + HasNoDependencies._abstract_slots + ['kind']
-    def __init__(self, kind, start, stop):
-        Base.__init__(self)
-        TimeRange.__init__(self, None, None, start, stop)
-        HasNoDependencies.__init__(self)
-        self.kind = kind
-
-    def get_color(self):
-        return self.kind.color
-
-    def active_time(self):
-        return self.total_time()
-
-    def application_time(self):
-        return 0
-
-    def meta_time(self):
-        return 0
-
-    def mapper_time(self):
-        return 0
-
-    def emit_tsv(self, tsv_file, base_level, max_levels, max_levels_ready,
-                 level, level_ready):
-        tsv_line = data_tsv_str(level = base_level + (max_levels - level),
-                                level_ready = None,
-                                ready = None,
-                                start = self.start,
-                                end = self.stop,
-                                color = self.get_color(),
-                                opacity = "1.0",
-                                title = repr(self),
-                                initiation = None,
-                                _in = None,
-                                out = None,
-                                children = None,
-                                parents = None,
-                                prof_uid = self.prof_uid)
-        tsv_file.write(tsv_line)
-
-    def __repr__(self):
-        return 'Message '+str(self.kind)
-
 class MapperCallKind(StatObject):
     __slots__ = ['mapper_call_kind', 'name', 'color']
     def __init__(self, mapper_call_kind, name):
@@ -2396,7 +2329,7 @@ class LFSR(object):
 class StatGatherer(object):
     __slots__ = [
         'state', 'application_tasks', 'meta_tasks', 'mapper_tasks',
-        'runtime_tasks', 'message_tasks'
+        'runtime_tasks'
     ]
     def __init__(self, state):
         self.state = state
@@ -2404,7 +2337,6 @@ class StatGatherer(object):
         self.meta_tasks = set()
         self.mapper_tasks = set()
         self.runtime_tasks = set()
-        self.message_tasks = set()
         for proc in itervalues(state.processors):
             for task in proc.tasks:
                 if isinstance(task, Task):
@@ -2418,9 +2350,6 @@ class StatGatherer(object):
                     task.kind.increment_calls(task.total_time(), proc)
                 elif isinstance(task, RuntimeCall):
                     self.runtime_tasks.add(task.kind)
-                    task.kind.increment_calls(task.total_time(), proc)
-                elif isinstance(task, Message):
-                    self.message_tasks.add(task.kind)
                     task.kind.increment_calls(task.total_time(), proc)
 
     def print_stats(self, verbose):
@@ -2446,14 +2375,6 @@ class StatGatherer(object):
                            reverse=True):
             kind.print_stats(verbose)
 
-        print("  -------------------------")
-        print("  Message Statistics")
-        print("  -------------------------")
-        for kind in sorted(self.message_tasks,
-                           key=lambda k: k.get_total_execution_time(),
-                           reverse=True):
-            kind.print_stats(verbose)
-
         if len(self.runtime_tasks) > 0:
             print("  -------------------------")
             print("  Runtime Statistics")
@@ -2469,10 +2390,9 @@ class State(object):
         'max_dim', 'processors', 'memories', 'mem_proc_affinity', 'channels',
         'task_kinds', 'variants', 'meta_variants', 'op_kinds', 'operations',
         'prof_uid_map', 'multi_tasks', 'first_times', 'last_times',
-        'last_time', 'message_kinds', 'messages', 'mapper_call_kinds',
-        'mapper_calls', 'runtime_call_kinds', 'runtime_calls', 'instances',
-        'index_spaces', 'partitions', 'logical_regions', 'field_spaces',
-        'fields', 'has_spy_data', 'spy_state', 'callbacks'
+        'last_time', 'mapper_call_kinds', 'mapper_calls', 'runtime_call_kinds', 
+        'runtime_calls', 'instances', 'index_spaces', 'partitions', 'logical_regions', 
+        'field_spaces', 'fields', 'has_spy_data', 'spy_state', 'callbacks'
     ]
     def __init__(self):
         self.max_dim = 3
@@ -2490,8 +2410,6 @@ class State(object):
         self.first_times = {}
         self.last_times = {}
         self.last_time = 0
-        self.message_kinds = {}
-        self.messages = {}
         self.mapper_call_kinds = {}
         self.mapper_calls = {}
         self.runtime_call_kinds = {}
@@ -2505,7 +2423,6 @@ class State(object):
         self.has_spy_data = False
         self.spy_state = None
         self.callbacks = {
-            "MessageDesc": self.log_message_desc,
             "MapperCallDesc": self.log_mapper_call_desc,
             "RuntimeCallDesc": self.log_runtime_call_desc,
             "MetaDesc": self.log_meta_desc,
@@ -2528,7 +2445,6 @@ class State(object):
             "InstUsageInfo": self.log_inst_usage,
             "InstTimelineInfo": self.log_inst_timeline,
             "PartitionInfo": self.log_partition_info,
-            "MessageInfo": self.log_message_info,
             "MapperCallInfo": self.log_mapper_call_info,
             "RuntimeCallInfo": self.log_runtime_call_info,
             "ProfTaskInfo": self.log_proftask_info,
@@ -2793,19 +2709,6 @@ class State(object):
     def log_op_desc(self, kind, name):
         if kind not in self.op_kinds:
             self.op_kinds[kind] = name
-
-    def log_message_desc(self, kind, name):
-        if kind not in self.message_kinds:
-            self.message_kinds[kind] = MessageKind(kind, name) 
-
-    def log_message_info(self, kind, proc_id, start, stop):
-        assert start <= stop
-        assert kind in self.message_kinds
-        if stop > self.last_time:
-            self.last_time = stop
-        message = Message(self.message_kinds[kind], start, stop)
-        proc = self.find_processor(proc_id)
-        proc.add_message(message)
 
     def log_mapper_call_desc(self, kind, name):
         if kind not in self.mapper_call_kinds:
@@ -3142,7 +3045,7 @@ class State(object):
     def assign_colors(self):
         # Subtract out some colors for which we have special colors
         num_colors = len(self.variants) + len(self.meta_variants) + \
-                     len(self.op_kinds) + len(self.message_kinds) + \
+                     len(self.op_kinds) + \
                      len(self.mapper_call_kinds) + len(self.runtime_call_kinds)
         # Use a LFSR to randomize these colors
         lsfr = LFSR(num_colors)
@@ -3171,8 +3074,7 @@ class State(object):
         for op in itervalues(self.operations):
             op.assign_color(op_colors)
         # Assign all the message kinds different colors
-        for kinds in (self.message_kinds,
-                      self.mapper_call_kinds,
+        for kinds in (self.mapper_call_kinds,
                       self.runtime_call_kinds):
             for kind in itervalues(kinds):
                 kind.assign_color(color_helper(lsfr.get_next(), num_colors))

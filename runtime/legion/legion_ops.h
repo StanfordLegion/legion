@@ -422,8 +422,8 @@ namespace Legion {
       static ApEvent merge_sync_preconditions(const TraceInfo &info,
                                 const std::vector<Grant> &grants,
                                 const std::vector<PhaseBarrier> &wait_barriers);
-      virtual void add_copy_profiling_request(unsigned src_index, 
-          unsigned dst_index, Realm::ProfilingRequestSet &reqeusts, bool fill);
+      virtual void add_copy_profiling_request(const OpProfilingResponse &resp,
+                                          Realm::ProfilingRequestSet &reqeusts);
       // Report a profiling result for this operation
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
                                         const Realm::ProfilingResponse &result,
@@ -1041,8 +1041,8 @@ namespace Legion {
       void check_privilege(void);
       void compute_parent_index(void);
       bool invoke_mapper(InstanceSet &mapped_instances);
-      virtual void add_copy_profiling_request(unsigned src_index, 
-          unsigned dst_index, Realm::ProfilingRequestSet &reqeusts, bool fill);
+      virtual void add_copy_profiling_request(const OpProfilingResponse &resp,
+                                          Realm::ProfilingRequestSet &reqeusts);
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
                                       const Realm::ProfilingResponse &response,
                                       const void *orig, size_t orig_length);
@@ -1233,8 +1233,8 @@ namespace Legion {
       int perform_conversion(unsigned idx, const RegionRequirement &req,
                              std::vector<MappingInstance> &output,
                              InstanceSet &targets, bool is_reduce = false);
-      virtual void add_copy_profiling_request(unsigned src_index,
-          unsigned dst_index, Realm::ProfilingRequestSet &reqeusts, bool fill);
+      virtual void add_copy_profiling_request(const OpProfilingResponse &resp,
+                                          Realm::ProfilingRequestSet &reqeusts);
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
                                       const Realm::ProfilingResponse &response,
                                       const void *orig, size_t orig_length);
@@ -1531,7 +1531,6 @@ namespace Legion {
         FIELD_SPACE_DELETION,
         FIELD_DELETION,
         LOGICAL_REGION_DELETION,
-        LOGICAL_PARTITION_DELETION,
       };
     public:
       DeletionOp(Runtime *rt);
@@ -1539,6 +1538,9 @@ namespace Legion {
       virtual ~DeletionOp(void);
     public:
       DeletionOp& operator=(const DeletionOp &rhs);
+    public:
+      inline void set_execution_precondition(ApEvent precondition)
+        { execution_precondition = precondition; }
     public:
       void initialize_index_space_deletion(InnerContext *ctx, IndexSpace handle,
                                    std::vector<IndexPartition> &sub_partitions,
@@ -1557,9 +1559,6 @@ namespace Legion {
       void initialize_logical_region_deletion(InnerContext *ctx, 
                                               LogicalRegion handle,
                                               const bool unordered);
-      void initialize_logical_partition_deletion(InnerContext *ctx, 
-                                                 LogicalPartition handle,
-                                                 const bool unordered);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1575,12 +1574,12 @@ namespace Legion {
                                          std::set<RtEvent> &applied) const;
     protected:
       DeletionKind kind;
+      ApEvent execution_precondition;
       IndexSpace index_space;
       IndexPartition index_part;
       std::vector<IndexPartition> sub_partitions;
       FieldSpace field_space;
       LogicalRegion logical_region;
-      LogicalPartition logical_part;
       std::set<FieldID> free_fields;
       std::vector<FieldID> local_fields;
       std::vector<FieldID> global_fields;
@@ -1590,6 +1589,7 @@ namespace Legion {
       std::vector<bool> returnable_privileges;
       std::vector<RegionRequirement> deletion_requirements;
       LegionVector<VersionInfo>::aligned version_infos;
+      std::set<RtEvent> map_applied_conditions;
     }; 
 
     /**
@@ -1766,8 +1766,8 @@ namespace Legion {
                    get_acquired_instances_ref(void);
       virtual void record_reference_mutation_effect(RtEvent event);
     protected:
-      virtual void add_copy_profiling_request(unsigned src_index,
-          unsigned dst_index, Realm::ProfilingRequestSet &reqeusts, bool fill);
+      virtual void add_copy_profiling_request(const OpProfilingResponse &resp,
+                                          Realm::ProfilingRequestSet &reqeusts);
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
                                       const Realm::ProfilingResponse &response,
                                       const void *orig, size_t orig_length);
@@ -1820,11 +1820,13 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
     public:
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_mapping(void);
       virtual unsigned find_parent_index(unsigned idx);
 #ifdef LEGION_SPY
       virtual void trigger_complete(void);
 #endif
     protected:
+      std::set<RtEvent> map_applied_conditions;
       unsigned parent_idx;
     };
 
@@ -1904,8 +1906,8 @@ namespace Legion {
       void check_acquire_privilege(void);
       void compute_parent_index(void);
       void invoke_mapper(void);
-      virtual void add_copy_profiling_request(unsigned src_index,
-          unsigned dst_index, Realm::ProfilingRequestSet &reqeusts, bool fill);
+      virtual void add_copy_profiling_request(const OpProfilingResponse &resp,
+                                          Realm::ProfilingRequestSet &reqeusts);
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
                                       const Realm::ProfilingResponse &response,
                                       const void *orig, size_t orig_length);
@@ -2016,8 +2018,8 @@ namespace Legion {
       void check_release_privilege(void);
       void compute_parent_index(void);
       void invoke_mapper(void);
-      virtual void add_copy_profiling_request(unsigned src_index,
-          unsigned dst_index, Realm::ProfilingRequestSet &reqeusts, bool fill);
+      virtual void add_copy_profiling_request(const OpProfilingResponse &resp,
+                                          Realm::ProfilingRequestSet &reqeusts);
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
                                       const Realm::ProfilingResponse &response,
                                       const void *orig, size_t orig_length);
@@ -2950,8 +2952,8 @@ namespace Legion {
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                    get_acquired_instances_ref(void);
       virtual void record_reference_mutation_effect(RtEvent event);
-      virtual void add_copy_profiling_request(unsigned src_index,
-          unsigned dst_index, Realm::ProfilingRequestSet &reqeusts, bool fill);
+      virtual void add_copy_profiling_request(const OpProfilingResponse &resp,
+                                          Realm::ProfilingRequestSet &reqeusts);
       // Report a profiling result for this operation
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
                                         const Realm::ProfilingResponse &result,
@@ -3090,8 +3092,8 @@ namespace Legion {
       virtual int get_depth(void) const;
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                                        get_acquired_instances_ref(void);
-      virtual void add_copy_profiling_request(unsigned src_index,
-          unsigned dst_index, Realm::ProfilingRequestSet &reqeusts, bool fill);
+      virtual void add_copy_profiling_request(const OpProfilingResponse &resp,
+                                          Realm::ProfilingRequestSet &reqeusts);
     public:
       virtual bool has_prepipeline_stage(void) const
         { return need_prepipeline_stage; }
@@ -3311,8 +3313,8 @@ namespace Legion {
                                   const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
-      virtual void add_copy_profiling_request(unsigned src_index,
-          unsigned dst_index, Realm::ProfilingRequestSet &reqeusts, bool fill);
+      virtual void add_copy_profiling_request(const OpProfilingResponse &resp,
+                                          Realm::ProfilingRequestSet &reqeusts);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
     protected:
@@ -3426,9 +3428,8 @@ namespace Legion {
                                   const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking) = 0;
-
-      virtual void add_copy_profiling_request(unsigned src_index,
-          unsigned dst_index, Realm::ProfilingRequestSet &reqeusts, bool fill);
+      virtual void add_copy_profiling_request(const OpProfilingResponse &resp,
+                                          Realm::ProfilingRequestSet &reqeusts);
       virtual void report_uninitialized_usage(const unsigned index,
                                               LogicalRegion handle,
                                               const RegionUsage usage,

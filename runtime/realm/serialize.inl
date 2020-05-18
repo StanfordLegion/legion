@@ -453,6 +453,30 @@ namespace Realm {
 	                   s.extract_bytes(&v[0], sizeof(T) * c)));
     }
 
+    template <typename T>
+    template <typename S, size_t Extent>
+    /*static*/ bool SerializationHelper<T,true>::serialize_span(S& s, span<T, Extent> sp)
+    {
+      size_t c = sp.size();
+      return ((s << c) &&
+	      s.enforce_alignment(__alignof__(T)) &&
+	      s.append_bytes(sp.data(), sizeof(T) * c));
+    }
+
+    template <typename T>
+    template <typename S, size_t Extent>
+    /*static*/ bool SerializationHelper<T,true>::deserialize_span(S& s, span<T, Extent>& sp)
+    {
+      size_t c;
+      if(!(s >> c)) return false;
+      // TODO: sanity-check size?
+      if(!s.enforce_alignment(__alignof__(T))) return false;
+      T *data = static_cast<T *>(s.peek_bytes(sizeof(T) * c));
+      if(!data || !s.extract_bytes(0, sizeof(T) * c)) return false;
+      sp = span<T, Extent>(data, c);
+      return true;
+    }
+
 
     ////////////////////////////////////////////////////////////////////////
     //
@@ -496,6 +520,17 @@ namespace Realm {
       v.resize(c);
       for(size_t i = 0; i < c; i++)
 	if(!deserialize(s, v[i])) return false;
+      return true;
+    }
+
+    template <typename T>
+    template <typename S, size_t Extent>
+    /*static*/ bool SerializationHelper<T,false>::serialize_span(S& s, span<T, Extent> sp)
+    {
+      size_t c = sp.size();
+      if(!(s << c)) return false;
+      for(size_t i = 0; i < c; i++)
+	if(!serialize(s, sp[i])) return false;
       return true;
     }
 
@@ -648,6 +683,20 @@ namespace Realm {
       str.assign(static_cast<const char *>(p), len);
       return s.extract_bytes(0, len);
     }      
+
+    // span works like vector...
+    template <typename S, typename T, size_t Extent>
+    bool serialize(S& s, span<T, Extent> sp)
+    {
+      return SerializationHelper<T, is_copy_serializable::test<T>::value>::serialize_span(s, sp);
+    }
+
+    // except deserialize is only going to work for copy-serializable things
+    template <typename S, typename T, size_t Extent>
+    bool deserialize(S& s, span<T, Extent>& sp)
+    {
+      return SerializationHelper<T, is_copy_serializable::test<T>::value>::deserialize_span(s, sp);
+    }
 
 
     ////////////////////////////////////////////////////////////////////////

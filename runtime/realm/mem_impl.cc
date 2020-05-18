@@ -375,10 +375,11 @@ namespace Realm {
 
     // attempt to allocate storage for the specified instance
     MemoryImpl::AllocationResult MemoryImpl::allocate_instance_storage(RegionInstance i,
-							   size_t bytes,
-							   size_t alignment,
-							   Event precondition,
-							   size_t offset /*=0*/)
+								       size_t bytes,
+								       size_t alignment,
+								       bool need_alloc_result,
+								       Event precondition,
+								       size_t offset /*=0*/)
     {
       // all allocation requests are handled by the memory's owning node for
       //  now - local caching might be possible though
@@ -388,7 +389,10 @@ namespace Realm {
 	amsg->memory = me;
 	amsg->inst = i;
 	amsg->bytes = bytes;
+	// this is a 64->32 bit copy, so ensure nothing was lost in truncation
 	amsg->alignment = alignment;
+	assert(amsg->alignment == alignment);
+	amsg->need_alloc_result = need_alloc_result;
 	amsg->precondition = precondition;
 	assert(offset==0);
 	amsg.commit();
@@ -426,7 +430,9 @@ namespace Realm {
       } else {
 	// defer allocation attempt
 	inst->metadata.inst_offset = RegionInstanceImpl::INSTOFFSET_DELAYEDALLOC;
-	inst->deferred_create.defer(inst, this, bytes, alignment, precondition);
+	inst->deferred_create.defer(inst, this,
+				    bytes, alignment, need_alloc_result,
+				    precondition);
 	return ALLOC_DEFERRED /*asynchronous notification*/;
       }
 
@@ -440,7 +446,8 @@ namespace Realm {
 					       inst_offset);
       }
 
-      if(result != ALLOC_DEFERRED) {
+      // if we needed an alloc result, send deferred responses too
+      if((result != ALLOC_DEFERRED) || need_alloc_result) {
 	NodeID creator_node = ID(i).instance_creator_node();
 	if(creator_node == Network::my_node_id) {
 	  // local notification of result
@@ -633,6 +640,7 @@ namespace Realm {
     // should only be called by RegionInstance::DeferredCreate
     void MemoryImpl::deferred_creation_triggered(RegionInstanceImpl *inst,
 						 size_t bytes, size_t alignment,
+						 bool need_alloc_result,
 						 bool poisoned)
     {
       AllocationResult result;
@@ -671,7 +679,8 @@ namespace Realm {
 	}
       }
 	    
-      if(result != ALLOC_DEFERRED) {
+      // if we needed an alloc result, send deferred responses too
+      if((result != ALLOC_DEFERRED) || need_alloc_result) {
 	NodeID creator_node = ID(inst->me).instance_creator_node();
 	if(creator_node == Network::my_node_id) {
 	  // local notification of result
@@ -996,7 +1005,7 @@ namespace Realm {
 	  NodeID creator_node = ID(it->first->me).instance_creator_node();
 	  if(creator_node == Network::my_node_id) {
 	    // local notification of result
-	    it->first->notify_allocation(ALLOC_INSTANT_SUCCESS, it->second);
+	    it->first->notify_allocation(ALLOC_EVENTUAL_SUCCESS, it->second);
 	  } else {
 	    // we have to at least have the correct offset on our local
 	    //  instance impl (even if we don't have the rest of the metadata)
@@ -1006,7 +1015,7 @@ namespace Realm {
 	    ActiveMessage<MemStorageAllocResponse> amsg(creator_node);
 	    amsg->inst = it->first->me;
 	    amsg->offset = it->second;
-	    amsg->result = ALLOC_INSTANT_SUCCESS;
+	    amsg->result = ALLOC_EVENTUAL_SUCCESS;
 	    amsg.commit();
 	  }
 	}
@@ -1018,7 +1027,7 @@ namespace Realm {
 	  NodeID creator_node = ID((*it)->me).instance_creator_node();
 	  if(creator_node == Network::my_node_id) {
 	    // local notification of result
-	    (*it)->notify_allocation(ALLOC_INSTANT_FAILURE,
+	    (*it)->notify_allocation(ALLOC_EVENTUAL_FAILURE,
 				     RegionInstanceImpl::INSTOFFSET_FAILED);
 	  } else {
 	    // we have to at least have the correct offset on our local
@@ -1029,7 +1038,7 @@ namespace Realm {
 	    ActiveMessage<MemStorageAllocResponse> amsg(creator_node);
 	    amsg->inst = (*it)->me;
 	    amsg->offset = RegionInstanceImpl::INSTOFFSET_FAILED;
-	    amsg->result = ALLOC_INSTANT_FAILURE;
+	    amsg->result = ALLOC_EVENTUAL_FAILURE;
 	    amsg.commit();
 	  }
 	}
@@ -1208,6 +1217,7 @@ namespace Realm {
 
     impl->allocate_instance_storage(args.inst,
 				    args.bytes, args.alignment,
+				    args.need_alloc_result,
 				    args.precondition);
   }
 

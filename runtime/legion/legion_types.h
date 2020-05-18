@@ -358,6 +358,7 @@ namespace Legion {
       LG_DEFER_MAKE_OWNER_TASK_ID,
       LG_DEFER_MERGE_OR_FORWARD_TASK_ID,
       LG_DEFER_EQ_RESPONSE_TASK_ID,
+      LG_DEFER_REMOVE_EQ_REF_TASK_ID,
       LG_DEFER_REMOTE_REF_UPDATE_TASK_ID,
       LG_COPY_FILL_AGGREGATION_TASK_ID,
       LG_COPY_FILL_DELETION_TASK_ID,
@@ -383,8 +384,12 @@ namespace Legion {
       LG_MALLOC_INSTANCE_TASK_ID,
       LG_FREE_INSTANCE_TASK_ID,
       LG_YIELD_TASK_ID,
-      LG_MESSAGE_ID, // These two must be the last two
-      LG_RETRY_SHUTDOWN_TASK_ID,
+      // this marks the beginning of task IDs tracked by the shutdown algorithm
+      LG_BEGIN_SHUTDOWN_TASK_IDS,
+      LG_RETRY_SHUTDOWN_TASK_ID = LG_BEGIN_SHUTDOWN_TASK_IDS,
+      // Message ID goes at the end so we can append additional 
+      // message IDs here for the profiler
+      LG_MESSAGE_ID,
       LG_LAST_TASK_ID, // This one should always be last
     }; 
 
@@ -488,6 +493,7 @@ namespace Legion {
         "Defer Make Owner",                                       \
         "Defer Merge or Forward",                                 \
         "Defer Equivalence Set Response",                         \
+        "Defer Remove Equivalence Set Expression References",     \
         "Defer Remote Reference Update",                          \
         "Copy Fill Aggregation",                                  \
         "Copy Fill Deletion",                                     \
@@ -513,8 +519,8 @@ namespace Legion {
         "Malloc Instance",                                        \
         "Free Instance",                                          \
         "Yield",                                                  \
-        "Remote Message",                                         \
         "Retry Shutdown",                                         \
+        "Remote Message",                                         \
       };
 
     enum MappingCallKind {
@@ -676,6 +682,7 @@ namespace Legion {
       SEND_REGISTRATION_CALLBACK,
       SEND_REMOTE_TASK_REPLAY,
       SEND_REMOTE_TASK_PROFILING_RESPONSE,
+      SEND_SHARED_OWNERSHIP,
       SEND_INDEX_SPACE_NODE,
       SEND_INDEX_SPACE_REQUEST,
       SEND_INDEX_SPACE_RETURN,
@@ -709,7 +716,6 @@ namespace Legion {
       SEND_FIELD_SPACE_INFOS_RESPONSE,
       SEND_FIELD_ALLOC_REQUEST,
       SEND_FIELD_SIZE_UPDATE,
-      SEND_FIELD_SPACE_TOP_ALLOC,
       SEND_FIELD_FREE,
       SEND_FIELD_SPACE_LAYOUT_INVALIDATION,
       SEND_LOCAL_FIELD_ALLOC_REQUEST,
@@ -723,7 +729,6 @@ namespace Legion {
       INDEX_PARTITION_DESTRUCTION_MESSAGE,
       FIELD_SPACE_DESTRUCTION_MESSAGE,
       LOGICAL_REGION_DESTRUCTION_MESSAGE,
-      LOGICAL_PARTITION_DESTRUCTION_MESSAGE,
       INDIVIDUAL_REMOTE_COMPLETE,
       INDIVIDUAL_REMOTE_COMMIT,
       SLICE_REMOTE_MAPPED,
@@ -855,6 +860,7 @@ namespace Legion {
         "Send Registration Callback",                                 \
         "Send Remote Task Replay",                                    \
         "Send Remote Task Profiling Response",                        \
+        "Send Shared Ownership",                                      \
         "Send Index Space Node",                                      \
         "Send Index Space Request",                                   \
         "Send Index Space Return",                                    \
@@ -888,7 +894,6 @@ namespace Legion {
         "Send Field Space Infos Response",                            \
         "Send Field Alloc Request",                                   \
         "Send Field Size Update",                                     \
-        "Send Field Space Top Alloc",                                 \
         "Send Field Free",                                            \
         "Send Field Space Layout Invalidation",                       \
         "Send Local Field Alloc Request",                             \
@@ -902,7 +907,6 @@ namespace Legion {
         "Index Partition Destruction",                                \
         "Field Space Destruction",                                    \
         "Logical Region Destruction",                                 \
-        "Logical Partition Destruction",                              \
         "Individual Remote Complete",                                 \
         "Individual Remote Commit",                                   \
         "Slice Remote Mapped",                                        \

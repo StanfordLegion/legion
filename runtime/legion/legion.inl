@@ -1982,7 +1982,8 @@ namespace Legion {
           : bounds(b), transform(t), M(M2), has_source(false), 
             has_transform(!t.is_identity()), gpu_warning(true)
         { 
-          LEGION_STATIC_ASSERT(M2 <= LEGION_MAX_DIM);
+          LEGION_STATIC_ASSERT(M2 <= LEGION_MAX_DIM,
+              "Accessor DIM larger than LEGION_MAX_DIM");
         }
         template<int M2>
         Tester(const DomainT<M2,T> b, const Rect<N,T> s,
@@ -1990,7 +1991,8 @@ namespace Legion {
           : bounds(b), transform(t), source(s), M(M2), has_source(true), 
             has_transform(!t.is_identity()), gpu_warning(true)
         { 
-          LEGION_STATIC_ASSERT(M2 <= LEGION_MAX_DIM);
+          LEGION_STATIC_ASSERT(M2 <= LEGION_MAX_DIM,
+              "Accessor DIM larger than LEGION_MAX_DIM");
         }
       public:
         __CUDA_HD__
@@ -10339,7 +10341,8 @@ namespace Legion {
                                            bool replace/*= false*/)
     //--------------------------------------------------------------------------
     {
-      LEGION_STATIC_ASSERT(DIM <= DomainPoint::MAX_POINT_DIM);  
+      LEGION_STATIC_ASSERT(DIM <= DomainPoint::MAX_POINT_DIM,
+          "ArgumentMap DIM is larger than LEGION_MAX_DIM");  
       DomainPoint dp;
       dp.dim = DIM;
       for (unsigned idx = 0; idx < DIM; idx++)
@@ -10352,7 +10355,8 @@ namespace Legion {
     inline bool ArgumentMap::remove_point(const PT point[DIM])
     //--------------------------------------------------------------------------
     {
-      LEGION_STATIC_ASSERT(DIM <= DomainPoint::MAX_POINT_DIM);
+      LEGION_STATIC_ASSERT(DIM <= DomainPoint::MAX_POINT_DIM,
+          "ArgumentMap DIM is larger than LEGION_MAX_DIM");
       DomainPoint dp;
       dp.dim = DIM;
       for (unsigned idx = 0; idx < DIM; idx++)
@@ -11547,7 +11551,8 @@ namespace Legion {
     inline RT FutureMap::get_result(const PT point[DIM]) const
     //--------------------------------------------------------------------------
     {
-      LEGION_STATIC_ASSERT(DIM <= DomainPoint::MAX_POINT_DIM);
+      LEGION_STATIC_ASSERT(DIM <= DomainPoint::MAX_POINT_DIM,
+          "FutureMap DIM is larger than LEGION_MAX_DIM");
       DomainPoint dp;
       dp.dim = DIM;
       for (unsigned idx = 0; idx < DIM; idx++)
@@ -11561,7 +11566,8 @@ namespace Legion {
     inline Future FutureMap::get_future(const PT point[DIM]) const
     //--------------------------------------------------------------------------
     {
-      LEGION_STATIC_ASSERT(DIM <= DomainPoint::MAX_POINT_DIM);
+      LEGION_STATIC_ASSERT(DIM <= DomainPoint::MAX_POINT_DIM,
+          "FutureMap DIM is larger than LEGION_MAX_DIM");
       DomainPoint dp;
       dp.dim = DIM;
       for (unsigned idx = 0; idx < DIM; idx++)
@@ -11574,7 +11580,8 @@ namespace Legion {
     inline void FutureMap::get_void_result(const PT point[DIM]) const
     //--------------------------------------------------------------------------
     {
-      LEGION_STATIC_ASSERT(DIM <= DomainPoint::MAX_POINT_DIM);
+      LEGION_STATIC_ASSERT(DIM <= DomainPoint::MAX_POINT_DIM,
+          "FutureMap DIM is larger than LEGION_MAX_DIM");
       DomainPoint dp;
       dp.dim = DIM;
       for (unsigned idx = 0; idx < DIM; idx++)
@@ -12742,10 +12749,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Assert that we are returning Futures or FutureMaps
-      LEGION_STATIC_ASSERT((LegionTypeInequality<T,Future>::value));
-      LEGION_STATIC_ASSERT((LegionTypeInequality<T,FutureMap>::value));
+      LEGION_STATIC_ASSERT((LegionTypeInequality<T,Future>::value),
+          "Future types are not permitted as return types for Legion tasks");
+      LEGION_STATIC_ASSERT((LegionTypeInequality<T,FutureMap>::value),
+          "FutureMap types are not permitted as return types for Legion tasks");
       // Assert that the return type size is within the required size
-      LEGION_STATIC_ASSERT(sizeof(T) <= LEGION_MAX_RETURN_SIZE);
+      LEGION_STATIC_ASSERT(sizeof(T) <= LEGION_MAX_RETURN_SIZE,
+          "Task return values must be less than or equal to "
+          "LEGION_MAX_RETURN_SIZE bytes");
       const Task *task; Context ctx; Runtime *rt;
       const std::vector<PhysicalRegion> *regions;
       Runtime::legion_task_preamble(args, arglen, p, task, regions, ctx, rt);
@@ -12789,10 +12800,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Assert that we are returning Futures or FutureMaps
-      LEGION_STATIC_ASSERT((LegionTypeInequality<T,Future>::value));
-      LEGION_STATIC_ASSERT((LegionTypeInequality<T,FutureMap>::value));
+      LEGION_STATIC_ASSERT((LegionTypeInequality<T,Future>::value),
+          "Future types are not permitted as return types for Legion tasks");
+      LEGION_STATIC_ASSERT((LegionTypeInequality<T,FutureMap>::value),
+          "FutureMap types are not permitted as return types for Legion tasks");
       // Assert that the return type size is within the required size
-      LEGION_STATIC_ASSERT(sizeof(T) <= LEGION_MAX_RETURN_SIZE);
+      LEGION_STATIC_ASSERT((sizeof(T) <= LEGION_MAX_RETURN_SIZE) ||
+         (LegionSerialization::IsAStruct<T>::value && 
+          LegionSerialization::HasSerialize<T>::value),
+         "Task return values must be less than or equal to "
+          "LEGION_MAX_RETURN_SIZE bytes");
 
       const Task *task; Context ctx; Runtime *rt;
       const std::vector<PhysicalRegion> *regions;

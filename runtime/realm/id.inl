@@ -217,6 +217,22 @@ namespace Realm {
     return this->compqueue_type_tag() == FMT_CompQueue::TAG_VALUE;
   }
 
+  /*static*/ inline ID ID::make_subgraph(unsigned owner_node, unsigned creator_node, unsigned subgraph_idx)
+  {
+    ID id;
+    id.id = 0;
+    id.subgraph_type_tag() |= FMT_Subgraph::TAG_VALUE;
+    id.subgraph_owner_node() |= owner_node;
+    id.subgraph_creator_node() |= creator_node;
+    id.subgraph_subgraph_idx() |= subgraph_idx;
+    return id;
+  }
+
+  inline bool ID::is_subgraph(void) const
+  {
+    return this->subgraph_type_tag() == FMT_Subgraph::TAG_VALUE;
+  }
+
   inline std::ostream& operator<<(std::ostream& os, ID id) { return os << std::hex << static_cast<ID::IDType>(id.id) << std::dec; }
 
 }; // namespace Realm

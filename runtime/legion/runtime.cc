@@ -6613,12 +6613,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     VirtualChannel::VirtualChannel(VirtualChannelKind kind, 
-        AddressSpaceID local_address_space, 
-        size_t max_message_size, LegionProfiler *prof)
+        AddressSpaceID local_address_space, size_t max_message_size, 
+        bool profile_outgoing, LegionProfiler *prof)
       : sending_buffer((char*)malloc(max_message_size)), 
         sending_buffer_size(max_message_size), 
         ordered_channel((kind != DEFAULT_VIRTUAL_CHANNEL) &&
                         (kind != THROUGHPUT_VIRTUAL_CHANNEL)), 
+        profile_outgoing_messages(profile_outgoing),
         request_priority((kind == THROUGHPUT_VIRTUAL_CHANNEL) ?
             LG_THROUGHPUT_MESSAGE_PRIORITY : (kind == UPDATE_VIRTUAL_CHANNEL) ?
             LG_LATENCY_DEFERRED_PRIORITY : LG_LATENCY_MESSAGE_PRIORITY),
@@ -6669,7 +6670,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     VirtualChannel::VirtualChannel(const VirtualChannel &rhs)
       : sending_buffer(NULL), sending_buffer_size(0), 
-        ordered_channel(false), request_priority(rhs.request_priority),
+        ordered_channel(false), profile_outgoing_messages(false),
+        request_priority(rhs.request_priority),
         response_priority(rhs.response_priority), profiler(NULL)
     //--------------------------------------------------------------------------
     {
@@ -6708,7 +6710,7 @@ namespace Legion {
         // Make sure we can at least get the meta-data into the buffer
         // Since there is no partial data we can fake the flush
         if ((sending_buffer_size - sending_index) <= header_size)
-          send_message(true/*complete*/, runtime, target, response, shutdown);
+          send_message(true/*complete*/, runtime, target, k, response,shutdown);
         // Now can package up the meta data
         packaged_messages++;
         *((MessageKind*)(sending_buffer+sending_index)) = k;
@@ -6722,7 +6724,7 @@ namespace Legion {
           unsigned remaining = sending_buffer_size - sending_index;
           if (remaining == 0)
             send_message(false/*complete*/, runtime, 
-                         target, response, shutdown);
+                         target, k, response, shutdown);
           remaining = sending_buffer_size - sending_index;
 #ifdef DEBUG_LEGION
           assert(remaining > 0); // should be space after the send
@@ -6751,12 +6753,12 @@ namespace Legion {
         sending_index += buffer_size;
       }
       if (flush)
-        send_message(true/*complete*/, runtime, target, response, shutdown);
+        send_message(true/*complete*/, runtime, target, k, response, shutdown);
     }
 
     //--------------------------------------------------------------------------
     void VirtualChannel::send_message(bool complete, Runtime *runtime,
-                                 Processor target, bool response, bool shutdown)
+               Processor target, MessageKind kind, bool response, bool shutdown)
     //--------------------------------------------------------------------------
     {
       // See if we need to switch the header file
@@ -6800,11 +6802,10 @@ namespace Legion {
       // see waits on message handlers
       // Note that we don't profile on shutdown messages or we would 
       // never actually finish running
-      if (!shutdown && (runtime->num_profiling_nodes > 0) && 
-          (runtime->find_address_space(target) < runtime->num_profiling_nodes))
+      if (profile_outgoing_messages && !shutdown)
       {
         Realm::ProfilingRequestSet requests;
-        LegionProfiler::add_message_request(requests, target);
+        LegionProfiler::add_message_request(requests, kind, target);
         last_message_event = RtEvent(target.spawn(
 #ifdef LEGION_SEPARATE_META_TASKS
               LG_TASK_ID + LG_MESSAGE_ID,
@@ -7134,8 +7135,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       bool has_shutdown = false;
-      // For profiling if we are doing it
-      unsigned long long start = 0, stop = 0;
       for (unsigned idx = 0; idx < num_messages; idx++)
       {
         // Pull off the message kind and the size of the message
@@ -7159,8 +7158,6 @@ namespace Legion {
         if (idx == (num_messages-1))
           assert(message_size == arglen);
 #endif
-        if (profiler != NULL)
-          start = Realm::Clock::current_time_in_nanoseconds();
         // Build the deserializer
         Deserializer derez(args,message_size);
         switch (kind)
@@ -7193,6 +7190,11 @@ namespace Legion {
           case SEND_REMOTE_TASK_PROFILING_RESPONSE:
             {
               runtime->handle_remote_task_profiling_response(derez);
+              break;
+            }
+          case SEND_SHARED_OWNERSHIP:
+            {
+              runtime->handle_shared_ownership(derez);
               break;
             }
           case SEND_INDEX_SPACE_NODE:
@@ -7369,11 +7371,6 @@ namespace Legion {
               runtime->handle_field_size_update(derez, remote_address_space);
               break;
             }
-          case SEND_FIELD_SPACE_TOP_ALLOC:
-            {
-              runtime->handle_field_space_top_alloc(derez,remote_address_space);
-              break;
-            }
           case SEND_FIELD_FREE:
             {
               runtime->handle_field_free(derez, remote_address_space);
@@ -7424,32 +7421,22 @@ namespace Legion {
             }
           case INDEX_SPACE_DESTRUCTION_MESSAGE:
             {
-              runtime->handle_index_space_destruction(derez, 
-                                                      remote_address_space);
+              runtime->handle_index_space_destruction(derez); 
               break;
             }
           case INDEX_PARTITION_DESTRUCTION_MESSAGE:
             {
-              runtime->handle_index_partition_destruction(derez, 
-                                                          remote_address_space);
+              runtime->handle_index_partition_destruction(derez); 
               break;
             }
           case FIELD_SPACE_DESTRUCTION_MESSAGE:
             {
-              runtime->handle_field_space_destruction(derez, 
-                                                      remote_address_space);
+              runtime->handle_field_space_destruction(derez); 
               break;
             }
           case LOGICAL_REGION_DESTRUCTION_MESSAGE:
             {
-              runtime->handle_logical_region_destruction(derez, 
-                                                         remote_address_space);
-              break;
-            }
-          case LOGICAL_PARTITION_DESTRUCTION_MESSAGE:
-            {
-              runtime->handle_logical_partition_destruction(derez, 
-                                                          remote_address_space);
+              runtime->handle_logical_region_destruction(derez); 
               break;
             }
           case INDIVIDUAL_REMOTE_COMPLETE:
@@ -8109,11 +8096,6 @@ namespace Legion {
           default:
             assert(false); // should never get here
         }
-        if (profiler != NULL)
-        {
-          stop = Realm::Clock::current_time_in_nanoseconds();
-          profiler->record_message(kind, start, stop);
-        }
         // Update the args and arglen
         args += message_size;
         arglen -= message_size;
@@ -8169,9 +8151,10 @@ namespace Legion {
     MessageManager::MessageManager(AddressSpaceID remote,
                                    Runtime *rt, size_t max_message_size,
                                    const Processor remote_util_group)
-      : remote_address_space(remote), runtime(rt), target(remote_util_group), 
-        channels((VirtualChannel*)
-                  malloc(MAX_NUM_VIRTUAL_CHANNELS*sizeof(VirtualChannel))) 
+      : channels((VirtualChannel*)
+                  malloc(MAX_NUM_VIRTUAL_CHANNELS*sizeof(VirtualChannel))), 
+        runtime(rt), remote_address_space(remote), target(remote_util_group), 
+        always_flush(remote < rt->num_profiling_nodes)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8181,13 +8164,14 @@ namespace Legion {
       for (unsigned idx = 0; idx < MAX_NUM_VIRTUAL_CHANNELS; idx++)
       {
         new (channels+idx) VirtualChannel((VirtualChannelKind)idx,
-            rt->address_space, max_message_size, runtime->profiler);
+          rt->address_space, max_message_size, always_flush, runtime->profiler);
       }
     }
 
     //--------------------------------------------------------------------------
     MessageManager::MessageManager(const MessageManager &rhs)
-      : remote_address_space(0), runtime(NULL),target(rhs.target),channels(NULL)
+      : channels(NULL), runtime(NULL), remote_address_space(0), 
+        target(rhs.target), always_flush(false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -8219,6 +8203,9 @@ namespace Legion {
            VirtualChannelKind channel, bool flush, bool response, bool shutdown)
     //--------------------------------------------------------------------------
     {
+      // Always flush for the profiler if we're doing that
+      if (!flush && always_flush)
+        flush = true;
       channels[channel].package_message(rez, kind, flush, runtime, 
                                         target, response, shutdown);
     }
@@ -8356,7 +8343,7 @@ namespace Legion {
       {
         LG_TASK_DESCRIPTIONS(task_descs);
         // Only need to see tasks less than this 
-        for (unsigned idx = 0; idx < LG_MESSAGE_ID; idx++)
+        for (unsigned idx = 0; idx < LG_BEGIN_SHUTDOWN_TASK_IDS; idx++)
         {
           if (runtime->outstanding_counts[idx] == 0)
             continue;
@@ -10077,12 +10064,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(req.handle_type != SINGULAR);
 #endif
-      // It's actually unsafe to evaluate projection region requirements
-      // with NO_ACCESS since they can race with deletion operations for
-      // the region requirement as NO_ACCESS region requirements aren't
-      // recorded in the region tree
-      if (req.privilege == NO_ACCESS)
-        return LogicalRegion::NO_REGION;
       if (!is_exclusive)
       {
         AutoLock p_lock(projection_reservation);
@@ -10128,19 +10109,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(req.handle_type != SINGULAR);
 #endif
-      // It's actually unsafe to evaluate projection region requirements
-      // with NO_ACCESS since they can race with deletion operations for
-      // the region requirement as NO_ACCESS region requirements aren't
-      // recorded in the region tree
-      if (req.privilege == NO_ACCESS)
-      {
-        for (std::vector<PointTask*>::const_iterator it =
-              point_tasks.begin(); it != point_tasks.end(); it++)
-        {
-          (*it)->set_projection_result(idx, LogicalRegion::NO_REGION);
-        }
-        return;
-      }
       std::map<LogicalRegion,std::vector<DomainPoint> > dependences;
       const bool find_dependences = is_invertible && IS_WRITE(req);
       Domain launch_domain;
@@ -10262,19 +10230,6 @@ namespace Legion {
       assert(req.handle_type != SINGULAR);
       assert(mappable != NULL);
 #endif
-      // It's actually unsafe to evaluate projection region requirements
-      // with NO_ACCESS since they can race with deletion operations for
-      // the region requirement as NO_ACCESS region requirements aren't
-      // recorded in the region tree
-      if (req.privilege == NO_ACCESS)
-      {
-        for (std::vector<ProjectionPoint*>::const_iterator it =
-              points.begin(); it != points.end(); it++)
-        {
-          (*it)->set_projection_result(idx, LogicalRegion::NO_REGION);
-        }
-        return;
-      }
       // TODO: support for invertible point operations
       if (is_invertible && (req.privilege == READ_WRITE))
         assert(false);
@@ -10718,11 +10673,7 @@ namespace Legion {
           log_garbage.info("GC Source Kind %d %s", idx, reference_names[idx]);
         }
       }
-#endif
-      // Pull in any static registrations that were done
-      register_static_variants();
-      register_static_constraints();
-      register_static_projections();
+#endif 
 #ifdef DEBUG_LEGION
       if (logging_region_tree_state)
       {
@@ -11244,7 +11195,6 @@ namespace Legion {
     void Runtime::initialize_legion_prof(const LegionConfiguration &config)
     //--------------------------------------------------------------------------
     {
-      LG_TASK_DESCRIPTIONS(lg_task_descriptions);
       // For the profiler we want to find as many "holes" in the execution
       // as possible in which to run profiler tasks so we can minimize the
       // overhead on the application. To do this we want profiler tasks to
@@ -11263,9 +11213,14 @@ namespace Legion {
 #endif
       const Processor target_proc_for_profiler = prof_procs.size() > 1 ?
         Processor::create_group(prof_procs) : prof_procs.front();
+      LG_TASK_DESCRIPTIONS(lg_task_descriptions);
+      LG_MESSAGE_DESCRIPTIONS(lg_message_descriptions);
+      LEGION_STATIC_ASSERT((LG_MESSAGE_ID+1) == LG_LAST_TASK_ID,
+          "LG_MESSAGE_ID must always be the last meta-task ID");
       profiler = new LegionProfiler(target_proc_for_profiler,
-                                    machine, this, LG_LAST_TASK_ID,
-                                    lg_task_descriptions,
+                                    machine, this, LG_MESSAGE_ID,
+                                    lg_task_descriptions, LAST_SEND_KIND, 
+                                    lg_message_descriptions,
                                     Operation::LAST_OP_KIND,
                                     Operation::op_names,
                                     config.serializer_type.c_str(),
@@ -11273,8 +11228,6 @@ namespace Legion {
                                     total_address_spaces,
                                     config.prof_footprint_threshold << 20,
                                     config.prof_target_latency);
-      LG_MESSAGE_DESCRIPTIONS(lg_message_descriptions);
-      profiler->record_message_kinds(lg_message_descriptions, LAST_SEND_KIND);
       MAPPER_CALL_NAMES(lg_mapper_calls);
       profiler->record_mapper_call_kinds(lg_mapper_calls, LAST_MAPPER_CALL);
 #ifdef DETAILED_LEGION_PROF
@@ -11549,13 +11502,17 @@ namespace Legion {
     void Runtime::initialize_runtime(void)
     //--------------------------------------------------------------------------
     {  
-      // Initialize our virtual manager and our mappers
-      initialize_virtual_manager();
       // If we have an MPI rank table do the exchanges before initializing
       // the mappers as they may want to look at the rank table
       if (mpi_rank_table != NULL)
         mpi_rank_table->perform_rank_exchange();
       initialize_mappers(); 
+      // Pull in any static registrations that were done
+      register_static_variants();
+      register_static_constraints();
+      register_static_projections();
+      // Initialize our virtual manager and our mappers
+      initialize_virtual_manager();
       // Finally perform the registration callback methods
       const std::vector<RegistrationCallbackFnptr> &registration_callbacks
         = get_pending_registration_callbacks();
@@ -11854,6 +11811,112 @@ namespace Legion {
 #else
       assert(false); // update this
 #endif
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::create_shared_ownership(IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      const AddressSpaceID owner_space = 
+        IndexSpaceNode::get_owner_space(handle, this);
+      if (owner_space != address_space)
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize<int>(0);
+          rez.serialize(handle);
+        }
+        send_shared_ownership(owner_space, rez);
+      }
+      else
+      {
+        IndexSpaceNode *node = forest->get_node(handle);
+        if (!node->check_valid_and_increment(APPLICATION_REF))
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARED_OWNERSHIP,
+              "Illegal call to add shared ownership to index space %x "
+              "which has already been deleted", handle.get_id())
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::create_shared_ownership(IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      const AddressSpaceID owner_space = 
+        IndexPartNode::get_owner_space(handle, this);
+      if (owner_space != address_space)
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize<int>(1);
+          rez.serialize(handle);
+        }
+        send_shared_ownership(owner_space, rez);
+      }
+      else
+      {
+        IndexPartNode *node = forest->get_node(handle);
+        if (!node->check_valid_and_increment(APPLICATION_REF))
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARED_OWNERSHIP,
+              "Illegal call to add shared ownership to index partition %x "
+              "which has already been deleted", handle.get_id())
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::create_shared_ownership(FieldSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      const AddressSpaceID owner_space = 
+        FieldSpaceNode::get_owner_space(handle, this);
+      if (owner_space != address_space)
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize<int>(2);
+          rez.serialize(handle);
+        }
+        send_shared_ownership(owner_space, rez);
+      }
+      else
+      {
+        FieldSpaceNode *node = forest->get_node(handle);
+        if (!node->check_valid_and_increment(APPLICATION_REF))
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARED_OWNERSHIP,
+              "Illegal call to add shared ownership to field space %x "
+              "which has already been deleted", handle.get_id())
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::create_shared_ownership(LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+      const AddressSpaceID owner_space = 
+        RegionNode::get_owner_space(handle, this);
+      if (owner_space != address_space)
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize<int>(3);
+          rez.serialize(handle);
+        }
+        send_shared_ownership(owner_space, rez);
+      }
+      else
+      {
+        RegionNode *node = forest->get_node(handle);
+        if (!node->check_valid_and_increment(APPLICATION_REF))
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARED_OWNERSHIP,
+              "Illegal call to add shared ownership to logical region "
+              "(%x,%x,%x) which has already been deleted", 
+              handle.index_space.get_id(), handle.field_space.get_id(),
+              handle.tree_id)
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -12272,16 +12335,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::destroy_field_space(Context ctx, FieldSpace handle,
-                                      const bool unordered)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context destroy field space!");
-      ctx->destroy_field_space(handle, unordered);
-    }
-
-    //--------------------------------------------------------------------------
     size_t Runtime::get_field_size(Context ctx, FieldSpace handle, FieldID fid)
     //--------------------------------------------------------------------------
     {
@@ -12330,28 +12383,6 @@ namespace Legion {
             "Illegal dummy context create logical region!");
       return ctx->create_logical_region(forest, index_space, field_space,
                                         task_local); 
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::destroy_logical_region(Context ctx, LogicalRegion handle,
-                                         const bool unordered)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context destroy logical region!");
-      ctx->destroy_logical_region(handle, unordered); 
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::destroy_logical_partition(Context ctx,LogicalPartition handle,
-                                            const bool unordered)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context destroy logical partition!");
-      ctx->destroy_logical_partition(handle, unordered); 
     }
 
     //--------------------------------------------------------------------------
@@ -15233,6 +15264,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_shared_ownership(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_SHARED_OWNERSHIP,
+          REFERENCE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_index_space_node(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -15549,18 +15588,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_field_space_top_alloc(AddressSpaceID target,
-                                             Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      // put this on the reference virtual channel since it has no effects
-      // tracking and we need to make sure it is handled before references
-      // are removed from the remote copies
-      find_messenger(target)->send_message(rez, SEND_FIELD_SPACE_TOP_ALLOC,
-                                  REFERENCE_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_field_free(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -15711,21 +15738,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void Runtime::send_logical_region_destruction(LogicalRegion handle, 
                                                   AddressSpaceID target,
-                                                  std::set<RtEvent> *applied)
+                                                  std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
       Serializer rez;
       {
         RezCheck z(rez);
         rez.serialize(handle);
-        if (applied != NULL)
-        {
-          const RtUserEvent done = create_rt_user_event();
-          rez.serialize(done);
-          applied->insert(done);
-        }
-        else
-          rez.serialize(RtUserEvent::NO_RT_USER_EVENT);
+        const RtUserEvent done = create_rt_user_event();
+        rez.serialize(done);
+        applied.insert(done);
       }
       // Put this message on the same virtual channel as the unregister
       // messages for distributed collectables to make sure that they 
@@ -15733,33 +15755,6 @@ namespace Legion {
       find_messenger(target)->send_message(rez, 
           LOGICAL_REGION_DESTRUCTION_MESSAGE, REFERENCE_VIRTUAL_CHANNEL,
                                                               true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_logical_partition_destruction(
-                              LogicalPartition handle, AddressSpaceID target,
-                              std::set<RtEvent> *applied)
-    //--------------------------------------------------------------------------
-    {
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(handle);
-        if (applied != NULL)
-        {
-          const RtUserEvent done = create_rt_user_event();
-          rez.serialize(done);
-          applied->insert(done);
-        }
-        else
-          rez.serialize(RtUserEvent::NO_RT_USER_EVENT);
-      }
-      // Put this message on the same virtual channel as the unregister
-      // messages for distributed collectables to make sure that they 
-      // are properly ordered
-      find_messenger(target)->send_message(rez, 
-          LOGICAL_PARTITION_DESTRUCTION_MESSAGE, REFERENCE_VIRTUAL_CHANNEL,
-                                                                true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -16992,6 +16987,48 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_shared_ownership(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      int kind;
+      derez.deserialize(kind);
+      switch (kind)
+      {
+        case 0:
+          {
+            IndexSpace handle;
+            derez.deserialize(handle);
+            create_shared_ownership(handle);
+            break;
+          }
+        case 1:
+          {
+            IndexPartition handle;
+            derez.deserialize(handle);
+            create_shared_ownership(handle);
+            break;
+          }
+        case 2:
+          {
+            FieldSpace handle;
+            derez.deserialize(handle);
+            create_shared_ownership(handle);
+            break;
+          }
+        case 3:
+          {
+            LogicalRegion handle;
+            derez.deserialize(handle);
+            create_shared_ownership(handle);
+            break;
+          }
+        default:
+          assert(false);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_index_space_node(Deserializer &derez, 
                                           AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -17241,14 +17278,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_field_space_top_alloc(Deserializer &derez,
-                                                AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      FieldSpaceNode::handle_top_alloc(forest, derez, source);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::handle_field_free(Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -17316,8 +17345,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_space_destruction(Deserializer &derez,
-                                                 AddressSpaceID source)
+    void Runtime::handle_index_space_destruction(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -17329,7 +17357,7 @@ namespace Legion {
       assert(done.exists());
 #endif
       std::set<RtEvent> applied;
-      forest->destroy_index_space(handle, source, applied);
+      forest->destroy_index_space(handle, applied);
       if (!applied.empty())
         Runtime::trigger_event(done, Runtime::merge_events(applied));
       else
@@ -17337,8 +17365,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_partition_destruction(Deserializer &derez,
-                                                     AddressSpaceID source)
+    void Runtime::handle_index_partition_destruction(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -17350,7 +17377,7 @@ namespace Legion {
       assert(done.exists());
 #endif
       std::set<RtEvent> applied;
-      forest->destroy_index_partition(handle, source, applied);
+      forest->destroy_index_partition(handle, applied);
       if (!applied.empty())
         Runtime::trigger_event(done, Runtime::merge_events(applied));
       else
@@ -17358,8 +17385,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_field_space_destruction(Deserializer &derez,
-                                                 AddressSpaceID source)
+    void Runtime::handle_field_space_destruction(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -17371,7 +17397,7 @@ namespace Legion {
       assert(done.exists());
 #endif
       std::set<RtEvent> applied;
-      forest->destroy_field_space(handle, source, applied);
+      forest->destroy_field_space(handle, applied);
       if (!applied.empty())
         Runtime::trigger_event(done, Runtime::merge_events(applied));
       else
@@ -17379,8 +17405,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_logical_region_destruction(Deserializer &derez,
-                                                    AddressSpaceID source)
+    void Runtime::handle_logical_region_destruction(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -17389,28 +17414,7 @@ namespace Legion {
       RtUserEvent done;
       derez.deserialize(done);
       std::set<RtEvent> applied;
-      forest->destroy_logical_region(handle, source, applied);
-      if (done.exists())
-      {
-        if (!applied.empty())
-          Runtime::trigger_event(done, Runtime::merge_events(applied));
-        else
-          Runtime::trigger_event(done);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_logical_partition_destruction(Deserializer &derez,
-                                                       AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      LogicalPartition handle;
-      derez.deserialize(handle);
-      RtUserEvent done;
-      derez.deserialize(done);
-      std::set<RtEvent> applied;
-      forest->destroy_logical_partition(handle, source, applied);
+      forest->destroy_logical_region(handle, applied);
       if (done.exists())
       {
         if (!applied.empty())
@@ -19542,7 +19546,7 @@ namespace Legion {
       std::set<RtEvent> applied;
       for (std::map<std::pair<Domain,TypeTag>,IndexSpace>::const_iterator it =
             index_slice_spaces.begin(); it != index_slice_spaces.end(); it++)
-        forest->destroy_index_space(it->second, address_space, applied);
+        forest->destroy_index_space(it->second, applied);
       // If there are still any layout constraints that the application
       // failed to remove its references to then we can remove the reference
       // for them and make sure it's effects propagate
@@ -21591,13 +21595,23 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Some static asserts that need to hold true for the runtime to work
-      LEGION_STATIC_ASSERT(LEGION_MAX_RETURN_SIZE > 0);
-      LEGION_STATIC_ASSERT((1 << LEGION_FIELD_LOG2) == LEGION_MAX_FIELDS);
-      LEGION_STATIC_ASSERT(LEGION_MAX_NUM_NODES > 0);
-      LEGION_STATIC_ASSERT(LEGION_MAX_NUM_PROCS > 0);
-      LEGION_STATIC_ASSERT(LEGION_DEFAULT_MAX_TASK_WINDOW > 0);
-      LEGION_STATIC_ASSERT(LEGION_DEFAULT_MIN_TASKS_TO_SCHEDULE > 0);
-      LEGION_STATIC_ASSERT(LEGION_DEFAULT_MAX_MESSAGE_SIZE > 0); 
+      LEGION_STATIC_ASSERT(LEGION_MAX_RETURN_SIZE > 0, 
+          "Need a positive and non-zero value for LEGION_MAX_RETURN_SIZE");
+      LEGION_STATIC_ASSERT((1 << LEGION_FIELD_LOG2) == LEGION_MAX_FIELDS,
+          "LEGION_MAX_FIELDS must be a pwoer of 2");
+      LEGION_STATIC_ASSERT(LEGION_MAX_NUM_NODES > 0,
+          "Need a positive and non-zero value for LEGION_MAX_NUM_NODES");
+      LEGION_STATIC_ASSERT(LEGION_MAX_NUM_PROCS > 0,
+          "Need a positive and non-zero value for LEGION_MAX_NUM_PROCS");
+      LEGION_STATIC_ASSERT(LEGION_DEFAULT_MAX_TASK_WINDOW > 0,
+          "Need a positive and non-zero value for "
+          "LEGION_DEFAULT_MAX_TASK_WINDOW");
+      LEGION_STATIC_ASSERT(LEGION_DEFAULT_MIN_TASKS_TO_SCHEDULE > 0,
+          "Need a positive and non-zero value for "
+          "LEGION_DEFAULT_MIN_TASKS_TO_SCHEDULE");
+      LEGION_STATIC_ASSERT(LEGION_DEFAULT_MAX_MESSAGE_SIZE > 0,
+          "Need a positive and non-zero value for "
+          "LEGION_DEFAULT_MAX_MESSAGE_SIZE"); 
 
       // Register builtin reduction operators
       register_builtin_reduction_operators();
@@ -23686,6 +23700,11 @@ namespace Legion {
             EquivalenceSet::handle_deferred_response(args, runtime);
             break;
           }
+        case LG_DEFER_REMOVE_EQ_REF_TASK_ID:
+          {
+            EquivalenceSet::handle_deferred_remove_refs(args);
+            break;
+          }
         case LG_DEFER_REMOTE_REF_UPDATE_TASK_ID:
           {
             DistributedCollectable::handle_defer_remote_reference_update(
@@ -23783,10 +23802,10 @@ namespace Legion {
           assert(false); // should never get here
       }
 #ifdef DEBUG_LEGION
-      if (tid < LG_MESSAGE_ID)
+      if (tid < LG_BEGIN_SHUTDOWN_TASK_IDS)
         runtime->decrement_total_outstanding_tasks(tid, true/*meta*/);
 #else
-      if (tid < LG_MESSAGE_ID)
+      if (tid < LG_BEGIN_SHUTDOWN_TASK_IDS)
         runtime->decrement_total_outstanding_tasks();
 #endif
 #ifdef DEBUG_SHUTDOWN_HANG

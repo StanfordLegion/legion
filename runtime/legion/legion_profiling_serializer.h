@@ -43,7 +43,6 @@ namespace Legion {
 
       virtual bool is_thread_safe(void) const = 0;
       // You must override the following functions in your implementation
-      virtual void serialize(const LegionProfDesc::MessageDesc&) = 0;
       virtual void serialize(const LegionProfDesc::MapperCallDesc&) = 0;
       virtual void serialize(const LegionProfDesc::RuntimeCallDesc&) = 0;
       virtual void serialize(const LegionProfDesc::MetaDesc&) = 0;
@@ -87,7 +86,6 @@ namespace Legion {
       virtual void serialize(const LegionProfInstance::InstUsageInfo&) = 0;
       virtual void serialize(const LegionProfInstance::InstTimelineInfo&) = 0;
       virtual void serialize(const LegionProfInstance::PartitionInfo&) = 0;
-      virtual void serialize(const LegionProfInstance::MessageInfo&) = 0;
       virtual void serialize(const LegionProfInstance::MapperCallInfo&) = 0;
       virtual void serialize(const LegionProfInstance::RuntimeCallInfo&) = 0;
       virtual void serialize(const LegionProfInstance::GPUTaskInfo&) = 0;
@@ -106,7 +104,6 @@ namespace Legion {
 
       bool is_thread_safe(void) const { return false; }
       // Serialize Methods
-      void serialize(const LegionProfDesc::MessageDesc&);
       void serialize(const LegionProfDesc::MapperCallDesc&);
       void serialize(const LegionProfDesc::RuntimeCallDesc&);
       void serialize(const LegionProfDesc::MetaDesc&);
@@ -147,7 +144,6 @@ namespace Legion {
       void serialize(const LegionProfInstance::InstUsageInfo&);
       void serialize(const LegionProfInstance::InstTimelineInfo&);
       void serialize(const LegionProfInstance::PartitionInfo&);
-      void serialize(const LegionProfInstance::MessageInfo&);
       void serialize(const LegionProfInstance::MapperCallInfo&);
       void serialize(const LegionProfInstance::RuntimeCallInfo&);
       void serialize(const LegionProfInstance::GPUTaskInfo&);
@@ -216,7 +212,6 @@ namespace Legion {
 
       bool is_thread_safe(void) const { return true; }
       // Serialize Methods
-      void serialize(const LegionProfDesc::MessageDesc&);
       void serialize(const LegionProfDesc::MapperCallDesc&);
       void serialize(const LegionProfDesc::RuntimeCallDesc&);
       void serialize(const LegionProfDesc::MetaDesc&);
@@ -257,7 +252,6 @@ namespace Legion {
       void serialize(const LegionProfInstance::InstUsageInfo&);
       void serialize(const LegionProfInstance::InstTimelineInfo&);
       void serialize(const LegionProfInstance::PartitionInfo&);
-      void serialize(const LegionProfInstance::MessageInfo&);
       void serialize(const LegionProfInstance::MapperCallInfo&);
       void serialize(const LegionProfInstance::RuntimeCallInfo&);
       void serialize(const LegionProfInstance::GPUTaskInfo&);

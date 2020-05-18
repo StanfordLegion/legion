@@ -2279,31 +2279,10 @@ namespace Legion {
       for (LegionList<FieldState>::aligned::iterator it = field_states.begin();
             it != field_states.end(); /*nothing*/)
       {
-        it->valid_fields -= deleted_mask;
-        if (!it->valid_fields)
-        {
+        if (it->filter(deleted_mask))
           it = field_states.erase(it);
-          continue;
-        }
-        std::vector<LegionColor> to_delete;
-        for (LegionMap<LegionColor,FieldMask>::aligned::iterator child_it = 
-              it->open_children.begin(); child_it != 
-              it->open_children.end(); child_it++)
-        {
-          child_it->second -= deleted_mask;
-          if (!child_it->second)
-            to_delete.push_back(child_it->first);
-        }
-        if (!to_delete.empty())
-        {
-          for (std::vector<LegionColor>::const_iterator cit = to_delete.begin();
-                cit != to_delete.end(); cit++)
-            it->open_children.erase(*cit);
-        }
-        if (!it->open_children.empty())
-          it++;
         else
-          it = field_states.erase(it);
+          it++;
       }
       reduction_fields -= deleted_mask;
       if (!outstanding_reductions.empty())
@@ -2408,9 +2387,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FieldState::FieldState(const GenericUser &user, const FieldMask &m, 
-                           const LegionColor c)
-      : ChildState(m), redop(0), projection(NULL), 
-        projection_space(NULL), rebuild_timeout(1)
+                           RegionTreeNode *child, std::set<RtEvent> &applied)
+      : redop(0), projection(NULL), projection_space(NULL), rebuild_timeout(1)
     //--------------------------------------------------------------------------
     {
       if (IS_READ_ONLY(user.usage))
@@ -2422,20 +2400,24 @@ namespace Legion {
         open_state = OPEN_SINGLE_REDUCE;
         redop = user.usage.redop;
       }
-      open_children[c] = m;
+      if (open_children.insert(child, m))
+      {
+        WrapperReferenceMutator mutator(applied);
+        child->add_base_valid_ref(FIELD_STATE_REF, &mutator);
+      }
     }
 
     //--------------------------------------------------------------------------
     FieldState::FieldState(const RegionUsage &usage, const FieldMask &m,
                            ProjectionFunction *proj, IndexSpaceNode *proj_space,
                            bool disjoint, bool dirty_reduction)
-      : ChildState(m), redop(0), projection(proj), 
-        projection_space(proj_space), rebuild_timeout(1)
+     : redop(0),projection(proj),projection_space(proj_space),rebuild_timeout(1)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(projection != NULL);
 #endif
+      open_children.relax_valid_mask(m);
       if (IS_READ_ONLY(usage))
         open_state = OPEN_READ_ONLY_PROJ;
       else if (IS_REDUCE(usage))
@@ -2450,6 +2432,44 @@ namespace Legion {
         open_state = OPEN_READ_WRITE_PROJ_DISJOINT_SHALLOW;
       else
         open_state = OPEN_READ_WRITE_PROJ;
+    }
+
+    //--------------------------------------------------------------------------
+    FieldState::FieldState(const FieldState &rhs)
+      : open_state(rhs.open_state), redop(rhs.redop), 
+        projection(rhs.projection), projection_space(rhs.projection_space), 
+        rebuild_timeout(rhs.rebuild_timeout)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(rhs.open_children.empty());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    FieldState::~FieldState(void)
+    //--------------------------------------------------------------------------
+    {
+      for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
+            open_children.begin(); it != open_children.end(); it++)
+        if (it->first->remove_base_valid_ref(FIELD_STATE_REF))
+          delete it->first;
+    }
+
+    //--------------------------------------------------------------------------
+    FieldState& FieldState::operator=(const FieldState &rhs)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(open_children.empty());
+      assert(rhs.open_children.empty());
+#endif
+      open_state = rhs.open_state;
+      redop = rhs.redop;
+      projection = rhs.projection;
+      projection_space = rhs.projection_space;
+      rebuild_timeout = rhs.rebuild_timeout;
+      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -2479,25 +2499,20 @@ namespace Legion {
 #endif
         // Only support merging reduction fields with exactly the
         // same mask which should be single fields for reductions
-        return (valid_fields == rhs.valid_fields);
+        return (valid_fields() == rhs.valid_fields());
       }
     }
 
     //--------------------------------------------------------------------------
-    void FieldState::merge(const FieldState &rhs, RegionTreeNode *node)
+    void FieldState::merge(FieldState &rhs, RegionTreeNode *node)
     //--------------------------------------------------------------------------
     {
-      valid_fields |= rhs.valid_fields;
-      for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator it = 
+      for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
             rhs.open_children.begin(); it != rhs.open_children.end(); it++)
-      {
-        LegionMap<LegionColor,FieldMask>::aligned::iterator finder = 
-                                      open_children.find(it->first);
-        if (finder == open_children.end())
-          open_children[it->first] = it->second;
-        else
-          finder->second |= it->second;
-      }
+        // Remove duplicate references if we already had it
+        if (!open_children.insert(it->first, it->second))
+          it->first->remove_base_valid_ref(FIELD_STATE_REF);
+      rhs.open_children.clear();
 #ifdef DEBUG_LEGION
       assert(redop == rhs.redop);
       assert(projection == rhs.projection);
@@ -2523,6 +2538,79 @@ namespace Legion {
             open_state = OPEN_MULTI_REDUCE;
         }
       }
+    }
+
+    //--------------------------------------------------------------------------
+    bool FieldState::filter(const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      if (is_projection_state())
+      {
+#ifdef DEBUG_LEGION
+        assert(projection != NULL);
+        assert(open_children.empty());
+#endif
+        open_children.filter_valid_mask(mask);
+        return !open_children.get_valid_mask();
+      }
+      else
+      {
+        std::vector<RegionTreeNode*> to_delete;
+        for (FieldMaskSet<RegionTreeNode>::iterator it = 
+              open_children.begin(); it != open_children.end(); it++)
+        {
+          it.filter(mask);
+          if (!it->second)
+            to_delete.push_back(it->first);
+        }
+        if (to_delete.size() < open_children.size())
+        {
+          for (std::vector<RegionTreeNode*>::const_iterator it = 
+                to_delete.begin(); it != to_delete.end(); it++)
+          {
+            open_children.erase(*it);
+            if ((*it)->remove_base_valid_ref(FIELD_STATE_REF))
+              delete (*it);
+          }
+        }
+        else
+        {
+          open_children.clear();
+          for (std::vector<RegionTreeNode*>::const_iterator it = 
+                to_delete.begin(); it != to_delete.end(); it++)
+            if ((*it)->remove_base_valid_ref(FIELD_STATE_REF))
+              delete (*it);
+        }
+        open_children.tighten_valid_mask();
+        return open_children.empty();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldState::add_child(RegionTreeNode *child, const FieldMask &mask, 
+                               std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      if (open_children.insert(child, mask))
+      {
+        WrapperReferenceMutator mutator(applied_events);
+        child->add_base_valid_ref(FIELD_STATE_REF, &mutator);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldState::remove_child(RegionTreeNode *child)
+    //--------------------------------------------------------------------------
+    {
+      FieldMaskSet<RegionTreeNode>::iterator finder = 
+        open_children.find(child);
+#ifdef DEBUG_LEGION
+      assert(finder != open_children.end());
+      assert(!finder->second);
+#endif
+      open_children.erase(finder);
+      if (child->remove_base_valid_ref(FIELD_STATE_REF))
+        delete child;
     }
 
     //--------------------------------------------------------------------------
@@ -2614,14 +2702,14 @@ namespace Legion {
           assert(false);
       }
       logger->down();
-      for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator it = 
+      for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
             open_children.begin(); it != open_children.end(); it++)
       {
         FieldMask overlap = it->second & capture_mask;
         if (!overlap)
           continue;
         char *mask_buffer = overlap.to_string();
-        logger->log("Color %d   Mask %s", it->first, mask_buffer);
+        logger->log("Color %d   Mask %s", it->first->get_color(), mask_buffer);
         free(mask_buffer);
       }
       logger->up();
@@ -2699,11 +2787,12 @@ namespace Legion {
           assert(false);
       }
       logger->down();
-      for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator it = 
+      for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
             open_children.begin(); it != open_children.end(); it++)
       {
+        IndexSpaceNode *color_space = node->row_source->color_space;
         DomainPoint color =
-          node->row_source->color_space->delinearize_color_to_point(it->first);
+          color_space->delinearize_color_to_point(it->first->get_color());
         FieldMask overlap = it->second & capture_mask;
         if (!overlap)
           continue;
@@ -7931,14 +8020,37 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     EquivalenceSet::DisjointPartitionRefinement::DisjointPartitionRefinement(
-                                                               IndexPartNode *p)
-      : partition(p), total_child_volume(0),
+     EquivalenceSet *owner, IndexPartNode *p, std::set<RtEvent> &applied_events)
+      : owner_did(owner->did), partition(p), total_child_volume(0),
         partition_volume(partition->get_union_expression()->get_volume())
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(partition->is_disjoint());
 #endif
+      WrapperReferenceMutator mutator(applied_events);
+      partition->add_nested_valid_ref(owner_did, &mutator);
+    }
+
+    //--------------------------------------------------------------------------
+    EquivalenceSet::DisjointPartitionRefinement::DisjointPartitionRefinement(
+      const DisjointPartitionRefinement &rhs, std::set<RtEvent> &applied_events)
+      : owner_did(rhs.owner_did), partition(rhs.partition), 
+        children(rhs.get_children()), total_child_volume(children.size()), 
+        partition_volume(rhs.get_volume())
+    //--------------------------------------------------------------------------
+    {
+      WrapperReferenceMutator mutator(applied_events);
+      partition->add_nested_valid_ref(owner_did, &mutator);
+    }
+
+    //--------------------------------------------------------------------------
+    EquivalenceSet::DisjointPartitionRefinement::~DisjointPartitionRefinement(
+                                                                           void)
+    //--------------------------------------------------------------------------
+    {
+      if (partition->remove_nested_valid_ref(owner_did))
+        delete partition;
     }
 
     //--------------------------------------------------------------------------
@@ -8061,6 +8173,14 @@ namespace Legion {
               disjoint_partition_refinements.begin(); it !=
               disjoint_partition_refinements.end(); it++)
           delete it->first;
+      }
+      if (!unrefined_remainders.empty())
+      {
+        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+              unrefined_remainders.begin(); it != 
+              unrefined_remainders.end(); it++)
+          if (it->first->remove_expression_reference())
+            delete it->first;
       }
       if (subset_exprs != NULL)
         delete subset_exprs;
@@ -8327,7 +8447,11 @@ namespace Legion {
             {
               for (std::vector<IndexSpaceExpression*>::const_iterator it = 
                     to_delete.begin(); it != to_delete.end(); it++)
+              {
                 unrefined_remainders.erase(*it);
+                if ((*it)->remove_expression_reference())
+                  delete (*it);
+              }
               unrefined_remainders.tighten_valid_mask();
             }
           }
@@ -8365,6 +8489,7 @@ namespace Legion {
       //assert(forest->subtract_index_spaces(expr, set_expr)->is_empty());
 #endif
       RtEvent refinement_done;
+      std::set<RtEvent> done_events;
       FieldMaskSet<EquivalenceSet> to_traverse, pending_to_traverse;
       std::map<EquivalenceSet*,IndexSpaceExpression*> to_traverse_exprs;
       {
@@ -8475,6 +8600,7 @@ namespace Legion {
             disjoint_partition_refinements.get_valid_mask();
           if (!!disjoint_overlap)
           {
+            FieldMaskSet<DisjointPartitionRefinement> to_add;
             std::vector<DisjointPartitionRefinement*> to_delete;
             // Iterate over the disjoint partition refinements and see 
             // which ones we overlap with
@@ -8506,10 +8632,30 @@ namespace Legion {
                   // If child is NULL then we haven't made it yet
                   if (child == NULL)
                   {
+                    // We want to maintain the invariant that a disjoint
+                    // partition refinement represents all the children
+                    // being refined for all the same fields, so we need
+                    // to split this disjoint partition refinement into
+                    // two if there is a difference in fields
+                    const FieldMask non_overlap = it->second - overlap;
+                    if (!!non_overlap)
+                    {
+                      // Make a new disjoint partition refinement that is
+                      // a copy of the old one up to this point
+                      DisjointPartitionRefinement *copy_refinement = 
+                        new DisjointPartitionRefinement(*(it->first),
+                                                        done_events);
+                      to_add.insert(copy_refinement, non_overlap);
+                      // Filter the fields down to just the overlap
+                      it.filter(non_overlap);
+                    }
+#ifdef DEBUG_LEGION
+                    assert(it->second == overlap);
+#endif
                     // Refine this for all the fields in the disjoint 
                     // partition refinement to maintain the invariant that
                     // all these chidren have been refined for all fields
-                    child = add_pending_refinement(expr,it->second,node,source);
+                    child = add_pending_refinement(expr, overlap, node, source);
                     pending_to_traverse.insert(child, overlap);
                     to_traverse_exprs[child] = expr;
                     // If this is a pending refinement then we'll need to
@@ -8538,10 +8684,10 @@ namespace Legion {
                               it->first->partition->get_union_expression());
 #ifdef DEBUG_LEGION
                         assert((diff_expr != NULL) && !diff_expr->is_empty());
-                        assert(unrefined_remainders.get_valid_mask() * 
-                                it->second);
+                        assert(unrefined_remainders.get_valid_mask() * overlap);
 #endif
-                        unrefined_remainders.insert(diff_expr, it->second);
+                        if (unrefined_remainders.insert(diff_expr, overlap))
+                          diff_expr->add_expression_reference();
                       }
                     }
                     // Remove these fields from the overlap indicating
@@ -8566,7 +8712,7 @@ namespace Legion {
                       }
                     }
                     // If we couldn't find it in the already valid set, check
-                    // also in the pending refineemnts
+                    // also in the pending refinements
                     if (!!overlap)
                     {
                       finder = pending_refinements.find(child);
@@ -8619,6 +8765,15 @@ namespace Legion {
                 delete (*it);
               }
               disjoint_partition_refinements.tighten_valid_mask();
+            }
+            if (!to_add.empty())
+            {
+              if (!disjoint_partition_refinements.empty())
+                for (FieldMaskSet<DisjointPartitionRefinement>::const_iterator
+                      it = to_add.begin(); it != to_add.end(); it++)
+                  disjoint_partition_refinements.insert(it->first, it->second);
+              else
+                disjoint_partition_refinements.swap(to_add);
             }
           }
         }
@@ -8720,7 +8875,8 @@ namespace Legion {
                       assert(unrefined_remainders.get_valid_mask() * 
                               it->set_mask);
 #endif
-                      unrefined_remainders.insert(remainder, it->set_mask);
+                      if (unrefined_remainders.insert(remainder, it->set_mask))
+                        remainder->add_expression_reference();
                     }
                   }
                 }
@@ -8763,7 +8919,8 @@ namespace Legion {
                     assert(unrefined_remainders.get_valid_mask() * 
                             to_filter);
 #endif
-                    unrefined_remainders.insert(remainder, to_filter);
+                    if (unrefined_remainders.insert(remainder, to_filter))
+                      remainder->add_expression_reference();
                   }
                 }
               }
@@ -8803,7 +8960,8 @@ namespace Legion {
                   node->parent->is_disjoint())
               {
                 DisjointPartitionRefinement *dis = 
-                  new DisjointPartitionRefinement(node->parent);
+                  new DisjointPartitionRefinement(this, 
+                            node->parent, done_events);
                 EquivalenceSet *child = 
                   add_pending_refinement(expr, disjoint_mask, node, source);
                 pending_to_traverse.insert(child, disjoint_mask);
@@ -8858,7 +9016,8 @@ namespace Legion {
               IndexSpaceExpression *diff =
                 forest->subtract_index_spaces(set_expr, expr);
 #endif
-              unrefined_remainders.insert(diff, ray_mask);
+              if (unrefined_remainders.insert(diff, ray_mask))
+                diff->add_expression_reference();
               ray_mask.clear();
             }
           }
@@ -8870,7 +9029,6 @@ namespace Legion {
       // trigger it now to signal to the next user that they can start
       if (deferral_event.exists())
         Runtime::trigger_event(deferral_event);
-      std::set<RtEvent> done_events;
       // Any fields which are still valid should be recorded
       if (!!ray_mask)
       {
@@ -9494,14 +9652,23 @@ namespace Legion {
       rez.serialize<size_t>(unrefined_remainders.size());
       if (!unrefined_remainders.empty())
       {
+        std::vector<IndexSpaceExpression*> *references = 
+          new std::vector<IndexSpaceExpression*>();
+        references->reserve(unrefined_remainders.size());
         for (FieldMaskSet<IndexSpaceExpression>::const_iterator it = 
               unrefined_remainders.begin(); it != 
               unrefined_remainders.end(); it++)
         {
           it->first->pack_expression(rez, logical_owner_space);
           rez.serialize(it->second);
+          references->push_back(it->first);
         }
         unrefined_remainders.clear();
+        // Defer removing the references on these expressions until
+        // the migration has been done
+        DeferRemoveRefArgs args(references);
+        runtime->issue_runtime_meta_task(args, 
+            LG_THROUGHPUT_WORK_PRIORITY, done_migration);
       }
       // Pack disjoint partition refinements
       rez.serialize<size_t>(disjoint_partition_refinements.size());
@@ -9679,7 +9846,8 @@ namespace Legion {
           IndexSpaceExpression::unpack_expression(derez,runtime->forest,source);
         FieldMask mask;
         derez.deserialize(mask);
-        unrefined_remainders.insert(expr, mask);
+        if (unrefined_remainders.insert(expr, mask))
+          expr->add_expression_reference();
       }
       size_t num_disjoint_refinements;
       derez.deserialize(num_disjoint_refinements);
@@ -9688,7 +9856,8 @@ namespace Legion {
         IndexPartition handle;
         derez.deserialize(handle);
         IndexPartNode *part = runtime->forest->get_node(handle);
-        DisjointPartitionRefinement *dis = new DisjointPartitionRefinement(part);
+        DisjointPartitionRefinement *dis = 
+          new DisjointPartitionRefinement(this, part, owner_preconditions);
         size_t num_children;
         derez.deserialize(num_children);
         for (unsigned idx2 = 0; idx2 < num_children; idx2++)
@@ -9762,25 +9931,24 @@ namespace Legion {
       if (need_lock)
       {
         AutoLock eq(eq_lock);
-        // See if we need to defer this because there are outstanding analyses
-        if (pending_analyses > 0)
-        {
-#ifdef DEBUG_LEGION
-          assert(!waiting_event.exists());
-#endif
-          waiting_event = Runtime::create_rt_user_event();
-          DeferMakeOwnerArgs args(this, new_subsets, done_event);
-          runtime->issue_runtime_meta_task(args, 
-              LG_LATENCY_DEFERRED_PRIORITY, waiting_event);
-          return false;
-        }
-        else
-          return make_owner(new_subsets, done_event, false/*need lock*/);
+        return make_owner(new_subsets, done_event, false/*need lock*/);
       }
-      // Now we can mark that we are the logical owner
 #ifdef DEBUG_LEGION
       assert(!is_logical_owner());
 #endif
+      // See if we need to defer this because there are outstanding analyses
+      if (pending_analyses > 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(!waiting_event.exists());
+#endif
+        waiting_event = Runtime::create_rt_user_event();
+        DeferMakeOwnerArgs args(this, new_subsets, done_event);
+        runtime->issue_runtime_meta_task(args, 
+            LG_LATENCY_DEFERRED_PRIORITY, waiting_event);
+        return false;
+      }
+      // Now we can mark that we are the logical owner
       logical_owner_space = local_space;
       // If we were waiting for a valid copy of the subsets we now have it
       if (eq_state == PENDING_VALID_STATE)
@@ -12535,7 +12703,8 @@ namespace Legion {
         assert((diff_expr != NULL) && !diff_expr->is_empty());
         assert(unrefined_remainders.get_valid_mask() * finalize_mask);
 #endif
-        unrefined_remainders.insert(diff_expr, finalize_mask);
+        if (unrefined_remainders.insert(diff_expr, finalize_mask))
+          diff_expr->add_expression_reference();
       }
     }
 
@@ -12576,13 +12745,18 @@ namespace Legion {
       {
         for (std::vector<IndexSpaceExpression*>::const_iterator 
               it = to_delete.begin(); it != to_delete.end(); it++)
+        {
           unrefined_remainders.erase(*it);
+          if ((*it)->remove_expression_reference())
+            delete (*it);
+        }
       }
       if (!to_add.empty())
       {
         for (FieldMaskSet<IndexSpaceExpression>::const_iterator
               it = to_add.begin(); it != to_add.end(); it++)
-          unrefined_remainders.insert(it->first, it->second);
+          if (unrefined_remainders.insert(it->first, it->second))
+            it->first->add_expression_reference();
       }
     }
 
@@ -13218,6 +13392,18 @@ namespace Legion {
       // Remove our expression reference too
       if (dargs->is_local && dargs->expr->remove_expression_reference())
         delete dargs->expr;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/void EquivalenceSet::handle_deferred_remove_refs(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferRemoveRefArgs *dargs = (const DeferRemoveRefArgs*)args;
+      for (std::vector<IndexSpaceExpression*>::const_iterator it = 
+            dargs->references->begin(); it != dargs->references->end(); it++)
+        if ((*it)->remove_expression_reference())
+          delete (*it);
+      delete dargs->references;
     }
 
     //--------------------------------------------------------------------------

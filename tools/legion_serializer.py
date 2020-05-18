@@ -84,7 +84,6 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
     prefix = r'\[(?:[0-9]+) - (?:[0-9a-f]+)\] \{\w+\}\{legion_prof\}: '
 
     patterns = {
-        "MessageDesc": re.compile(prefix + r'Prof Message Desc (?P<kind>[0-9]+) (?P<name>[a-zA-Z0-9_ ]+)'),
         "MapperCallDesc": re.compile(prefix + r'Prof Mapper Call Desc (?P<kind>[0-9]+) (?P<name>[a-zA-Z0-9_ ]+)'),
         "RuntimeCallDesc": re.compile(prefix + r'Prof Runtime Call Desc (?P<kind>[0-9]+) (?P<name>[a-zA-Z0-9_ ]+)'),
         "MetaDesc": re.compile(prefix + r'Prof Meta Desc (?P<kind>[0-9]+) (?P<name>[a-zA-Z0-9_ ]+)'),
@@ -122,7 +121,6 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "InstUsageInfo": re.compile(prefix + r'Prof Inst Usage (?P<op_id>[0-9]+) (?P<inst_id>[a-f0-9]+) (?P<mem_id>[a-f0-9]+) (?P<size>[0-9]+)'),
         "InstTimelineInfo": re.compile(prefix + r'Prof Inst Timeline (?P<op_id>[0-9]+) (?P<inst_id>[a-f0-9]+) (?P<create>[0-9]+) (?P<destroy>[0-9]+)'),
         "PartitionInfo": re.compile(prefix + r'Prof Partition Timeline (?P<op_id>[0-9]+) (?P<part_op>[0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)'),
-        "MessageInfo": re.compile(prefix + r'Prof Message Info (?P<kind>[0-9]+) (?P<proc_id>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)'),
         "MapperCallInfo": re.compile(prefix + r'Prof Mapper Call Info (?P<kind>[0-9]+) (?P<proc_id>[a-f0-9]+) (?P<op_id>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)'),
         "RuntimeCallInfo": re.compile(prefix + r'Prof Runtime Call Info (?P<kind>[0-9]+) (?P<proc_id>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)'),
         "ProfTaskInfo": re.compile(prefix + r'Prof ProfTask Info (?P<proc_id>[a-f0-9]+) (?P<op_id>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
@@ -264,7 +262,6 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
         "int":                "i", # int
         "ProcKind":           "i", # int (really an enum so this depends)
         "MemKind":            "i", # int (really an enum so this depends)
-        "MessageKind":        "i", # int (really an enum so this depends)
         "MappingCallKind":    "i", # int (really an enum so this depends)
         "RuntimeCallKind":    "i", # int (really an enum so this depends)
         "DepPartOpKind":      "i", # int (really an enum so this depends)
