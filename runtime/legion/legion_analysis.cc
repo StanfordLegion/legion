@@ -9697,25 +9697,24 @@ namespace Legion {
       if (need_lock)
       {
         AutoLock eq(eq_lock);
-        // See if we need to defer this because there are outstanding analyses
-        if (pending_analyses > 0)
-        {
-#ifdef DEBUG_LEGION
-          assert(!waiting_event.exists());
-#endif
-          waiting_event = Runtime::create_rt_user_event();
-          DeferMakeOwnerArgs args(this, new_subsets, done_event);
-          runtime->issue_runtime_meta_task(args, 
-              LG_LATENCY_DEFERRED_PRIORITY, waiting_event);
-          return false;
-        }
-        else
-          return make_owner(new_subsets, done_event, false/*need lock*/);
+        return make_owner(new_subsets, done_event, false/*need lock*/);
       }
-      // Now we can mark that we are the logical owner
 #ifdef DEBUG_LEGION
       assert(!is_logical_owner());
 #endif
+      // See if we need to defer this because there are outstanding analyses
+      if (pending_analyses > 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(!waiting_event.exists());
+#endif
+        waiting_event = Runtime::create_rt_user_event();
+        DeferMakeOwnerArgs args(this, new_subsets, done_event);
+        runtime->issue_runtime_meta_task(args, 
+            LG_LATENCY_DEFERRED_PRIORITY, waiting_event);
+        return false;
+      }
+      // Now we can mark that we are the logical owner
       logical_owner_space = local_space;
       // If we were waiting for a valid copy of the subsets we now have it
       if (eq_state == PENDING_VALID_STATE)
