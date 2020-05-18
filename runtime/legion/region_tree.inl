@@ -1076,7 +1076,7 @@ namespace Legion {
         IndexSpaceExpression *sub = sub_expressions[idx];
         // Add the parent and the reference
         sub->add_parent_operation(this);
-        sub->add_expression_reference();
+        sub->add_expression_reference(true/*expr tree*/);
         // Then get the realm index space expression
         ApEvent precondition = sub->get_expr_index_space(
             &spaces[idx], this->type_tag, false/*need tight result*/);
@@ -1144,7 +1144,7 @@ namespace Legion {
         IndexSpaceExpression *sub = sub_expressions[idx];
         // Add the parent and the reference
         sub->add_parent_operation(this);
-        sub->add_expression_reference();
+        sub->add_expression_reference(true/*expr tree*/);
       }
     }
 
@@ -1165,7 +1165,7 @@ namespace Legion {
     {
       // Remove references from our sub expressions
       for (unsigned idx = 0; idx < sub_expressions.size(); idx++)
-        if (sub_expressions[idx]->remove_expression_reference())
+        if (sub_expressions[idx]->remove_expression_reference(true/*exprtree*/))
           delete sub_expressions[idx];
     }
 
@@ -1246,7 +1246,7 @@ namespace Legion {
         forest->remove_union_operation(this, sub_expressions);
       // Remove our expression reference added by invalidate_operation
       // and return true if we should be deleted
-      return this->remove_expression_reference();
+      return this->remove_expression_reference(true/*expr tree*/);
     }
 
     //--------------------------------------------------------------------------
@@ -1280,7 +1280,7 @@ namespace Legion {
         IndexSpaceExpression *sub = sub_expressions[idx];
         // Add the parent and the reference
         sub->add_parent_operation(this);
-        sub->add_expression_reference();
+        sub->add_expression_reference(true/*expr tree*/);
         ApEvent precondition = sub->get_expr_index_space(
             &spaces[idx], this->type_tag, false/*need tight result*/);
         if (precondition.exists())
@@ -1347,7 +1347,7 @@ namespace Legion {
         IndexSpaceExpression *sub = sub_expressions[idx];
         // Add the parent and the reference
         sub->add_parent_operation(this);
-        sub->add_expression_reference();
+        sub->add_expression_reference(true/*expr tree*/);
       }
     }
 
@@ -1369,7 +1369,7 @@ namespace Legion {
     {
       // Remove references from our sub expressions
       for (unsigned idx = 0; idx < sub_expressions.size(); idx++)
-        if (sub_expressions[idx]->remove_expression_reference())
+        if (sub_expressions[idx]->remove_expression_reference(true/*exprtree*/))
           delete sub_expressions[idx];
     }
 
@@ -1450,7 +1450,7 @@ namespace Legion {
         forest->remove_intersection_operation(this, sub_expressions);
       // Remove our expression reference added by invalidate_operation
       // and return true if we should be deleted
-      return this->remove_expression_reference();
+      return this->remove_expression_reference(true/*expr tree*/);
     }
 
     //--------------------------------------------------------------------------
@@ -1480,7 +1480,7 @@ namespace Legion {
       {
         // Special case for when the expressions are the same
         lhs->add_parent_operation(this);
-        lhs->add_expression_reference();
+        lhs->add_expression_reference(true/*expr tree*/);
         this->realm_index_space = Realm::IndexSpace<DIM,T>::make_empty();
         this->tight_index_space = Realm::IndexSpace<DIM,T>::make_empty();
         this->realm_index_space_ready = ApEvent::NO_AP_EVENT;
@@ -1492,8 +1492,8 @@ namespace Legion {
         // Add the parent and the references
         lhs->add_parent_operation(this);
         rhs->add_parent_operation(this);
-        lhs->add_expression_reference();
-        rhs->add_expression_reference();
+        lhs->add_expression_reference(true/*expr tree*/);
+        rhs->add_expression_reference(true/*expr tree*/);
         ApEvent left_ready = 
           lhs->get_expr_index_space(&lhs_space, this->type_tag, false/*tight*/);
         ApEvent right_ready = 
@@ -1552,12 +1552,12 @@ namespace Legion {
       if (lhs != NULL)
       {
         lhs->add_parent_operation(this);
-        lhs->add_expression_reference();
+        lhs->add_expression_reference(true/*expr tree*/);
       }
       if (rhs != NULL)
       {
         rhs->add_parent_operation(this);
-        rhs->add_expression_reference();
+        rhs->add_expression_reference(true/*expr tree*/);
       }
     }
 
@@ -1578,9 +1578,10 @@ namespace Legion {
     IndexSpaceDifference<DIM,T>::~IndexSpaceDifference(void)
     //--------------------------------------------------------------------------
     {
-      if ((rhs != NULL) && (lhs != rhs) && rhs->remove_expression_reference())
+      if ((rhs != NULL) && (lhs != rhs) && 
+          rhs->remove_expression_reference(true/*expr tree*/))
         delete rhs;
-      if ((lhs != NULL) && lhs->remove_expression_reference())
+      if ((lhs != NULL) && lhs->remove_expression_reference(true/*expr tree*/))
         delete lhs;
     }
 
@@ -1661,7 +1662,7 @@ namespace Legion {
         forest->remove_subtraction_operation(this, lhs, rhs);
       // Remove our expression reference added by invalidate_operation
       // and return true if we should be deleted
-      return this->remove_expression_reference();
+      return this->remove_expression_reference(true/*expr tree*/);
     }
 
     //--------------------------------------------------------------------------
@@ -2322,60 +2323,6 @@ namespace Legion {
       // Wait for a tight space on which to perform the test
       get_realm_index_space(test_space, true/*tight*/);
       return test_space.contains(p);
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    bool IndexSpaceNodeT<DIM,T>::destroy_node(AddressSpaceID source,
-                                              std::set<RtEvent> &applied)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(registered_with_runtime);
-#endif
-      if (destroyed)
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_INDEX_SPACE_DELETION,
-            "Duplicate deletion of Index Space %d", handle.get_id())
-      destroyed = true;
-      // If we're not the owner, send a message that we're removing
-      // the application reference
-      if (!is_owner())
-      {
-        if (source != owner_space)
-          runtime->send_index_space_destruction(handle, owner_space, applied);
-        return false;
-      }
-      else
-      {
-        if (has_remote_instances())
-        {
-          DestroyNodeFunctor functor(handle, source, runtime, applied);
-          map_over_remote_instances(functor);
-        }
-        // Traverse down and destroy all of the child nodes
-        // Need to make a copy of this in case the children
-        // end up being deleted and removing themselves
-        std::vector<IndexPartNode*> color_map_copy;
-        {
-          unsigned index = 0;
-          AutoLock n_lock(node_lock,1,false/*exclusive*/);
-          if (!color_map.empty())
-          {
-            color_map_copy.resize(color_map.size());
-            for (std::map<LegionColor,IndexPartNode*>::const_iterator it = 
-                  color_map.begin(); it != color_map.end(); it++)
-              color_map_copy[index++] = it->second;
-          }
-        }
-        if (!color_map_copy.empty())
-        {
-          for (std::vector<IndexPartNode*>::const_iterator it = 
-                color_map_copy.begin(); it != color_map_copy.end(); it++)
-            if ((*it)->destroy_node(local_space, false/*top*/, applied))
-              delete (*it);
-        }
-        return remove_base_valid_ref(APPLICATION_REF, NULL/*mutator*/);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -4726,66 +4673,6 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
-    } 
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    bool IndexPartNodeT<DIM,T>::destroy_node(AddressSpaceID source, bool top,
-                                             std::set<RtEvent> &applied) 
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(registered_with_runtime);
-#endif
-      if (destroyed)
-      {
-        // Deletion operations for different parts of the index space tree
-        // can actually race to get here, so we don't report any races here
-#if 0
-        if (top)
-          REPORT_LEGION_ERROR(ERROR_ILLEGAL_INDEX_PARTITION_DELETION,
-              "Duplicate deletion of Index Partition %d", handle.get_id())
-        else
-#endif
-        return false;
-      }
-      destroyed = true;
-      // If we're not the owner send a message to do the destruction
-      // otherwise we can do it here
-      if (!is_owner())
-      {
-        runtime->send_index_partition_destruction(handle, owner_space, applied);
-        return false;
-      }
-      else
-      {
-#ifdef DEBUG_LEGION
-        assert(partition_ready.has_triggered());
-#endif
-        // Traverse down and destroy all of the child nodes
-        // Need to make a copy of this in case the children
-        // end up being deleted and removing themselves
-        std::vector<IndexSpaceNode*> color_map_copy;
-        {
-          unsigned index = 0;
-          AutoLock n_lock(node_lock,1,false/*exclusive*/);
-          if (!color_map.empty())
-          {
-            color_map_copy.resize(color_map.size());
-            for (std::map<LegionColor,IndexSpaceNode*>::const_iterator it =
-                  color_map.begin(); it != color_map.end(); it++)
-              color_map_copy[index++] = it->second;
-          }
-        }
-        if (!color_map_copy.empty())
-        {
-          for (std::vector<IndexSpaceNode*>::const_iterator it = 
-                color_map_copy.begin(); it != color_map_copy.end(); it++)
-            if ((*it)->destroy_node(local_space, applied))
-              delete (*it);
-        }
-        return remove_base_valid_ref(APPLICATION_REF, NULL/*mutator*/);
-      }
     } 
 #endif // defined(DEFINE_NT_TEMPLATES)
 

@@ -1527,7 +1527,6 @@ namespace Legion {
         FIELD_SPACE_DELETION,
         FIELD_DELETION,
         LOGICAL_REGION_DELETION,
-        LOGICAL_PARTITION_DELETION,
       };
     public:
       DeletionOp(Runtime *rt);
@@ -1535,6 +1534,9 @@ namespace Legion {
       virtual ~DeletionOp(void);
     public:
       DeletionOp& operator=(const DeletionOp &rhs);
+    public:
+      inline void set_execution_precondition(ApEvent precondition)
+        { execution_precondition = precondition; }
     public:
       void initialize_index_space_deletion(InnerContext *ctx, IndexSpace handle,
                                    std::vector<IndexPartition> &sub_partitions,
@@ -1553,9 +1555,6 @@ namespace Legion {
       void initialize_logical_region_deletion(InnerContext *ctx, 
                                               LogicalRegion handle,
                                               const bool unordered);
-      void initialize_logical_partition_deletion(InnerContext *ctx, 
-                                                 LogicalPartition handle,
-                                                 const bool unordered);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1571,12 +1570,12 @@ namespace Legion {
                                          std::set<RtEvent> &applied) const;
     protected:
       DeletionKind kind;
+      ApEvent execution_precondition;
       IndexSpace index_space;
       IndexPartition index_part;
       std::vector<IndexPartition> sub_partitions;
       FieldSpace field_space;
       LogicalRegion logical_region;
-      LogicalPartition logical_part;
       std::set<FieldID> free_fields;
       std::vector<FieldID> local_fields;
       std::vector<FieldID> global_fields;
@@ -1586,6 +1585,7 @@ namespace Legion {
       std::vector<bool> returnable_privileges;
       std::vector<RegionRequirement> deletion_requirements;
       LegionVector<VersionInfo>::aligned version_infos;
+      std::set<RtEvent> map_applied_conditions;
     }; 
 
     /**
@@ -1816,11 +1816,13 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
     public:
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_mapping(void);
       virtual unsigned find_parent_index(unsigned idx);
 #ifdef LEGION_SPY
       virtual void trigger_complete(void);
 #endif
     protected:
+      std::set<RtEvent> map_applied_conditions;
       unsigned parent_idx;
     };
 

@@ -2861,7 +2861,8 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path);
+                                                   privilege_path,
+                                                   map_applied_conditions);
     }
 
     //--------------------------------------------------------------------------
@@ -4372,7 +4373,8 @@ namespace Legion {
         runtime->forest->perform_dependence_analysis(this, idx, 
                                                      src_requirements[idx],
                                                      projection_info,
-                                                     src_privilege_paths[idx]);
+                                                     src_privilege_paths[idx],
+                                                     map_applied_conditions);
       dst_versions.resize(dst_requirements.size());
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
@@ -4385,7 +4387,8 @@ namespace Legion {
         runtime->forest->perform_dependence_analysis(this, index, 
                                                      dst_requirements[idx],
                                                      projection_info,
-                                                     dst_privilege_paths[idx]);
+                                                     dst_privilege_paths[idx],
+                                                     map_applied_conditions);
         // Switch the privileges back when we are done
         if (is_reduce_req)
           dst_requirements[idx].privilege = REDUCE;
@@ -4398,7 +4401,8 @@ namespace Legion {
           runtime->forest->perform_dependence_analysis(this, offset + idx, 
                                                  src_indirect_requirements[idx],
                                                  projection_info,
-                                                 gather_privilege_paths[idx]);
+                                                 gather_privilege_paths[idx],
+                                                 map_applied_conditions);
       }
       if (!dst_indirect_requirements.empty())
       {
@@ -4408,7 +4412,8 @@ namespace Legion {
           runtime->forest->perform_dependence_analysis(this, offset + idx, 
                                                  dst_indirect_requirements[idx],
                                                  projection_info,
-                                                 scatter_privilege_paths[idx]);
+                                                 scatter_privilege_paths[idx],
+                                                 map_applied_conditions);
       }
     }
 
@@ -6508,7 +6513,8 @@ namespace Legion {
         runtime->forest->perform_dependence_analysis(this, idx, 
                                                      src_requirements[idx],
                                                      src_info,
-                                                     src_privilege_paths[idx]);
+                                                     src_privilege_paths[idx],
+                                                     map_applied_conditions);
       }
       dst_versions.resize(dst_requirements.size());
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
@@ -6523,7 +6529,8 @@ namespace Legion {
         runtime->forest->perform_dependence_analysis(this, index, 
                                                      dst_requirements[idx],
                                                      dst_info,
-                                                     dst_privilege_paths[idx]);
+                                                     dst_privilege_paths[idx],
+                                                     map_applied_conditions);
         // Switch the privileges back when we are done
         if (is_reduce_req)
           dst_requirements[idx].privilege = REDUCE;
@@ -6538,7 +6545,8 @@ namespace Legion {
           runtime->forest->perform_dependence_analysis(this, idx, 
                                                  src_indirect_requirements[idx],
                                                  gather_info,
-                                                 gather_privilege_paths[idx]);
+                                                 gather_privilege_paths[idx],
+                                                 map_applied_conditions);
         }
       }
       if (!dst_indirect_requirements.empty())
@@ -6551,7 +6559,8 @@ namespace Legion {
           runtime->forest->perform_dependence_analysis(this, idx, 
                                                  dst_indirect_requirements[idx],
                                                  scatter_info,
-                                                 scatter_privilege_paths[idx]);
+                                                 scatter_privilege_paths[idx],
+                                                 map_applied_conditions);
         }
       }
     }
@@ -7940,19 +7949,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DeletionOp::initialize_logical_partition_deletion(InnerContext *ctx,
-                                  LogicalPartition handle, const bool unordered)
-    //--------------------------------------------------------------------------
-    {
-      initialize_operation(ctx, !unordered/*track*/);
-      kind = LOGICAL_PARTITION_DELETION;
-      logical_part = handle; 
-      if (runtime->legion_spy_enabled)
-        LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
-                                          unique_op_id);
-    }
-
-    //--------------------------------------------------------------------------
     void DeletionOp::activate(void)
     //--------------------------------------------------------------------------
     {
@@ -7974,6 +7970,7 @@ namespace Legion {
       returnable_privileges.clear();
       deletion_requirements.clear();
       version_infos.clear();
+      map_applied_conditions.clear();
       // Return this to the available deletion ops on the queue
       runtime->free_deletion_op(this);
     }
@@ -8001,23 +7998,9 @@ namespace Legion {
         // These cases do not need any kind of analysis to construct
         // any region requirements
         case INDEX_SPACE_DELETION:
-          {
-            parent_ctx->analyze_destroy_index_space(index_space,
-              deletion_requirements, parent_req_indexes, deletion_req_indexes);
-            break;
-          }
         case INDEX_PARTITION_DELETION:
-          {
-            parent_ctx->analyze_destroy_index_partition(index_part,
-              deletion_requirements, parent_req_indexes, deletion_req_indexes);
-            break;
-          }
         case FIELD_SPACE_DELETION:
-          {
-            parent_ctx->analyze_destroy_field_space(field_space,
-              deletion_requirements, parent_req_indexes, deletion_req_indexes);
-            break;
-          }
+          break;
         case FIELD_DELETION:
           {
             parent_ctx->analyze_destroy_fields(field_space, free_fields,
@@ -8033,18 +8016,17 @@ namespace Legion {
                                   returnable_privileges);
             break;
           }
-        case LOGICAL_PARTITION_DELETION:
-          {
-            parent_ctx->analyze_destroy_logical_partition(logical_part,
-              deletion_requirements, parent_req_indexes, deletion_req_indexes);
-            break;
-          }
         default:
           assert(false);
       }
 #ifdef DEBUG_LEGION
       assert(deletion_requirements.size() == parent_req_indexes.size());
 #endif
+      // Even though we're going to do a full fence analysis after this,
+      // we still need to do this call so we register ourselves in the 
+      // region tree to serve as mapping dependences on things that might
+      // use these data structures in the case of recycling, e.g. in the
+      // case that we recycle a field index
       for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
       {
         RegionRequirement &req = deletion_requirements[idx];
@@ -8052,8 +8034,16 @@ namespace Legion {
         RegionTreePath privilege_path;
         initialize_privilege_path(privilege_path, req);
         runtime->forest->perform_deletion_analysis(this, idx, req, 
-                                                   privilege_path);
+                           privilege_path, map_applied_conditions);
       }
+      // Now pretend like this is going to be a mapping fence on everyone
+      // who came before, although we will never actually record ourselves
+      // as a mapping fence since we want operations that come after us to
+      // be re-ordered up above us. We need this upward facing fence though
+      // to ensure that all tasks are done above use before we do delete
+      // any internal data structures associated with these resources
+      execution_precondition = parent_ctx->perform_fence_analysis(this, 
+                                    true/*mapping*/, true/*execution*/);
       if (runtime->legion_spy_enabled)
       {
         for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
@@ -8079,41 +8069,6 @@ namespace Legion {
                                             req.privilege_fields);
         }
       }
-#ifdef DEBUG_LEGION
-#if 0
-      if (kind == LOGICAL_REGION_DELETION)
-      {
-        assert(deletion_requirements.size() == returnable_privileges.size());
-        // Still need to clean up these contexts in debug mode in case the
-        // deletion doesn't happen before the context gets deleted and the
-        // runtime tries to check that the context is empty for all region
-        // trees. The check is only in debug mode so we only need to do this
-        // in debug mode.
-        bool has_outermost = false;
-        RegionTreeContext outermost_ctx;
-        const RegionTreeContext tree_context = parent_ctx->get_context();
-        for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
-        {
-          const RegionRequirement &req = deletion_requirements[idx];
-          if (returnable_privileges[idx])
-          {
-            if (!has_outermost)
-            {
-              TaskContext *outermost = 
-                parent_ctx->find_outermost_local_context();
-              outermost_ctx = outermost->get_context();
-              has_outermost = true;
-            }
-            runtime->forest->invalidate_current_context(outermost_ctx,
-                                      false/*users only*/, req.region);
-          }
-          else
-            runtime->forest->invalidate_current_context(tree_context,
-                                    false/*users only*/, req.region);
-        }
-      }
-#endif
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -8145,7 +8100,6 @@ namespace Legion {
     { 
       // Clean out the physical state for these operations once we know that  
       // all prior operations that needed the state have been done
-      std::set<RtEvent> map_applied_events;
       if (kind == LOGICAL_REGION_DELETION)
       {
         // Just need to clean out the version managers which will free
@@ -8180,50 +8134,17 @@ namespace Legion {
         const PhysicalTraceInfo trace_info(this, -1U, false/*init*/);
         for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
           runtime->forest->invalidate_fields(this, idx, version_infos[idx],
-                                             trace_info, map_applied_events);
+                                             trace_info,map_applied_conditions);
       }
       // Mark that we're done mapping and defer the execution as appropriate
-      if (!map_applied_events.empty())
-        complete_mapping(Runtime::merge_events(map_applied_events));
+      if (!map_applied_conditions.empty())
+        complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
         complete_mapping();
       // Wait for all the operations on which this deletion depends on to
       // complete before we are officially considered done execution
-      std::set<ApEvent> execution_preconditions;
-      if (!incoming.empty())
-      {
-        for (std::map<Operation*,GenerationID>::const_iterator it = 
-              incoming.begin(); it != incoming.end(); it++)
-        {
-          // Do this first and then check to see if it is for
-          // the same generation of the operation
-          const ApEvent done = it->first->get_completion_event();
-          __sync_synchronize();
-          if (it->second == it->first->get_generation())
-            execution_preconditions.insert(done);
-        }
-      }
-      // If we're deleting parts of an index space tree then we also need 
-      // to make sure all the dependent partitioning operations are done
-      if (kind == INDEX_PARTITION_DELETION)
-      {
-        IndexPartNode *node = runtime->forest->get_node(index_part);
-        execution_preconditions.insert(node->partition_ready);
-      }
-      if (!sub_partitions.empty())
-      {
-        for (std::vector<IndexPartition>::const_iterator it = 
-              sub_partitions.begin(); it != sub_partitions.end(); it++)
-        {
-          IndexPartNode *node = runtime->forest->get_node(*it);
-          execution_preconditions.insert(node->partition_ready);
-        }
-      }
-      if (execution_fence_event.exists())
-        execution_preconditions.insert(execution_fence_event);
-      if (!execution_preconditions.empty())
-        complete_execution(Runtime::protect_event(
-            Runtime::merge_events(NULL, execution_preconditions)));
+      if (execution_precondition.exists())
+        complete_execution(Runtime::protect_event(execution_precondition));
       else
         complete_execution();
     }
@@ -8232,37 +8153,44 @@ namespace Legion {
     void DeletionOp::trigger_complete(void)
     //--------------------------------------------------------------------------
     {
-      // We put these operations in the commit stage to make sure that there
-      // is no mis-speculation or faults that could potentially affect them
       std::set<RtEvent> preconditions;
       std::vector<LogicalRegion> regions_to_destroy;
       switch (kind)
       {
         case INDEX_SPACE_DELETION:
           {
-            if (!deletion_req_indexes.empty())
-              parent_ctx->remove_deleted_requirements(deletion_req_indexes,
-                                                      regions_to_destroy);
-            runtime->forest->destroy_index_space(index_space,
-                                     runtime->address_space, preconditions);
+#ifdef DEBUG_LEGION
+            assert(deletion_req_indexes.empty());
+#endif
+            runtime->forest->destroy_index_space(index_space, preconditions);
+            if (!sub_partitions.empty())
+            {
+              for (std::vector<IndexPartition>::const_iterator it = 
+                    sub_partitions.begin(); it != sub_partitions.end(); it++)
+                runtime->forest->destroy_index_partition(*it, preconditions);
+            }
             break;
           }
         case INDEX_PARTITION_DELETION:
           {
-            if (!deletion_req_indexes.empty())
-              parent_ctx->remove_deleted_requirements(deletion_req_indexes,
-                                                      regions_to_destroy);
-            runtime->forest->destroy_index_partition(index_part,
-                                     runtime->address_space, preconditions);
+#ifdef DEBUG_LEGION
+            assert(deletion_req_indexes.empty());
+#endif
+            runtime->forest->destroy_index_partition(index_part, preconditions);
+            if (!sub_partitions.empty())
+            {
+              for (std::vector<IndexPartition>::const_iterator it = 
+                    sub_partitions.begin(); it != sub_partitions.end(); it++)
+                runtime->forest->destroy_index_partition(*it, preconditions);
+            }
             break;
           }
         case FIELD_SPACE_DELETION:
           {
-            if (!deletion_req_indexes.empty())
-              parent_ctx->remove_deleted_requirements(deletion_req_indexes,
-                                                      regions_to_destroy);
-            runtime->forest->destroy_field_space(field_space,
-                                     runtime->address_space, preconditions);
+#ifdef DEBUG_LEGION
+            assert(deletion_req_indexes.empty());
+#endif
+            runtime->forest->destroy_field_space(field_space, preconditions);
             break;
           }
         case FIELD_DELETION:
@@ -8293,16 +8221,7 @@ namespace Legion {
               // If we had no deletion requirements then we know there is
               // nothing to race with and we can just do our deletion
               runtime->forest->destroy_logical_region(logical_region,
-                                runtime->address_space, preconditions);
-            break;
-          }
-        case LOGICAL_PARTITION_DELETION:
-          {
-            if (!deletion_req_indexes.empty())
-              parent_ctx->remove_deleted_requirements(deletion_req_indexes,
-                                                      regions_to_destroy);
-            runtime->forest->destroy_logical_partition(logical_part,
-                                    runtime->address_space, preconditions);
+                                                      preconditions);
             break;
           }
         default:
@@ -8312,8 +8231,7 @@ namespace Legion {
       {
         for (std::vector<LogicalRegion>::const_iterator it =
               regions_to_destroy.begin(); it != regions_to_destroy.end(); it++)
-          runtime->forest->destroy_logical_region(*it, runtime->address_space,
-                                                  preconditions);
+          runtime->forest->destroy_logical_region(*it, preconditions);
       }
 #ifdef LEGION_SPY
       // Still have to do this call to let Legion Spy know we're done
@@ -8879,7 +8797,8 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path);
+                                                   privilege_path,
+                                                   map_applied_conditions);
     }
 
     //--------------------------------------------------------------------------
@@ -9252,7 +9171,19 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path);
+                                                   privilege_path,
+                                                   map_applied_conditions);
+    }
+
+    //--------------------------------------------------------------------------
+    void VirtualCloseOp::trigger_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+      if (!map_applied_conditions.empty())
+        complete_mapping(Runtime::merge_events(map_applied_conditions));
+      else
+        complete_mapping();
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -9546,7 +9477,8 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path);
+                                                   privilege_path,
+                                                   map_applied_conditions);
     }
 
     //--------------------------------------------------------------------------
@@ -10407,7 +10339,8 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path);
+                                                   privilege_path,
+                                                   map_applied_conditions);
     }
 
     //--------------------------------------------------------------------------
@@ -13704,7 +13637,8 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path);
+                                                   privilege_path,
+                                                   map_applied_conditions);
       // Record this dependent partition op with the context so that it 
       // can track implicit dependences on it for later operations
       parent_ctx->update_current_implicit(this);
@@ -15188,7 +15122,8 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path);
+                                                   privilege_path,
+                                                   map_applied_conditions);
     }
 
     //--------------------------------------------------------------------------
@@ -15825,7 +15760,8 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path);
+                                                   privilege_path,
+                                                   map_applied_conditions);
     }
 
     //--------------------------------------------------------------------------
@@ -16458,7 +16394,8 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path); 
+                                                   privilege_path,
+                                                   map_applied_conditions); 
     }
 
     //--------------------------------------------------------------------------
@@ -17006,7 +16943,8 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement, 
                                                    projection_info,
-                                                   privilege_path);
+                                                   privilege_path,
+                                                   map_applied_conditions);
     }
 
     //--------------------------------------------------------------------------

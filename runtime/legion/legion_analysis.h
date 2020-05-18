@@ -599,54 +599,43 @@ namespace Legion {
     };  
 
     /**
-     * \struct ChildState
-     * Tracks the which fields have open children
-     * and then which children are open for each
-     * field. We also keep track of the children
-     * that are in the process of being closed
-     * to avoid races on two different operations
-     * trying to close the same child.
-     */
-    struct ChildState {
-    public:
-      ChildState(void) { }
-      ChildState(const FieldMask &m)
-        : valid_fields(m) { }
-      ChildState(const ChildState &rhs) 
-        : valid_fields(rhs.valid_fields),
-          open_children(rhs.open_children) { }
-    public:
-      ChildState& operator=(const ChildState &rhs)
-      {
-        valid_fields = rhs.valid_fields;
-        open_children = rhs.open_children;
-        return *this;
-      }
-    public:
-      FieldMask valid_fields;
-      LegionMap<LegionColor,FieldMask>::aligned open_children;
-    };
-
-    /**
      * \struct FieldState
      * Track the field state more accurately
      * for logical traversals to figure out 
      * which tasks can run in parallel.
      */
-    struct FieldState : public ChildState {
+    struct FieldState {
     public:
       FieldState(void);
       FieldState(const GenericUser &u, const FieldMask &m, 
-                 LegionColor child);
+                 RegionTreeNode *child, std::set<RtEvent> &applied);
       FieldState(const RegionUsage &u, const FieldMask &m,
                  ProjectionFunction *proj, IndexSpaceNode *proj_space, 
                  bool dis, bool dirty_reduction = false);
+      FieldState(const FieldState &rhs);
+      FieldState& operator=(const FieldState &rhs);
+      ~FieldState(void);
     public:
       inline bool is_projection_state(void) const 
         { return (open_state >= OPEN_READ_ONLY_PROJ); } 
+      inline const FieldMask& valid_fields(void) const 
+        { return open_children.get_valid_mask(); }
+      inline void move_to(FieldState &lhs)
+        {
+          open_children.swap(lhs.open_children);
+          lhs.open_state = open_state;
+          lhs.redop = redop;
+          lhs.projection = projection;
+          lhs.projection_space = projection_space;
+          lhs.rebuild_timeout = rebuild_timeout;
+        }
     public:
       bool overlaps(const FieldState &rhs) const;
-      void merge(const FieldState &rhs, RegionTreeNode *node);
+      void merge(FieldState &rhs, RegionTreeNode *node);
+      bool filter(const FieldMask &mask);
+      void add_child(RegionTreeNode *child,
+          const FieldMask &mask, std::set<RtEvent> &applied);
+      void remove_child(RegionTreeNode *child);
     public:
       bool projection_domain_dominates(IndexSpaceNode *next_space) const;
     public:
@@ -657,12 +646,23 @@ namespace Legion {
                        const FieldMask &capture_mask,
                        PartitionNode *node) const;
     public:
+      FieldMaskSet<RegionTreeNode> open_children;
       OpenState open_state;
       ReductionOpID redop;
       ProjectionFunction *projection;
       IndexSpaceNode *projection_space;
       unsigned rebuild_timeout;
     };  
+
+    // A helper class for containing field states
+    class FieldStateDeque : public LegionDeque<FieldState>::aligned {
+    public:
+      inline void emplace(FieldState &rhs)
+      {
+        this->resize(this->size() + 1);
+        rhs.move_to(this->back());
+      }
+    };
 
     /**
      * \class ProjectionEpoch
@@ -2114,6 +2114,16 @@ namespace Legion {
         const IndexSpaceExprID expr_id;
         const IndexSpace handle;
       };
+      struct DeferRemoveRefArgs : public LgTaskArgs<DeferRemoveRefArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_REMOVE_EQ_REF_TASK_ID;
+      public:
+        DeferRemoveRefArgs(std::vector<IndexSpaceExpression*> *refs)
+          : LgTaskArgs<DeferRemoveRefArgs>(implicit_provenance),
+            references(refs) { }
+      public:
+        std::vector<IndexSpaceExpression*> *const references;
+      };
     protected:
       enum EqState {
         // Owner starts in the mapping state, goes to pending refinement
@@ -2133,8 +2143,11 @@ namespace Legion {
     protected:
       struct DisjointPartitionRefinement {
       public:
-        DisjointPartitionRefinement(IndexPartNode *p);
-        DisjointPartitionRefinement(const DisjointPartitionRefinement &rhs);
+        DisjointPartitionRefinement(EquivalenceSet *owner, IndexPartNode *p,
+                                    std::set<RtEvent> &applied_events);
+        DisjointPartitionRefinement(const DisjointPartitionRefinement &rhs,
+                                    std::set<RtEvent> &applied_events);
+        ~DisjointPartitionRefinement(void);
       public:
         inline const std::map<IndexSpaceNode*,EquivalenceSet*>& 
           get_children(void) const { return children; }
@@ -2145,6 +2158,7 @@ namespace Legion {
         void add_child(IndexSpaceNode *node, EquivalenceSet *child);
         EquivalenceSet* find_child(IndexSpaceNode *node) const;
       public:
+        const DistributedID owner_did;
         IndexPartNode *const partition;
       private:
         std::map<IndexSpaceNode*,EquivalenceSet*> children;
@@ -2378,6 +2392,7 @@ namespace Legion {
       static void handle_make_owner(const void *args);
       static void handle_merge_or_forward(const void *args);
       static void handle_deferred_response(const void *args, Runtime *runtime);
+      static void handle_deferred_remove_refs(const void *args);
       static void handle_equivalence_set_request(Deserializer &derez,
                             Runtime *runtime, AddressSpaceID source);
       static void handle_equivalence_set_response(Deserializer &derez,

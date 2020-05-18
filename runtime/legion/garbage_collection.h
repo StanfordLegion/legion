@@ -82,7 +82,8 @@ namespace Legion {
       IS_EXPR_REF = 25,
       TRACE_REF = 26,
       AGGREGATORE_REF = 27,
-      LAST_SOURCE_REF = 28,
+      FIELD_STATE_REF = 28,
+      LAST_SOURCE_REF = 29,
     };
 
     enum ReferenceKind {
@@ -121,6 +122,7 @@ namespace Legion {
       "Index Space Expression Reference",           \
       "Physical Trace Reference",                   \
       "Aggregator Reference",                       \
+      "Field State Reference",                      \
     }
 
     extern Realm::Logger log_garbage;
@@ -423,7 +425,7 @@ namespace Legion {
       static void handle_did_remove_create(Runtime *runtime, 
                                            Deserializer &derez);
     protected:
-      RtEvent check_for_transition_event(void);
+      RtEvent check_for_transition_event(bool &reentrant);
       bool update_state(bool &need_activate, bool &need_validate,
                         bool &need_invalidate, bool &need_deactivate,
                         bool &do_deletion);
@@ -438,9 +440,11 @@ namespace Legion {
     private: // derived users can't see the state information
       State current_state;
       RtUserEvent transition_event;
+      RtEvent reentrant_event;
       bool has_gc_references;
       bool has_valid_references;
       bool has_resource_references;
+      bool reentrant_update;
     private: // derived users can't see the references
       int gc_references;
       int valid_references;

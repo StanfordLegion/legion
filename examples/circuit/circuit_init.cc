@@ -503,6 +503,7 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
   IndexSpace privacy_color_is = runtime->create_index_space(ctx, Rect<1>(0, 1));
   IndexPartition privacy_ip = runtime->create_pending_partition(ctx, 
                                 ckt.all_nodes.get_index_space(), privacy_color_is);
+  runtime->destroy_index_space(ctx, privacy_color_is);
   runtime->attach_name(privacy_ip, "privacy partition");
   IndexSpace all_shared_is = runtime->create_index_space_union(ctx, privacy_ip,
                                                      1/*color*/, temp_ghost_ip);
@@ -580,6 +581,7 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
   runtime->destroy_index_partition(ctx, wire_equal_ip);
   runtime->destroy_index_partition(ctx, locator_equal_ip);
 #endif // !SEQUENTIAL_LOAD_CIRCUIT
+  runtime->destroy_index_space(ctx, piece_is);
 
   char buf[100];
   // Build the pieces
