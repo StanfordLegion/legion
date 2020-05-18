@@ -200,7 +200,7 @@ namespace Realm {
 	if(c == wi->num_threads) {
 	  // last arriver - reset count once all others have exited
 	  //   reset "single" winner too
-	  wi->work_item->single_winner = -1;
+	  wi->work_item->single_winner.store(-1);
 	  while(true) {
 	    int expval = 2 * wi->num_threads - 1;
 	    if(wi->work_item->barrier_count.compare_exchange(expval, 0))
@@ -1087,7 +1087,7 @@ namespace Realm {
       if(c == wi->num_threads) {
 	// last arriver - reset count once all others have exited
 	//   reset "single" winner too
-	wi->work_item->single_winner = -1;
+	wi->work_item->single_winner.store(-1);
 	while(true) {
 	  int expval = 2 * wi->num_threads - 1;
 	  if(wi->work_item->barrier_count.compare_exchange(expval, 0))

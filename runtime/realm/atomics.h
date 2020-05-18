@@ -33,7 +33,9 @@ namespace Realm {
   class atomic {
   public:
     atomic(void);
-    atomic(T _value);
+
+    // this is explicit to disallow assignment of base value (must use store())
+    explicit atomic(T _value);
 
     // copy constructors are needed if atomics are put in a container
     atomic(const atomic<T>& copy_from);

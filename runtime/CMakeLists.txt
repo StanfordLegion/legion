@@ -48,6 +48,7 @@ list(APPEND REALM_SRC
   realm/event_impl.inl
   realm/faults.h            realm/faults.cc
   realm/faults.inl
+  realm/idx_impl.h          realm/idx_impl.cc
   realm/inst_impl.h         realm/inst_impl.cc
   realm/inst_layout.h       realm/inst_layout.inl
   realm/inst_layout.cc
@@ -66,6 +67,7 @@ list(APPEND REALM_SRC
   realm/rsrv_impl.h         realm/rsrv_impl.cc
   realm/runtime_impl.h      realm/runtime_impl.cc
   realm/sampling_impl.h     realm/sampling_impl.cc
+  realm/subgraph_impl.h     realm/subgraph_impl.cc
   realm/tasks.h             realm/tasks.cc
   realm/threads.h           realm/threads.cc
   realm/threads.inl
@@ -179,6 +181,8 @@ list(APPEND REALM_SRC
   realm/sampling.inl
   realm/serialize.h
   realm/serialize.inl
+  realm/subgraph.h
+  realm/subgraph.inl
   realm/timers.h           realm/timers.cc
   realm/timers.inl
   realm/utils.h

@@ -256,6 +256,7 @@ namespace Realm {
   using std::enable_if;
   using std::make_signed;
   using std::make_unsigned;
+  using std::remove_const;
 #else
   // roll our own...
   template <typename T> struct is_integral { static const bool value = false; };
@@ -284,10 +285,59 @@ namespace Realm {
 
   template <bool B, typename T> struct enable_if {};
   template <typename T> struct enable_if<true, T> { typedef T type; };
+
+  template< class T > struct remove_const          { typedef T type; };
+  template< class T > struct remove_const<const T> { typedef T type; };
 #endif
 
   // TODO: get this from <variant> for c++17 and up?
   struct monostate {};
+
+  // TODO: actually use C++20 version if available
+  const size_t dynamic_extent = size_t(-1);
+
+  template <typename T, size_t Extent = dynamic_extent> class span;
+
+  template <typename T>
+  class span<T, dynamic_extent> {
+  public:
+    typedef typename remove_const<T>::type value_type;
+    static const size_t extent = dynamic_extent;
+
+    span() : base(0), length(0) {}
+    span(T *_base, size_t _length) : base(_base), length(_length) {}
+
+    // from another span
+    template <size_t Extent2>
+    span(span<T, Extent2> copy_from)
+      : base(copy_from.data()), length(copy_from.size()) {}
+
+    // from a vector
+    span(const std::vector<typename remove_const<T>::type>& v)
+      : base(v.data()), length(v.size()) {}
+
+    T& operator[](size_t idx) const { return base[idx]; }
+
+    T *data() const { return base; }
+    size_t size() const { return length; }
+    bool empty() const { return (length == 0); }
+
+  protected:
+    T *base;
+    size_t length;
+  };
+
+  class empty_span {
+  public:
+    template <typename T>
+    operator span<T, dynamic_extent>() const { return span<T, dynamic_extent>(); }
+  };
+
+  template <typename T>
+  span<T, dynamic_extent> make_span(T *base, size_t length)
+  {
+    return span<T, dynamic_extent>(base, length);
+  }
 
 
 }; // namespace Realm
