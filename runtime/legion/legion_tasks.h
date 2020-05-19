@@ -39,68 +39,27 @@ namespace Legion {
      */
     class ResourceTracker {
     public:
-      enum ResourceUpdateKind {
-        REGION_CREATION_UPDATE,
-        REGION_DELETION_UPDATE,
-        FIELD_CREATION_UPDATE,
-        FIELD_DELETION_UPDATE,
-        FIELD_SPACE_CREATION_UPDATE,
-        FIELD_SPACE_LATENT_UPDATE,
-        FIELD_SPACE_DELETION_UPDATE,
-        INDEX_SPACE_CREATION_UPDATE,
-        INDEX_SPACE_DELETION_UPDATE,
-        INDEX_PARTITION_CREATION_UPDATE,
-        INDEX_PARTITION_DELETION_UPDATE,
-      };
-    public:
       ResourceTracker(void);
       ResourceTracker(const ResourceTracker &rhs);
       virtual ~ResourceTracker(void);
     public:
       ResourceTracker& operator=(const ResourceTracker &rhs);
     public:
-      virtual void register_region_creations(
-                     std::map<LogicalRegion,unsigned> &regions) = 0;
-      virtual void register_region_deletions(ApEvent precondition,
-                     const std::map<Operation*,GenerationID> &dependences,
-                     std::vector<LogicalRegion> &regions,
-                     std::set<RtEvent> &preconditions) = 0;
-    public:
-      virtual void register_field_creations(
-            std::set<std::pair<FieldSpace,FieldID> > &fields) = 0;
-      virtual void register_field_deletions(ApEvent precondition,
-            const std::map<Operation*,GenerationID> &dependences,
-            std::vector<std::pair<FieldSpace,FieldID> > &fields,
-            std::set<RtEvent> &preconditions) = 0;
-    public:
-      virtual void register_field_space_creations(
-                          std::map<FieldSpace,unsigned> &spaces) = 0;
-      virtual void register_latent_field_spaces(
-            std::map<FieldSpace,std::set<LogicalRegion> > &latent_spaces) = 0;
-      virtual void register_field_space_deletions(ApEvent precondition,
-                          const std::map<Operation*,GenerationID> &dependences,
-                          std::vector<FieldSpace> &spaces,
-                          std::set<RtEvent> &preconditions) = 0;
-    public:
-      virtual void register_index_space_creations(
-                          std::map<IndexSpace,unsigned> &spaces) = 0;
-      virtual void register_index_space_deletions(ApEvent precondition,
-                          const std::map<Operation*,GenerationID> &dependences,
-                          std::vector<std::pair<IndexSpace,bool> > &spaces,
-                          std::set<RtEvent> &preconditions) = 0;
-    public:
-      virtual void register_index_partition_creations(
-                          std::map<IndexPartition,unsigned> &parts) = 0;
-      virtual void register_index_partition_deletions(ApEvent precondition,
-                          const std::map<Operation*,GenerationID> &dependences,
-                          std::vector<std::pair<IndexPartition,bool> > &parts,
-                          std::set<RtEvent> &preconditions) = 0;
-    public:
-      virtual ApEvent compute_return_deletion_dependences(size_t return_index,
-                          std::map<Operation*,GenerationID> &dependences) = 0;
-    public:
       void return_resources(ResourceTracker *target, size_t return_index,
                             std::set<RtEvent> &preconditions);
+      virtual void receive_resources(size_t return_index,
+              std::map<LogicalRegion,unsigned> &created_regions,
+              std::vector<LogicalRegion> &deleted_regions,
+              std::set<std::pair<FieldSpace,FieldID> > &created_fields,
+              std::vector<std::pair<FieldSpace,FieldID> > &deleted_fields,
+              std::map<FieldSpace,unsigned> &created_field_spaces,
+              std::map<FieldSpace,std::set<LogicalRegion> > &latent_spaces,
+              std::vector<FieldSpace> &deleted_field_spaces,
+              std::map<IndexSpace,unsigned> &created_index_spaces,
+              std::vector<std::pair<IndexSpace,bool> > &deleted_index_spaces,
+              std::map<IndexPartition,unsigned> &created_partitions,
+              std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
+              std::set<RtEvent> &preconditions) = 0;
       void pack_resources_return(Serializer &rez, size_t return_index);
       static RtEvent unpack_resources_return(Deserializer &derez,
                                              ResourceTracker *target);
@@ -1309,40 +1268,19 @@ namespace Legion {
     public:
       static void handle_slice_return(Runtime *rt, Deserializer &derez);
     public: // Privilege tracker methods
-      virtual void register_region_creations(
-                     std::map<LogicalRegion,unsigned> &regions);
-      virtual void register_region_deletions(ApEvent precondition,
-                     const std::map<Operation*,GenerationID> &dependences,
-                     std::vector<LogicalRegion> &regions,
-                     std::set<RtEvent> &preconditions);
-      virtual void register_field_creations(
-            std::set<std::pair<FieldSpace,FieldID> > &fields);
-      virtual void register_latent_field_spaces(
-            std::map<FieldSpace,std::set<LogicalRegion> > &latent_spaces);
-      virtual void register_field_deletions(ApEvent precondition,
-            const std::map<Operation*,GenerationID> &dependences,
-            std::vector<std::pair<FieldSpace,FieldID> > &fields,
-            std::set<RtEvent> &preconditions);
-      virtual void register_field_space_creations(
-                          std::map<FieldSpace,unsigned> &spaces);
-      virtual void register_field_space_deletions(ApEvent precondition,
-                          const std::map<Operation*,GenerationID> &dependences,
-                          std::vector<FieldSpace> &spaces,
-                          std::set<RtEvent> &preconditions);
-      virtual void register_index_space_creations(
-                          std::map<IndexSpace,unsigned> &spaces);
-      virtual void register_index_space_deletions(ApEvent precondition,
-                          const std::map<Operation*,GenerationID> &dependences,
-                          std::vector<std::pair<IndexSpace,bool> > &spaces,
-                          std::set<RtEvent> &preconditions);
-      virtual void register_index_partition_creations(
-                          std::map<IndexPartition,unsigned> &parts);
-      virtual void register_index_partition_deletions(ApEvent precondition,
-                          const std::map<Operation*,GenerationID> &dependences,
-                          std::vector<std::pair<IndexPartition,bool> > &parts,
-                          std::set<RtEvent> &preconditions);
-      virtual ApEvent compute_return_deletion_dependences(size_t return_index,
-                          std::map<Operation*,GenerationID> &dependences);
+      virtual void receive_resources(size_t return_index,
+              std::map<LogicalRegion,unsigned> &created_regions,
+              std::vector<LogicalRegion> &deleted_regions,
+              std::set<std::pair<FieldSpace,FieldID> > &created_fields,
+              std::vector<std::pair<FieldSpace,FieldID> > &deleted_fields,
+              std::map<FieldSpace,unsigned> &created_field_spaces,
+              std::map<FieldSpace,std::set<LogicalRegion> > &latent_spaces,
+              std::vector<FieldSpace> &deleted_field_spaces,
+              std::map<IndexSpace,unsigned> &created_index_spaces,
+              std::vector<std::pair<IndexSpace,bool> > &deleted_index_spaces,
+              std::map<IndexPartition,unsigned> &created_partitions,
+              std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
+              std::set<RtEvent> &preconditions);
     public:
       // From MemoizableOp
       virtual void replay_analysis(void);

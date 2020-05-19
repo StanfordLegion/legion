@@ -2227,7 +2227,6 @@ namespace Legion {
       activate_deletion();
       mapping_barrier = RtBarrier::NO_RT_BARRIER;
       execution_barrier = RtBarrier::NO_RT_BARRIER;
-      completion_barrier = RtBarrier::NO_RT_BARRIER;
       is_total_sharding = false;
       is_first_local_shard = false;
     }
@@ -2342,11 +2341,14 @@ namespace Legion {
       else
         Runtime::phase_barrier_arrive(mapping_barrier, 1/*count*/);
       complete_mapping(mapping_barrier);
-      if (execution_precondition.exists())
-        Runtime::phase_barrier_arrive(execution_barrier, 1/*count*/, 
-            Runtime::protect_event(execution_precondition));
-      else
-        Runtime::phase_barrier_arrive(execution_barrier, 1/*count*/);
+      if (execution_precondition != execution_barrier)
+      {
+        if (execution_precondition.exists())
+          Runtime::phase_barrier_arrive(execution_barrier, 1/*count*/, 
+              Runtime::protect_event(execution_precondition));
+        else
+          Runtime::phase_barrier_arrive(execution_barrier, 1/*count*/);
+      }
       complete_execution(execution_barrier);
     }
 
@@ -2523,28 +2525,26 @@ namespace Legion {
           ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
 #endif
       if (!applied.empty())
-        Runtime::phase_barrier_arrive(completion_barrier, 1/*count*/,
-                                      Runtime::merge_events(applied));
+        complete_operation(Runtime::merge_events(applied));
       else
-        Runtime::phase_barrier_arrive(completion_barrier, 1/*count*/);
-      complete_operation(completion_barrier);
+        complete_operation();
     }
 
     //--------------------------------------------------------------------------
     void ReplDeletionOp::initialize_replication(ReplicateContext *ctx,
-                      RtBarrier &deletion_barrier, bool is_total, bool is_first)
+                                                RtBarrier &delmap_barrier, 
+                                                RtBarrier &delexec_barrier,
+                                                bool is_total, bool is_first)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!mapping_barrier.exists());
       assert(!execution_barrier.exists());
 #endif
-      mapping_barrier = deletion_barrier;
-      ctx->advance_replicate_barrier(deletion_barrier, ctx->total_shards);
-      execution_barrier = deletion_barrier;
-      ctx->advance_replicate_barrier(deletion_barrier, ctx->total_shards);
-      completion_barrier = deletion_barrier;
-      ctx->advance_replicate_barrier(deletion_barrier, ctx->total_shards);
+      mapping_barrier = delmap_barrier;
+      ctx->advance_replicate_barrier(delmap_barrier, ctx->total_shards);
+      execution_barrier = delexec_barrier;
+      ctx->advance_replicate_barrier(delexec_barrier, ctx->total_shards);
       is_total_sharding = is_total;
       is_first_local_shard = is_first;
     }
@@ -6559,7 +6559,9 @@ namespace Legion {
         creation_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards));
         // Same thing as above for deletion barriers
-        deletion_barrier = 
+        deletion_mapping_barrier = 
+          RtBarrier(Realm::Barrier::create_barrier(total_shards));
+        deletion_execution_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards));
         // Inline mapping barrier for synchronizing inline mappings
         // across all the shards
@@ -6636,7 +6638,8 @@ namespace Legion {
           startup_barrier.destroy_barrier();
           pending_partition_barrier.destroy_barrier();
           creation_barrier.destroy_barrier();
-          deletion_barrier.destroy_barrier();
+          deletion_mapping_barrier.destroy_barrier();
+          deletion_execution_barrier.destroy_barrier();
           inline_mapping_barrier.destroy_barrier();
           external_resource_barrier.destroy_barrier();
           mapping_fence_barrier.destroy_barrier();
@@ -6815,7 +6818,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(pending_partition_barrier.exists());
           assert(creation_barrier.exists());
-          assert(deletion_barrier.exists());
+          assert(deletion_mapping_barrier.exists());
+          assert(deletion_execution_barrier.exists());
           assert(inline_mapping_barrier.exists());
           assert(external_resource_barrier.exists());
           assert(mapping_fence_barrier.exists());
@@ -6831,7 +6835,8 @@ namespace Legion {
 #endif
           rez.serialize(pending_partition_barrier);
           rez.serialize(creation_barrier);
-          rez.serialize(deletion_barrier);
+          rez.serialize(deletion_mapping_barrier);
+          rez.serialize(deletion_execution_barrier);
           rez.serialize(inline_mapping_barrier);
           rez.serialize(external_resource_barrier);
           rez.serialize(mapping_fence_barrier);
@@ -6883,7 +6888,8 @@ namespace Legion {
       {
         derez.deserialize(pending_partition_barrier);
         derez.deserialize(creation_barrier);
-        derez.deserialize(deletion_barrier);
+        derez.deserialize(deletion_mapping_barrier);
+        derez.deserialize(deletion_execution_barrier);
         derez.deserialize(inline_mapping_barrier);
         derez.deserialize(external_resource_barrier);
         derez.deserialize(mapping_fence_barrier);
@@ -7341,7 +7347,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent ShardManager::broadcast_resource_update(ShardTask *source, 
+    void ShardManager::broadcast_resource_update(ShardTask *source, 
                              Serializer &rez, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {

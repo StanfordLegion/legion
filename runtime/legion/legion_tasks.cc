@@ -71,104 +71,34 @@ namespace Legion {
                           size_t return_index, std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
-      bool need_deletion_dependences = true;
-      ApEvent precondition;
-      std::map<Operation*,GenerationID> dependences;
-      if (!created_regions.empty())
-      {
-        target->register_region_creations(created_regions);
-        created_regions.clear();
-      }
-      if (!deleted_regions.empty())
-      {
-        if (need_deletion_dependences)
-        {
-          precondition = 
-            target->compute_return_deletion_dependences(return_index, dependences);
-          need_deletion_dependences = false;
-        }
-        target->register_region_deletions(precondition, dependences, 
-                                          deleted_regions, preconditions);
-        deleted_regions.clear();
-      }
-      if (!created_fields.empty())
-      {
-        target->register_field_creations(created_fields);
-        created_fields.clear();
-      }
-      if (!deleted_fields.empty())
-      {
-        if (need_deletion_dependences)
-        {
-          precondition = target->compute_return_deletion_dependences(
-                                            return_index, dependences);
-          need_deletion_dependences = false;
-        }
-        target->register_field_deletions(precondition, dependences, 
-                                         deleted_fields, preconditions);
-        deleted_fields.clear();
-      }
-      if (!created_field_spaces.empty())
-      {
-        target->register_field_space_creations(created_field_spaces);
-        created_field_spaces.clear();
-      }
-      if (!latent_field_spaces.empty())
-      {
-        target->register_latent_field_spaces(latent_field_spaces);
-        latent_field_spaces.clear();
-      }
-      if (!deleted_field_spaces.empty())
-      {
-        if (need_deletion_dependences)
-        {
-          precondition = target->compute_return_deletion_dependences(
-                                            return_index, dependences);
-          need_deletion_dependences = false;
-        }
-        target->register_field_space_deletions(precondition, dependences,
-                                     deleted_field_spaces, preconditions);
-        deleted_field_spaces.clear();
-      }
-      if (!created_index_spaces.empty())
-      {
-        target->register_index_space_creations(created_index_spaces);
-        created_index_spaces.clear();
-      }
-      if (!deleted_index_spaces.empty())
-      {
-        if (need_deletion_dependences)
-        {
-          precondition = target->compute_return_deletion_dependences(
-                                            return_index, dependences);
-          need_deletion_dependences = false;
-        }
-        target->register_index_space_deletions(precondition, dependences,
-                                     deleted_index_spaces, preconditions);
-        deleted_index_spaces.clear();
-      }
-      if (!created_index_partitions.empty())
-      {
-        target->register_index_partition_creations(created_index_partitions);
-        created_index_partitions.clear();
-      }
-      if (!deleted_index_partitions.empty())
-      {
-        if (need_deletion_dependences)
-        {
-          precondition = target->compute_return_deletion_dependences(
-                                            return_index, dependences);
-          need_deletion_dependences = false;
-        }
-        target->register_index_partition_deletions(precondition, dependences,
-                                    deleted_index_partitions, preconditions);
-        deleted_index_partitions.clear();
-      }
+      if (created_regions.empty() && deleted_regions.empty() && 
+          created_fields.empty() && deleted_fields.empty() &&
+          created_field_spaces.empty() && latent_field_spaces.empty() &&
+          deleted_field_spaces.empty() && created_index_spaces.empty() &&
+          deleted_index_spaces.empty() && created_index_partitions.empty() &&
+          deleted_index_partitions.empty())
+        return;
+      target->receive_resources(return_index, created_regions, deleted_regions,
+          created_fields, deleted_fields, created_field_spaces, 
+          latent_field_spaces, deleted_field_spaces, created_index_spaces,
+          deleted_index_spaces, created_index_partitions, 
+          deleted_index_partitions, preconditions); 
+      created_regions.clear();
+      deleted_regions.clear();
+      created_fields.clear();
+      deleted_fields.clear();
+      created_field_spaces.clear();
+      latent_field_spaces.clear();
+      deleted_field_spaces.clear();
+      created_index_spaces.clear();
+      deleted_index_spaces.clear();
+      created_index_partitions.clear();
+      deleted_index_partitions.clear();
     }
 
     //--------------------------------------------------------------------------
     void ResourceTracker::pack_resources_return(Serializer &rez, 
-                                     AddressSpaceID target, size_t return_index)
+                                                size_t return_index)
     //--------------------------------------------------------------------------
     {
       // Shouldn't need the lock here since we only do this
@@ -306,184 +236,106 @@ namespace Legion {
       DerezCheck z(derez);
       size_t return_index;
       derez.deserialize(return_index);
-      bool need_deletion_dependences = true;
-      ApEvent precondition;
-      std::map<Operation*,GenerationID> dependences;
-      std::set<RtEvent> preconditions;
       size_t num_created_regions;
       derez.deserialize(num_created_regions);
-      if (num_created_regions > 0)
+      std::map<LogicalRegion,unsigned> created_regions;
+      for (unsigned idx = 0; idx < num_created_regions; idx++)
       {
-        std::map<LogicalRegion,unsigned> created_regions;
-        for (unsigned idx = 0; idx < num_created_regions; idx++)
-        {
-          LogicalRegion reg;
-          derez.deserialize(reg);
-          derez.deserialize(created_regions[reg]);
-        }
-        target->register_region_creations(created_regions);
+        LogicalRegion reg;
+        derez.deserialize(reg);
+        derez.deserialize(created_regions[reg]);
       }
       size_t num_deleted_regions;
       derez.deserialize(num_deleted_regions);
-      if (num_deleted_regions > 0)
-      {
-        std::vector<LogicalRegion> deleted_regions(num_deleted_regions);
-        for (unsigned idx = 0; idx < num_deleted_regions; idx++)
-          derez.deserialize(deleted_regions[idx]);
-        if (need_deletion_dependences)
-        {
-          precondition = target->compute_return_deletion_dependences(
-                                            return_index, dependences);
-          need_deletion_dependences = false;
-        }
-        target->register_region_deletions(precondition, dependences, 
-                                          deleted_regions, preconditions);
-      }
+      std::vector<LogicalRegion> deleted_regions(num_deleted_regions);
+      for (unsigned idx = 0; idx < num_deleted_regions; idx++)
+        derez.deserialize(deleted_regions[idx]);
       size_t num_created_fields;
       derez.deserialize(num_created_fields);
-      if (num_created_fields > 0)
+      std::set<std::pair<FieldSpace,FieldID> > created_fields;
+      for (unsigned idx = 0; idx < num_created_fields; idx++)
       {
-        std::set<std::pair<FieldSpace,FieldID> > created_fields;
-        for (unsigned idx = 0; idx < num_created_fields; idx++)
-        {
-          std::pair<FieldSpace,FieldID> key;
-          derez.deserialize(key.first);
-          derez.deserialize(key.second);
-          created_fields.insert(key);
-        }
-        target->register_field_creations(created_fields);
+        std::pair<FieldSpace,FieldID> key;
+        derez.deserialize(key.first);
+        derez.deserialize(key.second);
+        created_fields.insert(key);
       }
       size_t num_deleted_fields;
       derez.deserialize(num_deleted_fields);
-      if (num_deleted_fields > 0)
-      {
-        std::vector<std::pair<FieldSpace,FieldID> > 
+      std::vector<std::pair<FieldSpace,FieldID> > 
           deleted_fields(num_deleted_fields);
-        for (unsigned idx = 0; idx < num_deleted_fields; idx++)
-        {
-          derez.deserialize(deleted_fields[idx].first);
-          derez.deserialize(deleted_fields[idx].second);
-        }
-        if (need_deletion_dependences)
-        {
-          precondition = target->compute_return_deletion_dependences(
-                                            return_index, dependences);
-          need_deletion_dependences = false;
-        }
-        target->register_field_deletions(precondition, dependences, 
-                                         deleted_fields, preconditions);
+      for (unsigned idx = 0; idx < num_deleted_fields; idx++)
+      {
+        derez.deserialize(deleted_fields[idx].first);
+        derez.deserialize(deleted_fields[idx].second);
       }
       size_t num_created_field_spaces;
       derez.deserialize(num_created_field_spaces);
-      if (num_created_field_spaces > 0)
+      std::map<FieldSpace,unsigned> created_field_spaces;
+      for (unsigned idx = 0; idx < num_created_field_spaces; idx++)
       {
-        std::map<FieldSpace,unsigned> created_field_spaces;
-        for (unsigned idx = 0; idx < num_created_field_spaces; idx++)
-        {
-          FieldSpace sp;
-          derez.deserialize(sp);
-          derez.deserialize(created_field_spaces[sp]);
-        }
-        target->register_field_space_creations(created_field_spaces);
-      } 
+        FieldSpace sp;
+        derez.deserialize(sp);
+        derez.deserialize(created_field_spaces[sp]);
+      }
       size_t num_latent_field_spaces;
       derez.deserialize(num_latent_field_spaces);
-        std::map<FieldSpace,unsigned> latent_field_spaces;
-      if (num_latent_field_spaces > 0)
+      std::map<FieldSpace,std::set<LogicalRegion> > latent_field_spaces;
+      for (unsigned idx = 0; idx < num_latent_field_spaces; idx++)
       {
-        std::map<FieldSpace,std::set<LogicalRegion> > latent_field_spaces;
-        for (unsigned idx = 0; idx < num_latent_field_spaces; idx++)
+        FieldSpace sp;
+        derez.deserialize(sp);
+        std::set<LogicalRegion> &regions = latent_field_spaces[sp];
+        size_t num_regions;
+        derez.deserialize(num_regions);
+        for (unsigned idx2 = 0; idx2 < num_regions; idx2++)
         {
-          FieldSpace sp;
-          derez.deserialize(sp);
-          std::set<LogicalRegion> &regions = latent_field_spaces[sp];
-          size_t num_regions;
-          derez.deserialize(num_regions);
-          for (unsigned idx2 = 0; idx2 < num_regions; idx2++)
-          {
-            LogicalRegion region;
-            derez.deserialize(region);
-            regions.insert(region);
-          }
+          LogicalRegion region;
+          derez.deserialize(region);
+          regions.insert(region);
         }
-        target->register_latent_field_spaces(latent_field_spaces);
       }
       size_t num_deleted_field_spaces;
       derez.deserialize(num_deleted_field_spaces);
-      if (num_deleted_field_spaces > 0)
-      {
-        std::vector<FieldSpace> deleted_field_spaces(num_deleted_field_spaces);
-        for (unsigned idx = 0; idx < num_deleted_field_spaces; idx++)
-          derez.deserialize(deleted_field_spaces[idx]);
-        if (need_deletion_dependences)
-        {
-          precondition = target->compute_return_deletion_dependences(
-                                            return_index, dependences);
-          need_deletion_dependences = false;
-        }
-        target->register_field_space_deletions(precondition, dependences,
-                                     deleted_field_spaces, preconditions);
-      }
+      std::vector<FieldSpace> deleted_field_spaces(num_deleted_field_spaces);
+      for (unsigned idx = 0; idx < num_deleted_field_spaces; idx++)
+        derez.deserialize(deleted_field_spaces[idx]);
       size_t num_created_index_spaces;
       derez.deserialize(num_created_index_spaces);
-      if (num_created_index_spaces > 0)
+      std::map<IndexSpace,unsigned> created_index_spaces;
+      for (unsigned idx = 0; idx < num_created_index_spaces; idx++)
       {
-        std::map<IndexSpace,unsigned> created_index_spaces;
-        for (unsigned idx = 0; idx < num_created_index_spaces; idx++)
-        {
-          IndexSpace sp;
-          derez.deserialize(sp);
-          derez.deserialize(created_index_spaces[sp]);
-        }
-        target->register_index_space_creations(created_index_spaces);
+        IndexSpace sp;
+        derez.deserialize(sp);
+        derez.deserialize(created_index_spaces[sp]);
       }
       size_t num_deleted_index_spaces;
       derez.deserialize(num_deleted_index_spaces);
-      if (num_deleted_index_spaces > 0)
-      {
-        std::vector<std::pair<IndexSpace,bool> > 
+      std::vector<std::pair<IndexSpace,bool> > 
           deleted_index_spaces(num_deleted_index_spaces);
-        for (unsigned idx = 0; idx < num_deleted_index_spaces; idx++)
-          derez.deserialize(deleted_index_spaces[idx]);
-        if (need_deletion_dependences)
-        {
-          precondition = target->compute_return_deletion_dependences(
-                                            return_index, dependences);
-          need_deletion_dependences = false;
-        }
-        target->register_index_space_deletions(precondition, dependences,
-                                    deleted_index_spaces, preconditions);
-      }
+      for (unsigned idx = 0; idx < num_deleted_index_spaces; idx++)
+        derez.deserialize(deleted_index_spaces[idx]);
       size_t num_created_index_partitions;
       derez.deserialize(num_created_index_partitions);
-      if (num_created_index_partitions > 0)
+      std::map<IndexPartition,unsigned> created_index_partitions;
+      for (unsigned idx = 0; idx < num_created_index_partitions; idx++)
       {
-        std::map<IndexPartition,unsigned> created_index_partitions;
-        for (unsigned idx = 0; idx < num_created_index_partitions; idx++)
-        {
-          IndexPartition ip;
-          derez.deserialize(ip);
-          derez.deserialize(created_index_partitions[ip]);
-        }
-        target->register_index_partition_creations(created_index_partitions);
+        IndexPartition ip;
+        derez.deserialize(ip);
+        derez.deserialize(created_index_partitions[ip]);
       }
       size_t num_deleted_index_partitions;
       derez.deserialize(num_deleted_index_partitions);
-      if (num_deleted_index_partitions > 0)
-      {
-        std::vector<std::pair<IndexPartition,bool> > 
+      std::vector<std::pair<IndexPartition,bool> > 
           deleted_index_partitions(num_deleted_index_partitions);
-        for (unsigned idx = 0; idx < num_deleted_index_partitions; idx++)
-          derez.deserialize(deleted_index_partitions[idx]);
-        if (need_deletion_dependences)
-        {
-          precondition = target->compute_return_deletion_dependences(
-                                            return_index, dependences);
-          need_deletion_dependences = false;
-        }
-        target->register_index_partition_deletions(precondition, dependences,
-                                    deleted_index_partitions, preconditions);
-      }
+      for (unsigned idx = 0; idx < num_deleted_index_partitions; idx++)
+        derez.deserialize(deleted_index_partitions[idx]);
+      std::set<RtEvent> preconditions;
+      target->receive_resources(return_index, created_regions, deleted_regions,
+          created_fields, deleted_fields, created_field_spaces,
+          latent_field_spaces, deleted_field_spaces, created_index_spaces,
+          deleted_index_spaces, created_index_partitions,
+          deleted_index_partitions, preconditions);
       if (!preconditions.empty())
         return Runtime::merge_events(preconditions);
       else
@@ -6221,7 +6073,7 @@ namespace Legion {
       if (execution_context != NULL)
       {
         rez.serialize<bool>(true);
-        execution_context->pack_resources_return(rez, target, context_index);
+        execution_context->pack_resources_return(rez, context_index);
       }
       else
         rez.serialize<bool>(false);
@@ -10793,7 +10645,7 @@ namespace Legion {
       rez.serialize<size_t>(points.size());
       rez.serialize(applied_condition);
       // Serialize the privilege state
-      pack_resources_return(rez, target, context_index); 
+      pack_resources_return(rez, context_index); 
       // Now pack up the future results
       if (redop > 0)
       {
@@ -10843,279 +10695,224 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::register_region_creations(
-                                         std::map<LogicalRegion,unsigned> &regs) 
+    void SliceTask::receive_resources(size_t return_index,
+              std::map<LogicalRegion,unsigned> &created_regs,
+              std::vector<LogicalRegion> &deleted_regs,
+              std::set<std::pair<FieldSpace,FieldID> > &created_fids,
+              std::vector<std::pair<FieldSpace,FieldID> > &deleted_fids,
+              std::map<FieldSpace,unsigned> &created_fs,
+              std::map<FieldSpace,std::set<LogicalRegion> > &latent_fs,
+              std::vector<FieldSpace> &deleted_fs,
+              std::map<IndexSpace,unsigned> &created_is,
+              std::vector<std::pair<IndexSpace,bool> > &deleted_is,
+              std::map<IndexPartition,unsigned> &created_partitions,
+              std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
+              std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
-      if (!latent_field_spaces.empty())
+      if (!created_regs.empty())
       {
-        for (std::map<LogicalRegion,unsigned>::const_iterator it = 
-              regs.begin(); it != regs.end(); it++)
+        if (!latent_field_spaces.empty())
         {
-          std::map<FieldSpace,std::set<LogicalRegion> >::iterator finder =
-            latent_field_spaces.find(it->first.get_field_space());
-          if (finder != latent_field_spaces.end())
-            finder->second.insert(it->first);
-        }
-      }
-      if (!created_regions.empty())
-      {
-        for (std::map<LogicalRegion,unsigned>::const_iterator it = 
-              regs.begin(); it != regs.end(); it++)
-        {
-          std::map<LogicalRegion,unsigned>::iterator finder = 
-            created_regions.find(it->first);
-          if (finder == created_regions.end())
-            created_regions.insert(*it);
-          else
-            finder->second += it->second;
-        }
-      }
-      else
-        created_regions.swap(regs);
-    }
-
-    //--------------------------------------------------------------------------
-    void SliceTask::register_region_deletions(ApEvent precondition,
-                           const std::map<Operation*,GenerationID> &dependences,
-                                              std::vector<LogicalRegion> &regs,
-                                              std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(op_lock);
-      if (!deleted_regions.empty())
-        deleted_regions.insert(deleted_regions.end(), regs.begin(), regs.end());
-      else
-        deleted_regions.swap(regs);
-    }
-
-    //--------------------------------------------------------------------------
-    void SliceTask::register_field_creations(
-                               std::set<std::pair<FieldSpace,FieldID> > &fields)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(op_lock);
-      if (!created_fields.empty())
-      {
-#ifdef DEBUG_LEGION
-        for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator it = 
-              fields.begin(); it != fields.end(); it++)
-        {
-          assert(created_fields.find(*it) == created_fields.end());
-          created_fields.insert(*it);
-        }
-#else
-        created_fields.insert(fields.begin(), fields.end());
-#endif
-      }
-      else
-        created_fields.swap(fields);
-    }
-
-    //--------------------------------------------------------------------------
-    void SliceTask::register_field_deletions(ApEvent precondition,
-                           const std::map<Operation*,GenerationID> &dependences,
-                           std::vector<std::pair<FieldSpace,FieldID> > &fields,
-                           std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(op_lock);
-      if (!deleted_fields.empty())
-        deleted_fields.insert(deleted_fields.end(), 
-                              fields.begin(), fields.end());
-      else
-        deleted_fields.swap(fields);
-    }
-
-    //--------------------------------------------------------------------------
-    void SliceTask::register_field_space_creations(
-                                          std::map<FieldSpace,unsigned> &spaces)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(op_lock);
-      if (!latent_field_spaces.empty())
-      {
-        // Remove any latent field spaces we have ownership for
-        for (std::map<FieldSpace,unsigned>::const_iterator it =
-              spaces.begin(); it != spaces.end(); it++)
-        {
-          std::map<FieldSpace,std::set<LogicalRegion> >::iterator finder = 
-            latent_field_spaces.find(it->first);
-          if (finder != latent_field_spaces.end())
-            latent_field_spaces.erase(finder);
-        }
-      }
-      if (!created_field_spaces.empty())
-      {
-        for (std::map<FieldSpace,unsigned>::const_iterator it = 
-              spaces.begin(); it != spaces.end(); it++)
-        {
-          std::map<FieldSpace,unsigned>::iterator finder = 
-            created_field_spaces.find(it->first);
-          if (finder == created_field_spaces.end())
-            created_field_spaces.insert(*it);
-          else
-            finder->second += it->second;
-        }
-      }
-      else
-        created_field_spaces.swap(spaces);
-    }
-
-    //--------------------------------------------------------------------------
-    void SliceTask::register_latent_field_spaces(
-                          std::map<FieldSpace,std::set<LogicalRegion> > &spaces)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(op_lock);
-      if (!created_field_spaces.empty())
-      {
-        // Remote any latent field spaces we already have ownership on
-        for (std::map<FieldSpace,std::set<LogicalRegion> >::iterator it =
-              spaces.begin(); it != spaces.end(); /*nothing*/)
-        {
-          if (created_field_spaces.find(it->first) != 
-                created_field_spaces.end())
+          for (std::map<LogicalRegion,unsigned>::const_iterator it = 
+                created_regs.begin(); it != created_regs.end(); it++)
           {
-            std::map<FieldSpace,std::set<LogicalRegion> >::iterator 
-              to_delete = it++;
-            spaces.erase(to_delete);
+            std::map<FieldSpace,std::set<LogicalRegion> >::iterator finder =
+              latent_field_spaces.find(it->first.get_field_space());
+            if (finder != latent_field_spaces.end())
+              finder->second.insert(it->first);
           }
-          else
-            it++;
         }
-        if (spaces.empty())
-          return;
-      }
-      if (!created_regions.empty())
-      {
-        // See if any of these regions are copies of our latent spaces
-        for (std::map<LogicalRegion,unsigned>::const_iterator it = 
-              created_regions.begin(); it != created_regions.end(); it++)
+        if (!created_regions.empty())
         {
-          std::map<FieldSpace,std::set<LogicalRegion> >::iterator finder = 
-            spaces.find(it->first.get_field_space());
-          if (finder != spaces.end())
-            finder->second.insert(it->first);
+          for (std::map<LogicalRegion,unsigned>::const_iterator it = 
+                created_regs.begin(); it != created_regs.end(); it++)
+          {
+            std::map<LogicalRegion,unsigned>::iterator finder = 
+              created_regions.find(it->first);
+            if (finder == created_regions.end())
+              created_regions.insert(*it);
+            else
+              finder->second += it->second;
+          }
         }
+        else
+          created_regions.swap(created_regs);
       }
-      // Now we can do the merge
-      if (!latent_field_spaces.empty())
+      if (!deleted_regs.empty())
       {
-        for (std::map<FieldSpace,std::set<LogicalRegion> >::const_iterator it =
-              spaces.begin(); it != spaces.end(); it++)
-        {
-          std::map<FieldSpace,std::set<LogicalRegion> >::iterator finder = 
-            latent_field_spaces.find(it->first);
-          if (finder != latent_field_spaces.end())
-            finder->second.insert(it->second.begin(), it->second.end());
-          else
-            latent_field_spaces.insert(*it);
-        }
+        if (!deleted_regions.empty())
+          deleted_regions.insert(deleted_regions.end(), 
+              deleted_regs.begin(), deleted_regs.end());
+        else
+          deleted_regions.swap(deleted_regs);
       }
-      else
-        latent_field_spaces.swap(spaces);
-    }
-
-    //--------------------------------------------------------------------------
-    void SliceTask::register_field_space_deletions(ApEvent precondition,
-                           const std::map<Operation*,GenerationID> &dependences,
-                                               std::vector<FieldSpace> &sps,
-                                               std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(op_lock);
-      if (!deleted_field_spaces.empty())
-        deleted_field_spaces.insert(deleted_field_spaces.end(), 
-                                    sps.begin(), sps.end());
-      else
-        deleted_field_spaces.swap(sps);
-    }
-
-    //--------------------------------------------------------------------------
-    void SliceTask::register_index_space_creations(
-                                          std::map<IndexSpace,unsigned> &spaces)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(op_lock);
-      if (!created_index_spaces.empty())
+      if (!created_fids.empty())
       {
-        for (std::map<IndexSpace,unsigned>::const_iterator it = 
-              spaces.begin(); it != spaces.end(); it++)
+        if (!created_fields.empty())
         {
-          std::map<IndexSpace,unsigned>::iterator finder = 
-            created_index_spaces.find(it->first);
-          if (finder == created_index_spaces.end())
-            created_index_spaces.insert(*it);
-          else
-            finder->second += it->second;
+#ifdef DEBUG_LEGION
+          for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator it = 
+                created_fids.begin(); it != created_fids.end(); it++)
+          {
+            assert(created_fields.find(*it) == created_fields.end());
+            created_fields.insert(*it);
+          }
+#else
+          created_fields.insert(created_fids.begin(), created_fids.end());
+#endif
         }
+        else
+          created_fields.swap(created_fids);
       }
-      else
-        created_index_spaces.swap(spaces);
-    }
-
-    //--------------------------------------------------------------------------
-    void SliceTask::register_index_space_deletions(ApEvent precondition,
-                           const std::map<Operation*,GenerationID> &dependences,
-                                  std::vector<std::pair<IndexSpace,bool> > &sps,
-                                               std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(op_lock);
-      if (!deleted_index_spaces.empty())
-        deleted_index_spaces.insert(deleted_index_spaces.end(), 
-                                    sps.begin(), sps.end());
-      else
-        deleted_index_spaces.swap(sps);
-    }
-
-    //--------------------------------------------------------------------------
-    void SliceTask::register_index_partition_creations(
-                                       std::map<IndexPartition,unsigned> &parts)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(op_lock);
-      if (!created_index_partitions.empty())
+      if (!deleted_fids.empty())
       {
-        for (std::map<IndexPartition,unsigned>::const_iterator it = 
-              parts.begin(); it != parts.end(); it++)
-        {
-          std::map<IndexPartition,unsigned>::iterator finder = 
-            created_index_partitions.find(it->first);
-          if (finder == created_index_partitions.end())
-            created_index_partitions.insert(*it);
-          else
-            finder->second += it->second;
-        }
+        if (!deleted_fields.empty())
+          deleted_fields.insert(deleted_fields.end(), 
+                                deleted_fids.begin(), deleted_fids.end());
+        else
+          deleted_fields.swap(deleted_fids);
       }
-      else
-        created_index_partitions.swap(parts);
-    }
-
-    //--------------------------------------------------------------------------
-    void SliceTask::register_index_partition_deletions(ApEvent precondition,
-                           const std::map<Operation*,GenerationID> &dependences,
-                            std::vector<std::pair<IndexPartition,bool> > &parts, 
-                                               std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(op_lock);
-      if (!deleted_index_partitions.empty())
-        deleted_index_partitions.insert(deleted_index_partitions.end(),
-                                        parts.begin(), parts.end());
-      else
-        deleted_index_partitions.swap(parts);
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent SliceTask::compute_return_deletion_dependences(size_t return_index,
-                                 std::map<Operation*,GenerationID> &dependences)
-    //--------------------------------------------------------------------------
-    {
-      // Nothing to do
-      return ApEvent::NO_AP_EVENT;
+      if (!created_fs.empty())
+      {
+        if (!latent_field_spaces.empty())
+        {
+          // Remove any latent field spaces we have ownership for
+          for (std::map<FieldSpace,unsigned>::const_iterator it =
+                created_fs.begin(); it != created_fs.end(); it++)
+          {
+            std::map<FieldSpace,std::set<LogicalRegion> >::iterator finder = 
+              latent_field_spaces.find(it->first);
+            if (finder != latent_field_spaces.end())
+              latent_field_spaces.erase(finder);
+          }
+        }
+        if (!created_field_spaces.empty())
+        {
+          for (std::map<FieldSpace,unsigned>::const_iterator it = 
+                created_fs.begin(); it != created_fs.end(); it++)
+          {
+            std::map<FieldSpace,unsigned>::iterator finder = 
+              created_field_spaces.find(it->first);
+            if (finder == created_field_spaces.end())
+              created_field_spaces.insert(*it);
+            else
+              finder->second += it->second;
+          }
+        }
+        else
+          created_field_spaces.swap(created_fs);
+      }
+      if (!latent_fs.empty())
+      {
+        if (!created_field_spaces.empty())
+        {
+          // Remote any latent field spaces we already have ownership on
+          for (std::map<FieldSpace,std::set<LogicalRegion> >::iterator it =
+                latent_fs.begin(); it != latent_fs.end(); /*nothing*/)
+          {
+            if (created_field_spaces.find(it->first) != 
+                  created_field_spaces.end())
+            {
+              std::map<FieldSpace,std::set<LogicalRegion> >::iterator 
+                to_delete = it++;
+              latent_fs.erase(to_delete);
+            }
+            else
+              it++;
+          }
+        }
+        if (!created_regions.empty())
+        {
+          // See if any of these regions are copies of our latent spaces
+          for (std::map<LogicalRegion,unsigned>::const_iterator it = 
+                created_regions.begin(); it != created_regions.end(); it++)
+          {
+            std::map<FieldSpace,std::set<LogicalRegion> >::iterator finder = 
+              latent_fs.find(it->first.get_field_space());
+            if (finder != latent_fs.end())
+              finder->second.insert(it->first);
+          }
+        }
+        // Now we can do the merge
+        if (!latent_field_spaces.empty())
+        {
+          for (std::map<FieldSpace,std::set<LogicalRegion> >::const_iterator 
+                it = latent_fs.begin(); it != latent_fs.end(); it++)
+          {
+            std::map<FieldSpace,std::set<LogicalRegion> >::iterator finder = 
+              latent_field_spaces.find(it->first);
+            if (finder != latent_field_spaces.end())
+              finder->second.insert(it->second.begin(), it->second.end());
+            else
+              latent_field_spaces.insert(*it);
+          }
+        }
+        else
+          latent_field_spaces.swap(latent_fs);
+      }
+      if (!deleted_fs.empty())
+      {
+        if (!deleted_field_spaces.empty())
+          deleted_field_spaces.insert(deleted_field_spaces.end(), 
+                                      deleted_fs.begin(), deleted_fs.end());
+        else
+          deleted_field_spaces.swap(deleted_fs);
+      }
+      if (!created_is.empty())
+      {
+        if (!created_index_spaces.empty())
+        {
+          for (std::map<IndexSpace,unsigned>::const_iterator it = 
+                created_is.begin(); it != created_is.end(); it++)
+          {
+            std::map<IndexSpace,unsigned>::iterator finder = 
+              created_index_spaces.find(it->first);
+            if (finder == created_index_spaces.end())
+              created_index_spaces.insert(*it);
+            else
+              finder->second += it->second;
+          }
+        }
+        else
+          created_index_spaces.swap(created_is);
+      }
+      if (!deleted_is.empty())
+      {
+        if (!deleted_index_spaces.empty())
+          deleted_index_spaces.insert(deleted_index_spaces.end(), 
+                                      deleted_is.begin(), deleted_is.end());
+        else
+          deleted_index_spaces.swap(deleted_is);
+      }
+      if (!created_partitions.empty())
+      {
+        if (!created_index_partitions.empty())
+        {
+          for (std::map<IndexPartition,unsigned>::const_iterator it = 
+                created_partitions.begin(); it != 
+                created_partitions.end(); it++)
+          {
+            std::map<IndexPartition,unsigned>::iterator finder = 
+              created_index_partitions.find(it->first);
+            if (finder == created_index_partitions.end())
+              created_index_partitions.insert(*it);
+            else
+              finder->second += it->second;
+          }
+        }
+        else
+          created_index_partitions.swap(created_partitions);
+      }
+      if (!deleted_partitions.empty())
+      {
+        if (!deleted_index_partitions.empty())
+          deleted_index_partitions.insert(deleted_index_partitions.end(),
+              deleted_partitions.begin(), deleted_partitions.end());
+        else
+          deleted_index_partitions.swap(deleted_partitions);
+      }
     }
 
     //--------------------------------------------------------------------------

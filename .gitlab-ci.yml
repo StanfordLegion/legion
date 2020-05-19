@@ -134,11 +134,7 @@ variables:
 .kokkos: &kokkos
   USE_KOKKOS: "1"
   KOKKOS_REPO: "https://github.com/kokkos/kokkos.git"
-  KOKKOS_BRANCH: "develop"
-.kokkos_fork: &kokkos_fork
-  USE_KOKKOS: "1"
-  KOKKOS_REPO: "https://github.com/streichler/kokkos.git"
-  KOKKOS_BRANCH: "legion_interop"
+  KOKKOS_BRANCH: "master"
 
 .prof: &prof
   USE_PROF: "1"

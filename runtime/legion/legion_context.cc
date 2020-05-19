@@ -2737,6 +2737,91 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void InnerContext::receive_resources(size_t return_index,
+              std::map<LogicalRegion,unsigned> &created_regs,
+              std::vector<LogicalRegion> &deleted_regs,
+              std::set<std::pair<FieldSpace,FieldID> > &created_fids,
+              std::vector<std::pair<FieldSpace,FieldID> > &deleted_fids,
+              std::map<FieldSpace,unsigned> &created_fs,
+              std::map<FieldSpace,std::set<LogicalRegion> > &latent_fs,
+              std::vector<FieldSpace> &deleted_fs,
+              std::map<IndexSpace,unsigned> &created_is,
+              std::vector<std::pair<IndexSpace,bool> > &deleted_is,
+              std::map<IndexPartition,unsigned> &created_partitions,
+              std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
+              std::set<RtEvent> &preconditions)
+    //--------------------------------------------------------------------------
+    {
+      bool need_deletion_dependences = true;
+      ApEvent precondition;
+      std::map<Operation*,GenerationID> dependences;
+      if (!created_regs.empty())
+        register_region_creations(created_regs);
+      if (!deleted_regs.empty())
+      {
+        precondition = 
+          compute_return_deletion_dependences(return_index, dependences);
+        need_deletion_dependences = false;
+        register_region_deletions(precondition, dependences, 
+                                  deleted_regs, preconditions);
+      }
+      if (!created_fids.empty())
+        register_field_creations(created_fids);
+      if (!deleted_fids.empty())
+      {
+        if (need_deletion_dependences)
+        {
+          precondition = 
+            compute_return_deletion_dependences(return_index, dependences);
+          need_deletion_dependences = false;
+        }
+        register_field_deletions(precondition, dependences, 
+                                 deleted_fids, preconditions);
+      }
+      if (!created_fs.empty())
+        register_field_space_creations(created_fs);
+      if (!latent_fs.empty())
+        register_latent_field_spaces(latent_fs);
+      if (!deleted_fs.empty())
+      {
+        if (need_deletion_dependences)
+        {
+          precondition = 
+            compute_return_deletion_dependences(return_index, dependences);
+          need_deletion_dependences = false;
+        }
+        register_field_space_deletions(precondition, dependences,
+                                       deleted_fs, preconditions);
+      }
+      if (!created_is.empty())
+        register_index_space_creations(created_is);
+      if (!deleted_is.empty())
+      {
+        if (need_deletion_dependences)
+        {
+          precondition = 
+            compute_return_deletion_dependences(return_index, dependences);
+          need_deletion_dependences = false;
+        }
+        register_index_space_deletions(precondition, dependences,
+                                       deleted_is, preconditions);
+      }
+      if (!created_partitions.empty())
+        register_index_partition_creations(created_partitions);
+      if (!deleted_partitions.empty())
+      {
+        if (need_deletion_dependences)
+        {
+          precondition = 
+            compute_return_deletion_dependences(return_index, dependences);
+          need_deletion_dependences = false;
+        }
+        register_index_partition_deletions(precondition, dependences,
+                                           deleted_partitions, preconditions);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void InnerContext::register_region_creations(
                                       std::map<LogicalRegion,unsigned> &regions)
     //--------------------------------------------------------------------------
@@ -9520,7 +9605,8 @@ namespace Legion {
       // Get our allocation barriers
       pending_partition_barrier = manager->get_pending_partition_barrier();
       creation_barrier = manager->get_creation_barrier();
-      deletion_barrier = manager->get_deletion_barrier();
+      deletion_mapping_barrier = manager->get_deletion_mapping_barrier();
+      deletion_execution_barrier = manager->get_deletion_execution_barrier();
       inline_mapping_barrier = manager->get_inline_mapping_barrier();
       external_resource_barrier = manager->get_external_resource_barrier();
       mapping_fence_barrier = manager->get_mapping_fence_barrier();
@@ -9672,6 +9758,10 @@ namespace Legion {
         delete collective.first;
         pending_region_trees.pop_front();
       }
+      if (returned_resource_mapped_barrier.exists())
+        returned_resource_mapped_barrier.destroy_barrier();
+      if (returned_resource_execution_barrier.exists())
+        returned_resource_execution_barrier.destroy_barrier();
     }
 
     //--------------------------------------------------------------------------
@@ -10847,9 +10937,9 @@ namespace Legion {
       }
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
       op->initialize_index_space_deletion(this,handle,sub_partitions,unordered);
-      op->initialize_replication(this, deletion_barrier, 
-                      shard_manager->is_total_sharding(),
-                      shard_manager->is_first_local_shard(owner_shard));
+      op->initialize_replication(this, deletion_mapping_barrier, 
+          deletion_execution_barrier, shard_manager->is_total_sharding(),
+          shard_manager->is_first_local_shard(owner_shard));
       runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
     }
 
@@ -10938,9 +11028,9 @@ namespace Legion {
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
       op->initialize_index_part_deletion(this, handle, 
                                          sub_partitions, unordered);
-      op->initialize_replication(this, deletion_barrier, 
-                      shard_manager->is_total_sharding(),
-                      shard_manager->is_first_local_shard(owner_shard));
+      op->initialize_replication(this, deletion_mapping_barrier, 
+          deletion_execution_barrier, shard_manager->is_total_sharding(),
+          shard_manager->is_first_local_shard(owner_shard));
       runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
     }
 
@@ -12741,9 +12831,9 @@ namespace Legion {
       }
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
       op->initialize_field_space_deletion(this, handle, unordered);
-      op->initialize_replication(this, deletion_barrier, 
-                      shard_manager->is_total_sharding(),
-                      shard_manager->is_first_local_shard(owner_shard));
+      op->initialize_replication(this, deletion_mapping_barrier, 
+          deletion_execution_barrier, shard_manager->is_total_sharding(),
+          shard_manager->is_first_local_shard(owner_shard));
       runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
     }
 
@@ -12974,9 +13064,9 @@ namespace Legion {
       }
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
       op->initialize_field_deletion(this, space, fid, unordered);
-      op->initialize_replication(this, deletion_barrier, 
-                      shard_manager->is_total_sharding(),
-                      shard_manager->is_first_local_shard(owner_shard));
+      op->initialize_replication(this, deletion_mapping_barrier, 
+          deletion_execution_barrier, shard_manager->is_total_sharding(),
+          shard_manager->is_first_local_shard(owner_shard));
       runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
     }
 
@@ -13195,9 +13285,9 @@ namespace Legion {
         return;
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
       op->initialize_field_deletions(this, space, free_now, unordered);
-      op->initialize_replication(this, deletion_barrier, 
-                      shard_manager->is_total_sharding(),
-                      shard_manager->is_first_local_shard(owner_shard));
+      op->initialize_replication(this, deletion_mapping_barrier, 
+          deletion_execution_barrier, shard_manager->is_total_sharding(),
+          shard_manager->is_first_local_shard(owner_shard));
       runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
     }
 
@@ -13412,9 +13502,9 @@ namespace Legion {
       }
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
       op->initialize_logical_region_deletion(this, handle, unordered);
-      op->initialize_replication(this, deletion_barrier, 
-                      shard_manager->is_total_sharding(),
-                      shard_manager->is_first_local_shard(owner_shard));
+      op->initialize_replication(this, deletion_mapping_barrier, 
+          deletion_execution_barrier, shard_manager->is_total_sharding(),
+          shard_manager->is_first_local_shard(owner_shard));
       runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
     }
 
@@ -14822,131 +14912,110 @@ namespace Legion {
                                                   std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
-      ResourceUpdateKind kind;
-      derez.deserialize(kind);
-      size_t size;
-      derez.deserialize(size);
-      switch (kind)
+      size_t return_index;
+      derez.deserialize(return_index);
+      RtBarrier mapped_barrier, execution_barrier;
+      derez.deserialize(mapped_barrier);
+      derez.deserialize(execution_barrier);
+      size_t num_created_regions;
+      derez.deserialize(num_created_regions);
+      std::map<LogicalRegion,unsigned> created_regs;
+      for (unsigned idx = 0; idx < num_created_regions; idx++)
       {
-        case REGION_CREATION_UPDATE:
-          {
-            std::set<LogicalRegion> regions;
-            for (unsigned idx = 0; idx < size; idx++)
-            {
-              LogicalRegion handle;
-              derez.deserialize(handle);
-              regions.insert(handle);
-            }
-            TaskContext::register_region_creations(regions);
-            break;
-          }
-        case REGION_DELETION_UPDATE:
-          {
-            std::vector<LogicalRegion> regions(size);
-            for (unsigned idx = 0; idx < size; idx++)
-              derez.deserialize(regions[idx]);
-            perform_replicated_region_deletions(regions, applied);
-            break;
-          }
-        case FIELD_CREATION_UPDATE:
-          {
-            std::set<std::pair<FieldSpace,FieldID> > fields;
-            for (unsigned idx = 0; idx < size; idx++)
-            {
-              std::pair<FieldSpace,FieldID> key;
-              derez.deserialize(key.first);
-              derez.deserialize(key.second);
-              fields.insert(key);
-            }
-            TaskContext::register_field_creations(fields);
-            break;
-          }
-        case FIELD_DELETION_UPDATE:
-          {
-            std::vector<std::pair<FieldSpace,FieldID> > fields(size);
-            for (unsigned idx = 0; idx < size; idx++)
-            {
-              derez.deserialize(fields[idx].first);
-              derez.deserialize(fields[idx].second);
-            }
-            perform_replicated_field_deletions(fields, applied);
-            break;
-          }
-        case FIELD_SPACE_CREATION_UPDATE:
-          {
-            std::set<FieldSpace> spaces;
-            for (unsigned idx = 0; idx < size; idx++)
-            {
-              FieldSpace handle;
-              derez.deserialize(handle);
-              spaces.insert(handle);
-            }
-            TaskContext::register_field_space_creations(spaces);
-            break;
-          }
-        case FIELD_SPACE_LATENT_UPDATE:
-          {
-            std::map<FieldSpace,unsigned> spaces;
-            for (unsigned idx = 0; idx < size; idx++)
-            {
-              FieldSpace handle;
-              derez.deserialize(handle);
-              derez.deserialize(spaces[handle]);
-            }
-            TaskContext::register_latent_field_spaces(spaces);
-            break;
-          }
-        case FIELD_SPACE_DELETION_UPDATE:
-          {
-            std::vector<FieldSpace> spaces(size);
-            for (unsigned idx = 0; idx < size; idx++)
-              derez.deserialize(spaces[idx]);
-            perform_replicated_field_space_deletions(spaces, applied);
-            break;
-          }
-        case INDEX_SPACE_CREATION_UPDATE:
-          {
-            std::set<IndexSpace> spaces;
-            for (unsigned idx = 0; idx < size; idx++)
-            {
-              IndexSpace handle;
-              derez.deserialize(handle);
-              spaces.insert(handle);
-            }
-            TaskContext::register_index_space_creations(spaces);
-            break;
-          }
-        case INDEX_SPACE_DELETION_UPDATE:
-          {
-            std::vector<IndexSpace> spaces(size);
-            for (unsigned idx = 0; idx < size; idx++)
-              derez.deserialize(spaces[idx]);
-            perform_replicated_index_space_deletions(spaces, applied);
-            break;
-          }
-        case INDEX_PARTITION_CREATION_UPDATE:
-          {
-            std::set<IndexPartition> parts;
-            for (unsigned idx = 0; idx < size; idx++)
-            {
-              IndexPartition handle;
-              derez.deserialize(handle);
-              parts.insert(handle);
-            }
-            TaskContext::register_index_partition_creations(parts);
-            break;
-          }
-        case INDEX_PARTITION_DELETION_UPDATE:
-          {
-            std::vector<IndexPartition> parts(size);
-            for (unsigned idx = 0; idx < size; idx++)
-              derez.deserialize(parts[idx]);
-            perform_replicated_index_partition_deletions(parts, applied);
-            break;
-          }
-        default:
-          assert(false); // should never get here
+        LogicalRegion reg;
+        derez.deserialize(reg);
+        derez.deserialize(created_regs[reg]);
       }
+      size_t num_deleted_regions;
+      derez.deserialize(num_deleted_regions);
+      std::vector<LogicalRegion> deleted_regs(num_deleted_regions);
+      for (unsigned idx = 0; idx < num_deleted_regions; idx++)
+        derez.deserialize(deleted_regs[idx]);
+      size_t num_created_fields;
+      derez.deserialize(num_created_fields);
+      std::set<std::pair<FieldSpace,FieldID> > created_fids;
+      for (unsigned idx = 0; idx < num_created_fields; idx++)
+      {
+        std::pair<FieldSpace,FieldID> key;
+        derez.deserialize(key.first);
+        derez.deserialize(key.second);
+        created_fids.insert(key);
+      }
+      size_t num_deleted_fields;
+      derez.deserialize(num_deleted_fields);
+      std::vector<std::pair<FieldSpace,FieldID> > 
+          deleted_fids(num_deleted_fields);
+      for (unsigned idx = 0; idx < num_deleted_fields; idx++)
+      {
+        derez.deserialize(deleted_fids[idx].first);
+        derez.deserialize(deleted_fids[idx].second);
+      }
+      size_t num_created_field_spaces;
+      derez.deserialize(num_created_field_spaces);
+      std::map<FieldSpace,unsigned> created_fs;
+      for (unsigned idx = 0; idx < num_created_field_spaces; idx++)
+      {
+        FieldSpace sp;
+        derez.deserialize(sp);
+        derez.deserialize(created_fs[sp]);
+      }
+      size_t num_latent_field_spaces;
+      derez.deserialize(num_latent_field_spaces);
+      std::map<FieldSpace,std::set<LogicalRegion> > latent_fs;
+      for (unsigned idx = 0; idx < num_latent_field_spaces; idx++)
+      {
+        FieldSpace sp;
+        derez.deserialize(sp);
+        std::set<LogicalRegion> &regions = latent_fs[sp];
+        size_t num_regions;
+        derez.deserialize(num_regions);
+        for (unsigned idx2 = 0; idx2 < num_regions; idx2++)
+        {
+          LogicalRegion region;
+          derez.deserialize(region);
+          regions.insert(region);
+        }
+      }
+      size_t num_deleted_field_spaces;
+      derez.deserialize(num_deleted_field_spaces);
+      std::vector<FieldSpace> deleted_fs(num_deleted_field_spaces);
+      for (unsigned idx = 0; idx < num_deleted_field_spaces; idx++)
+        derez.deserialize(deleted_fs[idx]);
+      size_t num_created_index_spaces;
+      derez.deserialize(num_created_index_spaces);
+      std::map<IndexSpace,unsigned> created_is;
+      for (unsigned idx = 0; idx < num_created_index_spaces; idx++)
+      {
+        IndexSpace sp;
+        derez.deserialize(sp);
+        derez.deserialize(created_is[sp]);
+      }
+      size_t num_deleted_index_spaces;
+      derez.deserialize(num_deleted_index_spaces);
+      std::vector<std::pair<IndexSpace,bool> > 
+          deleted_is(num_deleted_index_spaces);
+      for (unsigned idx = 0; idx < num_deleted_index_spaces; idx++)
+        derez.deserialize(deleted_is[idx]);
+      size_t num_created_index_partitions;
+      derez.deserialize(num_created_index_partitions);
+      std::map<IndexPartition,unsigned> created_partitions;
+      for (unsigned idx = 0; idx < num_created_index_partitions; idx++)
+      {
+        IndexPartition ip;
+        derez.deserialize(ip);
+        derez.deserialize(created_partitions[ip]);
+      }
+      size_t num_deleted_index_partitions;
+      derez.deserialize(num_deleted_index_partitions);
+      std::vector<std::pair<IndexPartition,bool> > 
+          deleted_partitions(num_deleted_index_partitions);
+      for (unsigned idx = 0; idx < num_deleted_index_partitions; idx++)
+        derez.deserialize(deleted_partitions[idx]);
+      // Send this down to the base class to avoid re-broadcasting
+      receive_replicate_resources(return_index, created_regs, deleted_regs,
+          created_fids, deleted_fids, created_fs, latent_fs, deleted_fs,
+          created_is, deleted_is, created_partitions, deleted_partitions,
+          applied, mapped_barrier, execution_barrier);
     }
 
     //--------------------------------------------------------------------------
@@ -15047,491 +15116,714 @@ namespace Legion {
       }
     }
 
-#if 0
     //--------------------------------------------------------------------------
-    void ReplicateContext::register_region_creations(
-                                                  std::set<LogicalRegion> &regs)
-    //--------------------------------------------------------------------------
-    {
-      // Pack it up and send it to the other shards
-      Serializer rez;
-      rez.serialize<ResourceUpdateKind>(REGION_CREATION_UPDATE);
-      rez.serialize<size_t>(regs.size());
-      for (std::set<LogicalRegion>::const_iterator it = 
-            regs.begin(); it != regs.end(); it++)
-        rez.serialize(*it);
-      const RtEvent done = 
-        shard_manager->broadcast_resource_update(owner_shard, rez);
-      TaskContext::register_region_creations(regs);
-      // Wait for the remote updates to be done
-      if (done.exists() && !done.has_triggered())
-        done.wait();
-    }
-    
-    //--------------------------------------------------------------------------
-    void ReplicateContext::register_region_deletions(
-                   std::vector<LogicalRegion> &regs, std::set<RtEvent> &applied)
+    void ReplicateContext::receive_resources(size_t return_index,
+              std::map<LogicalRegion,unsigned> &created_regs,
+              std::vector<LogicalRegion> &deleted_regs,
+              std::set<std::pair<FieldSpace,FieldID> > &created_fids,
+              std::vector<std::pair<FieldSpace,FieldID> > &deleted_fids,
+              std::map<FieldSpace,unsigned> &created_fs,
+              std::map<FieldSpace,std::set<LogicalRegion> > &latent_fs,
+              std::vector<FieldSpace> &deleted_fs,
+              std::map<IndexSpace,unsigned> &created_is,
+              std::vector<std::pair<IndexSpace,bool> > &deleted_is,
+              std::map<IndexPartition,unsigned> &created_partitions,
+              std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
+              std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
+      // We need to broadcast these updates out to other shards
       Serializer rez;
-      rez.serialize<ResourceUpdateKind>(REGION_DELETION_UPDATE);
-      rez.serialize<size_t>(regs.size());
-      for (std::vector<LogicalRegion>::const_iterator it = 
-            regs.begin(); it != regs.end(); it++)
-        rez.serialize(*it);
-      const RtEvent done = 
-        shard_manager->broadcast_resource_update(owner_shard, rez);
-      // Now do the base call for our context
-      perform_replicated_region_deletions(regs, applied);
-      // Wait for the remote updates to be done
-      if (done.exists() && !done.has_triggered())
-        applied.insert(done);
+      // If we have any deletions make two barriers for use with
+      // the deletion operations we will need to perform
+      bool advance_barriers = false;
+      if (!deleted_regs.empty() || !deleted_fids.empty() || 
+          !deleted_fs.empty() || !deleted_is.empty() || 
+          !deleted_partitions.empty())
+      {
+        if (!returned_resource_mapped_barrier.exists())
+          returned_resource_mapped_barrier = RtBarrier(
+              Realm::Barrier::create_barrier(shard_manager->total_shards));
+        if (!returned_resource_execution_barrier.exists())
+          returned_resource_execution_barrier = RtBarrier(
+              Realm::Barrier::create_barrier(shard_manager->total_shards));
+        advance_barriers = true;
+      }
+      rez.serialize(return_index);
+      rez.serialize(returned_resource_mapped_barrier);
+      rez.serialize(returned_resource_execution_barrier);
+      rez.serialize<size_t>(created_regs.size());
+      if (!created_regs.empty())
+      {
+        for (std::map<LogicalRegion,unsigned>::const_iterator it =
+              created_regs.begin(); it != created_regs.end(); it++)
+        {
+          rez.serialize(it->first);
+          rez.serialize(it->second);
+        }
+      }
+      rez.serialize<size_t>(deleted_regs.size());
+      if (!deleted_regs.empty())
+      {
+        for (std::vector<LogicalRegion>::const_iterator it = 
+              deleted_regs.begin(); it != deleted_regs.end(); it++)
+          rez.serialize(*it);
+      }
+      rez.serialize<size_t>(created_fids.size());
+      if (!created_fids.empty())
+      {
+        for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator 
+              it = created_fids.begin(); it != created_fids.end(); it++)
+        {
+          rez.serialize(it->first);
+          rez.serialize(it->second);
+        }
+      }
+      rez.serialize<size_t>(deleted_fids.size());
+      if (!deleted_fids.empty())
+      {
+        for (std::vector<std::pair<FieldSpace,FieldID> >::const_iterator it =
+              deleted_fids.begin(); it != deleted_fids.end(); it++)
+        {
+          rez.serialize(it->first);
+          rez.serialize(it->second);
+        }
+      }
+      rez.serialize<size_t>(created_fs.size());
+      if (!created_fs.empty())
+      {
+        for (std::map<FieldSpace,unsigned>::const_iterator it = 
+              created_fs.begin(); it != created_fs.end(); it++)
+        {
+          rez.serialize(it->first);
+          rez.serialize(it->second);
+        }
+      } 
+      rez.serialize<size_t>(latent_fs.size());
+      if (!latent_fs.empty())
+      {
+        for (std::map<FieldSpace,std::set<LogicalRegion> >::const_iterator it =
+              latent_fs.begin(); it != latent_fs.end(); it++)
+        {
+          rez.serialize(it->first);
+          rez.serialize<size_t>(it->second.size());
+          for (std::set<LogicalRegion>::const_iterator it2 = 
+                it->second.begin(); it2 != it->second.end(); it2++)
+            rez.serialize(*it2);
+        }
+      }
+      rez.serialize<size_t>(deleted_fs.size());
+      if (!deleted_fs.empty())
+      {
+        for (std::vector<FieldSpace>::const_iterator it = 
+              deleted_fs.begin(); it != deleted_fs.end(); it++)
+          rez.serialize(*it);
+      }
+      rez.serialize<size_t>(created_is.size());
+      if (!created_is.empty())
+      {
+        for (std::map<IndexSpace,unsigned>::const_iterator it = 
+              created_is.begin(); it != created_is.end(); it++)
+        {
+          rez.serialize(it->first);
+          rez.serialize(it->second);
+        }
+      }
+      rez.serialize<size_t>(deleted_is.size());
+      if (!deleted_is.empty())
+      {
+        for (std::vector<std::pair<IndexSpace,bool> >::const_iterator it = 
+              deleted_is.begin(); it != deleted_is.end(); it++)
+          rez.serialize(*it);
+      }
+      rez.serialize<size_t>(created_partitions.size());
+      if (!created_partitions.empty())
+      {
+        for (std::map<IndexPartition,unsigned>::const_iterator it = 
+              created_partitions.begin(); it != 
+              created_partitions.end(); it++)
+        {
+          rez.serialize(it->first);
+          rez.serialize(it->second);
+        }
+      }
+      rez.serialize<size_t>(deleted_partitions.size());
+      if (!deleted_partitions.empty())
+      {
+        for (std::vector<std::pair<IndexPartition,bool> >::const_iterator it = 
+              deleted_partitions.begin(); it != deleted_partitions.end(); it++)
+          rez.serialize(*it);
+      }
+      shard_manager->broadcast_resource_update(owner_shard, rez, preconditions);
+      // Now we can handle this for ourselves
+      receive_replicate_resources(return_index, created_regs, deleted_regs,
+          created_fids, deleted_fids, created_fs, latent_fs, deleted_fs,
+          created_is, deleted_is, created_partitions, deleted_partitions,
+          preconditions, returned_resource_mapped_barrier, 
+          returned_resource_execution_barrier);
+      if (advance_barriers)
+      {
+        Runtime::advance_barrier(returned_resource_mapped_barrier);
+        Runtime::advance_barrier(returned_resource_execution_barrier);
+      }
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::perform_replicated_region_deletions(
-                   std::vector<LogicalRegion> &regs, std::set<RtEvent> &applied)
+    void ReplicateContext::receive_replicate_resources(size_t return_index,
+              std::map<LogicalRegion,unsigned> &created_regs,
+              std::vector<LogicalRegion> &deleted_regs,
+              std::set<std::pair<FieldSpace,FieldID> > &created_fids,
+              std::vector<std::pair<FieldSpace,FieldID> > &deleted_fids,
+              std::map<FieldSpace,unsigned> &created_fs,
+              std::map<FieldSpace,std::set<LogicalRegion> > &latent_fs,
+              std::vector<FieldSpace> &deleted_fs,
+              std::map<IndexSpace,unsigned> &created_is,
+              std::vector<std::pair<IndexSpace,bool> > &deleted_is,
+              std::map<IndexPartition,unsigned> &created_partitions,
+              std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
+              std::set<RtEvent> &preconditions, 
+              RtBarrier mapped_barrier, RtBarrier execution_barrier)
+    //--------------------------------------------------------------------------
+    {
+      bool first_deletion = true;
+      bool need_deletion_dependences = true;
+      ApEvent precondition;
+      std::map<Operation*,GenerationID> dependences;
+      if (!created_regs.empty())
+        register_region_creations(created_regs);
+      if (!deleted_regs.empty())
+      {
+        precondition = 
+          compute_return_deletion_dependences(return_index, dependences);
+        need_deletion_dependences = false;
+        register_region_deletions(precondition, dependences, 
+                                  deleted_regs, preconditions,
+                                  mapped_barrier, execution_barrier, 
+                                  first_deletion);
+      }
+      if (!created_fids.empty())
+        register_field_creations(created_fids);
+      if (!deleted_fids.empty())
+      {
+        if (need_deletion_dependences)
+        {
+          precondition = 
+            compute_return_deletion_dependences(return_index, dependences);
+          need_deletion_dependences = false;
+        }
+        register_field_deletions(precondition, dependences, 
+                                 deleted_fids, preconditions,
+                                 mapped_barrier, execution_barrier,
+                                 first_deletion);
+      }
+      if (!created_fs.empty())
+        register_field_space_creations(created_fs);
+      if (!latent_fs.empty())
+        register_latent_field_spaces(latent_fs);
+      if (!deleted_fs.empty())
+      {
+        if (need_deletion_dependences)
+        {
+          precondition = 
+            compute_return_deletion_dependences(return_index, dependences);
+          need_deletion_dependences = false;
+        }
+        register_field_space_deletions(precondition, dependences,
+                                       deleted_fs, preconditions,
+                                       mapped_barrier, execution_barrier,
+                                       first_deletion);
+      }
+      if (!created_is.empty())
+        register_index_space_creations(created_is);
+      if (!deleted_is.empty())
+      {
+        if (need_deletion_dependences)
+        {
+          precondition = 
+            compute_return_deletion_dependences(return_index, dependences);
+          need_deletion_dependences = false;
+        }
+        register_index_space_deletions(precondition, dependences,
+                                       deleted_is, preconditions,
+                                       mapped_barrier, execution_barrier,
+                                       first_deletion);
+      }
+      if (!created_partitions.empty())
+        register_index_partition_creations(created_partitions);
+      if (!deleted_partitions.empty())
+      {
+        if (need_deletion_dependences)
+        {
+          precondition = 
+            compute_return_deletion_dependences(return_index, dependences);
+          need_deletion_dependences = false;
+        }
+        register_index_partition_deletions(precondition, dependences,
+                                           deleted_partitions, preconditions,
+                                           mapped_barrier, execution_barrier,
+                                           first_deletion);
+      }
+      if (first_deletion && mapped_barrier.exists())
+      {
+        // trigger the barriers if nobody used them
+        Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/);
+        Runtime::phase_barrier_arrive(execution_barrier, 1/*count*/);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::register_region_deletions(ApEvent precondition,
+                           const std::map<Operation*,GenerationID> &dependences,
+                                            std::vector<LogicalRegion> &regions,
+                                            std::set<RtEvent> &preconditions,
+                                            RtBarrier mapped_barrier,
+                                            RtBarrier execution_barrier,
+                                            bool &first_deletion)
     //--------------------------------------------------------------------------
     {
       std::vector<LogicalRegion> delete_now;
-      std::vector<bool> returnable;
-      perform_region_deletions(regs, delete_now, returnable);
-      if (!delete_now.empty())
       {
-#ifdef DEBUG_LEGION
-        assert(delete_now.size() == returnable.size());
-#endif 
-        bool has_outermost = false;
-        RegionTreeContext outermost_ctx;
-        const RegionTreeContext tree_context = get_context();
-        const bool is_total_sharding = shard_manager->is_total_sharding();
-        const bool is_first_local_shard = 
-          shard_manager->is_first_local_shard(owner_shard);
-        const ShardID local_shard_id = owner_shard->shard_id;
-        for (unsigned idx = 0; idx < delete_now.size(); idx++)
+        AutoLock priv_lock(privilege_lock);
+        for (std::vector<LogicalRegion>::const_iterator rit =
+              regions.begin(); rit != regions.end(); rit++)
         {
-          // Clean out the context
-          if (returnable[idx])
+          std::map<LogicalRegion,unsigned>::iterator region_finder = 
+            created_regions.find(*rit);
+          if (region_finder == created_regions.end())
           {
-            if (!has_outermost)
-            {
-              TaskContext *outermost = find_outermost_local_context();
-              outermost_ctx = outermost->get_context();
-              has_outermost = true;
-            }
-            runtime->forest->invalidate_versions(outermost_ctx,delete_now[idx]);
+            if (local_regions.find(*rit) != local_regions.end())
+              REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
+                  "Local logical region (%x,%x,%x) in task %s (UID %lld) was "
+                  "not deleted by this task. Local regions can only be deleted "
+                  "by the task that made them.", rit->index_space.id,
+                  rit->field_space.id, rit->tree_id, 
+                  get_task_name(), get_unique_id())
+            // Deletion keeps going up
+            deleted_regions.push_back(*rit);
           }
           else
-            runtime->forest->invalidate_versions(tree_context, delete_now[idx]);
-          // Then tell the region tree forest it can destroy the region
-          if (is_total_sharding && is_first_local_shard)
-            runtime->forest->destroy_logical_region(delete_now[idx],
-                runtime->address_space, applied, true/*collective*/);
-          else if (local_shard_id == 0)
-            runtime->forest->destroy_logical_region(delete_now[idx],
-                                      runtime->address_space, applied);
+          {
+            // One of ours to delete
+#ifdef DEBUG_LEGION
+            assert(region_finder->second > 0);
+#endif
+            if (--region_finder->second == 0)
+            {
+              created_regions.erase(region_finder);
+              delete_now.push_back(*rit);
+              // Check to see if we have any latent field spaces to clean up
+              if (!latent_field_spaces.empty())
+              {
+                std::map<FieldSpace,std::set<LogicalRegion> >::iterator finder =
+                  latent_field_spaces.find(rit->get_field_space());
+                if (finder != latent_field_spaces.end())
+                {
+                  std::set<LogicalRegion>::iterator latent_finder = 
+                    finder->second.find(*rit);
+#ifdef DEBUG_LEGION
+                  assert(latent_finder != finder->second.end());
+#endif
+                  finder->second.erase(latent_finder);
+                  if (finder->second.empty())
+                  {
+                    // Now that all the regions using this field space have
+                    // been deleted we can clean up all the created_fields
+                    for (std::set<std::pair<FieldSpace,FieldID> >::iterator it =
+                          created_fields.begin(); it != 
+                          created_fields.end(); /*nothing*/)
+                    {
+                      if (it->first == finder->first)
+                      {
+                        std::set<std::pair<FieldSpace,FieldID> >::iterator 
+                          to_delete = it++;
+                        created_fields.erase(to_delete);
+                      }
+                      else
+                        it++;
+                    }
+                    latent_field_spaces.erase(finder);
+                  }
+                }
+              }
+            }
+          }
         }
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplicateContext::register_field_creations(
-                               std::set<std::pair<FieldSpace,FieldID> > &fields)
-    //--------------------------------------------------------------------------
-    {
-      Serializer rez;
-      rez.serialize<ResourceUpdateKind>(FIELD_CREATION_UPDATE);
-      rez.serialize<size_t>(fields.size());
-      for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator it = 
-            fields.begin(); it != fields.end(); it++)
-      {
-        rez.serialize(it->first);
-        rez.serialize(it->second);
-      }
-      const RtEvent done = 
-        shard_manager->broadcast_resource_update(owner_shard, rez);
-      // Now do the base call for our context
-      TaskContext::register_field_creations(fields);
-      // Wait for the remote updates to be done
-      if (done.exists() && !done.has_triggered())
-        done.wait();
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplicateContext::register_field_deletions(
-                            std::vector<std::pair<FieldSpace,FieldID> > &fields,
-                            std::set<RtEvent> &applied)
-    //--------------------------------------------------------------------------
-    {
-      Serializer rez;
-      rez.serialize<ResourceUpdateKind>(FIELD_DELETION_UPDATE);
-      rez.serialize<size_t>(fields.size());
-      for (std::vector<std::pair<FieldSpace,FieldID> >::const_iterator it = 
-            fields.begin(); it != fields.end(); it++)
-      {
-        rez.serialize(it->first);
-        rez.serialize(it->second);
-      }
-      const RtEvent done = 
-        shard_manager->broadcast_resource_update(owner_shard, rez);
-      // Now do the base call for our context
-      perform_replicated_field_deletions(fields, applied);
-      // Wait for the remote updates to be done
-      if (done.exists() && !done.has_triggered())
-        applied.insert(done);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplicateContext::perform_replicated_field_deletions(
-                            std::vector<std::pair<FieldSpace,FieldID> > &fields,
-                            std::set<RtEvent> &applied)
-    //--------------------------------------------------------------------------
-    {
-      std::map<FieldSpace,std::vector<FieldID> > delete_now;
-      std::vector<RegionRequirement> deletion_requirements;
-      perform_field_deletions(fields, delete_now, deletion_requirements);
       if (!delete_now.empty())
       {
-        std::set<RtEvent> preconditions;
-        LegionVector<VersionInfo>::aligned 
-          version_infos(deletion_requirements.size());
-        for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
-          runtime->forest->perform_versioning_analysis(owner_shard, idx,
-                                            deletion_requirements[idx],
-                                            version_infos[idx],
-                                            preconditions);
-        const bool is_total_sharding = shard_manager->is_total_sharding();
-        const bool is_first_local_shard = 
-          shard_manager->is_first_local_shard(owner_shard);
-        const ShardID local_shard_id = owner_shard->shard_id;
-        if (!preconditions.empty())
+        if (first_deletion)
         {
-          const RtEvent wait_on = Runtime::merge_events(preconditions);
-          preconditions.clear();
-          wait_on.wait();
-        }
-        if ((is_total_sharding && is_first_local_shard) || 
-            (local_shard_id == 0))
-        {
-          // For this case we actually need to go through and prune out any
-          // valid instances for these fields in the equivalence sets in order
-          // to be able to free up the resources.
-          const PhysicalTraceInfo trace_info(NULL, -1U/*idx*/, false/*init*/);
-          for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
-            runtime->forest->invalidate_fields(owner_shard, idx, 
-              version_infos[idx], trace_info, preconditions,
-              is_total_sharding/*collective*/);
-          // Wait for the invalidations to be done
-          if (!preconditions.empty())
+          std::set<RtEvent> bar_preconditions;
+          for (std::map<Operation*,GenerationID>::const_iterator dit = 
+                dependences.begin(); dit != dependences.end(); dit++)
           {
-            const RtEvent wait_on = Runtime::merge_events(preconditions);
-            preconditions.clear();
-            wait_on.wait();
+            const RtEvent mapped = dit->first->get_mapped_event();
+            __sync_synchronize();
+            if (dit->first->get_generation() == dit->second)
+              bar_preconditions.insert(mapped);
           }
-          for (std::map<FieldSpace,std::vector<FieldID> >::const_iterator it =
-                delete_now.begin(); it != delete_now.end(); it++)
-            runtime->forest->free_fields(it->first, it->second, applied);
+          if (!bar_preconditions.empty())
+            Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/,
+                Runtime::merge_events(bar_preconditions));
+          else
+            Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/);
+          Runtime::phase_barrier_arrive(execution_barrier, 1/*count*/, 
+                                        Runtime::protect_event(precondition));
+          first_deletion = false;
+        }
+        for (std::vector<LogicalRegion>::const_iterator it = 
+              delete_now.begin(); it != delete_now.end(); it++)
+        {
+          ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
+          op->initialize_logical_region_deletion(this, *it, true/*unordered*/);
+          op->initialize_replication(this, mapped_barrier, execution_barrier,
+              shard_manager->is_total_sharding(),
+              shard_manager->is_first_local_shard(owner_shard));
+          preconditions.insert(
+              Runtime::protect_event(op->get_completion_event()));
+          op->begin_dependence_analysis();
+          op->add_mapping_dependence(mapped_barrier);
+          op->end_dependence_analysis();
         }
       }
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::register_field_space_creations(
-                                                   std::set<FieldSpace> &spaces)
+    void ReplicateContext::register_field_deletions(ApEvent precondition,
+                           const std::map<Operation*,GenerationID> &dependences,
+                           std::vector<std::pair<FieldSpace,FieldID> > &fields,
+                           std::set<RtEvent> &preconditions,
+                           RtBarrier mapped_barrier,
+                           RtBarrier execution_barrier,
+                           bool &first_deletion)
     //--------------------------------------------------------------------------
     {
-      Serializer rez;
-      rez.serialize<ResourceUpdateKind>(FIELD_SPACE_CREATION_UPDATE);
-      rez.serialize<size_t>(spaces.size());
-      for (std::set<FieldSpace>::const_iterator it = 
-            spaces.begin(); it != spaces.end(); it++)
-        rez.serialize(*it);
-      const RtEvent done = 
-        shard_manager->broadcast_resource_update(owner_shard, rez);
-      // Now do the base call for our context
-      TaskContext::register_field_space_creations(spaces);
-      // Wait for the remote updates to be done
-      if (done.exists() && !done.has_triggered())
-        done.wait();
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplicateContext::register_latent_field_spaces(
-                                          std::map<FieldSpace,unsigned> &spaces)
-    //--------------------------------------------------------------------------
-    {
-      Serializer rez;
-      rez.serialize<ResourceUpdateKind>(FIELD_SPACE_LATENT_UPDATE);
-      rez.serialize<size_t>(spaces.size());
-      for (std::map<FieldSpace,unsigned>::const_iterator it = 
-            spaces.begin(); it != spaces.end(); it++)
+      std::map<FieldSpace,std::set<FieldID> > delete_now;
       {
-        rez.serialize(it->first);
-        rez.serialize(it->second);
+        AutoLock priv_lock(privilege_lock);
+        for (std::vector<std::pair<FieldSpace,FieldID> >::const_iterator fit =
+              fields.begin(); fit != fields.end(); fit++)
+        {
+          std::set<std::pair<FieldSpace,FieldID> >::const_iterator 
+            field_finder = created_fields.find(*fit);
+          if (field_finder == created_fields.end())
+          {
+            std::map<std::pair<FieldSpace,FieldID>,bool>::iterator 
+              local_finder = local_fields.find(*fit);
+            if (local_finder != local_fields.end())
+              REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
+                  "Local field %d in field space %x in task %s (UID %lld) was "
+                  "not deleted by this task. Local fields can only be deleted "
+                  "by the task that made them.", fit->second, fit->first.id,
+                  get_task_name(), get_unique_id())
+            deleted_fields.push_back(*fit);
+          }
+          else
+          {
+            // One of ours to delete
+            delete_now[fit->first].insert(fit->second);
+            created_fields.erase(field_finder);
+          }
+        }
       }
-      const RtEvent done = 
-        shard_manager->broadcast_resource_update(owner_shard, rez);
-      // Now do the base call for our context
-      TaskContext::register_latent_field_spaces(spaces);
-      // Wait for the remote updates to be done
-      if (done.exists() && !done.has_triggered())
-        done.wait();
+      if (!delete_now.empty())
+      {
+        if (first_deletion)
+        {
+          std::set<RtEvent> bar_preconditions;
+          for (std::map<Operation*,GenerationID>::const_iterator dit = 
+                dependences.begin(); dit != dependences.end(); dit++)
+          {
+            const RtEvent mapped = dit->first->get_mapped_event();
+            __sync_synchronize();
+            if (dit->first->get_generation() == dit->second)
+              bar_preconditions.insert(mapped);
+          }
+          if (!bar_preconditions.empty())
+            Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/,
+                Runtime::merge_events(bar_preconditions));
+          else
+            Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/);
+          Runtime::phase_barrier_arrive(execution_barrier, 1/*count*/, 
+                                        Runtime::protect_event(precondition));
+          first_deletion = false;
+        }
+        for (std::map<FieldSpace,std::set<FieldID> >::const_iterator it = 
+              delete_now.begin(); it != delete_now.end(); it++)
+        {
+          ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
+          op->initialize_field_deletions(this, it->first, it->second, 
+                                         true/*unordered*/);
+          op->initialize_replication(this, mapped_barrier, execution_barrier,
+              shard_manager->is_total_sharding(),
+              shard_manager->is_first_local_shard(owner_shard));
+          preconditions.insert(
+              Runtime::protect_event(op->get_completion_event()));
+          op->begin_dependence_analysis();
+          op->add_mapping_dependence(mapped_barrier);
+          op->end_dependence_analysis();
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::register_field_space_deletions(
-                    std::vector<FieldSpace> &spaces, std::set<RtEvent> &applied) 
-    //--------------------------------------------------------------------------
-    {
-      Serializer rez;
-      rez.serialize<ResourceUpdateKind>(FIELD_SPACE_DELETION_UPDATE);
-      rez.serialize<size_t>(spaces.size());
-      for (std::vector<FieldSpace>::const_iterator it = 
-            spaces.begin(); it != spaces.end(); it++)
-        rez.serialize(*it);
-      const RtEvent done = 
-        shard_manager->broadcast_resource_update(owner_shard, rez);
-      // Now do the base call for our context
-      perform_replicated_field_space_deletions(spaces, applied);
-      // Wait for the remote updates to be done
-      if (done.exists() && !done.has_triggered())
-        applied.insert(done);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplicateContext::perform_replicated_field_space_deletions(
-                    std::vector<FieldSpace> &spaces, std::set<RtEvent> &applied) 
+    void ReplicateContext::register_field_space_deletions(ApEvent precondition,
+                           const std::map<Operation*,GenerationID> &dependences,
+                                               std::vector<FieldSpace> &spaces,
+                                               std::set<RtEvent> &preconditions,
+                                               RtBarrier mapped_barrier,
+                                               RtBarrier execution_barrier,
+                                               bool &first_deletion)
     //--------------------------------------------------------------------------
     {
       std::vector<FieldSpace> delete_now;
-      perform_field_space_deletions(spaces, delete_now);
+      {
+        AutoLock priv_lock(privilege_lock);
+        for (std::vector<FieldSpace>::const_iterator fit = 
+              spaces.begin(); fit != spaces.end(); fit++)
+        {
+          std::map<FieldSpace,unsigned>::iterator finder = 
+            created_field_spaces.find(*fit);
+          if (finder != created_field_spaces.end())
+          {
+#ifdef DEBUG_LEGION
+            assert(finder->second > 0);
+#endif
+            if (--finder->second == 0)
+            {
+              delete_now.push_back(*fit);
+              created_field_spaces.erase(finder);
+              // Count how many regions are still using this field space
+              // that still need to be deleted before we can remove the
+              // list of created fields
+              std::set<LogicalRegion> remaining_regions;
+              for (std::map<LogicalRegion,unsigned>::const_iterator it = 
+                    created_regions.begin(); it != created_regions.end(); it++)
+                if (it->first.get_field_space() == *fit)
+                  remaining_regions.insert(it->first);
+              for (std::map<LogicalRegion,bool>::const_iterator it = 
+                    local_regions.begin(); it != local_regions.end(); it++)
+                if (it->first.get_field_space() == *fit)
+                  remaining_regions.insert(it->first);
+              if (remaining_regions.empty())
+              {
+                // No remaining regions so we can remove any created fields now
+                for (std::set<std::pair<FieldSpace,FieldID> >::iterator it = 
+                      created_fields.begin(); it != 
+                      created_fields.end(); /*nothing*/)
+                {
+                  if (it->first == *fit)
+                  {
+                    std::set<std::pair<FieldSpace,FieldID> >::iterator 
+                      to_delete = it++;
+                    created_fields.erase(to_delete);
+                  }
+                  else
+                    it++;
+                }
+              }
+              else
+                latent_field_spaces[*fit] = remaining_regions;
+            }
+          }
+          else
+            // If we didn't make this field space, record the deletion
+            // and keep going. It will be handled by the context that
+            // made the field space
+            deleted_field_spaces.push_back(*fit);
+        }
+      }
       if (!delete_now.empty())
       {
-        const bool is_total_sharding = shard_manager->is_total_sharding();
-        const bool is_first_local_shard = 
-          shard_manager->is_first_local_shard(owner_shard);
-        const ShardID local_shard_id = owner_shard->shard_id;
-        if ((is_total_sharding && is_first_local_shard) || 
-            (local_shard_id == 0))
+        for (std::vector<FieldSpace>::const_iterator it = 
+              delete_now.begin(); it != delete_now.end(); it++)
         {
-          for (std::vector<FieldSpace>::const_iterator it = 
-                delete_now.begin(); it != delete_now.end(); it++)
-            runtime->forest->destroy_field_space(*it, runtime->address_space,
-                                    applied, is_total_sharding/*collective*/);
+          ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
+          op->initialize_field_space_deletion(this, *it, true/*unordered*/);
+          op->initialize_replication(this, mapped_barrier, execution_barrier,
+              shard_manager->is_total_sharding(),
+              shard_manager->is_first_local_shard(owner_shard));
+          preconditions.insert(
+              Runtime::protect_event(op->get_completion_event()));
+          op->begin_dependence_analysis();
+          op->add_mapping_dependence(mapped_barrier);
+          op->end_dependence_analysis();
         }
-      } 
+      }
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::register_index_space_creations(
-                                                   std::set<IndexSpace> &spaces)
-    //--------------------------------------------------------------------------
-    {
-      Serializer rez;
-      rez.serialize<ResourceUpdateKind>(INDEX_SPACE_CREATION_UPDATE);
-      rez.serialize<size_t>(spaces.size());
-      for (std::set<IndexSpace>::const_iterator it = 
-            spaces.begin(); it != spaces.end(); it++)
-        rez.serialize(*it);
-      const RtEvent done = 
-        shard_manager->broadcast_resource_update(owner_shard, rez);
-      // Now do the base call for our context
-      TaskContext::register_index_space_creations(spaces);
-      // Wait for the remote updates to be done
-      if (done.exists() && !done.has_triggered())
-        done.wait();
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplicateContext::register_index_space_deletions(
-                    std::vector<IndexSpace> &spaces, std::set<RtEvent> &applied)
-    //--------------------------------------------------------------------------
-    {
-      Serializer rez;
-      rez.serialize<ResourceUpdateKind>(INDEX_SPACE_DELETION_UPDATE);
-      rez.serialize<size_t>(spaces.size());
-      for (std::vector<IndexSpace>::const_iterator it = 
-            spaces.begin(); it != spaces.end(); it++)
-        rez.serialize(*it);
-      const RtEvent done = 
-        shard_manager->broadcast_resource_update(owner_shard, rez);
-      // Now do the base call for our context
-      perform_replicated_index_space_deletions(spaces, applied);
-      // Wait for the remote updates to be done
-      if (done.exists() && !done.has_triggered())
-        applied.insert(done);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplicateContext::perform_replicated_index_space_deletions(
-                    std::vector<IndexSpace> &spaces, std::set<RtEvent> &applied)
+    void ReplicateContext::register_index_space_deletions(ApEvent precondition,
+                           const std::map<Operation*,GenerationID> &dependences,
+                               std::vector<std::pair<IndexSpace,bool> > &spaces,
+                                               std::set<RtEvent> &preconditions,
+                                               RtBarrier mapped_barrier,
+                                               RtBarrier execution_barrier,
+                                               bool &first_deletion)
     //--------------------------------------------------------------------------
     {
       std::vector<IndexSpace> delete_now;
-      std::vector<IndexPartition> sub_partitions;
-      perform_index_space_deletions(spaces, delete_now, sub_partitions);
+      std::vector<std::vector<IndexPartition> > sub_partitions;
+      {
+        AutoLock priv_lock(privilege_lock);
+        for (std::vector<std::pair<IndexSpace,bool> >::const_iterator sit =
+              spaces.begin(); sit != spaces.end(); sit++)
+        {
+          std::map<IndexSpace,unsigned>::iterator finder = 
+            created_index_spaces.find(sit->first);
+          if (finder != created_index_spaces.end())
+          {
+#ifdef DEBUG_LEGION
+            assert(finder->second > 0);
+#endif
+            if (--finder->second == 0)
+            {
+              delete_now.push_back(sit->first);
+              sub_partitions.resize(sub_partitions.size() + 1);
+              created_index_spaces.erase(finder);
+              if (sit->second)
+              {
+                std::vector<IndexPartition> &subs = sub_partitions.back();
+                // Also remove any index partitions for this index space tree
+                for (std::map<IndexPartition,unsigned>::iterator it = 
+                      created_index_partitions.begin(); it !=
+                      created_index_partitions.end(); /*nothing*/)
+                {
+                  if (it->first.get_tree_id() == sit->first.get_tree_id()) 
+                  {
+#ifdef DEBUG_LEGION
+                    assert(it->second > 0);
+#endif
+                    if (--it->second == 0)
+                    {
+                      subs.push_back(it->first);
+                      std::map<IndexPartition,unsigned>::iterator 
+                        to_delete = it++;
+                      created_index_partitions.erase(to_delete);
+                    }
+                    else
+                      it++;
+                  }
+                  else
+                    it++;
+                }
+              }
+            }
+          }
+          else
+            // If we didn't make the index space in this context, just
+            // record it and keep going, it will get handled later
+            deleted_index_spaces.push_back(*sit);
+        }
+      }
       if (!delete_now.empty())
       {
-        const bool is_total_sharding = shard_manager->is_total_sharding();
-        const bool is_first_local_shard = 
-          shard_manager->is_first_local_shard(owner_shard);
-        const ShardID local_shard_id = owner_shard->shard_id;
-        if (!sub_partitions.empty())
+#ifdef DEBUG_LEGION
+        assert(delete_now.size() == sub_partitions.size());
+#endif
+        for (unsigned idx = 0; idx < delete_now.size(); idx++)
         {
-          std::set<ApEvent> preconditions;
-          if (is_total_sharding && is_first_local_shard)
-          {
-            // Still need to wait on all sub partitions
-            // This is overly conservative and we could be more 
-            // precise and only wait on the sub_partitions for
-            // the index spaces or partitions we're deleting
-            for (std::vector<IndexPartition>::const_iterator it = 
-                  sub_partitions.begin(); it != sub_partitions.end(); it++)
-            {
-              IndexPartNode *node = runtime->forest->get_node(*it);
-              preconditions.insert(node->partition_ready);
-            }
-          }
-          else if (local_shard_id == 0)
-          {
-            for (std::vector<IndexPartition>::const_iterator it = 
-                  sub_partitions.begin(); it != sub_partitions.end(); it++)
-            {
-              IndexPartNode *node = runtime->forest->get_node(*it);
-              preconditions.insert(node->partition_ready);
-            }
-          }
-          if (!preconditions.empty())
-          {
-            const RtEvent wait_on = 
-              Runtime::protect_merge_events(preconditions);
-            wait_on.wait();
-          }
-        }
-        if ((is_total_sharding && is_first_local_shard) || 
-            (local_shard_id == 0))
-        {
-          for (std::vector<IndexSpace>::const_iterator it =
-                delete_now.begin(); it != delete_now.end(); it++)
-            runtime->forest->destroy_index_space(*it, runtime->address_space,
-                                    applied, is_total_sharding/*collective*/);
+          ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
+          op->initialize_index_space_deletion(this, delete_now[idx], 
+                            sub_partitions[idx], true/*unordered*/);
+          op->initialize_replication(this, mapped_barrier, execution_barrier,
+              shard_manager->is_total_sharding(),
+              shard_manager->is_first_local_shard(owner_shard));
+          preconditions.insert(
+              Runtime::protect_event(op->get_completion_event()));
+          op->begin_dependence_analysis();
+          op->add_mapping_dependence(mapped_barrier);
+          op->end_dependence_analysis();
         }
       }
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::register_index_partition_creations(
-                                                std::set<IndexPartition> &parts)
-    //--------------------------------------------------------------------------
-    {
-      Serializer rez;
-      rez.serialize<ResourceUpdateKind>(INDEX_PARTITION_CREATION_UPDATE);
-      rez.serialize<size_t>(parts.size());
-      for (std::set<IndexPartition>::const_iterator it = 
-            parts.begin(); it != parts.end(); it++)
-        rez.serialize(*it);
-      const RtEvent done = 
-        shard_manager->broadcast_resource_update(owner_shard, rez);
-      // Now do the base call for our context
-      TaskContext::register_index_partition_creations(parts);
-      // Wait for the remote updates to be done
-      if (done.exists() && !done.has_triggered())
-        done.wait();
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplicateContext::register_index_partition_deletions(
-                 std::vector<IndexPartition> &parts, std::set<RtEvent> &applied)
-    //--------------------------------------------------------------------------
-    {
-      Serializer rez;
-      rez.serialize<ResourceUpdateKind>(INDEX_PARTITION_DELETION_UPDATE);
-      rez.serialize<size_t>(parts.size());
-      for (std::vector<IndexPartition>::const_iterator it = 
-            parts.begin(); it != parts.end(); it++)
-        rez.serialize(*it);
-      const RtEvent done = 
-        shard_manager->broadcast_resource_update(owner_shard, rez);
-      // Now do the base call for our context
-      perform_replicated_index_partition_deletions(parts, applied);
-      // Wait for the remote updates to be done
-      if (done.exists() && !done.has_triggered())
-        applied.insert(done);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplicateContext::perform_replicated_index_partition_deletions(
-                 std::vector<IndexPartition> &parts, std::set<RtEvent> &applied)
+    void ReplicateContext::register_index_partition_deletions(ApEvent precond,
+                           const std::map<Operation*,GenerationID> &dependences,
+                            std::vector<std::pair<IndexPartition,bool> > &parts, 
+                                               std::set<RtEvent> &preconditions,
+                                               RtBarrier mapped_barrier,
+                                               RtBarrier execution_barrier,
+                                               bool &first_deletion)
     //--------------------------------------------------------------------------
     {
       std::vector<IndexPartition> delete_now;
-      std::vector<IndexPartition> sub_partitions;
-      perform_index_partition_deletions(parts, delete_now, sub_partitions);
-      if (!delete_now.empty())
+      std::vector<std::vector<IndexPartition> > sub_partitions;
       {
-        const bool is_total_sharding = shard_manager->is_total_sharding();
-        const bool is_first_local_shard = 
-          shard_manager->is_first_local_shard(owner_shard);
-        const ShardID local_shard_id = owner_shard->shard_id;
-        if (!delete_now.empty() || !sub_partitions.empty())
+        AutoLock priv_lock(privilege_lock);
+        for (std::vector<std::pair<IndexPartition,bool> >::const_iterator pit =
+              parts.begin(); pit != parts.end(); pit++)
         {
-          std::set<ApEvent> preconditions;
-          if (is_total_sharding && is_first_local_shard)
+          std::map<IndexPartition,unsigned>::iterator finder = 
+            created_index_partitions.find(pit->first);
+          if (finder != created_index_partitions.end())
           {
-            for (std::vector<IndexPartition>::const_iterator it = 
-                  delete_now.begin(); it != delete_now.end(); it++)
+#ifdef DEBUG_LEGION
+            assert(finder->second > 0);
+#endif
+            if (--finder->second == 0)
             {
-              if (IndexPartNode::get_owner_space(*it, runtime) == 
-                  runtime->address_space)
+              delete_now.push_back(pit->first);
+              sub_partitions.resize(sub_partitions.size() + 1);
+              created_index_partitions.erase(finder);
+              if (pit->second)
               {
-                IndexPartNode *node = runtime->forest->get_node(*it);
-                preconditions.insert(node->partition_ready);
+                std::vector<IndexPartition> &subs = sub_partitions.back();
+                // Remove any other partitions that this partition dominates
+                for (std::map<IndexPartition,unsigned>::iterator it = 
+                      created_index_partitions.begin(); it !=
+                      created_index_partitions.end(); /*nothing*/)
+                {
+                  if ((pit->first.get_tree_id() == it->first.get_tree_id()) &&
+                      runtime->forest->is_dominated_tree_only(it->first, 
+                                                              pit->first))
+                  {
+#ifdef DEBUG_LEGION
+                    assert(it->second > 0);
+#endif
+                    if (--it->second == 0)
+                    {
+                      subs.push_back(it->first);
+                      std::map<IndexPartition,unsigned>::iterator 
+                        to_delete = it++;
+                      created_index_partitions.erase(to_delete);
+                    }
+                    else
+                      it++;
+                  }
+                  else
+                    it++;
+                }
               }
             }
-            // Still need to wait on all the sub partitions
-            // This is overly conservative and we could be more 
-            // precise and only wait on the sub_partitions for
-            // the index spaces or partitions we're deleting
-            for (std::vector<IndexPartition>::const_iterator it = 
-                  sub_partitions.begin(); it != sub_partitions.end(); it++)
-            {
-              IndexPartNode *node = runtime->forest->get_node(*it);
-              preconditions.insert(node->partition_ready);
-            }
           }
-          else if (local_shard_id == 0)
-          {
-            for (std::vector<IndexPartition>::const_iterator it = 
-                  delete_now.begin(); it != delete_now.end(); it++)
-            {
-              IndexPartNode *node = runtime->forest->get_node(*it);
-              preconditions.insert(node->partition_ready);
-            }
-            for (std::vector<IndexPartition>::const_iterator it = 
-                  sub_partitions.begin(); it != sub_partitions.end(); it++)
-            {
-              IndexPartNode *node = runtime->forest->get_node(*it);
-              preconditions.insert(node->partition_ready);
-            }
-          }
-          if (!preconditions.empty())
-          {
-            const RtEvent wait_on = 
-              Runtime::protect_merge_events(preconditions);
-            wait_on.wait();
-          }
+          else
+            // If we didn't make the partition, record it and keep going
+            deleted_index_partitions.push_back(*pit);
         }
-        if ((is_total_sharding && is_first_local_shard) || 
-            (local_shard_id == 0))
+      }
+      if (!delete_now.empty())
+      {
+#ifdef DEBUG_LEGION
+        assert(delete_now.size() == sub_partitions.size());
+#endif
+        for (unsigned idx = 0; idx < delete_now.size(); idx++)
         {
-          for (std::vector<IndexPartition>::const_iterator it =
-                delete_now.begin(); it != delete_now.end(); it++)
-            runtime->forest->destroy_index_partition(*it,runtime->address_space,
-                                      applied, is_total_sharding/*collective*/);
+          ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
+          op->initialize_index_part_deletion(this, delete_now[idx], 
+                            sub_partitions[idx], true/*unordered*/);
+          op->initialize_replication(this, mapped_barrier, execution_barrier,
+              shard_manager->is_total_sharding(),
+              shard_manager->is_first_local_shard(owner_shard));
+          preconditions.insert(
+              Runtime::protect_event(op->get_completion_event()));
+          op->begin_dependence_analysis();
+          op->add_mapping_dependence(mapped_barrier);
+          op->end_dependence_analysis();
         }
       }
     }
-#endif
 
     //--------------------------------------------------------------------------
     CollectiveID ReplicateContext::get_next_collective_index(
@@ -16611,122 +16903,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::register_region_creations(
-                                      std::map<LogicalRegion,unsigned> &regions)
+    void LeafContext::receive_resources(size_t return_index,
+              std::map<LogicalRegion,unsigned> &created_regs,
+              std::vector<LogicalRegion> &deleted_regs,
+              std::set<std::pair<FieldSpace,FieldID> > &created_fids,
+              std::vector<std::pair<FieldSpace,FieldID> > &deleted_fids,
+              std::map<FieldSpace,unsigned> &created_fs,
+              std::map<FieldSpace,std::set<LogicalRegion> > &latent_fs,
+              std::vector<FieldSpace> &deleted_fs,
+              std::map<IndexSpace,unsigned> &created_is,
+              std::vector<std::pair<IndexSpace,bool> > &deleted_is,
+              std::map<IndexPartition,unsigned> &created_partitions,
+              std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
+              std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
       // should never be called
       assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::register_region_deletions(ApEvent precondition,
-                           const std::map<Operation*,GenerationID> &dependences,
-                                            std::vector<LogicalRegion> &regions,
-                                            std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::register_field_creations(
-                               std::set<std::pair<FieldSpace,FieldID> > &fields)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::register_field_deletions(ApEvent precondition,
-                           const std::map<Operation*,GenerationID> &dependences,
-                           std::vector<std::pair<FieldSpace,FieldID> > &fields,
-                           std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::register_field_space_creations(
-                                          std::map<FieldSpace,unsigned> &spaces)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::register_latent_field_spaces(
-                          std::map<FieldSpace,std::set<LogicalRegion> > &spaces)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::register_field_space_deletions(ApEvent precondition,
-                           const std::map<Operation*,GenerationID> &dependences,
-                                               std::vector<FieldSpace> &sps,
-                                               std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::register_index_space_creations(
-                                          std::map<IndexSpace,unsigned> &spaces)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::register_index_space_deletions(ApEvent precondition,
-                           const std::map<Operation*,GenerationID> &dependences,
-                                  std::vector<std::pair<IndexSpace,bool> > &sps,
-                                               std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::register_index_partition_creations(
-                                       std::map<IndexPartition,unsigned> &parts)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::register_index_partition_deletions(ApEvent precondition,
-                           const std::map<Operation*,GenerationID> &dependences,
-                            std::vector<std::pair<IndexPartition,bool> > &parts, 
-                                               std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent LeafContext::compute_return_deletion_dependences(
-            size_t return_index, std::map<Operation*,GenerationID> &dependences)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return ApEvent::NO_AP_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -18571,114 +18764,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InlineContext::register_region_creations(
-                                      std::map<LogicalRegion,unsigned> &regions)
+    void InlineContext::receive_resources(size_t return_index,
+              std::map<LogicalRegion,unsigned> &created_regs,
+              std::vector<LogicalRegion> &deleted_regs,
+              std::set<std::pair<FieldSpace,FieldID> > &created_fids,
+              std::vector<std::pair<FieldSpace,FieldID> > &deleted_fids,
+              std::map<FieldSpace,unsigned> &created_fs,
+              std::map<FieldSpace,std::set<LogicalRegion> > &latent_fs,
+              std::vector<FieldSpace> &deleted_fs,
+              std::map<IndexSpace,unsigned> &created_is,
+              std::vector<std::pair<IndexSpace,bool> > &deleted_is,
+              std::map<IndexPartition,unsigned> &created_partitions,
+              std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
+              std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
-      enclosing->register_region_creations(regions);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::register_region_deletions(ApEvent precondition,
-                           const std::map<Operation*,GenerationID> &dependences,
-                                            std::vector<LogicalRegion> &regions,
-                                            std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->register_region_deletions(precondition, dependences, 
-                                           regions, preconditions);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::register_field_creations(
-                               std::set<std::pair<FieldSpace,FieldID> > &fields)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->register_field_creations(fields);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::register_field_deletions(ApEvent precondition,
-                           const std::map<Operation*,GenerationID> &dependences,
-                           std::vector<std::pair<FieldSpace,FieldID> > &fields,
-                           std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->register_field_deletions(precondition, dependences, 
-                                          fields, preconditions);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::register_field_space_creations(
-                                          std::map<FieldSpace,unsigned> &spaces)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->register_field_space_creations(spaces);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::register_latent_field_spaces(
-                          std::map<FieldSpace,std::set<LogicalRegion> > &spaces)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->register_latent_field_spaces(spaces);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::register_field_space_deletions(ApEvent precondition,
-                           const std::map<Operation*,GenerationID> &dependences,
-                                               std::vector<FieldSpace> &spaces,
-                                               std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->register_field_space_deletions(precondition, dependences, 
-                                                spaces, preconditions);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::register_index_space_creations(
-                                          std::map<IndexSpace,unsigned> &spaces)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->register_index_space_creations(spaces);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::register_index_space_deletions(ApEvent precondition,
-                           const std::map<Operation*,GenerationID> &dependences,
-                               std::vector<std::pair<IndexSpace,bool> > &spaces,
-                                               std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->register_index_space_deletions(precondition, dependences, 
-                                                spaces, preconditions);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::register_index_partition_creations(
-                                       std::map<IndexPartition,unsigned> &parts)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->register_index_partition_creations(parts);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::register_index_partition_deletions(ApEvent precondition,
-                           const std::map<Operation*,GenerationID> &dependences,
-                            std::vector<std::pair<IndexPartition,bool> > &parts, 
-                                               std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->register_index_partition_deletions(precondition, dependences, 
-                                                    parts, preconditions);
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent InlineContext::compute_return_deletion_dependences(
-                   size_t index, std::map<Operation*,GenerationID> &dependences)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->compute_return_deletion_dependences(index, dependences);
+      enclosing->receive_resources(return_index, created_regs, deleted_regs,
+          created_fids, deleted_fids, created_fs, latent_fs, deleted_fs,
+          created_is, deleted_is, created_partitions, deleted_partitions,
+          preconditions);
     }
 
     //--------------------------------------------------------------------------

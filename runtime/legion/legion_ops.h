@@ -294,6 +294,8 @@ namespace Legion {
         { return ((trace != NULL) && !tracing); }
       inline LegionTrace* get_trace(void) const { return trace; }
       inline size_t get_ctx_index(void) const { return context_index; }
+      inline void add_mapping_dependence(RtEvent dep)
+        { mapping_tracker->add_mapping_dependence(dep); }
     public:
       // Be careful using this call as it is only valid when the operation
       // actually has a parent task.  Right now the only place it is used
