@@ -2139,7 +2139,7 @@ namespace Realm {
     void GPUProcessor::stream_synchronize(cudaStream_t stream)
     {
       // same as device_synchronize if stream is zero
-      if (stream != 0)
+      if(!IS_DEFAULT_STREAM(stream))
       {
         if(!block_on_synchronize) {
           GPUStream *s = gpu->find_stream(stream);
