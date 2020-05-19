@@ -3805,14 +3805,27 @@ namespace Legion {
       IndexSpace create_index_space(Context ctx, 
                                     const std::set<Domain> &domains);
       /**
+       * Create a new shared ownership of a top-level index space to prevent it 
+       * from being destroyed by other potential owners. Every call to this
+       * method that succeeds must be matched with a corresponding call
+       * to destroy the index space in order for the index space to 
+       * actually be deleted. The index space must not have been destroyed
+       * prior to this call being performed.
+       * @param ctx the enclosing task context
+       * @param handle for top-level index space to request ownership for
+       */
+      void create_shared_ownership(Context ctx, IndexSpace handle);
+      /**
        * Destroy an existing index space
        * @param ctx the enclosing task context
        * @param handle the index space to destroy
        * @param unordered set to true if this is performed by a different
        *          thread than the one for the task (e.g a garbage collector)
+       * @param recurse delete the full index tree
        */
       void destroy_index_space(Context ctx, IndexSpace handle,
-                               const bool unordered = false);
+                               const bool unordered = false,
+                               const bool recurse = true);
     public:
       //------------------------------------------------------------------------
       // Index Partition Operations Based on Coloring
@@ -3965,16 +3978,28 @@ namespace Legion {
        LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic> field_accessor,
                                         Color color = AUTO_GENERATE_ID);
-
+      /**
+       * Create a new shared ownership of an index partition to prevent it 
+       * from being destroyed by other potential owners. Every call to this
+       * method that succeeds must be matched with a corresponding call
+       * to destroy the index partition in order for the index partition to 
+       * actually be deleted. The index partition must not have been destroyed
+       * prior to this call being performed.
+       * @param ctx the enclosing task context
+       * @param handle for index partition to request ownership for
+       */
+      void create_shared_ownership(Context ctx, IndexPartition handle);
       /**
        * Destroy an index partition
        * @param ctx the enclosing task context
        * @param handle index partition to be destroyed
        * @param unordered set to true if this is performed by a different
        *          thread than the one for the task (e.g a garbage collector)
+       * @param recurse destroy the full sub-tree below this partition
        */
       void destroy_index_partition(Context ctx, IndexPartition handle,
-                                   const bool unordered = false);
+                                   const bool unordered = false,
+                                   const bool recurse = true);
     public:
       //------------------------------------------------------------------------
       // Dependent Partitioning Operations
@@ -5239,6 +5264,17 @@ namespace Legion {
        */
       FieldSpace create_field_space(Context ctx);
       /**
+       * Create a new shared ownership of a field space to prevent it 
+       * from being destroyed by other potential owners. Every call to this
+       * method that succeeds must be matched with a corresponding call
+       * to destroy the field space in order for the field space to 
+       * actually be deleted. The field space must not have been destroyed
+       * prior to this call being performed.
+       * @param ctx the enclosing task context
+       * @param handle for field space to request ownership for
+       */
+      void create_shared_ownership(Context ctx, FieldSpace handle);
+      /**
        * Destroy an existing field space.
        * @param ctx enclosing task context
        * @param handle of the field space to be destroyed
@@ -5312,6 +5348,17 @@ namespace Legion {
                                       IndexSpaceT<DIM,COORD_T> index,
                                       FieldSpace fields,
                                       bool task_local = false);
+      /**
+       * Create a new shared ownership of a top-level logical region to prevent 
+       * it  from being destroyed by other potential owners. Every call to this
+       * method that succeeds must be matched with a corresponding call
+       * to destroy the logical region in order for the logical region to 
+       * actually be deleted. The logical region must not have been destroyed
+       * prior to this call being performed.
+       * @param ctx the enclosing task context
+       * @param handle for top-level logical region to request ownership for
+       */
+      void create_shared_ownership(Context ctx, LogicalRegion handle);
       /**
        * Destroy a logical region and all of its logical sub-regions.
        * @param ctx enclosing task context

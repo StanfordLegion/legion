@@ -2199,6 +2199,9 @@ namespace Legion {
       inline const FieldMask& get_valid_mask(void) const 
         { return valid_fields; }
       inline const FieldMask& tighten_valid_mask(void);
+      inline void relax_valid_mask(const FieldMask &m);
+      inline void filter_valid_mask(const FieldMask &m);
+      inline void restrict_valid_mask(const FieldMask &m);
     public:
       inline const FieldMask& operator[](T *entry) const;
     public:
@@ -2305,6 +2308,30 @@ namespace Legion {
             entries.multi_entries->end(); it++)
         valid_fields |= it->second;
       return valid_fields;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    inline void FieldMaskSet<T>::relax_valid_mask(const FieldMask &m)
+    //--------------------------------------------------------------------------
+    {
+      valid_fields |= m;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    inline void FieldMaskSet<T>::filter_valid_mask(const FieldMask &m)
+    //--------------------------------------------------------------------------
+    {
+      valid_fields -= m;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    inline void FieldMaskSet<T>::restrict_valid_mask(const FieldMask &m)
+    //--------------------------------------------------------------------------
+    {
+      valid_fields &= m;
     }
 
     //--------------------------------------------------------------------------

@@ -2083,6 +2083,15 @@ namespace Legion {
                                  const TaskArgument &arg, MapperID map_id);
       void process_mapper_task_result(const MapperTaskArgs *args); 
     public:
+      void create_shared_ownership(IndexSpace handle, 
+              const bool total_sharding_collective = false);
+      void create_shared_ownership(IndexPartition handle,
+              const bool total_sharding_collective = false);
+      void create_shared_ownership(FieldSpace handle,
+              const bool total_sharding_collective = false);
+      void create_shared_ownership(LogicalRegion handle,
+              const bool total_sharding_collective = false);
+    public:
       IndexPartition get_index_partition(Context ctx, IndexSpace parent, 
                                          Color color);
       IndexPartition get_index_partition(IndexSpace parent, Color color);
@@ -2138,8 +2147,6 @@ namespace Legion {
                      const void *realm_point, TypeTag type_tag);
     public:
       FieldSpace create_field_space(Context ctx);
-      void destroy_field_space(Context ctx, FieldSpace handle,
-                               const bool unordered);
       size_t get_field_size(Context ctx, FieldSpace handle, FieldID fid);
       size_t get_field_size(FieldSpace handle, FieldID fid);
       void get_field_space_fields(Context ctx, FieldSpace handle,
@@ -2149,10 +2156,6 @@ namespace Legion {
     public:
       LogicalRegion create_logical_region(Context ctx, IndexSpace index,
                                           FieldSpace fields, bool task_local);
-      void destroy_logical_region(Context ctx, LogicalRegion handle,
-                                  const bool unordered);
-      void destroy_logical_partition(Context ctx, LogicalPartition handle,
-                                     const bool unordered);
     public:
       LogicalPartition get_logical_partition(Context ctx, LogicalRegion parent, 
                                              IndexPartition handle);
@@ -2463,6 +2466,7 @@ namespace Legion {
                               MapperID map_id, Processor source);
       void send_remote_task_replay(AddressSpaceID target, Serializer &rez);
       void send_remote_task_profiling_response(Processor tar, Serializer &rez);
+      void send_shared_ownership(AddressSpaceID target, Serializer &rez);
       void send_index_space_node(AddressSpaceID target, Serializer &rez);
       void send_index_space_request(AddressSpaceID target, Serializer &rez);
       void send_index_space_return(AddressSpaceID target, Serializer &rez);
@@ -2515,7 +2519,6 @@ namespace Legion {
       void send_field_space_infos_response(AddressSpaceID, Serializer &rez);
       void send_field_alloc_request(AddressSpaceID target, Serializer &rez);
       void send_field_size_update(AddressSpaceID target, Serializer &rez);
-      void send_field_space_top_alloc(AddressSpaceID target, Serializer &rez);
       void send_field_free(AddressSpaceID target, Serializer &rez);
       void send_field_space_layout_invalidation(AddressSpaceID target, 
                                                 Serializer &rez);
@@ -2539,10 +2542,7 @@ namespace Legion {
                                         std::set<RtEvent> &applied);
       void send_logical_region_destruction(LogicalRegion handle, 
                                            AddressSpaceID target,
-                                           std::set<RtEvent> *applied);
-      void send_logical_partition_destruction(LogicalPartition handle,
-                                              AddressSpaceID target,
-                                              std::set<RtEvent> *applied);
+                                           std::set<RtEvent> &applied);
       void send_individual_remote_complete(Processor target, Serializer &rez);
       void send_individual_remote_commit(Processor target, Serializer &rez);
       void send_slice_remote_mapped(Processor target, Serializer &rez);
@@ -2759,6 +2759,7 @@ namespace Legion {
       void handle_registration_callback(Deserializer &derez);
       void handle_remote_task_replay(Deserializer &derez);
       void handle_remote_task_profiling_response(Deserializer &derez);
+      void handle_shared_ownership(Deserializer &derez);
       void handle_index_space_node(Deserializer &derez, AddressSpaceID source);
       void handle_index_space_request(Deserializer &derez, 
                                       AddressSpaceID source);
@@ -2805,8 +2806,6 @@ namespace Legion {
       void handle_field_space_infos_response(Deserializer &derez);
       void handle_field_alloc_request(Deserializer &derez);
       void handle_field_size_update(Deserializer &derez, AddressSpaceID source);
-      void handle_field_space_top_alloc(Deserializer &derez,
-                                        AddressSpaceID source);
       void handle_field_free(Deserializer &derez, AddressSpaceID source);
       void handle_field_space_layout_invalidation(Deserializer &derez,
                                                   AddressSpaceID source);
@@ -2820,16 +2819,10 @@ namespace Legion {
       void handle_top_level_region_return(Deserializer &derez);
       void handle_logical_region_node(Deserializer &derez, 
                                       AddressSpaceID source);
-      void handle_index_space_destruction(Deserializer &derez,
-                                          AddressSpaceID source);
-      void handle_index_partition_destruction(Deserializer &derez,
-                                              AddressSpaceID source);
-      void handle_field_space_destruction(Deserializer &derez,
-                                          AddressSpaceID source);
-      void handle_logical_region_destruction(Deserializer &derez,
-                                             AddressSpaceID source);
-      void handle_logical_partition_destruction(Deserializer &derez,
-                                                AddressSpaceID source);
+      void handle_index_space_destruction(Deserializer &derez);
+      void handle_index_partition_destruction(Deserializer &derez);
+      void handle_field_space_destruction(Deserializer &derez);
+      void handle_logical_region_destruction(Deserializer &derez);
       void handle_individual_remote_complete(Deserializer &derez);
       void handle_individual_remote_commit(Deserializer &derez);
       void handle_slice_remote_mapped(Deserializer &derez, 

@@ -954,6 +954,16 @@ extern "C" {
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
+   * @see Legion::Runtime::create_shared_ownership
+   */
+  void
+  legion_index_space_create_shared_ownership(legion_runtime_t runtime,
+                                             legion_context_t ctx,
+                                             legion_index_space_t handle);
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
    * @see Legion::Runtime::destroy_index_space()
    */
   void
@@ -1507,11 +1517,21 @@ extern "C" {
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
+   * @see Legion::Runtime::create_shared_ownership
+   */
+  void
+  legion_index_partition_create_shared_ownership(legion_runtime_t runtime,
+                                                 legion_context_t ctx,
+                                                 legion_index_partition_t handle);
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
    * @see Legion::Runtime::destroy_index_space()
    */
   void
   legion_index_partition_destroy(legion_runtime_t runtime,
-                                legion_context_t ctx,
+                                 legion_context_t ctx,
                                  legion_index_partition_t handle);
 
   /**
@@ -1568,6 +1588,16 @@ extern "C" {
   legion_field_space_t
   legion_field_space_create(legion_runtime_t runtime,
                             legion_context_t ctx);
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see Legion::Runtime::create_shared_ownership
+   */
+  void
+  legion_field_space_create_shared_ownership(legion_runtime_t runtime,
+                                             legion_context_t ctx,
+                                             legion_field_space_t handle);
 
   /**
    * @param handle Caller must have ownership of parameter `handle`.
@@ -1713,6 +1743,16 @@ extern "C" {
                                legion_index_space_t index,
                                legion_field_space_t fields,
                                bool task_local);
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see Legion::Runtime::create_shared_ownership
+   */
+  void
+  legion_logical_region_create_shared_ownership(legion_runtime_t runtime,
+                                                legion_context_t ctx,
+                                                legion_logical_region_t handle);
 
   /**
    * @param handle Caller must have ownership of parameter `handle`.

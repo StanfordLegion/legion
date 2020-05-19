@@ -937,7 +937,6 @@ namespace Legion {
       // Use the lowest field ID here as the key
       std::map<std::pair<FieldSpace,FieldID>,unsigned> field_counts;
       std::map<LogicalRegion,unsigned> logical_region_counts;
-      std::map<LogicalPartition,unsigned> logical_partition_counts;
       // Use the lowest field ID here as the key
       std::map<std::pair<LogicalRegion,FieldID>,unsigned> detach_counts;
     protected:
@@ -947,7 +946,6 @@ namespace Legion {
       // Use the lowest field ID here as the key
       std::map<std::pair<FieldSpace,FieldID>,ReplDeletionOp*> field_deletions;
       std::map<LogicalRegion,ReplDeletionOp*> logical_region_deletions;
-      std::map<LogicalPartition,ReplDeletionOp*> logical_partition_deletions;
       // Use the lowest field ID here as the key
       std::map<std::pair<LogicalRegion,FieldID>,ReplDetachOp*> detachments;
     };
@@ -1330,8 +1328,7 @@ namespace Legion {
        std::map<IndexPartition,ReplDeletionOp*> &index_partition_deletions,
        std::map<FieldSpace,ReplDeletionOp*> field_space_deletions,
        std::map<std::pair<FieldSpace,FieldID>,ReplDeletionOp*> &field_deletions,
-       std::map<LogicalRegion,ReplDeletionOp*> &logical_region_deletions,
-       std::map<LogicalPartition,ReplDeletionOp*> &logical_partition_deletions);
+       std::map<LogicalRegion,ReplDeletionOp*> &logical_region_deletions);
     protected:
       RtBarrier mapping_barrier;
       RtBarrier execution_barrier;
@@ -2073,7 +2070,8 @@ namespace Legion {
       void send_intra_space_dependence(ShardID target, Serializer &rez);
       void handle_intra_space_dependence(Deserializer &derez);
     public:
-      RtEvent broadcast_resource_update(ShardTask *source, Serializer &rez);
+      void broadcast_resource_update(ShardTask *source, Serializer &rez,
+                                     std::set<RtEvent> &applied_events);
       void handle_resource_update(Deserializer &derez);
     public:
       void send_trace_event_request(ShardedPhysicalTemplate *physical_template,

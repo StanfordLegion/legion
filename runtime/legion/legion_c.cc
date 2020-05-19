@@ -699,6 +699,18 @@ legion_index_space_subtraction(legion_runtime_t runtime_,
 }
 
 void
+legion_index_space_create_shared_ownership(legion_runtime_t runtime_,
+                                           legion_context_t ctx_,
+                                           legion_index_space_t handle_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexSpace handle = CObjectWrapper::unwrap(handle_);
+
+  runtime->create_shared_ownership(ctx, handle);
+}
+
+void
 legion_index_space_destroy(legion_runtime_t runtime_,
                            legion_context_t ctx_,
                            legion_index_space_t handle_)
@@ -1737,6 +1749,18 @@ legion_index_partition_get_parent_index_space(legion_runtime_t runtime_,
 }
 
 void
+legion_index_partition_create_shared_ownership(legion_runtime_t runtime_,
+                                               legion_context_t ctx_,
+                                               legion_index_partition_t handle_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexPartition handle = CObjectWrapper::unwrap(handle_);
+
+  runtime->create_shared_ownership(ctx, handle);
+}
+
+void
 legion_index_partition_destroy(legion_runtime_t runtime_,
                                legion_context_t ctx_,
                                legion_index_partition_t handle_)
@@ -1816,6 +1840,18 @@ legion_field_space_create(legion_runtime_t runtime_,
 
   FieldSpace fs = runtime->create_field_space(ctx);
   return CObjectWrapper::wrap(fs);
+}
+
+void
+legion_field_space_create_shared_ownership(legion_runtime_t runtime_,
+                                           legion_context_t ctx_,
+                                           legion_field_space_t handle_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  FieldSpace handle = CObjectWrapper::unwrap(handle_);
+
+  runtime->create_shared_ownership(ctx, handle);
 }
 
 void
@@ -2003,6 +2039,18 @@ legion_logical_region_create(legion_runtime_t runtime_,
   LogicalRegion r =
     runtime->create_logical_region(ctx, index, fields, task_local);
   return CObjectWrapper::wrap(r);
+}
+
+void
+legion_logical_region_create_shared_ownership(legion_runtime_t runtime_,
+                                              legion_context_t ctx_,
+                                              legion_logical_region_t handle_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+
+  runtime->create_shared_ownership(ctx, handle);
 }
 
 void

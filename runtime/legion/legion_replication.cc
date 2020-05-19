@@ -746,7 +746,8 @@ namespace Legion {
                                        sharding_function, sharding_space);
         runtime->forest->perform_dependence_analysis(this, idx, regions[idx], 
                                                      projection_info,
-                                                     privilege_paths[idx]);
+                                                     privilege_paths[idx],
+                                                     map_applied_conditions);
       }
     }
 
@@ -1414,7 +1415,8 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path);
+                                                   privilege_path,
+                                                   map_applied_conditions);
     }
 
     //--------------------------------------------------------------------------
@@ -1860,7 +1862,8 @@ namespace Legion {
         runtime->forest->perform_dependence_analysis(this, idx, 
                                                      src_requirements[idx],
                                                      projection_info,
-                                                     src_privilege_paths[idx]);
+                                                     src_privilege_paths[idx],
+                                                     map_applied_conditions);
       }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
@@ -1875,7 +1878,8 @@ namespace Legion {
         runtime->forest->perform_dependence_analysis(this, index, 
                                                      dst_requirements[idx],
                                                      projection_info,
-                                                     dst_privilege_paths[idx]);
+                                                     dst_privilege_paths[idx],
+                                                     map_applied_conditions);
         // Switch the privileges back when we are done
         if (is_reduce_req)
           dst_requirements[idx].privilege = REDUCE;
@@ -2338,72 +2342,9 @@ namespace Legion {
       else
         Runtime::phase_barrier_arrive(mapping_barrier, 1/*count*/);
       complete_mapping(mapping_barrier);
-      // Wait for all the operations on which this deletion depends on to
-      // complete before we are officially considered done execution
-      std::set<ApEvent> execution_preconditions;
-      if (!incoming.empty())
-      {
-        for (std::map<Operation*,GenerationID>::const_iterator it = 
-              incoming.begin(); it != incoming.end(); it++)
-        {
-          // Do this first and then check to see if it is for
-          // the same generation of the operation
-          const ApEvent done = it->first->get_completion_event();
-          __sync_synchronize();
-          if (it->second == it->first->get_generation())
-            execution_preconditions.insert(done);
-        }
-      }
-      // If we're deleting parts of an index space tree then we also need 
-      // to make sure all the dependent partitioning operations are done
-      if (is_total_sharding && is_first_local_shard)
-      {
-        // If we have a total sharding we just need to record our 
-        // preconditions as the other nodes will get the partitions
-        // that are owned by their node
-        if (kind == INDEX_PARTITION_DELETION)
-        {
-          if (IndexPartNode::get_owner_space(index_part, runtime) == 
-              runtime->address_space)
-          {
-            IndexPartNode *node = runtime->forest->get_node(index_part);
-            execution_preconditions.insert(node->partition_ready);
-          }
-        }
-        if (!sub_partitions.empty())
-        {
-          // Still need to wait on all sub partitions
-          // This is overly conservative and we could be more 
-          // precise and only wait on the sub_partitions for
-          // the index spaces or partitions we're deleting
-          for (std::vector<IndexPartition>::const_iterator it = 
-                sub_partitions.begin(); it != sub_partitions.end(); it++)
-          {
-            IndexPartNode *node = runtime->forest->get_node(*it);
-            execution_preconditions.insert(node->partition_ready);
-          }
-        }
-      }
-      else if (repl_ctx->owner_shard->shard_id == 0)
-      {
-        if (kind == INDEX_PARTITION_DELETION)
-        {
-          IndexPartNode *node = runtime->forest->get_node(index_part);
-          execution_preconditions.insert(node->partition_ready);
-        }
-        if (!sub_partitions.empty())
-        {
-          for (std::vector<IndexPartition>::const_iterator it = 
-                sub_partitions.begin(); it != sub_partitions.end(); it++)
-          {
-            IndexPartNode *node = runtime->forest->get_node(*it);
-            execution_preconditions.insert(node->partition_ready);
-          }
-        }
-      }
-      if (!execution_preconditions.empty())
-        Runtime::phase_barrier_arrive(execution_barrier, 1/*count*/,
-            Runtime::protect_merge_events(execution_preconditions));
+      if (execution_precondition.exists())
+        Runtime::phase_barrier_arrive(execution_barrier, 1/*count*/, 
+            Runtime::protect_event(execution_precondition));
       else
         Runtime::phase_barrier_arrive(execution_barrier, 1/*count*/);
       complete_execution(execution_barrier);
@@ -2420,70 +2361,62 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       std::set<RtEvent> applied;
-      // TODO: figure out how to turn collective deletion back on
-      // This is actually very hard given the way that references
-      // have been set up in the region tree and how we call
-      // destroy_node on the region tree. Be very careful turning
-      // this on without changing how destroy_node works for
-      // primitives in the region tree to avoid races.
-#ifdef COLLECTIVE_DELETION
       if (is_total_sharding && is_first_local_shard)
       {
         switch (kind)
         {
           case INDEX_SPACE_DELETION:
             {
+#ifdef DEBUG_LEGION
+              assert(deletion_req_indexes.empty());
+#endif
               runtime->forest->destroy_index_space(index_space,
-                                                   runtime->address_space,
                                                    applied, true/*collective*/);
+              if (!sub_partitions.empty())
+              {
+                for (std::vector<IndexPartition>::const_iterator it = 
+                      sub_partitions.begin(); it != sub_partitions.end(); it++)
+                  runtime->forest->destroy_index_partition(*it, applied,
+                                                           true/*collective*/);
+              }
               break;
             }
           case INDEX_PARTITION_DELETION:
             {
-              runtime->forest->destroy_index_partition(index_part,
-                                                       runtime->address_space,
-                                                       applied,
+#ifdef DEBUG_LEGION
+              assert(deletion_req_indexes.empty());
+#endif
+              runtime->forest->destroy_index_partition(index_part, applied,
                                                        true/*collective*/);
+              if (!sub_partitions.empty())
+              {
+                for (std::vector<IndexPartition>::const_iterator it = 
+                      sub_partitions.begin(); it != sub_partitions.end(); it++)
+                  runtime->forest->destroy_index_partition(*it, applied,
+                                                           true/*collective*/);
+              }
               break;
             }
           case FIELD_SPACE_DELETION:
             {
-              runtime->forest->destroy_field_space(field_space,
-                                                   runtime->address_space,
-                                                   applied, true/*collective*/);
+#ifdef DEBUG_LEGION
+              assert(deletion_req_indexes.empty());
+#endif
+              runtime->forest->destroy_field_space(field_space, applied, 
+                                                   true/*collective*/);
               break;
             }
           case FIELD_DELETION:
-            {
-              if (!local_fields.empty())
-                runtime->forest->free_local_fields(field_space, 
-                  local_fields, local_field_indexes, true/*collective*/);
-              if (!global_fields.empty())
-                runtime->forest->free_fields(field_space, global_fields, 
-                                             applied, true/*collective*/); 
-              parent_ctx->remove_deleted_fields(free_fields, 
-                                                parent_req_indexes);
-              if (!local_fields.empty())
-                parent_ctx->remove_deleted_local_fields(field_space,
-                                                        local_fields);
-              break;
-            }
+            // Everyone is going to do the same thing for field deletions
+            break;
           case LOGICAL_REGION_DELETION:
             {
               // Only do something here if we don't have any parent req indexes
               // If we had no deletion requirements then we know there is
               // nothing to race with and we can just do our deletion
               if (parent_req_indexes.empty())
-                runtime->forest->destroy_logical_region(logical_region, 
-                                                runtime->address_space,
-                                                applied, true/*collective*/);
-              break;
-            }
-          case LOGICAL_PARTITION_DELETION:
-            {
-              runtime->forest->destroy_logical_partition(logical_part,
-                                              runtime->address_space,
-                                              applied, true/*collective*/);
+                runtime->forest->destroy_logical_region(logical_region, applied,
+                                                        true/*collective*/);
               break;
             }
           default:
@@ -2491,70 +2424,79 @@ namespace Legion {
         }
       }
       else if (repl_ctx->owner_shard->shard_id == 0)
-#else
-      if (repl_ctx->owner_shard->shard_id == 0)
-#endif
       {
         // Shard 0 will handle the actual deletions
         switch (kind)
         {
           case INDEX_SPACE_DELETION:
             {
-              runtime->forest->destroy_index_space(index_space,
-                               runtime->address_space, applied);
+#ifdef DEBUG_LEGION
+              assert(deletion_req_indexes.empty());
+#endif
+              runtime->forest->destroy_index_space(index_space, applied);
+              if (!sub_partitions.empty())
+              {
+                for (std::vector<IndexPartition>::const_iterator it = 
+                      sub_partitions.begin(); it != sub_partitions.end(); it++)
+                  runtime->forest->destroy_index_partition(*it, applied);
+              }
               break;
             }
           case INDEX_PARTITION_DELETION:
             {
-              runtime->forest->destroy_index_partition(index_part,
-                                   runtime->address_space, applied);
+#ifdef DEBUG_LEGION
+              assert(deletion_req_indexes.empty());
+#endif
+              runtime->forest->destroy_index_partition(index_part, applied);
+              if (!sub_partitions.empty())
+              {
+                for (std::vector<IndexPartition>::const_iterator it = 
+                      sub_partitions.begin(); it != sub_partitions.end(); it++)
+                  runtime->forest->destroy_index_partition(*it, applied);
+              }
               break;
             }
           case FIELD_SPACE_DELETION:
             {
-              runtime->forest->destroy_field_space(field_space,
-                               runtime->address_space, applied);
+#ifdef DEBUG_LEGION
+              assert(deletion_req_indexes.empty());
+#endif
+              runtime->forest->destroy_field_space(field_space, applied);
               break;
             }
           case FIELD_DELETION:
-            {
-              if (!local_fields.empty())
-                runtime->forest->free_local_fields(field_space, 
-                              local_fields, local_field_indexes);
-              if (!global_fields.empty())
-                runtime->forest->free_fields(field_space,global_fields,applied);
-              parent_ctx->remove_deleted_fields(free_fields, 
-                                                parent_req_indexes);
-              if (!local_fields.empty())
-                parent_ctx->remove_deleted_local_fields(field_space,
-                                                        local_fields);
-              break;
-            }
+            // Everyone is going to do the same thing for field deletions
+            break;
           case LOGICAL_REGION_DELETION:
             {
               // Only do something here if we don't have any parent req indexes
               // If we had no deletion requirements then we know there is
               // nothing to race with and we can just do our deletion
               if (parent_req_indexes.empty())
-                runtime->forest->destroy_logical_region(logical_region, 
-                                      runtime->address_space, applied);
-              break;
-            }
-          case LOGICAL_PARTITION_DELETION:
-            {
-              runtime->forest->destroy_logical_partition(logical_part,
-                                      runtime->address_space, applied);
+                runtime->forest->destroy_logical_region(logical_region,applied);
               break;
             }
           default:
             assert(false);
         }
       }
-      // Always need to remove the references that we put on the regions
       std::vector<LogicalRegion> regions_to_destroy;
-      if (!deletion_req_indexes.empty())
-        parent_ctx->remove_deleted_requirements(deletion_req_indexes, 
-                                                regions_to_destroy);
+      // If this is a field deletion then everyone does the same thing
+      if (kind == FIELD_DELETION)
+      {
+        if (!local_fields.empty())
+          runtime->forest->free_local_fields(field_space, local_fields, 
+                              local_field_indexes, true/*collective*/);
+        if (!global_fields.empty())
+          runtime->forest->free_fields(field_space, global_fields, applied, 
+                                   (repl_ctx->owner_shard->shard_id != 0));
+        parent_ctx->remove_deleted_fields(free_fields, parent_req_indexes);
+        if (!local_fields.empty())
+          parent_ctx->remove_deleted_local_fields(field_space, local_fields);
+        if (!deletion_req_indexes.empty())
+          parent_ctx->remove_deleted_requirements(deletion_req_indexes,
+                                                  regions_to_destroy);
+      }
       else if ((kind == LOGICAL_REGION_DELETION) && !parent_req_indexes.empty())
         parent_ctx->remove_deleted_requirements(parent_req_indexes,
                                                 regions_to_destroy);
@@ -2565,15 +2507,14 @@ namespace Legion {
         {
           for (std::vector<LogicalRegion>::const_iterator it =
                regions_to_destroy.begin(); it != regions_to_destroy.end(); it++)
-            runtime->forest->destroy_logical_region(*it,
-                runtime->address_space, applied, true/*collective*/);
+            runtime->forest->destroy_logical_region(*it, applied, 
+                                                    true/*collective*/);
         }
         else if (repl_ctx->owner_shard->shard_id == 0)
         {
           for (std::vector<LogicalRegion>::const_iterator it =
                regions_to_destroy.begin(); it != regions_to_destroy.end(); it++)
-            runtime->forest->destroy_logical_region(*it,
-                        runtime->address_space, applied);
+            runtime->forest->destroy_logical_region(*it, applied);
         }
       }
 #ifdef LEGION_SPY
@@ -2614,8 +2555,7 @@ namespace Legion {
        std::map<IndexPartition,ReplDeletionOp*> &index_partition_deletions,
        std::map<FieldSpace,ReplDeletionOp*> field_space_deletions,
        std::map<std::pair<FieldSpace,FieldID>,ReplDeletionOp*> &field_deletions,
-       std::map<LogicalRegion,ReplDeletionOp*> &logical_region_deletions,
-       std::map<LogicalPartition,ReplDeletionOp*> &logical_partition_deletions)
+       std::map<LogicalRegion,ReplDeletionOp*> &logical_region_deletions)
     //--------------------------------------------------------------------------
     {
       switch (kind)
@@ -2667,15 +2607,6 @@ namespace Legion {
                     logical_region_deletions.end());
 #endif
             logical_region_deletions[logical_region] = this;
-            break;
-          }
-        case LOGICAL_PARTITION_DELETION:
-          {
-#ifdef DEBUG_LEGION
-            assert(logical_partition_deletions.find(logical_part) ==
-                    logical_partition_deletions.end());
-#endif
-            logical_partition_deletions[logical_part] = this;
             break;
           }
         default:
@@ -3127,7 +3058,8 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path);
+                                                   privilege_path,
+                                                   map_applied_conditions);
       // Record this dependent partition op with the context so that it 
       // can track implicit dependences on it for later operations
       parent_ctx->update_current_implicit(this);
@@ -7410,7 +7342,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent ShardManager::broadcast_resource_update(ShardTask *source, 
-                                                    Serializer &rez)
+                             Serializer &rez, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       std::vector<AddressSpaceID> shard_spaces;
@@ -7423,7 +7355,6 @@ namespace Legion {
             unique_shard_spaces.begin(), unique_shard_spaces.end());
       }
       // First pack it out and send it out to any remote nodes 
-      std::set<RtEvent> remote_handled;
       if (shard_spaces.size() > 1)
       {
         // Find the start index
@@ -7461,7 +7392,7 @@ namespace Legion {
           rez2.serialize(rez.get_buffer(), rez.get_used_bytes());
           rez2.serialize(next_done);
           runtime->send_control_replicate_resource_update(targets[idx], rez2);
-          remote_handled.insert(next_done);
+          applied_events.insert(next_done);
         }
       }
       // Then send it to any other local shards
@@ -7472,12 +7403,8 @@ namespace Legion {
         if ((*it) == source)
           continue;
         Deserializer derez(rez.get_buffer(), rez.get_used_bytes());
-        (*it)->handle_resource_update(derez, remote_handled);
+        (*it)->handle_resource_update(derez, applied_events);
       }
-      if (!remote_handled.empty())
-        return Runtime::merge_events(remote_handled);
-      else
-        return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -11538,7 +11465,6 @@ namespace Legion {
       pack_counts(rez, field_space_counts);
       pack_counts(rez, field_counts);
       pack_counts(rez, logical_region_counts);
-      pack_counts(rez, logical_partition_counts);
       pack_counts(rez, detach_counts); 
     }
 
@@ -11556,7 +11482,6 @@ namespace Legion {
         field_space_counts.clear();
         field_counts.clear();
         logical_region_counts.clear();
-        logical_partition_counts.clear();
         detach_counts.clear();
       }
       unpack_counts(stage, derez, index_space_counts);
@@ -11564,7 +11489,6 @@ namespace Legion {
       unpack_counts(stage, derez, field_space_counts);
       unpack_counts(stage, derez, field_counts);
       unpack_counts(stage, derez, logical_region_counts);
-      unpack_counts(stage, derez, logical_partition_counts);
       unpack_counts(stage, derez, detach_counts); 
     }
 
@@ -11592,8 +11516,7 @@ namespace Legion {
 #endif
                 op->record_unordered_kind(index_space_deletions,
                     index_partition_deletions, field_space_deletions,
-                    field_deletions, logical_region_deletions, 
-                    logical_partition_deletions);
+                    field_deletions, logical_region_deletions); 
                 break; 
               }
             case Operation::DETACH_OP_KIND:
@@ -11617,7 +11540,6 @@ namespace Legion {
         initialize_counts(field_space_deletions, field_space_counts);
         initialize_counts(field_deletions, field_counts);
         initialize_counts(logical_region_deletions, logical_region_counts);
-        initialize_counts(logical_partition_deletions,logical_partition_counts);
         initialize_counts(detachments, detach_counts);
       }
       // Perform the exchange
@@ -11638,16 +11560,13 @@ namespace Legion {
                        field_deletions, ready_ops);
         find_ready_ops(total_shards, logical_region_counts,
                        logical_region_deletions, ready_ops);
-        find_ready_ops(total_shards, logical_partition_counts,
-                       logical_partition_deletions, ready_ops);
         find_ready_ops(total_shards, detach_counts,
                        detachments, ready_ops);
       }
       // Return true if anybody anywhere had a non-zero count
       return (!index_space_counts.empty() || !index_partition_counts.empty() ||
           !field_space_counts.empty() || !field_counts.empty() || 
-          !logical_region_counts.empty() || !logical_partition_counts.empty() ||
-          !detach_counts.empty());
+          !logical_region_counts.empty() || !detach_counts.empty());
     }
 
     /////////////////////////////////////////////////////////////

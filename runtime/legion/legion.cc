@@ -3355,11 +3355,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::destroy_index_space(Context ctx, IndexSpace handle,
-                                      const bool unordered)
+    void Runtime::create_shared_ownership(Context ctx, IndexSpace handle)
     //--------------------------------------------------------------------------
     {
-      ctx->destroy_index_space(handle, unordered);
+      ctx->create_shared_ownership(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::destroy_index_space(Context ctx, IndexSpace handle,
+                                      const bool unordered, const bool recurse)
+    //--------------------------------------------------------------------------
+    {
+      ctx->destroy_index_space(handle, unordered, recurse);
     } 
 
     //--------------------------------------------------------------------------
@@ -3648,11 +3655,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::destroy_index_partition(Context ctx, IndexPartition handle,
-                                          const bool unordered)
+    void Runtime::create_shared_ownership(Context ctx, IndexPartition handle)
     //--------------------------------------------------------------------------
     {
-      ctx->destroy_index_partition(handle, unordered);
+      ctx->create_shared_ownership(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::destroy_index_partition(Context ctx, IndexPartition handle,
+                                       const bool unordered, const bool recurse)
+    //--------------------------------------------------------------------------
+    {
+      ctx->destroy_index_partition(handle, unordered, recurse);
     }
 
     //--------------------------------------------------------------------------
@@ -4718,11 +4732,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::create_shared_ownership(Context ctx, FieldSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      ctx->create_shared_ownership(handle);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::destroy_field_space(Context ctx, FieldSpace handle,
                                       const bool unordered)
     //--------------------------------------------------------------------------
     {
-      runtime->destroy_field_space(ctx, handle, unordered);
+      ctx->destroy_field_space(handle, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -4785,11 +4806,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::create_shared_ownership(Context ctx, LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+      ctx->create_shared_ownership(handle);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::destroy_logical_region(Context ctx, LogicalRegion handle,
                                          const bool unordered)
     //--------------------------------------------------------------------------
     {
-      runtime->destroy_logical_region(ctx, handle, unordered);
+      ctx->destroy_logical_region(handle, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -4797,7 +4825,7 @@ namespace Legion {
                                             const bool unordered)
     //--------------------------------------------------------------------------
     {
-      runtime->destroy_logical_partition(ctx, handle, unordered);
+      // This is a no-op now
     }
 
     //--------------------------------------------------------------------------
