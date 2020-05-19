@@ -2225,6 +2225,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_deletion();
+      ready_barrier = RtBarrier::NO_RT_BARRIER;
       mapping_barrier = RtBarrier::NO_RT_BARRIER;
       execution_barrier = RtBarrier::NO_RT_BARRIER;
       is_total_sharding = false;
@@ -2243,6 +2244,8 @@ namespace Legion {
     void ReplDeletionOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
+      if ((kind == FIELD_DELETION) || (kind == LOGICAL_REGION_DELETION))
+        Runtime::phase_barrier_arrive(ready_barrier, 1/*count*/);
       if (kind == FIELD_DELETION)
       {
 #ifdef DEBUG_LEGION
@@ -2265,12 +2268,13 @@ namespace Legion {
                                               preconditions);
           if (!preconditions.empty())
           {
+            preconditions.insert(ready_barrier);
             enqueue_ready_operation(Runtime::merge_events(preconditions));
             return;
           }
         }
       }
-      enqueue_ready_operation();
+      enqueue_ready_operation(ready_barrier);
     }
 
     //--------------------------------------------------------------------------
@@ -2278,7 +2282,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(mapping_barrier.exists());
       assert(execution_barrier.exists());
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
       assert(repl_ctx != NULL);
@@ -2289,7 +2292,6 @@ namespace Legion {
       // know that we have a deletion operation on every shard or not
       // If not, we just let the deletion for shard 0 do all the work, 
       // otherwise we know we can evenly distribute the work
-      std::set<RtEvent> map_applied_events;
       if (kind == LOGICAL_REGION_DELETION)
       {
         // Just need to clean out the version managers which will free
@@ -2318,9 +2320,13 @@ namespace Legion {
               runtime->forest->invalidate_versions(tree_context, req.region);
           }
         }
+        complete_mapping();
       }
       else if (kind == FIELD_DELETION)
       {
+#ifdef DEBUG_LEGION
+        assert(mapping_barrier.exists());
+#endif
         if ((is_total_sharding && is_first_local_shard) || 
             (repl_ctx->owner_shard->shard_id == 0))
         {
@@ -2330,25 +2336,24 @@ namespace Legion {
           const TraceInfo trace_info(this);
           for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
             runtime->forest->invalidate_fields(this, idx, version_infos[idx],
-                PhysicalTraceInfo(trace_info, idx), map_applied_events, 
+                PhysicalTraceInfo(trace_info, idx), map_applied_conditions, 
                 is_total_sharding/*collective*/);
         }
-      }
-      // Complete our mapping as necessary
-      if (!map_applied_events.empty())
-        Runtime::phase_barrier_arrive(mapping_barrier, 1/*count*/,
-            Runtime::merge_events(map_applied_events));
-      else
-        Runtime::phase_barrier_arrive(mapping_barrier, 1/*count*/);
-      complete_mapping(mapping_barrier);
-      if (execution_precondition != execution_barrier)
-      {
-        if (execution_precondition.exists())
-          Runtime::phase_barrier_arrive(execution_barrier, 1/*count*/, 
-              Runtime::protect_event(execution_precondition));
+        if (!map_applied_conditions.empty())
+          Runtime::phase_barrier_arrive(mapping_barrier, 1/*count*/,
+              Runtime::merge_events(map_applied_conditions));
         else
-          Runtime::phase_barrier_arrive(execution_barrier, 1/*count*/);
+          Runtime::phase_barrier_arrive(mapping_barrier, 1/*count*/);
+        complete_mapping(mapping_barrier);
       }
+      else
+        complete_mapping();
+      // complete execution once all the shards are done
+      if (execution_precondition.exists())
+        Runtime::phase_barrier_arrive(execution_barrier, 1/*count*/, 
+            Runtime::protect_event(execution_precondition));
+      else
+        Runtime::phase_barrier_arrive(execution_barrier, 1/*count*/);
       complete_execution(execution_barrier);
     }
 
@@ -2532,19 +2537,44 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplDeletionOp::initialize_replication(ReplicateContext *ctx,
+                                                RtBarrier &delready_barrier,
                                                 RtBarrier &delmap_barrier, 
                                                 RtBarrier &delexec_barrier,
-                                                bool is_total, bool is_first)
+                                                bool is_total, bool is_first,
+                                                bool unordered/*=false*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(!ready_barrier.exists());
       assert(!mapping_barrier.exists());
       assert(!execution_barrier.exists());
 #endif
-      mapping_barrier = delmap_barrier;
-      ctx->advance_replicate_barrier(delmap_barrier, ctx->total_shards);
+      // Only field and region deletions need a ready barrier since they
+      // will be touching the physical states of the region tree
+      if ((kind == LOGICAL_REGION_DELETION) || (kind == FIELD_DELETION))
+      {
+        ready_barrier = delready_barrier;
+        if (unordered)
+          Runtime::advance_barrier(delready_barrier);
+        else
+          ctx->advance_replicate_barrier(delready_barrier, ctx->total_shards);
+        // Only field deletions need a mapping barrier for downward facing
+        // dependences in other shards
+        if (kind == FIELD_DELETION)
+        {
+          mapping_barrier = delmap_barrier;
+          if (unordered)
+            Runtime::advance_barrier(delmap_barrier);
+          else
+            ctx->advance_replicate_barrier(delmap_barrier, ctx->total_shards);
+        }
+      }
+      // All deletion kinds need an execution barrier
       execution_barrier = delexec_barrier;
-      ctx->advance_replicate_barrier(delexec_barrier, ctx->total_shards);
+      if (unordered)
+        Runtime::advance_barrier(delexec_barrier);
+      else
+        ctx->advance_replicate_barrier(delexec_barrier, ctx->total_shards);
       is_total_sharding = is_total;
       is_first_local_shard = is_first;
     }
@@ -6559,6 +6589,8 @@ namespace Legion {
         creation_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards));
         // Same thing as above for deletion barriers
+        deletion_ready_barrier = 
+          RtBarrier(Realm::Barrier::create_barrier(total_shards));
         deletion_mapping_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards));
         deletion_execution_barrier = 
@@ -6638,6 +6670,7 @@ namespace Legion {
           startup_barrier.destroy_barrier();
           pending_partition_barrier.destroy_barrier();
           creation_barrier.destroy_barrier();
+          deletion_ready_barrier.destroy_barrier();
           deletion_mapping_barrier.destroy_barrier();
           deletion_execution_barrier.destroy_barrier();
           inline_mapping_barrier.destroy_barrier();
@@ -6818,6 +6851,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(pending_partition_barrier.exists());
           assert(creation_barrier.exists());
+          assert(deletion_ready_barrier.exists());
           assert(deletion_mapping_barrier.exists());
           assert(deletion_execution_barrier.exists());
           assert(inline_mapping_barrier.exists());
@@ -6835,6 +6869,7 @@ namespace Legion {
 #endif
           rez.serialize(pending_partition_barrier);
           rez.serialize(creation_barrier);
+          rez.serialize(deletion_ready_barrier);
           rez.serialize(deletion_mapping_barrier);
           rez.serialize(deletion_execution_barrier);
           rez.serialize(inline_mapping_barrier);
@@ -6888,6 +6923,7 @@ namespace Legion {
       {
         derez.deserialize(pending_partition_barrier);
         derez.deserialize(creation_barrier);
+        derez.deserialize(deletion_ready_barrier);
         derez.deserialize(deletion_mapping_barrier);
         derez.deserialize(deletion_execution_barrier);
         derez.deserialize(inline_mapping_barrier);

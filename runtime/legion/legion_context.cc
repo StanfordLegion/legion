@@ -9605,6 +9605,7 @@ namespace Legion {
       // Get our allocation barriers
       pending_partition_barrier = manager->get_pending_partition_barrier();
       creation_barrier = manager->get_creation_barrier();
+      deletion_ready_barrier = manager->get_deletion_ready_barrier();
       deletion_mapping_barrier = manager->get_deletion_mapping_barrier();
       deletion_execution_barrier = manager->get_deletion_execution_barrier();
       inline_mapping_barrier = manager->get_inline_mapping_barrier();
@@ -9758,6 +9759,8 @@ namespace Legion {
         delete collective.first;
         pending_region_trees.pop_front();
       }
+      if (returned_resource_ready_barrier.exists())
+        returned_resource_ready_barrier.destroy_barrier();
       if (returned_resource_mapped_barrier.exists())
         returned_resource_mapped_barrier.destroy_barrier();
       if (returned_resource_execution_barrier.exists())
@@ -10937,8 +10940,9 @@ namespace Legion {
       }
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
       op->initialize_index_space_deletion(this,handle,sub_partitions,unordered);
-      op->initialize_replication(this, deletion_mapping_barrier, 
-          deletion_execution_barrier, shard_manager->is_total_sharding(),
+      op->initialize_replication(this, deletion_ready_barrier,
+          deletion_mapping_barrier, deletion_execution_barrier, 
+          shard_manager->is_total_sharding(),
           shard_manager->is_first_local_shard(owner_shard));
       runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
     }
@@ -11028,8 +11032,9 @@ namespace Legion {
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
       op->initialize_index_part_deletion(this, handle, 
                                          sub_partitions, unordered);
-      op->initialize_replication(this, deletion_mapping_barrier, 
-          deletion_execution_barrier, shard_manager->is_total_sharding(),
+      op->initialize_replication(this, deletion_ready_barrier,
+          deletion_mapping_barrier, deletion_execution_barrier, 
+          shard_manager->is_total_sharding(),
           shard_manager->is_first_local_shard(owner_shard));
       runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
     }
@@ -12831,8 +12836,9 @@ namespace Legion {
       }
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
       op->initialize_field_space_deletion(this, handle, unordered);
-      op->initialize_replication(this, deletion_mapping_barrier, 
-          deletion_execution_barrier, shard_manager->is_total_sharding(),
+      op->initialize_replication(this, deletion_ready_barrier,
+          deletion_mapping_barrier, deletion_execution_barrier, 
+          shard_manager->is_total_sharding(),
           shard_manager->is_first_local_shard(owner_shard));
       runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
     }
@@ -13064,8 +13070,9 @@ namespace Legion {
       }
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
       op->initialize_field_deletion(this, space, fid, unordered);
-      op->initialize_replication(this, deletion_mapping_barrier, 
-          deletion_execution_barrier, shard_manager->is_total_sharding(),
+      op->initialize_replication(this, deletion_ready_barrier,
+          deletion_mapping_barrier, deletion_execution_barrier, 
+          shard_manager->is_total_sharding(),
           shard_manager->is_first_local_shard(owner_shard));
       runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
     }
@@ -13285,8 +13292,9 @@ namespace Legion {
         return;
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
       op->initialize_field_deletions(this, space, free_now, unordered);
-      op->initialize_replication(this, deletion_mapping_barrier, 
-          deletion_execution_barrier, shard_manager->is_total_sharding(),
+      op->initialize_replication(this, deletion_ready_barrier,
+          deletion_mapping_barrier, deletion_execution_barrier, 
+          shard_manager->is_total_sharding(),
           shard_manager->is_first_local_shard(owner_shard));
       runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
     }
@@ -13502,8 +13510,9 @@ namespace Legion {
       }
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
       op->initialize_logical_region_deletion(this, handle, unordered);
-      op->initialize_replication(this, deletion_mapping_barrier, 
-          deletion_execution_barrier, shard_manager->is_total_sharding(),
+      op->initialize_replication(this, deletion_ready_barrier,
+          deletion_mapping_barrier, deletion_execution_barrier, 
+          shard_manager->is_total_sharding(),
           shard_manager->is_first_local_shard(owner_shard));
       runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
     }
@@ -14914,7 +14923,8 @@ namespace Legion {
     {
       size_t return_index;
       derez.deserialize(return_index);
-      RtBarrier mapped_barrier, execution_barrier;
+      RtBarrier ready_barrier, mapped_barrier, execution_barrier;
+      derez.deserialize(ready_barrier);
       derez.deserialize(mapped_barrier);
       derez.deserialize(execution_barrier);
       size_t num_created_regions;
@@ -15015,7 +15025,7 @@ namespace Legion {
       receive_replicate_resources(return_index, created_regs, deleted_regs,
           created_fids, deleted_fids, created_fs, latent_fs, deleted_fs,
           created_is, deleted_is, created_partitions, deleted_partitions,
-          applied, mapped_barrier, execution_barrier);
+          applied, ready_barrier, mapped_barrier, execution_barrier);
     }
 
     //--------------------------------------------------------------------------
@@ -15134,22 +15144,24 @@ namespace Legion {
     {
       // We need to broadcast these updates out to other shards
       Serializer rez;
-      // If we have any deletions make two barriers for use with
-      // the deletion operations we will need to perform
-      bool advance_barriers = false;
+      // If we have any deletions make barriers for use with
+      // the deletion operations we may need to perform
       if (!deleted_regs.empty() || !deleted_fids.empty() || 
           !deleted_fs.empty() || !deleted_is.empty() || 
           !deleted_partitions.empty())
       {
+        if (!returned_resource_ready_barrier.exists())
+          returned_resource_ready_barrier = RtBarrier(
+              Realm::Barrier::create_barrier(shard_manager->total_shards));
         if (!returned_resource_mapped_barrier.exists())
           returned_resource_mapped_barrier = RtBarrier(
               Realm::Barrier::create_barrier(shard_manager->total_shards));
         if (!returned_resource_execution_barrier.exists())
           returned_resource_execution_barrier = RtBarrier(
               Realm::Barrier::create_barrier(shard_manager->total_shards));
-        advance_barriers = true;
       }
       rez.serialize(return_index);
+      rez.serialize(returned_resource_ready_barrier);
       rez.serialize(returned_resource_mapped_barrier);
       rez.serialize(returned_resource_execution_barrier);
       rez.serialize<size_t>(created_regs.size());
@@ -15259,13 +15271,8 @@ namespace Legion {
       receive_replicate_resources(return_index, created_regs, deleted_regs,
           created_fids, deleted_fids, created_fs, latent_fs, deleted_fs,
           created_is, deleted_is, created_partitions, deleted_partitions,
-          preconditions, returned_resource_mapped_barrier, 
-          returned_resource_execution_barrier);
-      if (advance_barriers)
-      {
-        Runtime::advance_barrier(returned_resource_mapped_barrier);
-        Runtime::advance_barrier(returned_resource_execution_barrier);
-      }
+          preconditions, returned_resource_ready_barrier,
+          returned_resource_mapped_barrier,returned_resource_execution_barrier);
     }
 
     //--------------------------------------------------------------------------
@@ -15281,11 +15288,10 @@ namespace Legion {
               std::vector<std::pair<IndexSpace,bool> > &deleted_is,
               std::map<IndexPartition,unsigned> &created_partitions,
               std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
-              std::set<RtEvent> &preconditions, 
-              RtBarrier mapped_barrier, RtBarrier execution_barrier)
+              std::set<RtEvent> &preconditions, RtBarrier &ready_barrier, 
+              RtBarrier &mapped_barrier, RtBarrier &execution_barrier)
     //--------------------------------------------------------------------------
     {
-      bool first_deletion = true;
       bool need_deletion_dependences = true;
       ApEvent precondition;
       std::map<Operation*,GenerationID> dependences;
@@ -15297,9 +15303,8 @@ namespace Legion {
           compute_return_deletion_dependences(return_index, dependences);
         need_deletion_dependences = false;
         register_region_deletions(precondition, dependences, 
-                                  deleted_regs, preconditions,
-                                  mapped_barrier, execution_barrier, 
-                                  first_deletion);
+                                  deleted_regs, preconditions, ready_barrier,
+                                  mapped_barrier, execution_barrier); 
       }
       if (!created_fids.empty())
         register_field_creations(created_fids);
@@ -15312,9 +15317,8 @@ namespace Legion {
           need_deletion_dependences = false;
         }
         register_field_deletions(precondition, dependences, 
-                                 deleted_fids, preconditions,
-                                 mapped_barrier, execution_barrier,
-                                 first_deletion);
+                                 deleted_fids, preconditions, ready_barrier,
+                                 mapped_barrier, execution_barrier);
       }
       if (!created_fs.empty())
         register_field_space_creations(created_fs);
@@ -15329,9 +15333,8 @@ namespace Legion {
           need_deletion_dependences = false;
         }
         register_field_space_deletions(precondition, dependences,
-                                       deleted_fs, preconditions,
-                                       mapped_barrier, execution_barrier,
-                                       first_deletion);
+                                       deleted_fs, preconditions, ready_barrier,
+                                       mapped_barrier, execution_barrier);
       }
       if (!created_is.empty())
         register_index_space_creations(created_is);
@@ -15344,9 +15347,8 @@ namespace Legion {
           need_deletion_dependences = false;
         }
         register_index_space_deletions(precondition, dependences,
-                                       deleted_is, preconditions,
-                                       mapped_barrier, execution_barrier,
-                                       first_deletion);
+                                       deleted_is, preconditions, ready_barrier,
+                                       mapped_barrier, execution_barrier);
       }
       if (!created_partitions.empty())
         register_index_partition_creations(created_partitions);
@@ -15360,14 +15362,8 @@ namespace Legion {
         }
         register_index_partition_deletions(precondition, dependences,
                                            deleted_partitions, preconditions,
-                                           mapped_barrier, execution_barrier,
-                                           first_deletion);
-      }
-      if (first_deletion && mapped_barrier.exists())
-      {
-        // trigger the barriers if nobody used them
-        Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/);
-        Runtime::phase_barrier_arrive(execution_barrier, 1/*count*/);
+                                           ready_barrier, mapped_barrier, 
+                                           execution_barrier);
       }
     }
 
@@ -15376,9 +15372,9 @@ namespace Legion {
                            const std::map<Operation*,GenerationID> &dependences,
                                             std::vector<LogicalRegion> &regions,
                                             std::set<RtEvent> &preconditions,
-                                            RtBarrier mapped_barrier,
-                                            RtBarrier execution_barrier,
-                                            bool &first_deletion)
+                                            RtBarrier &ready_barrier,
+                                            RtBarrier &mapped_barrier,
+                                            RtBarrier &execution_barrier)
     //--------------------------------------------------------------------------
     {
       std::vector<LogicalRegion> delete_now;
@@ -15451,38 +15447,21 @@ namespace Legion {
       }
       if (!delete_now.empty())
       {
-        if (first_deletion)
-        {
-          std::set<RtEvent> bar_preconditions;
-          for (std::map<Operation*,GenerationID>::const_iterator dit = 
-                dependences.begin(); dit != dependences.end(); dit++)
-          {
-            const RtEvent mapped = dit->first->get_mapped_event();
-            __sync_synchronize();
-            if (dit->first->get_generation() == dit->second)
-              bar_preconditions.insert(mapped);
-          }
-          if (!bar_preconditions.empty())
-            Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/,
-                Runtime::merge_events(bar_preconditions));
-          else
-            Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/);
-          Runtime::phase_barrier_arrive(execution_barrier, 1/*count*/, 
-                                        Runtime::protect_event(precondition));
-          first_deletion = false;
-        }
         for (std::vector<LogicalRegion>::const_iterator it = 
               delete_now.begin(); it != delete_now.end(); it++)
         {
           ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
           op->initialize_logical_region_deletion(this, *it, true/*unordered*/);
-          op->initialize_replication(this, mapped_barrier, execution_barrier,
-              shard_manager->is_total_sharding(),
+          op->initialize_replication(this, ready_barrier, mapped_barrier, 
+              execution_barrier, shard_manager->is_total_sharding(),
               shard_manager->is_first_local_shard(owner_shard));
+          op->set_execution_precondition(precondition);
           preconditions.insert(
               Runtime::protect_event(op->get_completion_event()));
           op->begin_dependence_analysis();
-          op->add_mapping_dependence(mapped_barrier);
+          for (std::map<Operation*,GenerationID>::const_iterator dit = 
+                dependences.begin(); dit != dependences.end(); dit++)
+            op->register_dependence(dit->first, dit->second);
           op->end_dependence_analysis();
         }
       }
@@ -15493,9 +15472,8 @@ namespace Legion {
                            const std::map<Operation*,GenerationID> &dependences,
                            std::vector<std::pair<FieldSpace,FieldID> > &fields,
                            std::set<RtEvent> &preconditions,
-                           RtBarrier mapped_barrier,
-                           RtBarrier execution_barrier,
-                           bool &first_deletion)
+                           RtBarrier &ready_barrier, RtBarrier &mapped_barrier,
+                           RtBarrier &execution_barrier)
     //--------------------------------------------------------------------------
     {
       std::map<FieldSpace,std::set<FieldID> > delete_now;
@@ -15528,39 +15506,22 @@ namespace Legion {
       }
       if (!delete_now.empty())
       {
-        if (first_deletion)
-        {
-          std::set<RtEvent> bar_preconditions;
-          for (std::map<Operation*,GenerationID>::const_iterator dit = 
-                dependences.begin(); dit != dependences.end(); dit++)
-          {
-            const RtEvent mapped = dit->first->get_mapped_event();
-            __sync_synchronize();
-            if (dit->first->get_generation() == dit->second)
-              bar_preconditions.insert(mapped);
-          }
-          if (!bar_preconditions.empty())
-            Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/,
-                Runtime::merge_events(bar_preconditions));
-          else
-            Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/);
-          Runtime::phase_barrier_arrive(execution_barrier, 1/*count*/, 
-                                        Runtime::protect_event(precondition));
-          first_deletion = false;
-        }
         for (std::map<FieldSpace,std::set<FieldID> >::const_iterator it = 
               delete_now.begin(); it != delete_now.end(); it++)
         {
           ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
           op->initialize_field_deletions(this, it->first, it->second, 
                                          true/*unordered*/);
-          op->initialize_replication(this, mapped_barrier, execution_barrier,
-              shard_manager->is_total_sharding(),
+          op->initialize_replication(this, ready_barrier, mapped_barrier, 
+              execution_barrier, shard_manager->is_total_sharding(),
               shard_manager->is_first_local_shard(owner_shard));
+          op->set_execution_precondition(precondition);
           preconditions.insert(
               Runtime::protect_event(op->get_completion_event()));
           op->begin_dependence_analysis();
-          op->add_mapping_dependence(mapped_barrier);
+          for (std::map<Operation*,GenerationID>::const_iterator dit = 
+                dependences.begin(); dit != dependences.end(); dit++)
+            op->register_dependence(dit->first, dit->second);
           op->end_dependence_analysis();
         }
       }
@@ -15571,9 +15532,9 @@ namespace Legion {
                            const std::map<Operation*,GenerationID> &dependences,
                                                std::vector<FieldSpace> &spaces,
                                                std::set<RtEvent> &preconditions,
-                                               RtBarrier mapped_barrier,
-                                               RtBarrier execution_barrier,
-                                               bool &first_deletion)
+                                               RtBarrier &ready_barrier,
+                                               RtBarrier &mapped_barrier,
+                                               RtBarrier &execution_barrier)
     //--------------------------------------------------------------------------
     {
       std::vector<FieldSpace> delete_now;
@@ -15640,13 +15601,16 @@ namespace Legion {
         {
           ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
           op->initialize_field_space_deletion(this, *it, true/*unordered*/);
-          op->initialize_replication(this, mapped_barrier, execution_barrier,
-              shard_manager->is_total_sharding(),
+          op->initialize_replication(this, ready_barrier, mapped_barrier, 
+              execution_barrier, shard_manager->is_total_sharding(),
               shard_manager->is_first_local_shard(owner_shard));
+          op->set_execution_precondition(precondition);
           preconditions.insert(
               Runtime::protect_event(op->get_completion_event()));
           op->begin_dependence_analysis();
-          op->add_mapping_dependence(mapped_barrier);
+          for (std::map<Operation*,GenerationID>::const_iterator dit = 
+                dependences.begin(); dit != dependences.end(); dit++)
+            op->register_dependence(dit->first, dit->second);
           op->end_dependence_analysis();
         }
       }
@@ -15657,9 +15621,9 @@ namespace Legion {
                            const std::map<Operation*,GenerationID> &dependences,
                                std::vector<std::pair<IndexSpace,bool> > &spaces,
                                                std::set<RtEvent> &preconditions,
-                                               RtBarrier mapped_barrier,
-                                               RtBarrier execution_barrier,
-                                               bool &first_deletion)
+                                               RtBarrier &ready_barrier,
+                                               RtBarrier &mapped_barrier,
+                                               RtBarrier &execution_barrier)
     //--------------------------------------------------------------------------
     {
       std::vector<IndexSpace> delete_now;
@@ -15726,13 +15690,16 @@ namespace Legion {
           ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
           op->initialize_index_space_deletion(this, delete_now[idx], 
                             sub_partitions[idx], true/*unordered*/);
-          op->initialize_replication(this, mapped_barrier, execution_barrier,
-              shard_manager->is_total_sharding(),
+          op->initialize_replication(this, ready_barrier, mapped_barrier, 
+              execution_barrier, shard_manager->is_total_sharding(),
               shard_manager->is_first_local_shard(owner_shard));
+          op->set_execution_precondition(precondition);
           preconditions.insert(
               Runtime::protect_event(op->get_completion_event()));
           op->begin_dependence_analysis();
-          op->add_mapping_dependence(mapped_barrier);
+          for (std::map<Operation*,GenerationID>::const_iterator dit = 
+                dependences.begin(); dit != dependences.end(); dit++)
+            op->register_dependence(dit->first, dit->second);
           op->end_dependence_analysis();
         }
       }
@@ -15743,9 +15710,9 @@ namespace Legion {
                            const std::map<Operation*,GenerationID> &dependences,
                             std::vector<std::pair<IndexPartition,bool> > &parts, 
                                                std::set<RtEvent> &preconditions,
-                                               RtBarrier mapped_barrier,
-                                               RtBarrier execution_barrier,
-                                               bool &first_deletion)
+                                               RtBarrier &ready_barrier,
+                                               RtBarrier &mapped_barrier,
+                                               RtBarrier &execution_barrier)
     //--------------------------------------------------------------------------
     {
       std::vector<IndexPartition> delete_now;
@@ -15813,13 +15780,16 @@ namespace Legion {
           ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
           op->initialize_index_part_deletion(this, delete_now[idx], 
                             sub_partitions[idx], true/*unordered*/);
-          op->initialize_replication(this, mapped_barrier, execution_barrier,
-              shard_manager->is_total_sharding(),
+          op->initialize_replication(this, ready_barrier, mapped_barrier, 
+              execution_barrier, shard_manager->is_total_sharding(),
               shard_manager->is_first_local_shard(owner_shard));
+          op->set_execution_precondition(precond);
           preconditions.insert(
               Runtime::protect_event(op->get_completion_event()));
           op->begin_dependence_analysis();
-          op->add_mapping_dependence(mapped_barrier);
+          for (std::map<Operation*,GenerationID>::const_iterator dit = 
+                dependences.begin(); dit != dependences.end(); dit++)
+            op->register_dependence(dit->first, dit->second);
           op->end_dependence_analysis();
         }
       }

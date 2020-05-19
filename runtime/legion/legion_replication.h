@@ -1321,8 +1321,9 @@ namespace Legion {
       virtual void trigger_complete(void);
     public:
       void initialize_replication(ReplicateContext *ctx, 
-          RtBarrier &deletion_mapping_barrier, 
-          RtBarrier &deletion_execution_barrier, bool is_total, bool is_first);
+          RtBarrier &deletion_ready_barrier,RtBarrier &deletion_mapping_barrier,
+          RtBarrier &deletion_execution_barrier, bool is_total, bool is_first,
+          bool unordered = false);
       // Help for handling unordered deletions 
       void record_unordered_kind(
        std::map<IndexSpace,ReplDeletionOp*> &index_space_deletions,
@@ -1331,6 +1332,7 @@ namespace Legion {
        std::map<std::pair<FieldSpace,FieldID>,ReplDeletionOp*> &field_deletions,
        std::map<LogicalRegion,ReplDeletionOp*> &logical_region_deletions);
     protected:
+      RtBarrier ready_barrier;
       RtBarrier mapping_barrier;
       RtBarrier execution_barrier;
       bool is_total_sharding;
@@ -1997,6 +1999,8 @@ namespace Legion {
         { return pending_partition_barrier; }
       inline RtBarrier get_creation_barrier(void) const
         { return creation_barrier; }
+      inline RtBarrier get_deletion_ready_barrier(void) const
+        { return deletion_ready_barrier; }
       inline RtBarrier get_deletion_mapping_barrier(void) const
         { return deletion_mapping_barrier; }
       inline RtBarrier get_deletion_execution_barrier(void) const
@@ -2159,6 +2163,7 @@ namespace Legion {
       RtBarrier startup_barrier;
       ApBarrier pending_partition_barrier;
       RtBarrier creation_barrier;
+      RtBarrier deletion_ready_barrier;
       RtBarrier deletion_mapping_barrier;
       RtBarrier deletion_execution_barrier;
       RtBarrier inline_mapping_barrier;
