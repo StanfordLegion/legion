@@ -2716,7 +2716,6 @@ namespace Legion {
       if (is_projection_state())
       {
 #ifdef DEBUG_LEGION
-        assert(!projections.empty());
         assert(open_children.empty());
 #endif
         open_children.filter_valid_mask(mask);
