@@ -37,6 +37,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#define IS_DEFAULT_STREAM(stream)   \
+  (((stream) == 0) || ((stream) == cudaStreamLegacy) || ((stream) == cudaStreamPerThread))
 
 namespace Realm {
   namespace Cuda {
@@ -2127,7 +2129,7 @@ namespace Realm {
 
     void GPUProcessor::stream_wait_on_event(cudaStream_t stream, cudaEvent_t event)
     {
-      if (stream == 0)
+      if(IS_DEFAULT_STREAM(stream))
         CHECK_CU( cuStreamWaitEvent(
               ThreadLocal::current_gpu_stream->get_stream(), event, 0) );
       else
@@ -2244,7 +2246,7 @@ namespace Realm {
     void GPUProcessor::event_record(cudaEvent_t event, cudaStream_t stream)
     {
       CUevent e = event;
-      if(stream == 0)
+      if(IS_DEFAULT_STREAM(stream))
         stream = ThreadLocal::current_gpu_stream->get_stream();
       CHECK_CU( cuEventRecord(e, stream) );
     }
@@ -2308,7 +2310,7 @@ namespace Realm {
         CU_LAUNCH_PARAM_END
       };
 
-      if (config.stream == 0)
+      if(IS_DEFAULT_STREAM(config.stream))
         config.stream = ThreadLocal::current_gpu_stream->get_stream();
       log_stream.debug() << "kernel " << func << " added to stream " << config.stream;
 
@@ -2338,7 +2340,7 @@ namespace Realm {
       // Find our function
       CUfunction f = gpu->lookup_function(func);
 
-      if (stream == 0)
+      if(IS_DEFAULT_STREAM(stream))
         stream = ThreadLocal::current_gpu_stream->get_stream();
       log_stream.debug() << "kernel " << func << " added to stream " << stream;
 
@@ -2378,7 +2380,7 @@ namespace Realm {
     void GPUProcessor::gpu_memcpy_async(void *dst, const void *src, size_t size,
 					cudaMemcpyKind kind, cudaStream_t stream)
     {
-      if (stream == 0)
+      if(IS_DEFAULT_STREAM(stream))
         stream = ThreadLocal::current_gpu_stream->get_stream();
       CHECK_CU( cuMemcpyAsync((CUdeviceptr)dst, (CUdeviceptr)src, size, stream) );
       // no synchronization here
@@ -2419,7 +2421,7 @@ namespace Realm {
                                           size_t spitch, size_t width, size_t height, 
                                           cudaMemcpyKind kind, cudaStream_t stream)
     {
-      if (stream == 0)
+      if(IS_DEFAULT_STREAM(stream))
         stream = ThreadLocal::current_gpu_stream->get_stream();
       CUDA_MEMCPY2D copy_info;
       copy_info.srcMemoryType = (kind == cudaMemcpyHostToDevice) ||
@@ -2459,7 +2461,7 @@ namespace Realm {
 						  size_t size, size_t offset,
 						  cudaMemcpyKind kind, cudaStream_t stream)
     {
-      if (stream == 0)
+      if(IS_DEFAULT_STREAM(stream))
         stream = ThreadLocal::current_gpu_stream->get_stream();
       CUdeviceptr var_base = gpu->lookup_variable(dst);
       CHECK_CU( cuMemcpyAsync(var_base + offset,
@@ -2483,7 +2485,7 @@ namespace Realm {
 						    size_t size, size_t offset,
 						    cudaMemcpyKind kind, cudaStream_t stream)
     {
-      if (stream == 0)
+      if(IS_DEFAULT_STREAM(stream))
         stream = ThreadLocal::current_gpu_stream->get_stream();
       CUdeviceptr var_base = gpu->lookup_variable(src);
       CHECK_CU( cuMemcpyAsync((CUdeviceptr)dst,
@@ -2503,7 +2505,7 @@ namespace Realm {
     void GPUProcessor::gpu_memset_async(void *dst, int value, 
                                         size_t count, cudaStream_t stream)
     {
-      if (stream == 0)
+      if(IS_DEFAULT_STREAM(stream))
         stream = ThreadLocal::current_gpu_stream->get_stream();
       CHECK_CU( cuMemsetD8Async((CUdeviceptr)dst, (unsigned char)value,
                                   count, stream) );
