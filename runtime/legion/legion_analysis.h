@@ -2712,7 +2712,9 @@ namespace Legion {
     public:
       virtual bool visit_only_valid(void) const;
       virtual bool visit_region(RegionNode *node);
+      virtual void postvisit_region(RegionNode *node);
       virtual bool visit_partition(PartitionNode *node);
+      virtual void postvisit_partition(PartitionNode *node);
     protected:
       const ContextID ctx;
       const bool users_only;

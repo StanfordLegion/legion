@@ -1962,16 +1962,34 @@ namespace Legion {
     bool CurrentInvalidator::visit_region(RegionNode *node)
     //--------------------------------------------------------------------------
     {
+      node->add_base_resource_ref(REGION_TREE_REF);
       node->invalidate_current_state(ctx, users_only); 
       return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void CurrentInvalidator::postvisit_region(RegionNode *node)
+    //--------------------------------------------------------------------------
+    {
+      if (node->remove_base_resource_ref(REGION_TREE_REF))
+        delete node;
     }
 
     //--------------------------------------------------------------------------
     bool CurrentInvalidator::visit_partition(PartitionNode *node)
     //--------------------------------------------------------------------------
     {
+      node->add_base_resource_ref(REGION_TREE_REF);
       node->invalidate_current_state(ctx, users_only);
       return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void CurrentInvalidator::postvisit_partition(PartitionNode *node)
+    //--------------------------------------------------------------------------
+    {
+      if (node->remove_base_resource_ref(REGION_TREE_REF))
+        delete node;
     }
 
     /////////////////////////////////////////////////////////////

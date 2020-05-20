@@ -15252,7 +15252,7 @@ namespace Legion {
         // same field index will record dependences on anything before
         if (invalidate_tree)
         {
-          DeletionInvalidator invalidator(ctx, user.field_mask);
+          CurrentInvalidator invalidator(ctx, false/*users only*/);
           visit_node(&invalidator);
         }
         else
