@@ -10494,8 +10494,8 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    Runtime::Runtime(Machine m, const LegionConfiguration &config,
-                     InputArgs args, AddressSpaceID unique,
+    Runtime::Runtime(Machine m, const LegionConfiguration &config, 
+                     bool background, InputArgs args, AddressSpaceID unique,
                      const std::set<Processor> &locals,
                      const std::set<Processor> &local_utilities,
                      const std::set<AddressSpaceID> &address_spaces,
@@ -10566,7 +10566,7 @@ namespace Legion {
         // a reference for each node so that we wait until we see all wait
         // call from each node before we start trying to perform a shutdown
         outstanding_top_level_tasks(
-            ((unique == 0) && runtime_backgrounded) ? total_address_spaces : 0),
+            ((unique == 0) && background) ? total_address_spaces : 0),
         local_procs(locals), local_utils(local_utilities),
         proc_spaces(processor_spaces),
         unique_index_space_id((unique == 0) ? runtime_stride : unique),
@@ -21632,7 +21632,7 @@ namespace Legion {
       // Construct our runtime objects 
       Processor::Kind startup_kind = Processor::NO_KIND;
       const RtEvent tasks_registered = configure_runtime(argc, argv,
-                                        config, realm, startup_kind);
+                            config, realm, startup_kind, background);
 #ifdef DEBUG_LEGION
       // Startup kind should be a CPU or a Utility processor
       assert((startup_kind == Processor::LOC_PROC) ||
@@ -22193,8 +22193,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ RtEvent Runtime::configure_runtime(int argc, char **argv,
-                             const LegionConfiguration &config,
-                             RealmRuntime &realm, Processor::Kind &startup_kind)
+                         const LegionConfiguration &config, RealmRuntime &realm,
+                         Processor::Kind &startup_kind, bool background)
     //--------------------------------------------------------------------------
     {
       // Do some error checking in case we are running with separate instances
@@ -22279,7 +22279,7 @@ namespace Legion {
           // Only one local processor here
           std::set<Processor> fake_local_procs;
           fake_local_procs.insert(*it);
-          Runtime *runtime = new Runtime(machine, config,
+          Runtime *runtime = new Runtime(machine, config, background,
                                          input_args, local_space,
                                          fake_local_procs, local_util_procs,
                                          address_spaces, proc_spaces);
@@ -22310,7 +22310,7 @@ namespace Legion {
         InputArgs input_args;
         input_args.argc = argc;
         input_args.argv = argv;
-        Runtime *runtime = new Runtime(machine, config, 
+        Runtime *runtime = new Runtime(machine, config, background,
                                        input_args, local_space,
                                        local_procs, local_util_procs,
                                        address_spaces, proc_spaces);

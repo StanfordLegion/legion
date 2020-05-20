@@ -1679,7 +1679,7 @@ namespace Legion {
       };
     public:
       Runtime(Machine m, const LegionConfiguration &config,
-              InputArgs input_args, AddressSpaceID space_id,
+              bool background, InputArgs input_args, AddressSpaceID space_id,
               const std::set<Processor> &local_procs,
               const std::set<Processor> &local_util_procs,
               const std::set<AddressSpaceID> &address_spaces,
@@ -3255,7 +3255,7 @@ namespace Legion {
       static void configure_interoperability(bool separate_runtimes);
       static RtEvent configure_runtime(int argc, char **argv,
           const LegionConfiguration &config, RealmRuntime &realm,
-          Processor::Kind &startup_kind);
+          Processor::Kind &startup_kind, bool background);
       static int wait_for_shutdown(void);
       static void set_return_code(int return_code);
       Future launch_top_level_task(const TaskLauncher &launcher);
