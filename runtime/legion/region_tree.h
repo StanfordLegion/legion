@@ -461,7 +461,8 @@ namespace Legion {
       void perform_deletion_analysis(DeletionOp *op, unsigned idx,
                                      RegionRequirement &req,
                                      RegionTreePath &path,
-                                     std::set<RtEvent> &applied_events);
+                                     std::set<RtEvent> &applied_events,
+                                     bool invalidate_tree);
       // Used by dependent partition operations
       void find_open_complete_partitions(Operation *op, unsigned idx,
                                          const RegionRequirement &req,
@@ -3464,7 +3465,8 @@ namespace Legion {
                                      RegionTreePath &path,
                                      const LogicalTraceInfo &trace_info,
                                      FieldMask &already_closed_mask,
-                                     std::set<RtEvent> &applied_events);
+                                     std::set<RtEvent> &applied_events,
+                                     bool invalidate_tree);
       void siphon_logical_deletion(LogicalCloser &closer,
                                    LogicalState &state,
                                    const FieldMask &current_mask,
