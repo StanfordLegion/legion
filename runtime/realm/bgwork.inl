@@ -20,6 +20,10 @@
 
 #include "realm/timers.h"
 
+#ifdef REALM_TIMELIMIT_USE_RDTSC
+#include <x86intrin.h>
+#endif
+
 namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
@@ -28,7 +32,13 @@ namespace Realm {
   //
 
   inline TimeLimit::TimeLimit()
-    : limit_time(0), interrupt_flag(0)
+    :
+#ifdef REALM_TIMELIMIT_USE_RDTSC
+      limit_rdtsc(~uint64_t(0))
+#else
+      limit_time(0)
+#endif
+    , interrupt_flag(0)
   {}
 
   // these constructors describe a limit in terms of Realm's clock
@@ -36,7 +46,13 @@ namespace Realm {
 						  atomic<bool> *_interrupt_flag /*= 0*/)
   {
     TimeLimit t;
+#ifdef REALM_TIMELIMIT_USE_RDTSC
+    t.limit_rdtsc = (__rdtsc() +
+		     (((absolute_time_in_nsec - Clock::current_time_in_nanoseconds()) *
+		       rdtsc_per_64k_nanoseconds) >> 16));
+#else
     t.limit_time = absolute_time_in_nsec;
+#endif
     t.interrupt_flag = _interrupt_flag;
     return t;
   }
@@ -45,7 +61,13 @@ namespace Realm {
 						  atomic<bool> *_interrupt_flag /*= 0*/)
   {
     TimeLimit t;
+#ifdef REALM_TIMELIMIT_USE_RDTSC
+    t.limit_rdtsc = (__rdtsc() +
+		     ((relative_time_in_nsec *
+		       rdtsc_per_64k_nanoseconds) >> 16));
+#else
     t.limit_time = Clock::current_time_in_nanoseconds() + relative_time_in_nsec;
+#endif
     t.interrupt_flag = _interrupt_flag;
     return t;
   }
@@ -64,17 +86,29 @@ namespace Realm {
 
   inline bool TimeLimit::is_expired() const
   {
+#ifdef REALM_TIMELIMIT_USE_RDTSC
+    return(((interrupt_flag != 0) && interrupt_flag->load()) ||
+	   (__rdtsc() >= limit_rdtsc));
+#else
     return(((interrupt_flag != 0) && interrupt_flag->load()) ||
 	   ((limit_time > 0) &&
 	    (Clock::current_time_in_nanoseconds() >= limit_time)));
+#endif
   }
 
   inline bool TimeLimit::will_expire(long long additional_nsec) const
   {
+#ifdef REALM_TIMELIMIT_USE_RDTSC
+    return(((interrupt_flag != 0) && interrupt_flag->load()) ||
+	   ((__rdtsc() +
+	     ((additional_nsec * rdtsc_per_64k_nanoseconds) >> 16)) >=
+	    limit_rdtsc));
+#else
     return(((interrupt_flag != 0) && interrupt_flag->load()) ||
 	   ((limit_time > 0) &&
 	    ((Clock::current_time_in_nanoseconds() +
 	      additional_nsec) >= limit_time)));
+#endif
   }
 
 

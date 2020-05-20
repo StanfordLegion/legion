@@ -25,6 +25,10 @@
 
 #include <string>
 
+#if defined(__i386__) || defined(__x86_64__)
+#define REALM_TIMELIMIT_USE_RDTSC
+#endif
+
 namespace Realm {
 
   class BackgroundWorkItem;
@@ -37,7 +41,8 @@ namespace Realm {
     // default constructor generates a time limit infinitely far in the future
     TimeLimit();
 
-    // these constructors describe a limit in terms of Realm's clock
+    // these constructors describe a limit in terms of Realm's clock (or
+    //  RDTSC, if available)
     static TimeLimit absolute(long long absolute_time_in_nsec,
 			      atomic<bool> *_interrupt_flag = 0);
     static TimeLimit relative(long long relative_time_in_nsec,
@@ -50,8 +55,17 @@ namespace Realm {
     bool is_expired() const;
     bool will_expire(long long additional_nsec) const;
 
+#ifdef REALM_TIMELIMIT_USE_RDTSC
+    static void calibrate_rdtsc();
+#endif
+
   protected:
+#ifdef REALM_TIMELIMIT_USE_RDTSC
+    static uint64_t rdtsc_per_64k_nanoseconds;
+    uint64_t limit_rdtsc;
+#else
     long long limit_time;
+#endif
     atomic<bool> *interrupt_flag;
   };
 

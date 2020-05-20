@@ -28,6 +28,45 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class TimeLimit
+  //
+
+#ifdef REALM_TIMELIMIT_USE_RDTSC
+  // set a default assuming a 2GHz clock so that we do something sensible
+  //  if calibration doesn't happen for some reason
+
+  /*static*/ uint64_t TimeLimit::rdtsc_per_64k_nanoseconds = 131072;
+
+  /*static*/ void TimeLimit::calibrate_rdtsc()
+  {
+    // measure 256k nanoseconds (i.e. 0.000256s) and see how many rdtscs we get
+    uint64_t ts1 = __rdtsc();
+    long long stop_at = Clock::current_time_in_nanoseconds() + 262144;
+    uint64_t ts2;
+    size_t loop_count = 0;
+    do {
+      loop_count++;
+      ts2 = __rdtsc();
+    } while(Clock::current_time_in_nanoseconds() < stop_at);
+
+    uint64_t per_64k_nsec = (ts2 - ts1) >> 2;
+    float freq = per_64k_nsec / 65536.0;
+    // ignore values that seem nonsensical - look for a frequency between
+    //   1-10 GHz and make sure we managed at least 256 loops (i.e. <= 1us/loop)
+    if((freq >= 1.0) && (freq <= 10.0) && (loop_count >= 256)) {
+      log_bgwork.info() << "rdtsc calibration: per_64k_nsec=" << per_64k_nsec
+			<< " freq=" << freq << " count=" << loop_count;
+      rdtsc_per_64k_nanoseconds = per_64k_nsec;
+    } else {
+      log_bgwork.warning() << "rdtsc calibration failed: per_64k_nsec=" << per_64k_nsec
+			   << " freq=" << freq << " count=" << loop_count
+			   << " - timeouts will be based on a 2GHz clock";
+    }
+  }
+#endif
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class BackgroundWorkThread
   //
 
@@ -217,6 +256,10 @@ namespace Realm {
 
     bool ok = cp.parse_command_line(cmdline);
     assert(ok);
+
+#ifdef REALM_TIMELIMIT_USE_RDTSC
+    TimeLimit::calibrate_rdtsc();
+#endif
   }
 
   void BackgroundWorkManager::start_dedicated_workers(Realm::CoreReservationSet& crs)
