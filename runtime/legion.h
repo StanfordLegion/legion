@@ -5367,6 +5367,9 @@ namespace Legion {
        * @param unordered set to true if this is performed by a different
        *          thread than the one for the task (e.g a garbage collector)
        */
+      LEGION_DEPRECATED("Destruction of logical partitions are no-ops now."
+          "Logical partitions are automatically destroyed when their root "
+          "logical region or their index spartition are destroyed.")
       void destroy_logical_partition(Context ctx, LogicalPartition handle,
                                      const bool unordered = false);
     public:
