@@ -5367,6 +5367,9 @@ namespace Legion {
        * @param unordered set to true if this is performed by a different
        *          thread than the one for the task (e.g a garbage collector)
        */
+      LEGION_DEPRECATED("Destruction of logical partitions are no-ops now."
+          "Logical partitions are automatically destroyed when their root "
+          "logical region or their index spartition are destroyed.")
       void destroy_logical_partition(Context ctx, LogicalPartition handle,
                                      const bool unordered = false);
     public:
@@ -7617,7 +7620,16 @@ namespace Legion {
        * running in background mode.  Otherwise it is illegal to 
        * invoke this method. Returns the exit code for the application.
        */
-      static int wait_for_shutdown(void); 
+      static int wait_for_shutdown(void);  
+
+      /**
+       * Set the return code for the application from Legion.
+       * This will be returned as the result from 'start' or
+       * 'wait_for_shutdown'. The default is zero. If multiple
+       * non-zero values are set then at least one of the non-zero
+       * values will be returned.
+       */
+      static void set_return_code(int return_code);
       
       /**
        * Set the top-level task ID for the runtime to use when beginning
@@ -7677,7 +7689,7 @@ namespace Legion {
        * the runtime to shutdown when all of it's effects are done.
        * The Context object is no longer valid after this call.
        */
-      void finish_implicit_task(Context ctx);
+      void finish_implicit_task(Context ctx); 
 
       /**
        * Return the maximum number of dimensions that Legion was

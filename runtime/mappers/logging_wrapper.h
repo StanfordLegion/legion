@@ -25,7 +25,7 @@ namespace Mapping {
  * \class LoggingWrapper
  * Adds logging to a wrapped mapper (use -level mapper=X).
  *
- * Currently only supports task mapping API calls.
+ * Currently only supports task and inline mapping API calls.
  */
 // TODO:
 // - Include other mapping calls.
@@ -54,6 +54,14 @@ class LoggingWrapper : public ForwardingMapper {
                                    const Task& task,
                                    const SelectTaskSrcInput& input,
                                    SelectTaskSrcOutput& output);
+  virtual void map_inline(const MapperContext ctx,
+                          const InlineMapping& inline_op,
+                          const MapInlineInput& input,
+                          MapInlineOutput& output);
+  virtual void select_inline_sources(const MapperContext ctx,
+                                     const InlineMapping& inline_op,
+                                     const SelectInlineSrcInput& input,
+                                     SelectInlineSrcOutput& output);
 };
 
 }; // namespace Mapping

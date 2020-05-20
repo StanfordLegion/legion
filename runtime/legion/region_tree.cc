@@ -1430,7 +1430,8 @@ namespace Legion {
                                                      unsigned idx,
                                                      RegionRequirement &req,
                                                      RegionTreePath &path,
-                                                     std::set<RtEvent> &applied)
+                                                     std::set<RtEvent> &applied,
+                                                     bool invalidate_tree)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_LOGICAL_ANALYSIS_CALL);
@@ -1456,8 +1457,8 @@ namespace Legion {
 #endif
       // Do the traversal
       FieldMask already_closed_mask;
-      parent_node->register_logical_deletion(ctx.get_id(), user, user_mask, 
-                           path, trace_info, already_closed_mask, applied);
+      parent_node->register_logical_deletion(ctx.get_id(), user, user_mask,
+          path, trace_info, already_closed_mask, applied, invalidate_tree);
       // Once we are done we can clear out the list of recorded dependences
       op->clear_logical_records();
 #ifdef DEBUG_LEGION
@@ -15177,7 +15178,8 @@ namespace Legion {
                                              RegionTreePath &path,
                                              const LogicalTraceInfo &trace_info,
                                              FieldMask &already_closed_mask,
-                                             std::set<RtEvent> &applied_events)
+                                             std::set<RtEvent> &applied_events,
+                                             bool invalidate_tree)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
@@ -15238,7 +15240,7 @@ namespace Legion {
         // Continue the traversal
         // Only continue checking the fields that are open below
         next_child->register_logical_deletion(ctx, user, open_below, path,
-                         trace_info, already_closed_mask, applied_events);
+            trace_info, already_closed_mask, applied_events, invalidate_tree);
       }
       else
       {
@@ -15250,6 +15252,19 @@ namespace Legion {
           LogicalRegistrar registrar(ctx, user.op, 
                                      check_mask, false/*dominate*/);
           visit_node(&registrar);
+        }
+        // If we're doing a full deletion of this region tree then we just
+        // want to delete everything from this level on down as no one
+        // else is going to be using it in the future. Ohterwise we register
+        // ourselves as a user at this level so that future users of the
+        // same field index will record dependences on anything before
+        if (invalidate_tree)
+        {
+          CurrentInvalidator invalidator(ctx, false/*users only*/);
+          visit_node(&invalidator);
+        }
+        else
+        {
           // Then register the deletion operation
           // In cases where the field index is recycled this deletion
           // operation will act as mapping dependence so that all the
@@ -15258,18 +15273,6 @@ namespace Legion {
           // index are done mapping
           register_local_user(state, user, trace_info);
         }
-        // We used to clear out the state below here but we've stopped doing
-        // that in order to support multiple deletions. We just leave the
-        // logical state in place until the end of the context so that multiple
-        // deletions of resources will work properly. We might change this if
-        // we ever come up with a way to avoid duplicate deletions.
-        // DeletionInvalidator invalidator(ctx, user.field_mask);
-        // visit_node(&invalidator);
-        // 
-        // On a second pass it's valuable to leave the state for when we
-        // recycle fields on the same region tree. It means that all operations
-        // which could potentially interfere on the same field index will be 
-        // serialized, which allows us to safely recycle field indexes
       }
     }
 
@@ -16157,7 +16160,6 @@ namespace Legion {
       assert(currently_active);
       currently_active = false;
 #endif
-      invalidate_logical_states();
       invalidate_version_managers();
       if (parent == NULL)
         context->runtime->release_tree_instances(handle.get_tree_id());
@@ -16393,23 +16395,33 @@ namespace Legion {
           std::map<LegionColor,PartitionNode*> children;
           // Need to hold the lock when reading from 
           // the color map or the valid map
-          if (traverser->visit_only_valid())
           {
             AutoLock n_lock(node_lock,1,false/*exclusive*/);
-            children = color_map;
-          }
-          else
-          {
-            AutoLock n_lock(node_lock,1,false/*exclusive*/);
-            children = color_map;
+            for (std::map<LegionColor,PartitionNode*>::const_iterator it = 
+                  color_map.begin(); it != color_map.end(); it++)
+            {
+              children.insert(*it);
+              it->second->add_base_resource_ref(REGION_TREE_REF);
+            }
           }
           for (std::map<LegionColor,PartitionNode*>::const_iterator it = 
                 children.begin(); it != children.end(); it++)
           {
-            bool result = it->second->visit_node(traverser);
+            const bool result = it->second->visit_node(traverser);
+            if (it->second->remove_base_resource_ref(REGION_TREE_REF))
+              delete it->second;
             continue_traversal = continue_traversal && result;
             if (!result && break_early)
+            {
+              it++;
+              while (it != children.end())
+              {
+                if (it->second->remove_base_resource_ref(REGION_TREE_REF))
+                  delete it->second;
+                it++;
+              }
               break;
+            }
           }
         }
       }
@@ -17361,7 +17373,6 @@ namespace Legion {
       assert(currently_active);
       currently_active = false;
 #endif
-      invalidate_logical_states();
       invalidate_version_managers();
       // Remove gc references on all of our child nodes
       // We should not need a lock at this point since nobody else should

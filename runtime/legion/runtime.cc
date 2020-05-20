@@ -8241,7 +8241,7 @@ namespace Legion {
                                      AddressSpaceID s, unsigned r, 
                                      ShutdownManager *own)
       : phase(p), runtime(rt), source(s), radix(r), owner(own),
-        needed_responses(0), result(true)
+        needed_responses(0), return_code(rt->return_code), result(true)
     //--------------------------------------------------------------------------
     {
     }
@@ -8308,13 +8308,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool ShutdownManager::handle_response(bool success,
+    bool ShutdownManager::handle_response(int code, bool success,
                                           const std::set<RtEvent> &to_add)
     //--------------------------------------------------------------------------
     {
       bool done = false;
       {
         AutoLock s_lock(shutdown_lock);
+        if ((return_code == 0) && (code != 0))
+          return_code = code;
         if (result && !success)
           result = false;
         wait_for.insert(to_add.begin(), to_add.end()); 
@@ -8365,7 +8367,7 @@ namespace Legion {
         else
         {
           log_shutdown.info("SHUTDOWN SUCCEEDED!");
-          runtime->finalize_runtime_shutdown();
+          runtime->finalize_runtime_shutdown(return_code);
         }
       }
       else if (runtime->address_space != source)
@@ -8376,6 +8378,7 @@ namespace Legion {
         // Send the message back
         Serializer rez;
         rez.serialize(owner);
+        rez.serialize(return_code);
         rez.serialize<bool>(result);
         rez.serialize<size_t>(wait_for.size());
         for (std::set<RtEvent>::const_iterator it = 
@@ -8463,6 +8466,8 @@ namespace Legion {
     {
       ShutdownManager *shutdown_manager;
       derez.deserialize(shutdown_manager);
+      int return_code;
+      derez.deserialize(return_code);
       bool success;
       derez.deserialize(success);
       size_t num_events;
@@ -8474,7 +8479,7 @@ namespace Legion {
         derez.deserialize(event);
         wait_for.insert(event);
       }
-      if (shutdown_manager->handle_response(success, wait_for))
+      if (shutdown_manager->handle_response(return_code, success, wait_for))
         delete shutdown_manager;
     }
 
@@ -10494,8 +10499,8 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    Runtime::Runtime(Machine m, const LegionConfiguration &config,
-                     InputArgs args, AddressSpaceID unique,
+    Runtime::Runtime(Machine m, const LegionConfiguration &config, 
+                     bool background, InputArgs args, AddressSpaceID unique,
                      const std::set<Processor> &locals,
                      const std::set<Processor> &local_utilities,
                      const std::set<AddressSpaceID> &address_spaces,
@@ -10561,8 +10566,12 @@ namespace Legion {
         legion_collective_participating_spaces(
                            config.legion_collective_participating_spaces),
         mpi_rank_table((mpi_rank >= 0) ? new MPIRankTable(this) : NULL),
-        prepared_for_shutdown(false),
-        total_outstanding_tasks(0), outstanding_top_level_tasks(0), 
+        prepared_for_shutdown(false), total_outstanding_tasks(0), 
+        // In the case where the runtime is backgrounded, have node 0 keep
+        // a reference for each node so that we wait until we see all wait
+        // call from each node before we start trying to perform a shutdown
+        outstanding_top_level_tasks(
+            ((unique == 0) && background) ? total_address_spaces : 0),
         local_procs(locals), local_utils(local_utilities),
         proc_spaces(processor_spaces),
         unique_index_space_id((unique == 0) ? runtime_stride : unique),
@@ -19580,7 +19589,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::finalize_runtime_shutdown(void)
+    void Runtime::finalize_runtime_shutdown(int exit_code)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -19624,7 +19633,7 @@ namespace Legion {
       // Then tell Realm to shutdown when they are all done
       RtEvent shutdown_precondition = Runtime::merge_events(shutdown_events);
       RealmRuntime realm = RealmRuntime::get_runtime();
-      realm.shutdown(shutdown_precondition);
+      realm.shutdown(shutdown_precondition, exit_code);
     }
 
     //--------------------------------------------------------------------------
@@ -21588,6 +21597,8 @@ namespace Legion {
     /*static*/ Runtime* Runtime::the_runtime = NULL;
     /*static*/ RtUserEvent Runtime::runtime_started_event = 
                                               RtUserEvent::NO_RT_USER_EVENT;
+    /*static*/ int Runtime::background_waits = 0;
+    /*static*/ int Runtime::return_code = 0;
     /*static*/ int Runtime::mpi_rank = -1;
 
     //--------------------------------------------------------------------------
@@ -21640,7 +21651,7 @@ namespace Legion {
       // Construct our runtime objects 
       Processor::Kind startup_kind = Processor::NO_KIND;
       const RtEvent tasks_registered = configure_runtime(argc, argv,
-                                        config, realm, startup_kind);
+                            config, realm, startup_kind, background);
 #ifdef DEBUG_LEGION
       // Startup kind should be a CPU or a Utility processor
       assert((startup_kind == Processor::LOC_PROC) ||
@@ -21858,7 +21869,7 @@ namespace Legion {
             LEGION_MAX_FIELDS)
       runtime_initialized = true;
       return config;
-    }
+    } 
 
     //--------------------------------------------------------------------------
     Future Runtime::launch_top_level_task(const TaskLauncher &launcher)
@@ -22201,8 +22212,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ RtEvent Runtime::configure_runtime(int argc, char **argv,
-                             const LegionConfiguration &config,
-                             RealmRuntime &realm, Processor::Kind &startup_kind)
+                         const LegionConfiguration &config, RealmRuntime &realm,
+                         Processor::Kind &startup_kind, bool background)
     //--------------------------------------------------------------------------
     {
       // Do some error checking in case we are running with separate instances
@@ -22287,7 +22298,7 @@ namespace Legion {
           // Only one local processor here
           std::set<Processor> fake_local_procs;
           fake_local_procs.insert(*it);
-          Runtime *runtime = new Runtime(machine, config,
+          Runtime *runtime = new Runtime(machine, config, background,
                                          input_args, local_space,
                                          fake_local_procs, local_util_procs,
                                          address_spaces, proc_spaces);
@@ -22318,7 +22329,7 @@ namespace Legion {
         InputArgs input_args;
         input_args.argc = argc;
         input_args.argv = argv;
-        Runtime *runtime = new Runtime(machine, config, 
+        Runtime *runtime = new Runtime(machine, config, background,
                                        input_args, local_space,
                                        local_procs, local_util_procs,
                                        address_spaces, proc_spaces);
@@ -22462,7 +22473,24 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_WAIT_FOR_SHUTDOWN, 
                       "Illegal call to wait_for_shutdown when runtime was "
                       "not launched in background mode!");
+      // If this is the first time we've called this on this node then 
+      // we need to remove our reference to allow shutdown to proceed
+      if (__sync_fetch_and_add(&background_waits, 1) == 0)
+      {
+        // Have to mark this as an external implicit task so that any
+        // waits will be done correctly by this extneral thread
+        external_implicit_task = true;
+        the_runtime->decrement_outstanding_top_level_tasks();
+        external_implicit_task = false;
+      }
       return RealmRuntime::get_runtime().wait_for_shutdown();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::set_return_code(int code)
+    //--------------------------------------------------------------------------
+    {
+      return_code = code;
     }
 
     //--------------------------------------------------------------------------

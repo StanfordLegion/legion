@@ -2164,6 +2164,7 @@ namespace Legion {
       // Switch over the executing processor to the one
       // that has actually been assigned to run this task.
       executing_processor = Processor::get_executing_processor();
+      owner_task->current_proc = executing_processor;
       if (runtime->legion_spy_enabled)
         LegionSpy::log_task_processor(get_unique_id(), executing_processor.id);
 #ifdef DEBUG_LEGION
@@ -2646,6 +2647,91 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::receive_resources(size_t return_index,
+              std::map<LogicalRegion,unsigned> &created_regs,
+              std::vector<LogicalRegion> &deleted_regs,
+              std::set<std::pair<FieldSpace,FieldID> > &created_fids,
+              std::vector<std::pair<FieldSpace,FieldID> > &deleted_fids,
+              std::map<FieldSpace,unsigned> &created_fs,
+              std::map<FieldSpace,std::set<LogicalRegion> > &latent_fs,
+              std::vector<FieldSpace> &deleted_fs,
+              std::map<IndexSpace,unsigned> &created_is,
+              std::vector<std::pair<IndexSpace,bool> > &deleted_is,
+              std::map<IndexPartition,unsigned> &created_partitions,
+              std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
+              std::set<RtEvent> &preconditions)
+    //--------------------------------------------------------------------------
+    {
+      bool need_deletion_dependences = true;
+      ApEvent precondition;
+      std::map<Operation*,GenerationID> dependences;
+      if (!created_regs.empty())
+        register_region_creations(created_regs);
+      if (!deleted_regs.empty())
+      {
+        precondition = 
+          compute_return_deletion_dependences(return_index, dependences);
+        need_deletion_dependences = false;
+        register_region_deletions(precondition, dependences, 
+                                  deleted_regs, preconditions);
+      }
+      if (!created_fids.empty())
+        register_field_creations(created_fids);
+      if (!deleted_fids.empty())
+      {
+        if (need_deletion_dependences)
+        {
+          precondition = 
+            compute_return_deletion_dependences(return_index, dependences);
+          need_deletion_dependences = false;
+        }
+        register_field_deletions(precondition, dependences, 
+                                 deleted_fids, preconditions);
+      }
+      if (!created_fs.empty())
+        register_field_space_creations(created_fs);
+      if (!latent_fs.empty())
+        register_latent_field_spaces(latent_fs);
+      if (!deleted_fs.empty())
+      {
+        if (need_deletion_dependences)
+        {
+          precondition = 
+            compute_return_deletion_dependences(return_index, dependences);
+          need_deletion_dependences = false;
+        }
+        register_field_space_deletions(precondition, dependences,
+                                       deleted_fs, preconditions);
+      }
+      if (!created_is.empty())
+        register_index_space_creations(created_is);
+      if (!deleted_is.empty())
+      {
+        if (need_deletion_dependences)
+        {
+          precondition = 
+            compute_return_deletion_dependences(return_index, dependences);
+          need_deletion_dependences = false;
+        }
+        register_index_space_deletions(precondition, dependences,
+                                       deleted_is, preconditions);
+      }
+      if (!created_partitions.empty())
+        register_index_partition_creations(created_partitions);
+      if (!deleted_partitions.empty())
+      {
+        if (need_deletion_dependences)
+        {
+          precondition = 
+            compute_return_deletion_dependences(return_index, dependences);
+          need_deletion_dependences = false;
+        }
+        register_index_partition_deletions(precondition, dependences,
+                                           deleted_partitions, preconditions);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -9805,122 +9891,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::register_region_creations(
-                                      std::map<LogicalRegion,unsigned> &regions)
+    void LeafContext::receive_resources(size_t return_index,
+              std::map<LogicalRegion,unsigned> &created_regs,
+              std::vector<LogicalRegion> &deleted_regs,
+              std::set<std::pair<FieldSpace,FieldID> > &created_fids,
+              std::vector<std::pair<FieldSpace,FieldID> > &deleted_fids,
+              std::map<FieldSpace,unsigned> &created_fs,
+              std::map<FieldSpace,std::set<LogicalRegion> > &latent_fs,
+              std::vector<FieldSpace> &deleted_fs,
+              std::map<IndexSpace,unsigned> &created_is,
+              std::vector<std::pair<IndexSpace,bool> > &deleted_is,
+              std::map<IndexPartition,unsigned> &created_partitions,
+              std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
+              std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
       // should never be called
       assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::register_region_deletions(ApEvent precondition,
-                           const std::map<Operation*,GenerationID> &dependences,
-                                            std::vector<LogicalRegion> &regions,
-                                            std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::register_field_creations(
-                               std::set<std::pair<FieldSpace,FieldID> > &fields)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::register_field_deletions(ApEvent precondition,
-                           const std::map<Operation*,GenerationID> &dependences,
-                           std::vector<std::pair<FieldSpace,FieldID> > &fields,
-                           std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::register_field_space_creations(
-                                          std::map<FieldSpace,unsigned> &spaces)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::register_latent_field_spaces(
-                          std::map<FieldSpace,std::set<LogicalRegion> > &spaces)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::register_field_space_deletions(ApEvent precondition,
-                           const std::map<Operation*,GenerationID> &dependences,
-                                               std::vector<FieldSpace> &sps,
-                                               std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::register_index_space_creations(
-                                          std::map<IndexSpace,unsigned> &spaces)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::register_index_space_deletions(ApEvent precondition,
-                           const std::map<Operation*,GenerationID> &dependences,
-                                  std::vector<std::pair<IndexSpace,bool> > &sps,
-                                               std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::register_index_partition_creations(
-                                       std::map<IndexPartition,unsigned> &parts)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::register_index_partition_deletions(ApEvent precondition,
-                           const std::map<Operation*,GenerationID> &dependences,
-                            std::vector<std::pair<IndexPartition,bool> > &parts, 
-                                               std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent LeafContext::compute_return_deletion_dependences(
-            size_t return_index, std::map<Operation*,GenerationID> &dependences)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return ApEvent::NO_AP_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -11656,114 +11643,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InlineContext::register_region_creations(
-                                      std::map<LogicalRegion,unsigned> &regions)
+    void InlineContext::receive_resources(size_t return_index,
+              std::map<LogicalRegion,unsigned> &created_regs,
+              std::vector<LogicalRegion> &deleted_regs,
+              std::set<std::pair<FieldSpace,FieldID> > &created_fids,
+              std::vector<std::pair<FieldSpace,FieldID> > &deleted_fids,
+              std::map<FieldSpace,unsigned> &created_fs,
+              std::map<FieldSpace,std::set<LogicalRegion> > &latent_fs,
+              std::vector<FieldSpace> &deleted_fs,
+              std::map<IndexSpace,unsigned> &created_is,
+              std::vector<std::pair<IndexSpace,bool> > &deleted_is,
+              std::map<IndexPartition,unsigned> &created_partitions,
+              std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
+              std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
-      enclosing->register_region_creations(regions);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::register_region_deletions(ApEvent precondition,
-                           const std::map<Operation*,GenerationID> &dependences,
-                                            std::vector<LogicalRegion> &regions,
-                                            std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->register_region_deletions(precondition, dependences, 
-                                           regions, preconditions);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::register_field_creations(
-                               std::set<std::pair<FieldSpace,FieldID> > &fields)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->register_field_creations(fields);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::register_field_deletions(ApEvent precondition,
-                           const std::map<Operation*,GenerationID> &dependences,
-                           std::vector<std::pair<FieldSpace,FieldID> > &fields,
-                           std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->register_field_deletions(precondition, dependences, 
-                                          fields, preconditions);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::register_field_space_creations(
-                                          std::map<FieldSpace,unsigned> &spaces)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->register_field_space_creations(spaces);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::register_latent_field_spaces(
-                          std::map<FieldSpace,std::set<LogicalRegion> > &spaces)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->register_latent_field_spaces(spaces);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::register_field_space_deletions(ApEvent precondition,
-                           const std::map<Operation*,GenerationID> &dependences,
-                                               std::vector<FieldSpace> &spaces,
-                                               std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->register_field_space_deletions(precondition, dependences, 
-                                                spaces, preconditions);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::register_index_space_creations(
-                                          std::map<IndexSpace,unsigned> &spaces)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->register_index_space_creations(spaces);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::register_index_space_deletions(ApEvent precondition,
-                           const std::map<Operation*,GenerationID> &dependences,
-                               std::vector<std::pair<IndexSpace,bool> > &spaces,
-                                               std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->register_index_space_deletions(precondition, dependences, 
-                                                spaces, preconditions);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::register_index_partition_creations(
-                                       std::map<IndexPartition,unsigned> &parts)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->register_index_partition_creations(parts);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::register_index_partition_deletions(ApEvent precondition,
-                           const std::map<Operation*,GenerationID> &dependences,
-                            std::vector<std::pair<IndexPartition,bool> > &parts, 
-                                               std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->register_index_partition_deletions(precondition, dependences, 
-                                                    parts, preconditions);
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent InlineContext::compute_return_deletion_dependences(
-                   size_t index, std::map<Operation*,GenerationID> &dependences)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->compute_return_deletion_dependences(index, dependences);
+      enclosing->receive_resources(return_index, created_regs, deleted_regs,
+          created_fids, deleted_fids, created_fs, latent_fs, deleted_fs,
+          created_is, deleted_is, created_partitions, deleted_partitions,
+          preconditions);
     }
 
     //--------------------------------------------------------------------------
@@ -12863,6 +12761,7 @@ namespace Legion {
 #endif
       rt = this->runtime->external;
       executing_processor = Processor::get_executing_processor();
+      owner_task->current_proc = executing_processor;
 #ifdef DEBUG_LEGION
       log_task.debug("Task %s (ID %lld) inlining on processor " IDFMT "",
                     get_task_name(), get_unique_id(), executing_processor.id);

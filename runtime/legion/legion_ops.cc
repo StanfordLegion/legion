@@ -8042,7 +8042,8 @@ namespace Legion {
         RegionTreePath privilege_path;
         initialize_privilege_path(privilege_path, req);
         runtime->forest->perform_deletion_analysis(this, idx, req, 
-                           privilege_path, map_applied_conditions);
+                           privilege_path, map_applied_conditions,
+                           (kind == LOGICAL_REGION_DELETION));
       }
       // Now pretend like this is going to be a mapping fence on everyone
       // who came before, although we will never actually record ourselves

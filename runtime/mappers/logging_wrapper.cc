@@ -173,7 +173,43 @@ void LoggingWrapper::select_task_sources(const MapperContext ctx,
   buf.report(task.regions[input.region_req_index],
              input.source_instances,
              input.region_req_index);
+  buf.line() << "  TARGET:";
+  buf.line() << "      " << to_string(runtime, ctx, input.target);
   mapper->select_task_sources(ctx, task, input, output);
+  buf.line() << "  OUTPUT:";
+  for (std::deque<PhysicalInstance>::iterator it =
+         output.chosen_ranking.begin();
+       it != output.chosen_ranking.end(); ++it) {
+    buf.line() << "      " << to_string(runtime, ctx, *it);
+  }
+}
+
+void LoggingWrapper::map_inline(const MapperContext ctx,
+                                const InlineMapping& inline_op,
+                                const MapInlineInput& input,
+                                MapInlineOutput& output) {
+  MessageBuffer buf(runtime, ctx);
+  buf.line() << "MAP_INLINE in "
+             << to_string(runtime, ctx, *(inline_op.parent_task));
+  buf.line() << "  INPUT:";
+  buf.report(inline_op.requirement, input.valid_instances, 0);
+  mapper->map_inline(ctx, inline_op, input, output);
+  buf.line() << "  OUTPUT:";
+  buf.report(inline_op.requirement, output.chosen_instances, 0);
+}
+
+void LoggingWrapper::select_inline_sources(const MapperContext ctx,
+                                           const InlineMapping& inline_op,
+                                           const SelectInlineSrcInput& input,
+                                           SelectInlineSrcOutput& output) {
+  MessageBuffer buf(runtime, ctx);
+  buf.line() << "SELECT_INLINE_SOURCES in "
+             << to_string(runtime, ctx, *(inline_op.parent_task));
+  buf.line() << "  INPUT:";
+  buf.report(inline_op.requirement, input.source_instances, 0);
+  buf.line() << "  TARGET:";
+  buf.line() << "      " << to_string(runtime, ctx, input.target);
+  mapper->select_inline_sources(ctx, inline_op, input, output);
   buf.line() << "  OUTPUT:";
   for (std::deque<PhysicalInstance>::iterator it =
          output.chosen_ranking.begin();
