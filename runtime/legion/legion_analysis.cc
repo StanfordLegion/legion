@@ -2108,16 +2108,34 @@ namespace Legion {
     bool DeletionInvalidator::visit_region(RegionNode *node)
     //--------------------------------------------------------------------------
     {
+      node->add_base_resource_ref(REGION_TREE_REF);
       node->invalidate_deleted_state(ctx, deletion_mask); 
       return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void DeletionInvalidator::postvisit_region(RegionNode *node)
+    //--------------------------------------------------------------------------
+    {
+      if (node->remove_base_resource_ref(REGION_TREE_REF))
+        delete node;
     }
 
     //--------------------------------------------------------------------------
     bool DeletionInvalidator::visit_partition(PartitionNode *node)
     //--------------------------------------------------------------------------
     {
+      node->add_base_resource_ref(REGION_TREE_REF);
       node->invalidate_deleted_state(ctx, deletion_mask);
       return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void DeletionInvalidator::postvisit_partition(PartitionNode *node)
+    //--------------------------------------------------------------------------
+    {
+      if (node->remove_base_resource_ref(REGION_TREE_REF))
+        delete node;
     }
 
     /////////////////////////////////////////////////////////////

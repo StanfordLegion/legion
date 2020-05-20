@@ -2686,7 +2686,9 @@ namespace Legion {
       virtual bool break_early(void) const { return false; }
       virtual bool visit_only_valid(void) const = 0;
       virtual bool visit_region(RegionNode *node) = 0;
+      virtual void postvisit_region(RegionNode *node) { }
       virtual bool visit_partition(PartitionNode *node) = 0;
+      virtual void postvisit_partition(PartitionNode *node) { }
     public:
       const bool force_instantiation;
     };
@@ -2793,7 +2795,9 @@ namespace Legion {
     public:
       virtual bool visit_only_valid(void) const;
       virtual bool visit_region(RegionNode *node);
+      virtual void postvisit_region(RegionNode *node);
       virtual bool visit_partition(PartitionNode *node);
+      virtual void postvisit_partition(PartitionNode *node);
     protected:
       const ContextID ctx;
       const FieldMask &deletion_mask;

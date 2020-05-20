@@ -17314,6 +17314,7 @@ namespace Legion {
           }
         }
       }
+      traverser->postvisit_region(this);
       return continue_traversal;
     }
 
@@ -18500,6 +18501,7 @@ namespace Legion {
           }
         }
       }
+      traverser->postvisit_partition(this);
       return continue_traversal;
     }
 
