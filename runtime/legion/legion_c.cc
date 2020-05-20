@@ -6232,10 +6232,16 @@ legion_runtime_start(int argc,
   return Runtime::start(argc, argv, background);
 }
 
-void
+int
 legion_runtime_wait_for_shutdown(void)
 {
-  Runtime::wait_for_shutdown();
+  return Runtime::wait_for_shutdown();
+}
+
+void
+legion_runtime_set_return_code(int return_code)
+{
+  Runtime::set_return_code(return_code);
 }
 
 void

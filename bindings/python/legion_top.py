@@ -135,6 +135,7 @@ def run_cmd(cmd, run_name=None):
         exec(code, module.__dict__, module.__dict__)
     except SyntaxError as ex:
         traceback.print_exception(SyntaxError,ex,sys.exc_info()[2],0)
+        c.legion_runtime_set_return_code(1)
     # Wait for execution to finish here before removing the module
     # because executing tasks might still need to refer to it
     future = c.legion_runtime_issue_execution_fence(
@@ -174,8 +175,10 @@ def run_path(filename, run_name=None):
             exec(code, module.__dict__, module.__dict__)
     except FileNotFoundError as ex:
         print("legion_python: can't open file "+str(filename)+": "+str(ex))
+        c.legion_runtime_set_return_code(1)
     except SyntaxError as ex:
         traceback.print_exception(SyntaxError,ex,sys.exc_info()[2],0)
+        c.legion_runtime_set_return_code(1)
     # Wait for execution to finish here before removing the module
     # because executing tasks might still need to refer to it
     future = c.legion_runtime_issue_execution_fence(
@@ -346,6 +349,7 @@ def legion_python_main(raw_args, user_data, proc):
             run_cmd(args[start+1], run_name='__main__')
         else:
             print('Argument expected for the -c option')
+            c.legion_runtime_set_return_code(1)
     elif args[start] == '-m':
         if len(args) > (start+1):
             filename = args[start+1] + '.py'
@@ -363,8 +367,10 @@ def legion_python_main(raw_args, user_data, proc):
                     break
             if not found:
                 print('No module named '+args[start+1])
+                c.legion_runtime_set_return_code(1)
         else:
             print('Argument expected for the -m option')
+            c.legion_runtime_set_return_code(1)
     else:
         assert start < len(args)
         sys.argv = list(args[start:])

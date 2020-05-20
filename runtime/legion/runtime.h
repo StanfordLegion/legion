@@ -1291,7 +1291,8 @@ namespace Legion {
       ShutdownManager& operator=(const ShutdownManager &rhs);
     public:
       bool attempt_shutdown(void);
-      bool handle_response(bool success, const std::set<RtEvent> &to_add);
+      bool handle_response(int code, bool success, 
+                           const std::set<RtEvent> &to_add);
     protected:
       void finalize(void);
     public:
@@ -1312,6 +1313,7 @@ namespace Legion {
       mutable LocalLock shutdown_lock;
       unsigned needed_responses;
       std::set<RtEvent> wait_for;
+      int return_code;
       bool result;
     };
 
@@ -3145,7 +3147,7 @@ namespace Legion {
       void confirm_runtime_shutdown(ShutdownManager *shutdown_manager, 
                                     bool phase_one);
       void prepare_runtime_shutdown(void);
-      void finalize_runtime_shutdown(void);
+      void finalize_runtime_shutdown(int exit_code);
     public:
       bool has_outstanding_tasks(void);
 #ifdef DEBUG_LEGION
@@ -3767,6 +3769,7 @@ namespace Legion {
           const LegionConfiguration &config, RealmRuntime &realm,
           Processor::Kind &startup_kind);
       static int wait_for_shutdown(void);
+      static void set_return_code(int return_code);
       Future launch_top_level_task(const TaskLauncher &launcher);
       IndividualTask* create_implicit_top_level(TaskID top_task_id,
                                                 MapperID top_mapper_id,
@@ -3868,6 +3871,9 @@ namespace Legion {
       static bool runtime_backgrounded;
       static Runtime *the_runtime;
       static RtUserEvent runtime_started_event;
+      static int background_waits;
+      // Shutdown error condition
+      static int return_code;
       // Static member variables for MPI interop
       static int mpi_rank;
     public:
