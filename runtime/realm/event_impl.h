@@ -29,6 +29,7 @@
 #include "realm/threads.h"
 #include "realm/logging.h"
 #include "realm/redop.h"
+#include "realm/bgwork.h"
 
 #include <vector>
 #include <map>
@@ -61,6 +62,28 @@ namespace Realm {
 
       IntrusiveListLink<EventWaiter> ew_list_link;
       typedef IntrusiveList<EventWaiter, &EventWaiter::ew_list_link, DummyLock> EventWaiterList;
+    };
+
+    // triggering events can often result in recursive expansion of work -
+    //  this widget flattens the call stack and defers excessive triggers
+    //  to avoid stalling the initial triggerer longer than they want
+    class EventTriggerNotifier : public BackgroundWorkItem {
+    public:
+      EventTriggerNotifier();
+
+      void trigger_event_waiters(EventWaiter::EventWaiterList& to_trigger,
+				 bool poisoned,
+				 TimeLimit trigger_until);
+
+      virtual void do_work(TimeLimit work_until);
+
+    protected:
+      Mutex mutex;
+      EventWaiter::EventWaiterList delayed_normal;
+      EventWaiter::EventWaiterList delayed_poisoned;
+
+      static REALM_THREAD_LOCAL EventWaiter::EventWaiterList *nested_normal;
+      static REALM_THREAD_LOCAL EventWaiter::EventWaiterList *nested_poisoned;
     };
 
     // parent class of GenEventImpl and BarrierImpl

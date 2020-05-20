@@ -31,13 +31,6 @@ namespace Realm {
   // used in places that don't currently propagate poison but should
   static const bool POISON_FIXME = false;
 
-  // turn nested event triggers into a list walk instead - keeps from blowing
-  //  out the stack
-  namespace ThreadLocal {
-    REALM_THREAD_LOCAL EventWaiter::EventWaiterList *nested_wake_list = 0;
-  };
-
-
   ////////////////////////////////////////////////////////////////////////
   //
   // class Event
@@ -548,6 +541,129 @@ namespace Realm {
     BarrierImpl *impl = get_runtime()->get_barrier_impl(*this);
     return impl->get_result(ID(id).barrier_generation(), value, value_size);
   }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class EventTriggerNotifier
+  //
+
+  EventTriggerNotifier::EventTriggerNotifier()
+    : BackgroundWorkItem("event triggers")
+  {}
+
+  void EventTriggerNotifier::trigger_event_waiters(EventWaiter::EventWaiterList& to_trigger,
+						   bool poisoned,
+						   TimeLimit trigger_until)
+  {
+    // we get one list from the caller, but we need a total of two
+    EventWaiter::EventWaiterList second_list;
+    if(poisoned) {
+      if(nested_poisoned != 0) {
+	nested_poisoned->absorb_append(to_trigger);
+	return;
+      }
+      // install lists to catch any recursive triggers
+      nested_poisoned = &to_trigger;
+      nested_normal = &second_list;
+    } else {
+      if(nested_normal != 0) {
+	nested_normal->absorb_append(to_trigger);
+	return;
+      }
+      // install lists to catch any recursive triggers
+      nested_normal = &to_trigger;
+      nested_poisoned = &second_list;
+    }
+
+    do {
+      // TODO: triggers are fast - consider doing more than one per time check?
+      if(!nested_normal->empty()) {
+	EventWaiter *w = nested_normal->pop_front();
+	w->event_triggered(false /*!poisoned*/);
+      } else if(!nested_poisoned->empty()) {
+	EventWaiter *w = nested_poisoned->pop_front();
+	w->event_triggered(true /*poisoned*/);
+      } else {
+	// list is exhausted - we can return right away (after removing
+	//   trigger-catching lists)
+	nested_normal = nested_poisoned = 0;
+	return;
+      }
+    } while(!trigger_until.is_expired());
+
+    // do we have any triggers we want to defer?
+    if(!nested_normal->empty() || !nested_poisoned->empty()) {
+      bool was_empty;
+      {
+	AutoLock<> al(mutex);
+	was_empty = delayed_normal.empty() && delayed_poisoned.empty();
+	delayed_normal.absorb_append(*nested_normal);
+	delayed_poisoned.absorb_append(*nested_poisoned);
+      }
+      if(was_empty)
+	make_active();
+    }
+
+    // done catching recursive event triggers
+    nested_normal = nested_poisoned = 0;
+  }
+
+  void EventTriggerNotifier::do_work(TimeLimit work_until)
+  {
+    // take the lock and grab both lists
+    EventWaiter::EventWaiterList todo_normal, todo_poisoned;
+    {
+      AutoLock<> al(mutex);
+      todo_normal.swap(delayed_normal);
+      todo_poisoned.swap(delayed_poisoned);
+    }
+
+    // any nested triggering should append to our list instead of recurse
+    nested_normal = &todo_normal;
+    nested_poisoned = &todo_poisoned;
+
+    // now trigger until we're out of time
+    do {
+      // TODO: triggers are fast - consider doing more than one per time check?
+      if(!todo_normal.empty()) {
+	EventWaiter *w = todo_normal.pop_front();
+	w->event_triggered(false /*!poisoned*/);
+      } else if(!todo_poisoned.empty()) {
+	EventWaiter *w = todo_poisoned.pop_front();
+	w->event_triggered(true /*poisoned*/);
+      } else
+	break;
+    } while(!work_until.is_expired());
+
+    // un-register nested trigger catchers
+    nested_normal = nested_poisoned = 0;
+
+    // if we have anything left to do, prepend (using append+swap) them to
+    //  whatever got added by other threads while we were triggering stuff
+    if(!todo_normal.empty() || !todo_poisoned.empty()) {
+      bool was_empty;
+      {
+	AutoLock<> al(mutex);
+	was_empty = delayed_normal.empty() && delayed_poisoned.empty();
+	if(!todo_normal.empty()) {
+	  if(!delayed_normal.empty())
+	    todo_normal.absorb_append(delayed_normal);
+	  delayed_normal.swap(todo_normal);
+	}
+	if(!todo_poisoned.empty()) {
+	  if(!delayed_poisoned.empty())
+	    todo_poisoned.absorb_append(delayed_poisoned);
+	  delayed_poisoned.swap(todo_poisoned);
+	}
+      }
+      if(was_empty)
+	make_active();
+    }
+  }
+
+  /*static*/ REALM_THREAD_LOCAL EventWaiter::EventWaiterList *EventTriggerNotifier::nested_normal = 0;
+  /*static*/ REALM_THREAD_LOCAL EventWaiter::EventWaiterList *EventTriggerNotifier::nested_poisoned = 0;
 
 
   ////////////////////////////////////////////////////////////////////////
@@ -1478,24 +1594,9 @@ namespace Realm {
 	  it != to_wake.end();
 	  it++) {
 	bool poisoned = is_generation_poisoned(it->first);
-	if(!poisoned) {
-	  if(ThreadLocal::nested_wake_list != 0) {
-	    // append our waiters for caller to handle rather than recursing
-	    ThreadLocal::nested_wake_list->absorb_append(it->second);
-	  } else {
-	    ThreadLocal::nested_wake_list = &(it->second);  // avoid recursion
-	    while(!it->second.empty()) {
-	      EventWaiter *w = it->second.pop_front();
-	      w->event_triggered(false /*!poisoned*/);
-	    }
-	    ThreadLocal::nested_wake_list = 0;
-	  }
-	} else {
-	  while(!it->second.empty()) {
-	    EventWaiter *w = it->second.pop_front();
-	    w->event_triggered(true /*poisoned*/);
-	  }
-	}
+	get_runtime()->event_triggerer.trigger_event_waiters(it->second,
+							     poisoned,
+							     TimeLimit::relative(10000 /*10 us*/));
       }
     }
   }
@@ -1817,26 +1918,10 @@ namespace Realm {
       }
 
       // finally, trigger any local waiters
-      if(!to_wake.empty()) {
-	if(!poisoned) {
-	  if(ThreadLocal::nested_wake_list != 0) {
-	    // append our waiters for caller to handle rather than recursing
-	    ThreadLocal::nested_wake_list->absorb_append(to_wake);
-	  } else {
-	    ThreadLocal::nested_wake_list = &to_wake;  // avoid recursion
-	    while(!to_wake.empty()) {
-	      EventWaiter *ew = to_wake.pop_front();
-	      ew->event_triggered(false /*!poisoned*/);
-	    }
-	    ThreadLocal::nested_wake_list = 0;
-	  }
-	} else {
-	  while(!to_wake.empty()) {
-	    EventWaiter *ew = to_wake.pop_front();
-	    ew->event_triggered(true /*poisoned*/);
-	  }
-	}
-      }
+      if(!to_wake.empty())
+	get_runtime()->event_triggerer.trigger_event_waiters(to_wake,
+							     poisoned,
+							     TimeLimit::relative(10000 /*10 us*/));
     }
 
     void GenEventImpl::perform_delayed_free_list_insertion(void)
@@ -2353,26 +2438,10 @@ static void *bytedup(const void *data, size_t datalen)
 	log_barrier.info() << "barrier trigger: event=" << me << "/" << trigger_gen;
 
 	// notify local waiters first
-	if(!local_notifications.empty()) {
-	  if(!POISON_FIXME) {
-	    if(ThreadLocal::nested_wake_list != 0) {
-	      // append our waiters for caller to handle rather than recursing
-	      ThreadLocal::nested_wake_list->absorb_append(local_notifications);
-	    } else {
-	      ThreadLocal::nested_wake_list = &local_notifications;  // avoid recursion
-	      while(!local_notifications.empty()) {
-		EventWaiter *ew = local_notifications.pop_front();
-		ew->event_triggered(false /*!poisoned*/);
-	      }
-	      ThreadLocal::nested_wake_list = 0;
-	    }
-	  } else {
-	    while(!local_notifications.empty()) {
-	      EventWaiter *ew = local_notifications.pop_front();
-	      ew->event_triggered(true /*poisoned*/);
-	    }
-	  }
-	}
+	if(!local_notifications.empty())
+	  get_runtime()->event_triggerer.trigger_event_waiters(local_notifications,
+							       POISON_FIXME,
+							       TimeLimit::relative(10000 /*10 us*/));
 
 	// now do remote notifications
 	for(std::vector<RemoteNotification>::const_iterator it = remote_notifications.begin();
@@ -2791,26 +2860,10 @@ static void *bytedup(const void *data, size_t datalen)
       }
 
       // with lock released, perform any local notifications
-      if(!local_notifications.empty()) {
-	if(!POISON_FIXME) {
-	  if(ThreadLocal::nested_wake_list != 0) {
-	    // append our waiters for caller to handle rather than recursing
-	    ThreadLocal::nested_wake_list->absorb_append(local_notifications);
-	  } else {
-	    ThreadLocal::nested_wake_list = &local_notifications;  // avoid recursion
-	    while(!local_notifications.empty()) {
-	      EventWaiter *ew = local_notifications.pop_front();
-	      ew->event_triggered(false /*!poisoned*/);
-	    }
-	    ThreadLocal::nested_wake_list = 0;
-	  }
-	} else {
-	  while(!local_notifications.empty()) {
-	    EventWaiter *ew = local_notifications.pop_front();
-	    ew->event_triggered(true /*poisoned*/);
-	  }
-	}
-      }
+      if(!local_notifications.empty())
+	get_runtime()->event_triggerer.trigger_event_waiters(local_notifications,
+							     POISON_FIXME,
+							     TimeLimit::relative(10000 /*10 us*/));
     }
 
     bool BarrierImpl::get_result(gen_t result_gen, void *value, size_t value_size)

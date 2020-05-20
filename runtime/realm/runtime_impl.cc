@@ -1199,6 +1199,7 @@ namespace Realm {
       sampling_profiler.configure_from_cmdline(cmdline, *core_reservations);
 
       bgwork.configure_from_cmdline(cmdline);
+      event_triggerer.add_to_manager(&bgwork);
 
       // initialize barrier timestamp
       BarrierImpl::barrier_adjustment_timestamp.store((((Barrier::timestamp_t)(Network::my_node_id)) << BarrierImpl::BARRIER_TIMESTAMP_NODEID_SHIFT) + 1);
@@ -2175,6 +2176,9 @@ namespace Realm {
 	  it++)
 	(*it)->detach(this, network_segments);
 
+#ifdef DEBUG_REALM
+      event_triggerer.shutdown_work_item();
+#endif
       bgwork.stop_dedicated_workers();
 
       // tear down the active message manager

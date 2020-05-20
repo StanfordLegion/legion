@@ -337,6 +337,7 @@ namespace Realm {
       CoreReservationSet *core_reservations;
       BackgroundWorkManager bgwork;
       IncomingMessageManager *message_manager;
+      EventTriggerNotifier event_triggerer;
 
       OperationTable optable;
 
