@@ -16152,7 +16152,6 @@ namespace Legion {
       assert(currently_active);
       currently_active = false;
 #endif
-      invalidate_logical_states();
       invalidate_version_managers();
       if (parent == NULL)
         context->runtime->release_tree_instances(handle.get_tree_id());
@@ -17366,7 +17365,6 @@ namespace Legion {
       assert(currently_active);
       currently_active = false;
 #endif
-      invalidate_logical_states();
       invalidate_version_managers();
       // Remove gc references on all of our child nodes
       // We should not need a lock at this point since nobody else should
