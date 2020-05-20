@@ -16196,7 +16196,7 @@ namespace Legion {
         // same field index will record dependences on anything before
         if (invalidate_tree)
         {
-          DeletionInvalidator invalidator(ctx, user.field_mask);
+          CurrentInvalidator invalidator(ctx, false/*users only*/);
           visit_node(&invalidator);
         }
         else
@@ -17058,7 +17058,6 @@ namespace Legion {
       assert(currently_active);
       currently_active = false;
 #endif
-      invalidate_logical_states();
       invalidate_version_managers();
       if (parent == NULL)
         context->runtime->release_tree_instances(handle.get_tree_id());
@@ -17294,27 +17293,36 @@ namespace Legion {
           std::map<LegionColor,PartitionNode*> children;
           // Need to hold the lock when reading from 
           // the color map or the valid map
-          if (traverser->visit_only_valid())
           {
             AutoLock n_lock(node_lock,1,false/*exclusive*/);
-            children = color_map;
-          }
-          else
-          {
-            AutoLock n_lock(node_lock,1,false/*exclusive*/);
-            children = color_map;
+            for (std::map<LegionColor,PartitionNode*>::const_iterator it = 
+                  color_map.begin(); it != color_map.end(); it++)
+            {
+              children.insert(*it);
+              it->second->add_base_resource_ref(REGION_TREE_REF);
+            }
           }
           for (std::map<LegionColor,PartitionNode*>::const_iterator it = 
                 children.begin(); it != children.end(); it++)
           {
-            bool result = it->second->visit_node(traverser);
+            const bool result = it->second->visit_node(traverser);
+            if (it->second->remove_base_resource_ref(REGION_TREE_REF))
+              delete it->second;
             continue_traversal = continue_traversal && result;
             if (!result && break_early)
+            {
+              it++;
+              while (it != children.end())
+              {
+                if (it->second->remove_base_resource_ref(REGION_TREE_REF))
+                  delete it->second;
+                it++;
+              }
               break;
+            }
           }
         }
       }
-      traverser->postvisit_region(this);
       return continue_traversal;
     }
 
@@ -18263,7 +18271,6 @@ namespace Legion {
       assert(currently_active);
       currently_active = false;
 #endif
-      invalidate_logical_states();
       invalidate_version_managers();
       // Remove gc references on all of our child nodes
       // We should not need a lock at this point since nobody else should
@@ -18501,7 +18508,6 @@ namespace Legion {
           }
         }
       }
-      traverser->postvisit_partition(this);
       return continue_traversal;
     }
 

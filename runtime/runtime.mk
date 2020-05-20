@@ -876,6 +876,8 @@ INSTALL_HEADERS += legion.h \
 		   realm/custom_serdez.inl \
 		   realm/sparsity.h \
 		   realm/sparsity.inl \
+		   realm/subgraph.h \
+		   realm/subgraph.inl \
 		   realm/dynamic_templates.h \
 		   realm/dynamic_templates.inl \
 		   realm/serialize.h \

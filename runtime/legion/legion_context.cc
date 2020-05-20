@@ -2248,6 +2248,7 @@ namespace Legion {
       // Switch over the executing processor to the one
       // that has actually been assigned to run this task.
       executing_processor = Processor::get_executing_processor();
+      owner_task->current_proc = executing_processor;
       if (runtime->legion_spy_enabled)
         LegionSpy::log_task_processor(get_unique_id(), executing_processor.id);
 #ifdef DEBUG_LEGION
@@ -19949,6 +19950,7 @@ namespace Legion {
 #endif
       rt = this->runtime->external;
       executing_processor = Processor::get_executing_processor();
+      owner_task->current_proc = executing_processor;
 #ifdef DEBUG_LEGION
       log_task.debug("Task %s (ID %lld) inlining on processor " IDFMT "",
                     get_task_name(), get_unique_id(), executing_processor.id);

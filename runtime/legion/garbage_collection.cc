@@ -290,7 +290,11 @@ namespace Legion {
               (__sync_fetch_and_add(&gc_references, 0) == 0))
             has_gc_references = false;
           else
+          {
+            if (!reentrant)
+              reentrant_event = RtEvent::NO_RT_EVENT;
             break;
+          }
           if (reentrant)
           {
             reentrant_update = true;
@@ -425,7 +429,11 @@ namespace Legion {
               (__sync_fetch_and_add(&valid_references, 0) == 0))
             has_valid_references = false;
           else
+          {
+            if (!reentrant)
+              reentrant_event = RtEvent::NO_RT_EVENT;
             break;
+          }
           if (reentrant)
           {
             reentrant_update = true;
@@ -703,7 +711,11 @@ namespace Legion {
           else
             finder->second += cnt;
           if (gc_references > cnt)
+          {
+            if (!reentrant)
+              reentrant_event = RtEvent::NO_RT_EVENT;
             return;
+          }
 #ifdef DEBUG_LEGION
           assert(!has_gc_references);
 #endif
@@ -782,7 +794,11 @@ namespace Legion {
           else
             finder->second += cnt;
           if (gc_references > cnt)
+          {
+            if (!reentrant)
+              reentrant_event = RtEvent::NO_RT_EVENT;
             return;
+          }
 #ifdef DEBUG_LEGION
           assert(!has_gc_references);
 #endif
@@ -864,7 +880,11 @@ namespace Legion {
           if (finder->second == 0)
             detailed_base_gc_references.erase(finder);
           if (gc_references > 0)
+          {
+            if (!reentrant)
+              reentrant_event = RtEvent::NO_RT_EVENT;
             return false;
+          }
           has_gc_references = false;
           if (reentrant)
           {
@@ -939,7 +959,11 @@ namespace Legion {
           if (finder->second == 0)
             detailed_nested_gc_references.erase(finder);
           if (gc_references > 0)
+          {
+            if (!reentrant)
+              reentrant_event = RtEvent::NO_RT_EVENT;
             return false;
+          }
           has_gc_references = false;
           if (reentrant)
           {
@@ -1009,7 +1033,11 @@ namespace Legion {
           else
             finder->second += cnt;
           if (valid_references > cnt)
+          {
+            if (!reentrant)
+              reentrant_event = RtEvent::NO_RT_EVENT;
             return;
+          }
 #ifdef DEBUG_LEGION
           assert(!has_valid_references);
 #endif
@@ -1087,7 +1115,11 @@ namespace Legion {
           else
             finder->second += cnt;
           if (valid_references > cnt)
+          {
+            if (!reentrant)
+              reentrant_event = RtEvent::NO_RT_EVENT;
             return;
+          }
 #ifdef DEBUG_LEGION
           assert(!has_valid_references);
 #endif
@@ -1170,7 +1202,11 @@ namespace Legion {
           if (finder->second == 0)
             detailed_base_valid_references.erase(finder);
           if (valid_references > 0)
+          {
+            if (!reentrant)
+              reentrant_event = RtEvent::NO_RT_EVENT;
             return false;
+          }
           has_valid_references = false;
           if (reentrant)
           {
@@ -1245,7 +1281,11 @@ namespace Legion {
           if (finder->second == 0)
             detailed_nested_valid_references.erase(finder);
           if (valid_references > 0)
+          {
+            if (!reentrant)
+              reentrant_event = RtEvent::NO_RT_EVENT;
             return false;
+          }
           has_valid_references = false;
           if (reentrant)
           {
