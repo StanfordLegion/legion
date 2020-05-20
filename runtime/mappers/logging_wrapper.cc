@@ -79,33 +79,32 @@ class MessageBuffer {
 
 LoggingWrapper::LoggingWrapper(Mapper* mapper)
     : ForwardingMapper(mapper) {
+  MessageBuffer buf(runtime, NULL);
   Machine machine = Machine::get_machine();
   AddressSpace rank = Processor::get_executing_processor().address_space();
-  std::cout << "Memories on rank " << rank << ":" << std::endl;
+  buf.line() << "Memories on rank " << rank << ":";
   Machine::MemoryQuery mem_query(machine);
   mem_query.local_address_space();
   for (Machine::MemoryQuery::iterator it = mem_query.begin();
        it != mem_query.end(); ++it) {
-    std::cout << "  " << *it << " (" << to_string(it->kind()) << ")"
-              << std::endl;
+    buf.line() << "  " << *it << " (" << to_string(it->kind()) << ")";
   }
-  std::cout << "Processors on rank " << rank << ":" << std::endl;
+  buf.line() << "Processors on rank " << rank << ":";
   Machine::ProcessorQuery proc_query(machine);
   proc_query.local_address_space();
   for (Machine::ProcessorQuery::iterator pit = proc_query.begin();
        pit != proc_query.end(); ++pit) {
-    std::cout << "  " << *pit << " (" << to_string(pit->kind()) << ") can see";
+    std::stringstream& line = buf.line();
+    line << "  " << *pit << " (" << to_string(pit->kind()) << ") can see";
     Machine::MemoryQuery mem_query(Machine::get_machine());
     mem_query.has_affinity_to(*pit);
     for (Machine::MemoryQuery::iterator mit = mem_query.begin();
          mit != mem_query.end(); ++mit) {
       Machine::AffinityDetails details;
       machine.has_affinity(*pit, *mit, &details);
-      std::cout << " " << *mit << "(bw=" << details.bandwidth << ")";
+      line << " " << *mit << "(bw=" << details.bandwidth << ")";
     }
-    std::cout << std::endl;
   }
-  std::cout.flush();
 }
 
 LoggingWrapper::~LoggingWrapper() {
