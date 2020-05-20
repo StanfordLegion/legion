@@ -4733,8 +4733,14 @@ extern "C" {
   /**
    * @see Legion::Runtime::wait_for_shutdown()
    */
-  void
+  int 
   legion_runtime_wait_for_shutdown(void);
+
+  /**
+   * @see Legion::Runtime::set_return_code()
+   */
+  void
+  legion_runtime_set_return_code(int return_code);
 
   /**
    * @see Legion::Runtime::set_top_level_task_id()
