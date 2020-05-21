@@ -99,6 +99,16 @@ namespace Realm {
       return Processor::NO_PROC;
     }
 
+    /*static*/ void Processor::free_group(const Processor& pg)
+    {
+      ProcessorGroup *grp = get_runtime()->get_procgroup_impl(pg);
+      //first we remove members and properly clean up task queues from members list
+      grp->remove_group_members();
+      
+      //return group to free list
+      get_runtime()->local_proc_group_free_list->free_entry( grp );
+    }
+  
     void Processor::get_group_members(std::vector<Processor>& members)
     {
       // if we're a plain old processor, the only member of our "group" is ourself
@@ -112,6 +122,23 @@ namespace Realm {
       ProcessorGroup *grp = get_runtime()->get_procgroup_impl(*this);
       grp->get_group_members(members);
     }
+
+    void ProcessorGroup::remove_group_members()
+    {
+      // can only be performed on owner node
+      assert(NodeID(ID(me).pgroup_owner_node()) == Network::my_node_id); // TODO check with Sean
+      for(std::vector<ProcessorImpl*>::iterator it = members.begin();
+          it != members.end();
+          it++) {
+        ProcessorImpl *m_impl = *it;
+        m_impl->remove_group(this);
+      }
+      members.clear(); //if reused we clear previous members
+      members_requested = false;
+      members_valid = false;
+      task_queue.free_gauge();
+    }
+
 
     int Processor::get_num_cores(void) const
     {
@@ -626,6 +653,10 @@ namespace Realm {
       task_queue.set_gauge(ready_task_count);
     }
 
+    void ProcessorGroup::remove_group(ProcessorGroup *group) {
+      assert(0);
+    }
+
     void ProcessorGroup::get_group_members(std::vector<Processor>& member_list)
     {
       assert(members_valid);
@@ -836,7 +867,13 @@ namespace Realm {
       amsg.commit();
     }
 
-  
+    void RemoteProcessor::remove_group(ProcessorGroup *group)
+    {
+      // not currently supported
+      assert(0);
+    }
+
+
   ////////////////////////////////////////////////////////////////////////
   //
   // class LocalTaskProcessor
@@ -884,6 +921,12 @@ namespace Realm {
   {
     // add the group's task queue to our scheduler too
     sched->add_task_queue(&group->task_queue);
+  }
+
+  void LocalTaskProcessor::remove_group(ProcessorGroup *group)
+  {
+    // remove the group's task queue from our scheduler
+    sched->remove_task_queue(&group->task_queue);
   }
 
   void LocalTaskProcessor::enqueue_task(Task *task)

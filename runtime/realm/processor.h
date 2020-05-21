@@ -64,6 +64,10 @@ namespace Realm {
       AddressSpace address_space(void) const;
 
       static Processor create_group(const std::vector<Processor>& members);
+
+      //Destroy a processor group freeing the resources it occupies
+      static void free_group(const Processor& pg);
+
       void get_group_members(std::vector<Processor>& members);
 
       int get_num_cores(void) const;

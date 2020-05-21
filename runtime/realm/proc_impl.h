@@ -68,6 +68,8 @@ namespace Realm {
 
       virtual void add_to_group(ProcessorGroup *group) = 0;
 
+      virtual void remove_group(ProcessorGroup *group) = 0;
+
       virtual void register_task(Processor::TaskFuncID func_id,
 				 CodeDescriptor& codedesc,
 				 const ByteArrayRef& user_data);
@@ -144,6 +146,8 @@ namespace Realm {
 
       virtual void add_to_group(ProcessorGroup *group);
 
+      virtual void remove_group(ProcessorGroup *group);
+
       // runs an internal Realm operation on this processor
       virtual void add_internal_task(InternalTask *task);
 
@@ -215,6 +219,8 @@ namespace Realm {
 
       virtual void add_to_group(ProcessorGroup *group);
 
+      virtual void remove_group(ProcessorGroup *group);
+
       virtual void spawn_task(Processor::TaskFuncID func_id,
 			      const void *args, size_t arglen,
                               const ProfilingRequestSet &reqs,
@@ -236,12 +242,16 @@ namespace Realm {
 
       void set_group_members(const std::vector<Processor>& member_list);
 
+      void remove_group_members();
+
       void get_group_members(std::vector<Processor>& member_list);
 
       virtual void enqueue_task(Task *task);
       virtual void enqueue_tasks(Task::TaskList& tasks);
 
       virtual void add_to_group(ProcessorGroup *group);
+
+      virtual void remove_group(ProcessorGroup *group);
 
       virtual void spawn_task(Processor::TaskFuncID func_id,
 			      const void *args, size_t arglen,
