@@ -62,7 +62,7 @@ namespace Realm {
 
   inline SubgraphDefinition::TaskDesc::TaskDesc()
     : proc(Processor::NO_PROC)
-    , task_id(-1)
+    , task_id(static_cast<Processor::TaskFuncID>(-1))
     , priority(0)
   {}
 
