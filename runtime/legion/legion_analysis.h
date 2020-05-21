@@ -2433,6 +2433,8 @@ namespace Legion {
       FieldMaskSet<CopyFillGuard> update_guards;
       // Keep track of the refinements that need to be done
       FieldMaskSet<EquivalenceSet> pending_refinements;
+      // Record which remote eq sets are being refined for the first time
+      std::set<EquivalenceSet*> remote_first_refinements;
       // Keep an event to track when the refinements are ready
       RtUserEvent transition_event;
       // An event to track when the refinement task is done on the owner

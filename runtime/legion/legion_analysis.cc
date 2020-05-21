@@ -8280,6 +8280,10 @@ namespace Legion {
           // When we wake up we have to do all the checks again
           // in case there were fields that weren't refined before
           // but are (partially or being) refined now
+#ifdef DEBUG_LEGION
+          // Should never be migrated while we are waiting here
+          assert(is_logical_owner());
+#endif
         }
         else
           first_pass = false;
@@ -12174,6 +12178,8 @@ namespace Legion {
     {
       RtUserEvent to_trigger;
       FieldMaskSet<EquivalenceSet> to_perform;
+      std::set<EquivalenceSet*> remote_first_refs;
+      std::set<RtEvent> remote_subsets_informed;
       do 
       {
         std::set<RtEvent> refinements_done;
@@ -12192,7 +12198,12 @@ namespace Legion {
             rez.serialize(it->first->did);
             rez.serialize(done_event);
             // Determine whether this is the inital refinement or not
-            if (subsets.find(it->first) == subsets.end())
+            // VERY IMPORTANT! You cannot use the subsets data structure
+            // to test this for the case where we constructed a KD-tree
+            // to build intermediate nodes into the refinement tree to
+            // avoid exceeding our maximum fanout. Instead we use the 
+            // remote_first_refs data structure to test this
+            if (remote_first_refs.find(it->first) != remote_first_refs.end())
               rez.serialize<bool>(true); // initial refinement
             else
               rez.serialize<bool>(false); // not initial refinement
@@ -12233,6 +12244,7 @@ namespace Legion {
             if (!subsets.insert(it->first, it->second))
               it->first->remove_nested_resource_ref(did);
           to_perform.clear();
+          remote_first_refs.clear();
           // See if there was anyone waiting for us to be done
           if (transition_event.exists())
           {
@@ -12363,11 +12375,10 @@ namespace Legion {
           }
           // If we're done refining then send updates to any
           // remote sets informing them of the complete set of subsets
-          std::set<RtEvent> remote_subsets_informed;
-          if (!remote_subsets.empty())
+          if (!remote_subsets.empty() && !complete_subsets.empty())
           {
-            for (std::set<AddressSpaceID>::const_iterator it = 
-                  remote_subsets.begin(); it != remote_subsets.end(); it++)
+            for (std::set<AddressSpaceID>::const_iterator rit = 
+                  remote_subsets.begin(); rit != remote_subsets.end(); rit++)
             {
               const RtUserEvent informed = Runtime::create_rt_user_event();
               Serializer rez;
@@ -12384,7 +12395,7 @@ namespace Legion {
                   rez.serialize(it->second);
                 }
               }
-              runtime->send_equivalence_set_subset_update(*it, rez);
+              runtime->send_equivalence_set_subset_update(*rit, rez);
               remote_subsets_informed.insert(informed);
             }
           }
@@ -12471,19 +12482,6 @@ namespace Legion {
             else
               it++;
           }
-          // Wait for everyone to be informed before we record
-          // that we are done refining
-          if (!remote_subsets_informed.empty())
-          {
-            const RtEvent wait_on = 
-              Runtime::merge_events(remote_subsets_informed);
-            if (wait_on.exists() && !wait_on.has_triggered())
-            {
-              eq.release();
-              wait_on.wait();
-              eq.reacquire();
-            }
-          }
         } 
         // See if we have more refinements to do
         if (pending_refinements.empty())
@@ -12500,12 +12498,18 @@ namespace Legion {
 #endif
           refining_fields = pending_refinements.get_valid_mask();
           to_perform.swap(pending_refinements);
+          remote_first_refs.swap(remote_first_refinements);
         }
       } while (!to_perform.empty());
 #ifdef DEBUG_LEGION
       assert(to_trigger.exists());
 #endif
-      Runtime::trigger_event(to_trigger);
+      // Make sure that everyone is informed before we return
+      if (!remote_subsets_informed.empty())
+        Runtime::trigger_event(to_trigger,
+            Runtime::merge_events(remote_subsets_informed));
+      else
+        Runtime::trigger_event(to_trigger);
     }
 
     //--------------------------------------------------------------------------
@@ -12744,6 +12748,9 @@ namespace Legion {
         (*subset_exprs)[expr] = subset;
         if (pending_refinements.insert(subset, mask))
           subset->add_nested_resource_ref(did);
+        // If this is going to be a remote first refinement record it
+        if (source != local_space)
+          remote_first_refinements.insert(subset);
       }
       else
       {
