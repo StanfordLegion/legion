@@ -31,6 +31,10 @@ namespace Realm {
     // if true, the number and min/max/avg/stddev duration of handler per
     //  message type is recorded and printed
     bool profile_activemsg_handlers = false;
+
+    // the maximum time we're willing to spend on inline message
+    //  handlers
+    long long max_inline_message_time = 5000 /* nanoseconds*/;
   };
 
 
@@ -40,20 +44,18 @@ namespace Realm {
   //
 
   ActiveMessageHandlerStats::ActiveMessageHandlerStats(void)
-    : count(0), sum(0), sum2(0), minval(0), maxval(0)
+    : count(0), sum(0), sum2(0), minval(~size_t(0)), maxval(0)
   {}
 
   void ActiveMessageHandlerStats::record(long long t_start, long long t_end)
   {
-    // TODO: thread safety?
     long long delta = t_end - t_start;
-    if(delta < 0) delta = 0;
     size_t val = (delta > 0) ? delta : 0;
-    if(!count || (val < minval)) minval = val;
-    if(!count || (val > maxval)) maxval = val;
-    count++;
-    sum += val;
-    sum2 += val * val; // TODO: smarter math to avoid overflow
+    count.fetch_add(1);
+    minval.fetch_min(val);
+    maxval.fetch_max(val);
+    sum.fetch_add(val);
+    sum2.fetch_add(val * val); // TODO: smarter math to avoid overflow
   }
 
 
@@ -99,18 +101,22 @@ namespace Realm {
     if(Config::profile_activemsg_handlers) {
       for(size_t i = 0; i < handlers.size(); i++) {
 	const ActiveMessageHandlerStats& stats = handlers[i].stats;
-	if(stats.count == 0)
+	size_t count = stats.count.load();
+	if(count == 0)
 	  continue;
 
-	double avg = double(stats.sum) / double(stats.count);
-	double stddev = sqrt((double(stats.sum2) / double(stats.count)) -
-			     (avg * avg));
+	size_t sum = stats.sum.load();
+	size_t sum2 = stats.sum2.load();
+	size_t minval = stats.minval.load();
+	size_t maxval = stats.maxval.load();
+	double avg = double(sum) / double(count);
+	double stddev = sqrt((double(sum2) / double(count)) - (avg * avg));
 	log_amhandler.print() << "handler " << std::hex << i << std::dec << ": " << handlers[i].name
-			      << " count=" << stats.count
+			      << " count=" << count
 			      << " avg=" << avg
 			      << " dev=" << stddev
-			      << " min=" << stats.minval
-			      << " max=" << stats.maxval;
+			      << " min=" << minval
+			      << " max=" << maxval;
       }
     }
   }
@@ -137,6 +143,10 @@ namespace Realm {
       e.name = nextreg->name;
       e.must_free = nextreg->must_free;
       e.handler = nextreg->get_handler();
+      e.handler_notimeout = nextreg->get_handler_notimeout();
+      // at least one of the two above must be non-null
+      assert((e.handler != 0) || (e.handler_notimeout != 0));
+      e.handler_inline = nextreg->get_handler_inline();
       handlers.push_back(e);
     }
 
@@ -145,7 +155,10 @@ namespace Realm {
     // handler ids are the same everywhere, so only log on node 0
     if(Network::my_node_id == 0)
       for(size_t i = 0; i < handlers.size(); i++)
-	log_amhandler.info() << "handler " << std::hex << i << std::dec << ": " << handlers[i].name;
+	log_amhandler.info() << "handler " << std::hex << i << std::dec
+			     << ": " << handlers[i].name
+			     << (handlers[i].handler ? " (timeout)" : "")
+			     << (handlers[i].handler_inline ? " (inline)" : "");
   }
 
   /*static*/ ActiveMessageHandlerRegBase *ActiveMessageHandlerTable::pending_handlers = 0;
@@ -216,7 +229,8 @@ namespace Realm {
 						    const void *payload, size_t payload_size,
 						    int payload_mode,
 						    CallbackFnptr callback_fnptr,
-						    CallbackData callback_data)
+						    CallbackData callback_data,
+						    TimeLimit work_until)
   {
 #ifdef DEBUG_INCOMING
     printf("adding incoming message from %d\n", sender);
@@ -225,7 +239,26 @@ namespace Realm {
     // look up which message this is
     ActiveMessageHandlerTable::HandlerEntry *handler = activemsg_handler_table.lookup_message_handler(msgid);
 
-    // TODO: try to handle inline
+    // if we have an inline handler and enough time to run it, give it
+    //  a go
+    if((handler->handler_inline != 0) &&
+       (Config::max_inline_message_time > 0) &&
+       !work_until.will_expire(Config::max_inline_message_time)) {
+      long long t_start = 0;
+      if(Config::profile_activemsg_handlers)
+	t_start = Clock::current_time_in_nanoseconds();
+
+      if((handler->handler_inline)(sender, hdr, payload, payload_size,
+				   TimeLimit::relative(Config::max_inline_message_time))) {
+	if(Config::profile_activemsg_handlers) {
+	  long long t_end = Clock::current_time_in_nanoseconds();
+	  handler->stats.record(t_start, t_end);
+	}
+	if(payload_mode == PAYLOAD_FREE)
+	  free(const_cast<void *>(payload));
+	return true;
+      }
+    }
 
     // can't handle inline - need to create a Message object for it
     // TODO: recycle these!
@@ -425,6 +458,9 @@ namespace Realm {
 
     ThreadLocal::in_message_handler = true;
 
+    Message *skipped_messages = 0;
+    Message **skipped_tail = &skipped_messages;
+
     while(current_msg) {
       Message *next_msg = current_msg->next_msg;
 #ifdef DETAILED_MESSAGE_TIMING
@@ -432,23 +468,58 @@ namespace Realm {
       CurrentTime start_time;
 #endif
       long long t_start = 0;
-      if(Config::profile_activemsg_handlers)
+      bool do_profile = Config::profile_activemsg_handlers;
+
+      // do we have a handler that understands time limits?
+      if(current_msg->handler->handler != 0) {
+	if(do_profile)
+	  t_start = Clock::current_time_in_nanoseconds();
+
+	(current_msg->handler->handler)(current_msg->sender,
+					current_msg->hdr,
+					current_msg->payload,
+					current_msg->payload_size,
+					work_until);
+      } else {
+	// estimate how long this handler will take, clamping at a
+	//  semi-arbitrary 20us
+	long long t_estimate = 20000;
+	{
+	  size_t num = current_msg->handler->stats.sum.load();
+	  size_t den = current_msg->handler->stats.count.load();
+	  if(num < (den * t_estimate))
+	    t_estimate = num / den;
+	}
+	if(work_until.will_expire(t_estimate)) {
+	  // skip this message instead of handling it now
+	  *skipped_tail = current_msg;
+	  skipped_tail = &current_msg->next_msg;
+	  current_msg = current_msg->next_msg;
+	  // skipping things can take time too, so check if we're
+	  //  completely out of time
+	  if(work_until.is_expired()) break;
+	  continue;
+	}
+
+	// always profile notimeout handlers
+	do_profile = true;
 	t_start = Clock::current_time_in_nanoseconds();
 
-      (current_msg->handler->handler)(current_msg->sender,
-				      current_msg->hdr,
-				      current_msg->payload,
-				      current_msg->payload_size);
+	(current_msg->handler->handler_notimeout)(current_msg->sender,
+						  current_msg->hdr,
+						  current_msg->payload,
+						  current_msg->payload_size);
+      }
 
       long long t_end = 0;
-      if(Config::profile_activemsg_handlers)
+      if(do_profile)
 	t_end = Clock::current_time_in_nanoseconds();
 
       if(current_msg->callback_fnptr)
 	(current_msg->callback_fnptr)(current_msg->sender,
 				      current_msg->callback_data);
 
-      if(Config::profile_activemsg_handlers)
+      if(do_profile)
 	current_msg->handler->stats.record(t_start, t_end);
 #ifdef DETAILED_MESSAGE_TIMING
       detailed_message_timing.record(timing_idx,
@@ -470,8 +541,14 @@ namespace Realm {
 
     ThreadLocal::in_message_handler = false;
 
+    // anything we didn't get to goes on the end of the skipped list
+    if(current_msg) {
+      *skipped_tail = current_msg;
+      skipped_tail = current_tail;
+    } else
+      *skipped_tail = 0;
     // put back whatever we had left, if anything - this'll requeue us if needed
-    return_messages(sender, current_msg, current_tail);
+    return_messages(sender, skipped_messages, skipped_tail);
   }
 
   void IncomingMessageManager::handler_thread_loop(void)
@@ -502,10 +579,17 @@ namespace Realm {
 	if(Config::profile_activemsg_handlers)
 	  t_start = Clock::current_time_in_nanoseconds();
 
-	(current_msg->handler->handler)(current_msg->sender,
-					current_msg->hdr,
-					current_msg->payload,
-					current_msg->payload_size);
+	if(current_msg->handler->handler != 0)
+	  (current_msg->handler->handler)(current_msg->sender,
+					  current_msg->hdr,
+					  current_msg->payload,
+					  current_msg->payload_size,
+					  TimeLimit());
+	else
+	  (current_msg->handler->handler_notimeout)(current_msg->sender,
+						    current_msg->hdr,
+						    current_msg->payload,
+						    current_msg->payload_size);
 
 	long long t_end = 0;
 	if(Config::profile_activemsg_handlers)

@@ -228,18 +228,90 @@ namespace Realm {
     ActiveMessageHandlerTable::append_handler_reg(this);
   }
 
+  namespace HandlerWrappers {
+    // this type only exists if you can supply a value of the right type
+    template <typename T, T fnptr> struct HasRightType {};
+
+    template <typename T, void (*HANDLER)(NodeID, const T&, const void *, size_t, TimeLimit)>
+    static void wrap_handler(NodeID sender, const void *header,
+			     const void *payload, size_t payload_size,
+			     TimeLimit work_until)
+    {
+      (*HANDLER)(sender, *reinterpret_cast<const T *>(header),
+		 payload, payload_size, work_until);
+    }
+
+    template <typename T, void (*HANDLER)(NodeID, const T&, const void *, size_t)>
+    static void wrap_handler_notimeout(NodeID sender, const void *header,
+				       const void *payload, size_t payload_size)
+    {
+      (*HANDLER)(sender, *reinterpret_cast<const T *>(header),
+		 payload, payload_size);
+    }
+
+    template <typename T, bool (*HANDLER)(NodeID, const T&, const void *, size_t, TimeLimit)>
+    static bool wrap_handler_inline(NodeID sender, const void *header,
+				    const void *payload, size_t payload_size,
+				    TimeLimit work_until)
+    {
+      return (*HANDLER)(sender, *reinterpret_cast<const T *>(header),
+			payload, payload_size, work_until);
+    }
+
+    // thsee overloads only exist if we have a handle_message method and it
+    //  has the desired type
+    template <typename T, typename T2>
+    ActiveMessageHandlerTable::MessageHandler get_handler(HasRightType<void (*)(NodeID, const T&, const void *, size_t, TimeLimit), &T2::handle_message> *)
+    {
+      return &wrap_handler<T, &T2::handle_message>;
+    }
+    template <typename T, typename T2>
+    ActiveMessageHandlerTable::MessageHandlerNoTimeout get_handler_notimeout(HasRightType<void (*)(NodeID, const T&, const void *, size_t), &T2::handle_message> *)
+    {
+      return &wrap_handler_notimeout<T, &T2::handle_message>;
+    }
+    template <typename T, typename T2>
+    ActiveMessageHandlerTable::MessageHandlerInline get_handler_inline(HasRightType<bool (*)(NodeID, const T&, const void *, size_t, TimeLimit), &T2::handle_inline> *)
+    {
+      return &wrap_handler_inline<T, &T2::handle_inline>;
+    }
+
+    // these return null pointers if the ones above do not match
+    template <typename T, typename T2>
+    ActiveMessageHandlerTable::MessageHandler get_handler(...)
+    {
+      return 0;
+    }
+    template <typename T, typename T2>
+    ActiveMessageHandlerTable::MessageHandlerNoTimeout get_handler_notimeout(...)
+    {
+      return 0;
+    }
+    template <typename T, typename T2>
+    ActiveMessageHandlerTable::MessageHandlerInline get_handler_inline(...)
+    {
+      return 0;
+    }
+
+  };
+
   template <typename T, typename T2>
   ActiveMessageHandlerTable::MessageHandler ActiveMessageHandlerReg<T, T2>::get_handler(void) const
   {
-    return &handler_wrapper;
+    return HandlerWrappers::template get_handler<T,T2>(0);
   }
 
   template <typename T, typename T2>
-  /*static*/ void ActiveMessageHandlerReg<T, T2>::handler_wrapper(NodeID sender, const void *header,
-								  const void *payload, size_t payload_size)
+  ActiveMessageHandlerTable::MessageHandlerNoTimeout ActiveMessageHandlerReg<T, T2>::get_handler_notimeout(void) const
   {
-    T2::handle_message(sender, *reinterpret_cast<const T *>(header),
-		       payload, payload_size);
+    return HandlerWrappers::template get_handler_notimeout<T,T2>(0);
   }
+
+  template <typename T, typename T2>
+  ActiveMessageHandlerTable::MessageHandlerInline ActiveMessageHandlerReg<T, T2>::get_handler_inline(void) const
+  {
+    return HandlerWrappers::template get_handler_inline<T,T2>(0);
+  }
+
 
 };

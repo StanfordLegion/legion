@@ -251,9 +251,15 @@ size_t SrcDataPool::max_spill_bytes = 0;  // default = no limit
 size_t SrcDataPool::print_spill_threshold = 1 << 30;  // default = 1 GB
 size_t SrcDataPool::print_spill_step = 1 << 30;       // default = 1 GB
 
-// certain threads are exempt from the max spillage due to deadlock concerns
-namespace ThreadLocal {
-  REALM_THREAD_LOCAL bool always_allow_spilling = false;
+namespace Realm {
+  namespace ThreadLocal {
+    // certain threads are exempt from the max spillage due to deadlock concerns
+    REALM_THREAD_LOCAL bool always_allow_spilling = false;
+
+    // we need to tunnel information through calls into GASNet that
+    //  call GASNet active message handlers, so use TLS
+    REALM_THREAD_LOCAL TimeLimit *gasnet_work_until = 0;
+  };
 };
 
 // wrapper so we don't have to expose SrcDataPool implementation
@@ -495,8 +501,8 @@ bool SrcDataPool::alloc_spill_memory(size_t size_needed, int msgtype, Lock& held
     size_t new_spill_bytes = old_spill_bytes + size_needed;
 
     if((max_spill_bytes != 0) &&
-       !::ThreadLocal::always_allow_spilling &&
-       !Realm::ThreadLocal::in_message_handler &&
+       !ThreadLocal::always_allow_spilling &&
+       !ThreadLocal::in_message_handler &&
        (new_spill_bytes > max_spill_bytes))
       break;
 
@@ -2473,7 +2479,10 @@ static void handle_new_activemsg(gasnet_token_t token,
 						     buf, nbytes,
 						     PAYLOAD_KEEP,
 						     incoming_message_handled,
-						     reinterpret_cast<uintptr_t>(buf));
+						     reinterpret_cast<uintptr_t>(buf),
+						     ((ThreadLocal::gasnet_work_until != 0) ?
+						        *ThreadLocal::gasnet_work_until :
+						        TimeLimit()));
     if(handled) {
       // we need to call the callback ourselves
       incoming_message_handled(src, reinterpret_cast<uintptr_t>(buf));
@@ -2678,6 +2687,9 @@ void EndpointManager::stop_threads(void)
 
 void EndpointManager::do_work(TimeLimit work_until)
 {
+  // make sure nested active mesage calls respect the time limit
+  ThreadLocal::gasnet_work_until = &work_until;
+
   push_messages(max_msgs_to_send, false /*!wait*/, work_until);
 
   // poll if we're not out of time
@@ -2691,6 +2703,9 @@ void EndpointManager::do_work(TimeLimit work_until)
     condvar.broadcast();
   } else
     make_active();
+
+  // relax the time limit again
+  ThreadLocal::gasnet_work_until = 0;
 }
 
 void EndpointManager::polling_worker_loop(void)

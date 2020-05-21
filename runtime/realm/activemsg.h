@@ -34,6 +34,10 @@ namespace Realm {
     // if true, the number and min/max/avg/stddev duration of handler per
     //  message type is recorded and printed
     extern bool profile_activemsg_handlers;
+
+    // the maximum time we're willing to spend on inline message
+    //  handlers
+    extern long long max_inline_message_time;
   };
 
   enum { PAYLOAD_NONE, // no payload in packet
@@ -106,7 +110,7 @@ namespace Realm {
   class ActiveMessageHandlerRegBase;
 
   struct ActiveMessageHandlerStats {
-    size_t count, sum, sum2, minval, maxval;
+    atomic<size_t> count, sum, sum2, minval, maxval;
 
     ActiveMessageHandlerStats(void);
     void record(long long t_start, long long t_end);
@@ -120,7 +124,13 @@ namespace Realm {
 
     typedef unsigned short MessageID;
     typedef void (*MessageHandler)(NodeID sender, const void *header,
-				   const void *payload, size_t payload_size);
+				   const void *payload, size_t payload_size,
+				   TimeLimit work_until);
+    typedef void (*MessageHandlerNoTimeout)(NodeID sender, const void *header,
+					    const void *payload, size_t payload_size);
+    typedef bool (*MessageHandlerInline)(NodeID sender, const void *header,
+					 const void *payload, size_t payload_size,
+					 TimeLimit work_until);
 
     template <typename T>
       MessageID lookup_message_id(void) const;
@@ -141,6 +151,8 @@ namespace Realm {
       const char *name;
       bool must_free;
       MessageHandler handler;
+      MessageHandlerNoTimeout handler_notimeout;
+      MessageHandlerInline handler_inline;
       ActiveMessageHandlerStats stats;
     };
 
@@ -158,6 +170,8 @@ namespace Realm {
   public:
     virtual ~ActiveMessageHandlerRegBase(void) {}
     virtual ActiveMessageHandlerTable::MessageHandler get_handler(void) const = 0;
+    virtual ActiveMessageHandlerTable::MessageHandlerNoTimeout get_handler_notimeout(void) const = 0;
+    virtual ActiveMessageHandlerTable::MessageHandlerInline get_handler_inline(void) const = 0;
 
     ActiveMessageHandlerTable::TypeHash hash;
     const char *name;
@@ -169,15 +183,34 @@ namespace Realm {
   class ActiveMessageHandlerReg : public ActiveMessageHandlerRegBase {
   public:
     ActiveMessageHandlerReg(void);
+
+    // when registering an active message handler, the following three methods
+    //  are looked for in class T2
+    // (a) void handle_message(NodeID, const T&, const void *, size_t, TimeLimit)
+    // (b) void handle_message(NodeID, const T&, const void *, size_t)
+    // (c) bool handle_inline(NodeID, const T&, const void *, size_t, TimeLimit)
+    //
+    // at least one of (a) or (b) must be present, with (a) being preferred
+    //
+    // if (c) is present, it will be used to attempt inline handling of
+    //  active messages as they arrive, with the following constraints:
+    //   (i) the handler must not block on any mutexes (trylocks are ok)
+    //   (ii) the handler must not perform dynamic memory allocation/frees
+    //   (iii) the handler must try very hard to stay within the specified
+    //          time limit
+    // if the inline handler is unable to satisfy these requirements, it should
+    //  not attempt to handle the message, returning 'false' and letting it be
+    //  queued as normal
+
+    // returns either the requested kind of handler or a null pointer if
+    //  it doesn't exist
     virtual ActiveMessageHandlerTable::MessageHandler get_handler(void) const;
+    virtual ActiveMessageHandlerTable::MessageHandlerNoTimeout get_handler_notimeout(void) const;
+    virtual ActiveMessageHandlerTable::MessageHandlerInline get_handler_inline(void) const;
 
     // this method does nothing, but can be called to force the instantiation
     //  of a handler registration object (needed when things are inside templates)
     void force_instantiation(void) {}
-
-  protected:
-    static void handler_wrapper(NodeID sender, const void *header,
-				const void *payload, size_t payload_size);
   };
 
   namespace ThreadLocal {
@@ -205,7 +238,8 @@ namespace Realm {
 			      const void *payload, size_t payload_size,
 			      int payload_mode,
 			      CallbackFnptr callback_fnptr,
-			      CallbackData callback_data);
+			      CallbackData callback_data,
+			      TimeLimit work_until);
 
     void start_handler_threads(size_t stack_size);
 

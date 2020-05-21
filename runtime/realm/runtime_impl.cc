@@ -1144,6 +1144,7 @@ namespace Realm {
       cp.add_option_int("-ll:machine_query_cache", Config::use_machine_query_cache);
       cp.add_option_int("-ll:defalloc", Config::deferred_instance_allocation);
       cp.add_option_int("-ll:amprofile", Config::profile_activemsg_handlers);
+      cp.add_option_int("-ll:aminline", Config::max_inline_message_time);
       cp.add_option_int("-ll:ahandlers", active_msg_handler_threads);
       cp.add_option_int("-ll:handler_bgwork", active_msg_handler_bgwork);
 

@@ -146,7 +146,8 @@ void AMPoll()
 						    PAYLOAD_COPY,
 						    payload, msg->payload_size,
 						    payload_mode,
-						    0, 0);
+						    0, 0,
+						    TimeLimit());
         }
 
         CHECK_MPI( MPI_Irecv(buf_recv_list[i_recv_list], 1024, MPI_CHAR, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &req_recv_list[i_recv_list]) );
