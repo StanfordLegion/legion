@@ -135,8 +135,11 @@ namespace Realm {
 
       void add_subscription(NotificationCallback *callback, priority_t higher_than = PRI_NEG_INF);
 
+      void remove_subscription(NotificationCallback *callback);
+
       void set_gauge(ProfilingGauges::AbsoluteRangeGauge<int> *new_gauge);
 
+      void free_gauge();
       // gets highest priority task available from any task queue in list
       static Task *get_best_task(const std::vector<TaskQueue *>& queues,
 				 int& task_priority);
@@ -172,6 +175,8 @@ namespace Realm {
       virtual ~ThreadedTaskScheduler(void);
 
       virtual void add_task_queue(TaskQueue *queue);
+
+      virtual void remove_task_queue(TaskQueue *queue);
 
       virtual void start(void) = 0;
       virtual void shutdown(void) = 0;
@@ -324,7 +329,10 @@ namespace Realm {
 
       virtual void add_task_queue(TaskQueue *queue);
 
+      virtual void remove_task_queue(TaskQueue *queue);
+
       virtual void start(void);
+
       virtual void shutdown(void);
 
       virtual void thread_starting(Thread *thread);
@@ -363,6 +371,8 @@ namespace Realm {
       virtual ~UserThreadTaskScheduler(void);
 
       virtual void add_task_queue(TaskQueue *queue);
+
+      virtual void remove_task_queue(TaskQueue *queue);
 
       virtual void start(void);
       virtual void shutdown(void);
