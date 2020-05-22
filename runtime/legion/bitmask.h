@@ -26,16 +26,13 @@
 #include <vector>
 #include <set>
 
-#ifdef __MACH__
-#define MASK_FMT "llx"
-#else
+#ifndef __MACH__
 // SJT: this comes first because some systems require __STDC_FORMAT_MACROS
 //  to be defined before inttypes.h is included anywhere
 #ifndef __STDC_FORMAT_MACROS
 #define __STDC_FORMAT_MACROS
 #endif
 #include <inttypes.h>
-#define MASK_FMT PRIx64
 #endif
 
 // Apple can go screw itself
@@ -970,31 +967,34 @@
     inline char* to_string(const uint64_t *bits, int count)
     //--------------------------------------------------------------------------
     {
-      int maxlen = ((((count + 63) >> 6) << 4) + 1);  // includes trailing \0
-      char *result = 
-        (char*)malloc(maxlen * sizeof(char));
-#if defined(LEGION_DEBUG) || defined(REALM_DEBUG)
+      int length = ((count + 3) >> 2) + 1; // includes trailing \0
+      char *result = (char*)malloc(length * sizeof(char));
+#ifdef DEBUG_LEGION
       assert(result != 0);
 #endif
-      char *p = result;
-      // special case for non-multiple-of-64
-      if((count & 63) != 0 && bits[count >> 6]) {
-        // each nibble (4 bits) takes one character
-        int nibbles = ((count & 63) + 3) >> 2;
-        snprintf(p, maxlen-(p-result), "%*.*" MASK_FMT, nibbles, nibbles, bits[count >> 6]);
-        p += nibbles;
-      }
-      // rest are whole words
-      int idx = (count >> 6);
-      while(idx > 0) {
-        if (bits[--idx] || idx == 0) {
-          snprintf(p, maxlen-(p-result), "%16.16" MASK_FMT, bits[idx]);
-          p += 16;
+      int index = 0;
+      int words = (count + 63) >> 6;
+      for (int w = 0; w < words; w++)
+      {
+        uint64_t word = bits[w];
+        for (int n = 0; n < 16; n++)
+        {
+          int nibble = word & 0xF;
+          if (nibble < 10)
+            result[index++] = '0' + nibble;
+          else
+            result[index++] = 'A' + (nibble-10);
+          if ((index * 4) >= count)
+            break;
+          word >>= 4;
         }
       }
+#ifdef DEBUG_LEGION
+      assert(index == (length-1));
+#endif
+      result[index] = '\0';
       return result;
     }
-#undef MASK_FMT
 
     /**
      * A helper class for determining alignment of types
