@@ -3115,8 +3115,8 @@ namespace Legion {
       // If the sum of the left and right equivalence sets 
       // are too big then build intermediate nodes for each one
       if (((left_set.size() + right_set.size()) > LEGION_MAX_BVH_FANOUT) &&
-          (left_set.size() < subsets.size()) && 
-          (right_set.size() < subsets.size()))
+          (left_set.size() < subsets.size()) && !left_set.empty() &&
+          (right_set.size() < subsets.size()) && !right_set.empty())
       {
         // Make a new equivalence class and record all the subsets
         const AddressSpaceID local_space = runtime->address_space;
@@ -3154,11 +3154,24 @@ namespace Legion {
       {
         // If either right or left changed, then we need to recombine
         // and deduplicate the equivalence sets before we can return
-        std::set<EquivalenceSet*> children;
-        children.insert(left_set.begin(), left_set.end());
-        children.insert(right_set.begin(), right_set.end());
-        subsets.clear();
-        subsets.insert(subsets.end(), children.begin(), children.end());
+        if (!left_set.empty() && !right_set.empty())
+        {
+          std::set<EquivalenceSet*> children;
+          children.insert(left_set.begin(), left_set.end());
+          children.insert(right_set.begin(), right_set.end());
+          subsets.clear();
+          subsets.insert(subsets.end(), children.begin(), children.end());
+        }
+        else if (!left_set.empty())
+        {
+          subsets.clear();
+          subsets.insert(subsets.end(), left_set.begin(), left_set.end());
+        }
+        else
+        {
+          subsets.clear();
+          subsets.insert(subsets.end(), right_set.begin(), right_set.end());
+        }
         return true;
       }
       else // No changes were made
@@ -12762,27 +12775,17 @@ namespace Legion {
       }
       else
       {
-        // We already have a subset, see which fields it's already
-        // been refined for (maybe none if it is still pending)
+        // We should not have this subset already for these fields
+#ifdef DEBUG_LEGION
         FieldMaskSet<EquivalenceSet>::const_iterator finder = 
           subsets.find(subset);
-        if (finder != subsets.end())
-        {
-          const FieldMask diff_mask = mask - finder->second;
-          if (!!diff_mask)
-          {
-            if (pending_refinements.insert(subset, diff_mask))
-              subset->add_nested_resource_ref(did);
-          }
-          else // It's already refined for all of them, so just return
-            return subset;
-        }
-        else
-        {
-          // Do the normal insert if we couldn't find it
-          if (pending_refinements.insert(subset, mask))
-            subset->add_nested_resource_ref(did);
-        }
+        assert((finder == subsets.end()) || (finder->second * mask));
+        finder = pending_refinements.find(subset);
+        assert((finder == pending_refinements.end()) || 
+                (finder->second * mask));
+#endif
+        if (pending_refinements.insert(subset, mask))
+          subset->add_nested_resource_ref(did);
       }
       // Launch the refinement task if there isn't one already running
       if (eq_state == MAPPING_STATE)
