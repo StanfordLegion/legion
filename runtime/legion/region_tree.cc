@@ -13201,7 +13201,7 @@ namespace Legion {
       for (std::deque<LayoutDescription*>::const_iterator it = 
             candidates.begin(); it != candidates.end(); it++)
       {
-        if ((*it)->match_layout(constraints, num_dims))
+        if (*(*it)->constraints == constraints)
           return (*it);
       }
       return NULL;
@@ -13265,7 +13265,7 @@ namespace Legion {
         for (LegionList<LayoutDescription*,LAYOUT_DESCRIPTION_ALLOC>::tracked
               ::const_iterator it = descs.begin(); it != descs.end(); it++)
         {
-          if (layout->match_layout(*it, layout->total_dims))
+          if (*(*it)->constraints == *layout->constraints)
           {
             // Delete the layout we are trying to register
             // and return the matching one

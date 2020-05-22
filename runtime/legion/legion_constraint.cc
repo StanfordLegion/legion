@@ -306,6 +306,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool ResourceConstraint::operator==(const ResourceConstraint &other) const
+    //--------------------------------------------------------------------------
+    {
+      return resource_kind == other.resource_kind
+          && equality_kind == other.equality_kind
+          && value == other.value;
+    }
+
+    //--------------------------------------------------------------------------
     void ResourceConstraint::swap(ResourceConstraint &rhs)
     //--------------------------------------------------------------------------
     {
@@ -361,6 +370,18 @@ namespace Legion {
 #endif
       for (int i = 0; i < dims; i++)
         values[i] = vs[i];
+    }
+
+    //--------------------------------------------------------------------------
+    bool LaunchConstraint::operator==(const LaunchConstraint &other) const
+    //--------------------------------------------------------------------------
+    {
+      if (!(launch_kind == other.launch_kind && dims == other.dims))
+        return false;
+      for (int i = 0; i < dims; i++)
+        if (values[i] != other.values[i])
+          return false;
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -520,6 +541,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool ExecutionConstraintSet::operator==(
+                                      const ExecutionConstraintSet &other) const
+    //--------------------------------------------------------------------------
+    {
+      return isa_constraint == other.isa_constraint
+          && processor_constraint == other.processor_constraint
+          && resource_constraints == other.resource_constraints
+          && launch_constraints == other.launch_constraints
+          && colocation_constraints == other.colocation_constraints;
+    }
+
+    //--------------------------------------------------------------------------
     void ExecutionConstraintSet::swap(ExecutionConstraintSet &rhs)
     //--------------------------------------------------------------------------
     {
@@ -594,6 +627,15 @@ namespace Legion {
           assert(false);
         }
       }
+    }
+
+    //--------------------------------------------------------------------------
+    bool SpecializedConstraint::operator==(
+                                       const SpecializedConstraint &other) const
+    //--------------------------------------------------------------------------
+    {
+      return kind == other.kind && redop == other.redop
+          && no_access == other.no_access && exact == other.exact;
     }
 
     //--------------------------------------------------------------------------
@@ -725,7 +767,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MemoryConstraint::MemoryConstraint(void)
-      : has_kind(false)
+      : kind(Memory::Kind::GLOBAL_MEM), has_kind(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -812,6 +854,15 @@ namespace Legion {
       : field_set(set.begin(),set.end()), contiguous(cg), inorder(in)
     //--------------------------------------------------------------------------
     {
+    }
+
+    //--------------------------------------------------------------------------
+    bool FieldConstraint::operator==(const FieldConstraint &other) const
+    //--------------------------------------------------------------------------
+    {
+      return field_set == other.field_set
+          && contiguous == other.contiguous
+          && inorder == other.inorder;
     }
 
     //--------------------------------------------------------------------------
@@ -1546,7 +1597,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PointerConstraint::PointerConstraint(void)
-      : is_valid(false)
+      : is_valid(false), memory(Memory::NO_MEMORY), ptr(0)
     //--------------------------------------------------------------------------
     {
     }
@@ -1704,6 +1755,20 @@ namespace Legion {
       return *this;
     }
 
+    //--------------------------------------------------------------------------
+    bool LayoutConstraintSet::operator==(const LayoutConstraintSet &other) const
+    //--------------------------------------------------------------------------
+    {
+      return specialized_constraint == other.specialized_constraint
+             && field_constraint == other.field_constraint
+             && memory_constraint == other.memory_constraint
+             && pointer_constraint == other.pointer_constraint
+             && ordering_constraint == other.ordering_constraint
+             && splitting_constraints == other.splitting_constraints
+             && dimension_constraints == other.dimension_constraints
+             && alignment_constraints == other.alignment_constraints
+             && offset_constraints == other.offset_constraints;
+    }
     //--------------------------------------------------------------------------
     bool LayoutConstraintSet::entails(const LayoutConstraintSet &other,
                                       unsigned total_dims,

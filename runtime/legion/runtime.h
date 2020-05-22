@@ -1546,6 +1546,8 @@ namespace Legion {
       virtual ~LayoutConstraints(void);
     public:
       LayoutConstraints& operator=(const LayoutConstraints &rhs);
+      bool operator==(const LayoutConstraints &rhs) const;
+      bool operator==(const LayoutConstraintSet &rhs) const;
     public:
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_inactive(ReferenceMutator *mutator);

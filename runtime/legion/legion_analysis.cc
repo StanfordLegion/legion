@@ -3430,7 +3430,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM>
     bool KDNode<DIM>::refine(std::vector<EquivalenceSet*> &subsets,
-                             const FieldMask &refinement_mask)
+                           const FieldMask &refinement_mask, unsigned max_depth)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3516,7 +3516,7 @@ namespace Legion {
       // Recurse down the tree
       const int next_dim = (refinement_dim + 1) % DIM;
       bool left_changed = false;
-      if (left_set.size() > LEGION_MAX_BVH_FANOUT)
+      if ((left_set.size() > LEGION_MAX_BVH_FANOUT) && (max_depth > 0))
       {
         // If all the subsets span our splitting plane then we need
         // to either start tracking the last changed dimension or 
@@ -3524,10 +3524,10 @@ namespace Legion {
         const int left_last_dim = (left_set.size() == subsets.size()) ? 
           ((last_changed_dim != -1) ? last_changed_dim : refinement_dim) : -1;
         KDNode<DIM> left(left_bounds, runtime, next_dim, left_last_dim);
-        left_changed = left.refine(left_set, refinement_mask);
+        left_changed = left.refine(left_set, refinement_mask, max_depth - 1);
       }
       bool right_changed = false;
-      if (right_set.size() > LEGION_MAX_BVH_FANOUT)
+      if ((right_set.size() > LEGION_MAX_BVH_FANOUT) && (max_depth > 0))
       {
         // If all the subsets span our splitting plane then we need
         // to either start tracking the last changed dimension or 
@@ -3535,7 +3535,7 @@ namespace Legion {
         const int right_last_dim = (right_set.size() == subsets.size()) ? 
           ((last_changed_dim != -1) ? last_changed_dim : refinement_dim) : -1;
         KDNode<DIM> right(right_bounds, runtime, next_dim, right_last_dim);
-        right_changed = right.refine(right_set, refinement_mask);
+        right_changed = right.refine(right_set, refinement_mask, max_depth - 1);
       }
       // If the sum of the left and right equivalence sets 
       // are too big then build intermediate nodes for each one
@@ -12767,7 +12767,15 @@ namespace Legion {
               // Refine the tree to make the new subsets
               std::vector<EquivalenceSet*> new_subsets(
                   fit->elements.begin(), fit->elements.end());
-              if (tree->refine(new_subsets, fit->set_mask))
+#ifdef LEGION_MAX_BVH_DEPTH
+              unsigned max_depth = 0; 
+              size_t bvh_ratio = new_subsets.size() / LEGION_MAX_BVH_FANOUT;
+              while (bvh_ratio >>= 1)
+                max_depth++;
+#else
+              unsigned max_depth = new_subsets.size();
+#endif
+              if (tree->refine(new_subsets, fit->set_mask, max_depth))
               {
                 // Remove old references
                 for (std::set<EquivalenceSet*>::const_iterator it = 
