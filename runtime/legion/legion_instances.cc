@@ -472,11 +472,8 @@ namespace Legion {
     {
       if (num_dims != total_dims)
         return false;
-      // Layout descriptions are always complete, so just check for conflicts
-      if (constraints->conflicts(candidate_constraints, total_dims, NULL))
-        return false;
-      // If they don't conflict they have to be the same
-      return true;
+      // We need to check equality on the entire constraint sets
+      return *constraints == candidate_constraints;
     }
 
     //--------------------------------------------------------------------------
@@ -493,11 +490,9 @@ namespace Legion {
       // that we actually need to check the FieldIDs which happens next
       if (layout->allocated_fields != allocated_fields)
         return false;
-      // Layout descriptions are always complete so just check for conflicts
-      if (constraints->conflicts(layout->constraints, total_dims, NULL))
-        return false;
-      // If they don't conflict they have to be the same
-      return true;
+
+      // Check equality on the entire constraint sets
+      return *layout->constraints == *constraints;
     }
 
     //--------------------------------------------------------------------------
