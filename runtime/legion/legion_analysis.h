@@ -854,7 +854,7 @@ namespace Legion {
     public:
       virtual ~KDTree(void) { }
       virtual bool refine(std::vector<EquivalenceSet*> &subsets,
-                          const FieldMask &refinement_mask) = 0;
+          const FieldMask &refinement_mask, unsigned max_depth) = 0;
     };
 
     /**
@@ -876,7 +876,7 @@ namespace Legion {
       KDNode<DIM>& operator=(const KDNode<DIM> &rhs);
     public:
       virtual bool refine(std::vector<EquivalenceSet*> &subsets,
-                          const FieldMask &refinement_mask);
+                          const FieldMask &refinement_mask, unsigned max_depth);
     public:
       static Rect<DIM> get_bounds(IndexSpaceExpression *expr);
     public:
