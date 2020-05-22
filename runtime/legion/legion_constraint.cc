@@ -767,7 +767,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MemoryConstraint::MemoryConstraint(void)
-      : kind(Memory::Kind::GLOBAL_MEM), has_kind(false)
+      : kind(Memory::GLOBAL_MEM), has_kind(false)
     //--------------------------------------------------------------------------
     {
     }
