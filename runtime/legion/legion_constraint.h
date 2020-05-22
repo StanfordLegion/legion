@@ -61,6 +61,9 @@ namespace Legion {
     public:
       ISAConstraint(uint64_t prop = 0);
     public:
+      inline bool operator==(const ISAConstraint &other) const
+      { return isa_prop == other.isa_prop; }
+    public:
       bool entails(const ISAConstraint &other) const;
       bool conflicts(const ISAConstraint &other) const;
     public:
@@ -85,6 +88,9 @@ namespace Legion {
                                             PROCESSOR_CONSTRAINT;
     public:
       ProcessorConstraint(Processor::Kind kind = Processor::NO_KIND);
+    public:
+      inline bool operator==(const ProcessorConstraint &other) const
+      { return valid_kinds == other.valid_kinds; }
     public:
       inline bool is_valid(void) const { return !valid_kinds.empty(); }
       void add_kind(Processor::Kind kind);
@@ -116,6 +122,8 @@ namespace Legion {
       ResourceConstraint(ResourceKind resource_kind, 
                          EqualityKind eq_kind, size_t value);
     public:
+      bool operator==(const ResourceConstraint &other) const;
+    public:
       bool entails(const ResourceConstraint &other) const;
       bool conflicts(const ResourceConstraint &other) const;
     public:
@@ -145,6 +153,8 @@ namespace Legion {
       LaunchConstraint(LaunchKind kind, size_t value);
       LaunchConstraint(LaunchKind kind, const size_t *value, int dims);
     public:
+      bool operator==(const LaunchConstraint &other) const;
+    public:
       bool entails(const LaunchConstraint &other) const;
       bool conflicts(const LaunchConstraint &other) const;
     public:
@@ -173,6 +183,9 @@ namespace Legion {
                            const std::set<FieldID> &fields);
       ColocationConstraint(const std::vector<unsigned> &indexes,
                            const std::set<FieldID> &fields);
+    public:
+      inline bool operator==(const ColocationConstraint &o) const
+      { return fields == o.fields && indexes == o.indexes; }
     public:
       bool entails(const ColocationConstraint &other) const;
       bool conflicts(const ColocationConstraint &other) const;
@@ -204,6 +217,8 @@ namespace Legion {
         add_constraint(const LaunchConstraint &constraint);
       ExecutionConstraintSet&
         add_constraint(const ColocationConstraint &constraint);
+    public:
+      bool operator==(const ExecutionConstraintSet &other) const;
     public:
       void swap(ExecutionConstraintSet &rhs);
       void serialize(Serializer &rez) const;
@@ -349,6 +364,8 @@ namespace Legion {
                             bool no_access = false,
                             bool exact = false);
     public:
+      bool operator==(const SpecializedConstraint &other) const;
+    public:
       bool entails(const SpecializedConstraint &other) const;
       bool conflicts(const SpecializedConstraint &other) const;
     public:
@@ -391,6 +408,9 @@ namespace Legion {
       MemoryConstraint(void);
       MemoryConstraint(Memory::Kind kind);
     public:
+      inline bool operator==(const MemoryConstraint &other) const
+      { return kind == other.kind && has_kind == other.has_kind; }
+    public:
       inline bool is_valid(void) const { return has_kind; }
       inline Memory::Kind get_kind(void) const { return kind; }
     public:
@@ -424,6 +444,8 @@ namespace Legion {
                       bool contiguous, bool inorder = true);
       FieldConstraint(const std::set<FieldID> &field_set,
                       bool contiguous, bool inorder = true);
+    public:
+      bool operator==(const FieldConstraint &other) const;
     public:
       inline bool is_contiguous(void) const { return contiguous; }
       inline bool is_inorder(void) const { return inorder; }
@@ -475,6 +497,9 @@ namespace Legion {
       OrderingConstraint(const std::vector<DimensionKind> &ordering,
                          bool contiguous);
     public:
+      inline bool operator==(const OrderingConstraint &other) const
+      { return ordering == other.ordering && contiguous == other.contiguous; }
+    public:
       bool entails(const OrderingConstraint &other, unsigned total_dims) const;
       bool conflicts(const OrderingConstraint &other,unsigned total_dims) const;
     public:
@@ -508,6 +533,9 @@ namespace Legion {
       SplittingConstraint(DimensionKind dim); // chunks
       SplittingConstraint(DimensionKind dim, size_t value);
     public:
+      inline bool operator==(const SplittingConstraint &o) const
+      { return kind == o.kind && value == o.value && chunks == o.chunks; }
+    public:
       bool entails(const SplittingConstraint &other) const;
       bool conflicts(const SplittingConstraint &other) const;
     public:
@@ -533,6 +561,9 @@ namespace Legion {
     public:
       DimensionConstraint(void);
       DimensionConstraint(DimensionKind dim, EqualityKind eq, size_t value);
+    public:
+      inline bool operator==(const DimensionConstraint &o) const
+      { return kind == o.kind && eqk == o.eqk && value == o.value; }
     public:
       bool entails(const DimensionConstraint &other) const;
       bool conflicts(const DimensionConstraint &other) const;
@@ -562,6 +593,9 @@ namespace Legion {
       AlignmentConstraint(FieldID fid, EqualityKind kind, 
                           size_t byte_boundary);
     public:
+      inline bool operator==(const AlignmentConstraint &o) const
+      { return fid == o.fid && eqk == o.eqk && alignment == o.alignment; }
+    public:
       bool entails(const AlignmentConstraint &other) const;
       bool conflicts(const AlignmentConstraint &other) const;
     public:
@@ -587,6 +621,9 @@ namespace Legion {
       OffsetConstraint(void);
       OffsetConstraint(FieldID fid, size_t offset);
     public:
+      inline bool operator==(const OffsetConstraint &o) const
+      { return fid == o.fid && offset == o.offset; }
+    public:
       bool entails(const OffsetConstraint &other) const;
       bool conflicts(const OffsetConstraint &other) const;
     public:
@@ -610,6 +647,9 @@ namespace Legion {
     public:
       PointerConstraint(void);
       PointerConstraint(Memory memory, uintptr_t ptr);
+    public:
+      inline bool operator==(const PointerConstraint &o) const
+      { return is_valid == o.is_valid && memory == o.memory && ptr == o.ptr; }
     public:
       bool entails(const PointerConstraint &other) const;
       bool conflicts(const PointerConstraint &other) const;
@@ -649,6 +689,8 @@ namespace Legion {
         add_constraint(const OffsetConstraint &constraint);
       LayoutConstraintSet&
         add_constraint(const PointerConstraint &constraint);
+    public:
+      bool operator==(const LayoutConstraintSet &other) const;
     public:
       // failed_constraint will be the one from 'other' that wasn't entailed
       bool entails(const LayoutConstraintSet &other, 

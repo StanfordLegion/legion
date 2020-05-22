@@ -9599,6 +9599,38 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool LayoutConstraints::operator==(const LayoutConstraints &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      // We check equalities only on the members of LayoutConstraintSet
+      return specialized_constraint == rhs.specialized_constraint
+             && field_constraint == rhs.field_constraint
+             && memory_constraint == rhs.memory_constraint
+             && pointer_constraint == rhs.pointer_constraint
+             && ordering_constraint == rhs.ordering_constraint
+             && splitting_constraints == rhs.splitting_constraints
+             && dimension_constraints == rhs.dimension_constraints
+             && alignment_constraints == rhs.alignment_constraints
+             && offset_constraints == rhs.offset_constraints;
+    }
+
+    //--------------------------------------------------------------------------
+    bool LayoutConstraints::operator==(const LayoutConstraintSet &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      // We check equalities only on the members of LayoutConstraintSet
+      return specialized_constraint == rhs.specialized_constraint
+             && field_constraint == rhs.field_constraint
+             && memory_constraint == rhs.memory_constraint
+             && pointer_constraint == rhs.pointer_constraint
+             && ordering_constraint == rhs.ordering_constraint
+             && splitting_constraints == rhs.splitting_constraints
+             && dimension_constraints == rhs.dimension_constraints
+             && alignment_constraints == rhs.alignment_constraints
+             && offset_constraints == rhs.offset_constraints;
+    }
+
+    //--------------------------------------------------------------------------
     void LayoutConstraints::notify_active(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
