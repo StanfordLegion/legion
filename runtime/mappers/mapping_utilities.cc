@@ -1138,9 +1138,8 @@ namespace Legion {
       //------------------------------------------------------------------------
       {
         switch (dom.get_dim()) {
-          case 1: return to_string<1>(dom);
-          case 2: return to_string<2>(dom);
-          case 3: return to_string<3>(dom);
+#define CASE(N) case N: return to_string<N>(dom);
+          LEGION_FOREACH_N(CASE)
           default: assert(false);
         }
         return "";
@@ -1163,7 +1162,7 @@ namespace Legion {
           } else {
             past_first = true;
           }
-          ss << *it;
+          ss << to_string(runtime, ctx, *it);
         }
         return ss.str();
       }
