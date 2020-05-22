@@ -1059,6 +1059,10 @@ namespace Legion {
   //----------------------------------------------------------------------------
   {
     assert(DIM == dim);
+#ifndef __CUDA_ARCH__
+    if (is_id != 0)
+      fprintf(stderr,"ERROR: Cannot implicitly convert sparse Domain to Rect");
+#endif
     assert(is_id == 0); // better not be one of these
     Rect<DIM,T> result;
     for (int i = 0; i < DIM; i++)
