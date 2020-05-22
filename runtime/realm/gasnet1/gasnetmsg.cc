@@ -56,7 +56,7 @@ REALM_ATTR_UNUSED(static const void *ignore_gasnet_warning2) = (void *)_gasnett_
 
 using namespace Realm;
 
-enum { MSGID_CHANNEL_CLOSE = 250,
+enum { MSGID_CHANNEL_FLUSH = 250,
        MSGID_LONG_EXTENSION = 253,
        MSGID_FLIP_REQ = 254,
        MSGID_FLIP_ACK = 255 };
@@ -115,6 +115,7 @@ int deferred_free_pos;
 void *deferred_frees[DEFERRED_FREE_COUNT];
 
 gasnet_seginfo_t *segment_info = 0;
+atomic<size_t> total_messages_sent(0);
 
 static bool is_registered(void *ptr)
 {
@@ -1372,20 +1373,24 @@ public:
     mutex.unlock();
   }
 
-  void flush_outbound_messages(void)
+  void flush_outbound_messages(bool is_quiescent)
   {
-    mutex.lock();
-    assert(!out_channel_closed);
-    out_channel_closed = true;
-    mutex.unlock();
-    // messages_sent can no longer change
-    log_amsg.info() << "sending close: " << gasnet_mynode() << "->" << peer << ": count=" << messages_sent;
-    handlerarg_t count_hi = messages_sent >> 32;
-    handlerarg_t count_lo = messages_sent & 0xFFFFFFFFULL;
-    CHECK_GASNET( gasnet_AMRequestShort2(peer, MSGID_CHANNEL_CLOSE,
-					 count_lo, count_hi) );
+    // take a snapshot of messages we've sent since the last flush
+    size_t sent_snapshot;
+    {
+      AutoLock<> al(mutex);
+      sent_snapshot = messages_sent;
+      messages_sent = 0;
+    }
+    log_amsg.info() << "sending flush: " << gasnet_mynode() << "->" << peer << ": is_quiescent=" << is_quiescent << " count=" << sent_snapshot;
+    handlerarg_t count_hi = sent_snapshot >> 32;
+    handlerarg_t count_lo = sent_snapshot & 0xFFFFFFFFULL;
+    CHECK_GASNET( gasnet_AMRequestShort3(peer, MSGID_CHANNEL_FLUSH,
+					 count_lo, count_hi,
+					 is_quiescent) );
   }
 
+#if 0
   bool inbound_messages_flushed(bool verbose)
   {
     if(!in_channel_closed.load_acquire()) {
@@ -1399,13 +1404,29 @@ public:
       log_amsg.print() << "flush check: " << peer << "->" << gasnet_mynode() << ": exp=" << exp << " cur=" << cur;
     return(exp == cur);
   }
+#endif
 
-  void handle_channel_close(handlerarg_t count_lo, handlerarg_t count_hi)
+  void handle_channel_flush(handlerarg_t count_lo, handlerarg_t count_hi,
+			    handlerarg_t is_quiescent)
   {
     size_t count = (size_t(count_hi) << 32) + size_t(count_lo);
-    log_amsg.info() << "received close: " << peer << "->" << gasnet_mynode() << ": count=" << count << " cur=" << messages_handled.load();
-    messages_expected.store(count);
-    in_channel_closed.store_release(true);
+    log_amsg.info() << "received flush: " << peer << "->" << gasnet_mynode() << ": count=" << count << " cur=" << messages_handled.load() << " is_quiescent=" << is_quiescent;
+
+    {
+      AutoLock<> al(quiescence_checker.mutex);
+      // first, clear the overall quiesence flag if the peer isn't
+      if(!is_quiescent)
+	quiescence_checker.is_quiescent = false;
+      // second, decrement the handled count by the amount we're expected to
+      //  have handled
+      size_t old_count = messages_handled.fetch_sub(count);
+      // if counts match, all messages are already handled and we can
+      //  contribute to the check completion
+      if(old_count == count) {
+	if(++quiescence_checker.messages_received == int(gasnet_nodes() - 1))
+	  quiescence_checker.condvar.broadcast();
+      }
+    }
   }
 
 protected:
@@ -2122,11 +2143,12 @@ public:
     endpoints[src]->handle_flip_ack(ack_buffer);
   }
 
-  void handle_channel_close(gasnet_node_t src,
+  void handle_channel_flush(gasnet_node_t src,
 			    gasnet_handlerarg_t count_lo,
-			    gasnet_handlerarg_t count_hi)
+			    gasnet_handlerarg_t count_hi,
+			    gasnet_handlerarg_t is_quiescent)
   {
-    endpoints[src]->handle_channel_close(count_lo, count_hi);
+    endpoints[src]->handle_channel_flush(count_lo, count_hi, is_quiescent);
   }
 
   // returns whether any more messages remain
@@ -2239,16 +2261,23 @@ public:
 
   void count_handled_message(gasnet_node_t source)
   {
-    endpoints[source]->messages_handled.fetch_add(1);
+    size_t new_count = endpoints[source]->messages_handled.fetch_add(1) + 1;
+    if(new_count == 0) {
+      // this was the last straggler message before a flush, so update the
+      //  quiescence checker
+      AutoLock<> al(quiescence_checker.mutex);
+      if(++quiescence_checker.messages_received == int(gasnet_nodes() - 1))
+	quiescence_checker.condvar.broadcast();
+    }
   }
 
-  void flush_message_channels(void)
+  void flush_message_channels(bool is_quiescent)
   {
     // step 1: send close messages
     for(int i = 0; i < total_endpoints; i++)
       if(endpoints[i])
-	endpoints[i]->flush_outbound_messages();
-
+	endpoints[i]->flush_outbound_messages(is_quiescent);
+#if 0
     // step 2: wait until outbound queues are actually empty
     while(push_messages(0, false/*!wait*/, TimeLimit()))
       CHECK_GASNET( gasnet_AMPoll() );
@@ -2277,6 +2306,7 @@ public:
       // on to the next node
       cur++;
     }
+#endif
   }
   
   void start_polling_threads(void);
@@ -2324,13 +2354,14 @@ static void handle_flip_ack(gasnet_token_t token,
   endpoint_manager->handle_flip_ack(src, ack_buffer);
 }
 
-static void handle_channel_close(gasnet_token_t token,
+static void handle_channel_flush(gasnet_token_t token,
 				 handlerarg_t count_lo,
-				 handlerarg_t count_hi)
+				 handlerarg_t count_hi,
+				 handlerarg_t is_quiescent)
 {
   gasnet_node_t src;
   CHECK_GASNET( gasnet_AMGetMsgSource(token, &src) );
-  endpoint_manager->handle_channel_close(src, count_lo, count_hi);
+  endpoint_manager->handle_channel_flush(src, count_lo, count_hi, is_quiescent);
 }
 
 #if 0
@@ -2579,8 +2610,8 @@ void init_endpoints(size_t gasnet_mem_size,
   handlers[hcount].index = MSGID_RELEASE_SRCPTR;
   handlers[hcount].fnptr = (void (*)())SrcDataPool::release_srcptr_handler;
   hcount++;
-  handlers[hcount].index = MSGID_CHANNEL_CLOSE;
-  handlers[hcount].fnptr = (void (*)())handle_channel_close;
+  handlers[hcount].index = MSGID_CHANNEL_FLUSH;
+  handlers[hcount].fnptr = (void (*)())handle_channel_flush;
   hcount++;
   assert(hcount <= MAX_HANDLERS);
 #ifdef ACTIVE_MESSAGE_TRACE
@@ -2744,6 +2775,7 @@ void start_handler_threads(size_t stack_size)
   incoming_message_manager->start_handler_threads(stack_size);
 }
 
+#if 0
 void flush_activemsg_channels(void)
 {
   // start with a barrier to make sure everybody has sent any
@@ -2757,6 +2789,7 @@ void flush_activemsg_channels(void)
   gasnet_barrier_notify(0, GASNET_BARRIERFLAG_ANONYMOUS);
   gasnet_barrier_wait(0, GASNET_BARRIERFLAG_ANONYMOUS);
 }
+#endif
 
 void stop_activemsg_threads(void)
 {
@@ -2800,6 +2833,7 @@ void enqueue_message(NodeID target, int msgid,
     }
   }
 
+  total_messages_sent.fetch_add(1);
   endpoint_manager->enqueue_message(target, hdr, true); // TODO: decide when OOO is ok?
 }
 
@@ -2826,6 +2860,7 @@ void enqueue_message(NodeID target, int msgid,
       hdr->set_payload_empty();
     }
   }
+  total_messages_sent.fetch_add(1);
   endpoint_manager->enqueue_message(target, hdr, true); // TODO: decide when OOO is ok?
 }
 
@@ -2850,6 +2885,7 @@ void enqueue_message(NodeID target, int msgid,
     }
   }
 
+  total_messages_sent.fetch_add(1);
   endpoint_manager->enqueue_message(target, hdr, true); // TODO: decide when OOO is ok?
 }
 
@@ -2901,6 +2937,57 @@ extern void record_message(NodeID source, bool sent_reply)
 #ifdef TRACE_MESSAGES
   endpoint_manager->record_message(source, sent_reply);
 #endif
+}
+
+QuiescenceChecker quiescence_checker;
+
+QuiescenceChecker::QuiescenceChecker()
+  : last_message_count(0)
+  , condvar(mutex)
+  , messages_received(0)
+  , is_quiescent(true)
+{}
+
+bool QuiescenceChecker::perform_check(void)
+{
+  // figure out if we are quiescent - did we send any messages since last time?
+  size_t total_sent = total_messages_sent.load();
+  bool any_messages_sent = (total_sent != last_message_count);
+
+  log_amsg.info() << "local quiescence: prev=" << last_message_count
+		  << " cur=" << total_sent;
+
+  last_message_count = total_sent;
+
+  endpoint_manager->flush_message_channels(!any_messages_sent);
+
+  // now take the lock and wait for the responses to come back
+  bool result;
+  {
+    AutoLock<> al(mutex);
+
+    // clear the flag if we sent any messages either
+    if(any_messages_sent)
+      is_quiescent = false;
+
+    while(messages_received < int(gasnet_nodes() - 1))
+      condvar.wait();
+
+    result = is_quiescent;
+
+    // reset so we can try again
+    is_quiescent = true;
+    messages_received = 0;
+  }
+
+  // if it didn't work, use a barrier to make sure everybody's ready to try
+  //  again
+  if(!result) {
+    gasnet_barrier_notify(0, GASNET_BARRIERFLAG_ANONYMOUS);
+    gasnet_barrier_wait(0, GASNET_BARRIERFLAG_ANONYMOUS);
+  }
+
+  return result;
 }
 
 ////////////////////////////////////////////////////////////////////////

@@ -484,5 +484,21 @@ union AtLeastEightBytes {
 
 enum { MSGID_NEW_ACTIVEMSG = 251 };
 
+class QuiescenceChecker {
+public:
+  QuiescenceChecker();
+  
+  bool perform_check(void);
+
+public:
+  size_t last_message_count;
+  Realm::Mutex mutex;
+  Realm::CondVar condvar;
+  int messages_received;
+  bool is_quiescent;
+};
+
+extern QuiescenceChecker quiescence_checker;
+
 #endif
 

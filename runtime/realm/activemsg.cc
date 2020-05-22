@@ -183,7 +183,11 @@ namespace Realm {
     , nodes(_nodes), dedicated_threads(_dedicated_threads)
     , sleeper_count(0)
     , bgwork_requested(false)
-    , shutdown_flag(0), condvar(mutex)
+    , shutdown_flag(0)
+    , handlers_active(0)
+    , drain_pending(false)
+    , condvar(mutex)
+    , drain_condvar(mutex)
   {
     heads = new Message *[nodes];
     tails = new Message **[nodes];
@@ -327,6 +331,17 @@ namespace Realm {
 													     *core_rsrv);
   }
 
+  // stalls caller until all incoming messages have been handled
+  void IncomingMessageManager::drain_incoming_messages(void)
+  {
+    AutoLock<> al(mutex);
+
+    while((todo_oldest != todo_newest) || (handlers_active > 0)) {
+      drain_pending = true;
+      drain_condvar.wait();
+    }
+  }
+
   void IncomingMessageManager::shutdown(void)
   {
 #ifdef DEBUG_REALM
@@ -378,6 +393,7 @@ namespace Realm {
     heads[sender] = 0;
     tails[sender] = 0;
     in_handler[sender] = true;
+    handlers_active++;
 #ifdef DEBUG_INCOMING
     printf("handling incoming messages from %d\n", sender);
 #endif
@@ -395,11 +411,9 @@ namespace Realm {
 					       IncomingMessageManager::Message *head,
 					       IncomingMessageManager::Message **tail)
   {
-    // TODO: if we're in out-of-order mode, we don't need to take the lock
-    //  if we're not actually putting anything back
-
     AutoLock<> al(mutex);
     in_handler[sender] = false;
+    handlers_active--;
 
     bool enqueue_needed = false;
     if(heads[sender] != 0) {
@@ -434,6 +448,12 @@ namespace Realm {
 	bgwork_requested.store(true);
 	make_active();
       }
+    }
+
+    // was somebody waiting for the queue to go (perhaps temporarily) empty?
+    if(drain_pending && (todo_oldest == todo_newest) && (handlers_active == 0)) {
+      drain_pending = false;
+      drain_condvar.broadcast();
     }
   }
 

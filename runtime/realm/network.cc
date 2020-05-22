@@ -78,6 +78,7 @@ namespace Realm {
 			   const void *val_in, void *val_out, size_t bytes);
     virtual void gather(NodeID root,
 			const void *val_in, void *vals_out, size_t bytes);
+    virtual bool check_for_quiescence(void);
 
     // used to create a remote proxy for a memory
     virtual MemoryImpl *create_remote_memory(Memory m, size_t size, Memory::Kind kind,
@@ -180,6 +181,11 @@ namespace Realm {
 				     size_t bytes)
   {
     memcpy(vals_out, val_in, bytes);
+  }
+
+  bool LoopbackNetworkModule::check_for_quiescence(void)
+  {
+    return true;
   }
 
   // used to create a remote proxy for a memory

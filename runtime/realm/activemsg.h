@@ -243,6 +243,9 @@ namespace Realm {
 
     void start_handler_threads(size_t stack_size);
 
+    // stalls caller until all incoming messages have been handled
+    void drain_incoming_messages(void);
+
     void shutdown(void);
 
     virtual void do_work(TimeLimit work_until);
@@ -275,8 +278,10 @@ namespace Realm {
     bool *in_handler;
     int *todo_list; // list of nodes with non-empty message lists
     int todo_oldest, todo_newest;
+    int handlers_active;
+    bool drain_pending;
     Realm::Mutex mutex;
-    Realm::CondVar condvar;
+    Realm::CondVar condvar, drain_condvar;
     Realm::CoreReservation *core_rsrv;
     std::vector<Realm::Thread *> handler_threads;
   };

@@ -35,6 +35,8 @@ int i_recv_list = 0;
 namespace Realm {
 namespace MPI {
 
+  atomic<size_t> messages_sent(0);
+
 #define AM_MSG_HEADER_SIZE 4 * sizeof(int)
 
 
@@ -213,6 +215,8 @@ void AMSend(int tgt, int msgid, int header_size, int payload_size, const char *h
         CHECK_MPI( MPI_Send(payload, payload_size, MPI_BYTE, tgt, msg_tag, comm_medium) );
 
     }
+
+    messages_sent.fetch_add(1);
 }
 
 } /* namespace MPI */

@@ -608,6 +608,17 @@ namespace Realm {
     CHECK_MPI( MPI_Gather(val_in, bytes, MPI_BYTE, vals_out, bytes, MPI_BYTE, root, MPI_COMM_WORLD) );
   }
 
+  bool MPIModule::check_for_quiescence(void)
+  {
+    // add up the total messages sent by anybody since the last time we tried
+    unsigned long sent_snapshot = MPI::messages_sent.exchange(0);
+    unsigned long total = 0;
+    CHECK_MPI( MPI_Allreduce(&sent_snapshot, &total,
+			     1, MPI_UNSIGNED_LONG, MPI_SUM, MPI_COMM_WORLD) );
+    // if it's zero, we're quiescent
+    return (total == 0);
+  }
+
   // used to create a remote proxy for a memory
   MemoryImpl *MPIModule::create_remote_memory(Memory m, size_t size, Memory::Kind kind,
 					       const ByteArray& rdma_info)

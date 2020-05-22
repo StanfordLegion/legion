@@ -2139,7 +2139,29 @@ namespace Realm {
 
       // the operation tables on every rank should be clear of work
       optable.shutdown_check();
-      Network::barrier();
+
+      // make sure the network is completely quiescent
+      if(Network::max_node_id > 0) {
+	int tries = 0;
+	while(true) {
+	  // first make sure the incoming message queue is quiescent
+	  message_manager->drain_incoming_messages();
+
+	  // then check the network for quiescence
+	  tries++;
+	  bool done = Network::check_for_quiescence();
+	  if(done) {
+	    if(Network::my_node_id == 0)
+	      log_runtime.info() << "quiescent after " << tries << " attempts";
+	    break;
+	  }
+
+	  if(tries >= 10) {
+	    log_runtime.fatal() << "network still not quiescent after " << tries << " attempts";
+	    abort();
+	  }
+	}
+      }
       
       // mark that a shutdown is in progress so that we can hopefully catch
       //  things that try to run during teardown

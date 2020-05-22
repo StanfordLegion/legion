@@ -666,10 +666,6 @@ namespace Realm {
   void GASNet1Module::detach(RuntimeImpl *runtime,
 			     std::vector<NetworkSegment *>& segments)
   {
-    // flush out all inter-node communication channels to make sure
-    //  we handle any incoming work before we start tearing stuff down
-    flush_activemsg_channels();
-
     stop_activemsg_threads();
   }
 
@@ -694,6 +690,11 @@ namespace Realm {
     gasnet_coll_gather(GASNET_TEAM_ALL, root,
 		       vals_out, const_cast<void *>(val_in), bytes,
 		       GASNET_COLL_FLAGS);
+  }
+
+  bool GASNet1Module::check_for_quiescence(void)
+  {
+    return quiescence_checker.perform_check();
   }
 
   // used to create a remote proxy for a memory
