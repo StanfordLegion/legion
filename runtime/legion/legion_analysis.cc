@@ -12285,11 +12285,7 @@ namespace Legion {
               break;
           }
           if (!disjoint_partition_refinements.empty())
-          {
-            // Make sure this is tight before we remove them
-            disjoint_partition_refinements.tighten_valid_mask();
             complete_mask -= disjoint_partition_refinements.get_valid_mask();
-          }
           // Only need one iteration of this loop
           break;
         }
@@ -12674,6 +12670,7 @@ namespace Legion {
           if ((*it)->remove_expression_reference())
             delete (*it);
         }
+        unrefined_remainders.tighten_valid_mask();
       }
       if (!to_add.empty())
       {
