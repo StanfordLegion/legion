@@ -44,13 +44,13 @@ namespace Realm {
 
       virtual ~DeferredLockRequest(void) { }
 
-      virtual void event_triggered(bool poisoned)
+      virtual void event_triggered(bool poisoned, TimeLimit work_until)
       {
 	// if input event is poisoned, do not attempt to take the lock - simply poison
 	//  the output event too
 	if(poisoned) {
 	  log_poison.info() << "poisoned deferred lock skipped - lock=" << lock << " after=" << after_lock;
-	  GenEventImpl::trigger(after_lock, true /*poisoned*/);
+	  GenEventImpl::trigger(after_lock, true /*poisoned*/, work_until);
 	} else {
 	  get_runtime()->get_lock_impl(lock)->acquire(mode, exclusive,
 						      ReservationImpl::ACQUIRE_BLOCKING,
@@ -89,7 +89,7 @@ namespace Realm {
 
       virtual ~DeferredUnlockRequest(void) { }
 
-      virtual void event_triggered(bool poisoned)
+      virtual void event_triggered(bool poisoned, TimeLimit work_until)
       {
 	// if input event is poisoned, do not attempt to release the lock
 	// we don't have an output event here, so this may result in a hang if nobody is
@@ -97,7 +97,7 @@ namespace Realm {
 	if(poisoned) {
 	  log_poison.warning() << "poisoned deferred unlock skipped - POSSIBLE HANG - lock=" << lock;
 	} else {
-	  get_runtime()->get_lock_impl(lock)->release();
+	  get_runtime()->get_lock_impl(lock)->release(work_until);
 	}
 	// not attached to anything, so delete ourselves when we're done
 	delete this;
@@ -129,7 +129,7 @@ namespace Realm {
 
       virtual ~DeferredLockDestruction(void) { }
 
-      virtual void event_triggered(bool poisoned)
+      virtual void event_triggered(bool poisoned, TimeLimit work_until)
       {
 	// if input event is poisoned, do not attempt to destroy the lock
 	// we don't have an output event here, so this may result in a leak if nobody is
@@ -221,7 +221,7 @@ namespace Realm {
       //  don't build up continuation
       if(wait_on.has_triggered()) {
 	log_reservation.info() << "reservation release: rsrv=" << *this;
-	get_runtime()->get_lock_impl(*this)->release();
+	get_runtime()->get_lock_impl(*this)->release(TimeLimit::responsive());
       } else {
 	log_reservation.info() << "reservation release: rsrv=" << *this << " wait_on=" << wait_on;
 	EventImpl::add_waiter(wait_on, new DeferredUnlockRequest(*this));
@@ -362,7 +362,8 @@ namespace Realm {
 
 
     /*static*/ void LockGrantMessage::handle_message(NodeID sender, const LockGrantMessage &args,
-						     const void *data, size_t datalen)
+						     const void *data, size_t datalen,
+						     TimeLimit work_until)
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       log_reservation.debug(          "reservation request granted: reservation=" IDFMT " mode=%d", // mask=%lx",
@@ -407,7 +408,7 @@ namespace Realm {
 	  it != to_wake.end();
 	  it++) {
 	log_reservation.debug() << "release trigger: reservation=" << args.lock << " event=" << (*it);
-	GenEventImpl::trigger(*it, false /*!poisoned*/);
+	GenEventImpl::trigger(*it, false /*!poisoned*/, work_until);
       }
     }
 
@@ -676,7 +677,7 @@ namespace Realm {
       return true;
     }
 
-    void ReservationImpl::release(void)
+    void ReservationImpl::release(TimeLimit work_until)
     {
       // make a list of events that we be woken - can't do it while holding the
       //  lock's mutex (because the event we trigger might try to take the lock)
@@ -799,13 +800,13 @@ namespace Realm {
       }
 
       if(!to_wake.empty()) {
-	for(WaiterList::iterator it = to_wake.begin();
+        for(WaiterList::iterator it = to_wake.begin();
 	    it != to_wake.end();
 	    it++) {
 #ifdef RSRV_DEBUG_MSGS
 	  log_reservation.debug() << "release trigger: reservation=" << me << " event=" << (*it);
 #endif
-	  GenEventImpl::trigger(*it, false /*!poisoned*/);
+	  GenEventImpl::trigger(*it, false /*!poisoned*/, work_until);
 	}
       }
     }
@@ -985,7 +986,7 @@ namespace Realm {
 	if((state.load() & STATE_SLOW_FALLBACK) != 0)
 	  frs.rsrv_impl->me.destroy_reservation();
 	else
-	  frs.rsrv_impl->release();
+	  frs.rsrv_impl->release(TimeLimit::responsive());
       }
     }
     // mutex, condvar must be manually destroyed
@@ -1339,7 +1340,7 @@ namespace Realm {
 	    if((cur_state & (STATE_WRITER | STATE_READER_COUNT_MASK)) == 0) {
 	      // swap RSRV_WAITING for RSRV
 	      state.fetch_sub(STATE_BASE_RSRV_WAITING - STATE_BASE_RSRV);
-	      frs.rsrv_impl->release();
+	      frs.rsrv_impl->release(TimeLimit::responsive());
 	    }
 
 	    //  b) even if we didn't do the release yet, make the next request
@@ -1481,7 +1482,7 @@ namespace Realm {
     if((state.load() & STATE_SLOW_FALLBACK) != 0) {
       //log_reservation.print() << "unlock " << (void *)this;
       assert(frs.rsrv_impl != 0);
-      frs.rsrv_impl->release();
+      frs.rsrv_impl->release(TimeLimit::responsive());
       return;
     }
 
@@ -1500,7 +1501,7 @@ namespace Realm {
       if((cur_state & STATE_BASE_RSRV_WAITING) != 0) {
 	// swap RSRV_WAITING for RSRV
 	state.fetch_sub(STATE_BASE_RSRV_WAITING - STATE_BASE_RSRV);
-	frs.rsrv_impl->release();
+	frs.rsrv_impl->release(TimeLimit::responsive());
       }
 
       // now we can clear the WRITER bit and finish
@@ -1519,7 +1520,7 @@ namespace Realm {
       if((cur_state & STATE_BASE_RSRV_WAITING) != 0) {
 	// swap RSRV_WAITING for RSRV
 	state.fetch_sub(STATE_BASE_RSRV_WAITING - STATE_BASE_RSRV);
-	frs.rsrv_impl->release();
+	frs.rsrv_impl->release(TimeLimit::responsive());
       }
 
       // finally, decrement the read count

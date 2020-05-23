@@ -59,7 +59,19 @@ namespace Realm {
   inline /*static*/ void GenEventImpl::trigger(Event e, bool poisoned)
   {
     GenEventImpl *impl = get_genevent_impl(e);
-    impl->trigger(gen_t(ID(e).event_generation()), Network::my_node_id, poisoned);
+    // ideally the caller would tell us how long we can spend triggering
+    //  a large fanout, but in the absence of such information, try to
+    //  remain "responsive"
+    impl->trigger(gen_t(ID(e).event_generation()), Network::my_node_id,
+		  poisoned, TimeLimit::responsive());
+  }
+
+  inline /*static*/ void GenEventImpl::trigger(Event e, bool poisoned,
+					       TimeLimit work_until)
+  {
+    GenEventImpl *impl = get_genevent_impl(e);
+    impl->trigger(gen_t(ID(e).event_generation()), Network::my_node_id,
+		  poisoned, work_until);
   }
 
 

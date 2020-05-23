@@ -250,7 +250,7 @@ namespace Realm {
     _wait_impl->add_waiter(_wait_gen, this);
   }
     
-  void Task::DeferredSpawn::event_triggered(bool poisoned)
+  void Task::DeferredSpawn::event_triggered(bool poisoned, TimeLimit work_until)
   {
     // record the triggering, which closes the pending_list
     {

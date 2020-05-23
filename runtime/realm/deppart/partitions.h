@@ -165,7 +165,7 @@ namespace Realm {
     public:
       void defer(PartitioningOperation *_op, Event wait_on);
 
-      virtual void event_triggered(bool poisoned);
+      virtual void event_triggered(bool poisoned, TimeLimit work_until);
       virtual void print(std::ostream& os) const;
       virtual Event get_finish_event(void) const;
 

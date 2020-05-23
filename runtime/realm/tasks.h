@@ -85,7 +85,7 @@ namespace Realm {
 	DeferredSpawn(void);
 	void setup(ProcessorImpl *_proc, Task *_task, Event _wait_on);
         void defer(EventImpl *_wait_impl, EventImpl::gen_t _wait_gen);
-	virtual void event_triggered(bool poisoned);
+	virtual void event_triggered(bool poisoned, TimeLimit work_until);
 	virtual void print(std::ostream& os) const;
 	virtual Event get_finish_event(void) const;
 

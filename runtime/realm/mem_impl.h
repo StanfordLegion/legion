@@ -170,11 +170,11 @@ namespace Realm {
       void deferred_creation_triggered(RegionInstanceImpl *inst,
 				       size_t bytes, size_t alignment,
 				       bool need_alloc_result,
-				       bool poisoned);
+				       bool poisoned, TimeLimit work_until);
 
       // should only be called by RegionInstance::DeferredDestroy
       void deferred_destruction_triggered(RegionInstanceImpl *inst,
-					  bool poisoned);
+					  bool poisoned, TimeLimit work_until);
 
     protected:
       // for internal use by allocation routines - must be called with
@@ -348,7 +348,8 @@ namespace Realm {
       MemoryImpl::AllocationResult result;
 
       static void handle_message(NodeID sender, const MemStorageAllocResponse &msg,
-				 const void *data, size_t datalen);
+				 const void *data, size_t datalen,
+				 TimeLimit work_until);
 
     };
 

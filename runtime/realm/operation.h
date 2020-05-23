@@ -166,7 +166,7 @@ namespace Realm {
 #endif
 
     struct TableEntry : public EventWaiter {
-      virtual void event_triggered(bool poisoned);
+      virtual void event_triggered(bool poisoned, TimeLimit work_until);
       virtual void print(std::ostream& os) const;
       virtual Event get_finish_event(void) const;
 

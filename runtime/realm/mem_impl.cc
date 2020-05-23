@@ -410,7 +410,8 @@ namespace Realm {
 	  if(creator_node == Network::my_node_id) {
 	    // local notification of result
 	    inst->notify_allocation(ALLOC_CANCELLED,
-				    RegionInstanceImpl::INSTOFFSET_FAILED);
+				    RegionInstanceImpl::INSTOFFSET_FAILED,
+				    TimeLimit::responsive());
 	  } else {
 	    // we have to at least have the correct offset on our local
 	    //  instance impl (even if we don't have the rest of the metadata)
@@ -451,7 +452,8 @@ namespace Realm {
 	NodeID creator_node = ID(i).instance_creator_node();
 	if(creator_node == Network::my_node_id) {
 	  // local notification of result
-	  inst->notify_allocation(result, inst_offset);
+	  inst->notify_allocation(result, inst_offset,
+				  TimeLimit::responsive());
 	} else {
 	  // we have to at least have the correct offset on our local
 	  //  instance impl (even if we don't have the rest of the metadata)
@@ -641,7 +643,8 @@ namespace Realm {
     void MemoryImpl::deferred_creation_triggered(RegionInstanceImpl *inst,
 						 size_t bytes, size_t alignment,
 						 bool need_alloc_result,
-						 bool poisoned)
+						 bool poisoned,
+						 TimeLimit work_until)
     {
       AllocationResult result;
       size_t inst_offset = 0;
@@ -684,7 +687,7 @@ namespace Realm {
 	NodeID creator_node = ID(inst->me).instance_creator_node();
 	if(creator_node == Network::my_node_id) {
 	  // local notification of result
-	  inst->notify_allocation(result, inst_offset);
+	  inst->notify_allocation(result, inst_offset, work_until);
 	} else {
 	  // we have to at least have the correct offset on our local
 	  //  instance impl (even if we don't have the rest of the metadata)
@@ -728,7 +731,8 @@ namespace Realm {
   
     // should only be called by RegionInstance::DeferredDestroy
     void MemoryImpl::deferred_destruction_triggered(RegionInstanceImpl *inst,
-						    bool poisoned)
+						    bool poisoned,
+						    TimeLimit work_until)
     {
       std::vector<std::pair<RegionInstanceImpl *, size_t> > successful_allocs;
       std::vector<RegionInstanceImpl *> failed_allocs;
@@ -1005,7 +1009,8 @@ namespace Realm {
 	  NodeID creator_node = ID(it->first->me).instance_creator_node();
 	  if(creator_node == Network::my_node_id) {
 	    // local notification of result
-	    it->first->notify_allocation(ALLOC_EVENTUAL_SUCCESS, it->second);
+	    it->first->notify_allocation(ALLOC_EVENTUAL_SUCCESS, it->second,
+					 work_until);
 	  } else {
 	    // we have to at least have the correct offset on our local
 	    //  instance impl (even if we don't have the rest of the metadata)
@@ -1028,7 +1033,8 @@ namespace Realm {
 	  if(creator_node == Network::my_node_id) {
 	    // local notification of result
 	    (*it)->notify_allocation(ALLOC_EVENTUAL_FAILURE,
-				     RegionInstanceImpl::INSTOFFSET_FAILED);
+				     RegionInstanceImpl::INSTOFFSET_FAILED,
+				     work_until);
 	  } else {
 	    // we have to at least have the correct offset on our local
 	    //  instance impl (even if we don't have the rest of the metadata)
@@ -1228,11 +1234,12 @@ namespace Realm {
   //
 
   /*static*/ void MemStorageAllocResponse::handle_message(NodeID sender, const MemStorageAllocResponse &args,
-							  const void *data, size_t datalen)
+							  const void *data, size_t datalen,
+							  TimeLimit work_until)
   {
     RegionInstanceImpl *impl = get_runtime()->get_instance_impl(args.inst);
 
-    impl->notify_allocation(args.result, args.offset);
+    impl->notify_allocation(args.result, args.offset, work_until);
   }
 
 

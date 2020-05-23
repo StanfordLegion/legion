@@ -56,7 +56,7 @@ namespace Realm {
     class EventWaiter {
     public:
       virtual ~EventWaiter(void) {}
-      virtual void event_triggered(bool poisoned) = 0;
+      virtual void event_triggered(bool poisoned, TimeLimit work_until) = 0;
       virtual void print(std::ostream& os) const = 0;
       virtual Event get_finish_event(void) const = 0;
 
@@ -140,7 +140,7 @@ namespace Realm {
       void arm_merger(void);
 
     protected:
-      void precondition_triggered(bool poisoned);
+      void precondition_triggered(bool poisoned, TimeLimit work_until);
 
       friend class MergeEventPrecondition;
 
@@ -148,7 +148,7 @@ namespace Realm {
       public:
 	EventMerger *merger;
 
-	virtual void event_triggered(bool poisoned);
+	virtual void event_triggered(bool poisoned, TimeLimit work_until);
 	virtual void print(std::ostream& os) const;
 	virtual Event get_finish_event(void) const;
       };
@@ -205,15 +205,18 @@ namespace Realm {
       static Event ignorefaults(Event wait_for);
 
       // record that the event has triggered and notify anybody who cares
-      void trigger(gen_t gen_triggered, int trigger_node, bool poisoned);
+      void trigger(gen_t gen_triggered, int trigger_node, bool poisoned,
+		   TimeLimit work_until);
 
       // helper for triggering with an Event (which must be backed by a GenEventImpl)
       static void trigger(Event e, bool poisoned);
+      static void trigger(Event e, bool poisoned, TimeLimit work_until);
 
       // process an update message from the owner
       void process_update(gen_t current_gen,
 			  const gen_t *new_poisoned_generations,
-			  int new_poisoned_count);
+			  int new_poisoned_count,
+			  TimeLimit work_until);
 
     public: //protected:
       // these state variables are monotonic, so can be checked without a lock for
@@ -316,7 +319,8 @@ namespace Realm {
       void adjust_arrival(gen_t barrier_gen, int delta, 
 			  Barrier::timestamp_t timestamp, Event wait_on,
 			  NodeID sender, bool forwarded,
-			  const void *reduce_value, size_t reduce_value_size);
+			  const void *reduce_value, size_t reduce_value_size,
+			  TimeLimit work_until);
 
       bool get_result(gen_t result_gen, void *value, size_t value_size);
 
@@ -391,7 +395,7 @@ namespace Realm {
       class DeferredDestroy : public EventWaiter {
       public:
 	void defer(CompQueueImpl *_cq, Event wait_on);
-	virtual void event_triggered(bool poisoned);
+	virtual void event_triggered(bool poisoned, TimeLimit work_until);
 	virtual void print(std::ostream& os) const;
 	virtual Event get_finish_event(void) const;
 
@@ -415,7 +419,7 @@ namespace Realm {
     protected:
       class CompQueueWaiter : public EventWaiter {
       public:
-	virtual void event_triggered(bool poisoned);
+        virtual void event_triggered(bool poisoned, TimeLimit work_until);
 	virtual void print(std::ostream& os) const;
 	virtual Event get_finish_event(void) const;
 
@@ -425,7 +429,8 @@ namespace Realm {
 	CompQueueWaiter *next_free;
       };
 
-      void add_completed_event(Event event, CompQueueWaiter *waiter);
+      void add_completed_event(Event event, CompQueueWaiter *waiter,
+			       TimeLimit work_until);
 
       static const size_t CQWAITER_BATCH_SIZE = 16;
       class CompQueueWaiterBatch {
@@ -474,7 +479,8 @@ namespace Realm {
     bool poisoned;
 
     static void handle_message(NodeID sender, const EventTriggerMessage &msg,
-			       const void *data, size_t datalen);
+			       const void *data, size_t datalen,
+			       TimeLimit work_until);
 
   };
 
@@ -482,7 +488,8 @@ namespace Realm {
     Event event;
 
     static void handle_message(NodeID sender, const EventUpdateMessage &msg,
-			       const void *data, size_t datalen);
+			       const void *data, size_t datalen,
+			       TimeLimit work_until);
 
   };
 
@@ -494,7 +501,8 @@ namespace Realm {
     Event wait_on;
 
     static void handle_message(NodeID sender, const BarrierAdjustMessage &msg,
-			       const void *data, size_t datalen);
+			       const void *data, size_t datalen,
+			       TimeLimit work_until);
     static void send_request(NodeID target, Barrier barrier, int delta, Event wait_on,
 			     NodeID sender, bool forwarded,
 			     const void *data, size_t datalen);
@@ -524,7 +532,8 @@ namespace Realm {
     unsigned base_arrival_count;
 
     static void handle_message(NodeID sender, const BarrierTriggerMessage &msg,
-			       const void *data, size_t datalen);
+			       const void *data, size_t datalen,
+			       TimeLimit work_until);
 
     static void send_request(NodeID target, ID::IDType barrier_id,
 			     EventImpl::gen_t trigger_gen, EventImpl::gen_t previous_gen,

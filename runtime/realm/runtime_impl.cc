@@ -463,7 +463,8 @@ namespace Realm {
       EventImpl::add_waiter(wait_on, this);
     }
 
-    void RuntimeImpl::DeferredShutdown::event_triggered(bool poisoned)
+    void RuntimeImpl::DeferredShutdown::event_triggered(bool poisoned,
+							TimeLimit work_until)
     {
       // no real good way to deal with a poisoned shutdown precondition
       if(poisoned) {

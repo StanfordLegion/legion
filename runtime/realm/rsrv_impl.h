@@ -24,6 +24,7 @@
 #include "realm/network.h"
 #include "realm/nodeset.h"
 #include "realm/mutex.h"
+#include "realm/bgwork.h"
 
 #define REALM_RSRV_USE_CIRCQUEUE
 #ifdef REALM_RSRV_USE_CIRCQUEUE
@@ -125,7 +126,7 @@ namespace Realm {
 
       bool select_local_waiters(WaiterList& to_wake);
 
-      void release(void);
+      void release(TimeLimit work_until);
 
       bool is_locked(unsigned check_mode, bool excl_ok);
 
@@ -155,7 +156,8 @@ namespace Realm {
     unsigned mode;
 
     static void handle_message(NodeID sender,const LockGrantMessage &msg,
-			       const void *data, size_t datalen);
+			       const void *data, size_t datalen,
+			       TimeLimit work_until);
   };
 
   struct DestroyLockMessage {

@@ -503,7 +503,8 @@ namespace Realm {
       EventImpl::add_waiter(e, this);
     }
 
-    void DmaRequest::Waiter::event_triggered(bool poisoned)
+    void DmaRequest::Waiter::event_triggered(bool poisoned,
+					     TimeLimit work_until)
     {
       if(poisoned) {
 	log_poison.info() << "cancelling poisoned dma operation - op=" << req << " after=" << req->get_finish_event();

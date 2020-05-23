@@ -268,8 +268,11 @@ namespace Realm {
 
   void Operation::trigger_finish_event(bool poisoned)
   {
-    if(finish_event)
-      finish_event->trigger(finish_gen, Network::my_node_id, poisoned);
+    if(finish_event) {
+      // don't spend a long time here triggering events
+      finish_event->trigger(finish_gen, Network::my_node_id, poisoned,
+			    TimeLimit::responsive());
+    }
 #ifndef REALM_USE_OPERATION_TABLE
     // no operation table to decrement the refcount, so do it ourselves
     // SJT: should this always be done for operations without finish events?
@@ -328,7 +331,8 @@ namespace Realm {
   {}
 #endif
 
-  void OperationTable::TableEntry::event_triggered(bool poisoned)
+  void OperationTable::TableEntry::event_triggered(bool poisoned,
+						   TimeLimit work_until)
   {
     table->event_triggered(finish_event);
   }
