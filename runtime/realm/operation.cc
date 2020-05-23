@@ -225,12 +225,8 @@ namespace Realm {
   {
     // there should be no race conditions for this - state should be WAITING because we
     //  know there's a precondition that didn't successfully trigger
-    Status::Result prev = Status::WAITING;
-    if(state.compare_exchange(prev, Status::CANCELLED)) {
-      status.result = Status::CANCELLED;
-      status.error_code = Faults::ERROR_POISONED_PRECONDITION;
-      status.error_details.set(&pre, sizeof(pre));
-
+    if(attempt_cancellation(Faults::ERROR_POISONED_PRECONDITION,
+			    &pre, sizeof(pre))) {
       mark_finished(false /*unsuccessful*/);
     } else {
       assert(0);
@@ -296,10 +292,15 @@ namespace Realm {
       timeline.record_create_time();
   }
 
-  std::ostream& operator<<(std::ostream& os, const Operation *op)
+  Operation::Status::Result Operation::get_state(void)
+  {
+    return state.load();
+  }
+
+  std::ostream& operator<<(std::ostream& os, Operation *op)
   {
     op->print(os);
-    os << " status=" << op->state.load()
+    os << " status=" << op->get_state()
        << "(" << op->timeline.ready_time
        << "," << op->timeline.start_time
        << ") work=" << op->pending_work_items.load();

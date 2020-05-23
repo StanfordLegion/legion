@@ -101,13 +101,23 @@ namespace Realm {
 	Mutex pending_list_mutex;
 	TaskList pending_list;
 	bool is_triggered, is_poisoned;
+	size_t list_length;
       };
       DeferredSpawn deferred_spawn;
       
     protected:
       virtual void mark_completed(void);
 
+      virtual Status::Result get_state(void);
+
       Thread *executing_thread;
+
+      // to spread out the cost of marking a long list of tasks ready, we
+      //  keep a 'marked_ready' bit in the head task of the list and the rest
+      //  have a pointer to the head task (which uses a uintptr_t so we can
+      //  borrow the bottom bit for avoiding races)
+      atomic<bool> marked_ready;
+      atomic<uintptr_t> pending_head;
     };
 
     class TaskQueue {
@@ -146,7 +156,7 @@ namespace Realm {
 				 int& task_priority);
 
       void enqueue_task(Task *task);
-      void enqueue_tasks(Task::TaskList& tasks);
+      void enqueue_tasks(Task::TaskList& tasks, size_t num_tasks);
     };
 
     // an internal task is an arbitrary blob of work that needs to happen on

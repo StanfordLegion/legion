@@ -811,9 +811,9 @@ namespace Realm {
     task_queue.enqueue_task(task);
   }
 
-  void LocalPythonProcessor::enqueue_tasks(Task::TaskList& tasks)
+  void LocalPythonProcessor::enqueue_tasks(Task::TaskList& tasks, size_t num_tasks)
   {
-    task_queue.enqueue_tasks(tasks);
+    task_queue.enqueue_tasks(tasks, num_tasks);
   }
 
   void LocalPythonProcessor::spawn_task(Processor::TaskFuncID func_id,

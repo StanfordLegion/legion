@@ -707,9 +707,10 @@ namespace Realm {
       task_queue.enqueue_task(task);
     }
 
-    void ProcessorGroupImpl::enqueue_tasks(Task::TaskList& tasks)
+    void ProcessorGroupImpl::enqueue_tasks(Task::TaskList& tasks,
+					   size_t num_tasks)
     {
-      task_queue.enqueue_tasks(tasks);
+      task_queue.enqueue_tasks(tasks, num_tasks);
     }
 
     void ProcessorGroupImpl::add_to_group(ProcessorGroupImpl *group)
@@ -889,7 +890,7 @@ namespace Realm {
       assert(0);
     }
 
-    void RemoteProcessor::enqueue_tasks(Task::TaskList& tasks)
+    void RemoteProcessor::enqueue_tasks(Task::TaskList& tasks, size_t num_tasks)
     {
       // should never be called
       assert(0);
@@ -1010,9 +1011,9 @@ namespace Realm {
     task_queue.enqueue_task(task);
   }
 
-  void LocalTaskProcessor::enqueue_tasks(Task::TaskList& tasks)
+  void LocalTaskProcessor::enqueue_tasks(Task::TaskList& tasks, size_t num_tasks)
   {
-    task_queue.enqueue_tasks(tasks);
+    task_queue.enqueue_tasks(tasks, num_tasks);
   }
 
   void LocalTaskProcessor::spawn_task(Processor::TaskFuncID func_id,

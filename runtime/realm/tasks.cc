@@ -38,7 +38,7 @@ namespace Realm {
     : Operation(_finish_event, _finish_gen, reqs)
     , proc(_proc), func_id(_func_id),
       before_event(_before_event), priority(_priority),
-      executing_thread(0)
+      executing_thread(0), marked_ready(false), pending_head(0)
   {
     // clamp task priority to "finite" range
     if(priority < TaskQueue::PRI_MIN_FINITE) priority = TaskQueue::PRI_MIN_FINITE;
@@ -67,6 +67,9 @@ namespace Realm {
   {
     if(free_argdata)
       free(argdata);
+
+    // if we're still holding a reference to a pending_head, something is wrong
+    assert(pending_head.load() == 0);
   }
 
   void Task::print(std::ostream& os) const
@@ -79,7 +82,17 @@ namespace Realm {
     log_task.info() << "task " << (void *)this << " ready: func=" << func_id
 		    << " proc=" << proc << " arglen=" << arglen
 		    << " before=" << before_event << " after=" << get_finish_event();
-    return Operation::mark_ready();
+    bool success = Operation::mark_ready();
+    if(!success) {
+      // might still want the timeline info
+      if(wants_timeline)
+	timeline.record_ready_time();
+    }
+    // unconditionally set the 'marked_ready' bit for the benefit of any
+    //  tasks that were pending with this one (they can't use the state of this
+    //  task as a cancellation would obscure whether it had become ready first)
+    marked_ready.store_release(true);
+    return success;
   }
 
   bool Task::mark_started(void)
@@ -87,7 +100,38 @@ namespace Realm {
     log_task.info() << "task " << (void *)this << " started: func=" << func_id
 		    << " proc=" << proc << " arglen=" << arglen
 		    << " before=" << before_event << " after=" << get_finish_event();
-    return Operation::mark_started();
+    // perform a delayed WAITING->READY update now if we were part of a chain
+    //  of tasks - don't actually look at the head (e.g. to grab the ready
+    //  time) until we're sure we got in ahead of any cancellations tohugh
+    bool did_pending_update = false;
+    if(pending_head.load() != 0) {
+      Status::Result expected = Status::WAITING;
+      if(state.compare_exchange(expected, Status::READY))
+	did_pending_update = true;
+    }
+    bool success = Operation::mark_started();
+    // if this succeeded, it's our job to release our hold on a pending_head
+    if(success) {
+      uintptr_t phead = pending_head.load() & ~uintptr_t(1);
+      if(phead != 0) {
+	// still have to avoid races with get_state calls though
+	while(true) {
+	  uintptr_t prev = phead;
+	  if(pending_head.compare_exchange(prev, 0)) break;
+	  assert(prev == (phead + 1));
+	}
+	Task *headptr = reinterpret_cast<Task *>(phead);
+#ifdef DEBUG_REALM
+	// no need for load_acquire here, because the pushing and popping of
+	//  this task (and the head task) involved a mutex
+	assert(headptr->marked_ready.load());
+#endif
+	if(did_pending_update && wants_timeline)
+	  timeline.ready_time = headptr->timeline.ready_time;
+	headptr->remove_reference();
+      }
+    }
+    return success;
   }
 
   void Task::mark_completed(void)
@@ -98,11 +142,67 @@ namespace Realm {
     Operation::mark_completed();
   }
 
+  Operation::Status::Result Task::get_state(void)
+  {
+    Status::Result lazy_state = state.load();
+
+    // if we're in pending but part of a chain, check our head task
+    if((lazy_state == Status::WAITING) && (pending_head.load() != 0)) {
+      // try to set the bottom bit of pending_head to prevent races with
+      //  calls to mark_started or attempt_cancellation that clear pending_head
+      while(true) {
+	uintptr_t phead = pending_head.fetch_or(1);
+	if(phead == 0) {
+	  // nope, already been cleared, so nothing for us to look at
+	  pending_head.store(0);
+	  break;
+	}
+	if((phead & 1) == 1) {
+	  // somebody else is already holding the lock, so try again
+	  continue;
+	}
+	// success - we can safely look at marked_ready and the timeline now
+	Task *headptr = reinterpret_cast<Task *>(phead);
+	bool success = false;
+	if(headptr->marked_ready.load_acquire()) {
+	  Status::Result expected = Status::WAITING;
+	  success = state.compare_exchange(expected, Status::READY);
+	}
+	if(success && wants_timeline)
+	  timeline.ready_time = headptr->timeline.ready_time;
+
+	// clear the LSB to release our hold - clearing of the whole pointer
+	//  will be done by mark_started or attempt_cancellation
+	pending_head.fetch_sub(1);
+
+	return (success ? Status::READY : lazy_state);
+      }
+    }
+
+    // in any other case, our state was actually current
+    return lazy_state;
+  }
+
   bool Task::attempt_cancellation(int error_code, const void *reason_data, size_t reason_size)
   {
     // let the base class handle the easy cases
-    if(Operation::attempt_cancellation(error_code, reason_data, reason_size))
+    if(Operation::attempt_cancellation(error_code, reason_data, reason_size)) {
+      // if we had a reference to a head pending task, let go of it
+      uintptr_t phead = pending_head.load() & ~uintptr_t(1);
+      if(phead != 0) {
+	// still have to avoid races with get_state calls though
+	while(true) {
+	  uintptr_t prev = phead;
+	  if(pending_head.compare_exchange(prev, 0)) break;
+	  assert(prev == (phead + 1));
+	}
+	Task *headptr = reinterpret_cast<Task *>(phead);
+	if(wants_timeline)
+	  timeline.ready_time = headptr->timeline.ready_time;
+	headptr->remove_reference();
+      }
       return true;
+    }
 
     // for a running task, see if we can signal it to stop
     Status::Result prev = Status::RUNNING;
@@ -229,6 +329,7 @@ namespace Realm {
 
   Task::DeferredSpawn::DeferredSpawn(void)
     : is_triggered(false)
+    , list_length(0)
   {}
 
   void Task::DeferredSpawn::setup(ProcessorImpl *_proc, Task *_task,
@@ -246,6 +347,7 @@ namespace Realm {
       AutoLock<> al(pending_list_mutex);
       // insert ourselves in the pending list
       pending_list.push_back(task);
+      list_length++;
     }
     _wait_impl->add_waiter(_wait_gen, this);
   }
@@ -270,7 +372,7 @@ namespace Realm {
       task->remove_reference();
     } else {
       //log_task.print() << "enqueuing " << pending_list.size() << " tasks";
-      proc->enqueue_tasks(pending_list);
+      proc->enqueue_tasks(pending_list, list_length);
     }
   }
 
@@ -300,6 +402,12 @@ namespace Realm {
       } else {
 	ok = true;
 	pending_list.push_back(to_add);
+	// task we added will hold a reference this head task
+	task->add_reference();
+	to_add->pending_head.store(reinterpret_cast<uintptr_t>(task));
+	// make sure to record our ready time if anybody in the chain needs it
+	if(to_add->wants_timeline)
+	  task->wants_timeline = true;
       }
     }
     return ok;
@@ -412,29 +520,18 @@ namespace Realm {
       task->mark_finished(false /*!successful*/);
   }
 
-  class ReadyMarker {
-  public:
-    ReadyMarker() : count(0) {}
-
-    void operator()(Task *task)
-    {
-      task->mark_ready();
-      count++;
-    }
-
-    size_t count;
-  };
-
-  void TaskQueue::enqueue_tasks(Task::TaskList& tasks)
+  void TaskQueue::enqueue_tasks(Task::TaskList& tasks, size_t num_tasks)
   {
     // early out if there are no tasks to add
     if(tasks.empty(PRI_NEG_INF)) return;
 
-    // mark all tasks as ready - we lose the ability to filter out those
-    //  that have been cancelled, but that'll happen in mark_started too,
-    //  and it saves us from messing with the list structure
-    ReadyMarker marker;
-    tasks.foreach(marker);
+    // mark just the first task as ready - the remaining tasks will lazily
+    //  pick up the update when mark_started gets called or when the state
+    //  is explictly queried
+    // we lose the ability to filter out tasks that have been cancelled, but
+    //  that'll happen in mark_started too, and it saves us from messing with
+    //  the list structure here
+    tasks.front()->mark_ready();
 
     // we'll tentatively notify based on the highest priority task to be
     //  added
@@ -450,7 +547,7 @@ namespace Realm {
     }
 
     if(task_count_gauge)
-      *task_count_gauge += marker.count;
+      *task_count_gauge += num_tasks;
 
     if(notify_priority > PRI_NEG_INF)
       for(size_t i = 0; i < callbacks.size(); i++)
