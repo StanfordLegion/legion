@@ -18842,29 +18842,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::add_to_dependence_queue(TaskContext *ctx, Processor p, 
-                                          Operation *op, const bool unordered)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(p.kind() != Processor::UTIL_PROC);
-#endif
-      // Launch the task to perform the prepipeline stage for the operation
-      if (op->has_prepipeline_stage())
-        ctx->add_to_prepipeline_queue(op);
-      if (program_order_execution && !unordered)
-      {
-        ApEvent term_event = op->get_completion_event();
-        ctx->add_to_dependence_queue(op, false/*unordered*/);
-        ctx->begin_task_wait(true/*from runtime*/);
-        term_event.wait();
-        ctx->end_task_wait();
-      }
-      else
-        ctx->add_to_dependence_queue(op, unordered);
-    }
-    
-    //--------------------------------------------------------------------------
     void Runtime::add_to_ready_queue(Processor p, TaskOp *op, RtEvent wait_on)
     //--------------------------------------------------------------------------
     {

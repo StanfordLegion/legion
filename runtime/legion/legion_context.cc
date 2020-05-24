@@ -3690,7 +3690,7 @@ namespace Legion {
         runtime->forest->create_index_space(handle, NULL, did, ready);
       creator_op->initialize_index_space(this, node, future);
       register_index_space_creation(handle);
-      runtime->add_to_dependence_queue(this, executing_processor, creator_op);
+      add_to_dependence_queue(creator_op);
       return handle;
     }
 
@@ -3765,7 +3765,7 @@ namespace Legion {
       }
       DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_index_space_deletion(this,handle,sub_partitions,unordered);
-      runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
+      add_to_dependence_queue(op, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -3831,7 +3831,7 @@ namespace Legion {
       DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_index_part_deletion(this, handle, 
                                          sub_partitions, unordered);
-      runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
+      add_to_dependence_queue(op, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -3862,7 +3862,7 @@ namespace Legion {
       RtEvent safe = runtime->forest->create_pending_partition(this,pid,parent,
         color_space, partition_color, DISJOINT_COMPLETE_KIND, did, term_event);
       // Now we can add the operation to the queue
-      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      add_to_dependence_queue(part_op);
       // Wait for any notifications to occur before returning
       if (safe.exists())
         safe.wait();
@@ -3897,7 +3897,7 @@ namespace Legion {
       const RtEvent safe = forest->create_pending_partition(this, pid, parent,
         color_space, partition_color, DISJOINT_COMPLETE_KIND, did, term_event);
       // Now we can add the operation to the queue
-      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      add_to_dependence_queue(part_op);
       // Wait for any notifications to occur before returning
       if (safe.exists())
         safe.wait();
@@ -3975,7 +3975,7 @@ namespace Legion {
       RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
             parent, color_space, partition_color, kind, did, term_event);
       // Now we can add the operation to the queue
-      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      add_to_dependence_queue(part_op);
       // Wait for any notifications to occur before returning
       if (safe.exists())
         safe.wait();
@@ -4054,7 +4054,7 @@ namespace Legion {
       RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
             parent, color_space, partition_color, kind, did, term_event);
       // Now we can add the operation to the queue
-      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      add_to_dependence_queue(part_op);
       // Wait for any notifications to occur before returning
       if (safe.exists())
         safe.wait();
@@ -4114,7 +4114,7 @@ namespace Legion {
       RtEvent safe = runtime->forest->create_pending_partition(this, pid,parent,
         part_node->color_space->handle, partition_color, kind, did, term_event);
       // Now we can add the operation to the queue
-      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      add_to_dependence_queue(part_op);
       // Wait for any notifications to occur before returning
       if (safe.exists())
         safe.wait();
@@ -4183,7 +4183,7 @@ namespace Legion {
       RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
             parent, color_space, partition_color, kind, did, term_event);
       // Now we can add the operation to the queue
-      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      add_to_dependence_queue(part_op);
       // Wait for any notifications to occur before returning
       if (safe.exists())
         safe.wait();
@@ -4227,7 +4227,7 @@ namespace Legion {
                   handles, kind, partition_color, term_event, safe_events);
       part_op->initialize_cross_product(this, handle1, handle2,partition_color);
       // Now we can add the operation to the queue
-      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      add_to_dependence_queue(part_op);
       if (!safe_events.empty())
       {
         const RtEvent wait_on = Runtime::merge_events(safe_events);
@@ -4312,7 +4312,7 @@ namespace Legion {
           unmapped_regions[idx].impl->unmap_region();
       }
       // Issue the copy operation
-      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      add_to_dependence_queue(part_op);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
@@ -4353,7 +4353,7 @@ namespace Legion {
       RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
             parent, color_space, part_color, part_kind, did, term_event);
       // Now we can add the operation to the queue
-      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      add_to_dependence_queue(part_op);
       // Wait for any notifications to occur before returning
       if (safe.exists())
         safe.wait();
@@ -4394,7 +4394,7 @@ namespace Legion {
       RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
             parent, color_space, part_color, part_kind, did, term_event);
       // Now we can add the operation to the queue
-      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      add_to_dependence_queue(part_op);
       // Wait for any notifications to occur before returning
       if (safe.exists())
         safe.wait();
@@ -4457,7 +4457,7 @@ namespace Legion {
           unmapped_regions[idx].impl->unmap_region();
       }
       // Issue the copy operation
-      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      add_to_dependence_queue(part_op);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
@@ -4523,7 +4523,7 @@ namespace Legion {
           unmapped_regions[idx].impl->unmap_region();
       }
       // Issue the copy operation
-      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      add_to_dependence_queue(part_op);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
@@ -4590,7 +4590,7 @@ namespace Legion {
           unmapped_regions[idx].impl->unmap_region();
       }
       // Issue the copy operation
-      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      add_to_dependence_queue(part_op);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
@@ -4674,7 +4674,7 @@ namespace Legion {
           unmapped_regions[idx].impl->unmap_region();
       }
       // Issue the copy operation
-      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      add_to_dependence_queue(part_op);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
@@ -4742,7 +4742,7 @@ namespace Legion {
           unmapped_regions[idx].impl->unmap_region();
       }
       // Issue the copy operation
-      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      add_to_dependence_queue(part_op);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
@@ -4815,7 +4815,7 @@ namespace Legion {
       part_op->initialize_index_space_union(this, result, handles);
       Runtime::trigger_event(domain_ready, part_op->get_completion_event());
       // Now we can add the operation to the queue
-      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      add_to_dependence_queue(part_op);
       return result;
     }
 
@@ -4839,7 +4839,7 @@ namespace Legion {
       part_op->initialize_index_space_union(this, result, handle);
       Runtime::trigger_event(domain_ready, part_op->get_completion_event());
       // Now we can add the operation to the queue
-      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      add_to_dependence_queue(part_op);
       return result;
     }
 
@@ -4864,7 +4864,7 @@ namespace Legion {
       part_op->initialize_index_space_intersection(this, result, handles);
       Runtime::trigger_event(domain_ready, part_op->get_completion_event());
       // Now we can add the operation to the queue
-      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      add_to_dependence_queue(part_op);
       return result;
     }
 
@@ -4889,7 +4889,7 @@ namespace Legion {
       part_op->initialize_index_space_intersection(this, result, handle);
       Runtime::trigger_event(domain_ready, part_op->get_completion_event());
       // Now we can add the operation to the queue
-      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      add_to_dependence_queue(part_op);
       return result;
     }
 
@@ -4915,7 +4915,7 @@ namespace Legion {
       part_op->initialize_index_space_difference(this, result, initial,handles);
       Runtime::trigger_event(domain_ready, part_op->get_completion_event());
       // Now we can add the operation to the queue
-      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      add_to_dependence_queue(part_op);
       return result;
     } 
 
@@ -5222,7 +5222,7 @@ namespace Legion {
       }
       DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_field_space_deletion(this, handle, unordered);
-      runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
+      add_to_dependence_queue(op, unordered);
     } 
 
     //--------------------------------------------------------------------------
@@ -5258,7 +5258,7 @@ namespace Legion {
         runtime->forest->allocate_field(space, ready, fid, serdez_id);
       creator_op->initialize_field(this, node, fid, field_size); 
       register_field_creation(space, fid, local);
-      runtime->add_to_dependence_queue(this, executing_processor, creator_op);
+      add_to_dependence_queue(creator_op);
       return fid;
     }
 
@@ -5364,7 +5364,7 @@ namespace Legion {
                                               resulting_fields, serdez_id);
       creator_op->initialize_fields(this, node, resulting_fields, sizes);
       register_all_field_creations(space, local, resulting_fields);
-      runtime->add_to_dependence_queue(this, executing_processor, creator_op);
+      add_to_dependence_queue(creator_op);
     }
 
     //--------------------------------------------------------------------------
@@ -5463,7 +5463,7 @@ namespace Legion {
       // Launch off the deletion operation
       DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_field_deletion(this, space, fid, unordered);
-      runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
+      add_to_dependence_queue(op, unordered);
     } 
 
     //--------------------------------------------------------------------------
@@ -5508,7 +5508,7 @@ namespace Legion {
         return;
       DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_field_deletions(this, space, free_now, unordered);
-      runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
+      add_to_dependence_queue(op, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -5572,7 +5572,7 @@ namespace Legion {
       }
       DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_logical_region_deletion(this, handle, unordered);
-      runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
+      add_to_dependence_queue(op, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -5751,7 +5751,7 @@ namespace Legion {
       AllReduceOp *all_reduce_op = runtime->get_available_all_reduce_op();
       Future result = 
         all_reduce_op->initialize(this, future_map, redop, deterministic);
-      runtime->add_to_dependence_queue(this, executing_processor,all_reduce_op);
+      add_to_dependence_queue(all_reduce_op);
       return result;
     }
 
@@ -5776,7 +5776,7 @@ namespace Legion {
       const DistributedID did = runtime->get_available_distributed_id();
       FutureMapImpl *impl = new FutureMapImpl(this, creation_op, 
           RtEvent::NO_RT_EVENT, runtime, did, runtime->address_space);
-      runtime->add_to_dependence_queue(this, executing_processor, creation_op);
+      add_to_dependence_queue(creation_op);
       impl->set_all_futures(futures);
       return FutureMap(impl);
     }
@@ -5826,7 +5826,7 @@ namespace Legion {
                       launcher.requirement.region.tree_id,
                       get_task_name(), get_unique_id())
       register_inline_mapped_region(result);
-      runtime->add_to_dependence_queue(this, executing_processor, map_op);
+      add_to_dependence_queue(map_op);
       return result;
     }
 
@@ -5846,7 +5846,7 @@ namespace Legion {
       map_op->initialize(this, region);
       register_inline_mapped_region(region);
       const ApEvent result = map_op->get_completion_event();
-      runtime->add_to_dependence_queue(this, executing_processor, map_op);
+      add_to_dependence_queue(map_op);
       return result;
     }
 
@@ -5892,7 +5892,7 @@ namespace Legion {
           unmapped_regions[idx].impl->unmap_region();
       }
       // Issue the copy operation
-      runtime->add_to_dependence_queue(this, executing_processor, fill_op);
+      add_to_dependence_queue(fill_op);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
@@ -5939,7 +5939,7 @@ namespace Legion {
           unmapped_regions[idx].impl->unmap_region();
       }
       // Issue the copy operation
-      runtime->add_to_dependence_queue(this, executing_processor, fill_op);
+      add_to_dependence_queue(fill_op);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
@@ -5975,7 +5975,7 @@ namespace Legion {
           unmapped_regions[idx].impl->unmap_region();
       }
       // Issue the copy operation
-      runtime->add_to_dependence_queue(this, executing_processor, copy_op);
+      add_to_dependence_queue(copy_op);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
@@ -6022,7 +6022,7 @@ namespace Legion {
           unmapped_regions[idx].impl->unmap_region();
       }
       // Issue the copy operation
-      runtime->add_to_dependence_queue(this, executing_processor, copy_op);
+      add_to_dependence_queue(copy_op);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
@@ -6057,7 +6057,7 @@ namespace Legion {
           unmapped_regions[idx].impl->unmap_region();
       }
       // Issue the acquire operation
-      runtime->add_to_dependence_queue(this, executing_processor, acquire_op);
+      add_to_dependence_queue(acquire_op);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
@@ -6092,7 +6092,7 @@ namespace Legion {
           unmapped_regions[idx].impl->unmap_region();
       }
       // Issue the release operation
-      runtime->add_to_dependence_queue(this, executing_processor, release_op);
+      add_to_dependence_queue(release_op);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
@@ -6138,7 +6138,7 @@ namespace Legion {
       // If we're counting this region as mapped we need to register it
       if (launcher.mapped)
         register_inline_mapped_region(result);
-      runtime->add_to_dependence_queue(this, executing_processor, attach_op);
+      add_to_dependence_queue(attach_op);
       return result;
     }
 
@@ -6159,7 +6159,7 @@ namespace Legion {
         unregister_inline_mapped_region(region);
         region.impl->unmap_region();
       }
-      runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
+      add_to_dependence_queue(op, unordered);
       return result;
     }
 
@@ -6236,7 +6236,7 @@ namespace Legion {
           unmapped_regions[idx].impl->unmap_region();
       }
       // Now we can issue the must epoch
-      runtime->add_to_dependence_queue(this, executing_processor, epoch_op);
+      add_to_dependence_queue(epoch_op);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
@@ -6254,7 +6254,7 @@ namespace Legion {
 #endif
       TimingOp *timing_op = runtime->get_available_timing_op();
       Future result = timing_op->initialize(this, launcher);
-      runtime->add_to_dependence_queue(this, executing_processor, timing_op);
+      add_to_dependence_queue(timing_op);
       return result;
     }
 
@@ -6269,7 +6269,7 @@ namespace Legion {
                     get_task_name(), get_unique_id());
 #endif
       Future f = fence_op->initialize(this, FenceOp::MAPPING_FENCE, true);
-      runtime->add_to_dependence_queue(this, executing_processor, fence_op);
+      add_to_dependence_queue(fence_op);
       return f;
     }
 
@@ -6284,7 +6284,7 @@ namespace Legion {
                     get_task_name(), get_unique_id());
 #endif
       Future f = fence_op->initialize(this, FenceOp::EXECUTION_FENCE, true);
-      runtime->add_to_dependence_queue(this, executing_processor, fence_op);
+      add_to_dependence_queue(fence_op);
       return f; 
     }
 
@@ -6299,7 +6299,7 @@ namespace Legion {
                     get_task_name(), get_unique_id());
 #endif
       frame_op->initialize(this);
-      runtime->add_to_dependence_queue(this, executing_processor, frame_op);
+      add_to_dependence_queue(frame_op);
     }
 
     //--------------------------------------------------------------------------
@@ -6316,7 +6316,7 @@ namespace Legion {
       // Hold a reference before initialization
       Predicate result(pred_op);
       pred_op->initialize(this, f);
-      runtime->add_to_dependence_queue(this, executing_processor, pred_op);
+      add_to_dependence_queue(pred_op);
       return result;
     }
 
@@ -6329,7 +6329,7 @@ namespace Legion {
       // Hold a reference before initialization
       Predicate result(pred_op);
       pred_op->initialize(this, p);
-      runtime->add_to_dependence_queue(this, executing_processor, pred_op);
+      add_to_dependence_queue(pred_op);
       return result;
     }
 
@@ -6367,7 +6367,7 @@ namespace Legion {
         // Hold a reference before initialization
         Predicate result(pred_op);
         pred_op->initialize(this, actual_predicates);
-        runtime->add_to_dependence_queue(this, executing_processor, pred_op);
+        add_to_dependence_queue(pred_op);
         return result;
       }
       else
@@ -6392,7 +6392,7 @@ namespace Legion {
         // Hold a reference before initialization
         Predicate result(pred_op);
         pred_op->initialize(this, actual_predicates);
-        runtime->add_to_dependence_queue(this, executing_processor, pred_op);
+        add_to_dependence_queue(pred_op);
         return result;
       }
     }
@@ -6618,6 +6618,9 @@ namespace Legion {
     void InnerContext::add_to_dependence_queue(Operation *op, bool unordered)
     //--------------------------------------------------------------------------
     {
+      // Launch the task to perform the prepipeline stage for the operation
+      if (op->has_prepipeline_stage())
+        add_to_prepipeline_queue(op);
       LgPriority priority = LG_THROUGHPUT_WORK_PRIORITY; 
       // If this is tracking, add it to our data structure first
       if (op->is_tracking_parent() || unordered)
@@ -6638,6 +6641,7 @@ namespace Legion {
       
       bool issue_task = false;
       RtEvent precondition;
+      const ApEvent term_event = op->get_completion_event();
       {
         AutoLock d_lock(dependence_lock);
         if (unordered)
@@ -6667,6 +6671,12 @@ namespace Legion {
       {
         DependenceArgs args(op, this);
         runtime->issue_runtime_meta_task(args, priority, precondition); 
+      }
+      if (runtime->program_order_execution && !unordered)
+      {
+        begin_task_wait(true/*from runtime*/);
+        term_event.wait();
+        end_task_wait();
       }
     }
 
@@ -7469,14 +7479,14 @@ namespace Legion {
       // Issue a begin op
       TraceBeginOp *begin = runtime->get_available_begin_op();
       begin->initialize_begin(this, dynamic_trace);
-      runtime->add_to_dependence_queue(this, executing_processor, begin);
+      add_to_dependence_queue(begin);
 
       if (!logical_only)
       {
         // Issue a replay op
         TraceReplayOp *replay = runtime->get_available_replay_op();
         replay->initialize_replay(this, dynamic_trace);
-        runtime->add_to_dependence_queue(this, executing_processor, replay);
+        add_to_dependence_queue(replay);
       }
 
       // Now mark that we are starting a trace
@@ -7511,14 +7521,14 @@ namespace Legion {
         // Already fixed, dump a complete trace op into the stream
         TraceCompleteOp *complete_op = runtime->get_available_trace_op();
         complete_op->initialize_complete(this, has_blocking_call);
-        runtime->add_to_dependence_queue(this, executing_processor, complete_op);
+        add_to_dependence_queue(complete_op);
       }
       else
       {
         // Not fixed yet, dump a capture trace op into the stream
         TraceCaptureOp *capture_op = runtime->get_available_capture_op(); 
         capture_op->initialize_capture(this, has_blocking_call);
-        runtime->add_to_dependence_queue(this, executing_processor, capture_op);
+        add_to_dependence_queue(capture_op);
         // Mark that the current trace is now fixed
         current_trace->as_dynamic_trace()->fix_trace();
       }
@@ -7573,7 +7583,7 @@ namespace Legion {
       // This operation takes ownership of the static trace reference
       TraceCompleteOp *complete_op = runtime->get_available_trace_op();
       complete_op->initialize_complete(this,current_trace->has_blocking_call());
-      runtime->add_to_dependence_queue(this, executing_processor, complete_op);
+      add_to_dependence_queue(complete_op);
       // We no longer have a trace that we're executing 
       current_trace = NULL;
     }
@@ -7913,8 +7923,7 @@ namespace Legion {
       DynamicCollectiveOp *collective = 
         runtime->get_available_dynamic_collective_op();
       Future result = collective->initialize(this, dc);
-      const Processor proc = get_executing_processor();
-      runtime->add_to_dependence_queue(this, proc, collective);
+      add_to_dependence_queue(collective);
       return result;
     }
 
@@ -8637,7 +8646,7 @@ namespace Legion {
           PostCloseOp *close_op = 
             runtime->get_available_post_close_op();
           close_op->initialize(this, idx, physical_instances[idx]);
-          runtime->add_to_dependence_queue(this, executing_processor, close_op);
+          add_to_dependence_queue(close_op);
         }
         else
         {
@@ -8645,7 +8654,7 @@ namespace Legion {
           VirtualCloseOp *close_op = 
             runtime->get_available_virtual_close_op();
           close_op->initialize(this, idx, regions[idx]);
-          runtime->add_to_dependence_queue(this, executing_processor, close_op);
+          add_to_dependence_queue(close_op);
         }
       }
       // Check to see if we have any unordered operations that we need to inject
@@ -8903,7 +8912,7 @@ namespace Legion {
           MapOp *op = runtime->get_available_map_op();
           op->initialize(this, physical_regions[idx]);
           wait_events.insert(op->get_completion_event());
-          runtime->add_to_dependence_queue(this, executing_processor, op);
+          add_to_dependence_queue(op);
         }
         else if (!phy_regions_mapped[idx] && is_region_mapped(idx))
         {
@@ -9145,7 +9154,7 @@ namespace Legion {
             unmapped_regions[idx].impl->unmap_region();
         }
         // Issue the task call
-        runtime->add_to_dependence_queue(this, executing_processor, task);
+        add_to_dependence_queue(task);
         // Remap any unmapped regions
         if (!unmapped_regions.empty())
           remap_unmapped_regions(current_trace, unmapped_regions);
@@ -11124,13 +11133,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::add_to_prepipeline_queue(Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     void LeafContext::add_to_dependence_queue(Operation *op, bool unordered)
     //--------------------------------------------------------------------------
     {
@@ -12448,13 +12450,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return enclosing->register_new_summary_operation(op);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::add_to_prepipeline_queue(Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->add_to_prepipeline_queue(op);
     }
 
     //--------------------------------------------------------------------------
