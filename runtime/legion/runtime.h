@@ -3080,8 +3080,6 @@ namespace Legion {
       void activate_context(InnerContext *context);
       void deactivate_context(InnerContext *context);
     public:
-      void add_to_dependence_queue(TaskContext *ctx, Processor p,
-                                   Operation *op, const bool unordered = false);
       void add_to_ready_queue(Processor p, TaskOp *task_op, 
                               RtEvent wait_on = RtEvent::NO_RT_EVENT);
       void add_to_local_queue(Processor p, Operation *op, LgPriority priority,

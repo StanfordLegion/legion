@@ -391,8 +391,8 @@ namespace Legion {
       virtual void register_new_internal_operation(InternalOp *op) = 0;
       virtual size_t register_new_close_operation(CloseOp *op) = 0;
       virtual size_t register_new_summary_operation(TraceSummaryOp *op) = 0;
-      virtual void add_to_prepipeline_queue(Operation *op) = 0;
-      virtual void add_to_dependence_queue(Operation *op, bool unordered) = 0;
+      virtual void add_to_dependence_queue(Operation *op, 
+                                           bool unordered = false) = 0;
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
                                           const void *result, size_t size, 
 #ifdef LEGION_MALLOC_INSTANCES
@@ -1139,9 +1139,10 @@ namespace Legion {
                                         const bool progress);
       virtual size_t register_new_close_operation(CloseOp *op);
       virtual size_t register_new_summary_operation(TraceSummaryOp *op);
-      virtual void add_to_prepipeline_queue(Operation *op);
+      void add_to_prepipeline_queue(Operation *op);
       bool process_prepipeline_stage(void);
-      virtual void add_to_dependence_queue(Operation *op, bool unordered); 
+      virtual void add_to_dependence_queue(Operation *op, 
+                                           bool unordered = false);
       void process_dependence_stage(void);
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
                                           const void *result, size_t size, 
@@ -2492,8 +2493,8 @@ namespace Legion {
       virtual void register_new_internal_operation(InternalOp *op);
       virtual size_t register_new_close_operation(CloseOp *op);
       virtual size_t register_new_summary_operation(TraceSummaryOp *op);
-      virtual void add_to_prepipeline_queue(Operation *op);
-      virtual void add_to_dependence_queue(Operation *op, bool unordered);
+      virtual void add_to_dependence_queue(Operation *op, 
+                                           bool unordered = false);
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
                                           const void *result, size_t size, 
 #ifdef LEGION_MALLOC_INSTANCES
@@ -2889,8 +2890,8 @@ namespace Legion {
       virtual void register_new_internal_operation(InternalOp *op);
       virtual size_t register_new_close_operation(CloseOp *op);
       virtual size_t register_new_summary_operation(TraceSummaryOp *op);
-      virtual void add_to_prepipeline_queue(Operation *op);
-      virtual void add_to_dependence_queue(Operation *op, bool unordered);
+      virtual void add_to_dependence_queue(Operation *op, 
+                                           bool unordered = false);
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
                                           const void *result, size_t size, 
 #ifdef LEGION_MALLOC_INSTANCES
