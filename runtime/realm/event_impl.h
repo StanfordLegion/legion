@@ -139,11 +139,6 @@ namespace Realm {
 
       void arm_merger(void);
 
-    protected:
-      void precondition_triggered(bool poisoned, TimeLimit work_until);
-
-      friend class MergeEventPrecondition;
-
       class MergeEventPrecondition : public EventWaiter {
       public:
 	EventMerger *merger;
@@ -152,6 +147,16 @@ namespace Realm {
 	virtual void print(std::ostream& os) const;
 	virtual Event get_finish_event(void) const;
       };
+
+      // as an alternative to add_precondition, get_next_precondition can
+      //  be used to get a precondition that can manually be added to a waiter
+      //  list
+      MergeEventPrecondition *get_next_precondition(void);
+
+    protected:
+      void precondition_triggered(bool poisoned, TimeLimit work_until);
+
+      friend class MergeEventPrecondition;
 
       GenEventImpl *event_impl;
       EventImpl::gen_t finish_gen;

@@ -875,6 +875,18 @@ namespace Realm {
       EventImpl::add_waiter(wait_for, p);
     }
 
+    // as an alternative to add_precondition, get_next_precondition can
+    //  be used to get a precondition that can manually be added to a waiter
+    //  list
+    EventMerger::MergeEventPrecondition *EventMerger::get_next_precondition(void)
+    {
+      assert(is_active());
+      assert(num_preconditions < max_preconditions);
+      MergeEventPrecondition *p = &preconditions[num_preconditions++];
+      count_needed.fetch_add(1);
+      return p;
+    }
+
     void EventMerger::arm_merger(void)
     {
       assert(is_active());
