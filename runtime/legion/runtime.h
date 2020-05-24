@@ -2150,7 +2150,6 @@ namespace Legion {
       bool safe_cast(Context ctx, LogicalRegion region,
                      const void *realm_point, TypeTag type_tag);
     public:
-      FieldSpace create_field_space(Context ctx);
       size_t get_field_size(Context ctx, FieldSpace handle, FieldID fid);
       size_t get_field_size(FieldSpace handle, FieldID fid);
       void get_field_space_fields(Context ctx, FieldSpace handle,

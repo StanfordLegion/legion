@@ -5264,6 +5264,32 @@ namespace Legion {
        */
       FieldSpace create_field_space(Context ctx);
       /**
+       * Create a new field space with an existing set of fields
+       * @param ctx enclosing task context
+       * @param field_sizes initial field sizes for fields
+       * @param resulting_fields optional field snames for fields
+       * @param serdez_id optional parameter for specifying a custom
+       *        serdez object for serializing and deserializing fields
+       * @return handle for the new field space
+       */
+      FieldSpace create_field_space(Context ctx,
+                                    const std::vector<size_t> &field_sizes,
+                                    std::vector<FieldID> &resulting_fields,
+                                    CustomSerdezID serdez_id = 0);
+      /**
+       * Create a new field space with an existing set of fields
+       * @param ctx enclosing task context
+       * @param field_sizes initial field sizes for fields
+       * @param resulting_fields optional field snames for fields
+       * @param serdez_id optional parameter for specifying a custom
+       *        serdez object for serializing and deserializing fields
+       * @return handle for the new field space
+       */
+      FieldSpace create_field_space(Context ctx,
+                                    const std::vector<Future> &field_sizes,
+                                    std::vector<FieldID> &resulting_fields,
+                                    CustomSerdezID serdez_id = 0);
+      /**
        * Create a new shared ownership of a field space to prevent it 
        * from being destroyed by other potential owners. Every call to this
        * method that succeeds must be matched with a corresponding call
