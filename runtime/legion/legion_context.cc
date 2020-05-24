@@ -5331,6 +5331,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    FieldSpace InnerContext::create_field_space(void)
+    //--------------------------------------------------------------------------
+    {
+      return TaskContext::create_field_space();
+    }
+
+    //--------------------------------------------------------------------------
+    FieldSpace InnerContext::create_field_space(
+                                         const std::vector<size_t> &sizes,
+                                         std::vector<FieldID> &resulting_fields,
+                                         CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpace result = TaskContext::create_field_space();
+      TaskContext::allocate_fields(result, sizes, resulting_fields,
+                                   false/*local*/, serdez_id);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     FieldSpace InnerContext::create_field_space(
                                          const std::vector<Future> &sizes,
                                          std::vector<FieldID> &resulting_fields,
@@ -12704,7 +12724,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldSpace ReplicateContext::create_field_space(RegionTreeForest *forest)
+    FieldSpace ReplicateContext::create_field_space(void)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -12724,8 +12744,9 @@ namespace Legion {
         double_buffer = value.double_buffer;
         // Need to register this before broadcasting
         std::set<RtEvent> applied;
-        FieldSpaceNode *node = forest->create_field_space(space, value.did, 
-            false/*notify remote*/, creation_barrier, &applied, &shard_mapping);
+        FieldSpaceNode *node = runtime->forest->create_field_space(space, 
+            value.did, false/*notify remote*/, creation_barrier, &applied,
+            &shard_mapping);
         // Now we can update the creation set
         node->update_creation_set(shard_mapping);
         // Arrive on the creation barrier
@@ -12779,6 +12800,30 @@ namespace Legion {
       increase_pending_field_spaces(double_buffer ? 
           pending_field_spaces.size() + 1 : 1, double_next && !double_buffer);
       return space;
+    }
+
+    //--------------------------------------------------------------------------
+    FieldSpace ReplicateContext::create_field_space(
+                                         const std::vector<size_t> &sizes,
+                                         std::vector<FieldID> &resulting_fields,
+                                         CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpace result = create_field_space();
+      allocate_fields(result, sizes, resulting_fields,false/*local*/,serdez_id);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    FieldSpace ReplicateContext::create_field_space(
+                                         const std::vector<Future> &sizes,
+                                         std::vector<FieldID> &resulting_fields,
+                                         CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpace result = create_field_space();
+      allocate_fields(result, sizes, resulting_fields,false/*local*/,serdez_id);
+      return result;
     }
 
     //--------------------------------------------------------------------------
