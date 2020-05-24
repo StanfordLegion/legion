@@ -6873,7 +6873,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::add_to_dependence_queue(Operation *op, bool unordered)
+    ApEvent InnerContext::add_to_dependence_queue(Operation *op, bool unordered, 
+                                                  bool outermost)
     //--------------------------------------------------------------------------
     {
       // Launch the task to perform the prepipeline stage for the operation
@@ -6907,7 +6908,7 @@ namespace Legion {
           // If this is unordered, stick it on the list of 
           // unordered ops to be added later and then we're done
           unordered_ops.push_back(op);
-          return;
+          return term_event;
         }
         if (!outstanding_dependence)
         {
@@ -6928,12 +6929,13 @@ namespace Legion {
         DependenceArgs args(op, this);
         runtime->issue_runtime_meta_task(args, priority, precondition); 
       }
-      if (runtime->program_order_execution && !unordered)
+      if (runtime->program_order_execution && !unordered && outermost)
       {
         begin_task_wait(true/*from runtime*/);
         term_event.wait();
         end_task_wait();
       }
+      return term_event;
     }
 
     //--------------------------------------------------------------------------
@@ -9628,6 +9630,7 @@ namespace Legion {
       attach_reduce_barrier = manager->get_attach_reduce_barrier();
       dependent_partition_barrier = manager->get_dependent_partition_barrier();
       semantic_attach_barrier = manager->get_semantic_attach_barrier();
+      inorder_barrier = manager->get_inorder_barrier();
 #ifdef DEBUG_LEGION_COLLECTIVES
       collective_check_barrier = manager->get_collective_check_barrier();
       close_check_barrier = manager->get_close_check_barrier();
@@ -14540,6 +14543,33 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ApEvent ReplicateContext::add_to_dependence_queue(Operation *op,
+                                                 bool unordered, bool outermost)
+    //--------------------------------------------------------------------------
+    {
+      if (runtime->program_order_execution && !unordered)
+      {
+#ifdef DEBUG_LEGION
+        assert(inorder_barrier.exists());
+#endif
+        ApEvent term_event = 
+         InnerContext::add_to_dependence_queue(op,unordered,false/*outermost*/);
+        Runtime::phase_barrier_arrive(inorder_barrier, 1/*count*/, term_event); 
+        term_event = inorder_barrier;
+        advance_replicate_barrier(inorder_barrier, total_shards);
+        if (outermost)
+        {
+          begin_task_wait(true/*from runtime*/);
+          term_event.wait();
+          end_task_wait();
+        }
+        return term_event;
+      }
+      else
+        return InnerContext::add_to_dependence_queue(op, unordered, outermost);
+    }
+
+    //--------------------------------------------------------------------------
     void ReplicateContext::record_dynamic_collective_contribution(
                                           DynamicCollective dc, const Future &f)
     //--------------------------------------------------------------------------
@@ -18220,10 +18250,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::add_to_dependence_queue(Operation *op, bool unordered)
+    ApEvent LeafContext::add_to_dependence_queue(Operation *op, 
+                                                 bool unordered, bool block)
     //--------------------------------------------------------------------------
     {
       assert(false);
+      return ApEvent::NO_AP_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -19626,10 +19658,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InlineContext::add_to_dependence_queue(Operation *op, bool unordered)
+    ApEvent InlineContext::add_to_dependence_queue(Operation *op, 
+                                                 bool unordered, bool outermost)
     //--------------------------------------------------------------------------
     {
-      enclosing->add_to_dependence_queue(op, unordered);
+      return enclosing->add_to_dependence_queue(op, unordered, outermost);
     }
 
     //--------------------------------------------------------------------------

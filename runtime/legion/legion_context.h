@@ -391,8 +391,9 @@ namespace Legion {
       virtual void register_new_internal_operation(InternalOp *op) = 0;
       virtual size_t register_new_close_operation(CloseOp *op) = 0;
       virtual size_t register_new_summary_operation(TraceSummaryOp *op) = 0;
-      virtual void add_to_dependence_queue(Operation *op, 
-                                           bool unordered = false) = 0;
+      virtual ApEvent add_to_dependence_queue(Operation *op, 
+                                              bool unordered = false,
+                                              bool outermost = true) = 0;
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
                                           const void *result, size_t size, 
 #ifdef LEGION_MALLOC_INSTANCES
@@ -1141,8 +1142,9 @@ namespace Legion {
       virtual size_t register_new_summary_operation(TraceSummaryOp *op);
       void add_to_prepipeline_queue(Operation *op);
       bool process_prepipeline_stage(void);
-      virtual void add_to_dependence_queue(Operation *op, 
-                                           bool unordered = false);
+      virtual ApEvent add_to_dependence_queue(Operation *op, 
+                                              bool unordered = false,
+                                              bool outermost = true);
       void process_dependence_stage(void);
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
                                           const void *result, size_t size, 
@@ -1842,6 +1844,9 @@ namespace Legion {
       virtual Future issue_execution_fence(void);
       virtual void begin_trace(TraceID tid, bool logical_only);
       virtual void end_trace(TraceID tid);
+      virtual ApEvent add_to_dependence_queue(Operation *op, 
+                                              bool unordered = false,
+                                              bool outermost = true);
     public:
       virtual void record_dynamic_collective_contribution(DynamicCollective dc,
                                                           const Future &f);
@@ -2002,6 +2007,7 @@ namespace Legion {
       ApBarrier attach_reduce_barrier;
       RtBarrier dependent_partition_barrier;
       RtBarrier semantic_attach_barrier;
+      ApBarrier inorder_barrier;
 #ifdef DEBUG_LEGION_COLLECTIVES
     protected:
       RtBarrier collective_check_barrier;
@@ -2493,8 +2499,9 @@ namespace Legion {
       virtual void register_new_internal_operation(InternalOp *op);
       virtual size_t register_new_close_operation(CloseOp *op);
       virtual size_t register_new_summary_operation(TraceSummaryOp *op);
-      virtual void add_to_dependence_queue(Operation *op, 
-                                           bool unordered = false);
+      virtual ApEvent add_to_dependence_queue(Operation *op, 
+                                              bool unordered = false,
+                                              bool outermost = true);
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
                                           const void *result, size_t size, 
 #ifdef LEGION_MALLOC_INSTANCES
@@ -2890,8 +2897,9 @@ namespace Legion {
       virtual void register_new_internal_operation(InternalOp *op);
       virtual size_t register_new_close_operation(CloseOp *op);
       virtual size_t register_new_summary_operation(TraceSummaryOp *op);
-      virtual void add_to_dependence_queue(Operation *op, 
-                                           bool unordered = false);
+      virtual ApEvent add_to_dependence_queue(Operation *op, 
+                                              bool unordered = false,
+                                              bool outermost = true);
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
                                           const void *result, size_t size, 
 #ifdef LEGION_MALLOC_INSTANCES

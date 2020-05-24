@@ -6619,6 +6619,9 @@ namespace Legion {
           RtBarrier(Realm::Barrier::create_barrier(total_shards));
         semantic_attach_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards));
+        if (runtime->program_order_execution)
+          inorder_barrier = 
+            ApBarrier(Realm::Barrier::create_barrier(total_shards));
         // callback barrier can't be made until we know how many
         // unique address spaces we'll actually have so see
         // ShardManager::launch
@@ -6683,6 +6686,8 @@ namespace Legion {
           attach_reduce_barrier.destroy_barrier();
           dependent_partition_barrier.destroy_barrier();
           semantic_attach_barrier.destroy_barrier();
+          if (inorder_barrier.exists())
+            inorder_barrier.destroy_barrier();
           callback_barrier.destroy_barrier();
 #ifdef DEBUG_LEGION_COLLECTIVES
           collective_check_barrier.destroy_barrier();
@@ -6882,6 +6887,7 @@ namespace Legion {
           rez.serialize(attach_reduce_barrier);
           rez.serialize(dependent_partition_barrier);
           rez.serialize(semantic_attach_barrier);
+          rez.serialize(inorder_barrier);
           rez.serialize(callback_barrier);
 #ifdef DEBUG_LEGION_COLLECTIVES
           assert(collective_check_barrier.exists());
@@ -6936,6 +6942,7 @@ namespace Legion {
         derez.deserialize(attach_reduce_barrier);
         derez.deserialize(dependent_partition_barrier);
         derez.deserialize(semantic_attach_barrier);
+        derez.deserialize(inorder_barrier);
         derez.deserialize(callback_barrier);
 #ifdef DEBUG_LEGION_COLLECTIVES
         derez.deserialize(collective_check_barrier);
