@@ -362,7 +362,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldSpace TaskContext::create_field_space(RegionTreeForest *forest)
+    FieldSpace TaskContext::create_field_space(void)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -375,8 +375,56 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         LegionSpy::log_field_space(space.id);
 
-      forest->create_field_space(space, did);
+      runtime->forest->create_field_space(space, did);
       register_field_space_creation(space);
+      return space;
+    }
+
+    //--------------------------------------------------------------------------
+    FieldSpace TaskContext::create_field_space(
+                                         const std::vector<size_t> &sizes,
+                                         std::vector<FieldID> &resulting_fields,
+                                         CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      FieldSpace space(runtime->get_unique_field_space_id());
+      DistributedID did = runtime->get_available_distributed_id();
+#ifdef DEBUG_LEGION
+      log_field.debug("Creating field space %x in task %s (ID %lld)", 
+                      space.id, get_task_name(), get_unique_id());
+#endif
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_field_space(space.id);
+
+      runtime->forest->create_field_space(space, did);
+      register_field_space_creation(space);
+      if (resulting_fields.size() < sizes.size())
+        resulting_fields.resize(sizes.size(), AUTO_GENERATE_ID);
+      for (unsigned idx = 0; idx < resulting_fields.size(); idx++)
+      {
+        if (resulting_fields[idx] == AUTO_GENERATE_ID)
+          resulting_fields[idx] = runtime->get_unique_field_id();
+#ifdef DEBUG_LEGION
+        else if (resulting_fields[idx] >= LEGION_MAX_APPLICATION_FIELD_ID)
+          REPORT_LEGION_ERROR(ERROR_TASK_ATTEMPTED_ALLOCATE_FIELD,
+            "Task %s (ID %lld) attempted to allocate a field with "
+            "ID %d which exceeds the LEGION_MAX_APPLICATION_FIELD_ID "
+            "bound set in legion_config.h", get_task_name(),
+            get_unique_id(), resulting_fields[idx])
+#endif
+        if (runtime->legion_spy_enabled)
+          LegionSpy::log_field_creation(space.id, 
+                                        resulting_fields[idx], sizes[idx]);
+      }
+      std::set<RtEvent> done_events;
+      runtime->forest->allocate_fields(space, sizes,resulting_fields,serdez_id);
+      register_all_field_creations(space, false/*local*/, resulting_fields);
+      if (!done_events.empty())
+      {
+        RtEvent wait_on = Runtime::merge_events(done_events);
+        wait_on.wait();
+      }
       return space;
     }
 
@@ -5151,6 +5199,18 @@ namespace Legion {
     {
       const VerifyPartitionArgs *vargs = (const VerifyPartitionArgs*)args;
       vargs->proxy_this->verify_partition(vargs->pid, vargs->kind, vargs->func);
+    }
+
+    //--------------------------------------------------------------------------
+    FieldSpace InnerContext::create_field_space(
+                                         const std::vector<Future> &sizes,
+                                         std::vector<FieldID> &resulting_fields,
+                                         CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpace result = TaskContext::create_field_space();
+      allocate_fields(result, sizes, resulting_fields,false/*local*/,serdez_id);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -10491,6 +10551,18 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
+    FieldSpace LeafContext::create_field_space(const std::vector<Future> &sizes,
+                                         std::vector<FieldID> &resulting_fields,
+                                         CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_NONLOCAL_FIELD_ALLOCATION2,
+       "Illegal deferred field allocations performed in leaf task %s (ID %lld)",
+       get_task_name(), get_unique_id())
+      return FieldSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
     void LeafContext::destroy_field_space(FieldSpace handle, 
                                           const bool unordered)
     //--------------------------------------------------------------------------
@@ -12082,10 +12154,30 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldSpace InlineContext::create_field_space(RegionTreeForest *forest)
+    FieldSpace InlineContext::create_field_space(void)
     //--------------------------------------------------------------------------
     {
-      return enclosing->create_field_space(forest);
+      return enclosing->create_field_space();
+    }
+
+    //--------------------------------------------------------------------------
+    FieldSpace InlineContext::create_field_space(
+                                         const std::vector<size_t> &sizes,
+                                         std::vector<FieldID> &resulting_fields,
+                                         CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_field_space(sizes, resulting_fields, serdez_id);
+    }
+
+    //--------------------------------------------------------------------------
+    FieldSpace InlineContext::create_field_space(
+                                         const std::vector<Future> &sizes,
+                                         std::vector<FieldID> &resulting_fields,
+                                         CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_field_space(sizes, resulting_fields, serdez_id);
     }
 
     //--------------------------------------------------------------------------

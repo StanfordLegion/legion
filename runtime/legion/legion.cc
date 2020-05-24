@@ -4680,7 +4680,27 @@ namespace Legion {
     FieldSpace Runtime::create_field_space(Context ctx)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_field_space(ctx);
+      return ctx->create_field_space();
+    }
+
+    //--------------------------------------------------------------------------
+    FieldSpace Runtime::create_field_space(Context ctx,
+                                         const std::vector<size_t> &field_sizes,
+                                         std::vector<FieldID> &resulting_fields,
+                                         CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+      return ctx->create_field_space(field_sizes, resulting_fields, serdez_id);
+    }
+
+    //--------------------------------------------------------------------------
+    FieldSpace Runtime::create_field_space(Context ctx,
+                                         const std::vector<Future> &field_sizes,
+                                         std::vector<FieldID> &resulting_fields,
+                                         CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+      return ctx->create_field_space(field_sizes, resulting_fields, serdez_id);
     }
 
     //--------------------------------------------------------------------------

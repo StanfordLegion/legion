@@ -1842,6 +1842,54 @@ legion_field_space_create(legion_runtime_t runtime_,
   return CObjectWrapper::wrap(fs);
 }
 
+legion_field_space_t
+legion_field_space_create_with_fields(legion_runtime_t runtime_,
+                                      legion_context_t ctx_,
+                                      size_t *field_sizes,
+                                      legion_field_id_t *field_ids,
+                                      size_t num_fields,
+                                      legion_custom_serdez_id_t serdez)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+
+  std::vector<size_t> sizes(num_fields);
+  std::vector<FieldID> ids(num_fields);
+  for (unsigned idx = 0; idx < num_fields; idx++)
+  {
+    sizes[idx] = field_sizes[idx];
+    ids[idx] = field_ids[idx];
+  }
+  FieldSpace fs = runtime->create_field_space(ctx, sizes, ids, serdez);
+  for (unsigned idx = 0; idx < num_fields; idx++)
+    field_ids[idx] = ids[idx];
+  return CObjectWrapper::wrap(fs);
+}
+
+legion_field_space_t
+legion_field_space_create_with_fields(legion_runtime_t runtime_,
+                                      legion_context_t ctx_,
+                                      legion_future_t *field_sizes,
+                                      legion_field_id_t *field_ids,
+                                      size_t num_fields,
+                                      legion_custom_serdez_id_t serdez)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+
+  std::vector<Future> sizes(num_fields);
+  std::vector<FieldID> ids(num_fields);
+  for (unsigned idx = 0; idx < num_fields; idx++)
+  {
+    sizes[idx] = *CObjectWrapper::unwrap(field_sizes[idx]);
+    ids[idx] = field_ids[idx];
+  }
+  FieldSpace fs = runtime->create_field_space(ctx, sizes, ids, serdez);
+  for (unsigned idx = 0; idx < num_fields; idx++)
+    field_ids[idx] = ids[idx];
+  return CObjectWrapper::wrap(fs);
+}
+
 void
 legion_field_space_create_shared_ownership(legion_runtime_t runtime_,
                                            legion_context_t ctx_,

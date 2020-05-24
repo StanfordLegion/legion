@@ -1590,6 +1590,32 @@ extern "C" {
                             legion_context_t ctx);
 
   /**
+   * @return Caller takes ownership of return value
+   *
+   * @see Legion::Runtime::create_field_space()
+   */
+  legion_field_space_t
+  legion_field_space_create_with_fields(legion_runtime_t runtime,
+                                        legion_context_t ctx,
+                                        size_t *field_sizes,
+                                        legion_field_id_t *field_ids,
+                                        size_t num_fields, 
+                                        legion_custom_serdez_id_t serdez);
+
+  /**
+   * @return Caller takes ownership of return value
+   *
+   * @see Legion::Runtime::create_field_space()
+   */
+  legion_field_space_t
+  legion_field_space_create_with_futures(legion_runtime_t runtime,
+                                         legion_context_t ctx,
+                                         legion_future_t *field_sizes,
+                                         legion_field_id_t *field_ids,
+                                         size_t num_fields, 
+                                         legion_custom_serdez_id_t serdez);
+
+  /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
    * @see Legion::Runtime::create_shared_ownership
