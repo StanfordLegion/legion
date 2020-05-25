@@ -41,6 +41,7 @@
 #cmakedefine GASNET_CONDUIT_ARIES 1
 #cmakedefine GASNET_CONDUIT_GEMINI 1
 #cmakedefine GASNET_CONDUIT_PSM 1
+#cmakedefine GASNET_CONDUIT_UCX 1
 
 #cmakedefine REALM_USE_MPI
 
