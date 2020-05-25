@@ -59,12 +59,8 @@ namespace Legion {
 #endif
       // Now that we know we're going to do this fill add any profiling requests
       Realm::ProfilingRequestSet requests;
-      // This object needs to live on the stack until realm copies it at
-      // the point where we issue the fill operation
-      Operation::OpProfilingResponse response(trace_info.op, trace_info.index,
-                                          trace_info.dst_index, true/*fill*/);
       if (trace_info.op != NULL)
-        trace_info.op->add_copy_profiling_request(response, requests);
+        trace_info.op->add_copy_profiling_request(trace_info, requests, true);
       if (forest->runtime->profiler != NULL)
         forest->runtime->profiler->add_fill_request(requests, trace_info.op);
 #ifdef LEGION_SPY
@@ -178,12 +174,8 @@ namespace Legion {
 #endif
       // Now that we know we're going to do this copy add any profling requests
       Realm::ProfilingRequestSet requests;
-      // This object needs to live on the stack until realm copies it at
-      // the point where we issue the copy operation
-      Operation::OpProfilingResponse response(trace_info.op, trace_info.index,
-                                          trace_info.dst_index, false/*fill*/);
       if (trace_info.op != NULL)
-        trace_info.op->add_copy_profiling_request(response, requests);
+        trace_info.op->add_copy_profiling_request(trace_info, requests, false);
       if (forest->runtime->profiler != NULL)
         forest->runtime->profiler->add_copy_request(requests, trace_info.op);
 #ifdef LEGION_SPY
@@ -368,12 +360,8 @@ namespace Legion {
     {
       // Now that we know we're going to do this copy add any profling requests
       Realm::ProfilingRequestSet requests;
-      // This object needs to live on the stack until realm copies it at
-      // the point where we issue the copy operation
-      Operation::OpProfilingResponse response(trace_info.op, trace_info.index,
-                                          trace_info.dst_index, false/*fill*/);
       if (trace_info.op != NULL)
-        trace_info.op->add_copy_profiling_request(response, requests);
+        trace_info.op->add_copy_profiling_request(trace_info, requests, false);
       if (forest->runtime->profiler != NULL)
         forest->runtime->profiler->add_copy_request(requests, trace_info.op);
 #ifdef LEGION_SPY

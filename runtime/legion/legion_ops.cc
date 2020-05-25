@@ -645,8 +645,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::add_copy_profiling_request(const OpProfilingResponse &resp,
-                                           Realm::ProfilingRequestSet &requests)
+    void Operation::add_copy_profiling_request(const PhysicalTraceInfo &info,
+                                Realm::ProfilingRequestSet &requests, bool fill)
     //--------------------------------------------------------------------------
     {
       // Should only be called for inherited types
@@ -3616,13 +3616,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapOp::add_copy_profiling_request(const OpProfilingResponse &response,
-                                           Realm::ProfilingRequestSet &requests)
+    void MapOp::add_copy_profiling_request(const PhysicalTraceInfo &info,
+                                Realm::ProfilingRequestSet &requests, bool fill)
     //--------------------------------------------------------------------------
     {
       // Nothing to do if we don't have any profiling requests
       if (profiling_requests.empty())
         return;
+      OpProfilingResponse response(this, info.index, info.dst_index, fill);
       Realm::ProfilingRequest &request = requests.add_request( 
           runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
           &response, sizeof(response), profiling_priority);
@@ -5999,13 +6000,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CopyOp::add_copy_profiling_request(const OpProfilingResponse &response,
-                                           Realm::ProfilingRequestSet &requests)
+    void CopyOp::add_copy_profiling_request(const PhysicalTraceInfo &info,
+                                Realm::ProfilingRequestSet &requests, bool fill)
     //--------------------------------------------------------------------------
     {
       // Nothing to do if we don't have any profiling requests
       if (profiling_requests.empty())
         return;
+      OpProfilingResponse response(this, info.index, info.dst_index, fill);
       Realm::ProfilingRequest &request = requests.add_request( 
           runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
           &response, sizeof(response), profiling_priority);
@@ -8979,14 +8981,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PostCloseOp::add_copy_profiling_request(
-                                           const OpProfilingResponse &response,
-                                           Realm::ProfilingRequestSet &requests)
+    void PostCloseOp::add_copy_profiling_request(const PhysicalTraceInfo &info,
+                                Realm::ProfilingRequestSet &requests, bool fill)
     //--------------------------------------------------------------------------
     {
       // Nothing to do if we don't have any profiling requests
       if (profiling_requests.empty())
         return;
+      OpProfilingResponse response(this, info.index, info.dst_index, fill);
       Realm::ProfilingRequest &request = requests.add_request( 
           runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
           &response, sizeof(response), profiling_priority);
@@ -9979,16 +9981,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AcquireOp::add_copy_profiling_request(const OpProfilingResponse &resp,
-                                           Realm::ProfilingRequestSet &requests)
+    void AcquireOp::add_copy_profiling_request(const PhysicalTraceInfo &info,
+                                Realm::ProfilingRequestSet &requests, bool fill)
     //--------------------------------------------------------------------------
     {
       // Nothing to do if we don't have any profiling requests
       if (profiling_requests.empty())
         return;
+      OpProfilingResponse response(this, info.index, info.dst_index, fill);
       Realm::ProfilingRequest &request = requests.add_request( 
           runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
-          &resp, sizeof(resp), profiling_priority);
+          &response, sizeof(response), profiling_priority);
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             profiling_requests.begin(); it != profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
@@ -10867,16 +10870,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReleaseOp::add_copy_profiling_request(const OpProfilingResponse &resp,
-                                           Realm::ProfilingRequestSet &requests)
+    void ReleaseOp::add_copy_profiling_request(const PhysicalTraceInfo &info,
+                                Realm::ProfilingRequestSet &requests, bool fill)
     //--------------------------------------------------------------------------
     {
       // Nothing to do if we don't have any profiling requests
       if (profiling_requests.empty())
         return;
+      OpProfilingResponse response(this, info.index, info.dst_index, fill);
       Realm::ProfilingRequest &request = requests.add_request( 
           runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
-          &resp, sizeof(resp), profiling_priority);
+          &response, sizeof(response), profiling_priority);
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             profiling_requests.begin(); it != profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
@@ -14394,13 +14398,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DependentPartitionOp::add_copy_profiling_request(
-                                           const OpProfilingResponse &response,
-                                           Realm::ProfilingRequestSet &requests)
+                                           const PhysicalTraceInfo &info,
+                                           Realm::ProfilingRequestSet &requests,
+                                           bool fill)
     //--------------------------------------------------------------------------
     {
       // Nothing to do if we don't have any profiling requests
       if (profiling_requests.empty())
         return;
+      OpProfilingResponse response(this, info.index, info.dst_index, fill);
       Realm::ProfilingRequest &request = requests.add_request( 
           runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
           &response, sizeof(response), profiling_priority);
@@ -15073,8 +15079,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FillOp::add_copy_profiling_request(const OpProfilingResponse &response,
-                                           Realm::ProfilingRequestSet &reqeusts)
+    void FillOp::add_copy_profiling_request(const PhysicalTraceInfo &info,
+                                Realm::ProfilingRequestSet &reqeusts, bool fill)
     //--------------------------------------------------------------------------
     {
       // Nothing to do for the moment
@@ -17087,8 +17093,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DetachOp::add_copy_profiling_request(const OpProfilingResponse &resp,
-                                           Realm::ProfilingRequestSet &reqeusts)
+    void DetachOp::add_copy_profiling_request(const PhysicalTraceInfo &info,
+                                Realm::ProfilingRequestSet &reqeusts, bool fill)
     //--------------------------------------------------------------------------
     {
       // Nothing to do
@@ -17644,17 +17650,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteOp::add_copy_profiling_request(const OpProfilingResponse &resp,
-                                           Realm::ProfilingRequestSet &requests)
+    void RemoteOp::add_copy_profiling_request(const PhysicalTraceInfo &info,
+                                Realm::ProfilingRequestSet &requests, bool fill)
     //--------------------------------------------------------------------------
     {
       // Nothing to do if we don't have any profiling requests
       if (profiling_requests.empty())
         return;
+      OpProfilingResponse response(remote_ptr, info.index, info.dst_index,fill);
       // Send the result back to the owner node
       Realm::ProfilingRequest &request = requests.add_request( 
           profiling_target, LG_LEGION_PROFILING_ID, 
-          &resp, sizeof(resp), profiling_priority);
+          &response, sizeof(response), profiling_priority);
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             profiling_requests.begin(); it != profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
