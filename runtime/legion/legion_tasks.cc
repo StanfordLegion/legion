@@ -4361,19 +4361,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::add_copy_profiling_request(const OpProfilingResponse &resp,
-                                           Realm::ProfilingRequestSet &requests)
+    void SingleTask::add_copy_profiling_request(const PhysicalTraceInfo &info,
+                                Realm::ProfilingRequestSet &requests, bool fill)
     //--------------------------------------------------------------------------
     {
       // Nothing to do if we don't have any copy profiling requests
       if (copy_profiling_requests.empty())
         return;
-#ifdef DEBUG_LEGION
-      assert(resp.src == resp.dst);
-#endif
+      OpProfilingResponse response(this, info.index, info.dst_index, fill);
       Realm::ProfilingRequest &request = requests.add_request(
         runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
-        &resp, sizeof(resp));
+        &response, sizeof(response));
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             copy_profiling_requests.begin(); it != 
             copy_profiling_requests.end(); it++)
@@ -8937,19 +8935,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::add_copy_profiling_request(const OpProfilingResponse &resp,
-                                           Realm::ProfilingRequestSet &requests)
+    void IndexTask::add_copy_profiling_request(const PhysicalTraceInfo &info,
+                                Realm::ProfilingRequestSet &requests, bool fill)
     //--------------------------------------------------------------------------
     {
       // Nothing to do if we don't have any copy profiling requests
       if (copy_profiling_requests.empty())
         return;
-#ifdef DEBUG_LEGION
-      assert(resp.src == resp.dst);
-#endif
+      OpProfilingResponse response(this, info.index, info.dst_index, fill);
       Realm::ProfilingRequest &request = requests.add_request(
         runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
-        &resp, sizeof(resp));
+        &response, sizeof(response));
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             copy_profiling_requests.begin(); it != 
             copy_profiling_requests.end(); it++)

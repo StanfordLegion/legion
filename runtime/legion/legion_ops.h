@@ -422,8 +422,8 @@ namespace Legion {
       static ApEvent merge_sync_preconditions(const TraceInfo &info,
                                 const std::vector<Grant> &grants,
                                 const std::vector<PhaseBarrier> &wait_barriers);
-      virtual void add_copy_profiling_request(const OpProfilingResponse &resp,
-                                          Realm::ProfilingRequestSet &reqeusts);
+      virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
+                               Realm::ProfilingRequestSet &requests, bool fill);
       // Report a profiling result for this operation
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
                                         const Realm::ProfilingResponse &result,
@@ -1045,8 +1045,8 @@ namespace Legion {
       void check_privilege(void);
       void compute_parent_index(void);
       bool invoke_mapper(InstanceSet &mapped_instances);
-      virtual void add_copy_profiling_request(const OpProfilingResponse &resp,
-                                          Realm::ProfilingRequestSet &reqeusts);
+      virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
+                               Realm::ProfilingRequestSet &requests, bool fill);
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
                                       const Realm::ProfilingResponse &response,
                                       const void *orig, size_t orig_length);
@@ -1236,8 +1236,8 @@ namespace Legion {
       int perform_conversion(unsigned idx, const RegionRequirement &req,
                              std::vector<MappingInstance> &output,
                              InstanceSet &targets, bool is_reduce = false);
-      virtual void add_copy_profiling_request(const OpProfilingResponse &resp,
-                                          Realm::ProfilingRequestSet &reqeusts);
+      virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
+                               Realm::ProfilingRequestSet &requests, bool fill);
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
                                       const Realm::ProfilingResponse &response,
                                       const void *orig, size_t orig_length);
@@ -1784,8 +1784,8 @@ namespace Legion {
                    get_acquired_instances_ref(void);
       virtual void record_reference_mutation_effect(RtEvent event);
     protected:
-      virtual void add_copy_profiling_request(const OpProfilingResponse &resp,
-                                          Realm::ProfilingRequestSet &reqeusts);
+      virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
+                               Realm::ProfilingRequestSet &requests, bool fill);
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
                                       const Realm::ProfilingResponse &response,
                                       const void *orig, size_t orig_length);
@@ -1924,8 +1924,8 @@ namespace Legion {
       void check_acquire_privilege(void);
       void compute_parent_index(void);
       void invoke_mapper(void);
-      virtual void add_copy_profiling_request(const OpProfilingResponse &resp,
-                                          Realm::ProfilingRequestSet &reqeusts);
+      virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
+                               Realm::ProfilingRequestSet &requests, bool fill);
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
                                       const Realm::ProfilingResponse &response,
                                       const void *orig, size_t orig_length);
@@ -2036,8 +2036,8 @@ namespace Legion {
       void check_release_privilege(void);
       void compute_parent_index(void);
       void invoke_mapper(void);
-      virtual void add_copy_profiling_request(const OpProfilingResponse &resp,
-                                          Realm::ProfilingRequestSet &reqeusts);
+      virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
+                               Realm::ProfilingRequestSet &requests, bool fill);
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
                                       const Realm::ProfilingResponse &response,
                                       const void *orig, size_t orig_length);
@@ -3019,8 +3019,8 @@ namespace Legion {
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                    get_acquired_instances_ref(void);
       virtual void record_reference_mutation_effect(RtEvent event);
-      virtual void add_copy_profiling_request(const OpProfilingResponse &resp,
-                                          Realm::ProfilingRequestSet &reqeusts);
+      virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
+                               Realm::ProfilingRequestSet &requests, bool fill);
       // Report a profiling result for this operation
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
                                         const Realm::ProfilingResponse &result,
@@ -3159,8 +3159,8 @@ namespace Legion {
       virtual int get_depth(void) const;
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                                        get_acquired_instances_ref(void);
-      virtual void add_copy_profiling_request(const OpProfilingResponse &resp,
-                                          Realm::ProfilingRequestSet &reqeusts);
+      virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
+                               Realm::ProfilingRequestSet &requests, bool fill);
     public:
       virtual bool has_prepipeline_stage(void) const
         { return need_prepipeline_stage; }
@@ -3391,8 +3391,8 @@ namespace Legion {
                                   const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
-      virtual void add_copy_profiling_request(const OpProfilingResponse &resp,
-                                          Realm::ProfilingRequestSet &reqeusts);
+      virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
+                               Realm::ProfilingRequestSet &requests, bool fill);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
     protected:
@@ -3512,8 +3512,8 @@ namespace Legion {
                                   const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking) = 0;
-      virtual void add_copy_profiling_request(const OpProfilingResponse &resp,
-                                          Realm::ProfilingRequestSet &reqeusts);
+      virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
+                               Realm::ProfilingRequestSet &requests, bool fill);
       virtual void report_uninitialized_usage(const unsigned index,
                                               LogicalRegion handle,
                                               const RegionUsage usage,

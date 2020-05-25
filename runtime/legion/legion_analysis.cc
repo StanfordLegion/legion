@@ -2675,12 +2675,17 @@ namespace Legion {
     void FieldState::merge(FieldState &rhs, RegionTreeNode *node)
     //--------------------------------------------------------------------------
     {
-      for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
-            rhs.open_children.begin(); it != rhs.open_children.end(); it++)
-        // Remove duplicate references if we already had it
-        if (!open_children.insert(it->first, it->second))
-          it->first->remove_base_valid_ref(FIELD_STATE_REF);
-      rhs.open_children.clear();
+      if (!rhs.open_children.empty())
+      {
+        for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
+              rhs.open_children.begin(); it != rhs.open_children.end(); it++)
+          // Remove duplicate references if we already had it
+          if (!open_children.insert(it->first, it->second))
+            it->first->remove_base_valid_ref(FIELD_STATE_REF);
+        rhs.open_children.clear();
+      }
+      else
+        open_children.relax_valid_mask(rhs.open_children.get_valid_mask());
 #ifdef DEBUG_LEGION
       assert(redop == rhs.redop);
       assert(projections_match(rhs));
