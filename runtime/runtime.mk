@@ -501,7 +501,7 @@ ifneq ($(findstring gasnet1,$(REALM_NETWORKS)),)
   # Detect conduit, if requested
   CONDUIT ?= auto
   ifeq ($(strip $(CONDUIT)),auto)
-    GASNET_PREFERRED_CONDUITS = ibv aries gemini pami mpi udp ofi psm mxm portals4 smp
+    GASNET_PREFERRED_CONDUITS = ibv aries gemini pami mpi udp ofi psm mxm portals4 smp ucx
     GASNET_LIBS_FOUND := $(wildcard $(GASNET_PREFERRED_CONDUITS:%=$(GASNET)/lib/libgasnet-%-par.*))
     ifeq ($(strip $(GASNET_LIBS_FOUND)),)
       $(error No multi-threaded GASNet conduits found in $(GASNET)/lib!)
@@ -529,6 +529,13 @@ ifneq ($(findstring gasnet1,$(REALM_NETWORKS)),)
     INC_FLAGS 	+= -I$(GASNET)/include/ibv-conduit
     REALM_CC_FLAGS	+= -DGASNET_CONDUIT_IBV
     LEGION_LD_FLAGS	+= -lgasnet-ibv-par -libverbs
+    # GASNet needs MPI for interop support
+    USE_MPI	= 1
+  endif
+  ifeq ($(strip $(CONDUIT)),ucx)
+    INC_FLAGS 	+= -I$(GASNET)/include/ucx-conduit
+    REALM_CC_FLAGS	+= -DGASNET_CONDUIT_UCX
+    LEGION_LD_FLAGS	+= -lgasnet-ucx-par -lucp -luct -lucs -lucm
     # GASNet needs MPI for interop support
     USE_MPI	= 1
   endif
