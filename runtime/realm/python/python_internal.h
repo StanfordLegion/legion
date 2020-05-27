@@ -149,7 +149,7 @@ namespace Realm {
 
     virtual void add_to_group(ProcessorGroupImpl *group);
     
-    virtual void remove_group(ProcessorGroupImpl *group);
+    virtual void remove_from_group(ProcessorGroupImpl *group);
     
     virtual void register_task(Processor::TaskFuncID func_id,
                                CodeDescriptor& codedesc,

@@ -128,13 +128,13 @@ namespace Realm {
       DynamicTable<RemoteEventTableAllocator> remote_events;
       DynamicTable<BarrierTableAllocator> barriers;
       DynamicTable<ReservationTableAllocator> reservations;
-      DynamicTable<ProcessorGroupTableAllocator> proc_groups;
       DynamicTable<CompQueueTableAllocator> compqueues;
 
       // sparsity maps can be created by other nodes, so keep a
       //  map per-creator_node
       std::vector<atomic<DynamicTable<SparsityMapTableAllocator> *> > sparsity_maps;
       std::vector<atomic<DynamicTable<SubgraphTableAllocator> *> > subgraphs;
+      std::vector<atomic<DynamicTable<ProcessorGroupTableAllocator> *> > proc_groups;
     };
 
     class RemoteIDAllocator {
@@ -304,13 +304,13 @@ namespace Realm {
       LocalEventTableAllocator::FreeList *local_event_free_list;
       BarrierTableAllocator::FreeList *local_barrier_free_list;
       ReservationTableAllocator::FreeList *local_reservation_free_list;
-      ProcessorGroupTableAllocator::FreeList *local_proc_group_free_list;
       CompQueueTableAllocator::FreeList *local_compqueue_free_list;
 
       // keep a free list for each node we allocate maps on (i.e. indexed
       //   by owner_node)
       std::vector<SparsityMapTableAllocator::FreeList *> local_sparsity_map_free_lists;
       std::vector<SubgraphTableAllocator::FreeList *> local_subgraph_free_lists;
+      std::vector<ProcessorGroupTableAllocator::FreeList *> local_proc_group_free_lists;
       RemoteIDAllocator remote_id_allocator;
 
       // legacy behavior if Runtime::run() is used

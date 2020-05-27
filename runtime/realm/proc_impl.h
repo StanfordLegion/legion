@@ -68,7 +68,7 @@ namespace Realm {
 
       virtual void add_to_group(ProcessorGroupImpl *group) = 0;
 
-      virtual void remove_group(ProcessorGroupImpl *group) = 0;
+      virtual void remove_from_group(ProcessorGroupImpl *group) = 0;
 
       virtual void register_task(Processor::TaskFuncID func_id,
 				 CodeDescriptor& codedesc,
@@ -146,7 +146,7 @@ namespace Realm {
 
       virtual void add_to_group(ProcessorGroupImpl *group);
 
-      virtual void remove_group(ProcessorGroupImpl *group);
+      virtual void remove_from_group(ProcessorGroupImpl *group);
 
       // runs an internal Realm operation on this processor
       virtual void add_internal_task(InternalTask *task);
@@ -219,7 +219,7 @@ namespace Realm {
 
       virtual void add_to_group(ProcessorGroupImpl *group);
 
-      virtual void remove_group(ProcessorGroupImpl *group);
+      virtual void remove_from_group(ProcessorGroupImpl *group);
 
       virtual void spawn_task(Processor::TaskFuncID func_id,
 			      const void *args, size_t arglen,
@@ -240,9 +240,9 @@ namespace Realm {
 
       void init(Processor _me, int _owner);
 
-      void set_group_members(const std::vector<Processor>& member_list);
+      void set_group_members(span<const Processor> member_list);
 
-      void remove_group_members();
+      void destroy(void);
 
       void get_group_members(std::vector<Processor>& member_list);
 
@@ -251,7 +251,7 @@ namespace Realm {
 
       virtual void add_to_group(ProcessorGroupImpl *group);
 
-      virtual void remove_group(ProcessorGroupImpl *group);
+      virtual void remove_from_group(ProcessorGroupImpl *group);
 
       virtual void spawn_task(Processor::TaskFuncID func_id,
 			      const void *args, size_t arglen,
@@ -273,6 +273,18 @@ namespace Realm {
       TaskQueue task_queue; // ready tasks
       ProfilingGauges::AbsoluteRangeGauge<int> *ready_task_count;
       DeferredSpawnCache deferred_spawn_cache;
+
+      class DeferredDestroy : public EventWaiter {
+      public:
+	void defer(ProcessorGroupImpl *_pg, Event wait_on);
+	virtual void event_triggered(bool poisoned);
+	virtual void print(std::ostream& os) const;
+	virtual Event get_finish_event(void) const;
+
+      protected:
+	ProcessorGroupImpl *pg;
+      };
+      DeferredDestroy deferred_destroy;
     };
     
     // a task registration can take a while if remote processors and/or JITs are
@@ -337,6 +349,29 @@ namespace Realm {
       Processor::TaskFuncID func_id;
 
       static void handle_message(NodeID sender,const SpawnTaskMessage &msg,
+				 const void *data, size_t datalen);
+    };
+
+    struct ProcGroupCreateMessage {
+      ProcessorGroup pgrp;
+      size_t num_members;
+
+      static void handle_message(NodeID sender, const ProcGroupCreateMessage &msg,
+				 const void *data, size_t datalen);
+    };
+
+    struct ProcGroupDestroyMessage {
+      ProcessorGroup pgrp;
+      Event wait_on;
+
+      static void handle_message(NodeID sender, const ProcGroupDestroyMessage &msg,
+				 const void *data, size_t datalen);
+    };
+
+    struct ProcGroupDestroyAckMessage {
+      ProcessorGroup pgrp;
+
+      static void handle_message(NodeID sender, const ProcGroupDestroyAckMessage &msg,
 				 const void *data, size_t datalen);
     };
 

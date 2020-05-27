@@ -838,7 +838,7 @@ namespace Realm {
     sched->add_task_queue(&group->task_queue);
   }
 
-  void LocalPythonProcessor::remove_group(ProcessorGroupImpl *group)
+  void LocalPythonProcessor::remove_from_group(ProcessorGroupImpl *group)
   {
     // remove the group's task queue from our scheduler
     sched->remove_task_queue(&group->task_queue);

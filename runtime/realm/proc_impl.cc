@@ -39,6 +39,7 @@ namespace Realm {
   extern Logger log_task;  // defined in tasks.cc
   extern Logger log_util;  // defined in tasks.cc
   Logger log_taskreg("taskreg");
+  Logger log_pgroup("procgroup");
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -78,23 +79,6 @@ namespace Realm {
       ProcessorGroupImpl *grp = get_runtime()->get_procgroup_impl(*this);
       grp->get_group_members(members);
     }
-
-    void ProcessorGroupImpl::remove_group_members()
-    {
-      // can only be performed on owner node
-      assert(NodeID(ID(me).pgroup_owner_node()) == Network::my_node_id); // TODO check with Sean
-      for(std::vector<ProcessorImpl*>::iterator it = members.begin();
-          it != members.end();
-          it++) {
-        ProcessorImpl *m_impl = *it;
-        m_impl->remove_group(this);
-      }
-      members.clear(); //if reused we clear previous members
-      members_requested = false;
-      members_valid = false;
-      task_queue.free_gauge();
-    }
-
 
     int Processor::get_num_cores(void) const
     {
@@ -427,52 +411,64 @@ namespace Realm {
 
     /*static*/ ProcessorGroup ProcessorGroup::create_group(const std::vector<Processor>& members)
     {
-      // are we creating a local group?
-      if((members.size() == 0) || (NodeID(ID(members[0]).proc_owner_node()) == Network::my_node_id)) {
-	ProcessorGroupImpl *grp = get_runtime()->local_proc_group_free_list->alloc_entry();
-	grp->set_group_members(members);
-#ifdef EVENT_GRAPH_TRACE
-        {
-          const int base_size = 1024;
-          char base_buffer[base_size];
-          char *buffer;
-          int buffer_size = (members.size() * 20);
-          if (buffer_size >= base_size)
-            buffer = (char*)malloc(buffer_size+1);
-          else
-            buffer = base_buffer;
-          buffer[0] = '\0';
-          int offset = 0;
-          for (std::vector<Processor>::const_iterator it = members.begin();
-                it != members.end(); it++)
-          {
-            int written = snprintf(buffer+offset,buffer_size-offset,
-                                   " " IDFMT, it->id);
-            assert(written < (buffer_size-offset));
-            offset += written;
-          }
-          log_event_graph.info("Group: " IDFMT " %ld%s",
-                                grp->me.id, members.size(), buffer);
-          if (buffer_size >= base_size)
-            free(buffer);
-        }
-#endif
-	return ID(grp->me).convert<ProcessorGroup>();
+      NodeID owner_node;
+      if(members.empty()) {
+	// create empty groups locally
+	owner_node = Network::my_node_id;
+      } else {
+	// owner of pgroup is owner of (all) processors
+	owner_node = ID(members[0]).proc_owner_node();
+	for(size_t i = 1; i < members.size(); i++)
+	  assert(NodeID(ID(members[i]).proc_owner_node()) == owner_node);
       }
 
-      assert(0);
-      return ProcessorGroup::NO_PROC_GROUP;
+      ProcessorGroupImpl *grp = get_runtime()->local_proc_group_free_lists[owner_node]->alloc_entry();
+      grp->set_group_members(members);
+
+      // fix ID to include creator node
+      ID id = grp->me;
+      id.pgroup_creator_node() = Network::my_node_id;
+      ProcessorGroup pgrp = ID(id).convert<ProcessorGroup>();
+      grp->me = pgrp;
+
+      log_pgroup.info() << "creating processor group: pgrp=" << pgrp
+			<< " members=" << PrettyVector<Processor>(members);
+
+      // if we're creating a remote group, send a message as well
+      if(owner_node != Network::my_node_id) {
+	ActiveMessage<ProcGroupCreateMessage> amsg(owner_node,
+						   members.size() * sizeof(Processor));
+	amsg->pgrp = pgrp;
+	amsg->num_members = members.size();
+	amsg.add_payload(members.data(), members.size() * sizeof(Processor));
+	amsg.commit();
+      }
+
+      return pgrp;
     }
 
     void ProcessorGroup::destroy(Event wait_on /*= NO_EVENT*/) const
     {
-      assert(wait_on.has_triggered());
-      ProcessorGroupImpl *grp = get_runtime()->get_procgroup_impl(*this);
-      //first we remove members and properly clean up task queues from members list
-      grp->remove_group_members();
+      assert(ID(*this).is_procgroup());
 
-      //return group to free list
-      get_runtime()->local_proc_group_free_list->free_entry( grp );
+      log_pgroup.info() << "destroying processor group: pgrp=" << *this
+			<< " wait_on = " << wait_on;
+
+      // bulk of deletion is handled by owner node
+      NodeID owner = ID(*this).pgroup_owner_node();
+      if(owner == Network::my_node_id) {
+	ProcessorGroupImpl *grp = get_runtime()->get_procgroup_impl(*this);
+
+	if(wait_on.has_triggered())
+	  grp->destroy();
+	else
+	  grp->deferred_destroy.defer(grp, wait_on);
+      } else {
+	ActiveMessage<ProcGroupDestroyMessage> amsg(owner);
+	amsg->pgrp = *this;
+	amsg->wait_on = wait_on;
+	amsg.commit();
+      }
     }
 
 
@@ -643,33 +639,30 @@ namespace Realm {
       lock.init(ID(me).convert<Reservation>(), ID(me).pgroup_owner_node());
     }
 
-    void ProcessorGroupImpl::set_group_members(const std::vector<Processor>& member_list)
+    void ProcessorGroupImpl::set_group_members(span<const Processor> member_list)
     {
-      // can only be performed on owner node
-      assert(NodeID(ID(me).pgroup_owner_node()) == Network::my_node_id);
+      NodeID owner_node = ID(me).pgroup_owner_node();
       
       // can only be done once
       assert(!members_valid);
 
-      for(std::vector<Processor>::const_iterator it = member_list.begin();
-	  it != member_list.end();
-	  it++) {
-	ProcessorImpl *m_impl = get_runtime()->get_processor_impl(*it);
+      for(size_t i = 0; i < member_list.size(); i++) {
+	ProcessorImpl *m_impl = get_runtime()->get_processor_impl(member_list[i]);
 	members.push_back(m_impl);
-	m_impl->add_to_group(this);
+	// only the owner node actually connects up to the member processors
+	if(owner_node == Network::my_node_id)
+	  m_impl->add_to_group(this);
       }
 
       members_requested = true;
       members_valid = true;
 
-      // now that we exist, profile our queue depth
-      std::string gname = stringbuilder() << "realm/proc " << me << "/ready tasks";
-      ready_task_count = new ProfilingGauges::AbsoluteRangeGauge<int>(gname);
-      task_queue.set_gauge(ready_task_count);
-    }
-
-    void ProcessorGroupImpl::remove_group(ProcessorGroupImpl *group) {
-      assert(0);
+      if((owner_node == Network::my_node_id) && (ready_task_count == 0)) {
+	// now that we exist, profile our queue depth
+	std::string gname = stringbuilder() << "realm/proc " << me << "/ready tasks";
+	ready_task_count = new ProfilingGauges::AbsoluteRangeGauge<int>(gname);
+	task_queue.set_gauge(ready_task_count);
+      }
     }
 
     void ProcessorGroupImpl::get_group_members(std::vector<Processor>& member_list)
@@ -680,6 +673,33 @@ namespace Realm {
 	  it != members.end();
 	  it++)
 	member_list.push_back((*it)->me);
+    }
+
+    void ProcessorGroupImpl::destroy(void)
+    {
+      // can only be performed on owner node
+      NodeID owner_node = ID(me).pgroup_owner_node();
+      assert(owner_node == Network::my_node_id);
+
+      for(std::vector<ProcessorImpl*>::iterator it = members.begin();
+          it != members.end();
+          it++) {
+        ProcessorImpl *m_impl = *it;
+        m_impl->remove_from_group(this);
+      }
+      members.clear(); //if reused we clear previous members
+      members_requested = false;
+      members_valid = false;
+
+      // return to free list if created locally, otherwise message creator
+      NodeID creator_node = ID(me).pgroup_creator_node();
+      if(creator_node == Network::my_node_id) {
+	get_runtime()->local_proc_group_free_lists[owner_node]->free_entry(this);
+      } else {
+	ActiveMessage<ProcGroupDestroyAckMessage> amsg(creator_node);
+	amsg->pgrp = ID(me).convert<ProcessorGroup>();
+	amsg.commit();
+      }
     }
 
     void ProcessorGroupImpl::enqueue_task(Task *task)
@@ -701,6 +721,18 @@ namespace Realm {
 	  it != members.end();
 	  it++)
 	(*it)->add_to_group(group);
+    }
+
+    void ProcessorGroupImpl::remove_from_group(ProcessorGroupImpl *group)
+    {
+      // recursively remove from all of our members
+      assert(members_valid);
+
+      for(std::vector<ProcessorImpl *>::const_iterator it = members.begin();
+	  it != members.end();
+	  it++)
+	(*it)->remove_from_group(group);
+      assert(0);
     }
 
     /*virtual*/ void ProcessorGroupImpl::spawn_task(Processor::TaskFuncID func_id,
@@ -747,6 +779,34 @@ namespace Realm {
 
       enqueue_or_defer_task(task, start_event, &deferred_spawn_cache);
     }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class ProcessorGroupImpl::DeferredDestroy
+  //
+
+  void ProcessorGroupImpl::DeferredDestroy::defer(ProcessorGroupImpl *_pg, Event wait_on)
+  {
+    pg = _pg;
+    EventImpl::add_waiter(wait_on, this);
+  }
+
+  void ProcessorGroupImpl::DeferredDestroy::event_triggered(bool poisoned)
+  {
+    assert(!poisoned);
+    pg->destroy();
+  }
+
+  void ProcessorGroupImpl::DeferredDestroy::print(std::ostream& os) const
+  {
+    os << "deferred processor group destruction: pg=" << pg->me;
+  }
+
+  Event ProcessorGroupImpl::DeferredDestroy::get_finish_event(void) const
+  {
+    return Event::NO_EVENT;
+  }
 
 
   ////////////////////////////////////////////////////////////////////////
@@ -882,7 +942,7 @@ namespace Realm {
       amsg.commit();
     }
 
-    void RemoteProcessor::remove_group(ProcessorGroupImpl *group)
+    void RemoteProcessor::remove_from_group(ProcessorGroupImpl *group)
     {
       // not currently supported
       assert(0);
@@ -938,7 +998,7 @@ namespace Realm {
     sched->add_task_queue(&group->task_queue);
   }
 
-  void LocalTaskProcessor::remove_group(ProcessorGroupImpl *group)
+  void LocalTaskProcessor::remove_from_group(ProcessorGroupImpl *group)
   {
     // remove the group's task queue from our scheduler
     sched->remove_task_queue(&group->task_queue);
@@ -1277,8 +1337,72 @@ namespace Realm {
 		  args.priority);
   }
 
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class ProcGroupCreateMessage
+  //
+
+  /*static*/ void ProcGroupCreateMessage::handle_message(NodeID sender, const ProcGroupCreateMessage &msg,
+							  const void *data, size_t datalen)
+  {
+    ProcessorGroupImpl *grp = get_runtime()->get_procgroup_impl(msg.pgrp);
+
+    assert(datalen == (msg.num_members * sizeof(Processor)));
+
+    grp->set_group_members(span<const Processor>(static_cast<const Processor *>(data),
+						 msg.num_members));
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class ProcGroupDestroyMessage
+  //
+
+  /*static*/ void ProcGroupDestroyMessage::handle_message(NodeID sender, const ProcGroupDestroyMessage &msg,
+							  const void *data, size_t datalen)
+  {
+    ProcessorGroupImpl *grp = get_runtime()->get_procgroup_impl(msg.pgrp);
+
+    if(msg.wait_on.has_triggered())
+      grp->destroy();
+    else
+      grp->deferred_destroy.defer(grp, msg.wait_on);
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class ProcGroupDestroyAckMessage
+  //
+
+  /*static*/ void ProcGroupDestroyAckMessage::handle_message(NodeID sender, const ProcGroupDestroyAckMessage &msg,
+							     const void *data, size_t datalen)
+  {
+    // sanity-check: this should only be received by the creator of a pgroup
+    //  and only when it's not also the owner
+    NodeID creator_node = ID(msg.pgrp).pgroup_creator_node();
+    assert(creator_node == Network::my_node_id);
+    NodeID owner_node = ID(msg.pgrp).pgroup_owner_node();
+    assert(owner_node != Network::my_node_id);
+
+    ProcessorGroupImpl *grp = get_runtime()->get_procgroup_impl(msg.pgrp);
+
+    // creator kept a copy of the member list - clear that
+    grp->members.clear();
+    grp->members_requested = false;
+    grp->members_valid = false;
+
+    get_runtime()->local_proc_group_free_lists[owner_node]->free_entry( grp );
+  }
+
+
   ActiveMessageHandlerReg<SpawnTaskMessage> spawn_task_message_handler;
   ActiveMessageHandlerReg<RegisterTaskMessage> register_task_message_handler;
   ActiveMessageHandlerReg<RegisterTaskCompleteMessage> register_task_complete_message_handler;
+  ActiveMessageHandlerReg<ProcGroupCreateMessage> proc_group_create_message_handler;
+  ActiveMessageHandlerReg<ProcGroupDestroyMessage> proc_group_destroy_message_handler;
+  ActiveMessageHandlerReg<ProcGroupDestroyAckMessage> proc_group_destroy_ack_message_handler;
 
 }; // namespace Realm
