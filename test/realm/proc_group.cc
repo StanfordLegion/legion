@@ -10,6 +10,8 @@
 
 using namespace Realm;
 
+Logger log_app("app");
+
 // Task IDs, some IDs are reserved so start at first available number
 enum {
   TOP_LEVEL_TASK = Processor::TASK_ID_FIRST_AVAILABLE+0,
@@ -19,17 +21,25 @@ enum {
 struct DelayTaskArgs {
   int id;
   int sleep_useconds;
+  RegionInstance inst;
 };
 
-int *task_counts = 0;
-Processor *task_procs = 0;
-double *task_start_times = 0;
-double *task_end_times = 0;
+enum {
+  FID_TASK_COUNT, // int
+  FID_TASK_PROC,  // Processor
+  FID_TASK_START, // double
+  FID_TASK_END,   // double
+};
 
 void delay_task(const void *args, size_t arglen, 
 		const void *userdata, size_t userlen, Processor p)
 {
   const DelayTaskArgs& d_args = *(const DelayTaskArgs *)args;
+
+  AffineAccessor<int, 1> task_counts(d_args.inst, FID_TASK_COUNT);
+  AffineAccessor<Processor, 1> task_procs(d_args.inst, FID_TASK_PROC);
+  AffineAccessor<double, 1> task_start_times(d_args.inst, FID_TASK_START);
+  AffineAccessor<double, 1> task_end_times(d_args.inst, FID_TASK_END);
 
   // increment the count
   __sync_fetch_and_add(&(task_counts[d_args.id]), 1);
@@ -44,7 +54,8 @@ void delay_task(const void *args, size_t arglen,
 }
 
 // checks that all tasks in the first group started before all tasks in the second group
-static int check_task_ordering(int start1, int end1, int start2, int end2)
+static int check_task_ordering(int start1, int end1, int start2, int end2,
+			       AffineAccessor<double, 1> task_start_times)
 {
   // get the max start time of group 1 and the min start time of group 2
   double max1 = -1e100;
@@ -58,8 +69,9 @@ static int check_task_ordering(int start1, int end1, int start2, int end2)
       min2 = task_start_times[i];
 
   if(max1 > min2) {
-    printf("ERROR: At least one task in [%d,%d] started after a task in [%d,%d]\n",
-	   start1, end1, start2, end2);
+    log_app.error() << "ERROR: At least one task in ["
+		    << start1 << "," << end1 << "] started after a task in ["
+		    << start2 << "," << end2 << "]";
     return 1;
   }
 
@@ -72,12 +84,21 @@ void top_level_task(const void *args, size_t arglen,
   int errors = 0;
   bool top_level_proc_reused = false;
 
-  printf("top level task - getting machine and list of CPUs\n");
+  log_app.info() << "top level task - getting machine and list of CPUs";
 
   Machine machine = Machine::get_machine();
+  Processor lastp = Processor::NO_PROC;
+  {
+    Machine::ProcessorQuery pq(machine);
+    pq.only_kind(Processor::LOC_PROC);
+    for(Machine::ProcessorQuery::iterator it = pq.begin(); it != pq.end(); ++it)
+      lastp = *it;
+  }
+  assert(lastp.exists());
+
   std::vector<Processor> all_cpus;
   Machine::ProcessorQuery pq(machine);
-  pq.same_address_space_as(p).only_kind(Processor::LOC_PROC);
+  pq.same_address_space_as(lastp).only_kind(Processor::LOC_PROC);
   for(Machine::ProcessorQuery::iterator it = pq.begin(); it != pq.end(); ++it) {
     // try not to use the processor that the top level task is running on
     if(*it != p)
@@ -90,30 +111,20 @@ void top_level_task(const void *args, size_t arglen,
   }
   int num_cpus = all_cpus.size();
 
-  printf("creating processor group for all CPUs...\n");
+  log_app.info() << "creating processor group for all CPUs...";
   ProcessorGroup pgrp = ProcessorGroup::create_group(all_cpus);
-  printf("group ID is " IDFMT "\n", pgrp.id);
+  log_app.info() << "group ID is " << pgrp;
 
   // see if the member list is what we expect
   std::vector<Processor> members;
   pgrp.get_group_members(members);
   if(members == all_cpus)
-    printf("member list matches\n");
+    log_app.info() << "member list matches";
   else {
     errors++;
-    printf("member list MISMATCHES\n");
-    printf("expected:");
-    for(std::vector<Processor>::const_iterator it = all_cpus.begin();
-	it != all_cpus.end();
-	it++)
-      printf(" " IDFMT, (*it).id);
-    printf("\n");
-    printf("  actual:");
-    for(std::vector<Processor>::const_iterator it = members.begin();
-	it != members.end();
-	it++)
-      printf(" " IDFMT, (*it).id);
-    printf("\n");
+    log_app.error() << "member list MISMATCHES: "
+		    << " expected=" << PrettyVector<Processor>(all_cpus)
+		    << " actual=" << PrettyVector<Processor>(members);
   }
 
   // we're going to launch 4 groups of tasks, each with one per CPU
@@ -138,16 +149,35 @@ void top_level_task(const void *args, size_t arglen,
   expected_order[2] = 4;
   expected_order[3] = 2;
 #endif
-  
-  int total_tasks = 4 * num_cpus;
-  task_counts = new int[total_tasks];
-  task_procs = new Processor[total_tasks];
-  task_start_times = new double[total_tasks];
-  task_end_times = new double[total_tasks];
-  for(int i = 0; i < total_tasks; i++)
-    task_counts[i] = 0;
 
-  std::set<Event> task_events;
+  int total_tasks = 4 * num_cpus;
+  Rect<1> is_tasks(0, total_tasks - 1);
+
+  Memory local_mem = Machine::MemoryQuery(machine).has_affinity_to(p).first();
+  Memory tgt_mem = Machine::MemoryQuery(machine).has_affinity_to(lastp).first();
+  std::map<FieldID, size_t> fields;
+  fields[FID_TASK_COUNT] = sizeof(int);
+  fields[FID_TASK_PROC] = sizeof(Processor);
+  fields[FID_TASK_START] = sizeof(double);
+  fields[FID_TASK_END] = sizeof(double);
+
+  RegionInstance local_inst, tgt_inst;
+  RegionInstance::create_instance(local_inst, local_mem, is_tasks,
+				  fields, 0 /*SOA*/,
+				  ProfilingRequestSet()).wait();
+  RegionInstance::create_instance(tgt_inst, tgt_mem, is_tasks,
+				  fields, 0 /*SOA*/,
+				  ProfilingRequestSet()).wait();
+
+  // clear the task counts to 0 in the remote instance
+  {
+    std::vector<CopySrcDstField> srcs(1), dsts(1);
+    srcs[0].set_fill(int(0));
+    dsts[0].set_field(tgt_inst, FID_TASK_COUNT, sizeof(int));
+    is_tasks.copy(srcs, dsts, ProfilingRequestSet(), Event::NO_EVENT).wait();
+  }
+
+  std::set<Event> task_events, pgrp_events;
   int count = 0;
   for(int batch = 0; batch < 4; batch++) {
     for(int i = 0; i < num_cpus; i++) {
@@ -157,26 +187,48 @@ void top_level_task(const void *args, size_t arglen,
       DelayTaskArgs d_args;
       d_args.id = count++;
       d_args.sleep_useconds = 250000;
+      d_args.inst = tgt_inst;
       Event e = (to_group ? pgrp : all_cpus[i]).spawn(DELAY_TASK, &d_args, sizeof(d_args),
 						      Event::NO_EVENT, priority);
       task_events.insert(e);
+      if(to_group)
+	pgrp_events.insert(e);
     }
     // small delay after each batch to make sure the tasks are all enqueued
     usleep(10000);
   }
-  printf("%d tasks launched\n", count);
+  log_app.info() << count << " tasks launched";
+
+  // can destroy the processor group as soon as all of its tasks are done
+  pgrp.destroy(Event::merge_events(pgrp_events));
 
   // merge events
   Event merged = Event::merge_events(task_events);
-  printf("merged event ID is " IDFMT " - waiting on it...\n",
-	 merged.id);
+  log_app.info() << "merged event ID is " << merged << " - waiting on it...";
 
-  merged.wait();
+  // copy results back once all tasks are done
+  {
+    std::vector<CopySrcDstField> srcs(4), dsts(4);
+    srcs[0].set_field(tgt_inst, FID_TASK_COUNT, sizeof(int));
+    srcs[1].set_field(tgt_inst, FID_TASK_PROC, sizeof(Processor));
+    srcs[2].set_field(tgt_inst, FID_TASK_START, sizeof(double));
+    srcs[3].set_field(tgt_inst, FID_TASK_END, sizeof(double));
+    dsts[0].set_field(local_inst, FID_TASK_COUNT, sizeof(int));
+    dsts[1].set_field(local_inst, FID_TASK_PROC, sizeof(Processor));
+    dsts[2].set_field(local_inst, FID_TASK_START, sizeof(double));
+    dsts[3].set_field(local_inst, FID_TASK_END, sizeof(double));
+    is_tasks.copy(srcs, dsts, ProfilingRequestSet(), merged).wait();
+  }
+
+  AffineAccessor<int, 1> task_counts(local_inst, FID_TASK_COUNT);
+  AffineAccessor<Processor, 1> task_procs(local_inst, FID_TASK_PROC);
+  AffineAccessor<double, 1> task_start_times(local_inst, FID_TASK_START);
+  AffineAccessor<double, 1> task_end_times(local_inst, FID_TASK_END);
 
   // now check the results
   for(int i = 0; i < total_tasks; i++) {
     if(task_counts[i] != 1) {
-      printf("ERROR: task count for %d is %d, not 1\n", i, task_counts[i]);
+      log_app.error() << "ERROR: task count for " << i << " is " << task_counts[i] << ", not 1";
       errors++;
     }
   }
@@ -187,7 +239,7 @@ void top_level_task(const void *args, size_t arglen,
       it != proc_counts.end();
       it++)
     if(it->second != 4) {
-      printf("ERROR: processor " IDFMT " ran %d tasks, not 4\n", it->first.id, it->second);
+      log_app.error() << "ERROR: processor " << it->first << " ran " << it->second << " tasks, not 4";
       errors++;
     }
 
@@ -197,21 +249,30 @@ void top_level_task(const void *args, size_t arglen,
     int start2 = (expected_order[i+1] - 1) * num_cpus;
     int end2 = start2 + (num_cpus - 1);
 
-    errors += check_task_ordering(start1, end1, start2, end2);
+    errors += check_task_ordering(start1, end1, start2, end2, task_start_times);
   }
 
   if(errors) {
-    printf("Raw data:\n");
+    log_app.error() << "Raw data:";
     for(int i = 0; i < total_tasks; i++) {
-      printf("%2d: %d " IDFMT " %4.1f %4.1f\n",
-	     i, task_counts[i], task_procs[i].id, task_start_times[i], task_end_times[i]);
+      log_app.error("%2d: %d " IDFMT " %4.1f %4.1f\n",
+		    i, task_counts[i], task_procs[i].id, task_start_times[i], task_end_times[i]);
     }
 
-    printf("Exiting with errors.\n");
+    log_app.error() <<  "Exiting with errors.";
     exit(1);
   }
 
-  printf("done!\n");
+  // simple check for now to make sure IDs are reused - create a new group
+  //  and verify it gets the same ID as the one we used above
+  ProcessorGroup pgrp2 = ProcessorGroup::create_group(all_cpus);
+  if(pgrp != pgrp2) {
+    log_app.error() << "processor group ID not reused? " << pgrp2 << " != " << pgrp;
+    exit(1);
+  }
+  pgrp2.destroy();
+
+  log_app.info() << "done!";
 }
 
 int main(int argc, char **argv)
