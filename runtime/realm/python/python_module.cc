@@ -832,7 +832,7 @@ namespace Realm {
     enqueue_or_defer_task(task, start_event, &deferred_spawn_cache);
   }
 
-  void LocalPythonProcessor::add_to_group(ProcessorGroup *group)
+  void LocalPythonProcessor::add_to_group(ProcessorGroupImpl *group)
   {
     // add the group's task queue to our scheduler too
     sched->add_task_queue(&group->task_queue);

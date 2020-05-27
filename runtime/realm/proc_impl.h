@@ -35,7 +35,7 @@
 
 namespace Realm {
 
-    class ProcessorGroup;
+    class ProcessorGroupImpl;
 
     namespace ThreadLocal {
       // if nonzero, prevents application thread from yielding execution
@@ -66,7 +66,7 @@ namespace Realm {
       // blocks until things are cleaned up
       virtual void shutdown(void);
 
-      virtual void add_to_group(ProcessorGroup *group) = 0;
+      virtual void add_to_group(ProcessorGroupImpl *group) = 0;
 
       virtual void register_task(Processor::TaskFuncID func_id,
 				 CodeDescriptor& codedesc,
@@ -142,7 +142,7 @@ namespace Realm {
       // blocks until things are cleaned up
       virtual void shutdown(void);
 
-      virtual void add_to_group(ProcessorGroup *group);
+      virtual void add_to_group(ProcessorGroupImpl *group);
 
       // runs an internal Realm operation on this processor
       virtual void add_internal_task(InternalTask *task);
@@ -213,7 +213,7 @@ namespace Realm {
       virtual void enqueue_task(Task *task);
       virtual void enqueue_tasks(Task::TaskList& tasks);
 
-      virtual void add_to_group(ProcessorGroup *group);
+      virtual void add_to_group(ProcessorGroupImpl *group);
 
       virtual void spawn_task(Processor::TaskFuncID func_id,
 			      const void *args, size_t arglen,
@@ -224,11 +224,11 @@ namespace Realm {
                               int priority);
     };
 
-    class ProcessorGroup : public ProcessorImpl {
+    class ProcessorGroupImpl : public ProcessorImpl {
     public:
-      ProcessorGroup(void);
+      ProcessorGroupImpl(void);
 
-      virtual ~ProcessorGroup(void);
+      virtual ~ProcessorGroupImpl(void);
 
       static const ID::ID_Types ID_TYPE = ID::ID_PROCGROUP;
 
@@ -241,7 +241,7 @@ namespace Realm {
       virtual void enqueue_task(Task *task);
       virtual void enqueue_tasks(Task::TaskList& tasks);
 
-      virtual void add_to_group(ProcessorGroup *group);
+      virtual void add_to_group(ProcessorGroupImpl *group);
 
       virtual void spawn_task(Processor::TaskFuncID func_id,
 			      const void *args, size_t arglen,
@@ -256,7 +256,7 @@ namespace Realm {
       bool members_requested;
       std::vector<ProcessorImpl *> members;
       ReservationImpl lock;
-      ProcessorGroup *next_free;
+      ProcessorGroupImpl *next_free;
 
       void request_group_members(void);
 

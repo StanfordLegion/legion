@@ -147,7 +147,7 @@ namespace Realm {
 
     virtual void shutdown(void);
 
-    virtual void add_to_group(ProcessorGroup *group);
+    virtual void add_to_group(ProcessorGroupImpl *group);
     
     virtual void register_task(Processor::TaskFuncID func_id,
                                CodeDescriptor& codedesc,

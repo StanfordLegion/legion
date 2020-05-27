@@ -2425,7 +2425,7 @@ namespace Realm {
       return null_check(nodes[id.proc_owner_node()].processors[id.proc_proc_idx()]);
     }
 
-    ProcessorGroup *RuntimeImpl::get_procgroup_impl(ID id)
+    ProcessorGroupImpl *RuntimeImpl::get_procgroup_impl(ID id)
     {
       if(!id.is_procgroup()) {
 	log_runtime.fatal() << "invalid processor group handle: id=" << id;
@@ -2433,8 +2433,8 @@ namespace Realm {
       }
 
       Node *n = &nodes[id.pgroup_owner_node()];
-      ProcessorGroup *impl = n->proc_groups.lookup_entry(id.pgroup_pgroup_idx(),
-							 id.pgroup_owner_node());
+      ProcessorGroupImpl *impl = n->proc_groups.lookup_entry(id.pgroup_pgroup_idx(),
+							     id.pgroup_owner_node());
       assert(impl->me == id.convert<Processor>());
       return impl;
     }

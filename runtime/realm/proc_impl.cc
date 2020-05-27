@@ -64,7 +64,7 @@ namespace Realm {
     {
       // are we creating a local group?
       if((members.size() == 0) || (NodeID(ID(members[0]).proc_owner_node()) == Network::my_node_id)) {
-	ProcessorGroup *grp = get_runtime()->local_proc_group_free_list->alloc_entry();
+	ProcessorGroupImpl *grp = get_runtime()->local_proc_group_free_list->alloc_entry();
 	grp->set_group_members(members);
 #ifdef EVENT_GRAPH_TRACE
         {
@@ -109,7 +109,7 @@ namespace Realm {
 
       assert(ID(*this).is_procgroup());
 
-      ProcessorGroup *grp = get_runtime()->get_procgroup_impl(*this);
+      ProcessorGroupImpl *grp = get_runtime()->get_procgroup_impl(*this);
       grp->get_group_members(members);
     }
 
@@ -236,7 +236,7 @@ namespace Realm {
       } else {
 	// assume we're a group
 	assert(id.is_procgroup());
-	ProcessorGroup *grp = get_runtime()->get_procgroup_impl(*this);
+	ProcessorGroupImpl *grp = get_runtime()->get_procgroup_impl(*this);
 	std::vector<Processor> members;
 	grp->get_group_members(members);
 	for(std::vector<Processor>::const_iterator it = members.begin();
@@ -576,10 +576,10 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // class ProcessorGroup
+  // class ProcessorGroupImpl
   //
 
-    ProcessorGroup::ProcessorGroup(void)
+    ProcessorGroupImpl::ProcessorGroupImpl(void)
       : ProcessorImpl(Processor::NO_PROC, Processor::PROC_GROUP),
 	members_valid(false), members_requested(false), next_free(0)
       , ready_task_count(0)
@@ -587,13 +587,13 @@ namespace Realm {
       deferred_spawn_cache.clear();
     }
 
-    ProcessorGroup::~ProcessorGroup(void)
+    ProcessorGroupImpl::~ProcessorGroupImpl(void)
     {
       deferred_spawn_cache.flush();
       delete ready_task_count;
     }
 
-    void ProcessorGroup::init(Processor _me, int _owner)
+    void ProcessorGroupImpl::init(Processor _me, int _owner)
     {
       assert(NodeID(ID(_me).pgroup_owner_node()) == _owner);
 
@@ -601,7 +601,7 @@ namespace Realm {
       lock.init(ID(me).convert<Reservation>(), ID(me).pgroup_owner_node());
     }
 
-    void ProcessorGroup::set_group_members(const std::vector<Processor>& member_list)
+    void ProcessorGroupImpl::set_group_members(const std::vector<Processor>& member_list)
     {
       // can only be performed on owner node
       assert(NodeID(ID(me).pgroup_owner_node()) == Network::my_node_id);
@@ -626,7 +626,7 @@ namespace Realm {
       task_queue.set_gauge(ready_task_count);
     }
 
-    void ProcessorGroup::get_group_members(std::vector<Processor>& member_list)
+    void ProcessorGroupImpl::get_group_members(std::vector<Processor>& member_list)
     {
       assert(members_valid);
 
@@ -636,17 +636,17 @@ namespace Realm {
 	member_list.push_back((*it)->me);
     }
 
-    void ProcessorGroup::enqueue_task(Task *task)
+    void ProcessorGroupImpl::enqueue_task(Task *task)
     {
       task_queue.enqueue_task(task);
     }
 
-    void ProcessorGroup::enqueue_tasks(Task::TaskList& tasks)
+    void ProcessorGroupImpl::enqueue_tasks(Task::TaskList& tasks)
     {
       task_queue.enqueue_tasks(tasks);
     }
 
-    void ProcessorGroup::add_to_group(ProcessorGroup *group)
+    void ProcessorGroupImpl::add_to_group(ProcessorGroupImpl *group)
     {
       // recursively add all of our members
       assert(members_valid);
@@ -657,13 +657,13 @@ namespace Realm {
 	(*it)->add_to_group(group);
     }
 
-    /*virtual*/ void ProcessorGroup::spawn_task(Processor::TaskFuncID func_id,
-						const void *args, size_t arglen,
-                                                const ProfilingRequestSet &reqs,
-						Event start_event,
-						GenEventImpl *finish_event,
-						EventImpl::gen_t finish_gen,
-						int priority)
+    /*virtual*/ void ProcessorGroupImpl::spawn_task(Processor::TaskFuncID func_id,
+						    const void *args, size_t arglen,
+						    const ProfilingRequestSet &reqs,
+						    Event start_event,
+						    GenEventImpl *finish_event,
+						    EventImpl::gen_t finish_gen,
+						    int priority)
     {
       // check for spawn to remote processor group
       NodeID target = ID(me).pgroup_owner_node();
@@ -788,7 +788,7 @@ namespace Realm {
       assert(0);
     }
 
-    void RemoteProcessor::add_to_group(ProcessorGroup *group)
+    void RemoteProcessor::add_to_group(ProcessorGroupImpl *group)
     {
       // not currently supported
       assert(0);
@@ -880,7 +880,7 @@ namespace Realm {
 #endif
   }
 
-  void LocalTaskProcessor::add_to_group(ProcessorGroup *group)
+  void LocalTaskProcessor::add_to_group(ProcessorGroupImpl *group)
   {
     // add the group's task queue to our scheduler too
     sched->add_task_queue(&group->task_queue);
