@@ -378,7 +378,6 @@ namespace Legion {
     public:
       bool is_affine(void) const;
       bool is_compact(void) const;
-      bool is_varfield(void) const;
       bool is_virtual(void) const;
       bool is_reduction(void) const;
       bool is_file(void) const;
