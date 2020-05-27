@@ -403,23 +403,23 @@ namespace Legion {
       };
 
       template<typename FT>
-      class AccessorRefHelper<FT,READ_ONLY> {
+      class AccessorRefHelper<FT,LEGION_READ_ONLY> {
       public:
         AccessorRefHelper(const Realm::AccessorRefHelper<FT> &h) : helper(h) { }
         // read
         inline operator FT(void) const { return helper; }
       private:
         // no writes allowed
-        inline AccessorRefHelper<FT,READ_ONLY>& operator=(
-                const AccessorRefHelper<FT,READ_ONLY> &rhs)
+        inline AccessorRefHelper<FT,LEGION_READ_ONLY>& operator=(
+                const AccessorRefHelper<FT,LEGION_READ_ONLY> &rhs)
           { helper = rhs.helper; return *this; }
       protected:
         Realm::AccessorRefHelper<FT> helper;
       };
 
-      // NO_ACCESS means we dynamically check the privilege
+      // LEGION_NO_ACCESS means we dynamically check the privilege
       template<typename FT>
-      class AccessorRefHelper<FT,NO_ACCESS> {
+      class AccessorRefHelper<FT,LEGION_NO_ACCESS> {
       public:
         AccessorRefHelper(const Realm::AccessorRefHelper<FT> &h, FieldID fid,
                           const DomainPoint &pt, PrivilegeMode p)
@@ -428,23 +428,24 @@ namespace Legion {
         // read
         inline operator FT(void) const 
           { 
-            if ((privilege & READ_PRIV) == 0)
+            if ((privilege & LEGION_READ_PRIV) == 0)
               PhysicalRegion::fail_privilege_check(point, field, privilege);
             return helper; 
           }
         // writes
-        inline AccessorRefHelper<FT,NO_ACCESS>& operator=(const FT &newval)
+        inline AccessorRefHelper<FT,LEGION_NO_ACCESS>& operator=(
+                const FT &newval)
           { 
-            if ((privilege & WRITE_PRIV) == 0)
+            if ((privilege & LEGION_WRITE_PRIV) == 0)
               PhysicalRegion::fail_privilege_check(point, field, privilege);
             helper = newval; 
             return *this; 
           }
         template<PrivilegeMode P2>
-        inline AccessorRefHelper<FT,NO_ACCESS>& operator=(
+        inline AccessorRefHelper<FT,LEGION_NO_ACCESS>& operator=(
                 const AccessorRefHelper<FT,P2> &rhs)
           { 
-            if ((privilege & WRITE_PRIV) == 0)
+            if ((privilege & LEGION_WRITE_PRIV) == 0)
               PhysicalRegion::fail_privilege_check(point, field, privilege);
             helper = rhs.helper; 
             return *this; 
@@ -500,7 +501,7 @@ namespace Legion {
       };
       // Further specialization for M = N and read-only
       template<typename A, typename FT, int N, typename T>
-      class GenericSyntaxHelper<A,FT,N,T,N,READ_ONLY> {
+      class GenericSyntaxHelper<A,FT,N,T,N,LEGION_READ_ONLY> {
       public:
         GenericSyntaxHelper(const A &acc, const Point<N-1,T> &p)
           : accessor(acc)
@@ -509,7 +510,7 @@ namespace Legion {
             point[i] = p[i];
         }
       public:
-        inline AccessorRefHelper<FT,READ_ONLY> operator[](T val)
+        inline AccessorRefHelper<FT,LEGION_READ_ONLY> operator[](T val)
         {
           point[N-1] = val;
           return accessor[point];
@@ -520,7 +521,7 @@ namespace Legion {
       };
       // Further specialization for M = N and reductions
       template<typename A, typename FT, int N, typename T>
-      class GenericSyntaxHelper<A,FT,N,T,N,REDUCE> {
+      class GenericSyntaxHelper<A,FT,N,T,N,LEGION_REDUCE> {
       public:
         GenericSyntaxHelper(const A &acc, const Point<N-1,T> &p)
           : accessor(acc)
@@ -589,7 +590,7 @@ namespace Legion {
 
       // Further specialization for M = N and read-only
       template<typename A, typename FT, int N, typename T>
-      class AffineSyntaxHelper<A,FT,N,T,N,READ_ONLY> {
+      class AffineSyntaxHelper<A,FT,N,T,N,LEGION_READ_ONLY> {
       public:
         __CUDA_HD__
         AffineSyntaxHelper(const A &acc, const Point<N-1,T> &p)
@@ -612,7 +613,7 @@ namespace Legion {
 
       // Further specialize for M = N and reductions
       template<typename A, typename FT, int N, typename T>
-      class AffineSyntaxHelper<A,FT,N,T,N,REDUCE> {
+      class AffineSyntaxHelper<A,FT,N,T,N,LEGION_REDUCE> {
       public:
         __CUDA_HD__
         AffineSyntaxHelper(const A &acc, const Point<N-1,T> &p)
@@ -651,9 +652,9 @@ namespace Legion {
         inline operator const FT&(void) const
           {
 #ifdef __CUDA_ARCH__
-            assert(privilege & READ_PRIV);
+            assert(privilege & LEGION_READ_PRIV);
 #else
-            if ((privilege & READ_PRIV) == 0)
+            if ((privilege & LEGION_READ_PRIV) == 0)
               PhysicalRegion::fail_privilege_check(point, field, privilege);
 #endif
             return ref;
@@ -663,9 +664,9 @@ namespace Legion {
         inline AffineRefHelper<FT>& operator=(const FT &newval)
           { 
 #ifdef __CUDA_ARCH__
-            assert(privilege & WRITE_PRIV);
+            assert(privilege & LEGION_WRITE_PRIV);
 #else
-            if ((privilege & WRITE_PRIV) == 0)
+            if ((privilege & LEGION_WRITE_PRIV) == 0)
               PhysicalRegion::fail_privilege_check(point, field, privilege);
 #endif
             ref = newval;
@@ -675,9 +676,9 @@ namespace Legion {
         inline AffineRefHelper<FT>& operator=(const AffineRefHelper<FT> &rhs)
           {
 #ifdef __CUDA_ARCH__
-            assert(privilege & WRITE_PRIV);
+            assert(privilege & LEGION_WRITE_PRIV);
 #else
-            if ((privilege & WRITE_PRIV) == 0)
+            if ((privilege & LEGION_WRITE_PRIV) == 0)
               PhysicalRegion::fail_privilege_check(point, field, privilege);
 #endif
             ref = rhs.ref;
@@ -694,7 +695,7 @@ namespace Legion {
 
       // Further specialization for M = N and NO_ACCESS (dynamic privilege)
       template<typename A, typename FT, int N, typename T>
-      class AffineSyntaxHelper<A,FT,N,T,N,NO_ACCESS> {
+      class AffineSyntaxHelper<A,FT,N,T,N,LEGION_NO_ACCESS> {
       public:
         __CUDA_HD__
         AffineSyntaxHelper(const A &acc, const Point<N-1,T> &p)
@@ -722,7 +723,7 @@ namespace Legion {
 
     // Read-only FieldAccessor specialization
     template<typename FT, int N, typename T, bool CB>
-    class FieldAccessor<READ_ONLY,FT,N,T,
+    class FieldAccessor<LEGION_READ_ONLY,FT,N,T,
                         Realm::GenericAccessor<FT,N,T>,CB> {
     public:
       FieldAccessor(void) { }
@@ -738,7 +739,7 @@ namespace Legion {
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
+          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
@@ -759,7 +760,7 @@ namespace Legion {
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
+          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
@@ -772,17 +773,20 @@ namespace Legion {
         { 
           return accessor.read(p); 
         }
-      inline const ArraySyntax::AccessorRefHelper<FT,READ_ONLY> 
+      inline const ArraySyntax::AccessorRefHelper<FT,LEGION_READ_ONLY> 
           operator[](const Point<N,T>& p) const
         { 
-          return ArraySyntax::AccessorRefHelper<FT,READ_ONLY>(accessor[p]);
+          return ArraySyntax::AccessorRefHelper<FT,LEGION_READ_ONLY>(
+                                                          accessor[p]);
         }
-      inline ArraySyntax::GenericSyntaxHelper<FieldAccessor<READ_ONLY,FT,N,T,
-            Realm::GenericAccessor<FT,N,T>,CB>,FT,N,T,2,READ_ONLY>
+      inline ArraySyntax::GenericSyntaxHelper<
+          FieldAccessor<LEGION_READ_ONLY,FT,N,T,
+            Realm::GenericAccessor<FT,N,T>,CB>,FT,N,T,2,LEGION_READ_ONLY>
           operator[](T index) const
       {
-        return ArraySyntax::GenericSyntaxHelper<FieldAccessor<READ_ONLY,FT,N,T,
-               Realm::GenericAccessor<FT,N,T>,CB>,FT,N,T,2,READ_ONLY>(
+        return ArraySyntax::GenericSyntaxHelper<
+            FieldAccessor<LEGION_READ_ONLY,FT,N,T,
+               Realm::GenericAccessor<FT,N,T>,CB>,FT,N,T,2,LEGION_READ_ONLY>(
               *this, Point<1,T>(index));
       }
     public:
@@ -797,7 +801,7 @@ namespace Legion {
     // Read-only FieldAccessor specialization
     // with bounds checks
     template<typename FT, int N, typename T>
-    class FieldAccessor<READ_ONLY,FT,N,T,
+    class FieldAccessor<LEGION_READ_ONLY,FT,N,T,
                         Realm::GenericAccessor<FT,N,T>,true> {
     public:
       FieldAccessor(void) { }
@@ -813,9 +817,10 @@ namespace Legion {
         : field(fid)
       {
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_ONLY, fid, actual_field_size, &bounds,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
-              silence_warnings, true/*generic accessor*/, check_field_size);
+          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size, 
+              &bounds, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              warning_string, silence_warnings, true/*generic accessor*/, 
+              check_field_size);
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                            bounds.bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
@@ -834,9 +839,10 @@ namespace Legion {
         : field(fid), bounds(source_bounds)
       {
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_ONLY, fid, actual_field_size, &bounds,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
-              silence_warnings, true/*generic accessor*/, check_field_size);
+          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,
+              &bounds, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              warning_string, silence_warnings, true/*generic accessor*/, 
+              check_field_size);
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                            source_bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
@@ -847,22 +853,27 @@ namespace Legion {
       inline FT read(const Point<N,T>& p) const 
         { 
           if (!bounds.contains(p)) 
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                              LEGION_READ_ONLY);
           return accessor.read(p); 
         }
-      inline const ArraySyntax::AccessorRefHelper<FT,READ_ONLY>
+      inline const ArraySyntax::AccessorRefHelper<FT,LEGION_READ_ONLY>
           operator[](const Point<N,T>& p) const
         { 
           if (!bounds.contains(p)) 
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
-          return ArraySyntax::AccessorRefHelper<FT,READ_ONLY>(accessor[p]);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                              LEGION_READ_ONLY);
+          return ArraySyntax::AccessorRefHelper<FT,LEGION_READ_ONLY>(
+                                                          accessor[p]);
         }
-      inline ArraySyntax::GenericSyntaxHelper<FieldAccessor<READ_ONLY,FT,N,T,
-             Realm::GenericAccessor<FT,N,T>,true>,FT,N,T,2,READ_ONLY>
+      inline ArraySyntax::GenericSyntaxHelper<
+          FieldAccessor<LEGION_READ_ONLY,FT,N,T,
+             Realm::GenericAccessor<FT,N,T>,true>,FT,N,T,2,LEGION_READ_ONLY>
           operator[](T index) const
       {
-        return ArraySyntax::GenericSyntaxHelper<FieldAccessor<READ_ONLY,FT,N,T,
-              Realm::GenericAccessor<FT,N,T>,true>,FT,N,T,2,READ_ONLY>(
+        return ArraySyntax::GenericSyntaxHelper<
+            FieldAccessor<LEGION_READ_ONLY,FT,N,T,
+              Realm::GenericAccessor<FT,N,T>,true>,FT,N,T,2,LEGION_READ_ONLY>(
               *this, Point<1,T>(index));
       }
     public:
@@ -879,7 +890,7 @@ namespace Legion {
     // Read-only FieldAccessor specialization 
     // with N==1 to avoid array ambiguity
     template<typename FT, typename T, bool CB>
-    class FieldAccessor<READ_ONLY,FT,1,T,
+    class FieldAccessor<LEGION_READ_ONLY,FT,1,T,
                         Realm::GenericAccessor<FT,1,T>,CB> {
     public:
       FieldAccessor(void) { }
@@ -895,7 +906,7 @@ namespace Legion {
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
+          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
@@ -916,7 +927,7 @@ namespace Legion {
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
+          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
@@ -929,10 +940,11 @@ namespace Legion {
         { 
           return accessor.read(p); 
         }
-      inline const ArraySyntax::AccessorRefHelper<FT,READ_ONLY>
+      inline const ArraySyntax::AccessorRefHelper<FT,LEGION_READ_ONLY>
           operator[](const Point<1,T>& p) const
         { 
-          return ArraySyntax::AccessorRefHelper<FT,READ_ONLY>(accessor[p]);
+          return ArraySyntax::AccessorRefHelper<FT,LEGION_READ_ONLY>(
+                                                          accessor[p]);
         }
     public:
       mutable Realm::GenericAccessor<FT,1,T> accessor;
@@ -946,7 +958,7 @@ namespace Legion {
     // Read-only FieldAccessor specialization 
     // with N==1 to avoid array ambiguity and bounds checks
     template<typename FT, typename T>
-    class FieldAccessor<READ_ONLY,FT,1,T,
+    class FieldAccessor<LEGION_READ_ONLY,FT,1,T,
                         Realm::GenericAccessor<FT,1,T>,true> {
     public:
       // No CUDA support due to PhysicalRegion constructor
@@ -963,9 +975,10 @@ namespace Legion {
         : field(fid)
       {
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_ONLY, fid, actual_field_size, &bounds,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
-              silence_warnings, true/*generic accessor*/, check_field_size);
+          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size, 
+              &bounds, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              warning_string, silence_warnings, true/*generic accessor*/, 
+              check_field_size);
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                            bounds.bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
@@ -984,9 +997,10 @@ namespace Legion {
         : field(fid)
       {
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_ONLY, fid, actual_field_size, &bounds,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
-              silence_warnings, true/*generic accessor*/, check_field_size);
+          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,
+              &bounds, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              warning_string, silence_warnings, true/*generic accessor*/, 
+              check_field_size);
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                            source_bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
@@ -997,15 +1011,18 @@ namespace Legion {
       inline FT read(const Point<1,T>& p) const 
         { 
           if (!bounds.contains(p)) 
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                              LEGION_READ_ONLY);
           return accessor.read(p); 
         }
-      inline const ArraySyntax::AccessorRefHelper<FT,READ_ONLY> 
+      inline const ArraySyntax::AccessorRefHelper<FT,LEGION_READ_ONLY> 
           operator[](const Point<1,T>& p) const
         { 
           if (!bounds.contains(p)) 
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
-          return ArraySyntax::AccessorRefHelper<FT,READ_ONLY>(accessor[p]);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                              LEGION_READ_ONLY);
+          return ArraySyntax::AccessorRefHelper<FT,LEGION_READ_ONLY>(
+                                                          accessor[p]);
         }
     public:
       mutable Realm::GenericAccessor<FT,1,T> accessor;
@@ -1020,7 +1037,7 @@ namespace Legion {
 
     // Read-write FieldAccessor specialization
     template<typename FT, int N, typename T, bool CB>
-    class FieldAccessor<READ_WRITE,FT,N,T,
+    class FieldAccessor<LEGION_READ_WRITE,FT,N,T,
                         Realm::GenericAccessor<FT,N,T>,CB> {
     public:
       FieldAccessor(void) { }
@@ -1036,7 +1053,7 @@ namespace Legion {
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
+          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
@@ -1057,7 +1074,7 @@ namespace Legion {
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
+          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
@@ -1074,17 +1091,20 @@ namespace Legion {
         { 
           accessor.write(p, val); 
         }
-      inline ArraySyntax::AccessorRefHelper<FT,READ_WRITE> 
+      inline ArraySyntax::AccessorRefHelper<FT,LEGION_READ_WRITE> 
           operator[](const Point<N,T>& p) const
         { 
-          return ArraySyntax::AccessorRefHelper<FT,READ_WRITE>(accessor[p]);
+          return ArraySyntax::AccessorRefHelper<FT,LEGION_READ_WRITE>(
+                                                          accessor[p]);
         }
-      inline ArraySyntax::GenericSyntaxHelper<FieldAccessor<READ_WRITE,FT,N,T,
-             Realm::GenericAccessor<FT,N,T>,CB>,FT,N,T,2,READ_WRITE>
+      inline ArraySyntax::GenericSyntaxHelper<
+          FieldAccessor<LEGION_READ_WRITE,FT,N,T,
+             Realm::GenericAccessor<FT,N,T>,CB>,FT,N,T,2,LEGION_READ_WRITE>
           operator[](T index) const
       {
-        return ArraySyntax::GenericSyntaxHelper<FieldAccessor<READ_WRITE,FT,N,T,
-              Realm::GenericAccessor<FT,N,T>,CB>,FT,N,T,2,READ_WRITE>(
+        return ArraySyntax::GenericSyntaxHelper<
+            FieldAccessor<LEGION_READ_WRITE,FT,N,T,
+              Realm::GenericAccessor<FT,N,T>,CB>,FT,N,T,2,LEGION_READ_WRITE>(
               *this, Point<1,T>(index));
       }
       // No reductions since we can't handle atomicity correctly
@@ -1100,7 +1120,7 @@ namespace Legion {
     // Read-write FieldAccessor specialization
     // with bounds checks
     template<typename FT, int N, typename T>
-    class FieldAccessor<READ_WRITE,FT,N,T,
+    class FieldAccessor<LEGION_READ_WRITE,FT,N,T,
                         Realm::GenericAccessor<FT,N,T>,true> {
     public:
       FieldAccessor(void) { }
@@ -1116,9 +1136,10 @@ namespace Legion {
         : field(fid)
       {
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_WRITE, fid, actual_field_size, &bounds,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
-              silence_warnings, true/*generic accessor*/, check_field_size);
+          region.get_instance_info(LEGION_READ_WRITE, fid, actual_field_size, 
+              &bounds, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              warning_string, silence_warnings, true/*generic accessor*/, 
+              check_field_size);
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                            bounds.bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
@@ -1137,9 +1158,10 @@ namespace Legion {
         : field(fid)
       {
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_WRITE, fid, actual_field_size, &bounds,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
-              silence_warnings, true/*generic accessor*/, check_field_size);
+          region.get_instance_info(LEGION_READ_WRITE, fid, actual_field_size, 
+              &bounds, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              warning_string, silence_warnings, true/*generic accessor*/, 
+              check_field_size);
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                            source_bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
@@ -1150,29 +1172,34 @@ namespace Legion {
       inline FT read(const Point<N,T>& p) const
         { 
           if (!bounds.contains(p)) 
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                              LEGION_READ_ONLY);
           return accessor.read(p); 
         }
       inline void write(const Point<N,T>& p, FT val) const
         { 
           if (!bounds.contains(p)) 
             PhysicalRegion::fail_bounds_check(DomainPoint(p),
-                                              field, WRITE_DISCARD);
+                                              field, LEGION_WRITE_DISCARD);
           accessor.write(p, val); 
         }
-      inline ArraySyntax::AccessorRefHelper<FT,READ_WRITE> 
+      inline ArraySyntax::AccessorRefHelper<FT,LEGION_READ_WRITE> 
           operator[](const Point<N,T>& p) const
         { 
           if (!bounds.contains(p)) 
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
-          return ArraySyntax::AccessorRefHelper<FT,READ_WRITE>(accessor[p]);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                              LEGION_READ_WRITE);
+          return ArraySyntax::AccessorRefHelper<FT,LEGION_READ_WRITE>(
+                                                          accessor[p]);
         }
-      inline ArraySyntax::GenericSyntaxHelper<FieldAccessor<READ_WRITE,FT,N,T,
-              Realm::GenericAccessor<FT,N,T>,true>,FT,N,T,2,READ_WRITE>
+      inline ArraySyntax::GenericSyntaxHelper<
+          FieldAccessor<LEGION_READ_WRITE,FT,N,T,
+              Realm::GenericAccessor<FT,N,T>,true>,FT,N,T,2,LEGION_READ_WRITE>
           operator[](T index) const
       {
-        return ArraySyntax::GenericSyntaxHelper<FieldAccessor<READ_WRITE,FT,N,T,
-              Realm::GenericAccessor<FT,N,T>,true>,FT,N,T,2,READ_WRITE>(
+        return ArraySyntax::GenericSyntaxHelper<
+            FieldAccessor<LEGION_READ_WRITE,FT,N,T,
+              Realm::GenericAccessor<FT,N,T>,true>,FT,N,T,2,LEGION_READ_WRITE>(
               *this, Point<1,T>(index));
       }
       // No reductions since we can't handle atomicity correctly
@@ -1190,7 +1217,7 @@ namespace Legion {
     // Read-write FieldAccessor specialization 
     // with N==1 to avoid array ambiguity
     template<typename FT, typename T, bool CB>
-    class FieldAccessor<READ_WRITE,FT,1,T,
+    class FieldAccessor<LEGION_READ_WRITE,FT,1,T,
                         Realm::GenericAccessor<FT,1,T>,CB> {
     public:
       FieldAccessor(void) { }
@@ -1206,7 +1233,7 @@ namespace Legion {
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
+          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
@@ -1227,7 +1254,7 @@ namespace Legion {
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
+          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
@@ -1244,10 +1271,11 @@ namespace Legion {
         { 
           accessor.write(p, val); 
         }
-      inline ArraySyntax::AccessorRefHelper<FT,READ_WRITE> 
+      inline ArraySyntax::AccessorRefHelper<FT,LEGION_READ_WRITE> 
           operator[](const Point<1,T>& p) const
         { 
-          return ArraySyntax::AccessorRefHelper<FT,READ_WRITE>(accessor[p]);
+          return ArraySyntax::AccessorRefHelper<FT,LEGION_READ_WRITE>(
+                                                          accessor[p]);
         }
       // No reductions since we can't handle atomicity correctly
     public:
@@ -1262,7 +1290,7 @@ namespace Legion {
     // Read-write FieldAccessor specialization 
     // with N==1 to avoid array ambiguity and bounds checks
     template<typename FT, typename T>
-    class FieldAccessor<READ_WRITE,FT,1,T,
+    class FieldAccessor<LEGION_READ_WRITE,FT,1,T,
                         Realm::GenericAccessor<FT,1,T>,true> {
     public:
       FieldAccessor(void) { }
@@ -1278,9 +1306,10 @@ namespace Legion {
         : field(fid)
       {
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_WRITE, fid, actual_field_size, &bounds,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
-              silence_warnings, true/*generic accessor*/, check_field_size);
+          region.get_instance_info(LEGION_READ_WRITE, fid, actual_field_size, 
+              &bounds, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              warning_string, silence_warnings, true/*generic accessor*/, 
+              check_field_size);
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                            bounds.bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
@@ -1299,9 +1328,10 @@ namespace Legion {
         : field(fid)
       {
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_WRITE, fid, actual_field_size, &bounds,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
-              silence_warnings, true/*generic accessor*/, check_field_size);
+          region.get_instance_info(LEGION_READ_WRITE, fid, actual_field_size, 
+              &bounds, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              warning_string, silence_warnings, true/*generic accessor*/, 
+              check_field_size);
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                            source_bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
@@ -1312,22 +1342,25 @@ namespace Legion {
       inline FT read(const Point<1,T>& p) const
         { 
           if (!bounds.contains(p)) 
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                              LEGION_READ_ONLY);
           return accessor.read(p); 
         }
       inline void write(const Point<1,T>& p, FT val) const
         { 
           if (!bounds.contains(p)) 
             PhysicalRegion::fail_bounds_check(DomainPoint(p),
-                                              field, WRITE_DISCARD);
+                                              field, LEGION_WRITE_DISCARD);
           accessor.write(p, val); 
         }
-      inline ArraySyntax::AccessorRefHelper<FT,READ_WRITE> 
+      inline ArraySyntax::AccessorRefHelper<FT,LEGION_READ_WRITE> 
           operator[](const Point<1,T>& p) const
         { 
           if (!bounds.contains(p)) 
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
-          return ArraySyntax::AccessorRefHelper<FT,READ_WRITE>(accessor[p]);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                              LEGION_READ_WRITE);
+          return ArraySyntax::AccessorRefHelper<FT,LEGION_READ_WRITE>(
+                                                          accessor[p]);
         }
       // No reduction since we can't handle atomicity correctly
     public:
@@ -1343,7 +1376,7 @@ namespace Legion {
 
     // Write-discard FieldAccessor specialization
     template<typename FT, int N, typename T, bool CB>
-    class FieldAccessor<WRITE_DISCARD,FT,N,T,
+    class FieldAccessor<LEGION_WRITE_DISCARD,FT,N,T,
                         Realm::GenericAccessor<FT,N,T>,CB> {
     public:
       FieldAccessor(void) { }
@@ -1359,8 +1392,8 @@ namespace Legion {
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size, 
+              &is,Internal::NT_TemplateHelper::encode_tag<N,T>(),warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                            is.bounds))
@@ -1380,8 +1413,8 @@ namespace Legion {
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<N,T>(),warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                            source_bounds))
@@ -1397,17 +1430,20 @@ namespace Legion {
         { 
           accessor.write(p, val); 
         }
-      inline ArraySyntax::AccessorRefHelper<FT,WRITE_DISCARD> 
+      inline ArraySyntax::AccessorRefHelper<FT,LEGION_WRITE_DISCARD> 
           operator[](const Point<N,T>& p) const
         { 
-          return ArraySyntax::AccessorRefHelper<FT,WRITE_DISCARD>(accessor[p]);
+          return ArraySyntax::AccessorRefHelper<FT,LEGION_WRITE_DISCARD>(
+                                                              accessor[p]);
         }
-      inline ArraySyntax::GenericSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,N,
-           T,Realm::GenericAccessor<FT,N,T>,CB>,FT,N,T,2,WRITE_DISCARD>
+      inline ArraySyntax::GenericSyntaxHelper<
+        FieldAccessor<LEGION_WRITE_DISCARD,FT,N,T,
+            Realm::GenericAccessor<FT,N,T>,CB>,FT,N,T,2,LEGION_WRITE_DISCARD>
           operator[](T index) const
       {
-        return ArraySyntax::GenericSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,
-          N,T,Realm::GenericAccessor<FT,N,T>,CB>,FT,N,T,2,WRITE_DISCARD>(
+        return ArraySyntax::GenericSyntaxHelper<
+          FieldAccessor<LEGION_WRITE_DISCARD,FT,N,T,
+            Realm::GenericAccessor<FT,N,T>,CB>,FT,N,T,2,LEGION_WRITE_DISCARD>(
               *this, Point<1,T>(index));
       }
     public:
@@ -1422,7 +1458,7 @@ namespace Legion {
     // Write-discard FieldAccessor specialization
     // with bounds checks
     template<typename FT, int N, typename T>
-    class FieldAccessor<WRITE_DISCARD,FT,N,T,
+    class FieldAccessor<LEGION_WRITE_DISCARD,FT,N,T,
                         Realm::GenericAccessor<FT,N,T>,true> {
     public:
       // No CUDA support due to PhysicalRegion constructor
@@ -1439,9 +1475,10 @@ namespace Legion {
         : field(fid)
       {
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid,actual_field_size,&bounds,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
-              silence_warnings, true/*generic accessor*/, check_field_size);
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &bounds, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              warning_string, silence_warnings, true/*generic accessor*/, 
+              check_field_size);
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                            bounds.bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
@@ -1460,9 +1497,10 @@ namespace Legion {
         : field(fid)
       {
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid,actual_field_size,&bounds,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
-              silence_warnings, true/*generic accessor*/, check_field_size);
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &bounds, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              warning_string, silence_warnings, true/*generic accessor*/, 
+              check_field_size);
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                            source_bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
@@ -1473,29 +1511,34 @@ namespace Legion {
       inline FT read(const Point<N,T>& p) const
         { 
           if (!bounds.contains(p)) 
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                              LEGION_READ_ONLY);
           return accessor.read(p); 
         }
       inline void write(const Point<N,T>& p, FT val) const
         { 
           if (!bounds.contains(p)) 
             PhysicalRegion::fail_bounds_check(DomainPoint(p),
-                                              field, WRITE_DISCARD);
+                                              field, LEGION_WRITE_DISCARD);
           accessor.write(p, val); 
         }
-      inline ArraySyntax::AccessorRefHelper<FT,WRITE_DISCARD>
+      inline ArraySyntax::AccessorRefHelper<FT,LEGION_WRITE_DISCARD>
           operator[](const Point<N,T>& p) const
         { 
           if (!bounds.contains(p)) 
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
-          return ArraySyntax::AccessorRefHelper<FT,WRITE_DISCARD>(accessor[p]);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                              LEGION_READ_WRITE);
+          return ArraySyntax::AccessorRefHelper<FT,LEGION_WRITE_DISCARD>(
+                                                              accessor[p]);
         }
-      inline ArraySyntax::GenericSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,N,
-           T,Realm::GenericAccessor<FT,N,T>,true>,FT,N,T,2,WRITE_DISCARD>
+      inline ArraySyntax::GenericSyntaxHelper<
+        FieldAccessor<LEGION_WRITE_DISCARD,FT,N,T,
+            Realm::GenericAccessor<FT,N,T>,true>,FT,N,T,2,LEGION_WRITE_DISCARD>
           operator[](T index) const
       {
-        return ArraySyntax::GenericSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,
-         N,T,Realm::GenericAccessor<FT,N,T>,true>,FT,N,T,2,WRITE_DISCARD>(
+        return ArraySyntax::GenericSyntaxHelper<
+          FieldAccessor<LEGION_WRITE_DISCARD,FT,N,T,
+            Realm::GenericAccessor<FT,N,T>,true>,FT,N,T,2,LEGION_WRITE_DISCARD>(
               *this, Point<1,T>(index));
       }
     public:
@@ -1512,7 +1555,7 @@ namespace Legion {
     // Write-discard FieldAccessor specialization with
     // N == 1 to avoid array ambiguity
     template<typename FT, typename T, bool CB>
-    class FieldAccessor<WRITE_DISCARD,FT,1,T,
+    class FieldAccessor<LEGION_WRITE_DISCARD,FT,1,T,
                         Realm::GenericAccessor<FT,1,T>,CB> {
     public:
       FieldAccessor(void) { }
@@ -1528,8 +1571,8 @@ namespace Legion {
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<1,T>(),warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                            is.bounds))
@@ -1549,8 +1592,8 @@ namespace Legion {
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<1,T>(),warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                            source_bounds))
@@ -1566,10 +1609,11 @@ namespace Legion {
         { 
           accessor.write(p, val); 
         }
-      inline ArraySyntax::AccessorRefHelper<FT,WRITE_DISCARD> 
+      inline ArraySyntax::AccessorRefHelper<FT,LEGION_WRITE_DISCARD> 
           operator[](const Point<1,T>& p) const
         { 
-          return ArraySyntax::AccessorRefHelper<FT,WRITE_DISCARD>(accessor[p]);
+          return ArraySyntax::AccessorRefHelper<FT,LEGION_WRITE_DISCARD>(
+                                                              accessor[p]);
         }
     public:
       mutable Realm::GenericAccessor<FT,1,T> accessor;
@@ -1583,7 +1627,7 @@ namespace Legion {
     // Write-discard FieldAccessor specialization with
     // N == 1 to avoid array ambiguity and bounds checks
     template<typename FT, typename T>
-    class FieldAccessor<WRITE_DISCARD,FT,1,T,
+    class FieldAccessor<LEGION_WRITE_DISCARD,FT,1,T,
                         Realm::GenericAccessor<FT,1,T>,true> {
     public:
       FieldAccessor(void) { }
@@ -1599,9 +1643,10 @@ namespace Legion {
         : field(fid)
       {
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid,actual_field_size,&bounds,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
-              silence_warnings, true/*generic accessor*/, check_field_size);
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &bounds, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              warning_string, silence_warnings, true/*generic accessor*/, 
+              check_field_size);
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                            bounds.bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
@@ -1620,9 +1665,10 @@ namespace Legion {
         : field(fid)
       {
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid,actual_field_size,&bounds,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
-              silence_warnings, true/*generic accessor*/, check_field_size);
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid,actual_field_size,
+              &bounds, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              warning_string, silence_warnings, true/*generic accessor*/, 
+              check_field_size);
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                            bounds.bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
@@ -1633,22 +1679,25 @@ namespace Legion {
       inline FT read(const Point<1,T>& p) const
         { 
           if (!bounds.contains(p)) 
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                              LEGION_READ_ONLY);
           return accessor.read(p); 
         }
       inline void write(const Point<1,T>& p, FT val) const
         { 
           if (!bounds.contains(p)) 
             PhysicalRegion::fail_bounds_check(DomainPoint(p),
-                                              field, WRITE_DISCARD);
+                                              field, LEGION_WRITE_DISCARD);
           accessor.write(p, val); 
         }
-      inline ArraySyntax::AccessorRefHelper<FT,WRITE_DISCARD> 
+      inline ArraySyntax::AccessorRefHelper<FT,LEGION_WRITE_DISCARD> 
           operator[](const Point<1,T>& p) const
         { 
           if (!bounds.contains(p)) 
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
-          return ArraySyntax::AccessorRefHelper<FT,WRITE_DISCARD>(accessor[p]);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                              LEGION_READ_WRITE);
+          return ArraySyntax::AccessorRefHelper<FT,LEGION_WRITE_DISCARD>(
+                                                              accessor[p]);
         }
     public:
       mutable Realm::GenericAccessor<FT,1,T> accessor;
@@ -1663,7 +1712,7 @@ namespace Legion {
 
     // Write-only FieldAccessor specialization
     template<typename FT, int N, typename T, bool CB>
-    class FieldAccessor<WRITE_ONLY,FT,N,T,
+    class FieldAccessor<LEGION_WRITE_ONLY,FT,N,T,
                         Realm::GenericAccessor<FT,N,T>,CB> {
     public:
       FieldAccessor(void) { }
@@ -1679,8 +1728,8 @@ namespace Legion {
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<N,T>(),warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                            is.bounds))
@@ -1700,8 +1749,8 @@ namespace Legion {
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<N,T>(),warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                            source_bounds))
@@ -1713,17 +1762,20 @@ namespace Legion {
         { 
           accessor.write(p, val); 
         }
-      inline ArraySyntax::AccessorRefHelper<FT,WRITE_DISCARD> 
+      inline ArraySyntax::AccessorRefHelper<FT,LEGION_WRITE_DISCARD> 
           operator[](const Point<N,T>& p) const
         { 
-          return ArraySyntax::AccessorRefHelper<FT,WRITE_DISCARD>(accessor[p]);
+          return ArraySyntax::AccessorRefHelper<FT,LEGION_WRITE_DISCARD>(
+                                                              accessor[p]);
         }
-      inline ArraySyntax::GenericSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,N,
-           T,Realm::GenericAccessor<FT,N,T>,CB>,FT,N,T,2,WRITE_DISCARD>
+      inline ArraySyntax::GenericSyntaxHelper<
+        FieldAccessor<LEGION_WRITE_DISCARD,FT,N,T,
+            Realm::GenericAccessor<FT,N,T>,CB>,FT,N,T,2,LEGION_WRITE_DISCARD>
           operator[](T index) const
       {
-        return ArraySyntax::GenericSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,
-          N,T,Realm::GenericAccessor<FT,N,T>,CB>,FT,N,T,2,WRITE_DISCARD>(
+        return ArraySyntax::GenericSyntaxHelper<
+          FieldAccessor<LEGION_WRITE_DISCARD,FT,N,T,
+            Realm::GenericAccessor<FT,N,T>,CB>,FT,N,T,2,LEGION_WRITE_DISCARD>(
               *this, Point<1,T>(index));
       }
     public:
@@ -1738,7 +1790,7 @@ namespace Legion {
     // Write-only FieldAccessor specialization
     // with bounds checks
     template<typename FT, int N, typename T>
-    class FieldAccessor<WRITE_ONLY,FT,N,T,
+    class FieldAccessor<LEGION_WRITE_ONLY,FT,N,T,
                         Realm::GenericAccessor<FT,N,T>,true> {
     public:
       // No CUDA support due to PhysicalRegion constructor
@@ -1755,9 +1807,10 @@ namespace Legion {
         : field(fid)
       {
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid,actual_field_size,&bounds,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
-              silence_warnings, true/*generic accessor*/, check_field_size);
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &bounds, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              warning_string, silence_warnings, true/*generic accessor*/, 
+              check_field_size);
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                            bounds.bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
@@ -1776,9 +1829,10 @@ namespace Legion {
         : field(fid)
       {
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid,actual_field_size,&bounds,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
-              silence_warnings, true/*generic accessor*/, check_field_size);
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &bounds, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              warning_string, silence_warnings, true/*generic accessor*/, 
+              check_field_size);
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                            source_bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
@@ -1790,22 +1844,26 @@ namespace Legion {
         { 
           if (!bounds.contains(p)) 
             PhysicalRegion::fail_bounds_check(DomainPoint(p),
-                                              field, WRITE_DISCARD);
+                                              field, LEGION_WRITE_DISCARD);
           accessor.write(p, val); 
         }
-      inline ArraySyntax::AccessorRefHelper<FT,WRITE_DISCARD>
+      inline ArraySyntax::AccessorRefHelper<FT,LEGION_WRITE_DISCARD>
           operator[](const Point<N,T>& p) const
         { 
           if (!bounds.contains(p)) 
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
-          return ArraySyntax::AccessorRefHelper<FT,WRITE_DISCARD>(accessor[p]);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                              LEGION_READ_WRITE);
+          return ArraySyntax::AccessorRefHelper<FT,LEGION_WRITE_DISCARD>(
+                                                              accessor[p]);
         }
-      inline ArraySyntax::GenericSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,N,
-           T,Realm::GenericAccessor<FT,N,T>,true>,FT,N,T,2,WRITE_DISCARD>
+      inline ArraySyntax::GenericSyntaxHelper<
+        FieldAccessor<LEGION_WRITE_DISCARD,FT,N,T,
+            Realm::GenericAccessor<FT,N,T>,true>,FT,N,T,2,LEGION_WRITE_DISCARD>
           operator[](T index) const
       {
-        return ArraySyntax::GenericSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,
-         N,T,Realm::GenericAccessor<FT,N,T>,true>,FT,N,T,2,WRITE_DISCARD>(
+        return ArraySyntax::GenericSyntaxHelper<
+          FieldAccessor<LEGION_WRITE_DISCARD,FT,N,T,
+            Realm::GenericAccessor<FT,N,T>,true>,FT,N,T,2,LEGION_WRITE_DISCARD>(
               *this, Point<1,T>(index));
       }
     public:
@@ -1822,7 +1880,7 @@ namespace Legion {
     // Write-only FieldAccessor specialization with
     // N == 1 to avoid array ambiguity
     template<typename FT, typename T, bool CB>
-    class FieldAccessor<WRITE_ONLY,FT,1,T,
+    class FieldAccessor<LEGION_WRITE_ONLY,FT,1,T,
                         Realm::GenericAccessor<FT,1,T>,CB> {
     public:
       FieldAccessor(void) { }
@@ -1838,8 +1896,8 @@ namespace Legion {
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size, 
+              &is,Internal::NT_TemplateHelper::encode_tag<1,T>(),warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                            is.bounds))
@@ -1859,8 +1917,8 @@ namespace Legion {
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<1,T>(),warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                            source_bounds))
@@ -1872,10 +1930,11 @@ namespace Legion {
         { 
           accessor.write(p, val); 
         }
-      inline ArraySyntax::AccessorRefHelper<FT,WRITE_DISCARD>
+      inline ArraySyntax::AccessorRefHelper<FT,LEGION_WRITE_DISCARD>
           operator[](const Point<1,T>& p) const
         { 
-          return ArraySyntax::AccessorRefHelper<FT,WRITE_DISCARD>(accessor[p]);
+          return ArraySyntax::AccessorRefHelper<FT,LEGION_WRITE_DISCARD>(
+                                                              accessor[p]);
         }
     public:
       mutable Realm::GenericAccessor<FT,1,T> accessor;
@@ -1889,7 +1948,7 @@ namespace Legion {
     // Write-only FieldAccessor specialization with
     // N == 1 to avoid array ambiguity and bounds checks
     template<typename FT, typename T>
-    class FieldAccessor<WRITE_ONLY,FT,1,T,
+    class FieldAccessor<LEGION_WRITE_ONLY,FT,1,T,
                         Realm::GenericAccessor<FT,1,T>,true> {
     public:
       FieldAccessor(void) { }
@@ -1905,9 +1964,10 @@ namespace Legion {
         : field(fid)
       {
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid,actual_field_size,&bounds,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
-              silence_warnings, true/*generic accessor*/, check_field_size);
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &bounds, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              warning_string, silence_warnings, true/*generic accessor*/, 
+              check_field_size);
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                            bounds.bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
@@ -1926,9 +1986,10 @@ namespace Legion {
         : field(fid)
       {
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid,actual_field_size,&bounds,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
-              silence_warnings, true/*generic accessor*/, check_field_size);
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &bounds, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              warning_string, silence_warnings, true/*generic accessor*/, 
+              check_field_size);
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                            source_bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
@@ -1940,15 +2001,17 @@ namespace Legion {
         { 
           if (!bounds.contains(p)) 
             PhysicalRegion::fail_bounds_check(DomainPoint(p),
-                                              field, WRITE_DISCARD);
+                                              field, LEGION_WRITE_DISCARD);
           accessor.write(p, val); 
         }
-      inline ArraySyntax::AccessorRefHelper<FT,WRITE_DISCARD>
+      inline ArraySyntax::AccessorRefHelper<FT,LEGION_WRITE_DISCARD>
           operator[](const Point<1,T>& p) const
         { 
           if (!bounds.contains(p)) 
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
-          return ArraySyntax::AccessorRefHelper<FT,WRITE_DISCARD>(accessor[p]);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                              LEGION_READ_WRITE);
+          return ArraySyntax::AccessorRefHelper<FT,LEGION_WRITE_DISCARD>(
+                                                              accessor[p]);
         }
     public:
       mutable Realm::GenericAccessor<FT,1,T> accessor;
@@ -2118,7 +2181,7 @@ namespace Legion {
 
     // Read-only FieldAccessor specialization
     template<typename FT, int N, typename T, bool CB>
-    class FieldAccessor<READ_ONLY,FT,N,T,
+    class FieldAccessor<LEGION_READ_ONLY,FT,N,T,
                         Realm::AffineAccessor<FT,N,T>,CB> {
     public:
       __CUDA_HD__
@@ -2135,7 +2198,7 @@ namespace Legion {
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
+          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
@@ -2157,7 +2220,7 @@ namespace Legion {
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
+          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
@@ -2180,7 +2243,7 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
+          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
@@ -2205,7 +2268,7 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
+          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
@@ -2258,12 +2321,14 @@ namespace Legion {
           return accessor[p]; 
         }
       __CUDA_HD__
-      inline ArraySyntax::AffineSyntaxHelper<FieldAccessor<READ_ONLY,FT,N,T,
-            Realm::AffineAccessor<FT,N,T>,CB>,FT,N,T,2,READ_ONLY>
+      inline ArraySyntax::AffineSyntaxHelper<
+          FieldAccessor<LEGION_READ_ONLY,FT,N,T,
+            Realm::AffineAccessor<FT,N,T>,CB>,FT,N,T,2,LEGION_READ_ONLY>
           operator[](T index) const
       {
-        return ArraySyntax::AffineSyntaxHelper<FieldAccessor<READ_ONLY,FT,N,T,
-               Realm::AffineAccessor<FT,N,T>,CB>,FT,N,T,2,READ_ONLY>(
+        return ArraySyntax::AffineSyntaxHelper<
+            FieldAccessor<LEGION_READ_ONLY,FT,N,T,
+               Realm::AffineAccessor<FT,N,T>,CB>,FT,N,T,2,LEGION_READ_ONLY>(
               *this, Point<1,T>(index));
       }
     public:
@@ -2278,7 +2343,7 @@ namespace Legion {
     // Read-only FieldAccessor specialization
     // with bounds checks
     template<typename FT, int N, typename T>
-    class FieldAccessor<READ_ONLY,FT,N,T,
+    class FieldAccessor<LEGION_READ_ONLY,FT,N,T,
                         Realm::AffineAccessor<FT,N,T>,true> {
     public:
       // No CUDA support due to PhysicalRegion constructor
@@ -2296,7 +2361,7 @@ namespace Legion {
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
+          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
@@ -2320,7 +2385,7 @@ namespace Legion {
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
+          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
@@ -2345,7 +2410,7 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
+          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
@@ -2372,7 +2437,7 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
+          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
@@ -2390,7 +2455,8 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                              LEGION_READ_ONLY);
 #endif
           return accessor.read(p);
         }
@@ -2401,7 +2467,8 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                              LEGION_READ_ONLY);
 #endif
           return accessor.ptr(p);
         }
@@ -2412,7 +2479,8 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, 
+                                              LEGION_READ_ONLY);
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
@@ -2438,7 +2506,8 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, 
+                                              LEGION_READ_ONLY);
 #endif
           for (int i = 0; i < N; i++)
             strides[i] = accessor.strides[i] / sizeof(FT);
@@ -2451,17 +2520,20 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                              LEGION_READ_ONLY);
 #endif
           return accessor[p]; 
         }
       __CUDA_HD__
-      inline ArraySyntax::AffineSyntaxHelper<FieldAccessor<READ_ONLY,FT,N,T,
-             Realm::AffineAccessor<FT,N,T>,true>,FT,N,T,2,READ_ONLY>
+      inline ArraySyntax::AffineSyntaxHelper<
+          FieldAccessor<LEGION_READ_ONLY,FT,N,T,
+             Realm::AffineAccessor<FT,N,T>,true>,FT,N,T,2,LEGION_READ_ONLY>
           operator[](T index) const
       {
-        return ArraySyntax::AffineSyntaxHelper<FieldAccessor<READ_ONLY,FT,N,T,
-              Realm::AffineAccessor<FT,N,T>,true>,FT,N,T,2,READ_ONLY>(
+        return ArraySyntax::AffineSyntaxHelper<
+            FieldAccessor<LEGION_READ_ONLY,FT,N,T,
+              Realm::AffineAccessor<FT,N,T>,true>,FT,N,T,2,LEGION_READ_ONLY>(
               *this, Point<1,T>(index));
       }
     public:
@@ -2478,7 +2550,7 @@ namespace Legion {
     // Read-only FieldAccessor specialization 
     // with N==1 to avoid array ambiguity
     template<typename FT, typename T, bool CB>
-    class FieldAccessor<READ_ONLY,FT,1,T,
+    class FieldAccessor<LEGION_READ_ONLY,FT,1,T,
                         Realm::AffineAccessor<FT,1,T>,CB> {
     public:
       __CUDA_HD__
@@ -2495,7 +2567,7 @@ namespace Legion {
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
+          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
@@ -2517,7 +2589,7 @@ namespace Legion {
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
+          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
@@ -2540,7 +2612,7 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
+          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
@@ -2565,7 +2637,7 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
+          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
@@ -2628,7 +2700,7 @@ namespace Legion {
     // Read-only FieldAccessor specialization 
     // with N==1 to avoid array ambiguity and bounds checks
     template<typename FT, typename T>
-    class FieldAccessor<READ_ONLY,FT,1,T,
+    class FieldAccessor<LEGION_READ_ONLY,FT,1,T,
                         Realm::AffineAccessor<FT,1,T>,true> {
     public:
       // No CUDA support due to PhysicalRegion constructor
@@ -2646,7 +2718,7 @@ namespace Legion {
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
+          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
@@ -2670,7 +2742,7 @@ namespace Legion {
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
+          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
@@ -2695,7 +2767,7 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
+          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
@@ -2722,7 +2794,7 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
+          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
@@ -2740,7 +2812,8 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                              LEGION_READ_ONLY);
 #endif
           return accessor.read(p); 
         }
@@ -2751,7 +2824,8 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                              LEGION_READ_ONLY);
 #endif
           return accessor.ptr(p); 
         }
@@ -2762,7 +2836,8 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, 
+                                              LEGION_READ_ONLY);
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
@@ -2788,7 +2863,8 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, 
+                                              LEGION_READ_ONLY);
 #endif
           strides[0] = accessor.strides[0] / sizeof(FT);
           return accessor.ptr(r.lo);
@@ -2800,7 +2876,8 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                              LEGION_READ_ONLY);
 #endif
           return accessor[p]; 
         }
@@ -2817,7 +2894,7 @@ namespace Legion {
 
     // Read-write FieldAccessor specialization
     template<typename FT, int N, typename T, bool CB>
-    class FieldAccessor<READ_WRITE,FT,N,T,
+    class FieldAccessor<LEGION_READ_WRITE,FT,N,T,
                         Realm::AffineAccessor<FT,N,T>,CB> {
     public:
       __CUDA_HD__
@@ -2834,7 +2911,7 @@ namespace Legion {
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
+          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
@@ -2856,7 +2933,7 @@ namespace Legion {
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
+          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
@@ -2879,7 +2956,7 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
+          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
@@ -2904,7 +2981,7 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
+          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
@@ -2962,12 +3039,14 @@ namespace Legion {
           return accessor[p]; 
         }
       __CUDA_HD__
-      inline ArraySyntax::AffineSyntaxHelper<FieldAccessor<READ_WRITE,FT,N,T,
-             Realm::AffineAccessor<FT,N,T>,CB>,FT,N,T,2,READ_WRITE>
+      inline ArraySyntax::AffineSyntaxHelper<
+          FieldAccessor<LEGION_READ_WRITE,FT,N,T,
+             Realm::AffineAccessor<FT,N,T>,CB>,FT,N,T,2,LEGION_READ_WRITE>
           operator[](T index) const
       {
-        return ArraySyntax::AffineSyntaxHelper<FieldAccessor<READ_WRITE,FT,N,T,
-              Realm::AffineAccessor<FT,N,T>,CB>,FT,N,T,2,READ_WRITE>(
+        return ArraySyntax::AffineSyntaxHelper<
+            FieldAccessor<LEGION_READ_WRITE,FT,N,T,
+              Realm::AffineAccessor<FT,N,T>,CB>,FT,N,T,2,LEGION_READ_WRITE>(
               *this, Point<1,T>(index));
       }
       template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
@@ -2988,7 +3067,7 @@ namespace Legion {
     // Read-write FieldAccessor specialization
     // with bounds checks
     template<typename FT, int N, typename T>
-    class FieldAccessor<READ_WRITE,FT,N,T,
+    class FieldAccessor<LEGION_READ_WRITE,FT,N,T,
                         Realm::AffineAccessor<FT,N,T>,true> {
     public:
       // No CUDA support due to PhysicalRegion constructor
@@ -3006,7 +3085,7 @@ namespace Legion {
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
+          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
@@ -3030,7 +3109,7 @@ namespace Legion {
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
+          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
@@ -3055,7 +3134,7 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
+          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
@@ -3082,7 +3161,7 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
+          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
@@ -3100,7 +3179,8 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                              LEGION_READ_ONLY);
 #endif
           return accessor.read(p); 
         }
@@ -3112,7 +3192,7 @@ namespace Legion {
 #else
           if (!bounds.contains(p)) 
             PhysicalRegion::fail_bounds_check(DomainPoint(p),
-                                              field, WRITE_DISCARD);
+                                              field, LEGION_WRITE_DISCARD);
 #endif
           accessor.write(p, val); 
         }
@@ -3123,7 +3203,8 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                              LEGION_READ_WRITE);
 #endif
           return accessor.ptr(p); 
         }
@@ -3134,7 +3215,8 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, 
+                                              LEGION_READ_WRITE);
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
@@ -3160,7 +3242,8 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, 
+                                              LEGION_READ_WRITE);
 #endif
           for (int i = 0; i < N; i++)
             strides[i] = accessor.strides[i] / sizeof(FT);
@@ -3173,17 +3256,20 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                              LEGION_READ_WRITE);
 #endif
           return accessor[p]; 
         }
       __CUDA_HD__
-      inline ArraySyntax::AffineSyntaxHelper<FieldAccessor<READ_WRITE,FT,N,T,
-              Realm::AffineAccessor<FT,N,T>,true>,FT,N,T,2,READ_WRITE>
+      inline ArraySyntax::AffineSyntaxHelper<
+          FieldAccessor<LEGION_READ_WRITE,FT,N,T,
+              Realm::AffineAccessor<FT,N,T>,true>,FT,N,T,2,LEGION_READ_WRITE>
           operator[](T index) const
       {
-        return ArraySyntax::AffineSyntaxHelper<FieldAccessor<READ_WRITE,FT,N,T,
-               Realm::AffineAccessor<FT,N,T>,true>,FT,N,T,2,READ_WRITE>(
+        return ArraySyntax::AffineSyntaxHelper<
+            FieldAccessor<LEGION_READ_WRITE,FT,N,T,
+               Realm::AffineAccessor<FT,N,T>,true>,FT,N,T,2,LEGION_READ_WRITE>(
               *this, Point<1,T>(index));
       }
       template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__ 
@@ -3194,7 +3280,8 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, REDUCE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                              LEGION_REDUCE);
 #endif
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
@@ -3212,7 +3299,7 @@ namespace Legion {
     // Read-write FieldAccessor specialization 
     // with N==1 to avoid array ambiguity
     template<typename FT, typename T, bool CB>
-    class FieldAccessor<READ_WRITE,FT,1,T,
+    class FieldAccessor<LEGION_READ_WRITE,FT,1,T,
                         Realm::AffineAccessor<FT,1,T>,CB> {
     public:
       __CUDA_HD__
@@ -3229,7 +3316,7 @@ namespace Legion {
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
+          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
@@ -3251,7 +3338,7 @@ namespace Legion {
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
+          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
@@ -3274,7 +3361,7 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
+          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
@@ -3299,7 +3386,7 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
+          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
@@ -3373,7 +3460,7 @@ namespace Legion {
     // Read-write FieldAccessor specialization 
     // with N==1 to avoid array ambiguity and bounds checks
     template<typename FT, typename T>
-    class FieldAccessor<READ_WRITE,FT,1,T,
+    class FieldAccessor<LEGION_READ_WRITE,FT,1,T,
                         Realm::AffineAccessor<FT,1,T>,true> {
     public:
       // No CUDA support due to PhysicalRegion constructor
@@ -3391,7 +3478,7 @@ namespace Legion {
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
+          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
@@ -3415,7 +3502,7 @@ namespace Legion {
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
+          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
@@ -3440,7 +3527,7 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
+          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
@@ -3467,7 +3554,7 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
+          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
@@ -3485,7 +3572,8 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                              LEGION_READ_ONLY);
 #endif
           return accessor.read(p); 
         }
@@ -3497,7 +3585,7 @@ namespace Legion {
 #else
           if (!bounds.contains(p)) 
             PhysicalRegion::fail_bounds_check(DomainPoint(p),
-                                              field, WRITE_DISCARD);
+                                              field, LEGION_WRITE_DISCARD);
 #endif
           accessor.write(p, val); 
         }
@@ -3508,7 +3596,8 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                              LEGION_READ_WRITE);
 #endif
           return accessor.ptr(p); 
         }
@@ -3519,7 +3608,8 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, 
+                                              LEGION_READ_WRITE);
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
@@ -3545,7 +3635,8 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, 
+                                              LEGION_READ_WRITE);
 #endif
           strides[0] = accessor.strides[0] / sizeof(FT);
           return accessor.ptr(r.lo);
@@ -3557,7 +3648,8 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                              LEGION_READ_WRITE);
 #endif
           return accessor[p]; 
         }
@@ -3569,7 +3661,8 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, REDUCE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                              LEGION_REDUCE);
 #endif
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
@@ -3586,7 +3679,7 @@ namespace Legion {
 
     // Write-discard FieldAccessor specialization
     template<typename FT, int N, typename T, bool CB>
-    class FieldAccessor<WRITE_DISCARD,FT,N,T,
+    class FieldAccessor<LEGION_WRITE_DISCARD,FT,N,T,
                         Realm::AffineAccessor<FT,N,T>,CB> {
     public:
       __CUDA_HD__
@@ -3603,8 +3696,8 @@ namespace Legion {
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size, 
+              &is,Internal::NT_TemplateHelper::encode_tag<N,T>(),warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                           is.bounds))
@@ -3625,8 +3718,8 @@ namespace Legion {
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<N,T>(),warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                           source_bounds))
@@ -3648,8 +3741,8 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<M,T>(),warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
               transform.transform, transform.offset, fid))
@@ -3673,8 +3766,8 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<M,T>(),warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
               transform.transform, transform.offset, fid, source_bounds))
@@ -3731,12 +3824,14 @@ namespace Legion {
           return accessor[p]; 
         }
       __CUDA_HD__
-      inline ArraySyntax::AffineSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,N,T,
-             Realm::AffineAccessor<FT,N,T>,CB>,FT,N,T,2,WRITE_DISCARD>
+      inline ArraySyntax::AffineSyntaxHelper<
+        FieldAccessor<LEGION_WRITE_DISCARD,FT,N,T,
+             Realm::AffineAccessor<FT,N,T>,CB>,FT,N,T,2,LEGION_WRITE_DISCARD>
           operator[](T index) const
       {
-        return ArraySyntax::AffineSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,N,
-          T,Realm::AffineAccessor<FT,N,T>,CB>,FT,N,T,2,WRITE_DISCARD>(
+        return ArraySyntax::AffineSyntaxHelper<
+          FieldAccessor<LEGION_WRITE_DISCARD,FT,N,T,
+            Realm::AffineAccessor<FT,N,T>,CB>,FT,N,T,2,LEGION_WRITE_DISCARD>(
               *this, Point<1,T>(index));
       }
     public:
@@ -3751,7 +3846,7 @@ namespace Legion {
     // Write-discard FieldAccessor specialization
     // with bounds checks
     template<typename FT, int N, typename T>
-    class FieldAccessor<WRITE_DISCARD,FT,N,T,
+    class FieldAccessor<LEGION_WRITE_DISCARD,FT,N,T,
                         Realm::AffineAccessor<FT,N,T>,true> {
     public:
       // No CUDA support due to PhysicalRegion constructor
@@ -3769,8 +3864,8 @@ namespace Legion {
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<N,T>(),warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                           is.bounds))
@@ -3793,8 +3888,8 @@ namespace Legion {
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string, 
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<N,T>(),warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                           source_bounds))
@@ -3818,8 +3913,8 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, 
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<M,T>(),warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
               transform.transform, transform.offset, fid))
@@ -3845,8 +3940,8 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, 
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<M,T>(),warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
               transform.transform, transform.offset, fid, source_bounds))
@@ -3863,7 +3958,8 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                              LEGION_READ_ONLY);
 #endif
           return accessor.read(p); 
         }
@@ -3875,7 +3971,7 @@ namespace Legion {
 #else
           if (!bounds.contains(p)) 
             PhysicalRegion::fail_bounds_check(DomainPoint(p),
-                                              field, WRITE_DISCARD);
+                                              field, LEGION_WRITE_DISCARD);
 #endif
           accessor.write(p, val); 
         }
@@ -3886,7 +3982,8 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                              LEGION_READ_WRITE);
 #endif
           return accessor.ptr(p); 
         }
@@ -3897,7 +3994,8 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, 
+                                              LEGION_READ_WRITE);
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
@@ -3923,7 +4021,8 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, 
+                                              LEGION_READ_WRITE);
 #endif
           for (int i = 0; i < N; i++)
             strides[i] = accessor.strides[i] / sizeof(FT);
@@ -3936,17 +4035,20 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                              LEGION_READ_WRITE);
 #endif
           return accessor[p]; 
         }
       __CUDA_HD__
-      inline ArraySyntax::AffineSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,N,T,
-             Realm::AffineAccessor<FT,N,T>,true>,FT,N,T,2,WRITE_DISCARD>
+      inline ArraySyntax::AffineSyntaxHelper<
+        FieldAccessor<LEGION_WRITE_DISCARD,FT,N,T,
+             Realm::AffineAccessor<FT,N,T>,true>,FT,N,T,2,LEGION_WRITE_DISCARD>
           operator[](T index) const
       {
-        return ArraySyntax::AffineSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,N,
-          T,Realm::AffineAccessor<FT,N,T>,true>,FT,N,T,2,WRITE_DISCARD>(
+        return ArraySyntax::AffineSyntaxHelper<
+          FieldAccessor<LEGION_WRITE_DISCARD,FT,N,T,
+            Realm::AffineAccessor<FT,N,T>,true>,FT,N,T,2,LEGION_WRITE_DISCARD>(
               *this, Point<1,T>(index));
       }
     public:
@@ -3963,7 +4065,7 @@ namespace Legion {
     // Write-discard FieldAccessor specialization with
     // N == 1 to avoid array ambiguity
     template<typename FT, typename T, bool CB>
-    class FieldAccessor<WRITE_DISCARD,FT,1,T,
+    class FieldAccessor<LEGION_WRITE_DISCARD,FT,1,T,
                         Realm::AffineAccessor<FT,1,T>,CB> {
     public:
       __CUDA_HD__
@@ -3980,8 +4082,8 @@ namespace Legion {
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<1,T>(),warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                           is.bounds))
@@ -4002,8 +4104,8 @@ namespace Legion {
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<1,T>(),warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                           source_bounds))
@@ -4025,8 +4127,8 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<M,T>(),warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
               transform.transform, transform.offset, fid))
@@ -4050,8 +4152,8 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<M,T>(),warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
               transform.transform, transform.offset, fid, source_bounds))
@@ -4118,7 +4220,7 @@ namespace Legion {
     // Write-discard FieldAccessor specialization with
     // N == 1 to avoid array ambiguity and bounds checks
     template<typename FT, typename T>
-    class FieldAccessor<WRITE_DISCARD,FT,1,T,
+    class FieldAccessor<LEGION_WRITE_DISCARD,FT,1,T,
                         Realm::AffineAccessor<FT,1,T>,true> {
     public:
       // No CUDA support due to PhysicalRegion constructor
@@ -4136,8 +4238,8 @@ namespace Legion {
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<1,T>(),warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                           is.bounds))
@@ -4160,8 +4262,8 @@ namespace Legion {
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string, 
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<1,T>(),warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                           source_bounds))
@@ -4185,8 +4287,8 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, 
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<M,T>(),warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
               transform.transform, transform.offset, fid))
@@ -4212,8 +4314,8 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<M,T>(),warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
               transform.transform, transform.offset, fid, source_bounds))
@@ -4230,7 +4332,8 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                              LEGION_READ_ONLY);
 #endif
           return accessor.read(p); 
         }
@@ -4242,7 +4345,7 @@ namespace Legion {
 #else
           if (!bounds.contains(p)) 
             PhysicalRegion::fail_bounds_check(DomainPoint(p),
-                                              field, WRITE_DISCARD);
+                                              field, LEGION_WRITE_DISCARD);
 #endif
           accessor.write(p, val); 
         }
@@ -4253,7 +4356,8 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                              LEGION_READ_WRITE);
 #endif
           return accessor.ptr(p); 
         }
@@ -4264,7 +4368,8 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, 
+                                              LEGION_READ_WRITE);
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
@@ -4290,7 +4395,8 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, 
+                                              LEGION_READ_WRITE);
 #endif
           strides[0] = accessor.strides[0] / sizeof(FT);
           return accessor.ptr(r.lo);
@@ -4302,7 +4408,8 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                              LEGION_READ_WRITE);
 #endif
           return accessor[p]; 
         }
@@ -4319,7 +4426,7 @@ namespace Legion {
 
     // Write-only FieldAccessor specialization
     template<typename FT, int N, typename T, bool CB>
-    class FieldAccessor<WRITE_ONLY,FT,N,T,
+    class FieldAccessor<LEGION_WRITE_ONLY,FT,N,T,
                         Realm::AffineAccessor<FT,N,T>,CB> {
     public:
       __CUDA_HD__
@@ -4336,8 +4443,8 @@ namespace Legion {
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<N,T>(),warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                           is.bounds))
@@ -4358,8 +4465,8 @@ namespace Legion {
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<N,T>(),warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                           source_bounds))
@@ -4381,8 +4488,8 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<M,T>(),warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
               transform.transform, transform.offset, fid))
@@ -4406,8 +4513,8 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<M,T>(),warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
               transform.transform, transform.offset, fid, source_bounds))
@@ -4459,12 +4566,14 @@ namespace Legion {
           return accessor[p]; 
         }
       __CUDA_HD__
-      inline ArraySyntax::AffineSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,N,T,
-             Realm::AffineAccessor<FT,N,T>,CB>,FT,N,T,2,WRITE_DISCARD>
+      inline ArraySyntax::AffineSyntaxHelper<
+        FieldAccessor<LEGION_WRITE_DISCARD,FT,N,T,
+             Realm::AffineAccessor<FT,N,T>,CB>,FT,N,T,2,LEGION_WRITE_DISCARD>
           operator[](T index) const
       {
-        return ArraySyntax::AffineSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,N,
-          T,Realm::AffineAccessor<FT,N,T>,CB>,FT,N,T,2,WRITE_DISCARD>(
+        return ArraySyntax::AffineSyntaxHelper<
+          FieldAccessor<LEGION_WRITE_DISCARD,FT,N,T,
+            Realm::AffineAccessor<FT,N,T>,CB>,FT,N,T,2,LEGION_WRITE_DISCARD>(
               *this, Point<1,T>(index));
       }
     public:
@@ -4479,7 +4588,7 @@ namespace Legion {
     // Write-only FieldAccessor specialization
     // with bounds checks
     template<typename FT, int N, typename T>
-    class FieldAccessor<WRITE_ONLY,FT,N,T,
+    class FieldAccessor<LEGION_WRITE_ONLY,FT,N,T,
                         Realm::AffineAccessor<FT,N,T>,true> {
     public:
       // No CUDA support due to PhysicalRegion constructor
@@ -4497,8 +4606,8 @@ namespace Legion {
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<N,T>(),warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                           is.bounds))
@@ -4521,8 +4630,8 @@ namespace Legion {
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string, 
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<N,T>(),warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                           source_bounds))
@@ -4546,8 +4655,8 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<M,T>(),warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
             transform.offset, fid);
@@ -4570,8 +4679,8 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<M,T>(),warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
               transform.transform, transform.offset, fid))
@@ -4589,7 +4698,7 @@ namespace Legion {
 #else
           if (!bounds.contains(p)) 
             PhysicalRegion::fail_bounds_check(DomainPoint(p),
-                                              field, WRITE_DISCARD);
+                                              field, LEGION_WRITE_DISCARD);
 #endif
           accessor.write(p, val); 
         }
@@ -4600,7 +4709,8 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                              LEGION_READ_WRITE);
 #endif
           return accessor.ptr(p); 
         }
@@ -4611,7 +4721,8 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, 
+                                              LEGION_READ_WRITE);
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
@@ -4637,7 +4748,8 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, 
+                                              LEGION_READ_WRITE);
 #endif
           for (int i = 0; i < N; i++)
             strides[i] = accessor.strides[i] / sizeof(FT);
@@ -4650,17 +4762,20 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                              LEGION_READ_WRITE);
 #endif
           return accessor[p]; 
         }
       __CUDA_HD__
-      inline ArraySyntax::AffineSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,N,T,
-             Realm::AffineAccessor<FT,N,T>,true>,FT,N,T,2,WRITE_DISCARD>
+      inline ArraySyntax::AffineSyntaxHelper<
+        FieldAccessor<LEGION_WRITE_DISCARD,FT,N,T,
+             Realm::AffineAccessor<FT,N,T>,true>,FT,N,T,2,LEGION_WRITE_DISCARD>
           operator[](T index) const
       {
-        return ArraySyntax::AffineSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,N,
-          T,Realm::AffineAccessor<FT,N,T>,true>,FT,N,T,2,WRITE_DISCARD>(
+        return ArraySyntax::AffineSyntaxHelper<
+          FieldAccessor<LEGION_WRITE_DISCARD,FT,N,T,
+            Realm::AffineAccessor<FT,N,T>,true>,FT,N,T,2,LEGION_WRITE_DISCARD>(
               *this, Point<1,T>(index));
       }
     public:
@@ -4677,7 +4792,7 @@ namespace Legion {
     // Write-only FieldAccessor specialization with
     // N == 1 to avoid array ambiguity
     template<typename FT, typename T, bool CB>
-    class FieldAccessor<WRITE_ONLY,FT,1,T,
+    class FieldAccessor<LEGION_WRITE_ONLY,FT,1,T,
                         Realm::AffineAccessor<FT,1,T>,CB> {
     public:
       __CUDA_HD__
@@ -4694,8 +4809,8 @@ namespace Legion {
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string, 
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<1,T>(),warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                           is.bounds))
@@ -4716,8 +4831,8 @@ namespace Legion {
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<1,T>(),warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                           source_bounds))
@@ -4739,8 +4854,8 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, 
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<M,T>(),warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
               transform.transform, transform.offset, fid))
@@ -4764,8 +4879,8 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<M,T>(),warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
               transform.transform, transform.offset, fid, source_bounds))
@@ -4827,7 +4942,7 @@ namespace Legion {
     // Write-only FieldAccessor specialization with
     // N == 1 to avoid array ambiguity and bounds checks
     template<typename FT, typename T>
-    class FieldAccessor<WRITE_ONLY,FT,1,T,
+    class FieldAccessor<LEGION_WRITE_ONLY,FT,1,T,
                         Realm::AffineAccessor<FT,1,T>,true> {
     public:
       // No CUDA support due to PhysicalRegion constructor
@@ -4845,8 +4960,8 @@ namespace Legion {
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<1,T>(),warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                           is.bounds))
@@ -4869,8 +4984,8 @@ namespace Legion {
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string, 
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<1,T>(),warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                           source_bounds))
@@ -4894,8 +5009,8 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<M,T>(),warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
               transform.transform, transform.offset, fid))
@@ -4921,8 +5036,8 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<M,T>(),warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
               transform.transform, transform.offset, fid, source_bounds))
@@ -4940,7 +5055,7 @@ namespace Legion {
 #else
           if (!bounds.contains(p)) 
             PhysicalRegion::fail_bounds_check(DomainPoint(p),
-                                              field, WRITE_DISCARD);
+                                              field, LEGION_WRITE_DISCARD);
 #endif
           accessor.write(p, val); 
         }
@@ -4951,7 +5066,8 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                              LEGION_READ_WRITE);
 #endif
           return accessor.ptr(p); 
         }
@@ -4962,7 +5078,8 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, 
+                                              LEGION_READ_WRITE);
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
@@ -4988,7 +5105,8 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            PhysicalRegion::fail_bounds_check(Domain(r), field, READ_WRITE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, 
+                                              LEGION_READ_WRITE);
 #endif
           strides[0] = accessor.strides[0] / sizeof(FT);
           return accessor.ptr(r.lo);
@@ -5000,7 +5118,8 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,READ_WRITE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                              LEGION_READ_WRITE);
 #endif
           return accessor[p]; 
         }
@@ -5028,7 +5147,7 @@ namespace Legion {
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(REDUCE, fid, sizeof(typename REDOP::RHS), 
+         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
               &is, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
@@ -5047,7 +5166,7 @@ namespace Legion {
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(REDUCE, fid, sizeof(typename REDOP::RHS), 
+         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
               &is, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
@@ -5067,7 +5186,7 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(REDUCE, fid, sizeof(typename REDOP::RHS),
+         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
               &is, Internal::NT_TemplateHelper::encode_tag<M,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
@@ -5088,7 +5207,7 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(REDUCE, fid, sizeof(typename REDOP::RHS),
+         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
               &is, Internal::NT_TemplateHelper::encode_tag<M,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
@@ -5151,12 +5270,12 @@ namespace Legion {
       __CUDA_HD__
       inline ArraySyntax::AffineSyntaxHelper<ReductionAccessor<REDOP,EXCLUSIVE,
          N,T,Realm::AffineAccessor<typename REDOP::RHS,N,T>,CB>,
-         typename REDOP::RHS,N,T,2,REDUCE>
+         typename REDOP::RHS,N,T,2,LEGION_REDUCE>
           operator[](T index) const
       {
         return ArraySyntax::AffineSyntaxHelper<ReductionAccessor<REDOP,
           EXCLUSIVE,N,T,Realm::AffineAccessor<typename REDOP::RHS,N,T>,CB>,
-          typename REDOP::RHS,N,T,2,REDUCE>(
+          typename REDOP::RHS,N,T,2,LEGION_REDUCE>(
               *this, Point<1,T>(index));
       }
     public:
@@ -5182,7 +5301,7 @@ namespace Legion {
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(REDUCE, fid, sizeof(typename REDOP::RHS),
+         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
               &is, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
@@ -5203,7 +5322,7 @@ namespace Legion {
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(REDUCE, fid, sizeof(typename REDOP::RHS), 
+         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
               &is, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
@@ -5225,7 +5344,7 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(REDUCE, fid, sizeof(typename REDOP::RHS),
+         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
               &is, Internal::NT_TemplateHelper::encode_tag<M,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
@@ -5249,7 +5368,7 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(REDUCE, fid, sizeof(typename REDOP::RHS),
+         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
               &is, Internal::NT_TemplateHelper::encode_tag<M,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
@@ -5269,7 +5388,8 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, REDUCE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                              LEGION_REDUCE);
 #endif
           REDOP::template fold<EXCLUSIVE>(accessor[p], val);
         }
@@ -5280,7 +5400,8 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, REDUCE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                              LEGION_REDUCE);
 #endif
           return accessor.ptr(p); 
         }
@@ -5291,7 +5412,8 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            PhysicalRegion::fail_bounds_check(Domain(r), field, REDUCE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, 
+                                              LEGION_REDUCE);
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
@@ -5318,7 +5440,8 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            PhysicalRegion::fail_bounds_check(Domain(r), field, REDUCE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, 
+                                              LEGION_REDUCE);
 #endif
           for (int i = 0; i < N; i++)
             strides[i] = accessor.strides[i] / sizeof(typename REDOP::RHS);
@@ -5337,12 +5460,12 @@ namespace Legion {
       __CUDA_HD__
       inline ArraySyntax::AffineSyntaxHelper<ReductionAccessor<REDOP,EXCLUSIVE,
              N,T, Realm::AffineAccessor<typename REDOP::RHS,N,T>,true>,
-             typename REDOP::RHS,N,T,2,REDUCE>
+             typename REDOP::RHS,N,T,2,LEGION_REDUCE>
           operator[](T index) const
       {
         return ArraySyntax::AffineSyntaxHelper<ReductionAccessor<REDOP,
           EXCLUSIVE,N,T,Realm::AffineAccessor<typename REDOP::RHS,N,T>,true>,
-          typename REDOP::RHS,N,T,2,REDUCE>(
+          typename REDOP::RHS,N,T,2,LEGION_REDUCE>(
               *this, Point<1,T>(index));
       }
     public:
@@ -5370,7 +5493,7 @@ namespace Legion {
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(REDUCE, fid, sizeof(typename REDOP::RHS),
+         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
               &is, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
@@ -5389,7 +5512,7 @@ namespace Legion {
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(REDUCE, fid, sizeof(typename REDOP::RHS),
+         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
               &is, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
@@ -5409,7 +5532,7 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(REDUCE, fid, sizeof(typename REDOP::RHS),
+         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
               &is, Internal::NT_TemplateHelper::encode_tag<M,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
@@ -5430,7 +5553,7 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(REDUCE, fid, sizeof(typename REDOP::RHS),
+         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
               &is, Internal::NT_TemplateHelper::encode_tag<M,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
@@ -5513,7 +5636,7 @@ namespace Legion {
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(REDUCE, fid, sizeof(typename REDOP::RHS),
+         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
               &is, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
@@ -5534,7 +5657,7 @@ namespace Legion {
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(REDUCE, fid, sizeof(typename REDOP::RHS),
+         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
               &is, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
@@ -5556,7 +5679,7 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(REDUCE, fid, sizeof(typename REDOP::RHS),
+         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
               &is, Internal::NT_TemplateHelper::encode_tag<M,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
@@ -5579,7 +5702,7 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(REDUCE, fid, sizeof(typename REDOP::RHS),
+         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
               &is, Internal::NT_TemplateHelper::encode_tag<M,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
@@ -5599,7 +5722,8 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, REDUCE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                              LEGION_REDUCE);
 #endif
           REDOP::template fold<EXCLUSIVE>(accessor[p], val);
         }
@@ -5610,7 +5734,8 @@ namespace Legion {
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
-            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, REDUCE);
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                              LEGION_REDUCE);
 #endif
           return accessor.ptr(p); 
         }
@@ -5621,7 +5746,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            PhysicalRegion::fail_bounds_check(Domain(r), field, REDUCE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, LEGION_REDUCE);
 #endif
           if (!accessor.is_dense_arbitrary(r))
           {
@@ -5648,7 +5773,7 @@ namespace Legion {
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
-            PhysicalRegion::fail_bounds_check(Domain(r), field, REDUCE);
+            PhysicalRegion::fail_bounds_check(Domain(r), field, LEGION_REDUCE);
 #endif
           strides[0] = accessor.strides[0] / sizeof(typename REDOP::RHS);
           return accessor.ptr(r.lo);
@@ -5774,7 +5899,7 @@ namespace Legion {
           {
             if (!region_bounds[idx].contains(p))
               continue;
-            if (CP && ((region_privileges[idx] & READ_ONLY) == 0))
+            if (CP && ((region_privileges[idx] & LEGION_READ_ONLY) == 0))
               PhysicalRegion::fail_privilege_check(DomainPoint(p), field,
                                                    region_privileges[idx]);
             found = true;
@@ -5792,7 +5917,7 @@ namespace Legion {
           {
             if (!region_bounds[idx].contains(p))
               continue;
-            if (CP && ((region_privileges[idx] & WRITE_PRIV) == 0))
+            if (CP && ((region_privileges[idx] & LEGION_WRITE_PRIV) == 0))
               PhysicalRegion::fail_privilege_check(DomainPoint(p), field,
                                                    region_privileges[idx]);
             found = true;
@@ -5803,7 +5928,7 @@ namespace Legion {
                                 region_privileges[0], true/*multi*/);
           return accessor.write(p, val);
         }
-      inline ArraySyntax::AccessorRefHelper<FT,NO_ACCESS> 
+      inline ArraySyntax::AccessorRefHelper<FT,LEGION_NO_ACCESS> 
           operator[](const Point<N,T>& p) const
         { 
           int index = -1;
@@ -5817,15 +5942,15 @@ namespace Legion {
           if (index < 0)
             PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
                                 region_privileges[0], true/*multi*/);
-          return ArraySyntax::AccessorRefHelper<FT,NO_ACCESS>(accessor[p], 
-                          field, DomainPoint(p), region_privileges[index]);
+          return ArraySyntax::AccessorRefHelper<FT,LEGION_NO_ACCESS>(
+              accessor[p], field, DomainPoint(p), region_privileges[index]);
         }
       inline ArraySyntax::GenericSyntaxHelper<MultiRegionAccessor<FT,N,T,
-             Realm::GenericAccessor<FT,N,T>,CB,CP,MR>,FT,N,T,2,NO_ACCESS>
+             Realm::GenericAccessor<FT,N,T>,CB,CP,MR>,FT,N,T,2,LEGION_NO_ACCESS>
           operator[](T index) const
       {
         return ArraySyntax::GenericSyntaxHelper<MultiRegionAccessor<FT,N,T,
-              Realm::GenericAccessor<FT,N,T>,CB,CP,MR>,FT,N,T,2,NO_ACCESS>(
+            Realm::GenericAccessor<FT,N,T>,CB,CP,MR>,FT,N,T,2,LEGION_NO_ACCESS>(
               *this, Point<1,T>(index));
       }
     public:
@@ -5937,7 +6062,7 @@ namespace Legion {
           {
             if (!region_bounds[idx].contains(p))
               continue;
-            if (CP && ((region_privileges[idx] & READ_ONLY) == 0))
+            if (CP && ((region_privileges[idx] & LEGION_READ_ONLY) == 0))
               PhysicalRegion::fail_privilege_check(DomainPoint(p), field,
                                                    region_privileges[idx]);
             found = true;
@@ -5955,7 +6080,7 @@ namespace Legion {
           {
             if (!region_bounds[idx].contains(p))
               continue;
-            if (CP && ((region_privileges[idx] & WRITE_PRIV) == 0))
+            if (CP && ((region_privileges[idx] & LEGION_WRITE_PRIV) == 0))
               PhysicalRegion::fail_privilege_check(DomainPoint(p), field,
                                                  region_privileges[idx]);
             found = true;
@@ -5966,7 +6091,7 @@ namespace Legion {
                                 region_privileges[0], true/*multi*/);
           return accessor.write(p, val);
         }
-      inline ArraySyntax::AccessorRefHelper<FT,NO_ACCESS> 
+      inline ArraySyntax::AccessorRefHelper<FT,LEGION_NO_ACCESS> 
           operator[](const Point<1,T>& p) const
         { 
           int index = -1;
@@ -5980,8 +6105,8 @@ namespace Legion {
           if (index < 0)
             PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
                                 region_privileges[0], true/*multi*/);
-          return ArraySyntax::AccessorRefHelper<FT,NO_ACCESS>(accessor[p],
-                          field, DomainPoint(p), region_privileges[index]);
+          return ArraySyntax::AccessorRefHelper<FT,LEGION_NO_ACCESS>(
+              accessor[p], field, DomainPoint(p), region_privileges[index]);
         }
     public:
       mutable Realm::GenericAccessor<FT,1,T> accessor;
@@ -6082,17 +6207,20 @@ namespace Legion {
         {
           return accessor.write(p, val);
         }
-      inline ArraySyntax::AccessorRefHelper<FT,READ_WRITE>
+      inline ArraySyntax::AccessorRefHelper<FT,LEGION_READ_WRITE>
           operator[](const Point<N,T>& p) const
         { 
-          return ArraySyntax::AccessorRefHelper<FT,READ_WRITE>(accessor[p]);
+          return ArraySyntax::AccessorRefHelper<FT,LEGION_READ_WRITE>(
+                                                          accessor[p]);
         }
       inline ArraySyntax::GenericSyntaxHelper<MultiRegionAccessor<FT,N,T,
-             Realm::GenericAccessor<FT,N,T>,false,false,MR>,FT,N,T,2,READ_WRITE>
+             Realm::GenericAccessor<FT,N,T>,false,false,MR>,
+              FT,N,T,2,LEGION_READ_WRITE>
           operator[](T index) const
       {
         return ArraySyntax::GenericSyntaxHelper<MultiRegionAccessor<FT,N,T,
-            Realm::GenericAccessor<FT,N,T>,false,false,MR>,FT,N,T,2,READ_WRITE>(
+                Realm::GenericAccessor<FT,N,T>,false,false,MR>,
+                FT,N,T,2,LEGION_READ_WRITE>(
             *this, Point<1,T>(index));
       }
     public:
@@ -6190,10 +6318,11 @@ namespace Legion {
         {
           return accessor.write(p, val);
         }
-      inline ArraySyntax::AccessorRefHelper<FT,READ_WRITE>
+      inline ArraySyntax::AccessorRefHelper<FT,LEGION_READ_WRITE>
           operator[](const Point<1,T>& p) const
         { 
-          return ArraySyntax::AccessorRefHelper<FT,READ_WRITE>(accessor[p]);
+          return ArraySyntax::AccessorRefHelper<FT,LEGION_READ_WRITE>(
+                                                          accessor[p]);
         }
     public:
       mutable Realm::GenericAccessor<FT,1,T> accessor;
@@ -6395,7 +6524,7 @@ namespace Legion {
           {
             if (!region_bounds[idx].contains(p))
               continue;
-            if ((region_privileges[idx] & READ_ONLY) == 0)
+            if ((region_privileges[idx] & LEGION_READ_ONLY) == 0)
             {
 #ifdef __CUDA_ARCH__
               // bounds checks are not precise for CUDA so keep going to 
@@ -6426,7 +6555,7 @@ namespace Legion {
           {
             if (!region_bounds[idx].contains(p))
               continue;
-            if ((region_privileges[idx] & WRITE_PRIV) == 0)
+            if ((region_privileges[idx] & LEGION_WRITE_PRIV) == 0)
             {
 #ifdef __CUDA_ARCH__
               // bounds checks are not precise for CUDA so keep going to 
@@ -6473,11 +6602,11 @@ namespace Legion {
         }
       __CUDA_HD__
       inline ArraySyntax::AffineSyntaxHelper<MultiRegionAccessor<FT,N,T,
-             Realm::AffineAccessor<FT,N,T>,CB,true,MR>,FT,N,T,2,NO_ACCESS>
+           Realm::AffineAccessor<FT,N,T>,CB,true,MR>,FT,N,T,2,LEGION_NO_ACCESS>
           operator[](T index) const
       {
         return ArraySyntax::AffineSyntaxHelper<MultiRegionAccessor<FT,N,T,
-              Realm::AffineAccessor<FT,N,T>,CB,true,MR>,FT,N,T,2,NO_ACCESS>(
+          Realm::AffineAccessor<FT,N,T>,CB,true,MR>,FT,N,T,2,LEGION_NO_ACCESS>(
               *this, Point<1,T>(index));
       }
       template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
@@ -6489,7 +6618,7 @@ namespace Legion {
           {
             if (!region_bounds[idx].contains(p))
               continue;
-            if ((region_privileges[idx] & REDUCE_PRIV) == 0)
+            if ((region_privileges[idx] & LEGION_REDUCE_PRIV) == 0)
             {
 #ifdef __CUDA_ARCH__
               // bounds checks are not precise for CUDA so keep going to 
@@ -6712,7 +6841,7 @@ namespace Legion {
           {
             if (!region_bounds[idx].contains(p))
               continue;
-            if ((region_privileges[idx] & READ_ONLY) == 0)
+            if ((region_privileges[idx] & LEGION_READ_ONLY) == 0)
             {
 #ifdef __CUDA_ARCH__
               // bounds checks are not precise for CUDA so keep going to 
@@ -6743,7 +6872,7 @@ namespace Legion {
           {
             if (!region_bounds[idx].contains(p))
               continue;
-            if ((region_privileges[idx] & WRITE_PRIV) == 0)
+            if ((region_privileges[idx] & LEGION_WRITE_PRIV) == 0)
             {
 #ifdef __CUDA_ARCH__
               // bounds checks are not precise for CUDA so keep going to 
@@ -6797,7 +6926,7 @@ namespace Legion {
           {
             if (!region_bounds[idx].contains(p))
               continue;
-            if ((region_privileges[idx] & REDUCE_PRIV) == 0)
+            if ((region_privileges[idx] & LEGION_REDUCE_PRIV) == 0)
             {
 #ifdef __CUDA_ARCH__
               // bounds checks are not precise for CUDA so keep going to 
@@ -7075,12 +7204,13 @@ namespace Legion {
         }
       __CUDA_HD__
       inline ArraySyntax::AffineSyntaxHelper<MultiRegionAccessor<FT,N,T,
-             Realm::AffineAccessor<FT,N,T>,true,false,MR>,FT,N,T,2,READ_WRITE>
+             Realm::AffineAccessor<FT,N,T>,true,false,MR>,
+             FT,N,T,2,LEGION_READ_WRITE>
           operator[](T index) const
       {
         return ArraySyntax::AffineSyntaxHelper<MultiRegionAccessor<FT,N,T,
-              Realm::AffineAccessor<FT,N,T>,true,false,MR>,FT,N,T,2,READ_WRITE>(
-              *this, Point<1,T>(index));
+              Realm::AffineAccessor<FT,N,T>,true,false,MR>,
+              FT,N,T,2,LEGION_READ_WRITE>(*this, Point<1,T>(index));
       }
       template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
       inline void reduce(const Point<N,T>& p, 
@@ -7566,12 +7696,12 @@ namespace Legion {
         }
       __CUDA_HD__
       inline ArraySyntax::AffineSyntaxHelper<MultiRegionAccessor<FT,N,T,
-             Realm::AffineAccessor<FT,N,T>,false,false,MR>,FT,N,T,2,READ_WRITE>
+       Realm::AffineAccessor<FT,N,T>,false,false,MR>,FT,N,T,2,LEGION_READ_WRITE>
           operator[](T index) const
       {
         return ArraySyntax::AffineSyntaxHelper<MultiRegionAccessor<FT,N,T,
-            Realm::AffineAccessor<FT,N,T>,false,false,MR>,FT,N,T,2,READ_WRITE>(
-            *this, Point<1,T>(index));
+            Realm::AffineAccessor<FT,N,T>,false,false,MR>,
+            FT,N,T,2,LEGION_READ_WRITE>(*this, Point<1,T>(index));
       }
       template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
       inline void reduce(const Point<N,T>& p, 
@@ -7797,7 +7927,7 @@ namespace Legion {
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(NO_ACCESS, fid, sizeof(FT), &is,
+          region.get_instance_info(LEGION_NO_ACCESS, fid, sizeof(FT), &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), 
               warning_string, silence_warnings, true/*generic accessor*/,
               false/*check field size*/);
@@ -7814,17 +7944,18 @@ namespace Legion {
         {
           accessor.write(p, val);
         }
-      inline ArraySyntax::AccessorRefHelper<FT,READ_WRITE>
+      inline ArraySyntax::AccessorRefHelper<FT,LEGION_READ_WRITE>
               operator[](const Point<N,T> &p) const
         {
-          return ArraySyntax::AccessorRefHelper<FT,READ_WRITE>(accessor[p]);
+          return ArraySyntax::AccessorRefHelper<FT,LEGION_READ_WRITE>(
+                                                          accessor[p]);
         }
       inline ArraySyntax::GenericSyntaxHelper<UnsafeFieldAccessor<FT,N,T,A>,
-                                                FT,N,T,2,READ_WRITE>
+                                                FT,N,T,2,LEGION_READ_WRITE>
           operator[](T index) const
         {
           return ArraySyntax::GenericSyntaxHelper<UnsafeFieldAccessor<FT,N,T,A>,
-                                  FT,N,T,2,READ_WRITE>(*this, Point<1,T>(index));
+                          FT,N,T,2,LEGION_READ_WRITE>(*this, Point<1,T>(index));
         }
     public:
       mutable A accessor;
@@ -7845,7 +7976,7 @@ namespace Legion {
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(NO_ACCESS, fid, sizeof(FT), &is,
+          region.get_instance_info(LEGION_NO_ACCESS, fid, sizeof(FT), &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), 
               warning_string, silence_warnings, true/*generic accessor*/,
               false/*check field size*/);
@@ -7863,10 +7994,11 @@ namespace Legion {
         {
           accessor.write(p, val);
         }
-      inline ArraySyntax::AccessorRefHelper<FT,READ_WRITE>
+      inline ArraySyntax::AccessorRefHelper<FT,LEGION_READ_WRITE>
               operator[](const Point<1,T> &p) const
         {
-          return ArraySyntax::AccessorRefHelper<FT,READ_WRITE>(accessor[p]);
+          return ArraySyntax::AccessorRefHelper<FT,LEGION_READ_WRITE>(
+                                                          accessor[p]);
         }
     public:
       mutable Realm::GenericAccessor<FT,1,T> accessor;
@@ -7887,7 +8019,7 @@ namespace Legion {
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(NO_ACCESS, fid, sizeof(FT), &is,
+          region.get_instance_info(LEGION_NO_ACCESS, fid, sizeof(FT), &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), 
               warning_string, silence_warnings,
               false/*generic accessor*/, false/*check field size*/);
@@ -7904,7 +8036,7 @@ namespace Legion {
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(NO_ACCESS, fid, sizeof(FT), &is,
+          region.get_instance_info(LEGION_NO_ACCESS, fid, sizeof(FT), &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), 
               warning_string, silence_warnings,
               false/*generic accessor*/, false/*check field size*/);
@@ -7922,7 +8054,7 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(NO_ACCESS, fid, sizeof(FT), &is,
+          region.get_instance_info(LEGION_NO_ACCESS, fid, sizeof(FT), &is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), 
               warning_string, silence_warnings,
               false/*generic accessor*/, false/*check field size*/);
@@ -7942,7 +8074,7 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(NO_ACCESS, fid, sizeof(FT), &is,
+          region.get_instance_info(LEGION_NO_ACCESS, fid, sizeof(FT), &is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), 
               warning_string, silence_warnings,
               false/*generic accessor*/, false/*check field size*/);
@@ -8004,7 +8136,7 @@ namespace Legion {
       inline FT& operator[](T index) const
         {
           return ArraySyntax::AffineSyntaxHelper<UnsafeFieldAccessor<FT,N,T,
-                 Realm::AffineAccessor<FT,N,T> >,FT,N,T,2,READ_WRITE>(
+                 Realm::AffineAccessor<FT,N,T> >,FT,N,T,2,LEGION_READ_WRITE>(
                 *this, Point<1,T>(index));
         }
     public:
@@ -8028,7 +8160,7 @@ namespace Legion {
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(NO_ACCESS, fid, sizeof(FT), &is,
+          region.get_instance_info(LEGION_NO_ACCESS, fid, sizeof(FT), &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), 
               warning_string, silence_warnings,
               false/*generic accessor*/, false/*check field size*/);
@@ -8045,7 +8177,7 @@ namespace Legion {
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(NO_ACCESS, fid, sizeof(FT), &is,
+          region.get_instance_info(LEGION_NO_ACCESS, fid, sizeof(FT), &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), 
               warning_string, silence_warnings,
               false/*generic accessor*/, false/*check field size*/);
@@ -8063,7 +8195,7 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(NO_ACCESS, fid, sizeof(FT), &is,
+          region.get_instance_info(LEGION_NO_ACCESS, fid, sizeof(FT), &is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), 
               warning_string, silence_warnings,
               false/*generic accessor*/, false/*check field size*/);
@@ -8083,7 +8215,7 @@ namespace Legion {
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-          region.get_instance_info(NO_ACCESS, fid, sizeof(FT), &is,
+          region.get_instance_info(LEGION_NO_ACCESS, fid, sizeof(FT), &is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), 
               warning_string, silence_warnings,
               false/*generic accessor*/, false/*check field size*/);
@@ -11168,7 +11300,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(resource == EXTERNAL_POSIX_FILE);
+      assert(resource == LEGION_EXTERNAL_POSIX_FILE);
 #endif
       file_name = name;
       mode = m;
@@ -11182,7 +11314,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(resource == EXTERNAL_HDF5_FILE);
+      assert(resource == LEGION_EXTERNAL_HDF5_FILE);
 #endif
       file_name = name;
       mode = m;
@@ -11197,7 +11329,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(handle.exists());
-      assert(resource == EXTERNAL_INSTANCE);
+      assert(resource == LEGION_EXTERNAL_INSTANCE);
 #endif
       constraints.add_constraint(PointerConstraint(mem, uintptr_t(base)));
       constraints.add_constraint(MemoryConstraint(mem.kind()));
@@ -11206,16 +11338,16 @@ namespace Legion {
       const int dims = handle.get_index_space().get_dim();
       std::vector<DimensionKind> dim_order(dims+1);
       // Field dimension first for AOS
-      dim_order[0] = DIM_F;
+      dim_order[0] = LEGION_DIM_F;
       if (column_major)
       {
         for (int idx = 0; idx < dims; idx++)
-          dim_order[idx+1] = (DimensionKind)(DIM_X + idx); 
+          dim_order[idx+1] = (DimensionKind)(LEGION_DIM_X + idx); 
       }
       else
       {
         for (int idx = 0; idx < dims; idx++)
-          dim_order[idx+1] = (DimensionKind)(DIM_X + (dims-1) - idx);
+          dim_order[idx+1] = (DimensionKind)(LEGION_DIM_X + (dims-1) - idx);
       }
       constraints.add_constraint(
           OrderingConstraint(dim_order, false/*contiguous*/));
@@ -11223,7 +11355,7 @@ namespace Legion {
         for (std::map<FieldID,size_t>::const_iterator it = alignments->begin();
              it != alignments->end(); it++)
           constraints.add_constraint(
-              AlignmentConstraint(it->first, GE_EK, it->second));
+              AlignmentConstraint(it->first, LEGION_GE_EK, it->second));
       privilege_fields.insert(fields.begin(), fields.end());
     }
     
@@ -11235,7 +11367,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(handle.exists());
-      assert(resource == EXTERNAL_INSTANCE);
+      assert(resource == LEGION_EXTERNAL_INSTANCE);
 #endif
       constraints.add_constraint(PointerConstraint(mem, uintptr_t(base)));
       constraints.add_constraint(MemoryConstraint(mem.kind()));
@@ -11246,22 +11378,22 @@ namespace Legion {
       if (column_major)
       {
         for (int idx = 0; idx < dims; idx++)
-          dim_order[idx] = (DimensionKind)(DIM_X + idx); 
+          dim_order[idx] = (DimensionKind)(LEGION_DIM_X + idx); 
       }
       else
       {
         for (int idx = 0; idx < dims; idx++)
-          dim_order[idx] = (DimensionKind)(DIM_X + (dims-1) - idx);
+          dim_order[idx] = (DimensionKind)(LEGION_DIM_X + (dims-1) - idx);
       }
       // Field dimension last for SOA 
-      dim_order[dims] = DIM_F;
+      dim_order[dims] = LEGION_DIM_F;
       constraints.add_constraint(
           OrderingConstraint(dim_order, false/*contiguous*/));
       if (alignments != NULL)
         for (std::map<FieldID,size_t>::const_iterator it = alignments->begin();
              it != alignments->end(); it++)
           constraints.add_constraint(
-              AlignmentConstraint(it->first, GE_EK, it->second));
+              AlignmentConstraint(it->first, LEGION_GE_EK, it->second));
       privilege_fields.insert(fields.begin(), fields.end());
     }
 
@@ -11823,7 +11955,7 @@ namespace Legion {
       }
       return create_index_partition(ctx, parent, 
               Domain::from_rect<T::ODIM>(color_space), c, 
-              DISJOINT_KIND, part_color);
+              LEGION_DISJOINT_KIND, part_color);
     }
 
     //--------------------------------------------------------------------------
@@ -12086,7 +12218,7 @@ namespace Legion {
       // Then do the create partition by restriction call
       return create_partition_by_restriction(ctx, parent, color_space,
                                              transform, extent,
-                                             DISJOINT_KIND, color);
+                                             LEGION_DISJOINT_KIND, color);
     }
 
     //--------------------------------------------------------------------------

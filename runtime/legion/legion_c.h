@@ -184,7 +184,7 @@ extern "C" {
    */
   typedef struct legion_domain_point_t {
     int dim;
-    coord_t point_data[MAX_POINT_DIM];
+    coord_t point_data[LEGION_MAX_DIM];
   } legion_domain_point_t;
 
   /**

@@ -796,6 +796,20 @@
 #ifdef LEGION_DISABLE_DEPRECATED_ENUMS
 #define LEGION_DEPRECATED_ENUM(x)
 #define LEGION_DEPRECATED_ENUM_FROM(x,y)
+#elif defined(LEGION_WARN_DEPRECATED_ENUMS)
+#if defined(__cplusplus) && __cplusplus > 201103L
+// c++14 and higher has nice deprecated warnings
+#define LEGION_DEPRECATED_ENUM(x)   \
+  x [[deprecated("use LEGION_" #x " instead")]] = LEGION_##x,
+#define LEGION_DEPRECATED_ENUM_FROM(x,y) \
+  x [[deprecated("use " #y " instead")]] = y,
+#else
+// C and older versions of c++
+#define LEGION_DEPRECATED_ENUM(x)   \
+  x __attribute__ ((deprecated ("use LEGION_" #x " instead"))) = LEGION_##x,
+#define LEGION_DEPRECATED_ENUM_FROM(x,y) \
+  x __attribute__ ((deprecated ("use " #y " instead"))) = y,
+#endif
 #else
 #define LEGION_DEPRECATED_ENUM(x)   \
   x = LEGION_##x,
@@ -1275,17 +1289,23 @@ typedef enum legion_privilege_mode_t {
   LEGION_DEPRECATED_ENUM(WRITE_DISCARD)
 } legion_privilege_mode_t;
 
-#ifndef LEGION_DISABLE_DEPRECATED_ENUMERATIONS
 typedef enum legion_allocate_mode_t {
-  NO_MEMORY       = 0x00000000,
-  ALLOCABLE       = 0x00000001,
-  FREEABLE        = 0x00000002,
-  MUTABLE         = 0x00000003,
-  REGION_CREATION = 0x00000004,
-  REGION_DELETION = 0x00000008,
-  ALL_MEMORY      = 0x0000000F,
+  LEGION_NO_MEMORY       = 0x00000000,
+  LEGION_ALLOCABLE       = 0x00000001,
+  LEGION_FREEABLE        = 0x00000002,
+  LEGION_MUTABLE         = 0x00000003,
+  LEGION_REGION_CREATION = 0x00000004,
+  LEGION_REGION_DELETION = 0x00000008,
+  LEGION_ALL_MEMORY      = 0x0000000F,
+  // for backwards compatibility
+  LEGION_DEPRECATED_ENUM(NO_MEMORY)
+  LEGION_DEPRECATED_ENUM(ALLOCABLE)
+  LEGION_DEPRECATED_ENUM(FREEABLE)
+  LEGION_DEPRECATED_ENUM(MUTABLE)
+  LEGION_DEPRECATED_ENUM(REGION_CREATION)
+  LEGION_DEPRECATED_ENUM(REGION_DELETION)
+  LEGION_DEPRECATED_ENUM(ALL_MEMORY)
 } legion_allocate_mode_t;
-#endif
 
 typedef enum legion_coherence_property_t {
   LEGION_EXCLUSIVE    = 0,
@@ -1921,6 +1941,7 @@ typedef enum legion_domain_max_rect_dim_t {
 } legion_domain_max_rect_dim_t;
 
 #undef LEGION_DEPRECATED_ENUM
+#undef LEGION_DEPRECATED_ENUM_FROM
 
 //==========================================================================
 //                                Types

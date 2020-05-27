@@ -571,7 +571,7 @@ namespace Legion {
           output.src_instances[idx] = input.src_instances[idx];
           continue;
         }
-        if ((copy.dst_requirements[idx].privilege == READ_WRITE) &&
+        if ((copy.dst_requirements[idx].privilege == LEGION_READ_WRITE) &&
             ((generate_random_integer() % COPY_VIRTUAL_RATIO) == 0))
         {
           output.src_instances[idx].push_back(

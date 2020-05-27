@@ -160,7 +160,8 @@ namespace Legion {
                                               const RegionRequirement &req)
     //--------------------------------------------------------------------------
     {
-      if ((req.handle_type == SINGULAR) || (req.handle_type == REG_PROJECTION))
+      if ((req.handle_type == LEGION_SINGULAR_PROJECTION) || 
+          (req.handle_type == LEGION_REGION_PROJECTION))
       {
         if (!req.region.exists())
           return;
@@ -170,7 +171,7 @@ namespace Legion {
       else
       {
 #ifdef DEBUG_LEGION
-        assert(req.handle_type == PART_PROJECTION);
+        assert(req.handle_type == LEGION_PARTITION_PROJECTION);
 #endif
         if (!req.partition.exists())
           return;
@@ -186,7 +187,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(req.handle_type == SINGULAR);
+      assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
       runtime->forest->initialize_path(req.region.get_index_space(),
                                        start_node.get_index_space(), path);
@@ -199,7 +200,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(req.handle_type == SINGULAR);
+      assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
       runtime->forest->initialize_path(req.region.get_index_space(),
                                        start_node.get_index_partition(), path);
@@ -255,17 +256,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(r.handle_type == SINGULAR);
+      assert(r.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
       r.parent = r.region;
-      r.prop = EXCLUSIVE;
+      r.prop = LEGION_EXCLUSIVE;
       // If we're doing a write discard, then we can add read privileges
       // inside our task since it is safe to read what we wrote
       if (HAS_WRITE_DISCARD(r))
       {
-        r.privilege |= (READ_PRIV | REDUCE_PRIV);
+        r.privilege |= (LEGION_READ_PRIV | LEGION_REDUCE_PRIV);
         // Then remove any discard masks from the privileges
-        r.privilege &= ~DISCARD_MASK;
+        r.privilege &= ~LEGION_DISCARD_MASK;
       }
     }
 
@@ -1389,14 +1390,15 @@ namespace Legion {
                                         bool before, bool closing)
     //--------------------------------------------------------------------------
     {
-      if ((req->handle_type == PART_PROJECTION &&
+      if ((req->handle_type == LEGION_PARTITION_PROJECTION &&
            req->partition == LogicalPartition::NO_PART) ||
-          (req->handle_type != PART_PROJECTION &&
+          (req->handle_type != LEGION_PARTITION_PROJECTION &&
            req->region == LogicalRegion::NO_REGION))
         return;
       InnerContext *context = find_physical_context(idx, *req);
       RegionTreeContext ctx = context->get_context();
-      RegionTreeNode *child_node = req->handle_type == PART_PROJECTION ? 
+      RegionTreeNode *child_node = req->handle_type == 
+        LEGION_PARTITION_PROJECTION ?
         static_cast<RegionTreeNode*>(runtime->forest->get_node(req->partition)) :
         static_cast<RegionTreeNode*>(runtime->forest->get_node(req->region));
       FieldMask user_mask =
@@ -1885,7 +1887,7 @@ namespace Legion {
       derez.deserialize(req.flags);
       derez.deserialize(req.handle_type);
       derez.deserialize(req.projection);
-      req.flags |= VERIFIED_FLAG;
+      req.flags |= LEGION_VERIFIED_FLAG;
       size_t projection_size;
       derez.deserialize(projection_size);
       if (projection_size > 0)
@@ -2736,7 +2738,7 @@ namespace Legion {
       // If this was a write-discard privilege, change it to read-write
       // so that we don't lose any data
       if (HAS_WRITE_DISCARD(requirement))
-        requirement.privilege = READ_WRITE;
+        requirement.privilege = LEGION_READ_WRITE;
       map_id = reg.impl->map_id;
       tag = reg.impl->tag;
       region = reg;
@@ -3201,8 +3203,8 @@ namespace Legion {
     void MapOp::check_privilege(void)
     //--------------------------------------------------------------------------
     { 
-      if ((requirement.handle_type == PART_PROJECTION) || 
-          (requirement.handle_type == REG_PROJECTION))
+      if ((requirement.handle_type == LEGION_PARTITION_PROJECTION) || 
+          (requirement.handle_type == LEGION_REGION_PROJECTION))
         REPORT_LEGION_ERROR(ERROR_PROJECTION_REGION_REQUIREMENTS,
                          "Projection region requirements are not "
                          "permitted for inline mappings (in task %s)",
@@ -3231,8 +3233,9 @@ namespace Legion {
           }
         case ERROR_FIELD_SPACE_FIELD_MISMATCH:
           {
-            FieldSpace sp = (requirement.handle_type == SINGULAR) ||
-            (requirement.handle_type == REG_PROJECTION)
+            FieldSpace sp = 
+              (requirement.handle_type == LEGION_SINGULAR_PROJECTION) ||
+              (requirement.handle_type == LEGION_REGION_PROJECTION)
             ? requirement.region.field_space :
             requirement.partition.field_space;
             REPORT_LEGION_ERROR(ERROR_FIELD_NOT_VALID_FIELD,
@@ -3445,8 +3448,8 @@ namespace Legion {
         {
           const void *name; size_t name_size;
           if (!runtime->retrieve_semantic_information(
-               requirement.region.get_field_space(), *it, NAME_SEMANTIC_TAG,
-               name, name_size, true, false))
+               requirement.region.get_field_space(), *it, 
+               LEGION_NAME_SEMANTIC_TAG, name, name_size, true, false))
             name = "(no name)";
           log_run.error("Missing instance for field %s (FieldID: %d)",
                         static_cast<const char*>(name), *it);
@@ -3867,7 +3870,7 @@ namespace Legion {
                            parent_ctx->get_unique_id());
         }
         src_requirements[idx] = launcher.src_requirements[idx];
-        src_requirements[idx].flags |= NO_ACCESS_FLAG;
+        src_requirements[idx].flags |= LEGION_NO_ACCESS_FLAG;
       }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
@@ -3882,21 +3885,21 @@ namespace Legion {
                            parent_ctx->get_unique_id());
         }
         dst_requirements[idx] = launcher.dst_requirements[idx];
-        dst_requirements[idx].flags |= NO_ACCESS_FLAG;
+        dst_requirements[idx].flags |= LEGION_NO_ACCESS_FLAG;
         // If our privilege is not reduce, then shift it to write discard
         // since we are going to write all over the region, although we
         // can only do this safely now if there is no scatter region
         // requirement or there is no gather indirect requirement 
         // and we know we don't have any out of bounds accesses,
         // otherwise we're doing it onto
-        if (dst_requirements[idx].privilege != REDUCE)
+        if (dst_requirements[idx].privilege != LEGION_REDUCE)
         {
           if (((idx < launcher.src_indirect_requirements.size()) &&
                 launcher.possible_src_indirect_out_of_range) ||
               (idx < launcher.dst_indirect_requirements.size()))
-            dst_requirements[idx].privilege = READ_WRITE;
+            dst_requirements[idx].privilege = LEGION_READ_WRITE;
           else
-            dst_requirements[idx].privilege = WRITE_DISCARD;
+            dst_requirements[idx].privilege = LEGION_WRITE_DISCARD;
         }
       }
       if (!launcher.src_indirect_requirements.empty())
@@ -3908,7 +3911,7 @@ namespace Legion {
         {
           src_indirect_requirements[idx] = 
             launcher.src_indirect_requirements[idx];
-          src_indirect_requirements[idx].flags |= NO_ACCESS_FLAG;
+          src_indirect_requirements[idx].flags |= LEGION_NO_ACCESS_FLAG;
         }
         if (launcher.src_indirect_is_range.size() != gather_size)
           REPORT_LEGION_ERROR(ERROR_COPY_GATHER_REQUIREMENT,
@@ -3930,7 +3933,7 @@ namespace Legion {
           if ((idx < launcher.dst_indirect_is_range.size()) &&
               launcher.dst_indirect_is_range[idx])
             continue;
-          if (dst_requirements[idx].privilege != REDUCE)
+          if (dst_requirements[idx].privilege != LEGION_REDUCE)
             REPORT_LEGION_ERROR(ERROR_DESTINATION_REGION_REQUIREMENT,
                 "Invalid privileges for destination region requirement %d "
                 " for copy across in parent task %s (ID %lld). Destination "
@@ -3951,7 +3954,7 @@ namespace Legion {
         {
           dst_indirect_requirements[idx] = 
             launcher.dst_indirect_requirements[idx];
-          dst_indirect_requirements[idx].flags |= NO_ACCESS_FLAG;
+          dst_indirect_requirements[idx].flags |= LEGION_NO_ACCESS_FLAG;
         }
         if (launcher.dst_indirect_is_range.size() != scatter_size)
           REPORT_LEGION_ERROR(ERROR_COPY_GATHER_REQUIREMENT,
@@ -4384,7 +4387,7 @@ namespace Legion {
         // so that we can get the version numbers correct
         const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
         if (is_reduce_req)
-          dst_requirements[idx].privilege = READ_WRITE;
+          dst_requirements[idx].privilege = LEGION_READ_WRITE;
         runtime->forest->perform_dependence_analysis(this, index, 
                                                      dst_requirements[idx],
                                                      projection_info,
@@ -4392,7 +4395,7 @@ namespace Legion {
                                                      map_applied_conditions);
         // Switch the privileges back when we are done
         if (is_reduce_req)
-          dst_requirements[idx].privilege = REDUCE;
+          dst_requirements[idx].privilege = LEGION_REDUCE;
       }
       if (!src_indirect_requirements.empty())
       {
@@ -4449,7 +4452,7 @@ namespace Legion {
       {
         RegionRequirement &req = dst_requirements[idx];
         if (HAS_WRITE_DISCARD(req))
-          req.privilege &= ~DISCARD_MASK;
+          req.privilege &= ~LEGION_DISCARD_MASK;
       }
       return true;
     }
@@ -4504,14 +4507,14 @@ namespace Legion {
         // Perform this dependence analysis as if it was READ_WRITE
         // so that we can get the version numbers correct
         if (is_reduce_req)
-          dst_requirements[idx].privilege = READ_WRITE;
+          dst_requirements[idx].privilege = LEGION_READ_WRITE;
         runtime->forest->perform_versioning_analysis(this, offset + idx,
                                                      dst_requirements[idx],
                                                      dst_versions[idx],
                                                      preconditions);
         // Switch the privileges back when we are done
         if (is_reduce_req)
-          dst_requirements[idx].privilege = REDUCE;
+          dst_requirements[idx].privilege = LEGION_REDUCE;
       }
       if (!src_indirect_requirements.empty())
       {
@@ -4590,7 +4593,7 @@ namespace Legion {
           // the registration since we know we are using normal instances
           const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
           if (is_reduce_req)
-            dst_requirements[idx].privilege = READ_WRITE;
+            dst_requirements[idx].privilege = LEGION_READ_WRITE;
           runtime->forest->physical_premap_region(this, 
                                                   idx+src_requirements.size(),
                                                   dst_requirements[idx],
@@ -4601,7 +4604,7 @@ namespace Legion {
           prepare_for_mapping(valid_instances, input.dst_instances[idx]);
           // Switch the privileges back when we are done
           if (is_reduce_req)
-            dst_requirements[idx].privilege = REDUCE;
+            dst_requirements[idx].privilege = LEGION_REDUCE;
         }
         if (!src_indirect_requirements.empty())
         {
@@ -4733,7 +4736,7 @@ namespace Legion {
         // the registration since we know we are using normal instances
         const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
         if (is_reduce_req)
-          dst_requirements[idx].privilege = READ_WRITE;
+          dst_requirements[idx].privilege = LEGION_READ_WRITE;
         perform_conversion<DST_REQ>(idx, dst_requirements[idx],
                                     output.dst_instances[idx], dst_targets);
         // Now do the registration
@@ -4763,7 +4766,7 @@ namespace Legion {
               dst_idx, dst_requirements[idx], dst_targets);
         // Switch the privileges back when we are done
         if (is_reduce_req)
-          dst_requirements[idx].privilege = REDUCE; 
+          dst_requirements[idx].privilege = LEGION_REDUCE; 
         if (idx < src_indirect_requirements.size())
         {
           std::vector<MappingInstance> gather_instances(1);
@@ -5469,8 +5472,9 @@ namespace Legion {
                                       unsigned idx, const bool permit_proj)
     //--------------------------------------------------------------------------
     {
-      if (!permit_proj && ((requirement.handle_type == PART_PROJECTION) ||
-          (requirement.handle_type == REG_PROJECTION)))
+      if (!permit_proj && 
+          ((requirement.handle_type == LEGION_PARTITION_PROJECTION) ||
+           (requirement.handle_type == LEGION_REGION_PROJECTION)))
         REPORT_LEGION_ERROR(ERROR_PROJECTION_REGION_REQUIREMENTS,
                          "Projection region requirements are not "
                                "permitted for copy operations (in task %s)",
@@ -5504,8 +5508,9 @@ namespace Legion {
           }
         case ERROR_FIELD_SPACE_FIELD_MISMATCH:
           {
-            FieldSpace sp = (requirement.handle_type == SINGULAR) ||
-            (requirement.handle_type == REG_PROJECTION)
+            FieldSpace sp = 
+              (requirement.handle_type == LEGION_SINGULAR_PROJECTION) ||
+              (requirement.handle_type == LEGION_REGION_PROJECTION)
             ? requirement.region.field_space :
             requirement.partition.field_space;
             REPORT_LEGION_ERROR(ERROR_FIELD_NOT_VALID,
@@ -5888,7 +5893,7 @@ namespace Legion {
         {
           const void *name; size_t name_size;
           if (!runtime->retrieve_semantic_information(
-               req.region.get_field_space(), *it, NAME_SEMANTIC_TAG,
+               req.region.get_field_space(), *it, LEGION_NAME_SEMANTIC_TAG,
                name, name_size, true, false))
             name = "(no name)";
           log_run.error("Missing instance for field %s (FieldID: %d)",
@@ -6171,7 +6176,7 @@ namespace Legion {
                            parent_ctx->get_unique_id());
         }
         src_requirements[idx] = launcher.src_requirements[idx];
-        src_requirements[idx].flags |= NO_ACCESS_FLAG;
+        src_requirements[idx].flags |= LEGION_NO_ACCESS_FLAG;
       }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
@@ -6194,21 +6199,21 @@ namespace Legion {
                           parent_ctx->get_task_name(),
                           parent_ctx->get_unique_id())
         dst_requirements[idx] = launcher.dst_requirements[idx];
-        dst_requirements[idx].flags |= NO_ACCESS_FLAG;
+        dst_requirements[idx].flags |= LEGION_NO_ACCESS_FLAG;
         // If our privilege is not reduce, then shift it to write discard
         // since we are going to write all over the region, although we
         // can only do this safely now if there is no scatter region
         // requirement or there is no gather indirect requirement 
         // and we know we don't have any out of bounds accesses,
         // otherwise we're doing it onto
-        if (dst_requirements[idx].privilege != REDUCE)
+        if (dst_requirements[idx].privilege != LEGION_REDUCE)
         {
           if (((idx < launcher.src_indirect_requirements.size()) &&
                 launcher.possible_src_indirect_out_of_range) ||
               (idx < launcher.dst_indirect_requirements.size()))
-            dst_requirements[idx].privilege = READ_WRITE;
+            dst_requirements[idx].privilege = LEGION_READ_WRITE;
           else
-            dst_requirements[idx].privilege = WRITE_DISCARD;
+            dst_requirements[idx].privilege = LEGION_WRITE_DISCARD;
         }
       }
       if (!launcher.src_indirect_requirements.empty())
@@ -6220,7 +6225,7 @@ namespace Legion {
         {
           src_indirect_requirements[idx] = 
             launcher.src_indirect_requirements[idx];
-          src_indirect_requirements[idx].flags |= NO_ACCESS_FLAG;
+          src_indirect_requirements[idx].flags |= LEGION_NO_ACCESS_FLAG;
         }
         if (launcher.src_indirect_is_range.size() != gather_size)
           REPORT_LEGION_ERROR(ERROR_COPY_GATHER_REQUIREMENT,
@@ -6242,7 +6247,7 @@ namespace Legion {
           if ((idx < launcher.dst_indirect_is_range.size()) &&
               launcher.dst_indirect_is_range[idx])
             continue;
-          if (dst_requirements[idx].privilege != REDUCE)
+          if (dst_requirements[idx].privilege != LEGION_REDUCE)
             REPORT_LEGION_ERROR(ERROR_DESTINATION_REGION_REQUIREMENT,
                 "Invalid privileges for destination region requirement %d "
                 " for copy across in parent task %s (ID %lld). Destination "
@@ -6267,7 +6272,7 @@ namespace Legion {
         {
           dst_indirect_requirements[idx] = 
             launcher.dst_indirect_requirements[idx];
-          dst_indirect_requirements[idx].flags |= NO_ACCESS_FLAG;
+          dst_indirect_requirements[idx].flags |= LEGION_NO_ACCESS_FLAG;
         }
         if (launcher.dst_indirect_is_range.size() != scatter_size)
           REPORT_LEGION_ERROR(ERROR_COPY_GATHER_REQUIREMENT,
@@ -6400,10 +6405,10 @@ namespace Legion {
         for (unsigned idx = 0; idx < src_requirements.size(); idx++)
         {
           const RegionRequirement &req = src_requirements[idx];
-          const bool reg = (req.handle_type == SINGULAR) ||
-                           (req.handle_type == REG_PROJECTION);
-          const bool proj = (req.handle_type == REG_PROJECTION) ||
-                            (req.handle_type == PART_PROJECTION); 
+          const bool reg = (req.handle_type == LEGION_SINGULAR_PROJECTION) ||
+                           (req.handle_type == LEGION_REGION_PROJECTION);
+          const bool proj = (req.handle_type == LEGION_REGION_PROJECTION) ||
+                            (req.handle_type == LEGION_PARTITION_PROJECTION); 
 
           LegionSpy::log_logical_requirement(unique_op_id, idx, reg,
               reg ? req.region.index_space.id :
@@ -6422,10 +6427,10 @@ namespace Legion {
         for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
         {
           const RegionRequirement &req = dst_requirements[idx];
-          const bool reg = (req.handle_type == SINGULAR) ||
-                           (req.handle_type == REG_PROJECTION);
-          const bool proj = (req.handle_type == REG_PROJECTION) ||
-                            (req.handle_type == PART_PROJECTION); 
+          const bool reg = (req.handle_type == LEGION_SINGULAR_PROJECTION) ||
+                           (req.handle_type == LEGION_REGION_PROJECTION);
+          const bool proj = (req.handle_type == LEGION_REGION_PROJECTION) ||
+                            (req.handle_type == LEGION_PARTITION_PROJECTION);
 
           LegionSpy::log_logical_requirement(unique_op_id, 
               src_requirements.size() + idx, reg,
@@ -6450,10 +6455,10 @@ namespace Legion {
           for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
           {
             const RegionRequirement &req = src_indirect_requirements[idx];
-            const bool reg = (req.handle_type == SINGULAR) ||
-                             (req.handle_type == REG_PROJECTION);
-            const bool proj = (req.handle_type == REG_PROJECTION) ||
-                              (req.handle_type == PART_PROJECTION); 
+            const bool reg = (req.handle_type == LEGION_SINGULAR_PROJECTION) ||
+                             (req.handle_type == LEGION_REGION_PROJECTION);
+            const bool proj = (req.handle_type == LEGION_REGION_PROJECTION) ||
+                              (req.handle_type == LEGION_PARTITION_PROJECTION);
 
             LegionSpy::log_logical_requirement(unique_op_id, offset + idx, reg,
                 reg ? req.region.index_space.id :
@@ -6477,10 +6482,10 @@ namespace Legion {
           for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
           {
             const RegionRequirement &req = dst_indirect_requirements[idx];
-            const bool reg = (req.handle_type == SINGULAR) ||
-                             (req.handle_type == REG_PROJECTION);
-            const bool proj = (req.handle_type == REG_PROJECTION) ||
-                              (req.handle_type == PART_PROJECTION); 
+            const bool reg = (req.handle_type == LEGION_SINGULAR_PROJECTION) ||
+                             (req.handle_type == LEGION_REGION_PROJECTION);
+            const bool proj = (req.handle_type == LEGION_REGION_PROJECTION) ||
+                              (req.handle_type == LEGION_PARTITION_PROJECTION);
 
             LegionSpy::log_logical_requirement(unique_op_id, offset + idx, reg,
                 reg ? req.region.index_space.id :
@@ -6527,7 +6532,7 @@ namespace Legion {
         // so that we can get the version numbers correct
         const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
         if (is_reduce_req)
-          dst_requirements[idx].privilege = READ_WRITE;
+          dst_requirements[idx].privilege = LEGION_READ_WRITE;
         runtime->forest->perform_dependence_analysis(this, index, 
                                                      dst_requirements[idx],
                                                      dst_info,
@@ -6535,7 +6540,7 @@ namespace Legion {
                                                      map_applied_conditions);
         // Switch the privileges back when we are done
         if (is_reduce_req)
-          dst_requirements[idx].privilege = REDUCE;
+          dst_requirements[idx].privilege = LEGION_REDUCE;
       }
       if (!src_indirect_requirements.empty())
       {
@@ -6677,7 +6682,7 @@ namespace Legion {
                                                       points.end());
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
-        if (src_requirements[idx].handle_type == SINGULAR)
+        if (src_requirements[idx].handle_type == LEGION_SINGULAR_PROJECTION)
           continue;
         ProjectionFunction *function = 
           runtime->find_projection_function(src_requirements[idx].projection);
@@ -6687,7 +6692,7 @@ namespace Legion {
       unsigned offset = src_requirements.size();
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
-        if (dst_requirements[idx].handle_type == SINGULAR)
+        if (dst_requirements[idx].handle_type == LEGION_SINGULAR_PROJECTION)
           continue;
         ProjectionFunction *function = 
           runtime->find_projection_function(dst_requirements[idx].projection);
@@ -6700,7 +6705,8 @@ namespace Legion {
         offset += dst_requirements.size();
         for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
         {
-          if (src_indirect_requirements[idx].handle_type == SINGULAR)
+          if (src_indirect_requirements[idx].handle_type == 
+              LEGION_SINGULAR_PROJECTION)
             continue;
           ProjectionFunction *function = 
             runtime->find_projection_function(
@@ -6715,7 +6721,8 @@ namespace Legion {
         offset += src_indirect_requirements.size();
         for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
         {
-          if (dst_indirect_requirements[idx].handle_type == SINGULAR)
+          if (dst_indirect_requirements[idx].handle_type == 
+              LEGION_SINGULAR_PROJECTION)
             continue;
           ProjectionFunction *function = 
             runtime->find_projection_function(
@@ -7125,13 +7132,13 @@ namespace Legion {
         // Perform this dependence analysis as if it was READ_WRITE
         // so that we can get the version numbers correct
         if (is_reduce_req)
-          dst_requirements[idx].privilege = READ_WRITE;
+          dst_requirements[idx].privilege = LEGION_READ_WRITE;
         runtime->forest->perform_versioning_analysis(this,
             src_requirements.size() + idx, dst_requirements[idx],
             dst_versions[idx], preconditions);
         // Switch the privileges back when we are done
         if (is_reduce_req)
-          dst_requirements[idx].privilege = REDUCE;
+          dst_requirements[idx].privilege = LEGION_REDUCE;
       }
       if (!src_indirect_requirements.empty())
       {
@@ -7217,29 +7224,30 @@ namespace Legion {
       if (idx < src_requirements.size())
       {
 #ifdef DEBUG_LEGION
-        assert(src_requirements[idx].handle_type != SINGULAR);
+        assert(src_requirements[idx].handle_type != LEGION_SINGULAR_PROJECTION);
 #endif
         src_requirements[idx].region = result;
-        src_requirements[idx].handle_type = SINGULAR;
+        src_requirements[idx].handle_type = LEGION_SINGULAR_PROJECTION;
       }
       else if (idx < (src_requirements.size() + dst_requirements.size()))
       {
         idx -= src_requirements.size();
 #ifdef DEBUG_LEGION
-        assert(dst_requirements[idx].handle_type != SINGULAR);
+        assert(dst_requirements[idx].handle_type != LEGION_SINGULAR_PROJECTION);
 #endif
         dst_requirements[idx].region = result;
-        dst_requirements[idx].handle_type = SINGULAR;
+        dst_requirements[idx].handle_type = LEGION_SINGULAR_PROJECTION;
       }
       else if (idx < (src_requirements.size() + 
             dst_requirements.size() + src_indirect_requirements.size()))
       {
         idx -= (src_requirements.size() + dst_requirements.size());
 #ifdef DEBUG_LEGION
-        assert(src_indirect_requirements[idx].handle_type != SINGULAR);
+        assert(src_indirect_requirements[idx].handle_type != 
+                LEGION_SINGULAR_PROJECTION);
 #endif
         src_indirect_requirements[idx].region = result;
-        src_indirect_requirements[idx].handle_type = SINGULAR;
+        src_indirect_requirements[idx].handle_type = LEGION_SINGULAR_PROJECTION;
       }
       else
       {
@@ -7247,10 +7255,11 @@ namespace Legion {
                 src_indirect_requirements.size());
 #ifdef DEBUG_LEGION
         assert(idx < dst_indirect_requirements.size());
-        assert(dst_indirect_requirements[idx].handle_type != SINGULAR);
+        assert(dst_indirect_requirements[idx].handle_type != 
+                LEGION_SINGULAR_PROJECTION);
 #endif
         dst_indirect_requirements[idx].region = result;
-        dst_indirect_requirements[idx].handle_type = SINGULAR;
+        dst_indirect_requirements[idx].handle_type = LEGION_SINGULAR_PROJECTION;
       }
     }
 
@@ -8052,7 +8061,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
         {
           const RegionRequirement &req = deletion_requirements[idx];
-          if (req.handle_type != PART_PROJECTION)
+          if (req.handle_type != LEGION_PARTITION_PROJECTION)
             LegionSpy::log_logical_requirement(unique_op_id, idx,true/*region*/,
                                                req.region.index_space.id,
                                                req.region.field_space.id,
@@ -8517,7 +8526,7 @@ namespace Legion {
     {
       if (!runtime->legion_spy_enabled)
         return; 
-      if (requirement.handle_type == PART_PROJECTION)
+      if (requirement.handle_type == LEGION_PARTITION_PROJECTION)
         LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/,
                                   false/*region*/,
                                   requirement.partition.index_partition.id,
@@ -9332,8 +9341,8 @@ namespace Legion {
       // Note we give it READ WRITE EXCLUSIVE to make sure that nobody
       // can be re-ordered around this operation for mapping or
       // normal dependences.  We won't actually read or write anything.
-      requirement = RegionRequirement(launcher.logical_region, READ_WRITE,
-                                      EXCLUSIVE, launcher.parent_region); 
+      requirement = RegionRequirement(launcher.logical_region, 
+          LEGION_READ_WRITE, LEGION_EXCLUSIVE, launcher.parent_region); 
       if (launcher.fields.empty())
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_PRIVILEGE_FIELDS_ACQUIRE,
@@ -9846,8 +9855,9 @@ namespace Legion {
           }
         case ERROR_FIELD_SPACE_FIELD_MISMATCH:
           {
-            FieldSpace sp = (requirement.handle_type == SINGULAR) ||
-            (requirement.handle_type == REG_PROJECTION)
+            FieldSpace sp = 
+              (requirement.handle_type == LEGION_SINGULAR_PROJECTION) ||
+              (requirement.handle_type == LEGION_REGION_PROJECTION)
             ? requirement.region.field_space :
             requirement.partition.field_space;
             REPORT_LEGION_ERROR(ERROR_FIELD_NOT_VALID,
@@ -10195,8 +10205,8 @@ namespace Legion {
       // Note we give it READ WRITE EXCLUSIVE to make sure that nobody
       // can be re-ordered around this operation for mapping or
       // normal dependences.  We won't actually read or write anything.
-      requirement = RegionRequirement(launcher.logical_region, READ_WRITE, 
-                                      EXCLUSIVE, launcher.parent_region); 
+      requirement = RegionRequirement(launcher.logical_region, 
+          LEGION_READ_WRITE, LEGION_EXCLUSIVE, launcher.parent_region); 
       if (launcher.fields.empty())
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_PRIVILEGE_FIELDS_RELEASE,
@@ -10735,8 +10745,9 @@ namespace Legion {
           }
         case ERROR_FIELD_SPACE_FIELD_MISMATCH:
           {
-            FieldSpace sp = (requirement.handle_type == SINGULAR) ||
-            (requirement.handle_type == REG_PROJECTION)
+            FieldSpace sp = 
+              (requirement.handle_type == LEGION_SINGULAR_PROJECTION) ||
+              (requirement.handle_type == LEGION_REGION_PROJECTION)
             ? requirement.region.field_space :
             requirement.partition.field_space;
             REPORT_LEGION_ERROR(ERROR_FIELD_NOT_VALID,
@@ -12242,8 +12253,9 @@ namespace Legion {
       if ((src_index >= 0) && (dst_index >= 0))
       {
         // If it is, see what kind of dependence we have
-        if ((dtype == TRUE_DEPENDENCE) || (dtype == ANTI_DEPENDENCE) ||
-            (dtype == ATOMIC_DEPENDENCE))
+        if ((dtype == LEGION_TRUE_DEPENDENCE) || 
+            (dtype == LEGION_ANTI_DEPENDENCE) ||
+            (dtype == LEGION_ATOMIC_DEPENDENCE))
         {
           TaskOp *src_task = find_task_by_index(src_index);
           TaskOp *dst_task = find_task_by_index(dst_index);
@@ -12253,11 +12265,11 @@ namespace Legion {
               " type %s", src_idx, src_task->get_task_name(),
               src_task->get_unique_id(), dst_idx, 
               dst_task->get_task_name(), dst_task->get_unique_id(),
-              (dtype == TRUE_DEPENDENCE) ? "TRUE DEPENDENCE" :
-                (dtype == ANTI_DEPENDENCE) ? "ANTI DEPENDENCE" :
+              (dtype == LEGION_TRUE_DEPENDENCE) ? "TRUE DEPENDENCE" :
+                (dtype == LEGION_ANTI_DEPENDENCE) ? "ANTI DEPENDENCE" :
                 "ATOMIC DEPENDENCE")
         }
-        else if (dtype == SIMULTANEOUS_DEPENDENCE)
+        else if (dtype == LEGION_SIMULTANEOUS_DEPENDENCE)
         {
           // Record the dependence kind
           int dst_index = find_operation_index(dst_op, dst_gen);
@@ -13377,7 +13389,8 @@ namespace Legion {
       initialize_operation(ctx, true/*track*/); 
       // Start without the projection requirement, we'll ask
       // the mapper later if it wants to turn this into an index launch
-      requirement = RegionRequirement(handle, READ_ONLY, EXCLUSIVE, parent);
+      requirement = 
+        RegionRequirement(handle, LEGION_READ_ONLY, LEGION_EXCLUSIVE, parent);
       requirement.add_field(fid);
       map_id = id;
       tag = t;
@@ -13414,7 +13427,8 @@ namespace Legion {
       // the mapper later if it wants to turn this into an index launch
       LogicalRegion proj_parent = 
         runtime->forest->get_parent_logical_region(projection);
-      requirement = RegionRequirement(proj_parent, READ_ONLY, EXCLUSIVE,parent);
+      requirement = 
+        RegionRequirement(proj_parent,LEGION_READ_ONLY,LEGION_EXCLUSIVE,parent);
       requirement.add_field(fid);
       map_id = id;
       tag = t;
@@ -13452,7 +13466,8 @@ namespace Legion {
       // the mapper later if it wants to turn this into an index launch
       LogicalRegion proj_parent = 
         runtime->forest->get_parent_logical_region(projection);
-      requirement = RegionRequirement(proj_parent, READ_ONLY, EXCLUSIVE,parent);
+      requirement = 
+        RegionRequirement(proj_parent,LEGION_READ_ONLY,LEGION_EXCLUSIVE,parent);
       requirement.add_field(fid);
       map_id = id;
       tag = t;
@@ -13486,7 +13501,8 @@ namespace Legion {
       initialize_operation(ctx, true/*track*/);
       // Start without the projection requirement, we'll ask
       // the mapper later if it wants to turn this into an index launch
-      requirement = RegionRequirement(handle, READ_ONLY, EXCLUSIVE, parent);
+      requirement = 
+        RegionRequirement(handle, LEGION_READ_ONLY, LEGION_EXCLUSIVE, parent);
       requirement.add_field(fid);
       map_id = id;
       tag = t;
@@ -13520,7 +13536,8 @@ namespace Legion {
       initialize_operation(ctx, true/*track*/);
       // Start without the projection requirement, we'll ask
       // the mapper later if it wants to turn this into an index launch
-      requirement = RegionRequirement(handle, READ_ONLY, EXCLUSIVE, parent);
+      requirement = 
+        RegionRequirement(handle, LEGION_READ_ONLY, LEGION_EXCLUSIVE, parent);
       requirement.add_field(fid);
       map_id = id;
       tag = t;
@@ -13553,8 +13570,8 @@ namespace Legion {
       parent_task = ctx->get_task();
       initialize_operation(ctx, true/*track*/);
       // start-off with non-projection requirement
-      requirement = RegionRequirement(domain, READ_WRITE, 
-                                      EXCLUSIVE, domain_parent);
+      requirement = RegionRequirement(domain, LEGION_READ_WRITE, 
+                                      LEGION_EXCLUSIVE, domain_parent);
       requirement.add_field(fid);
       map_id = id;
       tag = t;
@@ -13579,7 +13596,7 @@ namespace Legion {
     void DependentPartitionOp::log_requirement(void) const
     //--------------------------------------------------------------------------
     {
-      if (requirement.handle_type == PART_PROJECTION)
+      if (requirement.handle_type == LEGION_PARTITION_PROJECTION)
       {
         LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/,
                                   false/*region*/,
@@ -13681,7 +13698,7 @@ namespace Legion {
                       parent_ctx->get_task_name(), parent_ctx->get_unique_id())
       // Update the region requirement and other information
       requirement.partition = output.chosen_partition;
-      requirement.handle_type = PART_PROJECTION;
+      requirement.handle_type = LEGION_PARTITION_PROJECTION;
       requirement.projection = 0; // always default
       launch_space = partition_node->color_space;
       add_launch_space_reference(launch_space);
@@ -13700,7 +13717,7 @@ namespace Legion {
       if (is_index_space)
       {
 #ifdef DEBUG_LEGION
-        assert(requirement.handle_type == PART_PROJECTION);
+        assert(requirement.handle_type == LEGION_PARTITION_PROJECTION);
 #endif
         // Now enumerate the points and kick them off
         size_t num_points = index_domain.get_volume();
@@ -13770,7 +13787,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(requirement.handle_type == SINGULAR);
+      assert(requirement.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
       const PhysicalTraceInfo trace_info(this, 0/*index*/, true/*init*/);
       // Perform the mapping call to get the physical isntances 
@@ -13944,8 +13961,8 @@ namespace Legion {
         {
           const void *name; size_t name_size;
           if (!runtime->retrieve_semantic_information(
-               requirement.region.get_field_space(), *it, NAME_SEMANTIC_TAG,
-               name, name_size, true, false))
+               requirement.region.get_field_space(), *it, 
+               LEGION_NAME_SEMANTIC_TAG, name, name_size, true, false))
             name = "(no name)";
           log_run.error("Missing instance for field %s (FieldID: %d)",
                         static_cast<const char*>(name), *it);
@@ -14522,8 +14539,9 @@ namespace Legion {
           }
         case ERROR_FIELD_SPACE_FIELD_MISMATCH:
           {
-            FieldSpace sp = (requirement.handle_type == SINGULAR) ||
-            (requirement.handle_type == REG_PROJECTION)
+            FieldSpace sp = 
+              (requirement.handle_type == LEGION_SINGULAR_PROJECTION) ||
+              (requirement.handle_type == LEGION_REGION_PROJECTION)
             ? requirement.region.field_space :
             requirement.partition.field_space;
             REPORT_LEGION_ERROR(ERROR_FIELD_NOT_VALID_FIELD,
@@ -14817,10 +14835,10 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(idx == 0);
-      assert(requirement.handle_type == PART_PROJECTION);
+      assert(requirement.handle_type == LEGION_PARTITION_PROJECTION);
 #endif
       requirement.region = result;
-      requirement.handle_type = SINGULAR;
+      requirement.handle_type = LEGION_SINGULAR_PROJECTION;
     }
 
     /////////////////////////////////////////////////////////////
@@ -14932,8 +14950,8 @@ namespace Legion {
       initialize_speculation(ctx, true/*track*/, 1, 
                              launcher.static_dependences, launcher.predicate);
       initialize_memoizable();
-      requirement = RegionRequirement(launcher.handle, WRITE_DISCARD,
-                                      EXCLUSIVE, launcher.parent);
+      requirement = RegionRequirement(launcher.handle, LEGION_WRITE_DISCARD,
+                                      LEGION_EXCLUSIVE, launcher.parent);
       requirement.privilege_fields = launcher.fields;
       value_size = launcher.argument.get_size();
       if (value_size > 0)
@@ -15398,8 +15416,9 @@ namespace Legion {
           }
         case ERROR_FIELD_SPACE_FIELD_MISMATCH:
           {
-            FieldSpace sp = (requirement.handle_type == SINGULAR) ||
-            (requirement.handle_type == REG_PROJECTION)
+            FieldSpace sp = 
+              (requirement.handle_type == LEGION_SINGULAR_PROJECTION) ||
+              (requirement.handle_type == LEGION_REGION_PROJECTION)
             ? requirement.region.field_space :
             requirement.partition.field_space;
             REPORT_LEGION_ERROR(ERROR_FIELD_NOT_VALID,
@@ -15656,7 +15675,7 @@ namespace Legion {
         assert(!launcher.partition.exists());
 #endif
         requirement = RegionRequirement(launcher.region, launcher.projection,
-                                        WRITE_DISCARD, EXCLUSIVE,
+                                        LEGION_WRITE_DISCARD, LEGION_EXCLUSIVE,
                                         launcher.parent);
       }
       else
@@ -15665,7 +15684,7 @@ namespace Legion {
         assert(launcher.partition.exists());
 #endif
         requirement = RegionRequirement(launcher.partition, launcher.projection,
-                                        WRITE_DISCARD, EXCLUSIVE,
+                                        LEGION_WRITE_DISCARD, LEGION_EXCLUSIVE,
                                         launcher.parent);
       }
       requirement.privilege_fields = launcher.fields;
@@ -15730,10 +15749,10 @@ namespace Legion {
       initialize_privilege_path(privilege_path, requirement);
       if (runtime->legion_spy_enabled)
       { 
-        const bool reg = (requirement.handle_type == SINGULAR) ||
-                         (requirement.handle_type == REG_PROJECTION);
-        const bool proj = (requirement.handle_type == REG_PROJECTION) ||
-                          (requirement.handle_type == PART_PROJECTION); 
+        const bool reg = (requirement.handle_type == LEGION_SINGULAR_PROJECTION)
+                       || (requirement.handle_type == LEGION_REGION_PROJECTION);
+        const bool proj = (requirement.handle_type == LEGION_REGION_PROJECTION) 
+                    || (requirement.handle_type == LEGION_PARTITION_PROJECTION);
 
         LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/, reg,
             reg ? requirement.region.index_space.id :
@@ -16109,7 +16128,7 @@ namespace Legion {
       assert(idx == 0);
 #endif
       requirement.region = result;
-      requirement.handle_type = SINGULAR;
+      requirement.handle_type = LEGION_SINGULAR_PROJECTION;
     }
 
     //--------------------------------------------------------------------------
@@ -16167,7 +16186,7 @@ namespace Legion {
       mapping = launcher.mapped;
       switch (resource)
       {
-        case EXTERNAL_POSIX_FILE:
+        case LEGION_EXTERNAL_POSIX_FILE:
           {
             if (launcher.file_fields.empty()) 
               REPORT_LEGION_WARNING(LEGION_WARNING_FILE_ATTACH_OPERATION,
@@ -16177,8 +16196,8 @@ namespace Legion {
                               parent_ctx->get_unique_id())
             file_name = strdup(launcher.file_name);
             // Construct the region requirement for this task
-            requirement = RegionRequirement(launcher.handle, WRITE_DISCARD, 
-                                            EXCLUSIVE, launcher.parent);
+            requirement = RegionRequirement(launcher.handle, 
+                LEGION_WRITE_DISCARD, LEGION_EXCLUSIVE, launcher.parent);
             for (std::vector<FieldID>::const_iterator it = 
                   launcher.file_fields.begin(); it != 
                   launcher.file_fields.end(); it++)
@@ -16186,7 +16205,7 @@ namespace Legion {
             file_mode = launcher.mode;       
             break;
           }
-        case EXTERNAL_HDF5_FILE:
+        case LEGION_EXTERNAL_HDF5_FILE:
           {
 #ifndef LEGION_USE_HDF5
             REPORT_LEGION_ERROR(ERROR_ATTACH_HDF5,
@@ -16203,8 +16222,8 @@ namespace Legion {
                             parent_ctx->get_unique_id())
             file_name = strdup(launcher.file_name);
             // Construct the region requirement for this task
-            requirement = RegionRequirement(launcher.handle, WRITE_DISCARD, 
-                                            EXCLUSIVE, launcher.parent);
+            requirement = RegionRequirement(launcher.handle, 
+                LEGION_WRITE_DISCARD, LEGION_EXCLUSIVE, launcher.parent);
             for (std::map<FieldID,const char*>::const_iterator it = 
                   launcher.field_files.begin(); it != 
                   launcher.field_files.end(); it++)
@@ -16235,7 +16254,7 @@ namespace Legion {
                       "dimension must always be the last dimension for layout "
                       "constraints for HDF5 files.", unique_op_id,
                       parent_ctx->get_task_name(), parent_ctx->get_unique_id())
-                else if (*it == DIM_F)
+                else if (*it == LEGION_DIM_F)
                   has_dimf = true;
                 else if (int(*it) > dims)
                   REPORT_LEGION_ERROR(ERROR_ATTACH_HDF5_CONSTRAINT,
@@ -16261,7 +16280,7 @@ namespace Legion {
                     "HDF5 attach operations must be contiguous", unique_op_id,
                     parent_ctx->get_task_name(), parent_ctx->get_unique_id())
               if (!has_dimf)
-                output_constraint.ordering.push_back(DIM_F);
+                output_constraint.ordering.push_back(LEGION_DIM_F);
             }
             else
             {
@@ -16269,13 +16288,13 @@ namespace Legion {
               // on the number of dimensions
               for (int i = 0; i < dims; i++)
                 output_constraint.ordering.push_back(
-                    (DimensionKind)(DIM_X + i)); 
-              output_constraint.ordering.push_back(DIM_F);
+                    (DimensionKind)(LEGION_DIM_X + i)); 
+              output_constraint.ordering.push_back(LEGION_DIM_F);
             }
             output_constraint.contiguous = true;
             break;
           }
-        case EXTERNAL_INSTANCE:
+        case LEGION_EXTERNAL_INSTANCE:
           {
             layout_constraint_set = launcher.constraints;  
             const std::set<FieldID> &fields = launcher.privilege_fields;
@@ -16292,8 +16311,8 @@ namespace Legion {
                             parent_ctx->get_task_name(), 
                             parent_ctx->get_unique_id())
             // Construct the region requirement for this task
-            requirement = RegionRequirement(launcher.handle, WRITE_DISCARD, 
-                                            EXCLUSIVE, launcher.parent);
+            requirement = RegionRequirement(launcher.handle, 
+                LEGION_WRITE_DISCARD, LEGION_EXCLUSIVE, launcher.parent);
             for (std::set<FieldID>::const_iterator it = 
                   fields.begin(); it != fields.end(); it++)
               requirement.add_field(*it);
@@ -16427,15 +16446,15 @@ namespace Legion {
       InstanceRef external_instance;
       switch (resource)
       {
-        case EXTERNAL_POSIX_FILE:
-        case EXTERNAL_HDF5_FILE:
+        case LEGION_EXTERNAL_POSIX_FILE:
+        case LEGION_EXTERNAL_HDF5_FILE:
           {
             external_instance = 
               runtime->forest->create_external_instance(this, requirement, 
                                               requirement.instance_fields);
             break;
           }
-        case EXTERNAL_INSTANCE:
+        case LEGION_EXTERNAL_INSTANCE:
           {
             external_instance = 
               runtime->forest->create_external_instance(this, requirement,
@@ -16541,7 +16560,7 @@ namespace Legion {
       instance_footprint = footprint;
       switch (resource)
       {
-        case EXTERNAL_POSIX_FILE:
+        case LEGION_EXTERNAL_POSIX_FILE:
           {
             std::vector<Realm::FieldID> field_ids(field_set.size());
             unsigned idx = 0;
@@ -16553,7 +16572,7 @@ namespace Legion {
             result = node->create_file_instance(file_name, field_ids, sizes, 
                                                 file_mode, ready_event);
             constraints.specialized_constraint = 
-              SpecializedConstraint(GENERIC_FILE_SPECIALIZE);           
+              SpecializedConstraint(LEGION_GENERIC_FILE_SPECIALIZE);           
             constraints.field_constraint = 
               FieldConstraint(requirement.privilege_fields, 
                               false/*contiguous*/, false/*inorder*/);
@@ -16564,7 +16583,7 @@ namespace Legion {
             // AlignmentConstraints, OffsetConstraints
             break;
           }
-        case EXTERNAL_HDF5_FILE:
+        case LEGION_EXTERNAL_HDF5_FILE:
           {
             // First build the set of field paths
             std::vector<Realm::FieldID> field_ids(field_map.size());
@@ -16583,7 +16602,7 @@ namespace Legion {
                                       (file_mode == LEGION_FILE_READ_ONLY),
                                       ready_event);
             constraints.specialized_constraint = 
-              SpecializedConstraint(HDF5_FILE_SPECIALIZE);
+              SpecializedConstraint(LEGION_HDF5_FILE_SPECIALIZE);
             constraints.field_constraint = 
               FieldConstraint(requirement.privilege_fields, 
                               false/*contiguous*/, false/*inorder*/);
@@ -16593,7 +16612,7 @@ namespace Legion {
               layout_constraint_set.ordering_constraint;
             break;
           }
-        case EXTERNAL_INSTANCE:
+        case LEGION_EXTERNAL_INSTANCE:
           {
             Realm::InstanceLayoutGeneric *ilg = 
               node->create_layout(layout_constraint_set, field_set, sizes);
@@ -16606,7 +16625,7 @@ namespace Legion {
                                                     ilg, ready_event);
             constraints = layout_constraint_set;
             constraints.specialized_constraint = 
-              SpecializedConstraint(NORMAL_SPECIALIZE);
+              SpecializedConstraint(LEGION_AFFINE_SPECIALIZE);
             break;
           }
         default:
@@ -16665,8 +16684,9 @@ namespace Legion {
           }
         case ERROR_FIELD_SPACE_FIELD_MISMATCH:
           {
-            FieldSpace sp = (requirement.handle_type == SINGULAR) ||
-              (requirement.handle_type == REG_PROJECTION) ? 
+            FieldSpace sp = 
+              (requirement.handle_type == LEGION_SINGULAR_PROJECTION) ||
+              (requirement.handle_type == LEGION_REGION_PROJECTION) ? 
                 requirement.region.field_space :
                 requirement.partition.field_space;
             REPORT_LEGION_ERROR(ERROR_FIELD_NOT_VALID,
@@ -16834,8 +16854,8 @@ namespace Legion {
       requirement = region.impl->get_requirement();
       // Make sure that the privileges are read-write so that we wait for
       // all prior users of this particular region
-      requirement.privilege = READ_WRITE;
-      requirement.prop = EXCLUSIVE;
+      requirement.privilege = LEGION_READ_WRITE;
+      requirement.prop = LEGION_EXCLUSIVE;
       // Delay getting a reference until trigger_mapping().  This means we
       //  have to keep region
       if (!region.is_valid())
@@ -16998,7 +17018,7 @@ namespace Legion {
       ApEvent effects_done;
       if (flush)
       {
-        requirement.privilege = READ_ONLY;
+        requirement.privilege = LEGION_READ_ONLY;
         effects_done = 
           runtime->forest->physical_perform_updates_and_registration(
                                                   requirement, version_info,
@@ -17014,7 +17034,7 @@ namespace Legion {
                                                   true/*track effects*/,
                                                   false/*record valid*/,
                                                   false/*check initialized*/);
-        requirement.privilege = READ_WRITE;
+        requirement.privilege = LEGION_READ_WRITE;
       }
       InnerContext *context = find_physical_context(0/*index*/, requirement);
       std::vector<InstanceView*> external_views;
@@ -17274,19 +17294,19 @@ namespace Legion {
     {
       switch (measurement)
       {
-        case MEASURE_SECONDS:
+        case LEGION_MEASURE_SECONDS:
           {
             double value = Realm::Clock::current_time();
             result.impl->set_result(&value, sizeof(value), false);
             break;
           }
-        case MEASURE_MICRO_SECONDS:
+        case LEGION_MEASURE_MICRO_SECONDS:
           {
             long long value = Realm::Clock::current_time_in_microseconds();
             result.impl->set_result(&value, sizeof(value), false);
             break;
           }
-        case MEASURE_NANO_SECONDS:
+        case LEGION_MEASURE_NANO_SECONDS:
           {
             long long value = Realm::Clock::current_time_in_nanoseconds();
             result.impl->set_result(&value, sizeof(value), false);

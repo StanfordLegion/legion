@@ -653,7 +653,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Already hold the lock from the caller
-      RegionRequirement new_req(handle, READ_WRITE, EXCLUSIVE, handle);
+      RegionRequirement new_req(handle, LEGION_READ_WRITE, 
+                                LEGION_EXCLUSIVE, handle);
       if (runtime->legion_spy_enabled)
         TaskOp::log_requirement(get_unique_id(), next_created_index, new_req);
       // Put a region requirement with no fields in the list of
@@ -989,10 +990,10 @@ namespace Legion {
           RegionRequirement &req = delete_reqs.back();
           req.region = it->second.region;
           req.parent = it->second.region;
-          req.privilege = READ_WRITE;
-          req.prop = EXCLUSIVE;
+          req.privilege = LEGION_READ_WRITE;
+          req.prop = LEGION_EXCLUSIVE;
           req.privilege_fields = overlapping_fields;
-          req.handle_type = SINGULAR;
+          req.handle_type = LEGION_SINGULAR_PROJECTION;
           parent_req_indexes.push_back(it->first);
           std::map<unsigned,unsigned>::iterator deletion_finder =
             deletion_counts.find(it->first);
@@ -1082,10 +1083,10 @@ namespace Legion {
               RegionRequirement &req = delete_reqs.back();
               req.region = it->second.region;
               req.parent = it->second.region;
-              req.privilege = READ_WRITE;
-              req.prop = EXCLUSIVE;
+              req.privilege = LEGION_READ_WRITE;
+              req.prop = LEGION_EXCLUSIVE;
               req.privilege_fields = it->second.privilege_fields;
-              req.handle_type = SINGULAR;
+              req.handle_type = LEGION_SINGULAR_PROJECTION;
               req.flags = it->second.flags;
               parent_req_indexes.push_back(it->first);
               returnable.push_back(returnable_privileges[it->first]);
@@ -1192,10 +1193,10 @@ namespace Legion {
               RegionRequirement &req = delete_reqs.back();
               req.region = it->second.region;
               req.parent = it->second.region;
-              req.privilege = READ_WRITE;
-              req.prop = EXCLUSIVE;
+              req.privilege = LEGION_READ_WRITE;
+              req.prop = LEGION_EXCLUSIVE;
               req.privilege_fields = it->second.privilege_fields;
-              req.handle_type = SINGULAR;
+              req.handle_type = LEGION_SINGULAR_PROJECTION;
               parent_req_indexes.push_back(it->first);
               returnable.push_back(returnable_privileges[it->first]);
               // Always put a deletion index on here to mark that 
@@ -1385,7 +1386,7 @@ namespace Legion {
           physical_regions[our_idx].impl->get_requirement();
 #ifdef DEBUG_LEGION
         // This better be true for a single task
-        assert(our_req.handle_type == SINGULAR);
+        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
         RegionTreeID our_tid = our_req.region.get_tree_id();
         IndexSpace our_space = our_req.region.get_index_space();
@@ -1404,7 +1405,7 @@ namespace Legion {
         const RegionRequirement &our_req = it->impl->get_requirement();
 #ifdef DEBUG_LEGION
         // This better be true for a single task
-        assert(our_req.handle_type == SINGULAR);
+        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
         RegionTreeID our_tid = our_req.region.get_tree_id();
         IndexSpace our_space = our_req.region.get_index_space();
@@ -1437,7 +1438,7 @@ namespace Legion {
           physical_regions[our_idx].impl->get_requirement();
 #ifdef DEBUG_LEGION
         // This better be true for a single task
-        assert(our_req.handle_type == SINGULAR);
+        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
         RegionTreeID our_tid = our_req.region.get_tree_id();
         IndexSpace our_space = our_req.region.get_index_space();
@@ -1464,7 +1465,7 @@ namespace Legion {
         const RegionRequirement &our_req = it->impl->get_requirement();
 #ifdef DEBUG_LEGION
         // This better be true for a single task
-        assert(our_req.handle_type == SINGULAR);
+        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
         RegionTreeID our_tid = our_req.region.get_tree_id();
         IndexSpace our_space = our_req.region.get_index_space();
@@ -1503,7 +1504,7 @@ namespace Legion {
           physical_regions[our_idx].impl->get_requirement();
 #ifdef DEBUG_LEGION
         // This better be true for a single task
-        assert(our_req.handle_type == SINGULAR);
+        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
         RegionTreeID our_tid = our_req.region.get_tree_id();
         IndexSpace our_space = our_req.region.get_index_space();
@@ -1548,7 +1549,7 @@ namespace Legion {
         const RegionRequirement &our_req = it->impl->get_requirement();
 #ifdef DEBUG_LEGION
         // This better be true for a single task
-        assert(our_req.handle_type == SINGULAR);
+        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
         RegionTreeID our_tid = our_req.region.get_tree_id();
         IndexSpace our_space = our_req.region.get_index_space();
@@ -1635,7 +1636,7 @@ namespace Legion {
           physical_regions[our_idx].impl->get_requirement();
 #ifdef DEBUG_LEGION
         // This better be true for a single task
-        assert(our_req.handle_type == SINGULAR);
+        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
         RegionTreeID our_tid = our_req.region.get_tree_id();
         IndexSpace our_space = our_req.region.get_index_space();
@@ -1651,7 +1652,7 @@ namespace Legion {
         const RegionRequirement &our_req = it->impl->get_requirement();
 #ifdef DEBUG_LEGION
         // This better be true for a single task
-        assert(our_req.handle_type == SINGULAR);
+        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
         RegionTreeID our_tid = our_req.region.get_tree_id();
         IndexSpace our_space = our_req.region.get_index_space();
@@ -1681,8 +1682,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, CHECK_REGION_DEPENDENCE_CALL);
-      if ((req.handle_type == SINGULAR) || 
-          (req.handle_type == REG_PROJECTION))
+      if ((req.handle_type == LEGION_SINGULAR_PROJECTION) || 
+          (req.handle_type == LEGION_REGION_PROJECTION))
       {
         // If the trees are different we're done 
         if (our_tid != req.region.get_tree_id())
@@ -1724,8 +1725,8 @@ namespace Legion {
       switch (check_dependence_type(our_usage,usage))
       {
         // Only allow no-dependence, or simultaneous dependence through
-        case NO_DEPENDENCE:
-        case SIMULTANEOUS_DEPENDENCE:
+        case LEGION_NO_DEPENDENCE:
+        case LEGION_SIMULTANEOUS_DEPENDENCE:
           {
             return false;
           }
@@ -1933,8 +1934,8 @@ namespace Legion {
       RegionNode *top = runtime->forest->get_tree(req.parent.get_tree_id());
       const unsigned index = next_created_index++;
       RegionRequirement &new_req = created_requirements[index];
-      new_req = RegionRequirement(top->handle, READ_WRITE, 
-                                  EXCLUSIVE, top->handle);
+      new_req = RegionRequirement(top->handle, LEGION_READ_WRITE, 
+                                  LEGION_EXCLUSIVE, top->handle);
       if (runtime->legion_spy_enabled)
         TaskOp::log_requirement(get_unique_id(), index, new_req);
       // Add our fields
@@ -2051,7 +2052,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(bad_index < 0);
 #endif
-      if (req.flags & VERIFIED_FLAG)
+      if (req.flags & LEGION_VERIFIED_FLAG)
         return NO_ERROR;
       // Copy privilege fields for check
       std::set<FieldID> privilege_fields(req.privilege_fields);
@@ -2124,7 +2125,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(our_req.handle_type == SINGULAR); // better be singular
+      assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
       // Check to see if we found the requirement in the parent
       if (our_req.region == req.parent)
@@ -2133,8 +2134,8 @@ namespace Legion {
         // the parent name so we can set the bad index
         bad_index = local_index;
         bad_field = AUTO_GENERATE_ID; // set it to an invalid field
-        if ((req.handle_type == SINGULAR) || 
-            (req.handle_type == REG_PROJECTION))
+        if ((req.handle_type == LEGION_SINGULAR_PROJECTION) || 
+            (req.handle_type == LEGION_REGION_PROJECTION))
         {
           std::vector<LegionColor> path;
           if (!runtime->forest->compute_index_path(req.parent.index_space,
@@ -2161,8 +2162,8 @@ namespace Legion {
             // Only need to do this check if there were overlapping fields
             if (!skip_privilege && (PRIV_ONLY(req) & (~(our_req.privilege))))
             {
-              if ((req.handle_type == SINGULAR) || 
-                  (req.handle_type == REG_PROJECTION))
+              if ((req.handle_type == LEGION_SINGULAR_PROJECTION) || 
+                  (req.handle_type == LEGION_REGION_PROJECTION))
                 return ERROR_BAD_REGION_PRIVILEGES;
               else
                 return ERROR_BAD_PARTITION_PRIVILEGES;
@@ -3908,7 +3909,8 @@ namespace Legion {
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
       RtEvent safe = runtime->forest->create_pending_partition(this,pid,parent,
-        color_space, partition_color, DISJOINT_COMPLETE_KIND, did, term_event);
+                    color_space, partition_color, LEGION_DISJOINT_COMPLETE_KIND,
+                    did, term_event);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
       // Wait for any notifications to occur before returning
@@ -3943,7 +3945,8 @@ namespace Legion {
       // Tell the region tree forest about this partition
       RegionTreeForest *forest = runtime->forest;
       const RtEvent safe = forest->create_pending_partition(this, pid, parent,
-        color_space, partition_color, DISJOINT_COMPLETE_KIND, did, term_event);
+                  color_space, partition_color, LEGION_DISJOINT_COMPLETE_KIND,
+                  did, term_event);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
       // Wait for any notifications to occur before returning
@@ -3962,7 +3965,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      PartitionKind verify_kind = COMPUTE_KIND;
+      PartitionKind verify_kind = LEGION_COMPUTE_KIND;
       if (runtime->verify_partitions)
         SWAP_PART_KINDS(verify_kind, kind)
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
@@ -3991,8 +3994,9 @@ namespace Legion {
       part_op->initialize_union_partition(this, pid, handle1, handle2);
       ApEvent term_event = part_op->get_completion_event();
       // If either partition is aliased the result is aliased
-      if ((kind == COMPUTE_KIND) || (kind == COMPUTE_COMPLETE_KIND) ||
-          (kind == COMPUTE_INCOMPLETE_KIND))
+      if ((kind == LEGION_COMPUTE_KIND) || 
+          (kind == LEGION_COMPUTE_COMPLETE_KIND) ||
+          (kind == LEGION_COMPUTE_INCOMPLETE_KIND))
       {
         // If one of these partitions is aliased then the result is aliased
         IndexPartNode *p1 = runtime->forest->get_node(handle1);
@@ -4001,22 +4005,22 @@ namespace Legion {
           IndexPartNode *p2 = runtime->forest->get_node(handle2);
           if (!p2->is_disjoint(true/*from app*/))
           {
-            if (kind == COMPUTE_KIND)
-              kind = ALIASED_KIND;
-            else if (kind == COMPUTE_COMPLETE_KIND)
-              kind = ALIASED_COMPLETE_KIND;
+            if (kind == LEGION_COMPUTE_KIND)
+              kind = LEGION_ALIASED_KIND;
+            else if (kind == LEGION_COMPUTE_COMPLETE_KIND)
+              kind = LEGION_ALIASED_COMPLETE_KIND;
             else
-              kind = ALIASED_INCOMPLETE_KIND;
+              kind = LEGION_ALIASED_INCOMPLETE_KIND;
           }
         }
         else
         {
-          if (kind == COMPUTE_KIND)
-            kind = ALIASED_KIND;
-          else if (kind == COMPUTE_COMPLETE_KIND)
-            kind = ALIASED_COMPLETE_KIND;
+          if (kind == LEGION_COMPUTE_KIND)
+            kind = LEGION_ALIASED_KIND;
+          else if (kind == LEGION_COMPUTE_COMPLETE_KIND)
+            kind = LEGION_ALIASED_COMPLETE_KIND;
           else
-            kind = ALIASED_INCOMPLETE_KIND;
+            kind = LEGION_ALIASED_INCOMPLETE_KIND;
         }
       }
       // Tell the region tree forest about this partition
@@ -4042,7 +4046,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      PartitionKind verify_kind = COMPUTE_KIND;
+      PartitionKind verify_kind = LEGION_COMPUTE_KIND;
       if (runtime->verify_partitions)
         SWAP_PART_KINDS(verify_kind, kind)
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
@@ -4071,8 +4075,9 @@ namespace Legion {
       part_op->initialize_intersection_partition(this, pid, handle1, handle2);
       ApEvent term_event = part_op->get_completion_event();
       // If either partition is disjoint then the result is disjoint
-      if ((kind == COMPUTE_KIND) || (kind == COMPUTE_COMPLETE_KIND) ||
-          (kind == COMPUTE_INCOMPLETE_KIND))
+      if ((kind == LEGION_COMPUTE_KIND) || 
+          (kind == LEGION_COMPUTE_COMPLETE_KIND) ||
+          (kind == LEGION_COMPUTE_INCOMPLETE_KIND))
       {
         IndexPartNode *p1 = runtime->forest->get_node(handle1);
         if (!p1->is_disjoint(true/*from app*/))
@@ -4080,22 +4085,22 @@ namespace Legion {
           IndexPartNode *p2 = runtime->forest->get_node(handle2);
           if (p2->is_disjoint(true/*from app*/))
           {
-            if (kind == COMPUTE_KIND)
-              kind = DISJOINT_KIND;
-            else if (kind == COMPUTE_COMPLETE_KIND)
-              kind = DISJOINT_COMPLETE_KIND;
+            if (kind == LEGION_COMPUTE_KIND)
+              kind = LEGION_DISJOINT_KIND;
+            else if (kind == LEGION_COMPUTE_COMPLETE_KIND)
+              kind = LEGION_DISJOINT_COMPLETE_KIND;
             else
-              kind = DISJOINT_INCOMPLETE_KIND;
+              kind = LEGION_DISJOINT_INCOMPLETE_KIND;
           }
         }
         else
         {
-          if (kind == COMPUTE_KIND)
-            kind = DISJOINT_KIND;
-          else if (kind == COMPUTE_COMPLETE_KIND)
-            kind = DISJOINT_COMPLETE_KIND;
+          if (kind == LEGION_COMPUTE_KIND)
+            kind = LEGION_DISJOINT_KIND;
+          else if (kind == LEGION_COMPUTE_COMPLETE_KIND)
+            kind = LEGION_DISJOINT_COMPLETE_KIND;
           else
-            kind = DISJOINT_INCOMPLETE_KIND;
+            kind = LEGION_DISJOINT_INCOMPLETE_KIND;
         }
       }
       // Tell the region tree forest about this partition
@@ -4120,7 +4125,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      PartitionKind verify_kind = COMPUTE_KIND;
+      PartitionKind verify_kind = LEGION_COMPUTE_KIND;
       if (runtime->verify_partitions)
         SWAP_PART_KINDS(verify_kind, kind)
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
@@ -4145,17 +4150,18 @@ namespace Legion {
       ApEvent term_event = part_op->get_completion_event();
       IndexPartNode *part_node = runtime->forest->get_node(partition);
       // See if we can determine disjointness if we weren't told
-      if ((kind == COMPUTE_KIND) || (kind == COMPUTE_COMPLETE_KIND) ||
-          (kind == COMPUTE_INCOMPLETE_KIND))
+      if ((kind == LEGION_COMPUTE_KIND) || 
+          (kind == LEGION_COMPUTE_COMPLETE_KIND) ||
+          (kind == LEGION_COMPUTE_INCOMPLETE_KIND))
       {
         if (part_node->is_disjoint(true/*from app*/))
         {
-          if (kind == COMPUTE_KIND)
-            kind = DISJOINT_KIND;
-          else if (kind == COMPUTE_COMPLETE_KIND)
-            kind = DISJOINT_COMPLETE_KIND;
+          if (kind == LEGION_COMPUTE_KIND)
+            kind = LEGION_DISJOINT_KIND;
+          else if (kind == LEGION_COMPUTE_COMPLETE_KIND)
+            kind = LEGION_DISJOINT_COMPLETE_KIND;
           else
-            kind = DISJOINT_INCOMPLETE_KIND;
+            kind = LEGION_DISJOINT_INCOMPLETE_KIND;
         }
       }
       // Tell the region tree forest about this partition
@@ -4182,7 +4188,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
-      PartitionKind verify_kind = COMPUTE_KIND;
+      PartitionKind verify_kind = LEGION_COMPUTE_KIND;
       if (runtime->verify_partitions)
         SWAP_PART_KINDS(verify_kind, kind)
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
@@ -4213,18 +4219,19 @@ namespace Legion {
       part_op->initialize_difference_partition(this, pid, handle1, handle2);
       ApEvent term_event = part_op->get_completion_event();
       // If the left-hand-side is disjoint the result is disjoint
-      if ((kind == COMPUTE_KIND) || (kind == COMPUTE_COMPLETE_KIND) ||
-          (kind == COMPUTE_INCOMPLETE_KIND))
+      if ((kind == LEGION_COMPUTE_KIND) || 
+          (kind == LEGION_COMPUTE_COMPLETE_KIND) ||
+          (kind == LEGION_COMPUTE_INCOMPLETE_KIND))
       {
         IndexPartNode *p1 = runtime->forest->get_node(handle1);
         if (p1->is_disjoint(true/*from app*/))
         {
-          if (kind == COMPUTE_KIND)
-            kind = DISJOINT_KIND;
-          else if (kind == COMPUTE_COMPLETE_KIND)
-            kind = DISJOINT_COMPLETE_KIND;
+          if (kind == LEGION_COMPUTE_KIND)
+            kind = LEGION_DISJOINT_KIND;
+          else if (kind == LEGION_COMPUTE_COMPLETE_KIND)
+            kind = LEGION_DISJOINT_COMPLETE_KIND;
           else
-            kind = DISJOINT_INCOMPLETE_KIND;
+            kind = LEGION_DISJOINT_INCOMPLETE_KIND;
         }
       }
       // Tell the region tree forest about this partition
@@ -4260,7 +4267,7 @@ namespace Legion {
                               "cross product partitions!",
                               handle1.id, handle2.id)
 #endif
-      PartitionKind verify_kind = COMPUTE_KIND;
+      PartitionKind verify_kind = LEGION_COMPUTE_KIND;
       if (runtime->verify_partitions)
         SWAP_PART_KINDS(verify_kind, kind)
       LegionColor partition_color = INVALID_COLOR;
@@ -4379,7 +4386,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      PartitionKind verify_kind = COMPUTE_KIND;
+      PartitionKind verify_kind = LEGION_COMPUTE_KIND;
       if (runtime->verify_partitions)
         SWAP_PART_KINDS(verify_kind, part_kind)
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
@@ -4421,7 +4428,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      PartitionKind verify_kind = COMPUTE_KIND;
+      PartitionKind verify_kind = LEGION_COMPUTE_KIND;
       if (runtime->verify_partitions)
         SWAP_PART_KINDS(verify_kind, part_kind)
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
@@ -4464,7 +4471,7 @@ namespace Legion {
     {
       AutoRuntimeCall call(this);
       // Partition by field is disjoint by construction
-      PartitionKind verify_kind = DISJOINT_KIND;
+      PartitionKind verify_kind = LEGION_DISJOINT_KIND;
       if (runtime->verify_partitions)
         SWAP_PART_KINDS(verify_kind, part_kind)
       IndexSpace parent = handle.get_index_space(); 
@@ -4531,7 +4538,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
-      PartitionKind verify_kind = COMPUTE_KIND;
+      PartitionKind verify_kind = LEGION_COMPUTE_KIND;
       if (runtime->verify_partitions)
         SWAP_PART_KINDS(verify_kind, part_kind)
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
@@ -4597,7 +4604,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
-      PartitionKind verify_kind = COMPUTE_KIND;
+      PartitionKind verify_kind = LEGION_COMPUTE_KIND;
       if (runtime->verify_partitions)
         SWAP_PART_KINDS(verify_kind, part_kind)
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
@@ -4663,7 +4670,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
-      PartitionKind verify_kind = COMPUTE_KIND;
+      PartitionKind verify_kind = LEGION_COMPUTE_KIND;
       if (runtime->verify_partitions)
         SWAP_PART_KINDS(verify_kind, part_kind)
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
@@ -4683,18 +4690,19 @@ namespace Legion {
       ApEvent term_event = part_op->get_completion_event();
       // If the source of the preimage is disjoint then the result is disjoint
       // Note this only applies here and not to range
-      if ((part_kind == COMPUTE_KIND) || (part_kind == COMPUTE_COMPLETE_KIND) ||
-          (part_kind == COMPUTE_INCOMPLETE_KIND))
+      if ((part_kind == LEGION_COMPUTE_KIND) || 
+          (part_kind == LEGION_COMPUTE_COMPLETE_KIND) ||
+          (part_kind == LEGION_COMPUTE_INCOMPLETE_KIND))
       {
         IndexPartNode *p = runtime->forest->get_node(projection);
         if (p->is_disjoint(true/*from app*/))
         {
-          if (part_kind == COMPUTE_KIND)
-            part_kind = DISJOINT_KIND;
-          else if (part_kind == COMPUTE_COMPLETE_KIND)
-            part_kind = DISJOINT_COMPLETE_KIND;
+          if (part_kind == LEGION_COMPUTE_KIND)
+            part_kind = LEGION_DISJOINT_KIND;
+          else if (part_kind == LEGION_COMPUTE_COMPLETE_KIND)
+            part_kind = LEGION_DISJOINT_COMPLETE_KIND;
           else
-            part_kind = DISJOINT_INCOMPLETE_KIND;
+            part_kind = LEGION_DISJOINT_INCOMPLETE_KIND;
         }
       }
       // Tell the region tree forest about this partition
@@ -4747,7 +4755,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
-      PartitionKind verify_kind = COMPUTE_KIND;
+      PartitionKind verify_kind = LEGION_COMPUTE_KIND;
       if (runtime->verify_partitions)
         SWAP_PART_KINDS(verify_kind, part_kind)
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
@@ -4811,7 +4819,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      PartitionKind verify_kind = COMPUTE_KIND;
+      PartitionKind verify_kind = LEGION_COMPUTE_KIND;
       if (runtime->verify_partitions)
         SWAP_PART_KINDS(verify_kind, part_kind)
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
@@ -5142,54 +5150,59 @@ namespace Legion {
         delete itr;
       }
       // Check disjointness
-      if ((kind == DISJOINT_KIND) || (kind == DISJOINT_COMPLETE_KIND) ||
-          (kind == DISJOINT_INCOMPLETE_KIND))
+      if ((kind == LEGION_DISJOINT_KIND) || 
+          (kind == LEGION_DISJOINT_COMPLETE_KIND) ||
+          (kind == LEGION_DISJOINT_INCOMPLETE_KIND))
       {
         if (!node->is_disjoint(true/*from application*/))
           REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
               "Call to partitioning function %s in %s (UID %lld) specified "
               "partition was %s but the partition is aliased.",
               function_name, get_task_name(), get_unique_id(),
-              (kind == DISJOINT_KIND) ? "DISJOINT_KIND" :
-              (kind == DISJOINT_COMPLETE_KIND) ? "DISJOINT_COMPLETE_KIND" :
-              "DISJOINT_INCOMPLETE_KIND")
+              (kind == LEGION_DISJOINT_KIND) ? "DISJOINT_KIND" :
+              (kind == LEGION_DISJOINT_COMPLETE_KIND) ? "DISJOINT_COMPLETE_KIND"
+              : "DISJOINT_INCOMPLETE_KIND")
       }
-      else if ((kind == ALIASED_KIND) || (kind == ALIASED_COMPLETE_KIND) ||
-               (kind == ALIASED_INCOMPLETE_KIND))
+      else if ((kind == LEGION_ALIASED_KIND) || 
+               (kind == LEGION_ALIASED_COMPLETE_KIND) ||
+               (kind == LEGION_ALIASED_INCOMPLETE_KIND))
       {
         if (node->is_disjoint(true/*from application*/))
           REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
               "Call to partitioning function %s in %s (UID %lld) specified "
               "partition was %s but the partition is disjoint.",
               function_name, get_task_name(), get_unique_id(),
-              (kind == ALIASED_KIND) ? "ALIASED_KIND" :
-              (kind == ALIASED_COMPLETE_KIND) ? "ALIASED_COMPLETE_KIND" :
+              (kind == LEGION_ALIASED_KIND) ? "ALIASED_KIND" :
+              (kind == LEGION_ALIASED_COMPLETE_KIND) ? "ALIASED_COMPLETE_KIND" :
               "ALIASED_INCOMPLETE_KIND")
       }
       // Check completeness
-      if ((kind == DISJOINT_COMPLETE_KIND) || (kind == ALIASED_COMPLETE_KIND) ||
-          (kind == COMPUTE_COMPLETE_KIND))
+      if ((kind == LEGION_DISJOINT_COMPLETE_KIND) || 
+          (kind == LEGION_ALIASED_COMPLETE_KIND) ||
+          (kind == LEGION_COMPUTE_COMPLETE_KIND))
       {
         if (!node->is_complete(true/*from application*/))
           REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
               "Call to partitioning function %s in %s (UID %lld) specified "
               "partition was %s but the partition is incomplete.",
               function_name, get_task_name(), get_unique_id(),
-              (kind == DISJOINT_COMPLETE_KIND) ? "DISJOINT_COMPLETE_KIND" :
-              (kind == ALIASED_COMPLETE_KIND) ? "ALIASED_COMPLETE_KIND" :
+              (kind == LEGION_DISJOINT_COMPLETE_KIND) ? "DISJOINT_COMPLETE_KIND" 
+            : (kind == LEGION_ALIASED_COMPLETE_KIND) ? "ALIASED_COMPLETE_KIND" :
               "COMPUTE_COMPLETE_KIND")
       }
-      else if ((kind == DISJOINT_INCOMPLETE_KIND) || 
-         (kind == ALIASED_INCOMPLETE_KIND) || (kind == COMPUTE_INCOMPLETE_KIND))
+      else if ((kind == LEGION_DISJOINT_INCOMPLETE_KIND) || 
+               (kind == LEGION_ALIASED_INCOMPLETE_KIND) || 
+               (kind == LEGION_COMPUTE_INCOMPLETE_KIND))
       {
         if (node->is_complete(true/*from application*/))
           REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
               "Call to partitioning function %s in %s (UID %lld) specified "
               "partition was %s but the partition is complete.",
               function_name, get_task_name(), get_unique_id(),
-              (kind == DISJOINT_INCOMPLETE_KIND) ? "DISJOINT_INCOMPLETE_KIND" :
-              (kind == ALIASED_INCOMPLETE_KIND) ? "ALIASED_INCOMPLETE_KIND" :
-              "COMPUTE_INCOMPLETE_KIND")
+              (kind == LEGION_DISJOINT_INCOMPLETE_KIND) ? 
+                "DISJOINT_INCOMPLETE_KIND" :
+              (kind == LEGION_ALIASED_INCOMPLETE_KIND) ? 
+              "ALIASED_INCOMPLETE_KIND" : "COMPUTE_INCOMPLETE_KIND")
       } 
     }
 
@@ -8086,7 +8099,7 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         // this better be true for single tasks
-        assert(regions[idx].handle_type == SINGULAR);
+        assert(regions[idx].handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
         // If this is a NO_ACCESS or had no privilege fields we can skip this
         if (no_access_regions[idx])

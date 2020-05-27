@@ -3124,7 +3124,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       const void *name; size_t dummy_size;
-      runtime->retrieve_semantic_information(task_id, NAME_SEMANTIC_TAG,
+      runtime->retrieve_semantic_information(task_id, LEGION_NAME_SEMANTIC_TAG,
                                              name, dummy_size, false, false);
       result = reinterpret_cast<const char*>(name);
       resume_mapper_call(ctx);
@@ -3137,7 +3137,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       const void *name; size_t dummy_size;
-      runtime->retrieve_semantic_information(handle, NAME_SEMANTIC_TAG,
+      runtime->retrieve_semantic_information(handle, LEGION_NAME_SEMANTIC_TAG,
                                              name, dummy_size, false, false);
       result = reinterpret_cast<const char*>(name);
       resume_mapper_call(ctx);
@@ -3150,7 +3150,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       const void *name; size_t dummy_size;
-      runtime->retrieve_semantic_information(handle, NAME_SEMANTIC_TAG,
+      runtime->retrieve_semantic_information(handle, LEGION_NAME_SEMANTIC_TAG,
                                              name, dummy_size, false, false);
       result = reinterpret_cast<const char*>(name);
       resume_mapper_call(ctx);
@@ -3163,7 +3163,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       const void *name; size_t dummy_size;
-      runtime->retrieve_semantic_information(handle, NAME_SEMANTIC_TAG,
+      runtime->retrieve_semantic_information(handle, LEGION_NAME_SEMANTIC_TAG,
                                              name, dummy_size, false, false);
       result = reinterpret_cast<const char*>(name);
       resume_mapper_call(ctx);
@@ -3176,8 +3176,8 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       const void *name; size_t dummy_size;
-      runtime->retrieve_semantic_information(handle, fid, NAME_SEMANTIC_TAG,
-                                             name, dummy_size, false, false);
+      runtime->retrieve_semantic_information(handle, fid, 
+          LEGION_NAME_SEMANTIC_TAG, name, dummy_size, false, false);
       result = reinterpret_cast<const char*>(name);
       resume_mapper_call(ctx);
     }
@@ -3189,7 +3189,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       const void *name; size_t dummy_size;
-      runtime->retrieve_semantic_information(handle, NAME_SEMANTIC_TAG,
+      runtime->retrieve_semantic_information(handle, LEGION_NAME_SEMANTIC_TAG,
                                              name, dummy_size, false, false);
       result = reinterpret_cast<const char*>(name);
       resume_mapper_call(ctx);
@@ -3202,7 +3202,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       const void *name; size_t dummy_size;
-      runtime->retrieve_semantic_information(handle, NAME_SEMANTIC_TAG,
+      runtime->retrieve_semantic_information(handle, LEGION_NAME_SEMANTIC_TAG,
                                              name, dummy_size, false, false);
       result = reinterpret_cast<const char*>(name);
       resume_mapper_call(ctx);

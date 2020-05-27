@@ -4134,7 +4134,7 @@ legion_runtime_attach_hdf5(
   std::map<FieldID, const char *> *field_map =
     CObjectWrapper::unwrap(field_map_);
 
-  AttachLauncher launcher(EXTERNAL_HDF5_FILE, handle, parent);
+  AttachLauncher launcher(LEGION_EXTERNAL_HDF5_FILE, handle, parent);
   launcher.attach_hdf5(filename, *field_map, mode);
 
   PhysicalRegion result = runtime->attach_external_resource(ctx, launcher);
@@ -4268,7 +4268,7 @@ legion_copy_launcher_add_src_indirect_region_requirement_logical_region(
 
   unsigned idx = launcher->src_requirements.size();
   launcher->add_src_indirect_field(fid,
-    RegionRequirement(handle, READ_ONLY, prop, parent, tag, verified),
+    RegionRequirement(handle, LEGION_READ_ONLY, prop, parent, tag, verified),
     is_range_indirection);
   return idx;
 }
@@ -4290,7 +4290,7 @@ legion_copy_launcher_add_dst_indirect_region_requirement_logical_region(
 
   unsigned idx = launcher->dst_requirements.size();
   launcher->add_dst_indirect_field(fid,
-    RegionRequirement(handle, READ_ONLY, prop, parent, tag, verified),
+    RegionRequirement(handle, LEGION_READ_ONLY, prop, parent, tag, verified),
     is_range_indirection);
   return idx;
 }
@@ -4556,7 +4556,7 @@ legion_index_copy_launcher_add_src_indirect_region_requirement_logical_region(
 
   unsigned idx = launcher->src_requirements.size();
   launcher->add_src_indirect_field(fid,
-    RegionRequirement(handle, proj, READ_ONLY, prop, parent, tag, verified),
+    RegionRequirement(handle, proj, LEGION_READ_ONLY, prop, parent, tag, verified),
     is_range_indirection);
   return idx;
 }
@@ -4579,7 +4579,7 @@ legion_index_copy_launcher_add_dst_indirect_region_requirement_logical_region(
 
   unsigned idx = launcher->dst_requirements.size();
   launcher->add_dst_indirect_field(fid,
-    RegionRequirement(handle, proj, READ_ONLY, prop, parent, tag, verified),
+    RegionRequirement(handle, proj, LEGION_READ_ONLY, prop, parent, tag, verified),
     is_range_indirection);
   return idx;
 }
@@ -4602,7 +4602,7 @@ legion_index_copy_launcher_add_src_indirect_region_requirement_logical_partition
 
   unsigned idx = launcher->src_requirements.size();
   launcher->add_src_indirect_field(fid,
-    RegionRequirement(handle, proj, READ_ONLY, prop, parent, tag, verified),
+    RegionRequirement(handle, proj, LEGION_READ_ONLY, prop, parent, tag, verified),
     is_range_indirection);
   return idx;
 }
@@ -4625,7 +4625,7 @@ legion_index_copy_launcher_add_dst_indirect_region_requirement_logical_partition
 
   unsigned idx = launcher->dst_requirements.size();
   launcher->add_dst_indirect_field(fid,
-    RegionRequirement(handle, proj, READ_ONLY, prop, parent, tag, verified),
+    RegionRequirement(handle, proj, LEGION_READ_ONLY, prop, parent, tag, verified),
     is_range_indirection);
   return idx;
 }
@@ -6923,7 +6923,7 @@ legion_issue_timing_op_seconds(legion_runtime_t runtime_,
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
 
-  TimingLauncher launcher(MEASURE_SECONDS);
+  TimingLauncher launcher(LEGION_MEASURE_SECONDS);
   Future f = runtime->issue_timing_measurement(ctx, launcher);  
   return CObjectWrapper::wrap(new Future(f));
 }
@@ -6935,7 +6935,7 @@ legion_issue_timing_op_microseconds(legion_runtime_t runtime_,
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
 
-  TimingLauncher launcher(MEASURE_MICRO_SECONDS);
+  TimingLauncher launcher(LEGION_MEASURE_MICRO_SECONDS);
   Future f = runtime->issue_timing_measurement(ctx, launcher);  
   return CObjectWrapper::wrap(new Future(f));
 }
@@ -6947,7 +6947,7 @@ legion_issue_timing_op_nanoseconds(legion_runtime_t runtime_,
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
 
-  TimingLauncher launcher(MEASURE_NANO_SECONDS);
+  TimingLauncher launcher(LEGION_MEASURE_NANO_SECONDS);
   Future f = runtime->issue_timing_measurement(ctx, launcher);  
   return CObjectWrapper::wrap(new Future(f));
 }

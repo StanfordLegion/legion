@@ -35,7 +35,7 @@ namespace Legion {
       public:
         DependenceRecord(int idx)
           : operation_idx(idx), prev_idx(-1), next_idx(-1),
-            validates(false), dtype(TRUE_DEPENDENCE) { }
+            validates(false), dtype(LEGION_TRUE_DEPENDENCE) { }
         DependenceRecord(int op_idx, int pidx, int nidx,
                          bool val, DependenceType d,
                          const FieldMask &m)

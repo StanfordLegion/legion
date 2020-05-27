@@ -2060,18 +2060,18 @@ namespace Legion {
       // Check the privilege mode first
       switch (mode)
       {
-        case READ_ONLY:
+        case LEGION_READ_ONLY:
           {
-            if (!(READ_ONLY & req.privilege))
+            if (!(LEGION_READ_ONLY & req.privilege))
               REPORT_LEGION_ERROR(ERROR_ACCESSOR_PRIVILEGE_CHECK, 
                             "Error creating read-only field accessor without "
                             "read-only privileges on field %d in task %s",
                             fid, context->get_task_name())
             break;
           }
-        case READ_WRITE:
+        case LEGION_READ_WRITE:
           {
-            if (req.privilege == WRITE_DISCARD)
+            if (req.privilege == LEGION_WRITE_DISCARD)
             {
               if (!silence_warnings)
                 REPORT_LEGION_WARNING(LEGION_WARNING_READ_DISCARD, 
@@ -2083,28 +2083,28 @@ namespace Legion {
                                 fid, context->get_task_name(),
                                 (warning_string == NULL) ? "" : warning_string)
             }
-            else if (req.privilege != READ_WRITE)
+            else if (req.privilege != LEGION_READ_WRITE)
               REPORT_LEGION_ERROR(ERROR_ACCESSOR_PRIVILEGE_CHECK, 
                             "Error creating read-write field accessor without "
                             "read-write privileges on field %d in task %s",
                             fid, context->get_task_name())
             break;
           }
-        case WRITE_ONLY:
-        case WRITE_DISCARD:
+        case LEGION_WRITE_ONLY:
+        case LEGION_WRITE_DISCARD:
           {
-            if (!(WRITE_DISCARD & req.privilege))
+            if (!(LEGION_WRITE_DISCARD & req.privilege))
               REPORT_LEGION_ERROR(ERROR_ACCESSOR_PRIVILEGE_CHECK, 
                             "Error creating write-discard field accessor "
                             "without write privileges on field %d in task %s",
                             fid, context->get_task_name())
             break;
           }
-        case REDUCE:
+        case LEGION_REDUCE:
           {
-            if ((REDUCE != req.privilege) || (redop != req.redop))
+            if ((LEGION_REDUCE != req.privilege) || (redop != req.redop))
             {
-              if (!(REDUCE & req.privilege))
+              if (!(LEGION_REDUCE & req.privilege))
                 REPORT_LEGION_ERROR(ERROR_ACCESSOR_PRIVILEGE_CHECK, 
                               "Error creating reduction field accessor "
                               "without reduction privileges on field %d in "
@@ -2260,7 +2260,7 @@ namespace Legion {
       strcat(point_string,")");
       switch (mode)
       {
-        case READ_ONLY:
+        case LEGION_READ_ONLY:
           {
             REPORT_LEGION_ERROR(ERROR_ACCESSOR_BOUNDS_CHECK, 
                           "Bounds check failure reading point %s from "
@@ -2269,7 +2269,7 @@ namespace Legion {
                           multi ? " for multi-region accessor" : "")
             break;
           }
-        case READ_WRITE:
+        case LEGION_READ_WRITE:
           {
             REPORT_LEGION_ERROR(ERROR_ACCESSOR_BOUNDS_CHECK, 
                           "Bounds check failure geting a reference to point %s "
@@ -2278,8 +2278,8 @@ namespace Legion {
                           multi ? " for multi-region accessor" : "")
             break;
           }
-        case WRITE_ONLY:
-        case WRITE_DISCARD:
+        case LEGION_WRITE_ONLY:
+        case LEGION_WRITE_DISCARD:
           {
             REPORT_LEGION_ERROR(ERROR_ACCESSOR_BOUNDS_CHECK, 
                           "Bounds check failure writing to point %s in "
@@ -2288,7 +2288,7 @@ namespace Legion {
                           multi ? " for multi-region accessor" : "")
             break;
           }
-        case REDUCE:
+        case LEGION_REDUCE:
           {
             REPORT_LEGION_ERROR(ERROR_ACCESSOR_BOUNDS_CHECK, 
                           "Bounds check failure reducing to point %s in "
@@ -2331,7 +2331,7 @@ namespace Legion {
       strcat(rect_string,")");
       switch (mode)
       {
-        case READ_ONLY:
+        case LEGION_READ_ONLY:
           {
             REPORT_LEGION_ERROR(ERROR_ACCESSOR_BOUNDS_CHECK, 
                           "Bounds check failure getting a read-only reference "
@@ -2340,7 +2340,7 @@ namespace Legion {
                           multi ? " for multi-region accessor" : "")
             break;
           }
-        case READ_WRITE:
+        case LEGION_READ_WRITE:
           {
             REPORT_LEGION_ERROR(ERROR_ACCESSOR_BOUNDS_CHECK, 
                           "Bounds check failure geting a reference to rect %s "
@@ -2373,7 +2373,7 @@ namespace Legion {
       strcat(point_string,")");
       switch (mode)
       {
-        case READ_ONLY:
+        case LEGION_READ_ONLY:
           {
             REPORT_LEGION_ERROR(ERROR_ACCESSOR_PRIVILEGE_CHECK, 
                           "Privilege check failure reading point %s from "
@@ -2381,7 +2381,7 @@ namespace Legion {
                           implicit_context->get_task_name())
             break;
           }
-        case READ_WRITE:
+        case LEGION_READ_WRITE:
           {
             REPORT_LEGION_ERROR(ERROR_ACCESSOR_PRIVILEGE_CHECK, 
                           "Privilege check failure geting a reference to point "
@@ -2389,8 +2389,8 @@ namespace Legion {
                           implicit_context->get_task_name())
             break;
           }
-        case WRITE_ONLY:
-        case WRITE_DISCARD:
+        case LEGION_WRITE_ONLY:
+        case LEGION_WRITE_DISCARD:
           {
             REPORT_LEGION_ERROR(ERROR_ACCESSOR_PRIVILEGE_CHECK, 
                           "Privilege check failure writing to point %s in "
@@ -2398,7 +2398,7 @@ namespace Legion {
                           implicit_context->get_task_name())
             break;
           }
-        case REDUCE:
+        case LEGION_REDUCE:
           {
             REPORT_LEGION_ERROR(ERROR_ACCESSOR_PRIVILEGE_CHECK, 
                           "Privilege check failure reducing to point %s in "
@@ -2440,7 +2440,7 @@ namespace Legion {
       strcat(rect_string,")");
       switch (mode)
       {
-        case READ_ONLY:
+        case LEGION_READ_ONLY:
           {
             REPORT_LEGION_ERROR(ERROR_ACCESSOR_PRIVILEGE_CHECK, 
                           "Privilege check failure getting a read-only "
@@ -2448,7 +2448,7 @@ namespace Legion {
                           rect_string, fid, implicit_context->get_task_name())
             break;
           }
-        case READ_WRITE:
+        case LEGION_READ_WRITE:
           {
             REPORT_LEGION_ERROR(ERROR_ACCESSOR_PRIVILEGE_CHECK, 
                           "Privilege check failure geting a reference to rect "
@@ -8582,7 +8582,7 @@ namespace Legion {
       // Do this first before any logging for the variant
       if (logical_task_name != NULL)
         runtime->attach_semantic_information(registrar.task_id, 
-                          NAME_SEMANTIC_TAG, logical_task_name, 
+                          LEGION_NAME_SEMANTIC_TAG, logical_task_name, 
                           strlen(logical_task_name)+1, 
                           false/*mutable*/, false/*send to owner*/);
       runtime->register_variant(registrar, user_data, user_data_size,
@@ -8607,7 +8607,7 @@ namespace Legion {
         const size_t name_size = strlen(name) + 1; // for \0
         char *name_copy = (char*)legion_malloc(SEMANTIC_INFO_ALLOC, name_size);
         memcpy(name_copy, name, name_size);
-        semantic_infos[NAME_SEMANTIC_TAG] = 
+        semantic_infos[LEGION_NAME_SEMANTIC_TAG] = 
           SemanticInfo(name_copy, name_size, false/*mutable*/);
         if (runtime->legion_spy_enabled)
           LegionSpy::log_task_name(task_id, name);
@@ -8777,8 +8777,8 @@ namespace Legion {
       {
         // Do the request through the semantic information
         const void *result = NULL; size_t dummy_size;
-        if (retrieve_semantic_information(NAME_SEMANTIC_TAG, result, dummy_size,
-                                          true/*can fail*/,false/*wait until*/))
+        if (retrieve_semantic_information(LEGION_NAME_SEMANTIC_TAG, result, 
+              dummy_size, true/*can fail*/, false/*wait until*/))
           return reinterpret_cast<const char*>(result);
       }
       else
@@ -8786,7 +8786,7 @@ namespace Legion {
         // If we're already holding the lock then we can just do
         // the local look-up regardless of if we're the owner or not
         std::map<SemanticTag,SemanticInfo>::const_iterator finder = 
-          semantic_infos.find(NAME_SEMANTIC_TAG);
+          semantic_infos.find(LEGION_NAME_SEMANTIC_TAG);
         if (finder != semantic_infos.end())
           return reinterpret_cast<const char*>(finder->second.buffer);
       }
@@ -8801,7 +8801,7 @@ namespace Legion {
                                             bool is_mutable, bool send_to_owner)
     //--------------------------------------------------------------------------
     {
-      if ((tag == NAME_SEMANTIC_TAG) && (runtime->profiler != NULL))
+      if ((tag == LEGION_NAME_SEMANTIC_TAG) && (runtime->profiler != NULL))
         runtime->profiler->register_task_kind(task_id,(const char*)buffer,true);
 
       void *local = legion_malloc(SEMANTIC_INFO_ALLOC, size);
@@ -8879,7 +8879,7 @@ namespace Legion {
           if ((owner_space != runtime->address_space) && 
               (source != owner_space))
           {
-            if (tag == NAME_SEMANTIC_TAG)
+            if (tag == LEGION_NAME_SEMANTIC_TAG)
             {
               // Special case here for task names, the user can reasonably
               // expect all tasks to have an initial name so we have to 
@@ -10094,12 +10094,12 @@ namespace Legion {
     {
       const RegionRequirement &req = task->regions[idx];
 #ifdef DEBUG_LEGION
-      assert(req.handle_type != SINGULAR);
+      assert(req.handle_type != LEGION_SINGULAR_PROJECTION);
 #endif
       if (!is_exclusive)
       {
         AutoLock p_lock(projection_reservation);
-        if (req.handle_type == PART_PROJECTION)
+        if (req.handle_type == LEGION_PARTITION_PROJECTION)
         {
           LogicalRegion result = functor->project(task, idx, 
                                                   req.partition, point); 
@@ -10115,7 +10115,7 @@ namespace Legion {
       }
       else
       {
-        if (req.handle_type == PART_PROJECTION)
+        if (req.handle_type == LEGION_PARTITION_PROJECTION)
         {
           LogicalRegion result = functor->project(task, idx, 
                                                   req.partition, point);
@@ -10139,7 +10139,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(req.handle_type != SINGULAR);
+      assert(req.handle_type != LEGION_SINGULAR_PROJECTION);
 #endif
       std::map<LogicalRegion,std::vector<DomainPoint> > dependences;
       const bool find_dependences = is_invertible && IS_WRITE(req);
@@ -10149,7 +10149,7 @@ namespace Legion {
       if (!is_exclusive)
       {
         AutoLock p_lock(projection_reservation);
-        if (req.handle_type == PART_PROJECTION)
+        if (req.handle_type == LEGION_PARTITION_PROJECTION)
         {
           for (std::vector<PointTask*>::const_iterator it = 
                 point_tasks.begin(); it != point_tasks.end(); it++)
@@ -10200,7 +10200,7 @@ namespace Legion {
       }
       else
       {
-        if (req.handle_type == PART_PROJECTION)
+        if (req.handle_type == LEGION_PARTITION_PROJECTION)
         {
           for (std::vector<PointTask*>::const_iterator it = 
                 point_tasks.begin(); it != point_tasks.end(); it++)
@@ -10259,17 +10259,17 @@ namespace Legion {
     {
       Mappable *mappable = op->get_mappable();
 #ifdef DEBUG_LEGION
-      assert(req.handle_type != SINGULAR);
+      assert(req.handle_type != LEGION_SINGULAR_PROJECTION);
       assert(mappable != NULL);
 #endif
       // TODO: support for invertible point operations
-      if (is_invertible && (req.privilege == READ_WRITE))
+      if (is_invertible && (req.privilege == LEGION_READ_WRITE))
         assert(false);
 
       if (!is_exclusive)
       {
         AutoLock p_lock(projection_reservation);
-        if (req.handle_type == PART_PROJECTION)
+        if (req.handle_type == LEGION_PARTITION_PROJECTION)
         {
           for (std::vector<ProjectionPoint*>::const_iterator it = 
                 points.begin(); it != points.end(); it++)
@@ -10294,7 +10294,7 @@ namespace Legion {
       }
       else
       {
-        if (req.handle_type == PART_PROJECTION)
+        if (req.handle_type == LEGION_PARTITION_PROJECTION)
         {
           for (std::vector<ProjectionPoint*>::const_iterator it = 
                 points.begin(); it != points.end(); it++)
@@ -11522,7 +11522,7 @@ namespace Legion {
       // make a layout constraints
       LayoutConstraintSet constraint_set;
       constraint_set.add_constraint(
-          SpecializedConstraint(VIRTUAL_SPECIALIZE));
+          SpecializedConstraint(LEGION_VIRTUAL_SPECIALIZE));
       LayoutConstraints *constraints = 
         register_layout(FieldSpace::NO_SPACE, constraint_set, true/*internal*/);
       FieldMask all_ones(LEGION_FIELD_MASK_FIELD_ALL_ONES);
@@ -14147,7 +14147,7 @@ namespace Legion {
       if ((implicit_context != NULL) && 
           !implicit_context->perform_semantic_attach(send_to_owner))
         return;
-      if ((tag == NAME_SEMANTIC_TAG) && legion_spy_enabled)
+      if ((tag == LEGION_NAME_SEMANTIC_TAG) && legion_spy_enabled)
         LegionSpy::log_task_name(task_id, static_cast<const char*>(buffer));
       TaskImpl *impl = find_or_create_task_impl(task_id);
       impl->attach_semantic_information(tag, address_space, buffer, size, 
@@ -20765,8 +20765,8 @@ namespace Legion {
                                const RegionRequirement &req, FieldID &bad_field)
     //--------------------------------------------------------------------------
     {
-      FieldSpace sp = (req.handle_type == SINGULAR) 
-                      || (req.handle_type == REG_PROJECTION)
+      FieldSpace sp = (req.handle_type == LEGION_SINGULAR_PROJECTION) 
+                      || (req.handle_type == LEGION_REGION_PROJECTION)
                         ? req.region.field_space : req.partition.field_space;
       // First make sure that all the privilege fields are valid for
       // the given field space of the region or partition
@@ -20780,7 +20780,8 @@ namespace Legion {
         }
       }
       // Make sure that the requested node is a valid request
-      if ((req.handle_type == SINGULAR) || (req.handle_type == REG_PROJECTION))
+      if ((req.handle_type == LEGION_SINGULAR_PROJECTION) || 
+          (req.handle_type == LEGION_REGION_PROJECTION))
       {
         if (!forest->has_node(req.region))
           return ERROR_INVALID_REGION_HANDLE;
@@ -20817,7 +20818,7 @@ namespace Legion {
 
       // If this is a projection requirement and the child region selected will 
       // need to be in exclusive mode then the partition must be disjoint
-      if ((req.handle_type == PART_PROJECTION) && 
+      if ((req.handle_type == LEGION_PARTITION_PROJECTION) && 
           (IS_WRITE(req)))
       {
         if (!forest->is_disjoint(req.partition))
@@ -21944,7 +21945,7 @@ namespace Legion {
         // Save the top-level task name if necessary
         if (task_name != NULL)
           attach_semantic_information(top_task_id, 
-              NAME_SEMANTIC_TAG, task_name, 
+              LEGION_NAME_SEMANTIC_TAG, task_name, 
               strlen(task_name) + 1, true/*mutable*/);
         // Get an individual task to be the top-level task
         IndividualTask *top_task = get_available_individual_task();

@@ -509,7 +509,7 @@ namespace Legion {
             constraints.alignment_constraints.end(); it++)
       {
 #ifdef DEBUG_LEGION
-        assert(it->eqk == EQ_EK);
+        assert(it->eqk == LEGION_EQ_EK);
 #endif
         alignments[it->fid] = it->alignment;
       }
@@ -552,7 +552,7 @@ namespace Legion {
       for (unsigned idx = 0; order.ordering.size(); idx++)
       {
         const DimensionKind dim = order.ordering[idx];
-        if (dim == DIM_F)
+        if (dim == LEGION_DIM_F)
         {
           field_index = idx;
           break;
@@ -637,7 +637,7 @@ namespace Legion {
           for (std::vector<DimensionKind>::const_iterator dit = 
                 order.ordering.begin(); dit != order.ordering.end(); dit++)
           {
-            if ((*dit) != DIM_F)
+            if ((*dit) != LEGION_DIM_F)
             {
 #ifdef DEBUG_LEGION
               assert(int(*dit) < DIM);
@@ -4263,7 +4263,7 @@ namespace Legion {
       DETAILED_PROFILER(context->runtime, REALM_CREATE_INSTANCE_CALL);
 #ifdef DEBUG_LEGION
       assert(int(dimension_order.ordering.size()) == (DIM+1));
-      assert(dimension_order.ordering.back() == DIM_F);
+      assert(dimension_order.ordering.back() == LEGION_DIM_F);
 #endif
       // Have to wait for the index space to be ready if necessary
       Realm::IndexSpace<DIM,T> local_space;
