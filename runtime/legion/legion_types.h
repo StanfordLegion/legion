@@ -1718,6 +1718,7 @@ namespace Legion {
   typedef Realm::Machine Machine;
   typedef Realm::Memory Memory;
   typedef Realm::Processor Processor;
+  typedef Realm::ProcessorGroup ProcessorGroup;
   typedef Realm::CodeDescriptor CodeDescriptor;
   typedef Realm::Reservation Reservation;
   typedef Realm::CompletionQueue CompletionQueue;

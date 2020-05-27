@@ -62,54 +62,10 @@ namespace Realm {
 
     /*static*/ Processor Processor::create_group(const std::vector<Processor>& members)
     {
-      // are we creating a local group?
-      if((members.size() == 0) || (NodeID(ID(members[0]).proc_owner_node()) == Network::my_node_id)) {
-	ProcessorGroupImpl *grp = get_runtime()->local_proc_group_free_list->alloc_entry();
-	grp->set_group_members(members);
-#ifdef EVENT_GRAPH_TRACE
-        {
-          const int base_size = 1024;
-          char base_buffer[base_size];
-          char *buffer;
-          int buffer_size = (members.size() * 20);
-          if (buffer_size >= base_size)
-            buffer = (char*)malloc(buffer_size+1);
-          else
-            buffer = base_buffer;
-          buffer[0] = '\0';
-          int offset = 0;
-          for (std::vector<Processor>::const_iterator it = members.begin();
-                it != members.end(); it++)
-          {
-            int written = snprintf(buffer+offset,buffer_size-offset,
-                                   " " IDFMT, it->id);
-            assert(written < (buffer_size-offset));
-            offset += written;
-          }
-          log_event_graph.info("Group: " IDFMT " %ld%s",
-                                grp->me.id, members.size(), buffer); 
-          if (buffer_size >= base_size)
-            free(buffer);
-        }
-#endif
-	return grp->me;
-      }
-
-      assert(0);
-      return Processor::NO_PROC;
+      return ProcessorGroup::create_group(members);
     }
 
-    /*static*/ void Processor::free_group(const Processor& pg)
-    {
-      ProcessorGroupImpl *grp = get_runtime()->get_procgroup_impl(pg);
-      //first we remove members and properly clean up task queues from members list
-      grp->remove_group_members();
-      
-      //return group to free list
-      get_runtime()->local_proc_group_free_list->free_entry( grp );
-    }
-  
-    void Processor::get_group_members(std::vector<Processor>& members)
+    void Processor::get_group_members(std::vector<Processor>& members) const
     {
       // if we're a plain old processor, the only member of our "group" is ourself
       if(ID(*this).is_processor()) {
@@ -459,6 +415,65 @@ namespace Realm {
 #endif
     ThreadLocal::scheduler_lock--;
   }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class ProcessorGroup
+  //
+
+    /*static*/ const ProcessorGroup ProcessorGroup::NO_PROC_GROUP =
+			      ID(ID::ID_NULL).convert<ProcessorGroup>();
+
+    /*static*/ ProcessorGroup ProcessorGroup::create_group(const std::vector<Processor>& members)
+    {
+      // are we creating a local group?
+      if((members.size() == 0) || (NodeID(ID(members[0]).proc_owner_node()) == Network::my_node_id)) {
+	ProcessorGroupImpl *grp = get_runtime()->local_proc_group_free_list->alloc_entry();
+	grp->set_group_members(members);
+#ifdef EVENT_GRAPH_TRACE
+        {
+          const int base_size = 1024;
+          char base_buffer[base_size];
+          char *buffer;
+          int buffer_size = (members.size() * 20);
+          if (buffer_size >= base_size)
+            buffer = (char*)malloc(buffer_size+1);
+          else
+            buffer = base_buffer;
+          buffer[0] = '\0';
+          int offset = 0;
+          for (std::vector<Processor>::const_iterator it = members.begin();
+                it != members.end(); it++)
+          {
+            int written = snprintf(buffer+offset,buffer_size-offset,
+                                   " " IDFMT, it->id);
+            assert(written < (buffer_size-offset));
+            offset += written;
+          }
+          log_event_graph.info("Group: " IDFMT " %ld%s",
+                                grp->me.id, members.size(), buffer);
+          if (buffer_size >= base_size)
+            free(buffer);
+        }
+#endif
+	return ID(grp->me).convert<ProcessorGroup>();
+      }
+
+      assert(0);
+      return ProcessorGroup::NO_PROC_GROUP;
+    }
+
+    void ProcessorGroup::destroy(Event wait_on /*= NO_EVENT*/) const
+    {
+      assert(wait_on.has_triggered());
+      ProcessorGroupImpl *grp = get_runtime()->get_procgroup_impl(*this);
+      //first we remove members and properly clean up task queues from members list
+      grp->remove_group_members();
+
+      //return group to free list
+      get_runtime()->local_proc_group_free_list->free_entry( grp );
+    }
 
 
   ////////////////////////////////////////////////////////////////////////

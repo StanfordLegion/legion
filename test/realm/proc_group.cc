@@ -91,7 +91,7 @@ void top_level_task(const void *args, size_t arglen,
   int num_cpus = all_cpus.size();
 
   printf("creating processor group for all CPUs...\n");
-  Processor pgrp = Processor::create_group(all_cpus);
+  ProcessorGroup pgrp = ProcessorGroup::create_group(all_cpus);
   printf("group ID is " IDFMT "\n", pgrp.id);
 
   // see if the member list is what we expect
