@@ -76,6 +76,8 @@ vpath %.S .:$(RUNTIME_VPATH)
 
 REALM_LIB := librealm.a
 
+TEST_OBJS := $(TESTS:%=%.o)
+
 run_all : $(TESTS:%=run_%)
 
 run_% : %
@@ -86,7 +88,7 @@ run_% : %
 build : $(TESTS)
 
 clean :
-	rm -f $(REALM_LIB) $(REALM_OBJS) $(TESTS)
+	rm -f $(REALM_LIB) $(REALM_OBJS) $(TESTS) $(TEST_OBJS)
 
 # scatter uses C++11 lambdas
 scatter.o : CC_FLAGS += -std=c++11
@@ -100,6 +102,7 @@ $(REALM_LIB) : $(REALM_OBJS)
 
 ifeq ($(strip $(USE_CUDA)),1)
 EXTRAOBJS_memspeed := memspeed_gpu.o
+TEST_OBJS += $(EXTRAOBJS_memspeed)
 memspeed : memspeed_gpu.o
 
 %.o : %.cu $(REALM_DEFINES_HEADER) $(LEGION_DEFINES_HEADER)
