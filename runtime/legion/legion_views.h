@@ -1350,12 +1350,12 @@ namespace Legion {
       DependenceType dt = check_dependence_type(user->usage, next_user);
       switch (dt)
       {
-        case NO_DEPENDENCE:
-        case ATOMIC_DEPENDENCE:
-        case SIMULTANEOUS_DEPENDENCE:
+        case LEGION_NO_DEPENDENCE:
+        case LEGION_ATOMIC_DEPENDENCE:
+        case LEGION_SIMULTANEOUS_DEPENDENCE:
           return false;
-        case TRUE_DEPENDENCE:
-        case ANTI_DEPENDENCE:
+        case LEGION_TRUE_DEPENDENCE:
+        case LEGION_ANTI_DEPENDENCE:
           break;
         default:
           assert(false); // should never get here
@@ -1402,12 +1402,12 @@ namespace Legion {
       DependenceType dt = check_dependence_type(user->usage, next_user);
       switch (dt)
       {
-        case NO_DEPENDENCE:
-        case ATOMIC_DEPENDENCE:
-        case SIMULTANEOUS_DEPENDENCE:
+        case LEGION_NO_DEPENDENCE:
+        case LEGION_ATOMIC_DEPENDENCE:
+        case LEGION_SIMULTANEOUS_DEPENDENCE:
           return false;
-        case TRUE_DEPENDENCE:
-        case ANTI_DEPENDENCE:
+        case LEGION_TRUE_DEPENDENCE:
+        case LEGION_ANTI_DEPENDENCE:
           break;
         default:
           assert(false); // should never get here

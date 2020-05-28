@@ -1874,7 +1874,7 @@ namespace Legion {
         // so that we can get the version numbers correct
         const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
         if (is_reduce_req)
-          dst_requirements[idx].privilege = READ_WRITE;
+          dst_requirements[idx].privilege = LEGION_READ_WRITE;
         runtime->forest->perform_dependence_analysis(this, index, 
                                                      dst_requirements[idx],
                                                      projection_info,
@@ -1882,7 +1882,7 @@ namespace Legion {
                                                      map_applied_conditions);
         // Switch the privileges back when we are done
         if (is_reduce_req)
-          dst_requirements[idx].privilege = REDUCE;
+          dst_requirements[idx].privilege = LEGION_REDUCE;
       }
     }
 
@@ -2784,7 +2784,8 @@ namespace Legion {
       initialize_operation(ctx, true/*track*/); 
       // Start without the projection requirement, we'll ask
       // the mapper later if it wants to turn this into an index launch
-      requirement = RegionRequirement(handle, READ_ONLY, EXCLUSIVE, parent);
+      requirement = 
+        RegionRequirement(handle, LEGION_READ_ONLY, LEGION_EXCLUSIVE, parent);
       requirement.add_field(fid);
       map_id = id;
       tag = t;
@@ -2830,7 +2831,8 @@ namespace Legion {
       // the mapper later if it wants to turn this into an index launch
       LogicalRegion proj_parent = 
         runtime->forest->get_parent_logical_region(projection);
-      requirement = RegionRequirement(proj_parent, READ_ONLY, EXCLUSIVE,parent);
+      requirement = 
+        RegionRequirement(proj_parent,LEGION_READ_ONLY,LEGION_EXCLUSIVE,parent);
       requirement.add_field(fid);
       map_id = id;
       tag = t;
@@ -2885,7 +2887,8 @@ namespace Legion {
       // the mapper later if it wants to turn this into an index launch
       LogicalRegion proj_parent = 
         runtime->forest->get_parent_logical_region(projection);
-      requirement = RegionRequirement(proj_parent, READ_ONLY, EXCLUSIVE,parent);
+      requirement = 
+        RegionRequirement(proj_parent,LEGION_READ_ONLY,LEGION_EXCLUSIVE,parent);
       requirement.add_field(fid);
       map_id = id;
       tag = t;
@@ -2932,7 +2935,8 @@ namespace Legion {
       initialize_operation(ctx, true/*track*/);
       // Start without the projection requirement, we'll ask
       // the mapper later if it wants to turn this into an index launch
-      requirement = RegionRequirement(handle, READ_ONLY, EXCLUSIVE, parent);
+      requirement = 
+        RegionRequirement(handle, LEGION_READ_ONLY, LEGION_EXCLUSIVE, parent);
       requirement.add_field(fid);
       map_id = id;
       tag = t;
@@ -2972,7 +2976,8 @@ namespace Legion {
       initialize_operation(ctx, true/*track*/);
       // Start without the projection requirement, we'll ask
       // the mapper later if it wants to turn this into an index launch
-      requirement = RegionRequirement(handle, READ_ONLY, EXCLUSIVE, parent);
+      requirement = 
+        RegionRequirement(handle, LEGION_READ_ONLY, LEGION_EXCLUSIVE, parent);
       requirement.add_field(fid);
       map_id = id;
       tag = t;
@@ -4156,7 +4161,7 @@ namespace Legion {
         // with the result to broadcast it to the other shards
         switch (measurement)
         {
-          case MEASURE_SECONDS:
+          case LEGION_MEASURE_SECONDS:
             {
               double value = Realm::Clock::current_time();
               result.impl->set_result(&value, sizeof(value), false);
@@ -4164,14 +4169,14 @@ namespace Legion {
               timing_collective->broadcast(*ptr);
               break;
             }
-          case MEASURE_MICRO_SECONDS:
+          case LEGION_MEASURE_MICRO_SECONDS:
             {
               long long value = Realm::Clock::current_time_in_microseconds();
               result.impl->set_result(&value, sizeof(value), false);
               timing_collective->broadcast(value);
               break;
             }
-          case MEASURE_NANO_SECONDS:
+          case LEGION_MEASURE_NANO_SECONDS:
             {
               long long value = Realm::Clock::current_time_in_nanoseconds();
               result.impl->set_result(&value, sizeof(value), false);
@@ -4686,7 +4691,7 @@ namespace Legion {
         // separate updates as though they were going to just read 
         const bool is_write = IS_WRITE(requirement);
         if (is_write)
-          requirement.privilege = READ_ONLY; // pretend read-only for now
+          requirement.privilege = LEGION_READ_ONLY; // pretend read-only for now
         UpdateAnalysis *analysis = NULL; 
         const RtEvent registration_precondition = 
           runtime->forest->physical_perform_updates(requirement, version_info,
@@ -4721,7 +4726,7 @@ namespace Legion {
           else
             Runtime::phase_barrier_arrive(inline_barrier, 1/*count*/);
           // Set the privilege back to read-write
-          requirement.privilege = READ_WRITE;
+          requirement.privilege = LEGION_READ_WRITE;
           // Reset the usage of the analysis too
           analysis->usage = RegionUsage(requirement);
           // Wait for everyone to finish their updates
@@ -4958,7 +4963,7 @@ namespace Legion {
       // an instance which everyone has the name of or a sharded view
       did_broadcast = 
           new ValueBroadcast<DistributedID>(ctx, 0/*owner*/, COLLECTIVE_LOC_77);
-      if ((resource == EXTERNAL_INSTANCE) || local_files)
+      if ((resource == LEGION_EXTERNAL_INSTANCE) || local_files)
       {
         // In this case we need a second generation of the resource_bar
         ctx->advance_replicate_barrier(resource_bar, ctx->total_shards);
@@ -5023,7 +5028,7 @@ namespace Legion {
       const bool owner_shard = (repl_ctx->owner_shard->shard_id == 0);
       if (!owner_shard)
       {
-        if ((resource == EXTERNAL_INSTANCE) || local_files)
+        if ((resource == LEGION_EXTERNAL_INSTANCE) || local_files)
         {
           // Get the distributed ID for the sharded view and request it
           const DistributedID sharded_did = did_broadcast->get_value();
@@ -5056,7 +5061,7 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       const bool is_owner_shard = (repl_ctx->owner_shard->shard_id == 0);
-      if ((resource == EXTERNAL_INSTANCE) || local_files)
+      if ((resource == LEGION_EXTERNAL_INSTANCE) || local_files)
       {
 #ifdef DEBUG_LEGION
         assert(!restricted);
@@ -5065,15 +5070,15 @@ namespace Legion {
 #endif
         switch (resource)
         {
-          case EXTERNAL_POSIX_FILE:
-          case EXTERNAL_HDF5_FILE:
+          case LEGION_EXTERNAL_POSIX_FILE:
+          case LEGION_EXTERNAL_HDF5_FILE:
             {
               external_instance = 
                 runtime->forest->create_external_instance(this, requirement, 
                                                 requirement.instance_fields);
               break;
             }
-          case EXTERNAL_INSTANCE:
+          case LEGION_EXTERNAL_INSTANCE:
             {
               external_instance = 
                 runtime->forest->create_external_instance(this, requirement,
@@ -5174,8 +5179,8 @@ namespace Legion {
           // Make our instance now and send out the DID
           switch (resource)
           {
-            case EXTERNAL_POSIX_FILE:
-            case EXTERNAL_HDF5_FILE:
+            case LEGION_EXTERNAL_POSIX_FILE:
+            case LEGION_EXTERNAL_HDF5_FILE:
               {
                 external_instance = 
                   runtime->forest->create_external_instance(this, requirement, 

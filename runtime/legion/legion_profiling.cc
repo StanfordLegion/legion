@@ -1482,7 +1482,7 @@ namespace Legion {
           align_map.find(*it);
       bool has_align=false;
       unsigned alignment = 0;
-      EqualityKind eqk = LT_EK;
+      EqualityKind eqk = LEGION_LT_EK;
       if (align != align_map.end()) {
         has_align = true;
         alignment = align->second.alignment;
@@ -1517,8 +1517,7 @@ namespace Legion {
       for (std::vector<FieldID>::const_iterator it = 
             fields.begin(); it != fields.end(); it++)
 	thread_local_profiling_instance->register_physical_instance_field(op_id,
-                                              inst_id, *it, fs.get_id(),0,false,
-                                                                          LT_EK);
+                             inst_id, *it, fs.get_id(), 0, false, LEGION_LT_EK);
     }
 
     //--------------------------------------------------------------------------

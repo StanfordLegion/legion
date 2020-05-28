@@ -2777,7 +2777,10 @@ static void *bytedup(const void *data, size_t datalen)
 	    impl->value_capacity = new_capacity;
 	  }
 	  assert(datalen == (impl->redop->sizeof_lhs * (trigger_gen - args.previous_gen)));
-	  memcpy(impl->final_values + ((rel_gen - 1) * impl->redop->sizeof_lhs), data, datalen);
+	  assert(args.previous_gen >= impl->first_generation);
+	  memcpy(impl->final_values + ((args.previous_gen -
+					impl->first_generation) * impl->redop->sizeof_lhs),
+		 data, datalen);
 	}
 
 	// external waiters need to be signalled inside the lock

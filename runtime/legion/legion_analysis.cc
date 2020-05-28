@@ -1747,10 +1747,10 @@ namespace Legion {
                                    IndexSpaceNode *launch_space, 
                                    ShardingFunction *f/*=NULL*/,
                                    IndexSpace shard_space/*=NO_SPACE*/)
-      : projection((req.handle_type != SINGULAR) ? 
+      : projection((req.handle_type != LEGION_SINGULAR_PROJECTION) ? 
           runtime->find_projection_function(req.projection) : NULL),
-        projection_type(req.handle_type),
-        projection_space((req.handle_type != SINGULAR) ? launch_space : NULL),
+        projection_type(req.handle_type), projection_space(
+         (req.handle_type != LEGION_SINGULAR_PROJECTION) ? launch_space : NULL),
         sharding_function(f), sharding_space(shard_space.exists() ? 
             runtime->forest->get_node(shard_space) : 
               (f == NULL) ? NULL : projection_space)
@@ -3290,10 +3290,10 @@ namespace Legion {
       RegionRequirement req;
       if (root_node->is_region())
         req = RegionRequirement(root_node->as_region_node()->handle,
-                                READ_WRITE, EXCLUSIVE, trace_info.req.parent);
+            LEGION_READ_WRITE, LEGION_EXCLUSIVE, trace_info.req.parent);
       else
         req = RegionRequirement(root_node->as_partition_node()->handle, 0,
-                                READ_WRITE, EXCLUSIVE, trace_info.req.parent);
+            LEGION_READ_WRITE, LEGION_EXCLUSIVE, trace_info.req.parent);
       TaskContext *ctx = creator->get_context();
 #ifdef DEBUG_LEGION_COLLECTIVES
       close_op = ctx->get_merge_close_op(user, root_node);
@@ -3321,8 +3321,8 @@ namespace Legion {
       // don't run too early.
       LegionList<LogicalUser,LOGICAL_REC_ALLOC>::track_aligned &above_users = 
                                               current.op->get_logical_records();
-      const LogicalUser merge_close_user(close_op, 0/*idx*/, 
-          RegionUsage(READ_WRITE, EXCLUSIVE, 0/*redop*/), close_mask);
+      const LogicalUser merge_close_user(close_op, 0/*idx*/, RegionUsage(
+            LEGION_READ_WRITE, LEGION_EXCLUSIVE, 0/*redop*/), close_mask);
       register_dependences(close_op, merge_close_user, current, 
           open_below, closed_users, above_users, cusers, pusers);
       // Now we can remove our references on our local users
@@ -3357,7 +3357,7 @@ namespace Legion {
       // operations have already been kicked off and might be done
       // LogicalCloser::register_dependences
       const LogicalUser close_user(close_op, merge_close_gen,0/*idx*/,
-        RegionUsage(READ_WRITE, EXCLUSIVE, 0/*redop*/), close_mask);
+        RegionUsage(LEGION_READ_WRITE, LEGION_EXCLUSIVE,0/*redop*/),close_mask);
       users.push_back(close_user);
     }
 

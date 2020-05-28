@@ -901,8 +901,8 @@ namespace Legion {
               {
                 const LayoutConstraintSet &req_cons = 
                     runtime->find_layout_constraints(ctx, it->second);
-                if ((req_cons.specialized_constraint.kind != NO_SPECIALIZE) &&
-                   (req_cons.specialized_constraint.kind != VIRTUAL_SPECIALIZE))
+                if ((req_cons.specialized_constraint.kind != LEGION_NO_SPECIALIZE) &&
+                   (req_cons.specialized_constraint.kind != LEGION_VIRTUAL_SPECIALIZE))
                 {
                   result.is_inner = false;
                   break;
@@ -1460,7 +1460,7 @@ namespace Legion {
         bool has_relaxed_coherence = false;
         for (unsigned idx = 0; idx < task.regions.size(); idx++)
         {
-          if (task.regions[idx].prop != EXCLUSIVE)
+          if (task.regions[idx].prop != LEGION_EXCLUSIVE)
           {
             has_relaxed_coherence = true;
             break;
@@ -1475,7 +1475,7 @@ namespace Legion {
             // we will do a virtual mapping, for reduction-only instances
             // we will actually make a physical instance because the runtime
             // doesn't allow virtual mappings for reduction-only privileges
-            if (task.regions[idx].privilege == REDUCE)
+            if (task.regions[idx].privilege == LEGION_REDUCE)
               reduction_indexes.push_back(idx);
             else
               output.chosen_instances[idx].push_back(
@@ -1552,7 +1552,7 @@ namespace Legion {
                                   task.task_id, output.chosen_variant);
             for (unsigned idx = 0; idx < task.regions.size(); idx++)
             {
-              if (task.regions[idx].privilege == REDUCE)
+              if (task.regions[idx].privilege == LEGION_REDUCE)
               {
                 Memory target_memory = default_policy_select_target_memory(ctx,
                                                          task.target_proc,
@@ -1610,7 +1610,7 @@ namespace Legion {
         if (done_regions[idx])
           continue;
         // Skip any empty regions
-        if ((task.regions[idx].privilege == NO_ACCESS) ||
+        if ((task.regions[idx].privilege == LEGION_NO_ACCESS) ||
             (task.regions[idx].privilege_fields.empty()) ||
             missing_fields[idx].empty())
           continue;
@@ -1618,7 +1618,7 @@ namespace Legion {
         Memory target_memory = default_policy_select_target_memory(ctx,
                                                          task.target_proc,
                                                          task.regions[idx]);
-        if (task.regions[idx].privilege == REDUCE)
+        if (task.regions[idx].privilege == LEGION_REDUCE)
         {
           has_reductions = true;
           size_t footprint;
@@ -1690,7 +1690,7 @@ namespace Legion {
         // We don't ever save reduction instances in our cache
         if (has_reductions) {
           for (unsigned idx = 0; idx < task.regions.size(); idx++) {
-            if (task.regions[idx].privilege != REDUCE)
+            if (task.regions[idx].privilege != LEGION_REDUCE)
               continue;
             cached_result.mapping[idx].clear();
           }
@@ -1997,7 +1997,7 @@ namespace Legion {
       {
         const RegionRequirement &req = task.regions[idx];
         result = result * c1 + c2 + req.handle_type;
-        if (req.handle_type != PART_PROJECTION) {
+        if (req.handle_type != LEGION_PARTITION_PROJECTION) {
           result = result * c1 + c2 + req.region.get_tree_id();
           result = result * c1 + c2 + req.region.get_index_space().get_id();
           result = result * c1 + c2 + req.region.get_field_space().get_id();
@@ -2032,7 +2032,7 @@ namespace Legion {
       // Special case for reduction instances, no point in checking
       // for existing ones and we also know that currently we can only
       // make a single instance for each field of a reduction
-      if (req.privilege == REDUCE)
+      if (req.privilege == LEGION_REDUCE)
       {
         // Iterate over the fields one by one for now, once Realm figures
         // out how to deal with reduction instances that contain
@@ -2240,7 +2240,7 @@ namespace Legion {
     {
       // Do something special for reductions and 
       // it is not an explicit region-to-region copy
-      if ((req.privilege == REDUCE) && (mapping_kind != COPY_MAPPING))
+      if ((req.privilege == LEGION_REDUCE) && (mapping_kind != COPY_MAPPING))
       {
         // Always make new reduction instances
         force_new_instances = true;
@@ -2325,11 +2325,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // See if we are doing a reduction instance
-      if (req.privilege == REDUCE)
+      if (req.privilege == LEGION_REDUCE)
       {
         // Make reduction fold instances
         constraints.add_constraint(SpecializedConstraint(
-                            REDUCTION_FOLD_SPECIALIZE, req.redop))
+                            LEGION_AFFINE_REDUCTION_SPECIALIZE, req.redop))
           .add_constraint(MemoryConstraint(target_memory.kind()));
       }
       else
@@ -2356,8 +2356,8 @@ namespace Legion {
           std::vector<DimensionKind> dimension_ordering(dim + 1);
           for (int i = 0; i < dim; ++i)
             dimension_ordering[i] =
-              static_cast<DimensionKind>(static_cast<int>(DIM_X) + i);
-          dimension_ordering[dim] = DIM_F;
+              static_cast<DimensionKind>(static_cast<int>(LEGION_DIM_X) + i);
+          dimension_ordering[dim] = LEGION_DIM_F;
           constraints.add_constraint(OrderingConstraint(dimension_ordering,
                                                         false/*contigous*/));
         }
@@ -2393,7 +2393,7 @@ namespace Legion {
       // TODO: deal with task layout constraints that require multiple
       // region requirements to be mapped to the same instance
       std::vector<LogicalRegion> target_regions(1, target_region);
-      if (force_new || (req.privilege == REDUCE && (kind != COPY_MAPPING))) {
+      if (force_new || (req.privilege == LEGION_REDUCE && (kind != COPY_MAPPING))) {
         if (!runtime->create_physical_instance(ctx, target_memory, 
               constraints, target_regions, result))
           return false;
@@ -2406,7 +2406,7 @@ namespace Legion {
       if (created)
       {
         int priority = default_policy_select_garbage_collection_priority(ctx, 
-                kind, target_memory, result, meets, (req.privilege == REDUCE));
+            kind, target_memory, result, meets, (req.privilege == LEGION_REDUCE));
         if ((priority != 0) && !result.is_external_instance())
           runtime->set_garbage_collection_priority(ctx, result,priority);
       }
@@ -2425,7 +2425,7 @@ namespace Legion {
       // If it is not something we are making a big region for just
       // return the region that is actually needed
       LogicalRegion result = req.region; 
-      if (!meets_constraints || (req.privilege == REDUCE))
+      if (!meets_constraints || (req.privilege == LEGION_REDUCE))
         return result;
 
       // If the application requested that we use the exact region requested,
@@ -2836,7 +2836,7 @@ namespace Legion {
                                               output.src_instances[idx]);
         // Check to see if we are doing a reduce-across in which case we
         // need to actually create a real physical instance
-        if ((copy.dst_requirements[idx].privilege == REDUCE) ||
+        if ((copy.dst_requirements[idx].privilege == LEGION_REDUCE) ||
             (idx < copy.src_indirect_requirements.size()) ||
             (idx < copy.dst_indirect_requirements.size()))
         {

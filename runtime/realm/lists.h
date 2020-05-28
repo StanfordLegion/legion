@@ -114,12 +114,14 @@ namespace Realm {
     void push_back(T *new_entry);
     void push_front(T *new_entry);
 
+    bool empty(void) const;
     bool empty(PT min_priority) const;
 
     // this call isn't thread safe - the pointer returned may be accessed only
     //  if the caller can guarantee no concurrent pops have occurred
     T *front(void) const;
 
+    T *pop_front(void);
     T *pop_front(PT min_priority);
 
     // calls callback for each element in list

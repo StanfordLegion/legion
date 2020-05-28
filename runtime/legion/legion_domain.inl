@@ -1721,8 +1721,8 @@ namespace Legion {
     : m(rhs.m), n(rhs.n)
   //----------------------------------------------------------------------------
   {
-    assert(m <= ::MAX_POINT_DIM);
-    assert(n <= ::MAX_POINT_DIM);
+    assert(m <= LEGION_MAX_DIM);
+    assert(n <= LEGION_MAX_DIM);
     for (int i = 0; i < m; i++)
       for (int j = 0; j < n; j++)
         matrix[i * n + j] = rhs.matrix[i * n + j];
@@ -1734,8 +1734,8 @@ namespace Legion {
     : m(M), n(N)
   //----------------------------------------------------------------------------
   {
-    assert(m <= ::MAX_POINT_DIM);
-    assert(n <= ::MAX_POINT_DIM);
+    assert(m <= LEGION_MAX_DIM);
+    assert(n <= LEGION_MAX_DIM);
     for (int i = 0; i < M; i++)
       for (int j = 0; j < N; j++)
         matrix[i * n + j] = rhs[i][j];
@@ -1748,8 +1748,8 @@ namespace Legion {
   {
     m = rhs.m;
     n = rhs.n;
-    assert(m <= ::MAX_POINT_DIM);
-    assert(n <= ::MAX_POINT_DIM);
+    assert(m <= LEGION_MAX_DIM);
+    assert(n <= LEGION_MAX_DIM);
     for (int i = 0; i < m; i++)
       for (int j = 0; j < n; j++)
         matrix[i * n + j] = rhs.matrix[i * n + j];
@@ -1764,8 +1764,8 @@ namespace Legion {
   {
     m = M;
     n = N;
-    assert(m <= ::MAX_POINT_DIM);
-    assert(n <= ::MAX_POINT_DIM);
+    assert(m <= LEGION_MAX_DIM);
+    assert(n <= LEGION_MAX_DIM);
     for (int i = 0; i < M; i++)
       for (int j = 0; j < N; j++)
         matrix[i * n + j] = rhs[i][j];

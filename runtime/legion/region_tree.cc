@@ -232,14 +232,15 @@ namespace Legion {
         parent_notified = notified_event;
       }
       std::set<RtEvent> applied;
-      if ((part_kind == COMPUTE_KIND) || (part_kind == COMPUTE_COMPLETE_KIND) ||
-          (part_kind == COMPUTE_INCOMPLETE_KIND))
+      if ((part_kind == LEGION_COMPUTE_KIND) || 
+          (part_kind == LEGION_COMPUTE_COMPLETE_KIND) ||
+          (part_kind == LEGION_COMPUTE_INCOMPLETE_KIND))
       {
         RtUserEvent disjointness_event = Runtime::create_rt_user_event();
         // Use 1 if we know it's complete, 0 if it's not, 
         // otherwise -1 since we don't know
-        const int complete = (part_kind == COMPUTE_COMPLETE_KIND) ? 1 :
-                             (part_kind == COMPUTE_INCOMPLETE_KIND) ? 0 : -1;
+        const int complete = (part_kind == LEGION_COMPUTE_COMPLETE_KIND) ? 1 :
+                         (part_kind == LEGION_COMPUTE_INCOMPLETE_KIND) ? 0 : -1;
         IndexPartNode *node = create_node(pid, parent_node, color_node, 
             partition_color, disjointness_event, complete, did, partition_ready,
             partial_pending, RtEvent::NO_RT_EVENT, NULL, &applied);
@@ -253,15 +254,15 @@ namespace Legion {
       }
       else
       {
-        const bool disjoint = (part_kind == DISJOINT_KIND) || 
-                              (part_kind == DISJOINT_COMPLETE_KIND) ||
-                              (part_kind == DISJOINT_INCOMPLETE_KIND);
+        const bool disjoint = (part_kind == LEGION_DISJOINT_KIND) || 
+                              (part_kind == LEGION_DISJOINT_COMPLETE_KIND) ||
+                              (part_kind == LEGION_DISJOINT_INCOMPLETE_KIND);
         // Use 1 if we know it's complete, 0 if it's not, 
         // otherwise -1 since we don't know
-        const int complete = ((part_kind == DISJOINT_COMPLETE_KIND) ||
-                              (part_kind == ALIASED_COMPLETE_KIND)) ? 1 :
-                             ((part_kind == DISJOINT_INCOMPLETE_KIND) ||
-                              (part_kind == ALIASED_INCOMPLETE_KIND)) ? 0 : -1;
+        const int complete = ((part_kind == LEGION_DISJOINT_COMPLETE_KIND) ||
+                              (part_kind == LEGION_ALIASED_COMPLETE_KIND)) ? 1 :
+                             ((part_kind == LEGION_DISJOINT_INCOMPLETE_KIND) ||
+                        (part_kind == LEGION_ALIASED_INCOMPLETE_KIND)) ? 0 : -1;
         create_node(pid, parent_node, color_node, partition_color, disjoint,
                     complete, did, partition_ready, partial_pending, 
                     RtEvent::NO_RT_EVENT, NULL, &applied);
@@ -300,28 +301,29 @@ namespace Legion {
       // If we're supposed to compute this, but we already know that
       // the source is disjoint then we can also conlclude the the 
       // resulting partitions will also be disjoint under intersection
-      if (((kind == COMPUTE_KIND) || (kind == COMPUTE_COMPLETE_KIND) ||
-           (kind == COMPUTE_INCOMPLETE_KIND)) && 
+      if (((kind == LEGION_COMPUTE_KIND) || 
+           (kind == LEGION_COMPUTE_COMPLETE_KIND) ||
+           (kind == LEGION_COMPUTE_INCOMPLETE_KIND)) && 
           source->is_disjoint(true/*from app*/))
       {
-        if (kind == COMPUTE_KIND)
-          kind = DISJOINT_KIND;
-        else if (kind == COMPUTE_COMPLETE_KIND)
-          kind = DISJOINT_COMPLETE_KIND;
+        if (kind == LEGION_COMPUTE_KIND)
+          kind = LEGION_DISJOINT_KIND;
+        else if (kind == LEGION_COMPUTE_COMPLETE_KIND)
+          kind = LEGION_DISJOINT_COMPLETE_KIND;
         else
-          kind = DISJOINT_INCOMPLETE_KIND;
+          kind = LEGION_DISJOINT_INCOMPLETE_KIND;
       }
       // If the source dominates the base then we know that all the
       // partitions that we are about to make will be complete
-      if (((kind == DISJOINT_KIND) || (kind == ALIASED_KIND) || 
-            (kind == COMPUTE_KIND)) && source->dominates(base)) 
+      if (((kind == LEGION_DISJOINT_KIND) || (kind == LEGION_ALIASED_KIND) || 
+            (kind == LEGION_COMPUTE_KIND)) && source->dominates(base)) 
       {
-        if (kind == DISJOINT_KIND)
-          kind = DISJOINT_COMPLETE_KIND;
-        else if (kind == ALIASED_KIND)
-          kind = ALIASED_COMPLETE_KIND;
+        if (kind == LEGION_DISJOINT_KIND)
+          kind = LEGION_DISJOINT_COMPLETE_KIND;
+        else if (kind == LEGION_ALIASED_KIND)
+          kind = LEGION_ALIASED_COMPLETE_KIND;
         else
-          kind = COMPUTE_COMPLETE_KIND;
+          kind = LEGION_COMPUTE_COMPLETE_KIND;
       }
       // If we haven't been given a color yet, we need to find
       // one that will be valid for all the child partitions
@@ -546,8 +548,9 @@ namespace Legion {
           parent_notified = notified_event;
         }
         RtUserEvent disjointness_event;
-        if ((part_kind == COMPUTE_KIND) || (part_kind == COMPUTE_COMPLETE_KIND)
-            || (part_kind == COMPUTE_INCOMPLETE_KIND))
+        if ((part_kind == LEGION_COMPUTE_KIND) || 
+            (part_kind == LEGION_COMPUTE_COMPLETE_KIND) || 
+            (part_kind == LEGION_COMPUTE_INCOMPLETE_KIND))
         {
 #ifdef DEBUG_LEGION
           assert(part_result != NULL);
@@ -560,18 +563,19 @@ namespace Legion {
 #endif
         IndexPartNode *part_node;
         std::set<RtEvent> applied;
-        if ((part_kind != COMPUTE_KIND) && (part_kind != COMPUTE_COMPLETE_KIND)
-            && (part_kind != COMPUTE_INCOMPLETE_KIND))
+        if ((part_kind != LEGION_COMPUTE_KIND) && 
+            (part_kind != LEGION_COMPUTE_COMPLETE_KIND) && 
+            (part_kind != LEGION_COMPUTE_INCOMPLETE_KIND))
         {
-          const bool disjoint = (part_kind == DISJOINT_KIND) || 
-                                (part_kind == DISJOINT_COMPLETE_KIND) ||
-                                (part_kind == DISJOINT_INCOMPLETE_KIND);
+          const bool disjoint = (part_kind == LEGION_DISJOINT_KIND) || 
+                                (part_kind == LEGION_DISJOINT_COMPLETE_KIND) ||
+                                (part_kind == LEGION_DISJOINT_INCOMPLETE_KIND);
           // Use 1 if we know it's complete, 0 if it's not, 
           // otherwise -1 since we don't know
-          const int complete = ((part_kind == DISJOINT_COMPLETE_KIND) ||
-                                (part_kind == ALIASED_COMPLETE_KIND)) ? 1 :
-                               ((part_kind == DISJOINT_INCOMPLETE_KIND) ||
-                                (part_kind == ALIASED_INCOMPLETE_KIND)) ? 0 :-1;
+          const int complete = ((part_kind == LEGION_DISJOINT_COMPLETE_KIND) ||
+                              (part_kind == LEGION_ALIASED_COMPLETE_KIND)) ? 1 :
+                             ((part_kind == LEGION_DISJOINT_INCOMPLETE_KIND) ||
+                          (part_kind == LEGION_ALIASED_INCOMPLETE_KIND)) ? 0 :-1;
           part_node = create_node(pid, parent_node, color_node, partition_color,
             disjoint, complete, did, partition_ready, partial_pending,
             creation_ready, &mapping, &applied);
@@ -586,8 +590,8 @@ namespace Legion {
         {
           // Use 1 if we know it's complete, 0 if it's not, 
           // otherwise -1 since we don't know
-          const int complete = (part_kind == COMPUTE_COMPLETE_KIND) ? 1 :
-                               (part_kind == COMPUTE_INCOMPLETE_KIND) ? 0 : -1;
+          const int complete = (part_kind == LEGION_COMPUTE_COMPLETE_KIND) ? 1 :
+                         (part_kind == LEGION_COMPUTE_INCOMPLETE_KIND) ? 0 : -1;
           part_node = create_node(pid, parent_node, color_node, partition_color,
                                   disjointness_event, complete, did,
                                   partition_ready, partial_pending,
@@ -625,8 +629,9 @@ namespace Legion {
         IndexSpaceNode *parent_node = get_node(parent);
         IndexSpaceNode *color_node = get_node(color_space);
         RtUserEvent disjointness_event;
-        if ((part_kind == COMPUTE_KIND) || (part_kind == COMPUTE_COMPLETE_KIND)
-            || (part_kind == COMPUTE_INCOMPLETE_KIND))
+        if ((part_kind == LEGION_COMPUTE_KIND) || 
+            (part_kind == LEGION_COMPUTE_COMPLETE_KIND) || 
+            (part_kind == LEGION_COMPUTE_INCOMPLETE_KIND))
         {
 #ifdef DEBUG_LEGION
           assert(part_result != NULL);
@@ -639,18 +644,19 @@ namespace Legion {
 #endif
         IndexPartNode *part_node;
         std::set<RtEvent> applied;
-        if ((part_kind != COMPUTE_KIND) && (part_kind != COMPUTE_COMPLETE_KIND)
-            && (part_kind != COMPUTE_INCOMPLETE_KIND))
+        if ((part_kind != LEGION_COMPUTE_KIND) && 
+            (part_kind != LEGION_COMPUTE_COMPLETE_KIND) && 
+            (part_kind != LEGION_COMPUTE_INCOMPLETE_KIND))
         {
-          const bool disjoint = (part_kind == DISJOINT_KIND) || 
-                                (part_kind == DISJOINT_COMPLETE_KIND) ||
-                                (part_kind == DISJOINT_INCOMPLETE_KIND);
+          const bool disjoint = (part_kind == LEGION_DISJOINT_KIND) || 
+                                (part_kind == LEGION_DISJOINT_COMPLETE_KIND) ||
+                                (part_kind == LEGION_DISJOINT_INCOMPLETE_KIND);
           // Use 1 if we know it's complete, 0 if it's not, 
           // otherwise -1 since we don't know
-          const int complete = ((part_kind == DISJOINT_COMPLETE_KIND) ||
-                                (part_kind == ALIASED_COMPLETE_KIND)) ? 1 :
-                               ((part_kind == DISJOINT_INCOMPLETE_KIND) ||
-                                (part_kind == ALIASED_INCOMPLETE_KIND)) ? 0 :-1;
+          const int complete = ((part_kind == LEGION_DISJOINT_COMPLETE_KIND) ||
+                              (part_kind == LEGION_ALIASED_COMPLETE_KIND)) ? 1 :
+                             ((part_kind == LEGION_DISJOINT_INCOMPLETE_KIND) ||
+                        (part_kind == LEGION_ALIASED_INCOMPLETE_KIND)) ? 0 : -1;
           part_node = create_node(pid, parent_node, color_node, partition_color,
             disjoint, complete, did, partition_ready, partial_pending,
             creation_ready, &mapping, &applied);
@@ -659,8 +665,8 @@ namespace Legion {
         {
           // Use 1 if we know it's complete, 0 if it's not, 
           // otherwise -1 since we don't know
-          const int complete = (part_kind == COMPUTE_COMPLETE_KIND) ? 1 :
-                               (part_kind == COMPUTE_INCOMPLETE_KIND) ? 0 : -1;
+          const int complete = (part_kind == LEGION_COMPUTE_COMPLETE_KIND) ? 1 :
+                         (part_kind == LEGION_COMPUTE_INCOMPLETE_KIND) ? 0 : -1;
           part_node = create_node(pid, parent_node, color_node, partition_color,
                                   disjointness_event, complete, did,
                                   partition_ready, partial_pending,
@@ -1778,7 +1784,7 @@ namespace Legion {
       RegionTreeContext ctx = context->get_context(); 
 #ifdef DEBUG_LEGION
       assert(ctx.exists());
-      assert(req.handle_type == SINGULAR);
+      assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
       RegionNode *region_node = get_node(req.region);
       FieldMask user_mask = 
@@ -1794,7 +1800,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(req.handle_type == SINGULAR);
+      assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
       RegionNode *top_node = get_node(req.region);
       top_node->send_back_logical_state(ctx.get_id(), context_uid, target);
@@ -1813,8 +1819,8 @@ namespace Legion {
       RegionTreeContext ctx = context->get_context(); 
 #ifdef DEBUG_LEGION
       assert(ctx.exists());
-      assert((req.handle_type == SINGULAR) || 
-          ((req.handle_type == REG_PROJECTION) && (req.projection == 0)));
+      assert((req.handle_type == LEGION_SINGULAR_PROJECTION) || 
+      ((req.handle_type == LEGION_REGION_PROJECTION) && (req.projection == 0)));
 #endif
       RegionNode *region_node = get_node(req.region);
       FieldMask user_mask = 
@@ -1874,7 +1880,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, REGION_TREE_INITIALIZE_CONTEXT_CALL);
 #ifdef DEBUG_LEGION
-      assert(req.handle_type == SINGULAR);
+      assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
       RegionNode *top_node = get_node(req.region);
       RegionUsage usage(req);
@@ -2000,8 +2006,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(req1.handle_type == SINGULAR);
-      assert(req2.handle_type == SINGULAR);
+      assert(req1.handle_type == LEGION_SINGULAR_PROJECTION);
+      assert(req2.handle_type == LEGION_SINGULAR_PROJECTION);
       assert(req1.region.field_space == req2.region.field_space);
 #endif
       // We only need to check the fields shared by both region requirements
@@ -2096,7 +2102,7 @@ namespace Legion {
         ready.wait();
       FieldMaskSet<InstanceView> instances;
       if (analysis.report_instances(instances))
-        req.flags |= RESTRICTED_FLAG;
+        req.flags |= LEGION_RESTRICTED_FLAG;
       const std::vector<LogicalRegion> to_meet(1, req.region); 
       for (FieldMaskSet<InstanceView>::const_iterator it = 
             instances.begin(); it != instances.end(); it++)
@@ -2136,8 +2142,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       RegionTreeContext ctx = context->get_context();
       assert(ctx.exists());
-      assert((req.handle_type == SINGULAR) || 
-              (req.handle_type == REG_PROJECTION));
+      assert((req.handle_type == LEGION_SINGULAR_PROJECTION) || 
+              (req.handle_type == LEGION_REGION_PROJECTION));
       assert(!targets.empty());
       assert(!targets.is_virtual_mapping());
 #endif
@@ -2362,7 +2368,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(req.handle_type == SINGULAR);
+      assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
       // should be exclusive
       assert(IS_EXCLUSIVE(req));
 #endif
@@ -2428,7 +2434,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(req.handle_type == SINGULAR);
+      assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
       assert(IS_EXCLUSIVE(req));
 #endif
       // Iterate through the equivalence classes and find all the restrictions
@@ -2500,8 +2506,8 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_COPY_ACROSS_CALL);
 #ifdef DEBUG_LEGION
-      assert(src_req.handle_type == SINGULAR);
-      assert(dst_req.handle_type == SINGULAR);
+      assert(src_req.handle_type == LEGION_SINGULAR_PROJECTION);
+      assert(dst_req.handle_type == LEGION_SINGULAR_PROJECTION);
       assert(src_req.instance_fields.size() == dst_req.instance_fields.size());
 #endif
       std::vector<unsigned> src_indexes(src_req.instance_fields.size());
@@ -2730,9 +2736,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(src_req.handle_type == SINGULAR);
-      assert(idx_req.handle_type == SINGULAR);
-      assert(dst_req.handle_type == SINGULAR);
+      assert(src_req.handle_type == LEGION_SINGULAR_PROJECTION);
+      assert(idx_req.handle_type == LEGION_SINGULAR_PROJECTION);
+      assert(dst_req.handle_type == LEGION_SINGULAR_PROJECTION);
       assert(src_req.instance_fields.size() == dst_req.instance_fields.size());
       assert(idx_req.privilege_fields.size() == 1);
 #endif  
@@ -2866,9 +2872,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(src_req.handle_type == SINGULAR);
-      assert(idx_req.handle_type == SINGULAR);
-      assert(dst_req.handle_type == SINGULAR);
+      assert(src_req.handle_type == LEGION_SINGULAR_PROJECTION);
+      assert(idx_req.handle_type == LEGION_SINGULAR_PROJECTION);
+      assert(dst_req.handle_type == LEGION_SINGULAR_PROJECTION);
       assert(src_req.instance_fields.size() == dst_req.instance_fields.size());
       assert(idx_req.privilege_fields.size() == 1);
 #endif  
@@ -3000,10 +3006,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(src_req.handle_type == SINGULAR);
-      assert(src_idx_req.handle_type == SINGULAR);
-      assert(dst_req.handle_type == SINGULAR);
-      assert(dst_idx_req.handle_type == SINGULAR);
+      assert(src_req.handle_type == LEGION_SINGULAR_PROJECTION);
+      assert(src_idx_req.handle_type == LEGION_SINGULAR_PROJECTION);
+      assert(dst_req.handle_type == LEGION_SINGULAR_PROJECTION);
+      assert(dst_idx_req.handle_type == LEGION_SINGULAR_PROJECTION);
       assert(src_req.instance_fields.size() == dst_req.instance_fields.size());
       assert(src_idx_req.privilege_fields.size() == 1);
       assert(dst_idx_req.privilege_fields.size() == 1);
@@ -3134,7 +3140,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_FILL_FIELDS_CALL);
 #ifdef DEBUG_LEGION
-      assert(req.handle_type == SINGULAR);
+      assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
       if (trace_info.recording)
       {
@@ -3184,7 +3190,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(req.handle_type == SINGULAR);
+      assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
       if (IS_NO_ACCESS(req) || req.privilege_fields.empty())
         return ApEvent::NO_AP_EVENT;
@@ -3227,7 +3233,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(req.handle_type == SINGULAR);
+      assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
       RegionNode *attach_node = get_node(req.region);
       return attach_node->column_source->create_external_instance(
@@ -3249,7 +3255,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_ATTACH_EXTERNAL_CALL);
 #ifdef DEBUG_LEGION
-      assert(req.handle_type == SINGULAR);
+      assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
       const RegionUsage usage(req);
       RegionNode *region_node = get_node(req.region);
@@ -3305,7 +3311,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_DETACH_EXTERNAL_CALL);
 #ifdef DEBUG_LEGION
-      assert(req.handle_type == SINGULAR);
+      assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif 
       RegionNode *region_node = get_node(req.region);
       FieldSpaceNode *fs_node = region_node->column_source;
@@ -3350,7 +3356,7 @@ namespace Legion {
     {
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
         version_info.get_equivalence_sets();
-      const RegionUsage usage(READ_WRITE, EXCLUSIVE, 0);
+      const RegionUsage usage(LEGION_READ_WRITE, LEGION_EXCLUSIVE, 0);
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, op, index,
           usage, version_info, NULL/*view*/, trace_info, ApEvent::NO_AP_EVENT);
       analysis->add_reference();
@@ -3423,7 +3429,7 @@ namespace Legion {
     {
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
         version_info.get_equivalence_sets();
-      const RegionUsage usage(READ_WRITE, EXCLUSIVE, 0);
+      const RegionUsage usage(LEGION_READ_WRITE, LEGION_EXCLUSIVE, 0);
       // Sort the valid views into field mask sets
       LegionList<FieldSet<InstanceView*> >::aligned view_sets;
       valid_views.compute_field_sets(FieldMask(), view_sets);
@@ -3564,7 +3570,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(req.handle_type == SINGULAR);
+      assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
       RegionNode *reg_node = get_node(req.region);      
       // Get the field mask for the fields we need
@@ -3621,7 +3627,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(runtime->legion_spy_enabled); 
 #endif
-      FieldSpaceNode *node = (req.handle_type != PART_PROJECTION) ? 
+      FieldSpaceNode *node = (req.handle_type != LEGION_PARTITION_PROJECTION) ?
         get_node(req.region.get_field_space()) : 
         get_node(req.partition.get_field_space());
       for (unsigned idx = 0; idx < targets.size(); idx++)
@@ -5889,10 +5895,10 @@ namespace Legion {
     {
       get_node(handle)->attach_semantic_information(tag, source, buffer, 
                                           size, is_mutable, local_only);
-      if (runtime->legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
+      if (runtime->legion_spy_enabled && (LEGION_NAME_SEMANTIC_TAG == tag))
         LegionSpy::log_index_space_name(handle.id,
             reinterpret_cast<const char*>(buffer));
-      if (runtime->profiler && (NAME_SEMANTIC_TAG == tag))
+      if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
 	runtime->profiler->record_index_space(handle.id,
             reinterpret_cast<const char*>(buffer));
     }
@@ -5909,10 +5915,10 @@ namespace Legion {
     {
       get_node(handle)->attach_semantic_information(tag, source, buffer, 
                                           size, is_mutable, local_only);
-      if (runtime->legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
+      if (runtime->legion_spy_enabled && (LEGION_NAME_SEMANTIC_TAG == tag))
         LegionSpy::log_index_partition_name(handle.id,
             reinterpret_cast<const char*>(buffer));
-      if (runtime->profiler && (NAME_SEMANTIC_TAG == tag))
+      if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
 	runtime->profiler->record_index_part(handle.id,
             reinterpret_cast<const char*>(buffer));
     }
@@ -5929,10 +5935,10 @@ namespace Legion {
     {
       get_node(handle)->attach_semantic_information(tag, source, buffer, 
                                           size, is_mutable, local_only);
-      if (runtime->legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
+      if (runtime->legion_spy_enabled && (LEGION_NAME_SEMANTIC_TAG == tag))
         LegionSpy::log_field_space_name(handle.id,
             reinterpret_cast<const char*>(buffer));
-      if (runtime->profiler && (NAME_SEMANTIC_TAG == tag))
+      if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
 	runtime->profiler->record_field_space(handle.id,
             reinterpret_cast<const char*>(buffer));
     }
@@ -5950,10 +5956,10 @@ namespace Legion {
     {
       get_node(handle)->attach_semantic_information(fid, tag, src, buf, 
                                           size, is_mutable, local_only);
-      if (runtime->legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
+      if (runtime->legion_spy_enabled && (LEGION_NAME_SEMANTIC_TAG == tag))
         LegionSpy::log_field_name(handle.id, fid,
             reinterpret_cast<const char*>(buf));
-      if (runtime->profiler && (NAME_SEMANTIC_TAG == tag))
+      if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
 	runtime->profiler->record_field(handle.id, fid, size, 
             reinterpret_cast<const char*>(buf));
     }
@@ -5970,11 +5976,11 @@ namespace Legion {
     {
       get_node(handle)->attach_semantic_information(tag, source, buffer, 
                                           size, is_mutable, local_only);
-      if (runtime->legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
+      if (runtime->legion_spy_enabled && (LEGION_NAME_SEMANTIC_TAG == tag))
         LegionSpy::log_logical_region_name(handle.index_space.id,
             handle.field_space.id, handle.tree_id,
             reinterpret_cast<const char*>(buffer));
-      if (runtime->profiler && (NAME_SEMANTIC_TAG == tag))
+      if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
 	runtime->profiler->record_logical_region(handle.index_space.id,
             handle.field_space.id, handle.tree_id,
 	    reinterpret_cast<const char*>(buffer));
@@ -5992,7 +5998,7 @@ namespace Legion {
     {
       get_node(handle)->attach_semantic_information(tag, source, buffer, 
                                           size, is_mutable, local_only);
-      if (runtime->legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
+      if (runtime->legion_spy_enabled && (LEGION_NAME_SEMANTIC_TAG == tag))
         LegionSpy::log_logical_partition_name(handle.index_partition.id,
             handle.field_space.id, handle.tree_id,
             reinterpret_cast<const char*>(buffer));
@@ -15355,7 +15361,8 @@ namespace Legion {
                     // Make a new state with the default projection
                     // function to indicate that we are open in 
                     // disjoint shallow mode with read-write
-                    RegionUsage close_usage(READ_WRITE, EXCLUSIVE, 0);
+                    RegionUsage close_usage(LEGION_READ_WRITE, 
+                                            LEGION_EXCLUSIVE, 0);
                     IndexSpaceNode *color_space = 
                       as_partition_node()->row_source->color_space;
                     FieldState new_state(close_usage, overlap,
@@ -15398,7 +15405,8 @@ namespace Legion {
                     // Make a new state with the default projection
                     // function to indicate that we are open in 
                     // disjoint shallow mode with read-write
-                    RegionUsage close_usage(READ_WRITE, EXCLUSIVE, 0);
+                    RegionUsage close_usage(LEGION_READ_WRITE, 
+                                            LEGION_EXCLUSIVE, 0);
                     IndexSpaceNode *color_space = 
                       as_partition_node()->row_source->color_space;
                     FieldState new_state(close_usage, overlap,
@@ -16628,15 +16636,15 @@ namespace Legion {
           bool validate = validates_regions;
           switch (dtype)
           {
-            case NO_DEPENDENCE:
+            case LEGION_NO_DEPENDENCE:
               {
                 // No dependence so remove bits from the dominator mask
                 dominator_mask -= it->field_mask;
                 break;
               }
-            case ANTI_DEPENDENCE:
-            case ATOMIC_DEPENDENCE:
-            case SIMULTANEOUS_DEPENDENCE:
+            case LEGION_ANTI_DEPENDENCE:
+            case LEGION_ATOMIC_DEPENDENCE:
+            case LEGION_SIMULTANEOUS_DEPENDENCE:
               {
                 // Mark that these kinds of dependences are not allowed
                 // to validate region inputs
@@ -16644,7 +16652,7 @@ namespace Legion {
                 // No break so we register dependences just like
                 // a true dependence
               }
-            case TRUE_DEPENDENCE:
+            case LEGION_TRUE_DEPENDENCE:
               {
 #ifdef LEGION_SPY
                 LegionSpy::log_mapping_dependence(

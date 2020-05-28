@@ -57,7 +57,7 @@ namespace Legion {
     class ISAConstraint {
     public:
       static const ExecutionConstraintKind constraint_kind = 
-                                                ISA_CONSTRAINT;
+                                                LEGION_ISA_CONSTRAINT;
     public:
       ISAConstraint(uint64_t prop = 0);
     public:
@@ -85,7 +85,7 @@ namespace Legion {
     class ProcessorConstraint {
     public:
       static const ExecutionConstraintKind constraint_kind = 
-                                            PROCESSOR_CONSTRAINT;
+                                            LEGION_PROCESSOR_CONSTRAINT;
     public:
       ProcessorConstraint(Processor::Kind kind = Processor::NO_KIND);
     public:
@@ -116,7 +116,7 @@ namespace Legion {
     class ResourceConstraint {
     public:
       static const ExecutionConstraintKind constraint_kind = 
-                                            RESOURCE_CONSTRAINT;
+                                            LEGION_RESOURCE_CONSTRAINT;
     public:
       ResourceConstraint(void);
       ResourceConstraint(ResourceKind resource_kind, 
@@ -147,7 +147,7 @@ namespace Legion {
     class LaunchConstraint {
     public:
       static const ExecutionConstraintKind constraint_kind = 
-                                            LAUNCH_CONSTRAINT;
+                                            LEGION_LAUNCH_CONSTRAINT;
     public:
       LaunchConstraint(void);
       LaunchConstraint(LaunchKind kind, size_t value);
@@ -176,7 +176,7 @@ namespace Legion {
     class ColocationConstraint {
     public:
       static const ExecutionConstraintKind constraint_kind = 
-                                            COLOCATION_CONSTRAINT;
+                                            LEGION_COLOCATION_CONSTRAINT;
     public:
       ColocationConstraint(void);
       ColocationConstraint(unsigned index1, unsigned index2,
@@ -283,59 +283,59 @@ namespace Legion {
         { return T::constraint_kind; }
     public:
       virtual SpecializedConstraint* as_specialized_constraint(void)
-      { return (T::constraint_kind == SPECIALIZED_CONSTRAINT) ? 
+      { return (T::constraint_kind == LEGION_SPECIALIZED_CONSTRAINT) ? 
                 reinterpret_cast<SpecializedConstraint*>(this) : NULL; }
       virtual MemoryConstraint* as_memory_constraint(void)
-      { return (T::constraint_kind == MEMORY_CONSTRAINT) ?
+      { return (T::constraint_kind == LEGION_MEMORY_CONSTRAINT) ?
                 reinterpret_cast<MemoryConstraint*>(this) : NULL; }
       virtual FieldConstraint* as_field_constraint(void)
-      { return (T::constraint_kind == FIELD_CONSTRAINT) ?
+      { return (T::constraint_kind == LEGION_FIELD_CONSTRAINT) ?
                 reinterpret_cast<FieldConstraint*>(this) : NULL; }
       virtual OrderingConstraint* as_ordering_constraint(void)
-      { return (T::constraint_kind == ORDERING_CONSTRAINT) ?
+      { return (T::constraint_kind == LEGION_ORDERING_CONSTRAINT) ?
                 reinterpret_cast<OrderingConstraint*>(this) : NULL; }
       virtual SplittingConstraint* as_splitting_constraint(void)
-      { return (T::constraint_kind == SPLITTING_CONSTRAINT) ?
+      { return (T::constraint_kind == LEGION_SPLITTING_CONSTRAINT) ?
                 reinterpret_cast<SplittingConstraint*>(this) : NULL; }
       virtual DimensionConstraint* as_dimension_constraint(void)
-      { return (T::constraint_kind == DIMENSION_CONSTRAINT) ?
+      { return (T::constraint_kind == LEGION_DIMENSION_CONSTRAINT) ?
                 reinterpret_cast<DimensionConstraint*>(this) : NULL; }
       virtual AlignmentConstraint* as_alignment_constraint(void)
-      { return (T::constraint_kind == ALIGNMENT_CONSTRAINT) ?
+      { return (T::constraint_kind == LEGION_ALIGNMENT_CONSTRAINT) ?
                 reinterpret_cast<AlignmentConstraint*>(this) : NULL; }
       virtual OffsetConstraint* as_offset_constraint(void)
-      { return (T::constraint_kind == OFFSET_CONSTRAINT) ?
+      { return (T::constraint_kind == LEGION_OFFSET_CONSTRAINT) ?
                 reinterpret_cast<OffsetConstraint*>(this) : NULL; }
       virtual PointerConstraint* as_pointer_constraint(void)
-      { return (T::constraint_kind == POINTER_CONSTRAINT) ?
+      { return (T::constraint_kind == LEGION_POINTER_CONSTRAINT) ?
                 reinterpret_cast<PointerConstraint*>(this) : NULL; }
     public:
       virtual const SpecializedConstraint* as_specialized_constraint(void) const
-      { return (T::constraint_kind == SPECIALIZED_CONSTRAINT) ? 
+      { return (T::constraint_kind == LEGION_SPECIALIZED_CONSTRAINT) ? 
                 reinterpret_cast<const SpecializedConstraint*>(this) : NULL; }
       virtual const MemoryConstraint* as_memory_constraint(void) const
-      { return (T::constraint_kind == MEMORY_CONSTRAINT) ?
+      { return (T::constraint_kind == LEGION_MEMORY_CONSTRAINT) ?
                 reinterpret_cast<const MemoryConstraint*>(this) : NULL; }
       virtual const FieldConstraint* as_field_constraint(void) const
-      { return (T::constraint_kind == FIELD_CONSTRAINT) ?
+      { return (T::constraint_kind == LEGION_FIELD_CONSTRAINT) ?
                 reinterpret_cast<const FieldConstraint*>(this) : NULL; }
       virtual const OrderingConstraint* as_ordering_constraint(void) const
-      { return (T::constraint_kind == ORDERING_CONSTRAINT) ?
+      { return (T::constraint_kind == LEGION_ORDERING_CONSTRAINT) ?
                 reinterpret_cast<const OrderingConstraint*>(this) : NULL; }
       virtual const SplittingConstraint* as_splitting_constraint(void) const
-      { return (T::constraint_kind == SPLITTING_CONSTRAINT) ?
+      { return (T::constraint_kind == LEGION_SPLITTING_CONSTRAINT) ?
                 reinterpret_cast<const SplittingConstraint*>(this) : NULL; }
       virtual const DimensionConstraint* as_dimension_constraint(void) const
-      { return (T::constraint_kind == DIMENSION_CONSTRAINT) ?
+      { return (T::constraint_kind == LEGION_DIMENSION_CONSTRAINT) ?
                 reinterpret_cast<const DimensionConstraint*>(this) : NULL; }
       virtual const AlignmentConstraint* as_alignment_constraint(void) const
-      { return (T::constraint_kind == ALIGNMENT_CONSTRAINT) ?
+      { return (T::constraint_kind == LEGION_ALIGNMENT_CONSTRAINT) ?
                 reinterpret_cast<const AlignmentConstraint*>(this) : NULL; }
       virtual const OffsetConstraint* as_offset_constraint(void) const
-      { return (T::constraint_kind == OFFSET_CONSTRAINT) ?
+      { return (T::constraint_kind == LEGION_OFFSET_CONSTRAINT) ?
                 reinterpret_cast<const OffsetConstraint*>(this) : NULL; }
       virtual const PointerConstraint* as_pointer_constraint(void) const
-      { return (T::constraint_kind == POINTER_CONSTRAINT) ?
+      { return (T::constraint_kind == LEGION_POINTER_CONSTRAINT) ?
                 reinterpret_cast<const PointerConstraint*>(this) : NULL; }
     };
 
@@ -357,9 +357,9 @@ namespace Legion {
       public LayoutConstraintBase<SpecializedConstraint> {
     public:
       static const LayoutConstraintKind constraint_kind = 
-                                            SPECIALIZED_CONSTRAINT;
+                                            LEGION_SPECIALIZED_CONSTRAINT;
     public:
-      SpecializedConstraint(SpecializedKind kind = NORMAL_SPECIALIZE,
+      SpecializedConstraint(SpecializedKind kind = LEGION_AFFINE_SPECIALIZE,
                             ReductionOpID redop = 0, 
                             bool no_access = false,
                             bool exact = false);
@@ -378,7 +378,6 @@ namespace Legion {
     public:
       bool is_affine(void) const;
       bool is_compact(void) const;
-      bool is_varfield(void) const;
       bool is_virtual(void) const;
       bool is_reduction(void) const;
       bool is_file(void) const;
@@ -403,7 +402,7 @@ namespace Legion {
     class MemoryConstraint : public LayoutConstraintBase<MemoryConstraint> {
     public:
       static const LayoutConstraintKind constraint_kind = 
-                                            MEMORY_CONSTRAINT;
+                                            LEGION_MEMORY_CONSTRAINT;
     public:
       MemoryConstraint(void);
       MemoryConstraint(Memory::Kind kind);
@@ -437,7 +436,7 @@ namespace Legion {
     class FieldConstraint : public LayoutConstraintBase<FieldConstraint> {
     public:
       static const LayoutConstraintKind constraint_kind = 
-                                            FIELD_CONSTRAINT;
+                                            LEGION_FIELD_CONSTRAINT;
     public:
       FieldConstraint(bool contiguous = false, bool inorder = false);
       FieldConstraint(const std::vector<FieldID> &field_set,
@@ -491,7 +490,7 @@ namespace Legion {
     class OrderingConstraint : public LayoutConstraintBase<OrderingConstraint> {
     public:
       static const LayoutConstraintKind constraint_kind = 
-                                            ORDERING_CONSTRAINT;
+                                            LEGION_ORDERING_CONSTRAINT;
     public:
       OrderingConstraint(bool contiguous = false);
       OrderingConstraint(const std::vector<DimensionKind> &ordering,
@@ -527,7 +526,7 @@ namespace Legion {
       public LayoutConstraintBase<SplittingConstraint> {
     public:
       static const LayoutConstraintKind constraint_kind = 
-                                            SPLITTING_CONSTRAINT;
+                                            LEGION_SPLITTING_CONSTRAINT;
     public:
       SplittingConstraint(void);
       SplittingConstraint(DimensionKind dim); // chunks
@@ -557,7 +556,7 @@ namespace Legion {
       public LayoutConstraintBase<DimensionConstraint> {
     public:
       static const LayoutConstraintKind constraint_kind = 
-                                          DIMENSION_CONSTRAINT;
+                                          LEGION_DIMENSION_CONSTRAINT;
     public:
       DimensionConstraint(void);
       DimensionConstraint(DimensionKind dim, EqualityKind eq, size_t value);
@@ -587,7 +586,7 @@ namespace Legion {
       public LayoutConstraintBase<AlignmentConstraint> {
     public:
       static const LayoutConstraintKind constraint_kind = 
-                                            ALIGNMENT_CONSTRAINT;
+                                            LEGION_ALIGNMENT_CONSTRAINT;
     public:
       AlignmentConstraint(void);
       AlignmentConstraint(FieldID fid, EqualityKind kind, 
@@ -616,7 +615,7 @@ namespace Legion {
     class OffsetConstraint : public LayoutConstraintBase<OffsetConstraint> {
     public:
       static const LayoutConstraintKind constraint_kind = 
-                                            OFFSET_CONSTRAINT;
+                                            LEGION_OFFSET_CONSTRAINT;
     public:
       OffsetConstraint(void);
       OffsetConstraint(FieldID fid, size_t offset);
@@ -643,7 +642,7 @@ namespace Legion {
     class PointerConstraint : public LayoutConstraintBase<PointerConstraint> {
     public:
       static const LayoutConstraintKind constraint_kind = 
-                                            POINTER_CONSTRAINT;
+                                            LEGION_POINTER_CONSTRAINT;
     public:
       PointerConstraint(void);
       PointerConstraint(Memory memory, uintptr_t ptr);

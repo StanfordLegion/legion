@@ -1265,7 +1265,7 @@ namespace Legion {
         assert(false);
       }
       const bool create_only = 
-        (req.privilege == REDUCE) || req.enable_WAR_optimization;
+        (req.privilege == LEGION_REDUCE) || req.enable_WAR_optimization;
       // Try all the memories
       for (std::vector<Memory>::const_iterator it = req.target_ranking.begin();
             it != req.target_ranking.end(); it++)
@@ -1310,17 +1310,17 @@ namespace Legion {
       {
         assert(all_fields.size() == 1);
         constraints.add_constraint(SpecializedConstraint(
-                                      REDUCTION_FOLD_SPECIALIZE, redop))
+                                    LEGION_AFFINE_REDUCTION_SPECIALIZE, redop))
           .add_constraint(FieldConstraint(all_fields, true/*contiguous*/,
                                           true/*inorder*/));
       }
       else
       {
         std::vector<DimensionKind> dimension_ordering(4);
-        dimension_ordering[0] = DIM_F;
-        dimension_ordering[1] = DIM_X;
-        dimension_ordering[2] = DIM_Y;
-        dimension_ordering[3] = DIM_Z;
+        dimension_ordering[0] = LEGION_DIM_F;
+        dimension_ordering[1] = LEGION_DIM_X;
+        dimension_ordering[2] = LEGION_DIM_Y;
+        dimension_ordering[3] = LEGION_DIM_Z;
         constraints.add_constraint(SpecializedConstraint())
           .add_constraint(FieldConstraint(all_fields, true/*contiguous*/,
                                           true/*inorder*/))
@@ -1341,18 +1341,18 @@ namespace Legion {
       {
         assert(all_fields.size() == 1);
         constraints.add_constraint(SpecializedConstraint(
-                                    REDUCTION_FOLD_SPECIALIZE, redop)).
-          add_constraint(FieldConstraint(all_fields, true/*contiguous*/,
+                                    LEGION_AFFINE_REDUCTION_SPECIALIZE, redop))
+          .add_constraint(FieldConstraint(all_fields, true/*contiguous*/,
                                          true/*inorder*/));
       }
       else
       {
         std::vector<FieldID> all_fields(fields.begin(), fields.end());
         std::vector<DimensionKind> dimension_ordering(4);
-        dimension_ordering[0] = DIM_X;
-        dimension_ordering[1] = DIM_Y;
-        dimension_ordering[2] = DIM_Z;
-        dimension_ordering[3] = DIM_F;
+        dimension_ordering[0] = LEGION_DIM_X;
+        dimension_ordering[1] = LEGION_DIM_Y;
+        dimension_ordering[2] = LEGION_DIM_Z;
+        dimension_ordering[3] = LEGION_DIM_F;
         constraints.add_constraint(SpecializedConstraint())
           .add_constraint(FieldConstraint(all_fields, false/*contiguous*/,
                                           false/*inorder*/))
