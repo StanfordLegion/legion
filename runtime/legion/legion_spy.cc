@@ -143,7 +143,7 @@ namespace Legion {
         {
           if (logical)
           {
-            if (req->handle_type == SINGULAR)
+            if (req->handle_type == LEGION_SINGULAR_PROJECTION)
               logger->start_block("BEFORE ANALYZING REGION (%x,%d,%d) index "
                               "%d of %s (UID %lld) in context %d mask %s",
                     req->region.index_space.id, req->region.field_space.id, 
@@ -156,7 +156,7 @@ namespace Legion {
           }
           else if (pre_map)
           {
-            if (req->handle_type == SINGULAR)
+            if (req->handle_type == LEGION_SINGULAR_PROJECTION)
               logger->start_block("BEFORE PRE-MAPPING REGION (%x,%d,%d) index "
                               "%d of %s (UID %lld) in context %d mask %s",
                   req->region.index_space.id, req->region.field_space.id, 
@@ -169,7 +169,7 @@ namespace Legion {
           }
           else if (closing)
           {
-            if (req->handle_type == SINGULAR)
+            if (req->handle_type == LEGION_SINGULAR_PROJECTION)
               logger->start_block("BEFORE CLOSING REGION (%x,%d,%d) index %d "
                                 "of %s (UID %lld) in context %d mask %s",
                   req->region.index_space.id, req->region.field_space.id, 
@@ -182,7 +182,7 @@ namespace Legion {
           }
           else
           {
-            assert(req->handle_type == SINGULAR);
+            assert(req->handle_type == LEGION_SINGULAR_PROJECTION);
             logger->start_block("BEFORE MAPPING REGION (%x,%d,%d) index %d "
                               "of %s (UID %lld) in context %d mask %s",
                 req->region.index_space.id, req->region.field_space.id, 
@@ -193,7 +193,7 @@ namespace Legion {
         {
           if (logical)
           {
-            if (req->handle_type == SINGULAR)
+            if (req->handle_type == LEGION_SINGULAR_PROJECTION)
               logger->start_block("AFTER ANALYZING REGION (%x,%d,%d) index "
                               "%d of %s (UID %lld) in context %d mask %s",
                     req->region.index_space.id, req->region.field_space.id, 
@@ -206,7 +206,7 @@ namespace Legion {
           }
           else if (pre_map)
           {
-            if (req->handle_type == SINGULAR)
+            if (req->handle_type == LEGION_SINGULAR_PROJECTION)
               logger->start_block("AFTER PRE-MAPPING REGION (%x,%d,%d) index "
                             "%d of %s (UID %lld) in context %d mask %s",
                   req->region.index_space.id, req->region.field_space.id, 
@@ -219,7 +219,7 @@ namespace Legion {
           }
           else if (closing)
           {
-            if (req->handle_type == SINGULAR)
+            if (req->handle_type == LEGION_SINGULAR_PROJECTION)
               logger->start_block("AFTER CLOSING REGION (%x,%d,%d) index %d "
                                 "of %s (UID %lld) in context %d mask %s",
                   req->region.index_space.id, req->region.field_space.id, 
@@ -232,7 +232,7 @@ namespace Legion {
           }
           else
           {
-            assert(req->handle_type == SINGULAR);
+            assert(req->handle_type == LEGION_SINGULAR_PROJECTION);
             logger->start_block("AFTER MAPPING REGION (%x,%d,%d) index %d "
                               "of %s (UID %lld) in context %d mask %s",
                 req->region.index_space.id, req->region.field_space.id, 

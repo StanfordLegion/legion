@@ -554,7 +554,7 @@ namespace Legion {
     class ProjectionInfo {
     public:
       ProjectionInfo(void)
-        : projection(NULL), projection_type(SINGULAR),
+        : projection(NULL), projection_type(LEGION_SINGULAR_PROJECTION),
           projection_space(NULL) { }
       ProjectionInfo(Runtime *runtime, const RegionRequirement &req,
                      IndexSpaceNode *launch_space);

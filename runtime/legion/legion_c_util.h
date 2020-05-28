@@ -250,7 +250,7 @@ namespace Legion {
         legion_domain_t domain_;
         domain_.is_id = domain.is_id;
         domain_.dim = domain.dim;
-        std::copy(domain.rect_data, domain.rect_data + 2 * MAX_RECT_DIM, domain_.rect_data);
+        std::copy(domain.rect_data, domain.rect_data + 2 * LEGION_MAX_DIM, domain_.rect_data);
         return domain_;
       }
 
@@ -259,7 +259,7 @@ namespace Legion {
         Domain domain;
         domain.is_id = domain_.is_id;
         domain.dim = domain_.dim;
-        std::copy(domain_.rect_data, domain_.rect_data + 2 * MAX_RECT_DIM, domain.rect_data);
+        std::copy(domain_.rect_data, domain_.rect_data + 2 * LEGION_MAX_DIM, domain.rect_data);
         return domain;
       }
 
@@ -267,7 +267,7 @@ namespace Legion {
       wrap(DomainPoint dp) {
         legion_domain_point_t dp_;
         dp_.dim = dp.dim;
-        std::copy(dp.point_data, dp.point_data + MAX_POINT_DIM, dp_.point_data);
+        std::copy(dp.point_data, dp.point_data + LEGION_MAX_DIM, dp_.point_data);
         return dp_;
       }
 
@@ -275,7 +275,7 @@ namespace Legion {
       unwrap(legion_domain_point_t dp_) {
         DomainPoint dp;
         dp.dim = dp_.dim;
-        std::copy(dp_.point_data, dp_.point_data + MAX_POINT_DIM, dp.point_data);
+        std::copy(dp_.point_data, dp_.point_data + LEGION_MAX_DIM, dp.point_data);
         return dp;
       }
 
@@ -284,7 +284,7 @@ namespace Legion {
         legion_domain_transform_t transform_;
         transform_.m = transform.m;
         transform_.n = transform.n;
-        std::copy(transform.matrix, transform.matrix + MAX_POINT_DIM * MAX_POINT_DIM, transform_.matrix);
+        std::copy(transform.matrix, transform.matrix + LEGION_MAX_DIM * LEGION_MAX_DIM, transform_.matrix);
         return transform_;
       }
 
@@ -293,7 +293,7 @@ namespace Legion {
         DomainTransform transform;
         transform.m = transform_.m;
         transform.n = transform_.n;
-        std::copy(transform_.matrix, transform_.matrix + MAX_POINT_DIM * MAX_POINT_DIM, transform.matrix);
+        std::copy(transform_.matrix, transform_.matrix + LEGION_MAX_DIM * LEGION_MAX_DIM, transform.matrix);
         return transform;
       }
 

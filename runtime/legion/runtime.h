@@ -1360,6 +1360,8 @@ namespace Legion {
       virtual ~LayoutConstraints(void);
     public:
       LayoutConstraints& operator=(const LayoutConstraints &rhs);
+      bool operator==(const LayoutConstraints &rhs) const;
+      bool operator==(const LayoutConstraintSet &rhs) const;
     public:
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_inactive(ReferenceMutator *mutator);
@@ -1832,7 +1834,6 @@ namespace Legion {
       bool safe_cast(Context ctx, LogicalRegion region,
                      const void *realm_point, TypeTag type_tag);
     public:
-      FieldSpace create_field_space(Context ctx);
       size_t get_field_size(Context ctx, FieldSpace handle, FieldID fid);
       size_t get_field_size(FieldSpace handle, FieldID fid);
       void get_field_space_fields(Context ctx, FieldSpace handle,
@@ -2678,8 +2679,6 @@ namespace Legion {
       void activate_context(InnerContext *context);
       void deactivate_context(InnerContext *context);
     public:
-      void add_to_dependence_queue(TaskContext *ctx, Processor p,
-                                   Operation *op, const bool unordered = false);
       void add_to_ready_queue(Processor p, TaskOp *task_op, 
                               RtEvent wait_on = RtEvent::NO_RT_EVENT);
       void add_to_local_queue(Processor p, Operation *op, LgPriority priority,

@@ -471,11 +471,8 @@ namespace Legion {
     {
       if (num_dims != total_dims)
         return false;
-      // Layout descriptions are always complete, so just check for conflicts
-      if (constraints->conflicts(candidate_constraints, total_dims, NULL))
-        return false;
-      // If they don't conflict they have to be the same
-      return true;
+      // We need to check equality on the entire constraint sets
+      return *constraints == candidate_constraints;
     }
 
     //--------------------------------------------------------------------------
@@ -492,11 +489,9 @@ namespace Legion {
       // that we actually need to check the FieldIDs which happens next
       if (layout->allocated_fields != allocated_fields)
         return false;
-      // Layout descriptions are always complete so just check for conflicts
-      if (constraints->conflicts(layout->constraints, total_dims, NULL))
-        return false;
-      // If they don't conflict they have to be the same
-      return true;
+
+      // Check equality on the entire constraint sets
+      return *layout->constraints == *constraints;
     }
 
     //--------------------------------------------------------------------------
@@ -2991,8 +2986,8 @@ namespace Legion {
         bool compact = false;
         switch (constraints.specialized_constraint.get_kind())
         {
-          case COMPACT_SPECIALIZE:
-          case COMPACT_REDUCTION_SPECIALIZE:
+          case LEGION_COMPACT_SPECIALIZE:
+          case LEGION_COMPACT_REDUCTION_SPECIALIZE:
             {
               compact = true;
               break;
@@ -3120,8 +3115,8 @@ namespace Legion {
       // Figure out what kind of instance we just made
       switch (constraints.specialized_constraint.get_kind())
       {
-        case NO_SPECIALIZE:
-        case NORMAL_SPECIALIZE:
+        case LEGION_NO_SPECIALIZE:
+        case LEGION_AFFINE_SPECIALIZE:
           {
             // Now we can make the manager
             result = new IndividualManager(forest, did, local_space,
@@ -3135,7 +3130,7 @@ namespace Legion {
                                            false/*external instance*/);
             break;
           }
-        case REDUCTION_FOLD_SPECIALIZE:
+        case LEGION_AFFINE_REDUCTION_SPECIALIZE:
           {
             // TODO: this can go away once realm understands reduction
             // instances that contain multiple fields, Legion is ready
@@ -3182,7 +3177,7 @@ namespace Legion {
               Runtime::trigger_event(filled_and_ready);
             break;
           }
-        case REDUCTION_LIST_SPECIALIZE:
+        case LEGION_COMPACT_REDUCTION_SPECIALIZE:
           {
             // TODO: implement this
             assert(false);
@@ -3305,7 +3300,7 @@ namespace Legion {
         std::set<DimensionKind> spatial_dims, to_remove;
         for (unsigned idx = 0; idx < ord.ordering.size(); idx++)
         {
-          if (ord.ordering[idx] == DIM_F)
+          if (ord.ordering[idx] == LEGION_DIM_F)
           {
             // Should never be duplicated 
             if (field_idx != -1)
@@ -3315,7 +3310,7 @@ namespace Legion {
             else
               field_idx = idx;
           }
-          else if (ord.ordering[idx] > DIM_F)
+          else if (ord.ordering[idx] > LEGION_DIM_F)
             REPORT_LEGION_FATAL(ERROR_UNSUPPORTED_LAYOUT_CONSTRAINT,
               "Splitting layout constraints are not currently supported")
           else
@@ -3364,7 +3359,7 @@ namespace Legion {
               // Add them to the back
               for (unsigned idx = 0; idx < num_dims; idx++)
               {
-                DimensionKind dim = (DimensionKind)(DIM_X + idx);
+                DimensionKind dim = (DimensionKind)(LEGION_DIM_X + idx);
                 if (spatial_dims.find(dim) == spatial_dims.end())
                   ord.ordering.push_back(dim);
               }
@@ -3374,7 +3369,7 @@ namespace Legion {
               // Add them to the front
               for (int idx = (num_dims-1); idx >= 0; idx--)
               {
-                DimensionKind dim = (DimensionKind)(DIM_X + idx);
+                DimensionKind dim = (DimensionKind)(LEGION_DIM_X + idx);
                 if (spatial_dims.find(dim) == spatial_dims.end())
                   ord.ordering.insert(ord.ordering.begin(), dim);
               }
@@ -3387,7 +3382,7 @@ namespace Legion {
             // No field dimension so just add the spatial ones on the back
             for (unsigned idx = 0; idx < num_dims; idx++)
             {
-              DimensionKind dim = (DimensionKind)(DIM_X + idx);
+              DimensionKind dim = (DimensionKind)(LEGION_DIM_X + idx);
               if (spatial_dims.find(dim) == spatial_dims.end())
                 ord.ordering.push_back(dim);
             }
@@ -3396,7 +3391,7 @@ namespace Legion {
         // If we didn't see the field dimension either then add that
         // at the end to give us SOA layouts in general
         if (field_idx == -1)
-          ord.ordering.push_back(DIM_F);
+          ord.ordering.push_back(LEGION_DIM_F);
         // We've now got all our dimensions so we can set the
         // contiguous flag to true
         ord.contiguous = true;
@@ -3406,8 +3401,8 @@ namespace Legion {
         // We had no ordering constraints so populate it with 
         // SOA constraints for now
         for (unsigned idx = 0; idx < num_dims; idx++)
-          ord.ordering.push_back((DimensionKind)(DIM_X + idx));
-        ord.ordering.push_back(DIM_F);
+          ord.ordering.push_back((DimensionKind)(LEGION_DIM_X + idx));
+        ord.ordering.push_back(LEGION_DIM_F);
         ord.contiguous = true;
       }
 #ifdef DEBUG_LEGION
@@ -3427,12 +3422,12 @@ namespace Legion {
       // require us to update the field sizes
       switch (constraints.specialized_constraint.get_kind())
       {
-        case NO_SPECIALIZE:
-        case AFFINE_SPECIALIZE:
-        case COMPACT_SPECIALIZE:
+        case LEGION_NO_SPECIALIZE:
+        case LEGION_AFFINE_SPECIALIZE:
+        case LEGION_COMPACT_SPECIALIZE:
           break;
-        case AFFINE_REDUCTION_SPECIALIZE:
-        case COMPACT_REDUCTION_SPECIALIZE:
+        case LEGION_AFFINE_REDUCTION_SPECIALIZE:
+        case LEGION_COMPACT_REDUCTION_SPECIALIZE:
           {
             // Reduction folds are a special case of normal specialize
             redop_id = constraints.specialized_constraint.get_reduction_op();
@@ -3450,7 +3445,7 @@ namespace Legion {
             }
             break;
           }
-        case VIRTUAL_SPECIALIZE:
+        case LEGION_VIRTUAL_SPECIALIZE:
           {
             REPORT_LEGION_ERROR(ERROR_ILLEGAL_REQUEST_VIRTUAL_INSTANCE,
                           "Illegal request to create a virtual instance");

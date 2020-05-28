@@ -1036,13 +1036,13 @@ namespace Legion {
       inline RegionRequirement& add_flags(RegionFlags new_flags);
     public:
       inline bool is_verified(void) const 
-        { return (flags & VERIFIED_FLAG); }
+        { return (flags & LEGION_VERIFIED_FLAG); }
       inline bool is_no_access(void) const 
-        { return (flags & NO_ACCESS_FLAG); }
+        { return (flags & LEGION_NO_ACCESS_FLAG); }
       inline bool is_restricted(void) const 
-        { return (flags & RESTRICTED_FLAG); }
+        { return (flags & LEGION_RESTRICTED_FLAG); }
       inline bool must_premap(void) const
-        { return (flags & MUST_PREMAP_FLAG); }
+        { return (flags & LEGION_MUST_PREMAP_FLAG); }
     public:
       const void* get_projection_args(size_t *size) const;
       void set_projection_args(const void *args, size_t size, bool own = false);
@@ -3001,17 +3001,19 @@ namespace Legion {
       // type alias, who knows what their problem is
       typedef Legion::MappableType MappableType;
 #endif
-      static const MappableType TASK_MAPPABLE = ::TASK_MAPPABLE;
-      static const MappableType COPY_MAPPABLE = ::COPY_MAPPABLE;
-      static const MappableType INLINE_MAPPABLE = ::INLINE_MAPPABLE;
-      static const MappableType ACQUIRE_MAPPABLE = ::ACQUIRE_MAPPABLE;
-      static const MappableType RELEASE_MAPPABLE = ::RELEASE_MAPPABLE;
-      static const MappableType CLOSE_MAPPABLE = ::CLOSE_MAPPABLE;
-      static const MappableType FILL_MAPPABLE = ::FILL_MAPPABLE;
-      static const MappableType PARTITION_MAPPABLE = ::PARTITION_MAPPABLE;
+      static const MappableType TASK_MAPPABLE = ::LEGION_TASK_MAPPABLE;
+      static const MappableType COPY_MAPPABLE = ::LEGION_COPY_MAPPABLE;
+      static const MappableType INLINE_MAPPABLE = ::LEGION_INLINE_MAPPABLE;
+      static const MappableType ACQUIRE_MAPPABLE = ::LEGION_ACQUIRE_MAPPABLE;
+      static const MappableType RELEASE_MAPPABLE = ::LEGION_RELEASE_MAPPABLE;
+      static const MappableType CLOSE_MAPPABLE = ::LEGION_CLOSE_MAPPABLE;
+      static const MappableType FILL_MAPPABLE = ::LEGION_FILL_MAPPABLE;
+      static const MappableType PARTITION_MAPPABLE = 
+                                        ::LEGION_PARTITION_MAPPABLE;
       static const MappableType DYNAMIC_COLLECTIVE_MAPPABLE = 
-                                            ::DYNAMIC_COLLECTIVE_MAPPABLE;
-      static const MappableType MUST_EPOCH_MAPPABLE = ::MUST_EPOCH_MAPPABLE;
+                                        ::LEGION_DYNAMIC_COLLECTIVE_MAPPABLE;
+      static const MappableType MUST_EPOCH_MAPPABLE = 
+                                        ::LEGION_MUST_EPOCH_MAPPABLE;
     };
 
     /**
@@ -3836,11 +3838,11 @@ namespace Legion {
        */
       LEGION_DEPRECATED("Use the new dependent partitioning API calls instead.")
       IndexPartition create_index_partition(Context ctx, IndexSpace parent,
-                                        const Domain &color_space,
-                                        const PointColoring &coloring,
-                                        PartitionKind part_kind = COMPUTE_KIND,
-                                        Color color = AUTO_GENERATE_ID,
-                                        bool allocable = false);
+                                  const Domain &color_space,
+                                  const PointColoring &coloring,
+                                  PartitionKind part_kind = LEGION_COMPUTE_KIND,
+                                  Color color = AUTO_GENERATE_ID,
+                                  bool allocable = false);
       /**
        * @deprecated
        * See the previous create_index_partition call
@@ -3871,10 +3873,10 @@ namespace Legion {
        */
       LEGION_DEPRECATED("Use the new dependent partitioning API calls instead.")
       IndexPartition create_index_partition(Context ctx, IndexSpace parent,
-                                        const Domain &color_space,
-                                        const DomainPointColoring &coloring,
-                                        PartitionKind part_kind = COMPUTE_KIND,
-                                        Color color = AUTO_GENERATE_ID);
+                                  const Domain &color_space,
+                                  const DomainPointColoring &coloring,
+                                  PartitionKind part_kind = LEGION_COMPUTE_KIND,
+                                  Color color = AUTO_GENERATE_ID);
       /**
        * @deprecated
        * See the previous create index partition call
@@ -3907,10 +3909,10 @@ namespace Legion {
        */
       LEGION_DEPRECATED("Use the new dependent partitioning API calls instead.")
       IndexPartition create_index_partition(Context ctx, IndexSpace parent,
-                                      const Domain &color_space,
-                                      const MultiDomainPointColoring &coloring,
-                                      PartitionKind part_kind = COMPUTE_KIND,
-                                      Color color = AUTO_GENERATE_ID);
+                                  const Domain &color_space,
+                                  const MultiDomainPointColoring &coloring,
+                                  PartitionKind part_kind = LEGION_COMPUTE_KIND,
+                                  Color color = AUTO_GENERATE_ID);
       /**
        * @deprecated
        * See the previous create index partition call
@@ -4099,12 +4101,12 @@ namespace Legion {
        * @return name of the created index partition
        */
       IndexPartition create_partition_by_union(Context ctx,
-                                       IndexSpace parent,
-                                       IndexPartition handle1,
-                                       IndexPartition handle2,
-                                       IndexSpace color_space,
-                                       PartitionKind part_kind = COMPUTE_KIND,
-                                       Color color = AUTO_GENERATE_ID);
+                                 IndexSpace parent,
+                                 IndexPartition handle1,
+                                 IndexPartition handle2,
+                                 IndexSpace color_space,
+                                 PartitionKind part_kind = LEGION_COMPUTE_KIND,
+                                 Color color = AUTO_GENERATE_ID);
       template<int DIM, typename COORD_T,
                int COLOR_DIM, typename COLOR_COORD_T>
       IndexPartitionT<DIM,COORD_T> create_partition_by_union(Context ctx,
@@ -4112,7 +4114,7 @@ namespace Legion {
                               IndexPartitionT<DIM,COORD_T> handle1,
                               IndexPartitionT<DIM,COORD_T> handle2,
                               IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
-                              PartitionKind part_kind = COMPUTE_KIND,
+                              PartitionKind part_kind = LEGION_COMPUTE_KIND,
                               Color color = AUTO_GENERATE_ID);
       ///@}
       ///@{
@@ -4140,12 +4142,12 @@ namespace Legion {
        * @return name of the created index partition
        */
       IndexPartition create_partition_by_intersection(Context ctx,
-                                        IndexSpace parent,
-                                        IndexPartition handle1,
-                                        IndexPartition handle2,
-                                        IndexSpace color_space,
-                                        PartitionKind part_kind = COMPUTE_KIND,
-                                        Color color = AUTO_GENERATE_ID);
+                                  IndexSpace parent,
+                                  IndexPartition handle1,
+                                  IndexPartition handle2,
+                                  IndexSpace color_space,
+                                  PartitionKind part_kind = LEGION_COMPUTE_KIND,
+                                  Color color = AUTO_GENERATE_ID);
       template<int DIM, typename COORD_T,
                int COLOR_DIM, typename COLOR_COORD_T>
       IndexPartitionT<DIM,COORD_T> create_partition_by_intersection(
@@ -4154,7 +4156,7 @@ namespace Legion {
                               IndexPartitionT<DIM,COORD_T> handle1,
                               IndexPartitionT<DIM,COORD_T> handle2,
                               IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
-                              PartitionKind part_kind = COMPUTE_KIND,
+                              PartitionKind part_kind = LEGION_COMPUTE_KIND,
                               Color color = AUTO_GENERATE_ID);
       ///@}
       ///@{
@@ -4177,17 +4179,17 @@ namespace Legion {
        * @param dominates whether the parent dominates the partition
        */
       IndexPartition create_partition_by_intersection(Context ctx,
-                                         IndexSpace parent,
-                                         IndexPartition partition,
-                                         PartitionKind part_kind = COMPUTE_KIND,
-                                         Color color = AUTO_GENERATE_ID,
-                                         bool dominates = false);
+                                   IndexSpace parent,
+                                   IndexPartition partition,
+                                   PartitionKind part_kind = LEGION_COMPUTE_KIND,
+                                   Color color = AUTO_GENERATE_ID,
+                                   bool dominates = false);
       template<int DIM, typename COORD_T>
       IndexPartitionT<DIM,COORD_T> create_partition_by_intersection(Context ctx,
-                                         IndexSpaceT<DIM,COORD_T> parent,
-                                         IndexPartitionT<DIM,COORD_T> partition,
-                                         PartitionKind part_kind = COMPUTE_KIND,
-                                         Color color = AUTO_GENERATE_ID,
+                                 IndexSpaceT<DIM,COORD_T> parent,
+                                 IndexPartitionT<DIM,COORD_T> partition,
+                                 PartitionKind part_kind = LEGION_COMPUTE_KIND,
+                                 Color color = AUTO_GENERATE_ID,
                                          bool dominates = false);
       ///@}
       ///@{
@@ -4215,12 +4217,12 @@ namespace Legion {
        * @return name of the created index partition
        */
       IndexPartition create_partition_by_difference(Context ctx,
-                                        IndexSpace parent,
-                                        IndexPartition handle1,
-                                        IndexPartition handle2,
-                                        IndexSpace color_space,
-                                        PartitionKind part_kind = COMPUTE_KIND,
-                                        Color color = AUTO_GENERATE_ID);
+                                  IndexSpace parent,
+                                  IndexPartition handle1,
+                                  IndexPartition handle2,
+                                  IndexSpace color_space,
+                                  PartitionKind part_kind = LEGION_COMPUTE_KIND,
+                                  Color color = AUTO_GENERATE_ID);
       template<int DIM, typename COORD_T,
                int COLOR_DIM, typename COLOR_COORD_T>
       IndexPartitionT<DIM,COORD_T> create_partition_by_difference(Context ctx,
@@ -4228,7 +4230,7 @@ namespace Legion {
                               IndexPartitionT<DIM,COORD_T> handle1,
                               IndexPartitionT<DIM,COORD_T> handle2,
                               IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
-                              PartitionKind part_kind = COMPUTE_KIND,
+                              PartitionKind part_kind = LEGION_COMPUTE_KIND,
                               Color color = AUTO_GENERATE_ID);
       ///@}
       ///@{
@@ -4259,7 +4261,7 @@ namespace Legion {
                                   IndexPartition handle1,
                                   IndexPartition handle2,
                                   std::map<IndexSpace,IndexPartition> &handles,
-                                  PartitionKind part_kind = COMPUTE_KIND,
+                                  PartitionKind part_kind = LEGION_COMPUTE_KIND,
                                   Color color = AUTO_GENERATE_ID);
       template<int DIM, typename COORD_T, 
                int COLOR_DIM, typename COLOR_COORD_T>
@@ -4269,7 +4271,7 @@ namespace Legion {
                                   typename std::map<
                                     IndexSpaceT<DIM,COORD_T>,
                                     IndexPartitionT<DIM,COORD_T> > &handles,
-                                  PartitionKind part_kind = COMPUTE_KIND,
+                                  PartitionKind part_kind = LEGION_COMPUTE_KIND,
                                   Color color = AUTO_GENERATE_ID);
       ///@}
       ///@{
@@ -4355,12 +4357,12 @@ namespace Legion {
        * @return a new index partition of the parent index space
        */
       IndexPartition create_partition_by_restriction(Context ctx,
-                                        IndexSpace parent,
-                                        IndexSpace color_space,
-                                        DomainTransform transform,
-                                        Domain extent,
-                                        PartitionKind part_kind = COMPUTE_KIND,
-                                        Color color = AUTO_GENERATE_ID);
+                                  IndexSpace parent,
+                                  IndexSpace color_space,
+                                  DomainTransform transform,
+                                  Domain extent,
+                                  PartitionKind part_kind = LEGION_COMPUTE_KIND,
+                                  Color color = AUTO_GENERATE_ID);
       // Template version
       template<int DIM, int COLOR_DIM, typename COORD_T>
       IndexPartitionT<DIM,COORD_T> create_partition_by_restriction(Context ctx,
@@ -4368,7 +4370,7 @@ namespace Legion {
                                 IndexSpaceT<COLOR_DIM,COORD_T> color_space,
                                 Transform<DIM,COLOR_DIM,COORD_T> transform,
                                 Rect<DIM,COORD_T> extent,
-                                PartitionKind part_kind = COMPUTE_KIND,
+                                PartitionKind part_kind = LEGION_COMPUTE_KIND,
                                 Color color = AUTO_GENERATE_ID);
       ///@}
       ///@{
@@ -4438,23 +4440,23 @@ namespace Legion {
        * @return a new index partition of the parent index space
        */
       IndexPartition create_partition_by_domain(Context ctx,
-                                    IndexSpace parent,
-                                    const std::map<DomainPoint,Domain> &domains,
-                                    IndexSpace color_space,
-                                    bool perform_intersections = true,
-                                    PartitionKind part_kind = COMPUTE_KIND,
-                                    Color color = AUTO_GENERATE_ID);
+                                  IndexSpace parent,
+                                  const std::map<DomainPoint,Domain> &domains,
+                                  IndexSpace color_space,
+                                  bool perform_intersections = true,
+                                  PartitionKind part_kind = LEGION_COMPUTE_KIND,
+                                  Color color = AUTO_GENERATE_ID);
       template<int DIM, typename COORD_T, int COLOR_DIM, typename COLOR_COORD_T>
       IndexPartitionT<DIM,COORD_T> create_partition_by_domain(Context ctx,
-                                    IndexSpaceT<DIM,COORD_T> parent,
-                                    const std::map<
-                                           Point<COLOR_DIM,COLOR_COORD_T>,
-                                             DomainT<DIM,COORD_T> > &domains,
-                                    IndexSpaceT<COLOR_DIM,
-                                                COLOR_COORD_T> color_space,
-                                    bool perform_intersections = true,
-                                    PartitionKind part_kind = COMPUTE_KIND,
-                                    Color color = AUTO_GENERATE_ID);
+                                  IndexSpaceT<DIM,COORD_T> parent,
+                                  const std::map<
+                                         Point<COLOR_DIM,COLOR_COORD_T>,
+                                           DomainT<DIM,COORD_T> > &domains,
+                                  IndexSpaceT<COLOR_DIM,
+                                              COLOR_COORD_T> color_space,
+                                  bool perform_intersections = true,
+                                  PartitionKind part_kind = LEGION_COMPUTE_KIND,
+                                  Color color = AUTO_GENERATE_ID);
       /**
        * This is an alternate version of create_partition_by_domain that
        * instead takes a future map for the list of domains to be used.
@@ -4471,21 +4473,21 @@ namespace Legion {
        * @return a new index partition of the parent index space
        */
       IndexPartition create_partition_by_domain(Context ctx,
-                                      IndexSpace parent,
-                                      const FutureMap &domain_future_map,
-                                      IndexSpace color_space,
-                                      bool perform_intersections = true,
-                                      PartitionKind part_kind = COMPUTE_KIND,
-                                      Color color = AUTO_GENERATE_ID);
+                                  IndexSpace parent,
+                                  const FutureMap &domain_future_map,
+                                  IndexSpace color_space,
+                                  bool perform_intersections = true,
+                                  PartitionKind part_kind = LEGION_COMPUTE_KIND,
+                                  Color color = AUTO_GENERATE_ID);
       template<int DIM, typename COORD_T, int COLOR_DIM, typename COLOR_COORD_T>
       IndexPartitionT<DIM,COORD_T> create_partition_by_domain(Context ctx,
-                                      IndexSpaceT<DIM,COORD_T> parent,
-                                      const FutureMap &domain_future_map,
-                                      IndexSpaceT<COLOR_DIM,
-                                                  COLOR_COORD_T> color_space,
-                                      bool perform_intersections = true,
-                                      PartitionKind part_kind = COMPUTE_KIND,
-                                      Color color = AUTO_GENERATE_ID);
+                                  IndexSpaceT<DIM,COORD_T> parent,
+                                  const FutureMap &domain_future_map,
+                                  IndexSpaceT<COLOR_DIM,
+                                              COLOR_COORD_T> color_space,
+                                  bool perform_intersections = true,
+                                  PartitionKind part_kind = LEGION_COMPUTE_KIND,
+                                  Color color = AUTO_GENERATE_ID);
       ///@}
       ///@{
       /**
@@ -4522,7 +4524,7 @@ namespace Legion {
                                                MapperID id = 0,
                                                MappingTagID tag = 0,
                                                PartitionKind part_kind = 
-                                                                 DISJOINT_KIND);
+                                                         LEGION_DISJOINT_KIND);
       template<int DIM, typename COORD_T, 
                int COLOR_DIM, typename COLOR_COORD_T>
       IndexPartitionT<DIM,COORD_T> create_partition_by_field(Context ctx,
@@ -4532,7 +4534,7 @@ namespace Legion {
                           IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
                           Color color = AUTO_GENERATE_ID,
                           MapperID id = 0, MappingTagID tag = 0,
-                          PartitionKind part_kind = DISJOINT_KIND);
+                          PartitionKind part_kind = LEGION_DISJOINT_KIND);
       ///@}
       ///@{
       /**
@@ -4566,14 +4568,14 @@ namespace Legion {
        * @return a new index partition of the 'handle' index space
        */
       IndexPartition create_partition_by_image(Context ctx,
-                                         IndexSpace handle,
-                                         LogicalPartition projection,
-                                         LogicalRegion parent,
-                                         FieldID fid,
-                                         IndexSpace color_space,
-                                         PartitionKind part_kind = COMPUTE_KIND,
-                                         Color color = AUTO_GENERATE_ID,
-                                         MapperID id = 0, MappingTagID tag = 0);
+                                 IndexSpace handle,
+                                 LogicalPartition projection,
+                                 LogicalRegion parent,
+                                 FieldID fid,
+                                 IndexSpace color_space,
+                                 PartitionKind part_kind = LEGION_COMPUTE_KIND,
+                                 Color color = AUTO_GENERATE_ID,
+                                 MapperID id = 0, MappingTagID tag = 0);
       template<int DIM1, typename COORD_T1, 
                int DIM2, typename COORD_T2, 
                int COLOR_DIM, typename COLOR_COORD_T>
@@ -4583,19 +4585,19 @@ namespace Legion {
                               LogicalRegionT<DIM1,COORD_T1> parent,
                               FieldID fid, // type: Point<DIM2,COORD_T2>
                               IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
-                              PartitionKind part_kind = COMPUTE_KIND,
+                              PartitionKind part_kind = LEGION_COMPUTE_KIND,
                               Color color = AUTO_GENERATE_ID,
                               MapperID id = 0, MappingTagID tag = 0);
       // Range versions of image
       IndexPartition create_partition_by_image_range(Context ctx,
-                                         IndexSpace handle,
-                                         LogicalPartition projection,
-                                         LogicalRegion parent,
-                                         FieldID fid,
-                                         IndexSpace color_space,
-                                         PartitionKind part_kind = COMPUTE_KIND,
-                                         Color color = AUTO_GENERATE_ID,
-                                         MapperID id = 0, MappingTagID tag = 0);
+                                 IndexSpace handle,
+                                 LogicalPartition projection,
+                                 LogicalRegion parent,
+                                 FieldID fid,
+                                 IndexSpace color_space,
+                                 PartitionKind part_kind = LEGION_COMPUTE_KIND,
+                                 Color color = AUTO_GENERATE_ID,
+                                 MapperID id = 0, MappingTagID tag = 0);
       template<int DIM1, typename COORD_T1, 
                int DIM2, typename COORD_T2, 
                int COLOR_DIM, typename COLOR_COORD_T>
@@ -4606,7 +4608,7 @@ namespace Legion {
                               LogicalRegionT<DIM1,COORD_T1> parent,
                               FieldID fid, // type: Rect<DIM2,COORD_T2>
                               IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
-                              PartitionKind part_kind = COMPUTE_KIND,
+                              PartitionKind part_kind = LEGION_COMPUTE_KIND,
                               Color color = AUTO_GENERATE_ID,
                               MapperID id = 0, MappingTagID tag = 0);
       ///@}                                    
@@ -4639,14 +4641,14 @@ namespace Legion {
        * @return a new index partition of the index space of 'handle'
        */
       IndexPartition create_partition_by_preimage(Context ctx, 
-                                        IndexPartition projection,
-                                        LogicalRegion handle,
-                                        LogicalRegion parent,
-                                        FieldID fid,
-                                        IndexSpace color_space,
-                                        PartitionKind part_kind = COMPUTE_KIND,
-                                        Color color = AUTO_GENERATE_ID,
-                                        MapperID id = 0, MappingTagID tag = 0);
+                                  IndexPartition projection,
+                                  LogicalRegion handle,
+                                  LogicalRegion parent,
+                                  FieldID fid,
+                                  IndexSpace color_space,
+                                  PartitionKind part_kind = LEGION_COMPUTE_KIND,
+                                  Color color = AUTO_GENERATE_ID,
+                                  MapperID id = 0, MappingTagID tag = 0);
       template<int DIM1, typename COORD_T1,
                int DIM2, typename COORD_T2,
                int COLOR_DIM, typename COLOR_COORD_T>
@@ -4656,19 +4658,19 @@ namespace Legion {
                               LogicalRegionT<DIM1,COORD_T1> parent,
                               FieldID fid, // type: Point<DIM2,COORD_T2>
                               IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
-                              PartitionKind part_kind = COMPUTE_KIND,
+                              PartitionKind part_kind = LEGION_COMPUTE_KIND,
                               Color color = AUTO_GENERATE_ID,
                               MapperID id = 0, MappingTagID tag = 0);
       // Range versions of preimage 
       IndexPartition create_partition_by_preimage_range(Context ctx, 
-                                        IndexPartition projection,
-                                        LogicalRegion handle,
-                                        LogicalRegion parent,
-                                        FieldID fid,
-                                        IndexSpace color_space,
-                                        PartitionKind part_kind = COMPUTE_KIND,
-                                        Color color = AUTO_GENERATE_ID,
-                                        MapperID id = 0, MappingTagID tag = 0);
+                                  IndexPartition projection,
+                                  LogicalRegion handle,
+                                  LogicalRegion parent,
+                                  FieldID fid,
+                                  IndexSpace color_space,
+                                  PartitionKind part_kind = LEGION_COMPUTE_KIND,
+                                  Color color = AUTO_GENERATE_ID,
+                                  MapperID id = 0, MappingTagID tag = 0);
       template<int DIM1, typename COORD_T1,
                int DIM2, typename COORD_T2,
                int COLOR_DIM, typename COLOR_COORD_T>
@@ -4679,7 +4681,7 @@ namespace Legion {
                               LogicalRegionT<DIM1,COORD_T1> parent,
                               FieldID fid, // type: Rect<DIM2,COORD_T2>
                               IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
-                              PartitionKind part_kind = COMPUTE_KIND,
+                              PartitionKind part_kind = LEGION_COMPUTE_KIND,
                               Color color = AUTO_GENERATE_ID,
                               MapperID id = 0, MappingTagID tag = 0);
       ///@} 
@@ -4715,14 +4717,14 @@ namespace Legion {
       IndexPartition create_pending_partition(Context ctx,
                                               IndexSpace parent,
                                               IndexSpace color_space,
-                                  PartitionKind part_kind = COMPUTE_KIND, 
+                                  PartitionKind part_kind = LEGION_COMPUTE_KIND,
                                   Color color = AUTO_GENERATE_ID);
       template<int DIM, typename COORD_T,
                int COLOR_DIM, typename COLOR_COORD_T>
       IndexPartitionT<DIM,COORD_T> create_pending_partition(Context ctx,
                               IndexSpaceT<DIM,COORD_T> parent,
                               IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
-                              PartitionKind part_kind = COMPUTE_KIND,
+                              PartitionKind part_kind = LEGION_COMPUTE_KIND,
                               Color color = AUTO_GENERATE_ID);
       ///@}
       ///@{
@@ -5254,6 +5256,32 @@ namespace Legion {
        * @return handle for the new field space
        */
       FieldSpace create_field_space(Context ctx);
+      /**
+       * Create a new field space with an existing set of fields
+       * @param ctx enclosing task context
+       * @param field_sizes initial field sizes for fields
+       * @param resulting_fields optional field snames for fields
+       * @param serdez_id optional parameter for specifying a custom
+       *        serdez object for serializing and deserializing fields
+       * @return handle for the new field space
+       */
+      FieldSpace create_field_space(Context ctx,
+                                    const std::vector<size_t> &field_sizes,
+                                    std::vector<FieldID> &resulting_fields,
+                                    CustomSerdezID serdez_id = 0);
+      /**
+       * Create a new field space with an existing set of fields
+       * @param ctx enclosing task context
+       * @param field_sizes initial field sizes for fields
+       * @param resulting_fields optional field snames for fields
+       * @param serdez_id optional parameter for specifying a custom
+       *        serdez object for serializing and deserializing fields
+       * @return handle for the new field space
+       */
+      FieldSpace create_field_space(Context ctx,
+                                    const std::vector<Future> &field_sizes,
+                                    std::vector<FieldID> &resulting_fields,
+                                    CustomSerdezID serdez_id = 0);
       /**
        * Create a new shared ownership of a field space to prevent it 
        * from being destroyed by other potential owners. Every call to this

@@ -710,9 +710,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RegionRequirement::RegionRequirement(void)
       : region(LogicalRegion::NO_REGION), partition(LogicalPartition::NO_PART),
-        privilege(NO_ACCESS), prop(EXCLUSIVE), parent(LogicalRegion::NO_REGION),
-        redop(0), tag(0), flags(NO_FLAG), handle_type(SINGULAR), projection(0),
-        projection_args(NULL), projection_args_size(0)
+        privilege(LEGION_NO_ACCESS), prop(LEGION_EXCLUSIVE), 
+        parent(LogicalRegion::NO_REGION), redop(0), tag(0), 
+        flags(LEGION_NO_FLAG), handle_type(LEGION_SINGULAR_PROJECTION), 
+        projection(0), projection_args(NULL), projection_args_size(0)
     //--------------------------------------------------------------------------
     {
     }
@@ -726,16 +727,16 @@ namespace Legion {
                                         LogicalRegion _parent,
 				        MappingTagID _tag, bool _verified)
       : region(_handle), privilege(_priv), prop(_prop), parent(_parent),
-        redop(0), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG), 
-        handle_type(SINGULAR), projection(0), projection_args(NULL),
-        projection_args_size(0)
+        redop(0), tag(_tag), flags(_verified ? LEGION_VERIFIED_FLAG : 
+            LEGION_NO_FLAG), handle_type(LEGION_SINGULAR_PROJECTION), 
+        projection(0), projection_args(NULL), projection_args_size(0)
     //--------------------------------------------------------------------------
     { 
       privilege_fields = priv_fields;
       instance_fields = inst_fields;
       // For backwards compatibility with the old encoding
-      if (privilege == WRITE_PRIV)
-        privilege = WRITE_DISCARD;
+      if (privilege == LEGION_WRITE_PRIV)
+        privilege = LEGION_WRITE_DISCARD;
 #ifdef DEBUG_LEGION
       if (IS_REDUCE(*this)) // Shouldn't use this constructor for reductions
         REPORT_LEGION_ERROR(ERROR_USE_REDUCTION_REGION_REQ, 
@@ -752,16 +753,16 @@ namespace Legion {
                 PrivilegeMode _priv, CoherenceProperty _prop,
                 LogicalRegion _parent, MappingTagID _tag, bool _verified)
       : partition(pid), privilege(_priv), prop(_prop), parent(_parent),
-        redop(0), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG),
-        handle_type(PART_PROJECTION), projection(_proj), projection_args(NULL),
-        projection_args_size(0)
+        redop(0), tag(_tag), flags(_verified ? LEGION_VERIFIED_FLAG : 
+            LEGION_NO_FLAG), handle_type(LEGION_PARTITION_PROJECTION), 
+        projection(_proj), projection_args(NULL), projection_args_size(0)
     //--------------------------------------------------------------------------
     { 
       privilege_fields = priv_fields;
       instance_fields = inst_fields;
       // For backwards compatibility with the old encoding
-      if (privilege == WRITE_PRIV)
-        privilege = WRITE_DISCARD;
+      if (privilege == LEGION_WRITE_PRIV)
+        privilege = LEGION_WRITE_DISCARD;
 #ifdef DEBUG_LEGION
       if (IS_REDUCE(*this))
         REPORT_LEGION_ERROR(ERROR_USE_REDUCTION_REGION_REQ, 
@@ -778,16 +779,16 @@ namespace Legion {
                 PrivilegeMode _priv, CoherenceProperty _prop,
                 LogicalRegion _parent, MappingTagID _tag, bool _verified)
       : region(_handle), privilege(_priv), prop(_prop), parent(_parent),
-        redop(0), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG),
-        handle_type(REG_PROJECTION), projection(_proj), projection_args(NULL),
-        projection_args_size(0)
+        redop(0), tag(_tag), flags(_verified ? LEGION_VERIFIED_FLAG : 
+            LEGION_NO_FLAG), handle_type(LEGION_REGION_PROJECTION), 
+        projection(_proj), projection_args(NULL), projection_args_size(0)
     //--------------------------------------------------------------------------
     {
       privilege_fields = priv_fields;
       instance_fields = inst_fields;
       // For backwards compatibility with the old encoding
-      if (privilege == WRITE_PRIV)
-        privilege = WRITE_DISCARD;
+      if (privilege == LEGION_WRITE_PRIV)
+        privilege = LEGION_WRITE_DISCARD;
 #ifdef DEBUG_LEGION
       if (IS_REDUCE(*this))
         REPORT_LEGION_ERROR(ERROR_USE_REDUCTION_REGION_REQ, 
@@ -803,10 +804,10 @@ namespace Legion {
                                     ReductionOpID op, CoherenceProperty _prop, 
                                     LogicalRegion _parent, MappingTagID _tag, 
                                     bool _verified)
-      : region(_handle), privilege(REDUCE), prop(_prop), parent(_parent),
-        redop(op), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG), 
-        handle_type(SINGULAR), projection(0), projection_args(NULL),
-        projection_args_size(0)
+      : region(_handle), privilege(LEGION_REDUCE), prop(_prop), parent(_parent),
+        redop(op), tag(_tag), flags(_verified ? LEGION_VERIFIED_FLAG : 
+            LEGION_NO_FLAG), handle_type(LEGION_SINGULAR_PROJECTION), 
+        projection(0), projection_args(NULL), projection_args_size(0)
     //--------------------------------------------------------------------------
     {
       privilege_fields = priv_fields;
@@ -826,10 +827,10 @@ namespace Legion {
                         ReductionOpID op, CoherenceProperty _prop,
                         LogicalRegion _parent, MappingTagID _tag, 
                         bool _verified)
-      : partition(pid), privilege(REDUCE), prop(_prop), parent(_parent),
-        redop(op), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG),
-        handle_type(PART_PROJECTION), projection(_proj), projection_args(NULL),
-        projection_args_size(0)
+      : partition(pid), privilege(LEGION_REDUCE), prop(_prop), parent(_parent),
+        redop(op), tag(_tag), flags(_verified ? LEGION_VERIFIED_FLAG : 
+            LEGION_NO_FLAG), handle_type(LEGION_PARTITION_PROJECTION), 
+        projection(_proj), projection_args(NULL), projection_args_size(0)
     //--------------------------------------------------------------------------
     {
       privilege_fields = priv_fields;
@@ -849,10 +850,10 @@ namespace Legion {
                         ReductionOpID op, CoherenceProperty _prop,
                         LogicalRegion _parent, MappingTagID _tag, 
                         bool _verified)
-      : region(_handle), privilege(REDUCE), prop(_prop), parent(_parent),
-        redop(op), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG),
-        handle_type(REG_PROJECTION), projection(_proj), projection_args(NULL),
-        projection_args_size(0)
+      : region(_handle), privilege(LEGION_REDUCE), prop(_prop), parent(_parent),
+        redop(op), tag(_tag), flags(_verified ? LEGION_VERIFIED_FLAG : 
+            LEGION_NO_FLAG), handle_type(LEGION_REGION_PROJECTION), 
+        projection(_proj), projection_args(NULL), projection_args_size(0)
     //--------------------------------------------------------------------------
     {
       privilege_fields = priv_fields;
@@ -872,14 +873,14 @@ namespace Legion {
 					 MappingTagID _tag, 
                                          bool _verified)
       : region(_handle), privilege(_priv), prop(_prop), parent(_parent),
-        redop(0), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG), 
-        handle_type(SINGULAR), projection(), projection_args(NULL),
-        projection_args_size(0)
+        redop(0), tag(_tag), flags(_verified ? LEGION_VERIFIED_FLAG : 
+            LEGION_NO_FLAG), handle_type(LEGION_SINGULAR_PROJECTION), 
+        projection(), projection_args(NULL), projection_args_size(0)
     //--------------------------------------------------------------------------
     { 
       // For backwards compatibility with the old encoding
-      if (privilege == WRITE_PRIV)
-        privilege = WRITE_DISCARD;
+      if (privilege == LEGION_WRITE_PRIV)
+        privilege = LEGION_WRITE_DISCARD;
 #ifdef DEBUG_LEGION
       if (IS_REDUCE(*this)) // Shouldn't use this constructor for reductions
         REPORT_LEGION_ERROR(ERROR_USE_REDUCTION_REGION_REQ, 
@@ -897,14 +898,14 @@ namespace Legion {
                                          MappingTagID _tag, 
                                          bool _verified)
       : partition(pid), privilege(_priv), prop(_prop), parent(_parent),
-        redop(0), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG), 
-        handle_type(PART_PROJECTION), projection(_proj), projection_args(NULL),
-        projection_args_size(0)
+        redop(0), tag(_tag), flags(_verified ? LEGION_VERIFIED_FLAG : 
+            LEGION_NO_FLAG), handle_type(LEGION_PARTITION_PROJECTION), 
+        projection(_proj), projection_args(NULL), projection_args_size(0)
     //--------------------------------------------------------------------------
     { 
       // For backwards compatibility with the old encoding
-      if (privilege == WRITE_PRIV)
-        privilege = WRITE_DISCARD;
+      if (privilege == LEGION_WRITE_PRIV)
+        privilege = LEGION_WRITE_DISCARD;
 #ifdef DEBUG_LEGION
       if (IS_REDUCE(*this))
         REPORT_LEGION_ERROR(ERROR_USE_REDUCTION_REGION_REQ, 
@@ -922,14 +923,14 @@ namespace Legion {
                                          MappingTagID _tag, 
                                          bool _verified)
       : region(_handle), privilege(_priv), prop(_prop), parent(_parent),
-        redop(0), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG), 
-        handle_type(REG_PROJECTION), projection(_proj), projection_args(NULL),
-        projection_args_size(0)
+        redop(0), tag(_tag), flags(_verified ? LEGION_VERIFIED_FLAG : 
+            LEGION_NO_FLAG), handle_type(LEGION_REGION_PROJECTION), 
+        projection(_proj), projection_args(NULL), projection_args_size(0)
     //--------------------------------------------------------------------------
     {
       // For backwards compatibility with the old encoding
-      if (privilege == WRITE_PRIV)
-        privilege = WRITE_DISCARD;
+      if (privilege == LEGION_WRITE_PRIV)
+        privilege = LEGION_WRITE_DISCARD;
 #ifdef DEBUG_LEGION
       if (IS_REDUCE(*this))
         REPORT_LEGION_ERROR(ERROR_USE_REDUCTION_REGION_REQ, 
@@ -945,10 +946,10 @@ namespace Legion {
                                          LogicalRegion _parent, 
                                          MappingTagID _tag, 
                                          bool _verified)
-      : region(_handle), privilege(REDUCE), prop(_prop), parent(_parent),
-        redop(op), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG), 
-        handle_type(SINGULAR), projection(0), projection_args(NULL),
-        projection_args_size(0)
+      : region(_handle), privilege(LEGION_REDUCE), prop(_prop), parent(_parent),
+        redop(op), tag(_tag), flags(_verified ? LEGION_VERIFIED_FLAG : 
+            LEGION_NO_FLAG), handle_type(LEGION_SINGULAR_PROJECTION), 
+        projection(0), projection_args(NULL), projection_args_size(0)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -966,10 +967,10 @@ namespace Legion {
                                          LogicalRegion _parent, 
                                          MappingTagID _tag, 
                                          bool _verified)
-      : partition(pid), privilege(REDUCE), prop(_prop), parent(_parent),
-        redop(op), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG), 
-        handle_type(PART_PROJECTION), projection(_proj), projection_args(NULL),
-        projection_args_size(0)
+      : partition(pid), privilege(LEGION_REDUCE), prop(_prop), parent(_parent),
+        redop(op), tag(_tag), flags(_verified ? LEGION_VERIFIED_FLAG : 
+            LEGION_NO_FLAG), handle_type(LEGION_PARTITION_PROJECTION), 
+        projection(_proj), projection_args(NULL), projection_args_size(0)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -987,10 +988,10 @@ namespace Legion {
                                          LogicalRegion _parent, 
                                          MappingTagID _tag, 
                                          bool _verified)
-      : region(_handle), privilege(REDUCE), prop(_prop), parent(_parent),
-        redop(op), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG), 
-        handle_type(REG_PROJECTION), projection(_proj), projection_args(NULL),
-        projection_args_size(0)
+      : region(_handle), privilege(LEGION_REDUCE), prop(_prop), parent(_parent),
+        redop(op), tag(_tag), flags(_verified ? LEGION_VERIFIED_FLAG : 
+            LEGION_NO_FLAG), handle_type(LEGION_REGION_PROJECTION), 
+        projection(_proj), projection_args(NULL), projection_args_size(0)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1065,10 +1066,12 @@ namespace Legion {
           (prop == rhs.prop) && (parent == rhs.parent) && (redop == rhs.redop)
           && (tag == rhs.tag) && (flags == rhs.flags))
       {
-        if (((handle_type == SINGULAR) && (region == rhs.region)) ||
-            ((handle_type == PART_PROJECTION) && (partition == rhs.partition) &&
-             (projection == rhs.projection)) ||
-            ((handle_type == REG_PROJECTION) && (region == rhs.region)))
+        if (((handle_type == LEGION_SINGULAR_PROJECTION) && 
+              (region == rhs.region)) ||
+            ((handle_type == LEGION_PARTITION_PROJECTION) && 
+             (partition == rhs.partition) && (projection == rhs.projection)) ||
+            ((handle_type == LEGION_REGION_PROJECTION) && 
+             (region == rhs.region)))
         {
           if ((privilege_fields.size() == rhs.privilege_fields.size()) &&
               (instance_fields.size() == rhs.instance_fields.size()))
@@ -1147,7 +1150,7 @@ namespace Legion {
                         return false;
                       else
                       {
-                        if (handle_type == SINGULAR)
+                        if (handle_type == LEGION_SINGULAR_PROJECTION)
                           return (region < rhs.region);
                         else if (projection_args_size < 
                                   rhs.projection_args_size)
@@ -1163,7 +1166,7 @@ namespace Legion {
                             (memcmp(projection_args, rhs.projection_args,
                                     projection_args_size) > 0))
                           return false;
-                        else if (handle_type == PART_PROJECTION)
+                        else if (handle_type == LEGION_PARTITION_PROJECTION)
                         {
                           if (partition < rhs.partition)
                             return true;
@@ -1200,14 +1203,14 @@ namespace Legion {
     {
       switch (privilege)
       {
-        case NO_ACCESS:
+        case LEGION_NO_ACCESS:
           return LegionRuntime::ACCESSOR_NONE;
-        case READ_ONLY:
+        case LEGION_READ_ONLY:
           return LegionRuntime::ACCESSOR_READ;
-        case READ_WRITE:
-        case WRITE_DISCARD:
+        case LEGION_READ_WRITE:
+        case LEGION_WRITE_DISCARD:
           return LegionRuntime::ACCESSOR_ALL;
-        case REDUCE:
+        case LEGION_REDUCE:
           return LegionRuntime::ACCESSOR_REDUCE;
         default:
           assert(false);
@@ -1261,7 +1264,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpaceRequirement::IndexSpaceRequirement(void)
-      : handle(IndexSpace::NO_SPACE), privilege(NO_MEMORY), 
+      : handle(IndexSpace::NO_SPACE), privilege(LEGION_NO_MEMORY), 
         parent(IndexSpace::NO_SPACE), verified(false)
     //--------------------------------------------------------------------------
     {
@@ -1319,7 +1322,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FieldSpaceRequirement::FieldSpaceRequirement(void)
-      : handle(FieldSpace::NO_SPACE), privilege(NO_MEMORY), verified(false)
+      : handle(FieldSpace::NO_SPACE),privilege(LEGION_NO_MEMORY),verified(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1369,7 +1372,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     StaticDependence::StaticDependence(void)
       : previous_offset(0), previous_req_index(0), current_req_index(0),
-        dependence_type(NO_DEPENDENCE), validates(false), shard_only(false)
+        dependence_type(LEGION_NO_DEPENDENCE),validates(false),shard_only(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -2779,36 +2782,36 @@ namespace Legion {
       {
         switch (mappable->get_mappable_type())
         {
-          case TASK_MAPPABLE:
+          case LEGION_TASK_MAPPABLE:
             {
               const Task *task = mappable->as_task();
               return project(upper_bound, point, task->index_domain);
             }
-          case COPY_MAPPABLE:
+          case LEGION_COPY_MAPPABLE:
             {
               const Copy *copy = mappable->as_copy();
               return project(upper_bound, point, copy->index_domain);
             }
-          case INLINE_MAPPABLE:
-          case ACQUIRE_MAPPABLE:
-          case RELEASE_MAPPABLE:
-          case CLOSE_MAPPABLE:
-          case DYNAMIC_COLLECTIVE_MAPPABLE:
+          case LEGION_INLINE_MAPPABLE:
+          case LEGION_ACQUIRE_MAPPABLE:
+          case LEGION_RELEASE_MAPPABLE:
+          case LEGION_CLOSE_MAPPABLE:
+          case LEGION_DYNAMIC_COLLECTIVE_MAPPABLE:
             {
               const Domain launch_domain(point, point);
               return project(upper_bound, point, launch_domain);
             }
-          case FILL_MAPPABLE:
+          case LEGION_FILL_MAPPABLE:
             {
               const Fill *fill = mappable->as_fill();
               return project(upper_bound, point, fill->index_domain);
             }
-          case PARTITION_MAPPABLE:
+          case LEGION_PARTITION_MAPPABLE:
             {
               const Partition *part = mappable->as_partition();
               return project(upper_bound, point, part->index_domain);
             }
-          case MUST_EPOCH_MAPPABLE:
+          case LEGION_MUST_EPOCH_MAPPABLE:
             {
               const MustEpoch *must = mappable->as_must_epoch();
               return project(upper_bound, point, must->launch_domain);
@@ -2831,7 +2834,7 @@ namespace Legion {
 #endif
         switch (mappable->get_mappable_type())
         {
-          case TASK_MAPPABLE:
+          case LEGION_TASK_MAPPABLE:
             return project(0/*dummy ctx*/, 
                            const_cast<Task*>(mappable->as_task()),
                            index, upper_bound, point);
@@ -2860,36 +2863,36 @@ namespace Legion {
       {
         switch (mappable->get_mappable_type())
         {
-          case TASK_MAPPABLE:
+          case LEGION_TASK_MAPPABLE:
             {
               const Task *task = mappable->as_task();
               return project(upper_bound, point, task->index_domain);
             }
-          case COPY_MAPPABLE:
+          case LEGION_COPY_MAPPABLE:
             {
               const Copy *copy = mappable->as_copy();
               return project(upper_bound, point, copy->index_domain);
             }
-          case INLINE_MAPPABLE:
-          case ACQUIRE_MAPPABLE:
-          case RELEASE_MAPPABLE:
-          case CLOSE_MAPPABLE:
-          case DYNAMIC_COLLECTIVE_MAPPABLE:
+          case LEGION_INLINE_MAPPABLE:
+          case LEGION_ACQUIRE_MAPPABLE:
+          case LEGION_RELEASE_MAPPABLE:
+          case LEGION_CLOSE_MAPPABLE:
+          case LEGION_DYNAMIC_COLLECTIVE_MAPPABLE:
             {
               const Domain launch_domain(point, point);
               return project(upper_bound, point, launch_domain);
             }
-          case FILL_MAPPABLE:
+          case LEGION_FILL_MAPPABLE:
             {
               const Fill *fill = mappable->as_fill();
               return project(upper_bound, point, fill->index_domain);
             }
-          case PARTITION_MAPPABLE:
+          case LEGION_PARTITION_MAPPABLE:
             {
               const Partition *part = mappable->as_partition();
               return project(upper_bound, point, part->index_domain);
             }
-          case MUST_EPOCH_MAPPABLE:
+          case LEGION_MUST_EPOCH_MAPPABLE:
             {
               const MustEpoch *must = mappable->as_must_epoch();
               return project(upper_bound, point, must->launch_domain);
@@ -2912,7 +2915,7 @@ namespace Legion {
 #endif
         switch (mappable->get_mappable_type())
         {
-          case TASK_MAPPABLE:
+          case LEGION_TASK_MAPPABLE:
             return project(0/*dummy ctx*/, 
                            const_cast<Task*>(mappable->as_task()),
                            index, upper_bound, point);
@@ -3440,7 +3443,7 @@ namespace Legion {
                                   create_index_space(ctx, color_space);
       IndexPartition result = create_partition_by_domain(ctx, parent, domains,
           index_color_space, true/*perform intersections*/,
-          (disjoint ? DISJOINT_KIND : ALIASED_KIND), part_color);
+          (disjoint ? LEGION_DISJOINT_KIND : LEGION_ALIASED_KIND), part_color);
       return result;
     }
 
@@ -3478,7 +3481,7 @@ namespace Legion {
       IndexSpace index_color_space = create_index_space(ctx, color_space);
       IndexPartition result = create_partition_by_domain(ctx, parent, domains,
           index_color_space, true/*perform intersections*/,
-          (disjoint ? DISJOINT_KIND : ALIASED_KIND), part_color);
+          (disjoint ? LEGION_DISJOINT_KIND : LEGION_ALIASED_KIND), part_color);
       return result;
     }
 
@@ -3580,7 +3583,7 @@ namespace Legion {
       IndexSpace index_color_space = create_index_space(ctx, color_space);
       IndexPartition result = create_partition_by_domain(ctx, parent, domains,
         index_color_space, true/*perform intersections*/, 
-        (disjoint ? DISJOINT_KIND : ALIASED_KIND), part_color);
+        (disjoint ? LEGION_DISJOINT_KIND : LEGION_ALIASED_KIND), part_color);
       return result;
     }
 
@@ -4680,7 +4683,27 @@ namespace Legion {
     FieldSpace Runtime::create_field_space(Context ctx)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_field_space(ctx);
+      return ctx->create_field_space();
+    }
+
+    //--------------------------------------------------------------------------
+    FieldSpace Runtime::create_field_space(Context ctx,
+                                         const std::vector<size_t> &field_sizes,
+                                         std::vector<FieldID> &resulting_fields,
+                                         CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+      return ctx->create_field_space(field_sizes, resulting_fields, serdez_id);
+    }
+
+    //--------------------------------------------------------------------------
+    FieldSpace Runtime::create_field_space(Context ctx,
+                                         const std::vector<Future> &field_sizes,
+                                         std::vector<FieldID> &resulting_fields,
+                                         CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+      return ctx->create_field_space(field_sizes, resulting_fields, serdez_id);
     }
 
     //--------------------------------------------------------------------------
@@ -5415,7 +5438,7 @@ namespace Legion {
                                                  LegionFileMode mode)
     //--------------------------------------------------------------------------
     {
-      AttachLauncher launcher(EXTERNAL_HDF5_FILE, handle, parent);
+      AttachLauncher launcher(LEGION_EXTERNAL_HDF5_FILE, handle, parent);
       launcher.attach_hdf5(file_name, field_map, mode);
       return runtime->attach_external_resource(ctx, launcher);
     }
@@ -5437,7 +5460,7 @@ namespace Legion {
                                                  LegionFileMode mode)
     //--------------------------------------------------------------------------
     {
-      AttachLauncher launcher(EXTERNAL_POSIX_FILE, handle, parent);
+      AttachLauncher launcher(LEGION_EXTERNAL_POSIX_FILE, handle, parent);
       launcher.attach_file(file_name, field_vec, mode);
       return runtime->attach_external_resource(ctx, launcher);
     }
@@ -5765,7 +5788,7 @@ namespace Legion {
     Future Runtime::get_current_time(Context ctx, Future precondition)
     //--------------------------------------------------------------------------
     {
-      TimingLauncher launcher(MEASURE_SECONDS);
+      TimingLauncher launcher(LEGION_MEASURE_SECONDS);
       launcher.add_precondition(precondition);
       return runtime->issue_timing_measurement(ctx, launcher);
     }
@@ -5774,7 +5797,7 @@ namespace Legion {
     Future Runtime::get_current_time_in_microseconds(Context ctx, Future pre)
     //--------------------------------------------------------------------------
     {
-      TimingLauncher launcher(MEASURE_MICRO_SECONDS);
+      TimingLauncher launcher(LEGION_MEASURE_MICRO_SECONDS);
       launcher.add_precondition(pre);
       return runtime->issue_timing_measurement(ctx, launcher);
     }
@@ -5783,7 +5806,7 @@ namespace Legion {
     Future Runtime::get_current_time_in_nanoseconds(Context ctx, Future pre)
     //--------------------------------------------------------------------------
     {
-      TimingLauncher launcher(MEASURE_NANO_SECONDS);
+      TimingLauncher launcher(LEGION_MEASURE_NANO_SECONDS);
       launcher.add_precondition(pre);
       return runtime->issue_timing_measurement(ctx, launcher);
     }
@@ -6084,32 +6107,32 @@ namespace Legion {
                               bool is_mutable, bool local_only)
     //--------------------------------------------------------------------------
     {
-      Runtime::attach_semantic_information(task_id,
-          NAME_SEMANTIC_TAG, name, strlen(name) + 1, is_mutable, local_only);
+      Runtime::attach_semantic_information(task_id, LEGION_NAME_SEMANTIC_TAG, 
+                              name, strlen(name) + 1, is_mutable, local_only);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::attach_name(IndexSpace handle, const char *name, bool is_mut)
     //--------------------------------------------------------------------------
     {
-      Runtime::attach_semantic_information(handle,
-          NAME_SEMANTIC_TAG, name, strlen(name) + 1, is_mut);
+      Runtime::attach_semantic_information(handle, LEGION_NAME_SEMANTIC_TAG, 
+                                           name, strlen(name) + 1, is_mut);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::attach_name(IndexPartition handle, const char *name, bool ism)
     //--------------------------------------------------------------------------
     {
-      Runtime::attach_semantic_information(handle,
-          NAME_SEMANTIC_TAG, name, strlen(name) + 1, ism);
+      Runtime::attach_semantic_information(handle, LEGION_NAME_SEMANTIC_TAG, 
+                                           name, strlen(name) + 1, ism);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::attach_name(FieldSpace handle, const char *name, bool is_mut)
     //--------------------------------------------------------------------------
     {
-      Runtime::attach_semantic_information(handle,
-          NAME_SEMANTIC_TAG, name, strlen(name) + 1, is_mut);
+      Runtime::attach_semantic_information(handle, LEGION_NAME_SEMANTIC_TAG, 
+                                           name, strlen(name) + 1, is_mut);
     }
 
     //--------------------------------------------------------------------------
@@ -6118,8 +6141,8 @@ namespace Legion {
                                        const char *name, bool is_mutable)
     //--------------------------------------------------------------------------
     {
-      Runtime::attach_semantic_information(handle, fid,
-          NAME_SEMANTIC_TAG, name, strlen(name) + 1, is_mutable);
+      Runtime::attach_semantic_information(handle, fid, 
+          LEGION_NAME_SEMANTIC_TAG, name, strlen(name) + 1, is_mutable);
     }
 
     //--------------------------------------------------------------------------
@@ -6127,7 +6150,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Runtime::attach_semantic_information(handle,
-          NAME_SEMANTIC_TAG, name, strlen(name) + 1, ism);
+          LEGION_NAME_SEMANTIC_TAG, name, strlen(name) + 1, ism);
     }
 
     //--------------------------------------------------------------------------
@@ -6135,7 +6158,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Runtime::attach_semantic_information(handle,
-          NAME_SEMANTIC_TAG, name, strlen(name) + 1, m);
+          LEGION_NAME_SEMANTIC_TAG, name, strlen(name) + 1, m);
     }
 
     //--------------------------------------------------------------------------
@@ -6232,7 +6255,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const void* dummy_ptr; size_t dummy_size;
-      Runtime::retrieve_semantic_information(task_id, NAME_SEMANTIC_TAG,
+      Runtime::retrieve_semantic_information(task_id, LEGION_NAME_SEMANTIC_TAG,
                                          dummy_ptr, dummy_size, false, false);
       result = reinterpret_cast<const char*>(dummy_ptr);
     }
@@ -6243,7 +6266,7 @@ namespace Legion {
     {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(handle,
-          NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
+          LEGION_NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
       result = reinterpret_cast<const char*>(dummy_ptr);
     }
 
@@ -6254,7 +6277,7 @@ namespace Legion {
     {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(handle,
-          NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
+          LEGION_NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
       result = reinterpret_cast<const char*>(dummy_ptr);
     }
 
@@ -6264,7 +6287,7 @@ namespace Legion {
     {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(handle,
-          NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
+          LEGION_NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
       result = reinterpret_cast<const char*>(dummy_ptr);
     }
 
@@ -6276,7 +6299,7 @@ namespace Legion {
     {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(handle, fid,
-          NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
+          LEGION_NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
       result = reinterpret_cast<const char*>(dummy_ptr);
     }
 
@@ -6287,7 +6310,7 @@ namespace Legion {
     {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(handle,
-          NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
+          LEGION_NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
       result = reinterpret_cast<const char*>(dummy_ptr);
     }
 
@@ -6298,7 +6321,7 @@ namespace Legion {
     {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(part,
-          NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
+          LEGION_NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
       result = reinterpret_cast<const char*>(dummy_ptr);
     }
 

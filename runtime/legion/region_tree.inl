@@ -57,12 +57,8 @@ namespace Legion {
 #endif
       // Now that we know we're going to do this fill add any profiling requests
       Realm::ProfilingRequestSet requests;
-      // This object needs to live on the stack until realm copies it at
-      // the point where we issue the fill operation
-      Operation::OpProfilingResponse response(trace_info.op, trace_info.index,
-                                          trace_info.dst_index, true/*fill*/);
       if (trace_info.op != NULL)
-        trace_info.op->add_copy_profiling_request(response, requests);
+        trace_info.op->add_copy_profiling_request(trace_info, requests, true);
       if (forest->runtime->profiler != NULL)
         forest->runtime->profiler->add_fill_request(requests, trace_info.op);
 #ifdef LEGION_SPY
@@ -172,12 +168,8 @@ namespace Legion {
 #endif
       // Now that we know we're going to do this copy add any profling requests
       Realm::ProfilingRequestSet requests;
-      // This object needs to live on the stack until realm copies it at
-      // the point where we issue the copy operation
-      Operation::OpProfilingResponse response(trace_info.op, trace_info.index,
-                                          trace_info.dst_index, false/*fill*/);
       if (trace_info.op != NULL)
-        trace_info.op->add_copy_profiling_request(response, requests);
+        trace_info.op->add_copy_profiling_request(trace_info, requests, false);
       if (forest->runtime->profiler != NULL)
         forest->runtime->profiler->add_copy_request(requests, trace_info.op);
 #ifdef LEGION_SPY
@@ -359,12 +351,8 @@ namespace Legion {
     {
       // Now that we know we're going to do this copy add any profling requests
       Realm::ProfilingRequestSet requests;
-      // This object needs to live on the stack until realm copies it at
-      // the point where we issue the copy operation
-      Operation::OpProfilingResponse response(trace_info.op, trace_info.index,
-                                          trace_info.dst_index, false/*fill*/);
       if (trace_info.op != NULL)
-        trace_info.op->add_copy_profiling_request(response, requests);
+        trace_info.op->add_copy_profiling_request(trace_info, requests, false);
       if (forest->runtime->profiler != NULL)
         forest->runtime->profiler->add_copy_request(requests, trace_info.op);
 #ifdef LEGION_SPY
@@ -522,7 +510,7 @@ namespace Legion {
             constraints.alignment_constraints.end(); it++)
       {
 #ifdef DEBUG_LEGION
-        assert(it->eqk == EQ_EK);
+        assert(it->eqk == LEGION_EQ_EK);
 #endif
         alignments[it->fid] = it->alignment;
       }
@@ -570,7 +558,7 @@ namespace Legion {
       for (unsigned idx = 0; order.ordering.size(); idx++)
       {
         const DimensionKind dim = order.ordering[idx];
-        if (dim == DIM_F)
+        if (dim == LEGION_DIM_F)
         {
           field_index = idx;
           break;
@@ -635,7 +623,7 @@ namespace Legion {
       // It's only safe if fsize describes the size of a piece, which
       // is true if we only have a single piece or we're doing AOS
       const bool safe_reuse = 
-        ((piece_bounds.size() == 1) || (order.ordering.back() == DIM_F));
+        ((piece_bounds.size() == 1) || (order.ordering.back() == LEGION_DIM_F));
       // compute the starting offsets for each piece
       std::vector<size_t> piece_offsets(piece_bounds.size());
       if (safe_reuse)
@@ -698,7 +686,7 @@ namespace Legion {
             for (std::vector<DimensionKind>::const_iterator dit = 
                   order.ordering.begin(); dit != order.ordering.end(); dit++)
             {
-              if ((*dit) != DIM_F)
+              if ((*dit) != LEGION_DIM_F)
               {
 #ifdef DEBUG_LEGION
                 assert(int(*dit) < DIM);
@@ -4454,7 +4442,7 @@ namespace Legion {
       DETAILED_PROFILER(context->runtime, REALM_CREATE_INSTANCE_CALL);
 #ifdef DEBUG_LEGION
       assert(int(dimension_order.ordering.size()) == (DIM+1));
-      assert(dimension_order.ordering.back() == DIM_F);
+      assert(dimension_order.ordering.back() == LEGION_DIM_F);
 #endif
       // Have to wait for the index space to be ready if necessary
       Realm::IndexSpace<DIM,T> local_space;

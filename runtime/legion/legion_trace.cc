@@ -2064,8 +2064,8 @@ namespace Legion {
           LogicalRegion lr =
             forest->get_tree(view->get_manager()->tree_id)->handle;
           const void *name = NULL; size_t name_size = 0;
-          forest->runtime->retrieve_semantic_information(lr, NAME_SEMANTIC_TAG,
-              name, name_size, true, true);
+          forest->runtime->retrieve_semantic_information(lr, 
+              LEGION_NAME_SEMANTIC_TAG, name, name_size, true, true);
           log_tracing.info() << "  "
                     <<(view->is_reduction_view() ? "Reduction" : "Materialized")
                     << " view: " << view << ", Inst: " << std::hex
@@ -3726,7 +3726,7 @@ namespace Legion {
       views.insert(view, user_mask);
       record_copy_views(lhs_, expr, views);
 
-      const RegionUsage usage(WRITE_ONLY, EXCLUSIVE, 0);
+      const RegionUsage usage(LEGION_WRITE_ONLY, LEGION_EXCLUSIVE, 0);
       add_view_user(view, usage, lhs_, expr, user_mask);
     }
 
@@ -3826,8 +3826,8 @@ namespace Legion {
 #endif
       const unsigned lhs_ = find_event(lhs);
       record_fill_views(tracing_srcs);
-      record_views(lhs_, expr, RegionUsage(WRITE_ONLY, EXCLUSIVE, 0), 
-                   tracing_dsts, eqs);
+      record_views(lhs_, expr, RegionUsage(LEGION_WRITE_ONLY, 
+            LEGION_EXCLUSIVE, 0), tracing_dsts, eqs);
       record_copy_views(lhs_, expr, tracing_dsts);
     }
 
@@ -3863,11 +3863,11 @@ namespace Legion {
       assert(is_recording());
 #endif
       const unsigned lhs_ = find_event(lhs);
-      record_views(lhs_, expr, RegionUsage(READ_ONLY, EXCLUSIVE, 0), 
-                   tracing_srcs, src_eqs);
+      record_views(lhs_, expr, RegionUsage(LEGION_READ_ONLY, 
+            LEGION_EXCLUSIVE, 0), tracing_srcs, src_eqs);
       record_copy_views(lhs_, expr, tracing_srcs);
-      record_views(lhs_, expr, RegionUsage(WRITE_ONLY, EXCLUSIVE, 0), 
-                   tracing_dsts, dst_eqs);
+      record_views(lhs_, expr, RegionUsage(LEGION_WRITE_ONLY, 
+            LEGION_EXCLUSIVE, 0), tracing_dsts, dst_eqs);
       record_copy_views(lhs_, expr, tracing_dsts);
     }
 
@@ -3986,7 +3986,7 @@ namespace Legion {
 
         DependenceType dep =
           check_dependence_type(it->first->usage, user->usage);
-        if (dep == NO_DEPENDENCE)
+        if (dep == LEGION_NO_DEPENDENCE)
           continue;
 
         to_delete.insert(it->first, overlap);

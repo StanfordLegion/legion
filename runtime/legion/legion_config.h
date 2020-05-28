@@ -793,6 +793,30 @@
 #error "Unsupported LEGION_MAX_DIM"
 #endif
 
+#ifdef LEGION_DISABLE_DEPRECATED_ENUMS
+#define LEGION_DEPRECATED_ENUM(x)
+#define LEGION_DEPRECATED_ENUM_FROM(x,y)
+#elif defined(LEGION_WARN_DEPRECATED_ENUMS)
+#if defined(__cplusplus) && __cplusplus > 201103L
+// c++14 and higher has nice deprecated warnings
+#define LEGION_DEPRECATED_ENUM(x)   \
+  x [[deprecated("use LEGION_" #x " instead")]] = LEGION_##x,
+#define LEGION_DEPRECATED_ENUM_FROM(x,y) \
+  x [[deprecated("use " #y " instead")]] = y,
+#else
+// C and older versions of c++
+#define LEGION_DEPRECATED_ENUM(x)   \
+  x __attribute__ ((deprecated ("use LEGION_" #x " instead"))) = LEGION_##x,
+#define LEGION_DEPRECATED_ENUM_FROM(x,y) \
+  x __attribute__ ((deprecated ("use " #y " instead"))) = y,
+#endif
+#else
+#define LEGION_DEPRECATED_ENUM(x)   \
+  x = LEGION_##x,
+#define LEGION_DEPRECATED_ENUM_FROM(x,y) \
+  x = y,
+#endif
+
 // The following enums are all re-exported by
 // namespace Legion. These versions are here to facilitate the
 // C API. If you are writing C++ code, use the namespaced versions.
@@ -1242,42 +1266,66 @@ typedef enum legion_error_t {
 // We would like to make these associations explicit
 // but the python cffi parser is stupid as hell
 typedef enum legion_privilege_mode_t {
-  NO_ACCESS       = 0x00000000, 
-  READ_PRIV       = 0x00000001,
-  READ_ONLY       = 0x00000001, // READ_PRIV,
-  WRITE_PRIV      = 0x00000002,
-  REDUCE_PRIV     = 0x00000004,
-  REDUCE          = 0x00000004, // REDUCE_PRIV,
-  READ_WRITE      = 0x00000007, // READ_PRIV | WRITE_PRIV | REDUCE_PRIV,
-  DISCARD_MASK    = 0x10000000, // For marking we don't need inputs
-  WRITE_ONLY      = 0x10000002, // WRITE_PRIV | DISCARD_MASK,
-  WRITE_DISCARD   = 0x10000007, // READ_WRITE | DISCARD_MASK,
+  LEGION_NO_ACCESS       = 0x00000000, 
+  LEGION_READ_PRIV       = 0x00000001,
+  LEGION_READ_ONLY       = 0x00000001, // READ_PRIV,
+  LEGION_WRITE_PRIV      = 0x00000002,
+  LEGION_REDUCE_PRIV     = 0x00000004,
+  LEGION_REDUCE          = 0x00000004, // REDUCE_PRIV,
+  LEGION_READ_WRITE      = 0x00000007, // READ_PRIV | WRITE_PRIV | REDUCE_PRIV,
+  LEGION_DISCARD_MASK    = 0x10000000, // For marking we don't need inputs
+  LEGION_WRITE_ONLY      = 0x10000002, // WRITE_PRIV | DISCARD_MASK,
+  LEGION_WRITE_DISCARD   = 0x10000007, // READ_WRITE | DISCARD_MASK,
+  // for backwards compatibility
+  LEGION_DEPRECATED_ENUM(NO_ACCESS)
+  LEGION_DEPRECATED_ENUM(READ_PRIV)
+  LEGION_DEPRECATED_ENUM(READ_ONLY)
+  LEGION_DEPRECATED_ENUM(WRITE_PRIV)
+  LEGION_DEPRECATED_ENUM(REDUCE_PRIV)
+  LEGION_DEPRECATED_ENUM(REDUCE)
+  LEGION_DEPRECATED_ENUM(READ_WRITE)
+  LEGION_DEPRECATED_ENUM(DISCARD_MASK)
+  LEGION_DEPRECATED_ENUM(WRITE_ONLY)
+  LEGION_DEPRECATED_ENUM(WRITE_DISCARD)
 } legion_privilege_mode_t;
 
 typedef enum legion_allocate_mode_t {
-  NO_MEMORY       = 0x00000000,
-  ALLOCABLE       = 0x00000001,
-  FREEABLE        = 0x00000002,
-  MUTABLE         = 0x00000003,
-  REGION_CREATION = 0x00000004,
-  REGION_DELETION = 0x00000008,
-  ALL_MEMORY      = 0x0000000F,
+  LEGION_NO_MEMORY       = 0x00000000,
+  LEGION_ALLOCABLE       = 0x00000001,
+  LEGION_FREEABLE        = 0x00000002,
+  LEGION_MUTABLE         = 0x00000003,
+  LEGION_REGION_CREATION = 0x00000004,
+  LEGION_REGION_DELETION = 0x00000008,
+  LEGION_ALL_MEMORY      = 0x0000000F,
+  // for backwards compatibility
+  LEGION_DEPRECATED_ENUM(NO_MEMORY)
+  LEGION_DEPRECATED_ENUM(ALLOCABLE)
+  LEGION_DEPRECATED_ENUM(FREEABLE)
+  LEGION_DEPRECATED_ENUM(MUTABLE)
+  LEGION_DEPRECATED_ENUM(REGION_CREATION)
+  LEGION_DEPRECATED_ENUM(REGION_DELETION)
+  LEGION_DEPRECATED_ENUM(ALL_MEMORY)
 } legion_allocate_mode_t;
 
 typedef enum legion_coherence_property_t {
-  EXCLUSIVE    = 0,
-  ATOMIC       = 1,
-  SIMULTANEOUS = 2,
-  RELAXED      = 3,
+  LEGION_EXCLUSIVE    = 0,
+  LEGION_ATOMIC       = 1,
+  LEGION_SIMULTANEOUS = 2,
+  LEGION_RELAXED      = 3,
+  // for backwards compatibility
+  LEGION_DEPRECATED_ENUM(EXCLUSIVE)
+  LEGION_DEPRECATED_ENUM(ATOMIC)
+  LEGION_DEPRECATED_ENUM(SIMULTANEOUS)
+  LEGION_DEPRECATED_ENUM(RELAXED)
 } legion_coherence_property_t;
 
 // Optional region requirement flags
 typedef enum legion_region_flags_t {
-  NO_FLAG             = 0x00000000,
-  VERIFIED_FLAG       = 0x00000001,
-  NO_ACCESS_FLAG      = 0x00000002, // Deprecated, user SpecializedConstraint
-  RESTRICTED_FLAG     = 0x00000004,
-  MUST_PREMAP_FLAG    = 0x00000008,
+  LEGION_NO_FLAG             = 0x00000000,
+  LEGION_VERIFIED_FLAG       = 0x00000001,
+  LEGION_NO_ACCESS_FLAG      = 0x00000002, // Deprecated, user SpecializedConstraint
+  LEGION_RESTRICTED_FLAG     = 0x00000004,
+  LEGION_MUST_PREMAP_FLAG    = 0x00000008,
   // For non-trivial projection functions: 
   // tell the runtime the write is complete,
   // will be ignored for non-index space launches
@@ -1285,67 +1333,118 @@ typedef enum legion_region_flags_t {
   // Note that if you use this incorrectly it could
   // break the correctness of your code so be sure
   // you know what you are doing
-  COMPLETE_PROJECTION_WRITE_FLAG = 0x00000010,
+  LEGION_COMPLETE_PROJECTION_WRITE_FLAG = 0x00000010,
+  // for backwards compatibility
+  LEGION_DEPRECATED_ENUM(NO_FLAG)
+  LEGION_DEPRECATED_ENUM(VERIFIED_FLAG)
+  LEGION_DEPRECATED_ENUM(NO_ACCESS_FLAG)
+  LEGION_DEPRECATED_ENUM(RESTRICTED_FLAG)
+  LEGION_DEPRECATED_ENUM(MUST_PREMAP_FLAG)
+  LEGION_DEPRECATED_ENUM(COMPLETE_PROJECTION_WRITE_FLAG)
 } legion_region_flags_t;
 
 typedef enum legion_projection_type_t {
-  SINGULAR, // a single logical region
-  PART_PROJECTION, // projection from a partition
-  REG_PROJECTION, // projection from a region
+  LEGION_SINGULAR_PROJECTION, // a single logical region
+  LEGION_PARTITION_PROJECTION, // projection from a partition
+  LEGION_REGION_PROJECTION, // projection from a region
+  // for backwards compatibility
+  LEGION_DEPRECATED_ENUM_FROM(SINGULAR, LEGION_SINGULAR_PROJECTION) 
+  LEGION_DEPRECATED_ENUM_FROM(PART_PROJECTION, LEGION_PARTITION_PROJECTION)
+  LEGION_DEPRECATED_ENUM_FROM(REG_PROJECTION, LEGION_REGION_PROJECTION) 
 } legion_projection_type_t;
 // For backwards compatibility
 typedef legion_projection_type_t legion_handle_type_t;
 
 typedef enum legion_partition_kind_t {
-  DISJOINT_KIND, // disjoint and unknown
-  ALIASED_KIND, // aliased and unknown
-  COMPUTE_KIND, // unknown and unknown
-  DISJOINT_COMPLETE_KIND, // disjoint and complete
-  ALIASED_COMPLETE_KIND, // aliased and complete
-  COMPUTE_COMPLETE_KIND, // unknown and complete
-  DISJOINT_INCOMPLETE_KIND, // disjoint and incomplete
-  ALIASED_INCOMPLETE_KIND, // aliased and incomplete
-  COMPUTE_INCOMPLETE_KIND, // unknown and incomplete
+  LEGION_DISJOINT_KIND, // disjoint and unknown
+  LEGION_ALIASED_KIND, // aliased and unknown
+  LEGION_COMPUTE_KIND, // unknown and unknown
+  LEGION_DISJOINT_COMPLETE_KIND, // disjoint and complete
+  LEGION_ALIASED_COMPLETE_KIND, // aliased and complete
+  LEGION_COMPUTE_COMPLETE_KIND, // unknown and complete
+  LEGION_DISJOINT_INCOMPLETE_KIND, // disjoint and incomplete
+  LEGION_ALIASED_INCOMPLETE_KIND, // aliased and incomplete
+  LEGION_COMPUTE_INCOMPLETE_KIND, // unknown and incomplete
+  // for backwards compatibility
+  LEGION_DEPRECATED_ENUM(DISJOINT_KIND)
+  LEGION_DEPRECATED_ENUM(ALIASED_KIND)
+  LEGION_DEPRECATED_ENUM(COMPUTE_KIND)
+  LEGION_DEPRECATED_ENUM(DISJOINT_COMPLETE_KIND)
+  LEGION_DEPRECATED_ENUM(ALIASED_COMPLETE_KIND)
+  LEGION_DEPRECATED_ENUM(COMPUTE_COMPLETE_KIND)
+  LEGION_DEPRECATED_ENUM(DISJOINT_INCOMPLETE_KIND)
+  LEGION_DEPRECATED_ENUM(ALIASED_INCOMPLETE_KIND)
+  LEGION_DEPRECATED_ENUM(COMPUTE_INCOMPLETE_KIND)
 } legion_partition_kind_t;
 
 typedef enum legion_external_resource_t {
-  EXTERNAL_POSIX_FILE,
-  EXTERNAL_HDF5_FILE,
-  EXTERNAL_INSTANCE,
+  LEGION_EXTERNAL_POSIX_FILE,
+  LEGION_EXTERNAL_HDF5_FILE,
+  LEGION_EXTERNAL_INSTANCE,
+  // for backwards compatibility
+  LEGION_DEPRECATED_ENUM(EXTERNAL_POSIX_FILE)
+  LEGION_DEPRECATED_ENUM(EXTERNAL_HDF5_FILE)
+  LEGION_DEPRECATED_ENUM(EXTERNAL_INSTANCE)
 } legion_external_resource_t;
 
 typedef enum legion_timing_measurement_t {
-  MEASURE_SECONDS,
-  MEASURE_MICRO_SECONDS,
-  MEASURE_NANO_SECONDS,
+  LEGION_MEASURE_SECONDS,
+  LEGION_MEASURE_MICRO_SECONDS,
+  LEGION_MEASURE_NANO_SECONDS,
+  // for backwards compatibility
+  LEGION_DEPRECATED_ENUM(MEASURE_SECONDS)
+  LEGION_DEPRECATED_ENUM(MEASURE_MICRO_SECONDS)
+  LEGION_DEPRECATED_ENUM(MEASURE_NANO_SECONDS)
 } legion_timing_measurement_t;
 
 typedef enum legion_dependence_type_t {
-  NO_DEPENDENCE = 0,
-  TRUE_DEPENDENCE = 1,
-  ANTI_DEPENDENCE = 2, // WAR or WAW with Write-Only privilege
-  ATOMIC_DEPENDENCE = 3,
-  SIMULTANEOUS_DEPENDENCE = 4,
+  LEGION_NO_DEPENDENCE = 0,
+  LEGION_TRUE_DEPENDENCE = 1,
+  LEGION_ANTI_DEPENDENCE = 2, // WAR or WAW with Write-Only privilege
+  LEGION_ATOMIC_DEPENDENCE = 3,
+  LEGION_SIMULTANEOUS_DEPENDENCE = 4,
+  // for backwards compatibility
+  LEGION_DEPRECATED_ENUM(NO_DEPENDENCE)
+  LEGION_DEPRECATED_ENUM(TRUE_DEPENDENCE)
+  LEGION_DEPRECATED_ENUM(ANTI_DEPENDENCE)
+  LEGION_DEPRECATED_ENUM(ATOMIC_DEPENDENCE)
+  LEGION_DEPRECATED_ENUM(SIMULTANEOUS_DEPENDENCE)
 } legion_dependence_type_t;
 
 enum {
-  NAME_SEMANTIC_TAG = 0,
-  SOURCE_FILE_TAG = 1,
-  SOURCE_LINE_TAG = 2,
-  FIRST_AVAILABLE_SEMANTIC_TAG = 3,
+  LEGION_NAME_SEMANTIC_TAG = 0,
+  LEGION_SOURCE_FILE_TAG = 1,
+  LEGION_SOURCE_LINE_TAG = 2,
+  LEGION_FIRST_AVAILABLE_SEMANTIC_TAG = 3,
+  // for backwards compatibility
+  LEGION_DEPRECATED_ENUM(NAME_SEMANTIC_TAG)
+  LEGION_DEPRECATED_ENUM(SOURCE_FILE_TAG)
+  LEGION_DEPRECATED_ENUM(SOURCE_LINE_TAG)
+  LEGION_DEPRECATED_ENUM(FIRST_AVAILABLE_SEMANTIC_TAG)
 };
 
 typedef enum legion_mappable_type_id_t {
-  TASK_MAPPABLE = 0,
-  COPY_MAPPABLE = 1,
-  INLINE_MAPPABLE = 2,
-  ACQUIRE_MAPPABLE = 3,
-  RELEASE_MAPPABLE = 4,
-  CLOSE_MAPPABLE = 5,
-  FILL_MAPPABLE = 6,
-  PARTITION_MAPPABLE = 7,
-  DYNAMIC_COLLECTIVE_MAPPABLE = 8,
-  MUST_EPOCH_MAPPABLE = 9,
+  LEGION_TASK_MAPPABLE = 0,
+  LEGION_COPY_MAPPABLE = 1,
+  LEGION_INLINE_MAPPABLE = 2,
+  LEGION_ACQUIRE_MAPPABLE = 3,
+  LEGION_RELEASE_MAPPABLE = 4,
+  LEGION_CLOSE_MAPPABLE = 5,
+  LEGION_FILL_MAPPABLE = 6,
+  LEGION_PARTITION_MAPPABLE = 7,
+  LEGION_DYNAMIC_COLLECTIVE_MAPPABLE = 8,
+  LEGION_MUST_EPOCH_MAPPABLE = 9,
+  // for backwards compatibility
+  LEGION_DEPRECATED_ENUM(TASK_MAPPABLE)
+  LEGION_DEPRECATED_ENUM(COPY_MAPPABLE)
+  LEGION_DEPRECATED_ENUM(INLINE_MAPPABLE)
+  LEGION_DEPRECATED_ENUM(ACQUIRE_MAPPABLE)
+  LEGION_DEPRECATED_ENUM(RELEASE_MAPPABLE)
+  LEGION_DEPRECATED_ENUM(CLOSE_MAPPABLE)
+  LEGION_DEPRECATED_ENUM(FILL_MAPPABLE)
+  LEGION_DEPRECATED_ENUM(PARTITION_MAPPABLE)
+  LEGION_DEPRECATED_ENUM(DYNAMIC_COLLECTIVE_MAPPABLE)
+  LEGION_DEPRECATED_ENUM(MUST_EPOCH_MAPPABLE)
 } legion_mappable_type_id;
 
 typedef enum legion_type_id_t {
@@ -1617,144 +1716,232 @@ typedef enum legion_builtin_redop_t {
 #endif
 
 typedef enum legion_execution_constraint_t {
-  ISA_CONSTRAINT = 0, // instruction set architecture
-  PROCESSOR_CONSTRAINT = 1, // processor kind constraint
-  RESOURCE_CONSTRAINT = 2, // physical resources
-  LAUNCH_CONSTRAINT = 3, // launch configuration
-  COLOCATION_CONSTRAINT = 4, // region requirements in same instance
+  LEGION_ISA_CONSTRAINT = 0, // instruction set architecture
+  LEGION_PROCESSOR_CONSTRAINT = 1, // processor kind constraint
+  LEGION_RESOURCE_CONSTRAINT = 2, // physical resources
+  LEGION_LAUNCH_CONSTRAINT = 3, // launch configuration
+  LEGION_COLOCATION_CONSTRAINT = 4, // region requirements in same instance
+  // for backwards compatibility
+  LEGION_DEPRECATED_ENUM(ISA_CONSTRAINT)
+  LEGION_DEPRECATED_ENUM(PROCESSOR_CONSTRAINT)
+  LEGION_DEPRECATED_ENUM(RESOURCE_CONSTRAINT)
+  LEGION_DEPRECATED_ENUM(LAUNCH_CONSTRAINT)
+  LEGION_DEPRECATED_ENUM(COLOCATION_CONSTRAINT)
 } legion_execution_constraint_t;
 
 typedef enum legion_layout_constraint_t {
-  SPECIALIZED_CONSTRAINT = 0, // normal or speicalized (e.g. reduction-fold)
-  MEMORY_CONSTRAINT = 1, // constraint on the kind of memory
-  FIELD_CONSTRAINT = 2, // ordering of fields
-  ORDERING_CONSTRAINT = 3, // ordering of dimensions
-  SPLITTING_CONSTRAINT = 4, // splitting of dimensions 
-  DIMENSION_CONSTRAINT = 5, // dimension size constraint
-  ALIGNMENT_CONSTRAINT = 6, // alignment of a field
-  OFFSET_CONSTRAINT = 7, // offset of a field
-  POINTER_CONSTRAINT = 8, // pointer of a field
+  LEGION_SPECIALIZED_CONSTRAINT = 0, // normal or speicalized (e.g. reduction-fold)
+  LEGION_MEMORY_CONSTRAINT = 1, // constraint on the kind of memory
+  LEGION_FIELD_CONSTRAINT = 2, // ordering of fields
+  LEGION_ORDERING_CONSTRAINT = 3, // ordering of dimensions
+  LEGION_SPLITTING_CONSTRAINT = 4, // splitting of dimensions 
+  LEGION_DIMENSION_CONSTRAINT = 5, // dimension size constraint
+  LEGION_ALIGNMENT_CONSTRAINT = 6, // alignment of a field
+  LEGION_OFFSET_CONSTRAINT = 7, // offset of a field
+  LEGION_POINTER_CONSTRAINT = 8, // pointer of a field
+  // for backwards compatibility
+  LEGION_DEPRECATED_ENUM(SPECIALIZED_CONSTRAINT)
+  LEGION_DEPRECATED_ENUM(MEMORY_CONSTRAINT)
+  LEGION_DEPRECATED_ENUM(FIELD_CONSTRAINT)
+  LEGION_DEPRECATED_ENUM(ORDERING_CONSTRAINT)
+  LEGION_DEPRECATED_ENUM(SPLITTING_CONSTRAINT)
+  LEGION_DEPRECATED_ENUM(DIMENSION_CONSTRAINT)
+  LEGION_DEPRECATED_ENUM(ALIGNMENT_CONSTRAINT)
+  LEGION_DEPRECATED_ENUM(OFFSET_CONSTRAINT)
+  LEGION_DEPRECATED_ENUM(POINTER_CONSTRAINT)
 } legion_layout_constraint_t;
 
 typedef enum legion_equality_kind_t {
-  LT_EK = 0, // <
-  LE_EK = 1, // <=
-  GT_EK = 2, // >
-  GE_EK = 3, // >=
-  EQ_EK = 4, // ==
-  NE_EK = 5, // !=
+  LEGION_LT_EK = 0, // <
+  LEGION_LE_EK = 1, // <=
+  LEGION_GT_EK = 2, // >
+  LEGION_GE_EK = 3, // >=
+  LEGION_EQ_EK = 4, // ==
+  LEGION_NE_EK = 5, // !=
+  // for backwards compatibility
+  LEGION_DEPRECATED_ENUM(LT_EK)
+  LEGION_DEPRECATED_ENUM(LE_EK)
+  LEGION_DEPRECATED_ENUM(GT_EK)
+  LEGION_DEPRECATED_ENUM(GE_EK)
+  LEGION_DEPRECATED_ENUM(EQ_EK)
+  LEGION_DEPRECATED_ENUM(NE_EK)
 } legion_equality_kind_t;
 
 typedef enum legion_dimension_kind_t {
-  DIM_X = 0, // first logical index space dimension
-  DIM_Y = 1, // second logical index space dimension
-  DIM_Z = 2, // ...
+  LEGION_DIM_X = 0, // first logical index space dimension
+  LEGION_DIM_Y = 1, // second logical index space dimension
+  LEGION_DIM_Z = 2, // ...
   // field dimension (this is here for legacy reasons: Regent has hard coded it)
-  DIM_W = 3, // fourth logical index space dimension
-  DIM_V = 4, // fifth logical index space dimension
-  DIM_U = 5, // ...
-  DIM_T = 6,
-  DIM_S = 7,
-  DIM_R = 8,
-  DIM_F = 9, 
-  INNER_DIM_X = 10, // inner dimension for tiling X
-  OUTER_DIM_X = 11, // outer dimension for tiling X
-  INNER_DIM_Y = 12, // ...
-  OUTER_DIM_Y = 13,
-  INNER_DIM_Z = 14,
-  OUTER_DIM_Z = 15,
-  INNER_DIM_W = 16,
-  OUTER_DIM_W = 17,
-  INNER_DIM_V = 18,
-  OUTER_DIM_V = 19,
-  INNER_DIM_U = 20,
-  OUTER_DIM_U = 21,
-  INNER_DIM_T = 22,
-  OUTER_DIM_T = 23,
-  INNER_DIM_S = 24,
-  OUTER_DIM_S = 25,
-  INNER_DIM_R = 26,
-  OUTER_DIM_R = 27,
+  LEGION_DIM_W = 3, // fourth logical index space dimension
+  LEGION_DIM_V = 4, // fifth logical index space dimension
+  LEGION_DIM_U = 5, // ...
+  LEGION_DIM_T = 6,
+  LEGION_DIM_S = 7,
+  LEGION_DIM_R = 8,
+  LEGION_DIM_F = 9, 
+  LEGION_INNER_DIM_X = 10, // inner dimension for tiling X
+  LEGION_OUTER_DIM_X = 11, // outer dimension for tiling X
+  LEGION_INNER_DIM_Y = 12, // ...
+  LEGION_OUTER_DIM_Y = 13,
+  LEGION_INNER_DIM_Z = 14,
+  LEGION_OUTER_DIM_Z = 15,
+  LEGION_INNER_DIM_W = 16,
+  LEGION_OUTER_DIM_W = 17,
+  LEGION_INNER_DIM_V = 18,
+  LEGION_OUTER_DIM_V = 19,
+  LEGION_INNER_DIM_U = 20,
+  LEGION_OUTER_DIM_U = 21,
+  LEGION_INNER_DIM_T = 22,
+  LEGION_OUTER_DIM_T = 23,
+  LEGION_INNER_DIM_S = 24,
+  LEGION_OUTER_DIM_S = 25,
+  LEGION_INNER_DIM_R = 26,
+  LEGION_OUTER_DIM_R = 27,
+  // for backwards compatibility
+  LEGION_DEPRECATED_ENUM(DIM_X)
+  LEGION_DEPRECATED_ENUM(DIM_Y)
+  LEGION_DEPRECATED_ENUM(DIM_Z)
+  LEGION_DEPRECATED_ENUM(DIM_W)
+  LEGION_DEPRECATED_ENUM(DIM_V)
+  LEGION_DEPRECATED_ENUM(DIM_U)
+  LEGION_DEPRECATED_ENUM(DIM_T)
+  LEGION_DEPRECATED_ENUM(DIM_S)
+  LEGION_DEPRECATED_ENUM(DIM_R)
+  LEGION_DEPRECATED_ENUM(DIM_F)
 } legion_dimension_kind_t;
 
 // Make all flags 1-hot encoding so we can logically-or them together
 typedef enum legion_isa_kind_t {
   // Top-level ISA Kinds
-  X86_ISA   = 0x00000001,
-  ARM_ISA   = 0x00000002,
-  PPC_ISA   = 0x00000004, // Power PC
-  PTX_ISA   = 0x00000008, // auto-launch by runtime
-  CUDA_ISA  = 0x00000010, // run on CPU thread bound to CUDA context
-  LUA_ISA   = 0x00000020, // run on Lua processor
-  TERRA_ISA = 0x00000040, // JIT to target processor kind
-  LLVM_ISA  = 0x00000080, // JIT to target processor kind
-  GL_ISA    = 0x00000100, // run on CPU thread with OpenGL context
+  LEGION_X86_ISA   = 0x00000001,
+  LEGION_ARM_ISA   = 0x00000002,
+  LEGION_PPC_ISA   = 0x00000004, // Power PC
+  LEGION_PTX_ISA   = 0x00000008, // auto-launch by runtime
+  LEGION_CUDA_ISA  = 0x00000010, // run on CPU thread bound to CUDA context
+  LEGION_LUA_ISA   = 0x00000020, // run on Lua processor
+  LEGION_TERRA_ISA = 0x00000040, // JIT to target processor kind
+  LEGION_LLVM_ISA  = 0x00000080, // JIT to target processor kind
+  LEGION_GL_ISA    = 0x00000100, // run on CPU thread with OpenGL context
   // x86 Vector Instructions
-  SSE_ISA   = 0x00000200,
-  SSE2_ISA  = 0x00000400,
-  SSE3_ISA  = 0x00000800,
-  SSE4_ISA  = 0x00001000,
-  AVX_ISA   = 0x00002000,
-  AVX2_ISA  = 0x00004000,
-  FMA_ISA   = 0x00008000,
+  LEGION_SSE_ISA   = 0x00000200,
+  LEGION_SSE2_ISA  = 0x00000400,
+  LEGION_SSE3_ISA  = 0x00000800,
+  LEGION_SSE4_ISA  = 0x00001000,
+  LEGION_AVX_ISA   = 0x00002000,
+  LEGION_AVX2_ISA  = 0x00004000,
+  LEGION_FMA_ISA   = 0x00008000,
   // PowerPC Vector Insructions
-  VSX_ISA   = 0x00010000,
+  LEGION_VSX_ISA   = 0x00010000,
   // GPU variants
-  SM_10_ISA = 0x00020000,
-  SM_20_ISA = 0x00040000,
-  SM_30_ISA = 0x00080000,
-  SM_35_ISA = 0x00100000,
+  LEGION_SM_10_ISA = 0x00020000,
+  LEGION_SM_20_ISA = 0x00040000,
+  LEGION_SM_30_ISA = 0x00080000,
+  LEGION_SM_35_ISA = 0x00100000,
   // ARM Vector Instructions
-  NEON_ISA  = 0x00200000,
+  LEGION_NEON_ISA  = 0x00200000,
+  // for backwards compatibility
+  LEGION_DEPRECATED_ENUM(X86_ISA)
+  LEGION_DEPRECATED_ENUM(ARM_ISA)
+  LEGION_DEPRECATED_ENUM(PPC_ISA)
+  LEGION_DEPRECATED_ENUM(PTX_ISA)
+  LEGION_DEPRECATED_ENUM(CUDA_ISA)
+  LEGION_DEPRECATED_ENUM(LUA_ISA)
+  LEGION_DEPRECATED_ENUM(TERRA_ISA)
+  LEGION_DEPRECATED_ENUM(LLVM_ISA)
+  LEGION_DEPRECATED_ENUM(GL_ISA) 
+  LEGION_DEPRECATED_ENUM(SSE_ISA)
+  LEGION_DEPRECATED_ENUM(SSE2_ISA)
+  LEGION_DEPRECATED_ENUM(SSE3_ISA)
+  LEGION_DEPRECATED_ENUM(SSE4_ISA)
+  LEGION_DEPRECATED_ENUM(AVX_ISA)
+  LEGION_DEPRECATED_ENUM(AVX2_ISA)
+  LEGION_DEPRECATED_ENUM(FMA_ISA)
+  LEGION_DEPRECATED_ENUM(VSX_ISA)
+  LEGION_DEPRECATED_ENUM(SM_10_ISA)
+  LEGION_DEPRECATED_ENUM(SM_20_ISA)
+  LEGION_DEPRECATED_ENUM(SM_30_ISA)
+  LEGION_DEPRECATED_ENUM(SM_35_ISA)
+  LEGION_DEPRECATED_ENUM(NEON_ISA)
 } legion_isa_kind_t;
 
 typedef enum legion_resource_constraint_t {
-  L1_CACHE_SIZE = 0,
-  L2_CACHE_SIZE = 1,
-  L3_CACHE_SIZE = 2,
-  L1_CACHE_ASSOCIATIVITY = 3,
-  L2_CACHE_ASSOCIATIVITY = 4,
-  L3_CACHE_ASSOCIATIVITY = 5,
-  REGISTER_FILE_SIZE = 6,
-  SHARED_MEMORY_SIZE = 7,
-  TEXTURE_CACHE_SIZE = 8,
-  CONSTANT_CACHE_SIZE = 9,
-  NAMED_BARRIERS = 10,
-  SM_COUNT = 11, // total SMs on the device
-  MAX_OCCUPANCY = 12, // max warps per SM
+  LEGION_L1_CACHE_SIZE = 0,
+  LEGION_L2_CACHE_SIZE = 1,
+  LEGION_L3_CACHE_SIZE = 2,
+  LEGION_L1_CACHE_ASSOCIATIVITY = 3,
+  LEGION_L2_CACHE_ASSOCIATIVITY = 4,
+  LEGION_L3_CACHE_ASSOCIATIVITY = 5,
+  LEGION_REGISTER_FILE_SIZE = 6,
+  LEGION_SHARED_MEMORY_SIZE = 7,
+  LEGION_TEXTURE_CACHE_SIZE = 8,
+  LEGION_CONSTANT_CACHE_SIZE = 9,
+  LEGION_NAMED_BARRIERS = 10,
+  LEGION_SM_COUNT = 11, // total SMs on the device
+  LEGION_MAX_OCCUPANCY = 12, // max warps per SM
+  // for backwards compatibility
+  LEGION_DEPRECATED_ENUM(L1_CACHE_SIZE)
+  LEGION_DEPRECATED_ENUM(L2_CACHE_SIZE)
+  LEGION_DEPRECATED_ENUM(L3_CACHE_SIZE)
+  LEGION_DEPRECATED_ENUM(L1_CACHE_ASSOCIATIVITY)
+  LEGION_DEPRECATED_ENUM(L2_CACHE_ASSOCIATIVITY)
+  LEGION_DEPRECATED_ENUM(L3_CACHE_ASSOCIATIVITY)
+  LEGION_DEPRECATED_ENUM(REGISTER_FILE_SIZE)
+  LEGION_DEPRECATED_ENUM(SHARED_MEMORY_SIZE)
+  LEGION_DEPRECATED_ENUM(TEXTURE_CACHE_SIZE)
+  LEGION_DEPRECATED_ENUM(CONSTANT_CACHE_SIZE)
+  LEGION_DEPRECATED_ENUM(NAMED_BARRIERS)
+  LEGION_DEPRECATED_ENUM(SM_COUNT) 
+  LEGION_DEPRECATED_ENUM(MAX_OCCUPANCY)
 } legion_resource_constraint_t;
 
 typedef enum legion_launch_constraint_t {
-  CTA_SHAPE = 0,
-  GRID_SHAPE = 1,
-  DYNAMIC_SHARED_MEMORY = 2,
-  REGISTERS_PER_THREAD = 3,
-  CTAS_PER_SM = 4,
-  NAMED_BARRIERS_PER_CTA = 5,
+  LEGION_CTA_SHAPE = 0,
+  LEGION_GRID_SHAPE = 1,
+  LEGION_DYNAMIC_SHARED_MEMORY = 2,
+  LEGION_REGISTERS_PER_THREAD = 3,
+  LEGION_CTAS_PER_SM = 4,
+  LEGION_NAMED_BARRIERS_PER_CTA = 5,
 } legion_launch_constraint_t;
 
 typedef enum legion_specialized_constraint_t {
-  NO_SPECIALIZE = 0,
-  AFFINE_SPECIALIZE = 1, // affine layout
-  NORMAL_SPECIALIZE = AFFINE_SPECIALIZE, // backwards compatibility
-  COMPACT_SPECIALIZE = 2, // compacted sparsity
-  AFFINE_REDUCTION_SPECIALIZE = 3,
-  REDUCTION_FOLD_SPECIALIZE = AFFINE_REDUCTION_SPECIALIZE, // backwards compat
-  COMPACT_REDUCTION_SPECIALIZE = 4,
-  REDUCTION_LIST_SPECIALIZE = COMPACT_REDUCTION_SPECIALIZE, // backwards compat
-  VIRTUAL_SPECIALIZE = 5,
+  LEGION_NO_SPECIALIZE = 0,
+  LEGION_AFFINE_SPECIALIZE = 1, // affine layout
+  LEGION_COMPACT_SPECIALIZE = 2, // compacted sparsity
+  LEGION_AFFINE_REDUCTION_SPECIALIZE = 3,
+  LEGION_COMPACT_REDUCTION_SPECIALIZE = 4,
+  LEGION_VIRTUAL_SPECIALIZE = 5,
   // All file types must go below here, everything else above
-  GENERIC_FILE_SPECIALIZE = 6,
-  HDF5_FILE_SPECIALIZE = 7,
+  LEGION_GENERIC_FILE_SPECIALIZE = 6,
+  LEGION_HDF5_FILE_SPECIALIZE = 7,
+  // for backards compatibility
+  LEGION_DEPRECATED_ENUM(NO_SPECIALIZE)
+  LEGION_DEPRECATED_ENUM(AFFINE_SPECIALIZE)
+  LEGION_DEPRECATED_ENUM_FROM(NORMAL_SPECIALIZE, 
+      LEGION_AFFINE_SPECIALIZE)
+  LEGION_DEPRECATED_ENUM(COMPACT_SPECIALIZE)
+  LEGION_DEPRECATED_ENUM(AFFINE_REDUCTION_SPECIALIZE)
+  LEGION_DEPRECATED_ENUM_FROM(REDUCTION_FOLD_SPECIALIZE, 
+      LEGION_AFFINE_REDUCTION_SPECIALIZE)
+  LEGION_DEPRECATED_ENUM(COMPACT_REDUCTION_SPECIALIZE)
+  LEGION_DEPRECATED_ENUM_FROM(REDUCTION_LIST_SPECIALIZE,
+      LEGION_COMPACT_REDUCTION_SPECIALIZE)
+  LEGION_DEPRECATED_ENUM(VIRTUAL_SPECIALIZE)
+  LEGION_DEPRECATED_ENUM(GENERIC_FILE_SPECIALIZE)
+  LEGION_DEPRECATED_ENUM(HDF5_FILE_SPECIALIZE)
 } legion_specialized_constraint_t;
 
 // Keep this in sync with Domain::MAX_RECT_DIM in legion_domain.h
-#define LEGION_MAX_POINT_DIM (LEGION_MAX_DIM)
-#define LEGION_MAX_RECT_DIM  (LEGION_MAX_DIM)
+// these have to be macros for interacting with the preprocessor
+#define LEGION_MAX_POINT_DIM  (LEGION_MAX_DIM)
+#define LEGION_MAX_RECT_DIM   (LEGION_MAX_DIM)
 typedef enum legion_domain_max_rect_dim_t {
-  MAX_POINT_DIM = LEGION_MAX_POINT_DIM,
-  MAX_RECT_DIM = LEGION_MAX_RECT_DIM,
+  // for backwards compatibility
+  LEGION_DEPRECATED_ENUM(MAX_POINT_DIM)
+  LEGION_DEPRECATED_ENUM(MAX_RECT_DIM)
 } legion_domain_max_rect_dim_t;
+
+#undef LEGION_DEPRECATED_ENUM
+#undef LEGION_DEPRECATED_ENUM_FROM
 
 //==========================================================================
 //                                Types

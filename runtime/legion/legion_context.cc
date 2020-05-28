@@ -362,7 +362,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldSpace TaskContext::create_field_space(RegionTreeForest *forest)
+    FieldSpace TaskContext::create_field_space(void)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -375,8 +375,56 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         LegionSpy::log_field_space(space.id);
 
-      forest->create_field_space(space, did);
+      runtime->forest->create_field_space(space, did);
       register_field_space_creation(space);
+      return space;
+    }
+
+    //--------------------------------------------------------------------------
+    FieldSpace TaskContext::create_field_space(
+                                         const std::vector<size_t> &sizes,
+                                         std::vector<FieldID> &resulting_fields,
+                                         CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      FieldSpace space(runtime->get_unique_field_space_id());
+      DistributedID did = runtime->get_available_distributed_id();
+#ifdef DEBUG_LEGION
+      log_field.debug("Creating field space %x in task %s (ID %lld)", 
+                      space.id, get_task_name(), get_unique_id());
+#endif
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_field_space(space.id);
+
+      runtime->forest->create_field_space(space, did);
+      register_field_space_creation(space);
+      if (resulting_fields.size() < sizes.size())
+        resulting_fields.resize(sizes.size(), AUTO_GENERATE_ID);
+      for (unsigned idx = 0; idx < resulting_fields.size(); idx++)
+      {
+        if (resulting_fields[idx] == AUTO_GENERATE_ID)
+          resulting_fields[idx] = runtime->get_unique_field_id();
+#ifdef DEBUG_LEGION
+        else if (resulting_fields[idx] >= LEGION_MAX_APPLICATION_FIELD_ID)
+          REPORT_LEGION_ERROR(ERROR_TASK_ATTEMPTED_ALLOCATE_FIELD,
+            "Task %s (ID %lld) attempted to allocate a field with "
+            "ID %d which exceeds the LEGION_MAX_APPLICATION_FIELD_ID "
+            "bound set in legion_config.h", get_task_name(),
+            get_unique_id(), resulting_fields[idx])
+#endif
+        if (runtime->legion_spy_enabled)
+          LegionSpy::log_field_creation(space.id, 
+                                        resulting_fields[idx], sizes[idx]);
+      }
+      std::set<RtEvent> done_events;
+      runtime->forest->allocate_fields(space, sizes,resulting_fields,serdez_id);
+      register_all_field_creations(space, false/*local*/, resulting_fields);
+      if (!done_events.empty())
+      {
+        RtEvent wait_on = Runtime::merge_events(done_events);
+        wait_on.wait();
+      }
       return space;
     }
 
@@ -605,7 +653,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Already hold the lock from the caller
-      RegionRequirement new_req(handle, READ_WRITE, EXCLUSIVE, handle);
+      RegionRequirement new_req(handle, LEGION_READ_WRITE, 
+                                LEGION_EXCLUSIVE, handle);
       if (runtime->legion_spy_enabled)
         TaskOp::log_requirement(get_unique_id(), next_created_index, new_req);
       // Put a region requirement with no fields in the list of
@@ -941,10 +990,10 @@ namespace Legion {
           RegionRequirement &req = delete_reqs.back();
           req.region = it->second.region;
           req.parent = it->second.region;
-          req.privilege = READ_WRITE;
-          req.prop = EXCLUSIVE;
+          req.privilege = LEGION_READ_WRITE;
+          req.prop = LEGION_EXCLUSIVE;
           req.privilege_fields = overlapping_fields;
-          req.handle_type = SINGULAR;
+          req.handle_type = LEGION_SINGULAR_PROJECTION;
           parent_req_indexes.push_back(it->first);
           std::map<unsigned,unsigned>::iterator deletion_finder =
             deletion_counts.find(it->first);
@@ -1034,10 +1083,10 @@ namespace Legion {
               RegionRequirement &req = delete_reqs.back();
               req.region = it->second.region;
               req.parent = it->second.region;
-              req.privilege = READ_WRITE;
-              req.prop = EXCLUSIVE;
+              req.privilege = LEGION_READ_WRITE;
+              req.prop = LEGION_EXCLUSIVE;
               req.privilege_fields = it->second.privilege_fields;
-              req.handle_type = SINGULAR;
+              req.handle_type = LEGION_SINGULAR_PROJECTION;
               req.flags = it->second.flags;
               parent_req_indexes.push_back(it->first);
               returnable.push_back(returnable_privileges[it->first]);
@@ -1144,10 +1193,10 @@ namespace Legion {
               RegionRequirement &req = delete_reqs.back();
               req.region = it->second.region;
               req.parent = it->second.region;
-              req.privilege = READ_WRITE;
-              req.prop = EXCLUSIVE;
+              req.privilege = LEGION_READ_WRITE;
+              req.prop = LEGION_EXCLUSIVE;
               req.privilege_fields = it->second.privilege_fields;
-              req.handle_type = SINGULAR;
+              req.handle_type = LEGION_SINGULAR_PROJECTION;
               parent_req_indexes.push_back(it->first);
               returnable.push_back(returnable_privileges[it->first]);
               // Always put a deletion index on here to mark that 
@@ -1337,7 +1386,7 @@ namespace Legion {
           physical_regions[our_idx].impl->get_requirement();
 #ifdef DEBUG_LEGION
         // This better be true for a single task
-        assert(our_req.handle_type == SINGULAR);
+        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
         RegionTreeID our_tid = our_req.region.get_tree_id();
         IndexSpace our_space = our_req.region.get_index_space();
@@ -1356,7 +1405,7 @@ namespace Legion {
         const RegionRequirement &our_req = it->impl->get_requirement();
 #ifdef DEBUG_LEGION
         // This better be true for a single task
-        assert(our_req.handle_type == SINGULAR);
+        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
         RegionTreeID our_tid = our_req.region.get_tree_id();
         IndexSpace our_space = our_req.region.get_index_space();
@@ -1389,7 +1438,7 @@ namespace Legion {
           physical_regions[our_idx].impl->get_requirement();
 #ifdef DEBUG_LEGION
         // This better be true for a single task
-        assert(our_req.handle_type == SINGULAR);
+        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
         RegionTreeID our_tid = our_req.region.get_tree_id();
         IndexSpace our_space = our_req.region.get_index_space();
@@ -1416,7 +1465,7 @@ namespace Legion {
         const RegionRequirement &our_req = it->impl->get_requirement();
 #ifdef DEBUG_LEGION
         // This better be true for a single task
-        assert(our_req.handle_type == SINGULAR);
+        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
         RegionTreeID our_tid = our_req.region.get_tree_id();
         IndexSpace our_space = our_req.region.get_index_space();
@@ -1455,7 +1504,7 @@ namespace Legion {
           physical_regions[our_idx].impl->get_requirement();
 #ifdef DEBUG_LEGION
         // This better be true for a single task
-        assert(our_req.handle_type == SINGULAR);
+        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
         RegionTreeID our_tid = our_req.region.get_tree_id();
         IndexSpace our_space = our_req.region.get_index_space();
@@ -1500,7 +1549,7 @@ namespace Legion {
         const RegionRequirement &our_req = it->impl->get_requirement();
 #ifdef DEBUG_LEGION
         // This better be true for a single task
-        assert(our_req.handle_type == SINGULAR);
+        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
         RegionTreeID our_tid = our_req.region.get_tree_id();
         IndexSpace our_space = our_req.region.get_index_space();
@@ -1587,7 +1636,7 @@ namespace Legion {
           physical_regions[our_idx].impl->get_requirement();
 #ifdef DEBUG_LEGION
         // This better be true for a single task
-        assert(our_req.handle_type == SINGULAR);
+        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
         RegionTreeID our_tid = our_req.region.get_tree_id();
         IndexSpace our_space = our_req.region.get_index_space();
@@ -1603,7 +1652,7 @@ namespace Legion {
         const RegionRequirement &our_req = it->impl->get_requirement();
 #ifdef DEBUG_LEGION
         // This better be true for a single task
-        assert(our_req.handle_type == SINGULAR);
+        assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
         RegionTreeID our_tid = our_req.region.get_tree_id();
         IndexSpace our_space = our_req.region.get_index_space();
@@ -1633,8 +1682,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, CHECK_REGION_DEPENDENCE_CALL);
-      if ((req.handle_type == SINGULAR) || 
-          (req.handle_type == REG_PROJECTION))
+      if ((req.handle_type == LEGION_SINGULAR_PROJECTION) || 
+          (req.handle_type == LEGION_REGION_PROJECTION))
       {
         // If the trees are different we're done 
         if (our_tid != req.region.get_tree_id())
@@ -1676,8 +1725,8 @@ namespace Legion {
       switch (check_dependence_type(our_usage,usage))
       {
         // Only allow no-dependence, or simultaneous dependence through
-        case NO_DEPENDENCE:
-        case SIMULTANEOUS_DEPENDENCE:
+        case LEGION_NO_DEPENDENCE:
+        case LEGION_SIMULTANEOUS_DEPENDENCE:
           {
             return false;
           }
@@ -1885,8 +1934,8 @@ namespace Legion {
       RegionNode *top = runtime->forest->get_tree(req.parent.get_tree_id());
       const unsigned index = next_created_index++;
       RegionRequirement &new_req = created_requirements[index];
-      new_req = RegionRequirement(top->handle, READ_WRITE, 
-                                  EXCLUSIVE, top->handle);
+      new_req = RegionRequirement(top->handle, LEGION_READ_WRITE, 
+                                  LEGION_EXCLUSIVE, top->handle);
       if (runtime->legion_spy_enabled)
         TaskOp::log_requirement(get_unique_id(), index, new_req);
       // Add our fields
@@ -2003,7 +2052,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(bad_index < 0);
 #endif
-      if (req.flags & VERIFIED_FLAG)
+      if (req.flags & LEGION_VERIFIED_FLAG)
         return NO_ERROR;
       // Copy privilege fields for check
       std::set<FieldID> privilege_fields(req.privilege_fields);
@@ -2076,7 +2125,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(our_req.handle_type == SINGULAR); // better be singular
+      assert(our_req.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
       // Check to see if we found the requirement in the parent
       if (our_req.region == req.parent)
@@ -2085,8 +2134,8 @@ namespace Legion {
         // the parent name so we can set the bad index
         bad_index = local_index;
         bad_field = AUTO_GENERATE_ID; // set it to an invalid field
-        if ((req.handle_type == SINGULAR) || 
-            (req.handle_type == REG_PROJECTION))
+        if ((req.handle_type == LEGION_SINGULAR_PROJECTION) || 
+            (req.handle_type == LEGION_REGION_PROJECTION))
         {
           std::vector<LegionColor> path;
           if (!runtime->forest->compute_index_path(req.parent.index_space,
@@ -2113,8 +2162,8 @@ namespace Legion {
             // Only need to do this check if there were overlapping fields
             if (!skip_privilege && (PRIV_ONLY(req) & (~(our_req.privilege))))
             {
-              if ((req.handle_type == SINGULAR) || 
-                  (req.handle_type == REG_PROJECTION))
+              if ((req.handle_type == LEGION_SINGULAR_PROJECTION) || 
+                  (req.handle_type == LEGION_REGION_PROJECTION))
                 return ERROR_BAD_REGION_PRIVILEGES;
               else
                 return ERROR_BAD_PARTITION_PRIVILEGES;
@@ -3690,7 +3739,7 @@ namespace Legion {
         runtime->forest->create_index_space(handle, NULL, did, ready);
       creator_op->initialize_index_space(this, node, future);
       register_index_space_creation(handle);
-      runtime->add_to_dependence_queue(this, executing_processor, creator_op);
+      add_to_dependence_queue(creator_op);
       return handle;
     }
 
@@ -3765,7 +3814,7 @@ namespace Legion {
       }
       DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_index_space_deletion(this,handle,sub_partitions,unordered);
-      runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
+      add_to_dependence_queue(op, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -3831,7 +3880,7 @@ namespace Legion {
       DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_index_part_deletion(this, handle, 
                                          sub_partitions, unordered);
-      runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
+      add_to_dependence_queue(op, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -3860,9 +3909,10 @@ namespace Legion {
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
       RtEvent safe = runtime->forest->create_pending_partition(this,pid,parent,
-        color_space, partition_color, DISJOINT_COMPLETE_KIND, did, term_event);
+                    color_space, partition_color, LEGION_DISJOINT_COMPLETE_KIND,
+                    did, term_event);
       // Now we can add the operation to the queue
-      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      add_to_dependence_queue(part_op);
       // Wait for any notifications to occur before returning
       if (safe.exists())
         safe.wait();
@@ -3895,9 +3945,10 @@ namespace Legion {
       // Tell the region tree forest about this partition
       RegionTreeForest *forest = runtime->forest;
       const RtEvent safe = forest->create_pending_partition(this, pid, parent,
-        color_space, partition_color, DISJOINT_COMPLETE_KIND, did, term_event);
+                  color_space, partition_color, LEGION_DISJOINT_COMPLETE_KIND,
+                  did, term_event);
       // Now we can add the operation to the queue
-      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      add_to_dependence_queue(part_op);
       // Wait for any notifications to occur before returning
       if (safe.exists())
         safe.wait();
@@ -3914,7 +3965,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      PartitionKind verify_kind = COMPUTE_KIND;
+      PartitionKind verify_kind = LEGION_COMPUTE_KIND;
       if (runtime->verify_partitions)
         SWAP_PART_KINDS(verify_kind, kind)
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
@@ -3943,8 +3994,9 @@ namespace Legion {
       part_op->initialize_union_partition(this, pid, handle1, handle2);
       ApEvent term_event = part_op->get_completion_event();
       // If either partition is aliased the result is aliased
-      if ((kind == COMPUTE_KIND) || (kind == COMPUTE_COMPLETE_KIND) ||
-          (kind == COMPUTE_INCOMPLETE_KIND))
+      if ((kind == LEGION_COMPUTE_KIND) || 
+          (kind == LEGION_COMPUTE_COMPLETE_KIND) ||
+          (kind == LEGION_COMPUTE_INCOMPLETE_KIND))
       {
         // If one of these partitions is aliased then the result is aliased
         IndexPartNode *p1 = runtime->forest->get_node(handle1);
@@ -3953,29 +4005,29 @@ namespace Legion {
           IndexPartNode *p2 = runtime->forest->get_node(handle2);
           if (!p2->is_disjoint(true/*from app*/))
           {
-            if (kind == COMPUTE_KIND)
-              kind = ALIASED_KIND;
-            else if (kind == COMPUTE_COMPLETE_KIND)
-              kind = ALIASED_COMPLETE_KIND;
+            if (kind == LEGION_COMPUTE_KIND)
+              kind = LEGION_ALIASED_KIND;
+            else if (kind == LEGION_COMPUTE_COMPLETE_KIND)
+              kind = LEGION_ALIASED_COMPLETE_KIND;
             else
-              kind = ALIASED_INCOMPLETE_KIND;
+              kind = LEGION_ALIASED_INCOMPLETE_KIND;
           }
         }
         else
         {
-          if (kind == COMPUTE_KIND)
-            kind = ALIASED_KIND;
-          else if (kind == COMPUTE_COMPLETE_KIND)
-            kind = ALIASED_COMPLETE_KIND;
+          if (kind == LEGION_COMPUTE_KIND)
+            kind = LEGION_ALIASED_KIND;
+          else if (kind == LEGION_COMPUTE_COMPLETE_KIND)
+            kind = LEGION_ALIASED_COMPLETE_KIND;
           else
-            kind = ALIASED_INCOMPLETE_KIND;
+            kind = LEGION_ALIASED_INCOMPLETE_KIND;
         }
       }
       // Tell the region tree forest about this partition
       RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
             parent, color_space, partition_color, kind, did, term_event);
       // Now we can add the operation to the queue
-      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      add_to_dependence_queue(part_op);
       // Wait for any notifications to occur before returning
       if (safe.exists())
         safe.wait();
@@ -3994,7 +4046,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      PartitionKind verify_kind = COMPUTE_KIND;
+      PartitionKind verify_kind = LEGION_COMPUTE_KIND;
       if (runtime->verify_partitions)
         SWAP_PART_KINDS(verify_kind, kind)
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
@@ -4023,8 +4075,9 @@ namespace Legion {
       part_op->initialize_intersection_partition(this, pid, handle1, handle2);
       ApEvent term_event = part_op->get_completion_event();
       // If either partition is disjoint then the result is disjoint
-      if ((kind == COMPUTE_KIND) || (kind == COMPUTE_COMPLETE_KIND) ||
-          (kind == COMPUTE_INCOMPLETE_KIND))
+      if ((kind == LEGION_COMPUTE_KIND) || 
+          (kind == LEGION_COMPUTE_COMPLETE_KIND) ||
+          (kind == LEGION_COMPUTE_INCOMPLETE_KIND))
       {
         IndexPartNode *p1 = runtime->forest->get_node(handle1);
         if (!p1->is_disjoint(true/*from app*/))
@@ -4032,29 +4085,29 @@ namespace Legion {
           IndexPartNode *p2 = runtime->forest->get_node(handle2);
           if (p2->is_disjoint(true/*from app*/))
           {
-            if (kind == COMPUTE_KIND)
-              kind = DISJOINT_KIND;
-            else if (kind == COMPUTE_COMPLETE_KIND)
-              kind = DISJOINT_COMPLETE_KIND;
+            if (kind == LEGION_COMPUTE_KIND)
+              kind = LEGION_DISJOINT_KIND;
+            else if (kind == LEGION_COMPUTE_COMPLETE_KIND)
+              kind = LEGION_DISJOINT_COMPLETE_KIND;
             else
-              kind = DISJOINT_INCOMPLETE_KIND;
+              kind = LEGION_DISJOINT_INCOMPLETE_KIND;
           }
         }
         else
         {
-          if (kind == COMPUTE_KIND)
-            kind = DISJOINT_KIND;
-          else if (kind == COMPUTE_COMPLETE_KIND)
-            kind = DISJOINT_COMPLETE_KIND;
+          if (kind == LEGION_COMPUTE_KIND)
+            kind = LEGION_DISJOINT_KIND;
+          else if (kind == LEGION_COMPUTE_COMPLETE_KIND)
+            kind = LEGION_DISJOINT_COMPLETE_KIND;
           else
-            kind = DISJOINT_INCOMPLETE_KIND;
+            kind = LEGION_DISJOINT_INCOMPLETE_KIND;
         }
       }
       // Tell the region tree forest about this partition
       RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
             parent, color_space, partition_color, kind, did, term_event);
       // Now we can add the operation to the queue
-      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      add_to_dependence_queue(part_op);
       // Wait for any notifications to occur before returning
       if (safe.exists())
         safe.wait();
@@ -4072,7 +4125,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      PartitionKind verify_kind = COMPUTE_KIND;
+      PartitionKind verify_kind = LEGION_COMPUTE_KIND;
       if (runtime->verify_partitions)
         SWAP_PART_KINDS(verify_kind, kind)
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
@@ -4097,24 +4150,25 @@ namespace Legion {
       ApEvent term_event = part_op->get_completion_event();
       IndexPartNode *part_node = runtime->forest->get_node(partition);
       // See if we can determine disjointness if we weren't told
-      if ((kind == COMPUTE_KIND) || (kind == COMPUTE_COMPLETE_KIND) ||
-          (kind == COMPUTE_INCOMPLETE_KIND))
+      if ((kind == LEGION_COMPUTE_KIND) || 
+          (kind == LEGION_COMPUTE_COMPLETE_KIND) ||
+          (kind == LEGION_COMPUTE_INCOMPLETE_KIND))
       {
         if (part_node->is_disjoint(true/*from app*/))
         {
-          if (kind == COMPUTE_KIND)
-            kind = DISJOINT_KIND;
-          else if (kind == COMPUTE_COMPLETE_KIND)
-            kind = DISJOINT_COMPLETE_KIND;
+          if (kind == LEGION_COMPUTE_KIND)
+            kind = LEGION_DISJOINT_KIND;
+          else if (kind == LEGION_COMPUTE_COMPLETE_KIND)
+            kind = LEGION_DISJOINT_COMPLETE_KIND;
           else
-            kind = DISJOINT_INCOMPLETE_KIND;
+            kind = LEGION_DISJOINT_INCOMPLETE_KIND;
         }
       }
       // Tell the region tree forest about this partition
       RtEvent safe = runtime->forest->create_pending_partition(this, pid,parent,
         part_node->color_space->handle, partition_color, kind, did, term_event);
       // Now we can add the operation to the queue
-      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      add_to_dependence_queue(part_op);
       // Wait for any notifications to occur before returning
       if (safe.exists())
         safe.wait();
@@ -4134,7 +4188,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
-      PartitionKind verify_kind = COMPUTE_KIND;
+      PartitionKind verify_kind = LEGION_COMPUTE_KIND;
       if (runtime->verify_partitions)
         SWAP_PART_KINDS(verify_kind, kind)
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
@@ -4165,25 +4219,26 @@ namespace Legion {
       part_op->initialize_difference_partition(this, pid, handle1, handle2);
       ApEvent term_event = part_op->get_completion_event();
       // If the left-hand-side is disjoint the result is disjoint
-      if ((kind == COMPUTE_KIND) || (kind == COMPUTE_COMPLETE_KIND) ||
-          (kind == COMPUTE_INCOMPLETE_KIND))
+      if ((kind == LEGION_COMPUTE_KIND) || 
+          (kind == LEGION_COMPUTE_COMPLETE_KIND) ||
+          (kind == LEGION_COMPUTE_INCOMPLETE_KIND))
       {
         IndexPartNode *p1 = runtime->forest->get_node(handle1);
         if (p1->is_disjoint(true/*from app*/))
         {
-          if (kind == COMPUTE_KIND)
-            kind = DISJOINT_KIND;
-          else if (kind == COMPUTE_COMPLETE_KIND)
-            kind = DISJOINT_COMPLETE_KIND;
+          if (kind == LEGION_COMPUTE_KIND)
+            kind = LEGION_DISJOINT_KIND;
+          else if (kind == LEGION_COMPUTE_COMPLETE_KIND)
+            kind = LEGION_DISJOINT_COMPLETE_KIND;
           else
-            kind = DISJOINT_INCOMPLETE_KIND;
+            kind = LEGION_DISJOINT_INCOMPLETE_KIND;
         }
       }
       // Tell the region tree forest about this partition
       RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
             parent, color_space, partition_color, kind, did, term_event);
       // Now we can add the operation to the queue
-      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      add_to_dependence_queue(part_op);
       // Wait for any notifications to occur before returning
       if (safe.exists())
         safe.wait();
@@ -4212,7 +4267,7 @@ namespace Legion {
                               "cross product partitions!",
                               handle1.id, handle2.id)
 #endif
-      PartitionKind verify_kind = COMPUTE_KIND;
+      PartitionKind verify_kind = LEGION_COMPUTE_KIND;
       if (runtime->verify_partitions)
         SWAP_PART_KINDS(verify_kind, kind)
       LegionColor partition_color = INVALID_COLOR;
@@ -4227,7 +4282,7 @@ namespace Legion {
                   handles, kind, partition_color, term_event, safe_events);
       part_op->initialize_cross_product(this, handle1, handle2,partition_color);
       // Now we can add the operation to the queue
-      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      add_to_dependence_queue(part_op);
       if (!safe_events.empty())
       {
         const RtEvent wait_on = Runtime::merge_events(safe_events);
@@ -4312,7 +4367,7 @@ namespace Legion {
           unmapped_regions[idx].impl->unmap_region();
       }
       // Issue the copy operation
-      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      add_to_dependence_queue(part_op);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
@@ -4331,7 +4386,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      PartitionKind verify_kind = COMPUTE_KIND;
+      PartitionKind verify_kind = LEGION_COMPUTE_KIND;
       if (runtime->verify_partitions)
         SWAP_PART_KINDS(verify_kind, part_kind)
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
@@ -4353,7 +4408,7 @@ namespace Legion {
       RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
             parent, color_space, part_color, part_kind, did, term_event);
       // Now we can add the operation to the queue
-      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      add_to_dependence_queue(part_op);
       // Wait for any notifications to occur before returning
       if (safe.exists())
         safe.wait();
@@ -4373,7 +4428,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      PartitionKind verify_kind = COMPUTE_KIND;
+      PartitionKind verify_kind = LEGION_COMPUTE_KIND;
       if (runtime->verify_partitions)
         SWAP_PART_KINDS(verify_kind, part_kind)
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
@@ -4394,7 +4449,7 @@ namespace Legion {
       RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
             parent, color_space, part_color, part_kind, did, term_event);
       // Now we can add the operation to the queue
-      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      add_to_dependence_queue(part_op);
       // Wait for any notifications to occur before returning
       if (safe.exists())
         safe.wait();
@@ -4416,7 +4471,7 @@ namespace Legion {
     {
       AutoRuntimeCall call(this);
       // Partition by field is disjoint by construction
-      PartitionKind verify_kind = DISJOINT_KIND;
+      PartitionKind verify_kind = LEGION_DISJOINT_KIND;
       if (runtime->verify_partitions)
         SWAP_PART_KINDS(verify_kind, part_kind)
       IndexSpace parent = handle.get_index_space(); 
@@ -4457,7 +4512,7 @@ namespace Legion {
           unmapped_regions[idx].impl->unmap_region();
       }
       // Issue the copy operation
-      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      add_to_dependence_queue(part_op);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
@@ -4483,7 +4538,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
-      PartitionKind verify_kind = COMPUTE_KIND;
+      PartitionKind verify_kind = LEGION_COMPUTE_KIND;
       if (runtime->verify_partitions)
         SWAP_PART_KINDS(verify_kind, part_kind)
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
@@ -4523,7 +4578,7 @@ namespace Legion {
           unmapped_regions[idx].impl->unmap_region();
       }
       // Issue the copy operation
-      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      add_to_dependence_queue(part_op);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
@@ -4549,7 +4604,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
-      PartitionKind verify_kind = COMPUTE_KIND;
+      PartitionKind verify_kind = LEGION_COMPUTE_KIND;
       if (runtime->verify_partitions)
         SWAP_PART_KINDS(verify_kind, part_kind)
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
@@ -4590,7 +4645,7 @@ namespace Legion {
           unmapped_regions[idx].impl->unmap_region();
       }
       // Issue the copy operation
-      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      add_to_dependence_queue(part_op);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
@@ -4615,7 +4670,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
-      PartitionKind verify_kind = COMPUTE_KIND;
+      PartitionKind verify_kind = LEGION_COMPUTE_KIND;
       if (runtime->verify_partitions)
         SWAP_PART_KINDS(verify_kind, part_kind)
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
@@ -4635,18 +4690,19 @@ namespace Legion {
       ApEvent term_event = part_op->get_completion_event();
       // If the source of the preimage is disjoint then the result is disjoint
       // Note this only applies here and not to range
-      if ((part_kind == COMPUTE_KIND) || (part_kind == COMPUTE_COMPLETE_KIND) ||
-          (part_kind == COMPUTE_INCOMPLETE_KIND))
+      if ((part_kind == LEGION_COMPUTE_KIND) || 
+          (part_kind == LEGION_COMPUTE_COMPLETE_KIND) ||
+          (part_kind == LEGION_COMPUTE_INCOMPLETE_KIND))
       {
         IndexPartNode *p = runtime->forest->get_node(projection);
         if (p->is_disjoint(true/*from app*/))
         {
-          if (part_kind == COMPUTE_KIND)
-            part_kind = DISJOINT_KIND;
-          else if (part_kind == COMPUTE_COMPLETE_KIND)
-            part_kind = DISJOINT_COMPLETE_KIND;
+          if (part_kind == LEGION_COMPUTE_KIND)
+            part_kind = LEGION_DISJOINT_KIND;
+          else if (part_kind == LEGION_COMPUTE_COMPLETE_KIND)
+            part_kind = LEGION_DISJOINT_COMPLETE_KIND;
           else
-            part_kind = DISJOINT_INCOMPLETE_KIND;
+            part_kind = LEGION_DISJOINT_INCOMPLETE_KIND;
         }
       }
       // Tell the region tree forest about this partition
@@ -4674,7 +4730,7 @@ namespace Legion {
           unmapped_regions[idx].impl->unmap_region();
       }
       // Issue the copy operation
-      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      add_to_dependence_queue(part_op);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
@@ -4699,7 +4755,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
-      PartitionKind verify_kind = COMPUTE_KIND;
+      PartitionKind verify_kind = LEGION_COMPUTE_KIND;
       if (runtime->verify_partitions)
         SWAP_PART_KINDS(verify_kind, part_kind)
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
@@ -4742,7 +4798,7 @@ namespace Legion {
           unmapped_regions[idx].impl->unmap_region();
       }
       // Issue the copy operation
-      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      add_to_dependence_queue(part_op);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
@@ -4763,7 +4819,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      PartitionKind verify_kind = COMPUTE_KIND;
+      PartitionKind verify_kind = LEGION_COMPUTE_KIND;
       if (runtime->verify_partitions)
         SWAP_PART_KINDS(verify_kind, part_kind)
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
@@ -4815,7 +4871,7 @@ namespace Legion {
       part_op->initialize_index_space_union(this, result, handles);
       Runtime::trigger_event(domain_ready, part_op->get_completion_event());
       // Now we can add the operation to the queue
-      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      add_to_dependence_queue(part_op);
       return result;
     }
 
@@ -4839,7 +4895,7 @@ namespace Legion {
       part_op->initialize_index_space_union(this, result, handle);
       Runtime::trigger_event(domain_ready, part_op->get_completion_event());
       // Now we can add the operation to the queue
-      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      add_to_dependence_queue(part_op);
       return result;
     }
 
@@ -4864,7 +4920,7 @@ namespace Legion {
       part_op->initialize_index_space_intersection(this, result, handles);
       Runtime::trigger_event(domain_ready, part_op->get_completion_event());
       // Now we can add the operation to the queue
-      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      add_to_dependence_queue(part_op);
       return result;
     }
 
@@ -4889,7 +4945,7 @@ namespace Legion {
       part_op->initialize_index_space_intersection(this, result, handle);
       Runtime::trigger_event(domain_ready, part_op->get_completion_event());
       // Now we can add the operation to the queue
-      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      add_to_dependence_queue(part_op);
       return result;
     }
 
@@ -4915,7 +4971,7 @@ namespace Legion {
       part_op->initialize_index_space_difference(this, result, initial,handles);
       Runtime::trigger_event(domain_ready, part_op->get_completion_event());
       // Now we can add the operation to the queue
-      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      add_to_dependence_queue(part_op);
       return result;
     } 
 
@@ -5094,54 +5150,59 @@ namespace Legion {
         delete itr;
       }
       // Check disjointness
-      if ((kind == DISJOINT_KIND) || (kind == DISJOINT_COMPLETE_KIND) ||
-          (kind == DISJOINT_INCOMPLETE_KIND))
+      if ((kind == LEGION_DISJOINT_KIND) || 
+          (kind == LEGION_DISJOINT_COMPLETE_KIND) ||
+          (kind == LEGION_DISJOINT_INCOMPLETE_KIND))
       {
         if (!node->is_disjoint(true/*from application*/))
           REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
               "Call to partitioning function %s in %s (UID %lld) specified "
               "partition was %s but the partition is aliased.",
               function_name, get_task_name(), get_unique_id(),
-              (kind == DISJOINT_KIND) ? "DISJOINT_KIND" :
-              (kind == DISJOINT_COMPLETE_KIND) ? "DISJOINT_COMPLETE_KIND" :
-              "DISJOINT_INCOMPLETE_KIND")
+              (kind == LEGION_DISJOINT_KIND) ? "DISJOINT_KIND" :
+              (kind == LEGION_DISJOINT_COMPLETE_KIND) ? "DISJOINT_COMPLETE_KIND"
+              : "DISJOINT_INCOMPLETE_KIND")
       }
-      else if ((kind == ALIASED_KIND) || (kind == ALIASED_COMPLETE_KIND) ||
-               (kind == ALIASED_INCOMPLETE_KIND))
+      else if ((kind == LEGION_ALIASED_KIND) || 
+               (kind == LEGION_ALIASED_COMPLETE_KIND) ||
+               (kind == LEGION_ALIASED_INCOMPLETE_KIND))
       {
         if (node->is_disjoint(true/*from application*/))
           REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
               "Call to partitioning function %s in %s (UID %lld) specified "
               "partition was %s but the partition is disjoint.",
               function_name, get_task_name(), get_unique_id(),
-              (kind == ALIASED_KIND) ? "ALIASED_KIND" :
-              (kind == ALIASED_COMPLETE_KIND) ? "ALIASED_COMPLETE_KIND" :
+              (kind == LEGION_ALIASED_KIND) ? "ALIASED_KIND" :
+              (kind == LEGION_ALIASED_COMPLETE_KIND) ? "ALIASED_COMPLETE_KIND" :
               "ALIASED_INCOMPLETE_KIND")
       }
       // Check completeness
-      if ((kind == DISJOINT_COMPLETE_KIND) || (kind == ALIASED_COMPLETE_KIND) ||
-          (kind == COMPUTE_COMPLETE_KIND))
+      if ((kind == LEGION_DISJOINT_COMPLETE_KIND) || 
+          (kind == LEGION_ALIASED_COMPLETE_KIND) ||
+          (kind == LEGION_COMPUTE_COMPLETE_KIND))
       {
         if (!node->is_complete(true/*from application*/))
           REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
               "Call to partitioning function %s in %s (UID %lld) specified "
               "partition was %s but the partition is incomplete.",
               function_name, get_task_name(), get_unique_id(),
-              (kind == DISJOINT_COMPLETE_KIND) ? "DISJOINT_COMPLETE_KIND" :
-              (kind == ALIASED_COMPLETE_KIND) ? "ALIASED_COMPLETE_KIND" :
+              (kind == LEGION_DISJOINT_COMPLETE_KIND) ? "DISJOINT_COMPLETE_KIND" 
+            : (kind == LEGION_ALIASED_COMPLETE_KIND) ? "ALIASED_COMPLETE_KIND" :
               "COMPUTE_COMPLETE_KIND")
       }
-      else if ((kind == DISJOINT_INCOMPLETE_KIND) || 
-         (kind == ALIASED_INCOMPLETE_KIND) || (kind == COMPUTE_INCOMPLETE_KIND))
+      else if ((kind == LEGION_DISJOINT_INCOMPLETE_KIND) || 
+               (kind == LEGION_ALIASED_INCOMPLETE_KIND) || 
+               (kind == LEGION_COMPUTE_INCOMPLETE_KIND))
       {
         if (node->is_complete(true/*from application*/))
           REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
               "Call to partitioning function %s in %s (UID %lld) specified "
               "partition was %s but the partition is complete.",
               function_name, get_task_name(), get_unique_id(),
-              (kind == DISJOINT_INCOMPLETE_KIND) ? "DISJOINT_INCOMPLETE_KIND" :
-              (kind == ALIASED_INCOMPLETE_KIND) ? "ALIASED_INCOMPLETE_KIND" :
-              "COMPUTE_INCOMPLETE_KIND")
+              (kind == LEGION_DISJOINT_INCOMPLETE_KIND) ? 
+                "DISJOINT_INCOMPLETE_KIND" :
+              (kind == LEGION_ALIASED_INCOMPLETE_KIND) ? 
+              "ALIASED_INCOMPLETE_KIND" : "COMPUTE_INCOMPLETE_KIND")
       } 
     }
 
@@ -5151,6 +5212,18 @@ namespace Legion {
     {
       const VerifyPartitionArgs *vargs = (const VerifyPartitionArgs*)args;
       vargs->proxy_this->verify_partition(vargs->pid, vargs->kind, vargs->func);
+    }
+
+    //--------------------------------------------------------------------------
+    FieldSpace InnerContext::create_field_space(
+                                         const std::vector<Future> &sizes,
+                                         std::vector<FieldID> &resulting_fields,
+                                         CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpace result = TaskContext::create_field_space();
+      allocate_fields(result, sizes, resulting_fields,false/*local*/,serdez_id);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -5222,7 +5295,7 @@ namespace Legion {
       }
       DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_field_space_deletion(this, handle, unordered);
-      runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
+      add_to_dependence_queue(op, unordered);
     } 
 
     //--------------------------------------------------------------------------
@@ -5258,7 +5331,7 @@ namespace Legion {
         runtime->forest->allocate_field(space, ready, fid, serdez_id);
       creator_op->initialize_field(this, node, fid, field_size); 
       register_field_creation(space, fid, local);
-      runtime->add_to_dependence_queue(this, executing_processor, creator_op);
+      add_to_dependence_queue(creator_op);
       return fid;
     }
 
@@ -5364,7 +5437,7 @@ namespace Legion {
                                               resulting_fields, serdez_id);
       creator_op->initialize_fields(this, node, resulting_fields, sizes);
       register_all_field_creations(space, local, resulting_fields);
-      runtime->add_to_dependence_queue(this, executing_processor, creator_op);
+      add_to_dependence_queue(creator_op);
     }
 
     //--------------------------------------------------------------------------
@@ -5463,7 +5536,7 @@ namespace Legion {
       // Launch off the deletion operation
       DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_field_deletion(this, space, fid, unordered);
-      runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
+      add_to_dependence_queue(op, unordered);
     } 
 
     //--------------------------------------------------------------------------
@@ -5508,7 +5581,7 @@ namespace Legion {
         return;
       DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_field_deletions(this, space, free_now, unordered);
-      runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
+      add_to_dependence_queue(op, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -5572,7 +5645,7 @@ namespace Legion {
       }
       DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_logical_region_deletion(this, handle, unordered);
-      runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
+      add_to_dependence_queue(op, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -5751,7 +5824,7 @@ namespace Legion {
       AllReduceOp *all_reduce_op = runtime->get_available_all_reduce_op();
       Future result = 
         all_reduce_op->initialize(this, future_map, redop, deterministic);
-      runtime->add_to_dependence_queue(this, executing_processor,all_reduce_op);
+      add_to_dependence_queue(all_reduce_op);
       return result;
     }
 
@@ -5776,7 +5849,7 @@ namespace Legion {
       const DistributedID did = runtime->get_available_distributed_id();
       FutureMapImpl *impl = new FutureMapImpl(this, creation_op, 
           RtEvent::NO_RT_EVENT, runtime, did, runtime->address_space);
-      runtime->add_to_dependence_queue(this, executing_processor, creation_op);
+      add_to_dependence_queue(creation_op);
       impl->set_all_futures(futures);
       return FutureMap(impl);
     }
@@ -5826,7 +5899,7 @@ namespace Legion {
                       launcher.requirement.region.tree_id,
                       get_task_name(), get_unique_id())
       register_inline_mapped_region(result);
-      runtime->add_to_dependence_queue(this, executing_processor, map_op);
+      add_to_dependence_queue(map_op);
       return result;
     }
 
@@ -5846,7 +5919,7 @@ namespace Legion {
       map_op->initialize(this, region);
       register_inline_mapped_region(region);
       const ApEvent result = map_op->get_completion_event();
-      runtime->add_to_dependence_queue(this, executing_processor, map_op);
+      add_to_dependence_queue(map_op);
       return result;
     }
 
@@ -5892,7 +5965,7 @@ namespace Legion {
           unmapped_regions[idx].impl->unmap_region();
       }
       // Issue the copy operation
-      runtime->add_to_dependence_queue(this, executing_processor, fill_op);
+      add_to_dependence_queue(fill_op);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
@@ -5939,7 +6012,7 @@ namespace Legion {
           unmapped_regions[idx].impl->unmap_region();
       }
       // Issue the copy operation
-      runtime->add_to_dependence_queue(this, executing_processor, fill_op);
+      add_to_dependence_queue(fill_op);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
@@ -5975,7 +6048,7 @@ namespace Legion {
           unmapped_regions[idx].impl->unmap_region();
       }
       // Issue the copy operation
-      runtime->add_to_dependence_queue(this, executing_processor, copy_op);
+      add_to_dependence_queue(copy_op);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
@@ -6022,7 +6095,7 @@ namespace Legion {
           unmapped_regions[idx].impl->unmap_region();
       }
       // Issue the copy operation
-      runtime->add_to_dependence_queue(this, executing_processor, copy_op);
+      add_to_dependence_queue(copy_op);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
@@ -6057,7 +6130,7 @@ namespace Legion {
           unmapped_regions[idx].impl->unmap_region();
       }
       // Issue the acquire operation
-      runtime->add_to_dependence_queue(this, executing_processor, acquire_op);
+      add_to_dependence_queue(acquire_op);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
@@ -6092,7 +6165,7 @@ namespace Legion {
           unmapped_regions[idx].impl->unmap_region();
       }
       // Issue the release operation
-      runtime->add_to_dependence_queue(this, executing_processor, release_op);
+      add_to_dependence_queue(release_op);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
@@ -6138,7 +6211,7 @@ namespace Legion {
       // If we're counting this region as mapped we need to register it
       if (launcher.mapped)
         register_inline_mapped_region(result);
-      runtime->add_to_dependence_queue(this, executing_processor, attach_op);
+      add_to_dependence_queue(attach_op);
       return result;
     }
 
@@ -6159,7 +6232,7 @@ namespace Legion {
         unregister_inline_mapped_region(region);
         region.impl->unmap_region();
       }
-      runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
+      add_to_dependence_queue(op, unordered);
       return result;
     }
 
@@ -6236,7 +6309,7 @@ namespace Legion {
           unmapped_regions[idx].impl->unmap_region();
       }
       // Now we can issue the must epoch
-      runtime->add_to_dependence_queue(this, executing_processor, epoch_op);
+      add_to_dependence_queue(epoch_op);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
@@ -6254,7 +6327,7 @@ namespace Legion {
 #endif
       TimingOp *timing_op = runtime->get_available_timing_op();
       Future result = timing_op->initialize(this, launcher);
-      runtime->add_to_dependence_queue(this, executing_processor, timing_op);
+      add_to_dependence_queue(timing_op);
       return result;
     }
 
@@ -6269,7 +6342,7 @@ namespace Legion {
                     get_task_name(), get_unique_id());
 #endif
       Future f = fence_op->initialize(this, FenceOp::MAPPING_FENCE, true);
-      runtime->add_to_dependence_queue(this, executing_processor, fence_op);
+      add_to_dependence_queue(fence_op);
       return f;
     }
 
@@ -6284,7 +6357,7 @@ namespace Legion {
                     get_task_name(), get_unique_id());
 #endif
       Future f = fence_op->initialize(this, FenceOp::EXECUTION_FENCE, true);
-      runtime->add_to_dependence_queue(this, executing_processor, fence_op);
+      add_to_dependence_queue(fence_op);
       return f; 
     }
 
@@ -6299,7 +6372,7 @@ namespace Legion {
                     get_task_name(), get_unique_id());
 #endif
       frame_op->initialize(this);
-      runtime->add_to_dependence_queue(this, executing_processor, frame_op);
+      add_to_dependence_queue(frame_op);
     }
 
     //--------------------------------------------------------------------------
@@ -6316,7 +6389,7 @@ namespace Legion {
       // Hold a reference before initialization
       Predicate result(pred_op);
       pred_op->initialize(this, f);
-      runtime->add_to_dependence_queue(this, executing_processor, pred_op);
+      add_to_dependence_queue(pred_op);
       return result;
     }
 
@@ -6329,7 +6402,7 @@ namespace Legion {
       // Hold a reference before initialization
       Predicate result(pred_op);
       pred_op->initialize(this, p);
-      runtime->add_to_dependence_queue(this, executing_processor, pred_op);
+      add_to_dependence_queue(pred_op);
       return result;
     }
 
@@ -6367,7 +6440,7 @@ namespace Legion {
         // Hold a reference before initialization
         Predicate result(pred_op);
         pred_op->initialize(this, actual_predicates);
-        runtime->add_to_dependence_queue(this, executing_processor, pred_op);
+        add_to_dependence_queue(pred_op);
         return result;
       }
       else
@@ -6392,7 +6465,7 @@ namespace Legion {
         // Hold a reference before initialization
         Predicate result(pred_op);
         pred_op->initialize(this, actual_predicates);
-        runtime->add_to_dependence_queue(this, executing_processor, pred_op);
+        add_to_dependence_queue(pred_op);
         return result;
       }
     }
@@ -6618,6 +6691,9 @@ namespace Legion {
     void InnerContext::add_to_dependence_queue(Operation *op, bool unordered)
     //--------------------------------------------------------------------------
     {
+      // Launch the task to perform the prepipeline stage for the operation
+      if (op->has_prepipeline_stage())
+        add_to_prepipeline_queue(op);
       LgPriority priority = LG_THROUGHPUT_WORK_PRIORITY; 
       // If this is tracking, add it to our data structure first
       if (op->is_tracking_parent() || unordered)
@@ -6638,6 +6714,7 @@ namespace Legion {
       
       bool issue_task = false;
       RtEvent precondition;
+      const ApEvent term_event = op->get_completion_event();
       {
         AutoLock d_lock(dependence_lock);
         if (unordered)
@@ -6667,6 +6744,12 @@ namespace Legion {
       {
         DependenceArgs args(op, this);
         runtime->issue_runtime_meta_task(args, priority, precondition); 
+      }
+      if (runtime->program_order_execution && !unordered)
+      {
+        begin_task_wait(true/*from runtime*/);
+        term_event.wait();
+        end_task_wait();
       }
     }
 
@@ -7469,14 +7552,14 @@ namespace Legion {
       // Issue a begin op
       TraceBeginOp *begin = runtime->get_available_begin_op();
       begin->initialize_begin(this, dynamic_trace);
-      runtime->add_to_dependence_queue(this, executing_processor, begin);
+      add_to_dependence_queue(begin);
 
       if (!logical_only)
       {
         // Issue a replay op
         TraceReplayOp *replay = runtime->get_available_replay_op();
         replay->initialize_replay(this, dynamic_trace);
-        runtime->add_to_dependence_queue(this, executing_processor, replay);
+        add_to_dependence_queue(replay);
       }
 
       // Now mark that we are starting a trace
@@ -7511,14 +7594,14 @@ namespace Legion {
         // Already fixed, dump a complete trace op into the stream
         TraceCompleteOp *complete_op = runtime->get_available_trace_op();
         complete_op->initialize_complete(this, has_blocking_call);
-        runtime->add_to_dependence_queue(this, executing_processor, complete_op);
+        add_to_dependence_queue(complete_op);
       }
       else
       {
         // Not fixed yet, dump a capture trace op into the stream
         TraceCaptureOp *capture_op = runtime->get_available_capture_op(); 
         capture_op->initialize_capture(this, has_blocking_call);
-        runtime->add_to_dependence_queue(this, executing_processor, capture_op);
+        add_to_dependence_queue(capture_op);
         // Mark that the current trace is now fixed
         current_trace->as_dynamic_trace()->fix_trace();
       }
@@ -7573,7 +7656,7 @@ namespace Legion {
       // This operation takes ownership of the static trace reference
       TraceCompleteOp *complete_op = runtime->get_available_trace_op();
       complete_op->initialize_complete(this,current_trace->has_blocking_call());
-      runtime->add_to_dependence_queue(this, executing_processor, complete_op);
+      add_to_dependence_queue(complete_op);
       // We no longer have a trace that we're executing 
       current_trace = NULL;
     }
@@ -7913,8 +7996,7 @@ namespace Legion {
       DynamicCollectiveOp *collective = 
         runtime->get_available_dynamic_collective_op();
       Future result = collective->initialize(this, dc);
-      const Processor proc = get_executing_processor();
-      runtime->add_to_dependence_queue(this, proc, collective);
+      add_to_dependence_queue(collective);
       return result;
     }
 
@@ -8017,7 +8099,7 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         // this better be true for single tasks
-        assert(regions[idx].handle_type == SINGULAR);
+        assert(regions[idx].handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
         // If this is a NO_ACCESS or had no privilege fields we can skip this
         if (no_access_regions[idx])
@@ -8637,7 +8719,7 @@ namespace Legion {
           PostCloseOp *close_op = 
             runtime->get_available_post_close_op();
           close_op->initialize(this, idx, physical_instances[idx]);
-          runtime->add_to_dependence_queue(this, executing_processor, close_op);
+          add_to_dependence_queue(close_op);
         }
         else
         {
@@ -8645,7 +8727,7 @@ namespace Legion {
           VirtualCloseOp *close_op = 
             runtime->get_available_virtual_close_op();
           close_op->initialize(this, idx, regions[idx]);
-          runtime->add_to_dependence_queue(this, executing_processor, close_op);
+          add_to_dependence_queue(close_op);
         }
       }
       // Check to see if we have any unordered operations that we need to inject
@@ -8903,7 +8985,7 @@ namespace Legion {
           MapOp *op = runtime->get_available_map_op();
           op->initialize(this, physical_regions[idx]);
           wait_events.insert(op->get_completion_event());
-          runtime->add_to_dependence_queue(this, executing_processor, op);
+          add_to_dependence_queue(op);
         }
         else if (!phy_regions_mapped[idx] && is_region_mapped(idx))
         {
@@ -9145,7 +9227,7 @@ namespace Legion {
             unmapped_regions[idx].impl->unmap_region();
         }
         // Issue the task call
-        runtime->add_to_dependence_queue(this, executing_processor, task);
+        add_to_dependence_queue(task);
         // Remap any unmapped regions
         if (!unmapped_regions.empty())
           remap_unmapped_regions(current_trace, unmapped_regions);
@@ -10482,6 +10564,18 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
+    FieldSpace LeafContext::create_field_space(const std::vector<Future> &sizes,
+                                         std::vector<FieldID> &resulting_fields,
+                                         CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_NONLOCAL_FIELD_ALLOCATION2,
+       "Illegal deferred field allocations performed in leaf task %s (ID %lld)",
+       get_task_name(), get_unique_id())
+      return FieldSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
     void LeafContext::destroy_field_space(FieldSpace handle, 
                                           const bool unordered)
     //--------------------------------------------------------------------------
@@ -11121,13 +11215,6 @@ namespace Legion {
     {
       assert(false);
       return 0;
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::add_to_prepipeline_queue(Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -12080,10 +12167,30 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldSpace InlineContext::create_field_space(RegionTreeForest *forest)
+    FieldSpace InlineContext::create_field_space(void)
     //--------------------------------------------------------------------------
     {
-      return enclosing->create_field_space(forest);
+      return enclosing->create_field_space();
+    }
+
+    //--------------------------------------------------------------------------
+    FieldSpace InlineContext::create_field_space(
+                                         const std::vector<size_t> &sizes,
+                                         std::vector<FieldID> &resulting_fields,
+                                         CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_field_space(sizes, resulting_fields, serdez_id);
+    }
+
+    //--------------------------------------------------------------------------
+    FieldSpace InlineContext::create_field_space(
+                                         const std::vector<Future> &sizes,
+                                         std::vector<FieldID> &resulting_fields,
+                                         CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_field_space(sizes, resulting_fields, serdez_id);
     }
 
     //--------------------------------------------------------------------------
@@ -12448,13 +12555,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return enclosing->register_new_summary_operation(op);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::add_to_prepipeline_queue(Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->add_to_prepipeline_queue(op);
     }
 
     //--------------------------------------------------------------------------

@@ -1842,6 +1842,54 @@ legion_field_space_create(legion_runtime_t runtime_,
   return CObjectWrapper::wrap(fs);
 }
 
+legion_field_space_t
+legion_field_space_create_with_fields(legion_runtime_t runtime_,
+                                      legion_context_t ctx_,
+                                      size_t *field_sizes,
+                                      legion_field_id_t *field_ids,
+                                      size_t num_fields,
+                                      legion_custom_serdez_id_t serdez)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+
+  std::vector<size_t> sizes(num_fields);
+  std::vector<FieldID> ids(num_fields);
+  for (unsigned idx = 0; idx < num_fields; idx++)
+  {
+    sizes[idx] = field_sizes[idx];
+    ids[idx] = field_ids[idx];
+  }
+  FieldSpace fs = runtime->create_field_space(ctx, sizes, ids, serdez);
+  for (unsigned idx = 0; idx < num_fields; idx++)
+    field_ids[idx] = ids[idx];
+  return CObjectWrapper::wrap(fs);
+}
+
+legion_field_space_t
+legion_field_space_create_with_fields(legion_runtime_t runtime_,
+                                      legion_context_t ctx_,
+                                      legion_future_t *field_sizes,
+                                      legion_field_id_t *field_ids,
+                                      size_t num_fields,
+                                      legion_custom_serdez_id_t serdez)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+
+  std::vector<Future> sizes(num_fields);
+  std::vector<FieldID> ids(num_fields);
+  for (unsigned idx = 0; idx < num_fields; idx++)
+  {
+    sizes[idx] = *CObjectWrapper::unwrap(field_sizes[idx]);
+    ids[idx] = field_ids[idx];
+  }
+  FieldSpace fs = runtime->create_field_space(ctx, sizes, ids, serdez);
+  for (unsigned idx = 0; idx < num_fields; idx++)
+    field_ids[idx] = ids[idx];
+  return CObjectWrapper::wrap(fs);
+}
+
 void
 legion_field_space_create_shared_ownership(legion_runtime_t runtime_,
                                            legion_context_t ctx_,
@@ -4086,7 +4134,7 @@ legion_runtime_attach_hdf5(
   std::map<FieldID, const char *> *field_map =
     CObjectWrapper::unwrap(field_map_);
 
-  AttachLauncher launcher(EXTERNAL_HDF5_FILE, handle, parent);
+  AttachLauncher launcher(LEGION_EXTERNAL_HDF5_FILE, handle, parent);
   launcher.attach_hdf5(filename, *field_map, mode);
 
   PhysicalRegion result = runtime->attach_external_resource(ctx, launcher);
@@ -4220,7 +4268,7 @@ legion_copy_launcher_add_src_indirect_region_requirement_logical_region(
 
   unsigned idx = launcher->src_requirements.size();
   launcher->add_src_indirect_field(fid,
-    RegionRequirement(handle, READ_ONLY, prop, parent, tag, verified),
+    RegionRequirement(handle, LEGION_READ_ONLY, prop, parent, tag, verified),
     is_range_indirection);
   return idx;
 }
@@ -4242,7 +4290,7 @@ legion_copy_launcher_add_dst_indirect_region_requirement_logical_region(
 
   unsigned idx = launcher->dst_requirements.size();
   launcher->add_dst_indirect_field(fid,
-    RegionRequirement(handle, READ_ONLY, prop, parent, tag, verified),
+    RegionRequirement(handle, LEGION_READ_ONLY, prop, parent, tag, verified),
     is_range_indirection);
   return idx;
 }
@@ -4508,7 +4556,7 @@ legion_index_copy_launcher_add_src_indirect_region_requirement_logical_region(
 
   unsigned idx = launcher->src_requirements.size();
   launcher->add_src_indirect_field(fid,
-    RegionRequirement(handle, proj, READ_ONLY, prop, parent, tag, verified),
+    RegionRequirement(handle, proj, LEGION_READ_ONLY, prop, parent, tag, verified),
     is_range_indirection);
   return idx;
 }
@@ -4531,7 +4579,7 @@ legion_index_copy_launcher_add_dst_indirect_region_requirement_logical_region(
 
   unsigned idx = launcher->dst_requirements.size();
   launcher->add_dst_indirect_field(fid,
-    RegionRequirement(handle, proj, READ_ONLY, prop, parent, tag, verified),
+    RegionRequirement(handle, proj, LEGION_READ_ONLY, prop, parent, tag, verified),
     is_range_indirection);
   return idx;
 }
@@ -4554,7 +4602,7 @@ legion_index_copy_launcher_add_src_indirect_region_requirement_logical_partition
 
   unsigned idx = launcher->src_requirements.size();
   launcher->add_src_indirect_field(fid,
-    RegionRequirement(handle, proj, READ_ONLY, prop, parent, tag, verified),
+    RegionRequirement(handle, proj, LEGION_READ_ONLY, prop, parent, tag, verified),
     is_range_indirection);
   return idx;
 }
@@ -4577,7 +4625,7 @@ legion_index_copy_launcher_add_dst_indirect_region_requirement_logical_partition
 
   unsigned idx = launcher->dst_requirements.size();
   launcher->add_dst_indirect_field(fid,
-    RegionRequirement(handle, proj, READ_ONLY, prop, parent, tag, verified),
+    RegionRequirement(handle, proj, LEGION_READ_ONLY, prop, parent, tag, verified),
     is_range_indirection);
   return idx;
 }
@@ -6875,7 +6923,7 @@ legion_issue_timing_op_seconds(legion_runtime_t runtime_,
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
 
-  TimingLauncher launcher(MEASURE_SECONDS);
+  TimingLauncher launcher(LEGION_MEASURE_SECONDS);
   Future f = runtime->issue_timing_measurement(ctx, launcher);  
   return CObjectWrapper::wrap(new Future(f));
 }
@@ -6887,7 +6935,7 @@ legion_issue_timing_op_microseconds(legion_runtime_t runtime_,
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
 
-  TimingLauncher launcher(MEASURE_MICRO_SECONDS);
+  TimingLauncher launcher(LEGION_MEASURE_MICRO_SECONDS);
   Future f = runtime->issue_timing_measurement(ctx, launcher);  
   return CObjectWrapper::wrap(new Future(f));
 }
@@ -6899,7 +6947,7 @@ legion_issue_timing_op_nanoseconds(legion_runtime_t runtime_,
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
 
-  TimingLauncher launcher(MEASURE_NANO_SECONDS);
+  TimingLauncher launcher(LEGION_MEASURE_NANO_SECONDS);
   Future f = runtime->issue_timing_measurement(ctx, launcher);  
   return CObjectWrapper::wrap(new Future(f));
 }

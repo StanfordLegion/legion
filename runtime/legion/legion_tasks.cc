@@ -884,7 +884,7 @@ namespace Legion {
     {
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-        if (regions[idx].privilege != NO_ACCESS && 
+        if (regions[idx].privilege != LEGION_NO_ACCESS && 
             regions[idx].privilege_fields.empty())
         {
           REPORT_LEGION_WARNING(LEGION_WARNING_REGION_REQUIREMENT_TASK,
@@ -1067,7 +1067,7 @@ namespace Legion {
         {
           RegionRequirement &req = regions[idx];
           if (HAS_WRITE_DISCARD(req))
-            req.privilege &= ~DISCARD_MASK;
+            req.privilege &= ~LEGION_DISCARD_MASK;
         }
       }
       return output.speculate;
@@ -1331,8 +1331,8 @@ namespace Legion {
         LegionErrorType et = runtime->verify_requirement(regions[idx], 
                                                          bad_field); 
         if ((et == NO_ERROR) && !is_index_space && 
-            ((regions[idx].handle_type == PART_PROJECTION) || 
-             (regions[idx].handle_type == REG_PROJECTION)))
+            ((regions[idx].handle_type == LEGION_PARTITION_PROJECTION) || 
+             (regions[idx].handle_type == LEGION_REGION_PROJECTION)))
           et = ERROR_BAD_PROJECTION_USE;
         // If that worked, then check the privileges with the parent context
         if (et == NO_ERROR)
@@ -1386,8 +1386,9 @@ namespace Legion {
             }
           case ERROR_FIELD_SPACE_FIELD_MISMATCH:
             {
-              FieldSpace sp = (regions[idx].handle_type == SINGULAR) ||
-                (regions[idx].handle_type == REG_PROJECTION) ? 
+              FieldSpace sp = 
+                (regions[idx].handle_type == LEGION_SINGULAR_PROJECTION) ||
+                (regions[idx].handle_type == LEGION_REGION_PROJECTION) ? 
                   regions[idx].region.field_space :
                   regions[idx].partition.field_space;
               REPORT_LEGION_ERROR(ERROR_FIELD_NOT_VALID,
@@ -1668,7 +1669,7 @@ namespace Legion {
       // Update the region requirements for this point
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-        if (regions[idx].handle_type != SINGULAR)
+        if (regions[idx].handle_type != LEGION_SINGULAR_PROJECTION)
         {
           ProjectionFunction *function = 
             runtime->find_projection_function(regions[idx].projection);
@@ -1677,13 +1678,13 @@ namespace Legion {
           regions[idx].region = 
             function->project_point(this, idx, runtime, index_point);
           // Update the region requirement kind 
-          regions[idx].handle_type = SINGULAR;
+          regions[idx].handle_type = LEGION_SINGULAR_PROJECTION;
         }
         // Check to see if the region is a NO_REGION,
         // if it is then switch the privilege to NO_ACCESS
         if (regions[idx].region == LogicalRegion::NO_REGION)
         {
-          regions[idx].privilege = NO_ACCESS;
+          regions[idx].privilege = LEGION_NO_ACCESS;
           continue;
         }
       }
@@ -1767,7 +1768,8 @@ namespace Legion {
           {
             field_masks[idx] = field_space_node->get_field_mask(
                                         regions[indexes[idx]].privilege_fields);
-            if (regions[indexes[idx]].handle_type == PART_PROJECTION)
+            if (regions[indexes[idx]].handle_type == 
+                LEGION_PARTITION_PROJECTION)
               index_nodes[idx] = runtime->forest->get_node(
                         regions[indexes[idx]].partition.get_index_partition());
             else
@@ -1798,9 +1800,12 @@ namespace Legion {
             DependenceType dtype = check_dependence_type(usage1, usage2);
             // We can only reporting interfering requirements precisely
             // if at least one of these is not a projection requireemnts
-            if (((dtype == TRUE_DEPENDENCE) || (dtype == ANTI_DEPENDENCE)) &&
-                ((regions[indexes[i]].handle_type == SINGULAR) ||
-                 (regions[indexes[j]].handle_type == SINGULAR)))
+            if (((dtype == LEGION_TRUE_DEPENDENCE) || 
+                 (dtype == LEGION_ANTI_DEPENDENCE)) &&
+                ((regions[indexes[i]].handle_type == 
+                  LEGION_SINGULAR_PROJECTION) ||
+                 (regions[indexes[j]].handle_type == 
+                  LEGION_SINGULAR_PROJECTION)))
               report_interfering_requirements(indexes[j], indexes[i]);
             // Special case, if the parents are not the same,
             // then we don't have to do anything cause their
@@ -1890,10 +1895,10 @@ namespace Legion {
                                             const RegionRequirement &req)
     //--------------------------------------------------------------------------
     {
-      const bool reg = (req.handle_type == SINGULAR) ||
-                       (req.handle_type == REG_PROJECTION);
-      const bool proj = (req.handle_type == REG_PROJECTION) ||
-                        (req.handle_type == PART_PROJECTION); 
+      const bool reg = (req.handle_type == LEGION_SINGULAR_PROJECTION) ||
+                       (req.handle_type == LEGION_REGION_PROJECTION);
+      const bool proj = (req.handle_type == LEGION_REGION_PROJECTION) ||
+                        (req.handle_type == LEGION_PARTITION_PROJECTION); 
 
       LegionSpy::log_logical_requirement(uid, idx, reg,
           reg ? req.region.index_space.id :
@@ -2450,7 +2455,7 @@ namespace Legion {
         if (regions[idx].is_no_access())
           prepare_for_mapping(current_valid, input.valid_instances[idx]);
         // There are no valid instances for reduction-only cases
-        else if (regions[idx].privilege != REDUCE)
+        else if (regions[idx].privilege != LEGION_REDUCE)
           prepare_for_mapping(current_valid, visible_memories,
                               input.valid_instances[idx]);
       }
@@ -2694,9 +2699,10 @@ namespace Legion {
                 missing_fields.begin(); it != missing_fields.end(); it++)
           {
             const void *name; size_t name_size;
-            if(!runtime->retrieve_semantic_information(
-                regions[idx].region.get_field_space(), *it, NAME_SEMANTIC_TAG,
-                name, name_size, true/*can fail*/, false))
+            if (!runtime->retrieve_semantic_information(
+                regions[idx].region.get_field_space(), *it, 
+                LEGION_NAME_SEMANTIC_TAG, name, name_size, 
+                true/*can fail*/, false))
 	          name = "(no name)";
               log_run.error("Missing instance for field %s (FieldID: %d)",
                           static_cast<const char*>(name), *it);
@@ -3115,7 +3121,7 @@ namespace Legion {
               it != con_it->indexes.end(); it++, idx++)
         {
 #ifdef DEBUG_LEGION
-          assert(regions[*it].handle_type == SINGULAR);
+          assert(regions[*it].handle_type == LEGION_SINGULAR_PROJECTION);
           for (std::set<FieldID>::const_iterator fit = con_it->fields.begin();
                 fit != con_it->fields.end(); fit++)
           {
@@ -3701,7 +3707,7 @@ namespace Legion {
         // We also use read-only privileges to ensure that it doesn't
         // invalidate the other valid instances
         const PrivilegeMode mode = regions[idx].privilege;
-        regions[idx].privilege = READ_ONLY; 
+        regions[idx].privilege = LEGION_READ_ONLY; 
         VersionInfo &local_version_info = get_version_info(idx);
         runtime->forest->physical_perform_updates_and_registration(
                           regions[idx], local_version_info, this, idx,
@@ -3801,7 +3807,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < regions.size(); idx++)
         {
 #ifdef DEBUG_LEGION
-          assert(regions[idx].handle_type == SINGULAR);
+          assert(regions[idx].handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
           // If it was virtual mapper so it doesn't matter anyway.
           if (virtual_mapped[idx] || no_access_regions[idx])
@@ -3827,7 +3833,7 @@ namespace Legion {
             // Also make the region requirement read-write to force
             // people to wait on the value
             if (!IS_REDUCE(regions[idx]))
-              clone_requirements[idx].privilege = READ_WRITE;
+              clone_requirements[idx].privilege = LEGION_READ_WRITE;
             unmap_events[idx] = Runtime::create_ap_user_event();
             execution_context->add_physical_region(clone_requirements[idx],
                     false/*mapped*/, map_id, tag, unmap_events[idx],
@@ -4016,19 +4022,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::add_copy_profiling_request(const OpProfilingResponse &resp,
-                                           Realm::ProfilingRequestSet &requests)
+    void SingleTask::add_copy_profiling_request(const PhysicalTraceInfo &info,
+                                Realm::ProfilingRequestSet &requests, bool fill)
     //--------------------------------------------------------------------------
     {
       // Nothing to do if we don't have any copy profiling requests
       if (copy_profiling_requests.empty())
         return;
-#ifdef DEBUG_LEGION
-      assert(resp.src == resp.dst);
-#endif
+      OpProfilingResponse response(this, info.index, info.dst_index, fill);
       Realm::ProfilingRequest &request = requests.add_request(
         runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
-        &resp, sizeof(resp));
+        &response, sizeof(response));
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             copy_profiling_requests.begin(); it != 
             copy_profiling_requests.end(); it++)
@@ -6460,14 +6464,14 @@ namespace Legion {
 #endif
       RegionRequirement &req = regions[idx];
 #ifdef DEBUG_LEGION
-      assert(req.handle_type != SINGULAR);
+      assert(req.handle_type != LEGION_SINGULAR_PROJECTION);
 #endif
       req.region = result;
-      req.handle_type = SINGULAR;
+      req.handle_type = LEGION_SINGULAR_PROJECTION;
       // Check to see if the region is a NO_REGION,
       // if it is then switch the privilege to NO_ACCESS
       if (req.region == LogicalRegion::NO_REGION)
-        req.privilege = NO_ACCESS;
+        req.privilege = LEGION_NO_ACCESS;
     }
 
     //--------------------------------------------------------------------------
@@ -6991,14 +6995,14 @@ namespace Legion {
       {
         if (!IS_WRITE(regions[idx]))
           continue;
-        if (regions[idx].handle_type == SINGULAR)
-          regions[idx].flags |= MUST_PREMAP_FLAG;
-        else if (regions[idx].handle_type == REG_PROJECTION)
+        if (regions[idx].handle_type == LEGION_SINGULAR_PROJECTION)
+          regions[idx].flags |= LEGION_MUST_PREMAP_FLAG;
+        else if (regions[idx].handle_type == LEGION_REGION_PROJECTION)
         {
           ProjectionFunction *function = runtime->find_projection_function(
                                                     regions[idx].projection);
           if (function->depth == 0)
-            regions[idx].flags |= MUST_PREMAP_FLAG;
+            regions[idx].flags |= LEGION_MUST_PREMAP_FLAG;
         }
       }
       // Initialize the privilege paths
@@ -7373,7 +7377,7 @@ namespace Legion {
             const void *name; size_t name_size;
             if (!runtime->retrieve_semantic_information(
                 regions[*it].region.get_field_space(), *fit,
-                NAME_SEMANTIC_TAG, name, name_size, true, false))
+                LEGION_NAME_SEMANTIC_TAG, name, name_size, true, false))
               name = "(no name)";
             log_run.error("Missing instance for field %s (FieldID: %d)",
                           static_cast<const char*>(name), *it);
@@ -7943,19 +7947,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::add_copy_profiling_request(const OpProfilingResponse &resp,
-                                           Realm::ProfilingRequestSet &requests)
+    void IndexTask::add_copy_profiling_request(const PhysicalTraceInfo &info,
+                                Realm::ProfilingRequestSet &requests, bool fill)
     //--------------------------------------------------------------------------
     {
       // Nothing to do if we don't have any copy profiling requests
       if (copy_profiling_requests.empty())
         return;
-#ifdef DEBUG_LEGION
-      assert(resp.src == resp.dst);
-#endif
+      OpProfilingResponse response(this, info.index, info.dst_index, fill);
       Realm::ProfilingRequest &request = requests.add_request(
         runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
-        &resp, sizeof(resp));
+        &response, sizeof(response));
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             copy_profiling_requests.begin(); it != 
             copy_profiling_requests.end(); it++)
@@ -8433,7 +8435,7 @@ namespace Legion {
         if (it->first == it->second)
         {
           const RegionRequirement &req = regions[it->first];
-          if (req.handle_type != SINGULAR)
+          if (req.handle_type != LEGION_SINGULAR_PROJECTION)
           {
             ProjectionFunction *func = 
               runtime->find_projection_function(req.projection);   
@@ -9308,7 +9310,7 @@ namespace Legion {
       // Compute any projection region requirements
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-        if (regions[idx].handle_type == SINGULAR)
+        if (regions[idx].handle_type == LEGION_SINGULAR_PROJECTION)
           continue;
         else 
         {

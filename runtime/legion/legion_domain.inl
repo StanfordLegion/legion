@@ -1059,6 +1059,10 @@ namespace Legion {
   //----------------------------------------------------------------------------
   {
     assert(DIM == dim);
+#ifndef __CUDA_ARCH__
+    if (is_id != 0)
+      fprintf(stderr,"ERROR: Cannot implicitly convert sparse Domain to Rect");
+#endif
     assert(is_id == 0); // better not be one of these
     Rect<DIM,T> result;
     for (int i = 0; i < DIM; i++)
@@ -1717,8 +1721,8 @@ namespace Legion {
     : m(rhs.m), n(rhs.n)
   //----------------------------------------------------------------------------
   {
-    assert(m <= ::MAX_POINT_DIM);
-    assert(n <= ::MAX_POINT_DIM);
+    assert(m <= LEGION_MAX_DIM);
+    assert(n <= LEGION_MAX_DIM);
     for (int i = 0; i < m; i++)
       for (int j = 0; j < n; j++)
         matrix[i * n + j] = rhs.matrix[i * n + j];
@@ -1730,8 +1734,8 @@ namespace Legion {
     : m(M), n(N)
   //----------------------------------------------------------------------------
   {
-    assert(m <= ::MAX_POINT_DIM);
-    assert(n <= ::MAX_POINT_DIM);
+    assert(m <= LEGION_MAX_DIM);
+    assert(n <= LEGION_MAX_DIM);
     for (int i = 0; i < M; i++)
       for (int j = 0; j < N; j++)
         matrix[i * n + j] = rhs[i][j];
@@ -1744,8 +1748,8 @@ namespace Legion {
   {
     m = rhs.m;
     n = rhs.n;
-    assert(m <= ::MAX_POINT_DIM);
-    assert(n <= ::MAX_POINT_DIM);
+    assert(m <= LEGION_MAX_DIM);
+    assert(n <= LEGION_MAX_DIM);
     for (int i = 0; i < m; i++)
       for (int j = 0; j < n; j++)
         matrix[i * n + j] = rhs.matrix[i * n + j];
@@ -1760,8 +1764,8 @@ namespace Legion {
   {
     m = M;
     n = N;
-    assert(m <= ::MAX_POINT_DIM);
-    assert(n <= ::MAX_POINT_DIM);
+    assert(m <= LEGION_MAX_DIM);
+    assert(n <= LEGION_MAX_DIM);
     for (int i = 0; i < M; i++)
       for (int j = 0; j < N; j++)
         matrix[i * n + j] = rhs[i][j];

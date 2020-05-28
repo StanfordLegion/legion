@@ -1089,13 +1089,13 @@ namespace Legion {
       //------------------------------------------------------------------------
       {
         switch (priv) {
-          case NO_ACCESS: return "NO_ACCESS";
-          case READ_ONLY: return "READ_ONLY";
-          case WRITE_PRIV: return "WRITE_PRIV";
-          case REDUCE: return "REDUCE";
-          case READ_WRITE: return "READ_WRITE";
-          case WRITE_ONLY: return "WRITE_ONLY";
-          case WRITE_DISCARD: return "WRITE_DISCARD";
+          case LEGION_NO_ACCESS: return "NO_ACCESS";
+          case LEGION_READ_ONLY: return "READ_ONLY";
+          case LEGION_WRITE_PRIV: return "WRITE_PRIV";
+          case LEGION_REDUCE: return "REDUCE";
+          case LEGION_READ_WRITE: return "READ_WRITE";
+          case LEGION_WRITE_ONLY: return "WRITE_ONLY";
+          case LEGION_WRITE_DISCARD: return "WRITE_DISCARD";
           default: assert(false); return "";
         }
       }
@@ -1105,10 +1105,10 @@ namespace Legion {
       //------------------------------------------------------------------------
       {
         switch (prop) {
-          case EXCLUSIVE: return "EXCLUSIVE";
-          case ATOMIC: return "ATOMIC";
-          case SIMULTANEOUS: return "SIMULTANEOUS";
-          case RELAXED: return "RELAXED";
+          case LEGION_EXCLUSIVE: return "EXCLUSIVE";
+          case LEGION_ATOMIC: return "ATOMIC";
+          case LEGION_SIMULTANEOUS: return "SIMULTANEOUS";
+          case LEGION_RELAXED: return "RELAXED";
           default: assert(false); return "";
         }
       }
@@ -1138,9 +1138,8 @@ namespace Legion {
       //------------------------------------------------------------------------
       {
         switch (dom.get_dim()) {
-          case 1: return to_string<1>(dom);
-          case 2: return to_string<2>(dom);
-          case 3: return to_string<3>(dom);
+#define CASE(N) case N: return to_string<N>(dom);
+          LEGION_FOREACH_N(CASE)
           default: assert(false);
         }
         return "";
@@ -1163,7 +1162,7 @@ namespace Legion {
           } else {
             past_first = true;
           }
-          ss << *it;
+          ss << to_string(runtime, ctx, *it);
         }
         return ss.str();
       }
@@ -1177,9 +1176,9 @@ namespace Legion {
         const std::vector<DimensionKind>& dims =
           constraints.ordering_constraint.ordering;
         std::stringstream ss;
-        if (dims.front() == DIM_F) {
+        if (dims.front() == LEGION_DIM_F) {
           ss << "AoS:";
-        } else if (dims.back() == DIM_F) {
+        } else if (dims.back() == LEGION_DIM_F) {
           ss << "SoA:";
         } else {
           return "other";
@@ -1187,10 +1186,10 @@ namespace Legion {
         for (std::vector<DimensionKind>::const_reverse_iterator rit =
                dims.rbegin(); rit != dims.rend(); ++rit) {
           switch(*rit) {
-            case DIM_X: ss << "X"; break;
-            case DIM_Y: ss << "Y"; break;
-            case DIM_Z: ss << "Z"; break;
-            case DIM_F: break;
+            case LEGION_DIM_X: ss << "X"; break;
+            case LEGION_DIM_Y: ss << "Y"; break;
+            case LEGION_DIM_Z: ss << "Z"; break;
+            case LEGION_DIM_F: break;
             default: return "other";
           }
         }
@@ -1216,7 +1215,7 @@ namespace Legion {
           const void* name;
           size_t name_size;
           if (runtime->retrieve_semantic_information(
-                  ctx, fs, *it, NAME_SEMANTIC_TAG, name, name_size,
+                  ctx, fs, *it, LEGION_NAME_SEMANTIC_TAG, name, name_size,
                   true/*can_fail*/, false/*wait_until_ready*/)) {
             ss << static_cast<const char*>(name);
           } else {

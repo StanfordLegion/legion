@@ -1766,7 +1766,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ProjectionInfo::ProjectionInfo(Runtime *runtime, 
                      const RegionRequirement &req, IndexSpaceNode *launch_space)
-      : projection((req.handle_type != SINGULAR) ? 
+      : projection((req.handle_type != LEGION_SINGULAR_PROJECTION) ? 
           runtime->find_projection_function(req.projection) : NULL),
         projection_type(req.handle_type), projection_space(launch_space)
     //--------------------------------------------------------------------------
@@ -2507,12 +2507,17 @@ namespace Legion {
     void FieldState::merge(FieldState &rhs, RegionTreeNode *node)
     //--------------------------------------------------------------------------
     {
-      for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
-            rhs.open_children.begin(); it != rhs.open_children.end(); it++)
-        // Remove duplicate references if we already had it
-        if (!open_children.insert(it->first, it->second))
-          it->first->remove_base_valid_ref(FIELD_STATE_REF);
-      rhs.open_children.clear();
+      if (!rhs.open_children.empty())
+      {
+        for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
+              rhs.open_children.begin(); it != rhs.open_children.end(); it++)
+          // Remove duplicate references if we already had it
+          if (!open_children.insert(it->first, it->second))
+            it->first->remove_base_valid_ref(FIELD_STATE_REF);
+        rhs.open_children.clear();
+      }
+      else
+        open_children.relax_valid_mask(rhs.open_children.get_valid_mask());
 #ifdef DEBUG_LEGION
       assert(redop == rhs.redop);
       assert(projection == rhs.projection);
@@ -2967,10 +2972,10 @@ namespace Legion {
       RegionRequirement req;
       if (root_node->is_region())
         req = RegionRequirement(root_node->as_region_node()->handle,
-                                READ_WRITE, EXCLUSIVE, trace_info.req.parent);
+            LEGION_READ_WRITE, LEGION_EXCLUSIVE, trace_info.req.parent);
       else
         req = RegionRequirement(root_node->as_partition_node()->handle, 0,
-                                READ_WRITE, EXCLUSIVE, trace_info.req.parent);
+            LEGION_READ_WRITE, LEGION_EXCLUSIVE, trace_info.req.parent);
       close_op = creator->runtime->get_available_merge_close_op();
       merge_close_gen = close_op->get_generation();
       req.privilege_fields.clear();
@@ -2993,8 +2998,8 @@ namespace Legion {
       // don't run too early.
       LegionList<LogicalUser,LOGICAL_REC_ALLOC>::track_aligned &above_users = 
                                               current.op->get_logical_records();
-      const LogicalUser merge_close_user(close_op, 0/*idx*/, 
-          RegionUsage(READ_WRITE, EXCLUSIVE, 0/*redop*/), close_mask);
+      const LogicalUser merge_close_user(close_op, 0/*idx*/, RegionUsage(
+            LEGION_READ_WRITE, LEGION_EXCLUSIVE, 0/*redop*/), close_mask);
       register_dependences(close_op, merge_close_user, current, 
           open_below, closed_users, above_users, cusers, pusers);
       // Now we can remove our references on our local users
@@ -3029,7 +3034,7 @@ namespace Legion {
       // operations have already been kicked off and might be done
       // LogicalCloser::register_dependences
       const LogicalUser close_user(close_op, merge_close_gen,0/*idx*/,
-        RegionUsage(READ_WRITE, EXCLUSIVE, 0/*redop*/), close_mask);
+        RegionUsage(LEGION_READ_WRITE, LEGION_EXCLUSIVE,0/*redop*/),close_mask);
       users.push_back(close_user);
     }
 
@@ -3217,8 +3222,8 @@ namespace Legion {
       // If the sum of the left and right equivalence sets 
       // are too big then build intermediate nodes for each one
       if (((left_set.size() + right_set.size()) > LEGION_MAX_BVH_FANOUT) &&
-          (left_set.size() < subsets.size()) && 
-          (right_set.size() < subsets.size()))
+          (left_set.size() < subsets.size()) && !left_set.empty() &&
+          (right_set.size() < subsets.size()) && !right_set.empty())
       {
         // Make a new equivalence class and record all the subsets
         const AddressSpaceID local_space = runtime->address_space;
@@ -3256,11 +3261,24 @@ namespace Legion {
       {
         // If either right or left changed, then we need to recombine
         // and deduplicate the equivalence sets before we can return
-        std::set<EquivalenceSet*> children;
-        children.insert(left_set.begin(), left_set.end());
-        children.insert(right_set.begin(), right_set.end());
-        subsets.clear();
-        subsets.insert(subsets.end(), children.begin(), children.end());
+        if (!left_set.empty() && !right_set.empty())
+        {
+          std::set<EquivalenceSet*> children;
+          children.insert(left_set.begin(), left_set.end());
+          children.insert(right_set.begin(), right_set.end());
+          subsets.clear();
+          subsets.insert(subsets.end(), children.begin(), children.end());
+        }
+        else if (!left_set.empty())
+        {
+          subsets.clear();
+          subsets.insert(subsets.end(), left_set.begin(), left_set.end());
+        }
+        else
+        {
+          subsets.clear();
+          subsets.insert(subsets.end(), right_set.begin(), right_set.end());
+        }
         return true;
       }
       else // No changes were made
@@ -12373,11 +12391,7 @@ namespace Legion {
               break;
           }
           if (!disjoint_partition_refinements.empty())
-          {
-            // Make sure this is tight before we remove them
-            disjoint_partition_refinements.tighten_valid_mask();
             complete_mask -= disjoint_partition_refinements.get_valid_mask();
-          }
           // Only need one iteration of this loop
           break;
         }
@@ -12762,6 +12776,7 @@ namespace Legion {
           if ((*it)->remove_expression_reference())
             delete (*it);
         }
+        unrefined_remainders.tighten_valid_mask();
       }
       if (!to_add.empty())
       {
@@ -12863,27 +12878,17 @@ namespace Legion {
       }
       else
       {
-        // We already have a subset, see which fields it's already
-        // been refined for (maybe none if it is still pending)
+        // We should not have this subset already for these fields
+#ifdef DEBUG_LEGION
         FieldMaskSet<EquivalenceSet>::const_iterator finder = 
           subsets.find(subset);
-        if (finder != subsets.end())
-        {
-          const FieldMask diff_mask = mask - finder->second;
-          if (!!diff_mask)
-          {
-            if (pending_refinements.insert(subset, diff_mask))
-              subset->add_nested_resource_ref(did);
-          }
-          else // It's already refined for all of them, so just return
-            return subset;
-        }
-        else
-        {
-          // Do the normal insert if we couldn't find it
-          if (pending_refinements.insert(subset, mask))
-            subset->add_nested_resource_ref(did);
-        }
+        assert((finder == subsets.end()) || (finder->second * mask));
+        finder = pending_refinements.find(subset);
+        assert((finder == pending_refinements.end()) || 
+                (finder->second * mask));
+#endif
+        if (pending_refinements.insert(subset, mask))
+          subset->add_nested_resource_ref(did);
       }
       // Launch the refinement task if there isn't one already running
       if (eq_state == MAPPING_STATE)

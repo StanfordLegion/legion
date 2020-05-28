@@ -26,19 +26,32 @@
 #include "legion/legion_allocation.h"
 
 // Useful macros
-#define IS_NO_ACCESS(req) (((req).privilege & READ_WRITE) == NO_ACCESS)
-#define IS_READ_ONLY(req) (((req).privilege & READ_WRITE) <= READ_PRIV)
-#define HAS_READ(req) ((req).privilege & READ_PRIV)
-#define HAS_WRITE(req) ((req).privilege & (WRITE_PRIV | REDUCE))
-#define IS_WRITE(req) ((req).privilege & WRITE_PRIV)
-#define HAS_WRITE_DISCARD(req) (((req).privilege & WRITE_ONLY) == WRITE_ONLY)
-#define IS_DISCARD(req) (((req).privilege & DISCARD_MASK) == DISCARD_MASK)
-#define PRIV_ONLY(req) ((req).privilege & READ_WRITE)
-#define IS_REDUCE(req) (((req).privilege & READ_WRITE) == REDUCE)
-#define IS_EXCLUSIVE(req) ((req).prop == EXCLUSIVE)
-#define IS_ATOMIC(req) ((req).prop == ATOMIC)
-#define IS_SIMULT(req) ((req).prop == SIMULTANEOUS)
-#define IS_RELAXED(req) ((req).prop == RELAXED)
+#define IS_NO_ACCESS(req) \
+  (((req).privilege & LEGION_READ_WRITE) == LEGION_NO_ACCESS)
+#define IS_READ_ONLY(req) \
+  (((req).privilege & LEGION_READ_WRITE) <= LEGION_READ_PRIV)
+#define HAS_READ(req) \
+  ((req).privilege & LEGION_READ_PRIV)
+#define HAS_WRITE(req) \
+  ((req).privilege & (LEGION_WRITE_PRIV | LEGION_REDUCE))
+#define IS_WRITE(req) \
+  ((req).privilege & LEGION_WRITE_PRIV)
+#define HAS_WRITE_DISCARD(req) \
+  (((req).privilege & LEGION_WRITE_ONLY) == LEGION_WRITE_ONLY)
+#define IS_DISCARD(req) \
+  (((req).privilege & LEGION_DISCARD_MASK) == LEGION_DISCARD_MASK)
+#define PRIV_ONLY(req) \
+  ((req).privilege & LEGION_READ_WRITE)
+#define IS_REDUCE(req) \
+  (((req).privilege & LEGION_READ_WRITE) == LEGION_REDUCE)
+#define IS_EXCLUSIVE(req) \
+  ((req).prop == LEGION_EXCLUSIVE)
+#define IS_ATOMIC(req) \
+  ((req).prop == LEGION_ATOMIC)
+#define IS_SIMULT(req) \
+  ((req).prop == LEGION_SIMULTANEOUS)
+#define IS_RELAXED(req) \
+  ((req).prop == LEGION_RELAXED)
 
 namespace Legion {
 
@@ -200,7 +213,7 @@ namespace Legion {
     struct RegionUsage {
     public:
       RegionUsage(void)
-        : privilege(NO_ACCESS), prop(EXCLUSIVE), redop(0) { }
+        : privilege(LEGION_NO_ACCESS), prop(LEGION_EXCLUSIVE), redop(0) { }
       RegionUsage(PrivilegeMode p, CoherenceProperty c, ReductionOpID r)
         : privilege(p), prop(c), redop(r) { }
       RegionUsage(const RegionRequirement &req)
@@ -233,14 +246,14 @@ namespace Legion {
         // We know at least req1 or req2 is a writers, so if req1 is not...
         assert(HAS_WRITE(u2)); 
 #endif
-        return ANTI_DEPENDENCE;
+        return LEGION_ANTI_DEPENDENCE;
       }
       else
       {
         if (HAS_WRITE_DISCARD(u2))
         {
           // WAW with a write-only
-          return ANTI_DEPENDENCE;
+          return LEGION_ANTI_DEPENDENCE;
         }
         else
         {
@@ -258,16 +271,16 @@ namespace Legion {
       // Two readers are never a dependence
       if (IS_READ_ONLY(u1) && IS_READ_ONLY(u2))
       {
-        return NO_DEPENDENCE;
+        return LEGION_NO_DEPENDENCE;
       }
       else if (IS_REDUCE(u1) && IS_REDUCE(u2))
       {
         // If they are the same kind of reduction, no dependence, 
         // otherwise true dependence
         if (u1.redop == u2.redop)
-          return NO_DEPENDENCE;
+          return LEGION_NO_DEPENDENCE;
         else
-          return TRUE_DEPENDENCE;
+          return LEGION_TRUE_DEPENDENCE;
       }
       else
       {
@@ -278,7 +291,7 @@ namespace Legion {
         // If anything exclusive 
         if (IS_EXCLUSIVE(u1) || IS_EXCLUSIVE(u2))
         {
-          return check_for_anti_dependence(u1,u2,TRUE_DEPENDENCE/*default*/);
+          return check_for_anti_dependence(u1,u2,LEGION_TRUE_DEPENDENCE);
         }
         // Anything atomic (at least one is a write)
         else if (IS_ATOMIC(u1) || IS_ATOMIC(u2))
@@ -286,8 +299,7 @@ namespace Legion {
           // If they're both atomics, return an atomic dependence
           if (IS_ATOMIC(u1) && IS_ATOMIC(u2))
           {
-            return check_for_anti_dependence(u1,u2,
-                                             ATOMIC_DEPENDENCE/*default*/); 
+            return check_for_anti_dependence(u1,u2,LEGION_ATOMIC_DEPENDENCE); 
           }
           // If the one that is not an atomic is a read, we're also ok
           // We still need a simultaneous dependence if we don't have an
@@ -295,21 +307,21 @@ namespace Legion {
           else if ((!IS_ATOMIC(u1) && IS_READ_ONLY(u1)) ||
                    (!IS_ATOMIC(u2) && IS_READ_ONLY(u2)))
           {
-            return SIMULTANEOUS_DEPENDENCE;
+            return LEGION_SIMULTANEOUS_DEPENDENCE;
           }
           // Everything else is a dependence
-          return check_for_anti_dependence(u1,u2,TRUE_DEPENDENCE/*default*/);
+          return check_for_anti_dependence(u1,u2,LEGION_TRUE_DEPENDENCE);
         }
         // If either is simultaneous we have a simultaneous dependence
         else if (IS_SIMULT(u1) || IS_SIMULT(u2))
         {
-          return SIMULTANEOUS_DEPENDENCE;
+          return LEGION_SIMULTANEOUS_DEPENDENCE;
         }
         else if (IS_RELAXED(u1) && IS_RELAXED(u2))
         {
           // TODO: Make this truly relaxed, right now it is the 
           // same as simultaneous
-          return SIMULTANEOUS_DEPENDENCE;
+          return LEGION_SIMULTANEOUS_DEPENDENCE;
           // This is what it should be: return NO_DEPENDENCE;
           // What needs to be done:
           // - RegionNode::update_valid_instances needs to allow multiple 
@@ -319,7 +331,7 @@ namespace Legion {
         }
         // We should never make it here
         assert(false);
-        return NO_DEPENDENCE;
+        return LEGION_NO_DEPENDENCE;
       }
     } 
 

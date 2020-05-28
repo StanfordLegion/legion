@@ -263,7 +263,13 @@ namespace Legion {
                                             TypeTag type_tag,
                                             IndexSpace initial,
                                 const std::vector<IndexSpace> &handles) = 0;
-      virtual FieldSpace create_field_space(RegionTreeForest *forest);
+      virtual FieldSpace create_field_space(void);
+      virtual FieldSpace create_field_space(const std::vector<size_t> &sizes,
+                                        std::vector<FieldID> &resulting_fields,
+                                        CustomSerdezID serdez_id);
+      virtual FieldSpace create_field_space(const std::vector<Future> &sizes,
+                                        std::vector<FieldID> &resulting_fields,
+                                        CustomSerdezID serdez_id) = 0;
       virtual void create_shared_ownership(FieldSpace handle);
       virtual void destroy_field_space(FieldSpace handle,
                                        const bool unordered) = 0;
@@ -356,8 +362,8 @@ namespace Legion {
                const std::vector<StaticDependence> *dependences) = 0;
       virtual size_t register_new_close_operation(CloseOp *op) = 0;
       virtual size_t register_new_summary_operation(TraceSummaryOp *op) = 0;
-      virtual void add_to_prepipeline_queue(Operation *op) = 0;
-      virtual void add_to_dependence_queue(Operation *op, bool unordered) = 0;
+      virtual void add_to_dependence_queue(Operation *op, 
+                                           bool unordered = false) = 0;
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
                                           const void *result, size_t size, 
 #ifdef LEGION_MALLOC_INSTANCES
@@ -996,6 +1002,9 @@ namespace Legion {
       virtual void verify_partition(IndexPartition pid, PartitionKind kind,
                                     const char *function_name);
       static void handle_partition_verification(const void *args);
+      virtual FieldSpace create_field_space(const std::vector<Future> &sizes,
+                                        std::vector<FieldID> &resulting_fields,
+                                        CustomSerdezID serdez_id);
       virtual void destroy_field_space(FieldSpace handle, const bool unordered);
       virtual FieldID allocate_field(FieldSpace space, const Future &field_size,
                                      FieldID fid, bool local,
@@ -1067,9 +1076,10 @@ namespace Legion {
                 const std::vector<StaticDependence> *dependences);
       virtual size_t register_new_close_operation(CloseOp *op);
       virtual size_t register_new_summary_operation(TraceSummaryOp *op);
-      virtual void add_to_prepipeline_queue(Operation *op);
+      void add_to_prepipeline_queue(Operation *op);
       bool process_prepipeline_stage(void);
-      virtual void add_to_dependence_queue(Operation *op, bool unordered);
+      virtual void add_to_dependence_queue(Operation *op, 
+                                           bool unordered = false);
       void process_dependence_stage(void);
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
                                           const void *result, size_t size, 
@@ -1652,6 +1662,9 @@ namespace Legion {
                                             TypeTag type_tag,
                                             IndexSpace initial,
                                 const std::vector<IndexSpace> &handles);
+      virtual FieldSpace create_field_space(const std::vector<Future> &sizes,
+                                        std::vector<FieldID> &resulting_fields,
+                                        CustomSerdezID serdez_id);
       virtual void destroy_field_space(FieldSpace handle, const bool unordered);
       virtual FieldID allocate_field(FieldSpace space, const Future &field_size,
                                      FieldID fid, bool local,
@@ -1723,8 +1736,8 @@ namespace Legion {
                 const std::vector<StaticDependence> *dependences);
       virtual size_t register_new_close_operation(CloseOp *op);
       virtual size_t register_new_summary_operation(TraceSummaryOp *op);
-      virtual void add_to_prepipeline_queue(Operation *op);
-      virtual void add_to_dependence_queue(Operation *op, bool unordered);
+      virtual void add_to_dependence_queue(Operation *op, 
+                                           bool unordered = false);
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
                                           const void *result, size_t size, 
 #ifdef LEGION_MALLOC_INSTANCES
@@ -2000,8 +2013,14 @@ namespace Legion {
                                             TypeTag type_tag,
                                             IndexSpace initial,
                                 const std::vector<IndexSpace> &handles);
-      virtual FieldSpace create_field_space(RegionTreeForest *forest);
+      virtual FieldSpace create_field_space(void);
+      virtual FieldSpace create_field_space(const std::vector<size_t> &sizes,
+                                        std::vector<FieldID> &resulting_fields,
+                                        CustomSerdezID serdez_id);
       virtual void create_shared_ownership(FieldSpace handle);
+      virtual FieldSpace create_field_space(const std::vector<Future> &sizes,
+                                        std::vector<FieldID> &resulting_fields,
+                                        CustomSerdezID serdez_id);
       virtual void destroy_field_space(FieldSpace handle, const bool unordered);
       virtual FieldID allocate_field(FieldSpace space, size_t field_size,
                                      FieldID fid, bool local,
@@ -2087,8 +2106,8 @@ namespace Legion {
                 const std::vector<StaticDependence> *dependences);
       virtual size_t register_new_close_operation(CloseOp *op);
       virtual size_t register_new_summary_operation(TraceSummaryOp *op);
-      virtual void add_to_prepipeline_queue(Operation *op);
-      virtual void add_to_dependence_queue(Operation *op, bool unordered);
+      virtual void add_to_dependence_queue(Operation *op, 
+                                           bool unordered = false);
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
                                           const void *result, size_t size, 
 #ifdef LEGION_MALLOC_INSTANCES

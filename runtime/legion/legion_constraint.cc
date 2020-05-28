@@ -34,71 +34,71 @@ namespace Legion {
     {
       switch (eq1)
       {
-        case LT_EK: // < v1
+        case LEGION_LT_EK: // < v1
           {
             // Can entail for <, <=, !=  
-            if ((eq2 == LT_EK) && (v1 <= v2)) // < v2
+            if ((eq2 == LEGION_LT_EK) && (v1 <= v2)) // < v2
               return true;
-            if ((eq2 == LE_EK) && (v1 < v2)) // <= v2
+            if ((eq2 == LEGION_LE_EK) && (v1 < v2)) // <= v2
               return true;
-            if ((eq2 == NE_EK) && (v1 <= v2)) // != v2
+            if ((eq2 == LEGION_NE_EK) && (v1 <= v2)) // != v2
               return true;
             return false;
           }
-        case LE_EK: // <= v1
+        case LEGION_LE_EK: // <= v1
           {
             // Can entail for <, <=, !=
-            if ((eq2 == LT_EK) && (v1 < v2)) // < v2
+            if ((eq2 == LEGION_LT_EK) && (v1 < v2)) // < v2
               return true;
-            if ((eq2 == LE_EK) && (v1 <= v2)) // <= v2
+            if ((eq2 == LEGION_LE_EK) && (v1 <= v2)) // <= v2
               return true;
-            if ((eq2 == NE_EK) && (v1 < v2)) // != v2
+            if ((eq2 == LEGION_NE_EK) && (v1 < v2)) // != v2
               return true;
             return false;
           }
-        case GT_EK: // > v1
+        case LEGION_GT_EK: // > v1
           {
             // Can entail for >, >=, !=
-            if ((eq2 == GT_EK) && (v1 >= v2)) // > v2
+            if ((eq2 == LEGION_GT_EK) && (v1 >= v2)) // > v2
               return true;
-            if ((eq2 == GE_EK) && (v1 > v2)) // >= v2
+            if ((eq2 == LEGION_GE_EK) && (v1 > v2)) // >= v2
               return true;
-            if ((eq2 == NE_EK) && (v1 >= v2)) // != v2
+            if ((eq2 == LEGION_NE_EK) && (v1 >= v2)) // != v2
               return true;
             return false;
           }
-        case GE_EK: // >= v1
+        case LEGION_GE_EK: // >= v1
           {
             // Can entail for >, >=, !=
-            if ((eq2 == GT_EK) && (v1 > v2)) // > v2
+            if ((eq2 == LEGION_GT_EK) && (v1 > v2)) // > v2
               return true;
-            if ((eq2 == GE_EK) && (v1 >= v2)) // >= v2
+            if ((eq2 == LEGION_GE_EK) && (v1 >= v2)) // >= v2
               return true;
-            if ((eq2 == NE_EK) && (v1 > v2)) // != v2
+            if ((eq2 == LEGION_NE_EK) && (v1 > v2)) // != v2
               return true;
             return false;
           }
-        case EQ_EK: // == v1
+        case LEGION_EQ_EK: // == v1
           {
             // Can entail for <, <=, >, >=, ==, !=
-            if ((eq2 == LT_EK) && (v1 < v2)) // < v2
+            if ((eq2 == LEGION_LT_EK) && (v1 < v2)) // < v2
               return true;
-            if ((eq2 == LE_EK) && (v1 <= v2)) // <= v2
+            if ((eq2 == LEGION_LE_EK) && (v1 <= v2)) // <= v2
               return true;
-            if ((eq2 == GT_EK) && (v1 > v2)) // > v2
+            if ((eq2 == LEGION_GT_EK) && (v1 > v2)) // > v2
               return true;
-            if ((eq2 == GE_EK) && (v1 >= v2)) // >= v2
+            if ((eq2 == LEGION_GE_EK) && (v1 >= v2)) // >= v2
               return true;
-            if ((eq2 == EQ_EK) && (v1 == v2)) // == v2
+            if ((eq2 == LEGION_EQ_EK) && (v1 == v2)) // == v2
               return true;
-            if ((eq2 == NE_EK) && (v1 != v2)) // != v2
+            if ((eq2 == LEGION_NE_EK) && (v1 != v2)) // != v2
               return true;
             return false;
           }
-        case NE_EK: // != v1
+        case LEGION_NE_EK: // != v1
           {
             // Can only entail for != of the same value
-            if ((eq2 == NE_EK) && (v1 == v2)) // != v2
+            if ((eq2 == LEGION_NE_EK) && (v1 == v2)) // != v2
               return true;
             return false;
           }
@@ -115,71 +115,71 @@ namespace Legion {
     {
       switch (eq1)
       {
-        case LT_EK: // < v1
+        case LEGION_LT_EK: // < v1
           {
             // conflicts with >, >=, ==
-            if ((eq2 == GT_EK) && ((v1-1) <= v2)) // > v2
+            if ((eq2 == LEGION_GT_EK) && ((v1-1) <= v2)) // > v2
               return true;
-            if ((eq2 == GE_EK) && (v1 <= v2)) // >= v2
+            if ((eq2 == LEGION_GE_EK) && (v1 <= v2)) // >= v2
               return true;
-            if ((eq2 == EQ_EK) && (v1 <= v2)) // == v2
+            if ((eq2 == LEGION_EQ_EK) && (v1 <= v2)) // == v2
               return true;
             return false;
           }
-        case LE_EK: // <= v1
+        case LEGION_LE_EK: // <= v1
           {
             // conflicts with >, >=, == 
-            if ((eq2 == GT_EK) && (v1 <= v2)) // > v2
+            if ((eq2 == LEGION_GT_EK) && (v1 <= v2)) // > v2
               return true;
-            if ((eq2 == GE_EK) && (v1 < v2)) // >= v2
+            if ((eq2 == LEGION_GE_EK) && (v1 < v2)) // >= v2
               return true;
-            if ((eq2 == EQ_EK) && (v1 < v2)) // == v2
+            if ((eq2 == LEGION_EQ_EK) && (v1 < v2)) // == v2
               return true;
             return false;
           }
-        case GT_EK: // > v1
+        case LEGION_GT_EK: // > v1
           {
             // coflicts with <, <=, ==
-            if ((eq2 == LT_EK) && ((v1+1) >= v2)) // < v2
+            if ((eq2 == LEGION_LT_EK) && ((v1+1) >= v2)) // < v2
               return true;
-            if ((eq2 == LE_EK) && (v1 >= v2)) // <= v2
+            if ((eq2 == LEGION_LE_EK) && (v1 >= v2)) // <= v2
               return true;
-            if ((eq2 == EQ_EK) && (v1 >= v2)) // == v2
+            if ((eq2 == LEGION_EQ_EK) && (v1 >= v2)) // == v2
               return true;
             return false;
           }
-        case GE_EK: // >= v1
+        case LEGION_GE_EK: // >= v1
           {
             // conflicts with <, <=, ==
-            if ((eq2 == LT_EK) && (v1 >= v2)) // < v2
+            if ((eq2 == LEGION_LT_EK) && (v1 >= v2)) // < v2
               return true;
-            if ((eq2 == LE_EK) && (v1 > v2)) // <= v2
+            if ((eq2 == LEGION_LE_EK) && (v1 > v2)) // <= v2
               return true;
-            if ((eq2 == EQ_EK) && (v1 > v2)) // == v2
+            if ((eq2 == LEGION_EQ_EK) && (v1 > v2)) // == v2
               return true;
             return false;
           }
-        case EQ_EK: // == v1
+        case LEGION_EQ_EK: // == v1
           {
             // conflicts with <, <=, >, >=, ==, !=
-            if ((eq2 == LT_EK) && (v1 >= v2)) // < v2
+            if ((eq2 == LEGION_LT_EK) && (v1 >= v2)) // < v2
               return true;
-            if ((eq2 == LE_EK) && (v1 > v2)) // <= v2
+            if ((eq2 == LEGION_LE_EK) && (v1 > v2)) // <= v2
               return true;
-            if ((eq2 == GT_EK) && (v1 <= v2)) // > v2
+            if ((eq2 == LEGION_GT_EK) && (v1 <= v2)) // > v2
               return true;
-            if ((eq2 == GT_EK) && (v1 < v2)) // >= v2
+            if ((eq2 == LEGION_GT_EK) && (v1 < v2)) // >= v2
               return true;
-            if ((eq2 == EQ_EK) && (v1 != v2)) // == v2
+            if ((eq2 == LEGION_EQ_EK) && (v1 != v2)) // == v2
               return true;
-            if ((eq2 == NE_EK) && (v1 == v2)) // != v2
+            if ((eq2 == LEGION_NE_EK) && (v1 == v2)) // != v2
               return true;
             return false;
           }
-        case NE_EK: // != v1
+        case LEGION_NE_EK: // != v1
           {
             // conflicts with ==
-            if ((eq2 == EQ_EK) && (v1 == v2)) // == v2
+            if ((eq2 == LEGION_EQ_EK) && (v1 == v2)) // == v2
               return true;
             return false;
           }
@@ -306,6 +306,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool ResourceConstraint::operator==(const ResourceConstraint &other) const
+    //--------------------------------------------------------------------------
+    {
+      return resource_kind == other.resource_kind
+          && equality_kind == other.equality_kind
+          && value == other.value;
+    }
+
+    //--------------------------------------------------------------------------
     void ResourceConstraint::swap(ResourceConstraint &rhs)
     //--------------------------------------------------------------------------
     {
@@ -361,6 +370,18 @@ namespace Legion {
 #endif
       for (int i = 0; i < dims; i++)
         values[i] = vs[i];
+    }
+
+    //--------------------------------------------------------------------------
+    bool LaunchConstraint::operator==(const LaunchConstraint &other) const
+    //--------------------------------------------------------------------------
+    {
+      if (!(launch_kind == other.launch_kind && dims == other.dims))
+        return false;
+      for (int i = 0; i < dims; i++)
+        if (values[i] != other.values[i])
+          return false;
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -520,6 +541,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool ExecutionConstraintSet::operator==(
+                                      const ExecutionConstraintSet &other) const
+    //--------------------------------------------------------------------------
+    {
+      return isa_constraint == other.isa_constraint
+          && processor_constraint == other.processor_constraint
+          && resource_constraints == other.resource_constraints
+          && launch_constraints == other.launch_constraints
+          && colocation_constraints == other.colocation_constraints;
+    }
+
+    //--------------------------------------------------------------------------
     void ExecutionConstraintSet::swap(ExecutionConstraintSet &rhs)
     //--------------------------------------------------------------------------
     {
@@ -584,8 +617,8 @@ namespace Legion {
     {
       if (redop != 0)
       {
-        if ((kind != AFFINE_REDUCTION_SPECIALIZE) &&
-            (kind != COMPACT_REDUCTION_SPECIALIZE))
+        if ((kind != LEGION_AFFINE_REDUCTION_SPECIALIZE) &&
+            (kind != LEGION_COMPACT_REDUCTION_SPECIALIZE))
         {
           fprintf(stderr,"Illegal specialize constraint with reduction op %d."
                          "Only reduction specialized constraints are "
@@ -597,11 +630,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool SpecializedConstraint::operator==(
+                                       const SpecializedConstraint &other) const
+    //--------------------------------------------------------------------------
+    {
+      return kind == other.kind && redop == other.redop
+          && no_access == other.no_access && exact == other.exact;
+    }
+
+    //--------------------------------------------------------------------------
     bool SpecializedConstraint::entails(const SpecializedConstraint &other)const
     //--------------------------------------------------------------------------
     {
       // entails if the other doesn't have any specialization
-      if (other.kind == NO_SPECIALIZE)
+      if (other.kind == LEGION_NO_SPECIALIZE)
         return true;
       if (kind != other.kind)
         return false;
@@ -619,9 +661,9 @@ namespace Legion {
                                        const SpecializedConstraint &other) const
     //--------------------------------------------------------------------------
     {
-      if (kind == NO_SPECIALIZE)
+      if (kind == LEGION_NO_SPECIALIZE)
         return false;
-      if (other.kind == NO_SPECIALIZE)
+      if (other.kind == LEGION_NO_SPECIALIZE)
         return false;
       if (kind != other.kind)
         return true;
@@ -648,8 +690,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       rez.serialize(kind);
-      if ((kind == AFFINE_REDUCTION_SPECIALIZE) || 
-          (kind == COMPACT_REDUCTION_SPECIALIZE))
+      if ((kind == LEGION_AFFINE_REDUCTION_SPECIALIZE) || 
+          (kind == LEGION_COMPACT_REDUCTION_SPECIALIZE))
         rez.serialize(redop);
       rez.serialize<bool>(no_access);
       rez.serialize<bool>(exact);
@@ -660,8 +702,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       derez.deserialize(kind);
-      if ((kind == AFFINE_REDUCTION_SPECIALIZE) || 
-          (kind == COMPACT_REDUCTION_SPECIALIZE))
+      if ((kind == LEGION_AFFINE_REDUCTION_SPECIALIZE) || 
+          (kind == LEGION_COMPACT_REDUCTION_SPECIALIZE))
         derez.deserialize(redop);
       derez.deserialize<bool>(no_access);
       derez.deserialize<bool>(exact);
@@ -671,45 +713,45 @@ namespace Legion {
     bool SpecializedConstraint::is_normal(void) const
     //--------------------------------------------------------------------------
     {
-      return (kind == AFFINE_SPECIALIZE);
+      return (kind == LEGION_AFFINE_SPECIALIZE);
     }
 
     //--------------------------------------------------------------------------
     bool SpecializedConstraint::is_affine(void) const
     //--------------------------------------------------------------------------
     {
-      return ((kind == AFFINE_SPECIALIZE) || 
-              (kind == AFFINE_REDUCTION_SPECIALIZE));
+      return ((kind == LEGION_AFFINE_SPECIALIZE) || 
+              (kind == LEGION_AFFINE_REDUCTION_SPECIALIZE));
     }
 
     //--------------------------------------------------------------------------
     bool SpecializedConstraint::is_compact(void) const
     //--------------------------------------------------------------------------
     {
-      return ((kind == COMPACT_SPECIALIZE) || 
-              (kind == COMPACT_REDUCTION_SPECIALIZE));
+      return ((kind == LEGION_COMPACT_SPECIALIZE) || 
+              (kind == LEGION_COMPACT_REDUCTION_SPECIALIZE));
     }
 
     //--------------------------------------------------------------------------
     bool SpecializedConstraint::is_virtual(void) const
     //--------------------------------------------------------------------------
     {
-      return (kind == VIRTUAL_SPECIALIZE);
+      return (kind == LEGION_VIRTUAL_SPECIALIZE);
     }
 
     //--------------------------------------------------------------------------
     bool SpecializedConstraint::is_reduction(void) const
     //--------------------------------------------------------------------------
     {
-      return ((kind == AFFINE_REDUCTION_SPECIALIZE) || 
-              (kind == COMPACT_REDUCTION_SPECIALIZE));
+      return ((kind == LEGION_AFFINE_REDUCTION_SPECIALIZE) || 
+              (kind == LEGION_COMPACT_REDUCTION_SPECIALIZE));
     }
 
     //--------------------------------------------------------------------------
     bool SpecializedConstraint::is_file(void) const
     //--------------------------------------------------------------------------
     {
-      return (VIRTUAL_SPECIALIZE < kind);
+      return (LEGION_VIRTUAL_SPECIALIZE < kind);
     }
 
     /////////////////////////////////////////////////////////////
@@ -718,7 +760,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MemoryConstraint::MemoryConstraint(void)
-      : has_kind(false)
+      : kind(Memory::GLOBAL_MEM), has_kind(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -805,6 +847,15 @@ namespace Legion {
       : field_set(set.begin(),set.end()), contiguous(cg), inorder(in)
     //--------------------------------------------------------------------------
     {
+    }
+
+    //--------------------------------------------------------------------------
+    bool FieldConstraint::operator==(const FieldConstraint &other) const
+    //--------------------------------------------------------------------------
+    {
+      return field_set == other.field_set
+          && contiguous == other.contiguous
+          && inorder == other.inorder;
     }
 
     //--------------------------------------------------------------------------
@@ -1238,9 +1289,9 @@ namespace Legion {
     {
       if (total_dims == 0)
         return false;
-      if (dim == DIM_F)
+      if (dim == LEGION_DIM_F)
         return false;
-      if (dim < DIM_F)
+      if (dim < LEGION_DIM_F)
       {
         // Normal spatial dimension
         if (dim >= total_dims)
@@ -1249,7 +1300,7 @@ namespace Legion {
       else
       {
         // Split spatial dimension
-        const unsigned actual_dim = (dim - (DIM_F + 1)) / 2;
+        const unsigned actual_dim = (dim - (LEGION_DIM_F + 1)) / 2;
         if (actual_dim >= total_dims)
           return true;
       }
@@ -1539,7 +1590,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PointerConstraint::PointerConstraint(void)
-      : is_valid(false)
+      : is_valid(false), memory(Memory::NO_MEMORY), ptr(0)
     //--------------------------------------------------------------------------
     {
     }
@@ -1697,6 +1748,20 @@ namespace Legion {
       return *this;
     }
 
+    //--------------------------------------------------------------------------
+    bool LayoutConstraintSet::operator==(const LayoutConstraintSet &other) const
+    //--------------------------------------------------------------------------
+    {
+      return specialized_constraint == other.specialized_constraint
+             && field_constraint == other.field_constraint
+             && memory_constraint == other.memory_constraint
+             && pointer_constraint == other.pointer_constraint
+             && ordering_constraint == other.ordering_constraint
+             && splitting_constraints == other.splitting_constraints
+             && dimension_constraints == other.dimension_constraints
+             && alignment_constraints == other.alignment_constraints
+             && offset_constraints == other.offset_constraints;
+    }
     //--------------------------------------------------------------------------
     bool LayoutConstraintSet::entails(const LayoutConstraintSet &other,
                                       unsigned total_dims,

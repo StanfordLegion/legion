@@ -542,7 +542,7 @@ namespace Legion {
     bool is_identity(void) const;
   public:
     int m, n;
-    coord_t matrix[::MAX_POINT_DIM * ::MAX_POINT_DIM];
+    coord_t matrix[LEGION_MAX_DIM * LEGION_MAX_DIM];
   };
 
   /**
