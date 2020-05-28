@@ -11354,6 +11354,11 @@ namespace Legion {
       // See if we have a value
       bool valid;
       bool value = future.impl->get_boolean_value(valid);
+#ifdef LEGION_SPY
+      // Still have to do this call to let Legion Spy know we're done
+      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
+                                      ApEvent::NO_AP_EVENT);
+#endif
       if (!valid)
       {
         // Launch a task to get the value
@@ -11364,11 +11369,6 @@ namespace Legion {
       }
       else
         set_resolved_value(get_generation(), value);
-#ifdef LEGION_SPY
-      // Still have to do this call to let Legion Spy know we're done
-      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
-                                      ApEvent::NO_AP_EVENT);
-#endif
     } 
 
     /////////////////////////////////////////////////////////////
@@ -11482,22 +11482,22 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       complete_mapping();
-      if (pred_op != NULL)
-      {
-        bool prev_value;
-        bool valid = pred_op->register_waiter(this, get_generation(),
-                                              prev_value);
-        // Don't forget to negate 
-        if (valid)
-          set_resolved_value(get_generation(), !prev_value);
-        // Now we can remove the reference we added
-        pred_op->remove_predicate_reference();
-      }
 #ifdef LEGION_SPY
       // Still have to do this call to let Legion Spy know we're done
       LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
                                       ApEvent::NO_AP_EVENT);
 #endif
+      if (pred_op != NULL)
+      {
+        bool prev_value;
+        bool valid = pred_op->register_waiter(this, get_generation(),
+                                              prev_value);
+        // Now we can remove the reference we added
+        pred_op->remove_predicate_reference();
+        // Don't forget to negate 
+        if (valid)
+          set_resolved_value(get_generation(), !prev_value);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -11654,8 +11654,6 @@ namespace Legion {
           need_resolve = false_short || (true_count == previous.size());
         }
       }
-      if (need_resolve)
-        set_resolved_value(local_gen, !false_short);
       // Clean up any references that we have
       for (std::vector<PredicateOp*>::const_iterator it = previous.begin();
             it != previous.end(); it++)
@@ -11665,6 +11663,8 @@ namespace Legion {
       LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
                                       ApEvent::NO_AP_EVENT);
 #endif
+      if (need_resolve)
+        set_resolved_value(local_gen, !false_short);
     }
 
     //--------------------------------------------------------------------------
@@ -11834,8 +11834,6 @@ namespace Legion {
           need_resolve = true_short || (false_count == previous.size());
         }
       }
-      if (need_resolve)
-        set_resolved_value(local_gen, true_short);
       // Clean up any references that we have
       for (std::vector<PredicateOp*>::const_iterator it = previous.begin();
             it != previous.end(); it++)
@@ -11845,6 +11843,8 @@ namespace Legion {
       LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
                                       ApEvent::NO_AP_EVENT);
 #endif
+      if (need_resolve)
+        set_resolved_value(local_gen, true_short);
     }
 
     //--------------------------------------------------------------------------
