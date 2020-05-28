@@ -4342,7 +4342,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(parent != NULL);
       assert(p.field_space == parent->handle.field_space);
-      assert(p.tree_id = parent->handle.tree_id);
+      assert(p.tree_id == parent->handle.tree_id);
 #endif
       RtEvent row_ready, col_ready;
       IndexPartNode *row_src = get_node(p.index_partition, &row_ready);
