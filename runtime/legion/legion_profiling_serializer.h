@@ -67,6 +67,8 @@ namespace Legion {
       = 0;
       virtual void serialize(const LegionProfInstance::PhysicalInstDimOrderDesc&)
       = 0;
+      virtual void serialize(const LegionProfInstance::IndexSpaceSizeDesc&)
+      = 0;
       virtual void serialize(const LegionProfInstance::TaskKind&) = 0;
       virtual void serialize(const LegionProfInstance::TaskVariant&) = 0;
       virtual void serialize(const LegionProfInstance::OperationInstance&) = 0;
@@ -125,6 +127,7 @@ namespace Legion {
       void serialize(const LegionProfInstance::PhysicalInstRegionDesc&);
       void serialize(const LegionProfInstance::PhysicalInstLayoutDesc&);
       void serialize(const LegionProfInstance::PhysicalInstDimOrderDesc&);
+      void serialize(const LegionProfInstance::IndexSpaceSizeDesc&);
       void serialize(const LegionProfInstance::TaskKind&);
       void serialize(const LegionProfInstance::TaskVariant&);
       void serialize(const LegionProfInstance::OperationInstance&);
@@ -198,6 +201,7 @@ namespace Legion {
         PHYSICAL_INST_REGION_ID,
         PHYSICAL_INST_LAYOUT_ID,
         PHYSICAL_INST_LAYOUT_DIM_ID,
+        INDEX_SPACE_SIZE_ID,
 #ifdef LEGION_PROF_SELF_PROFILE
         PROFTASK_INFO_ID
 #endif
@@ -233,6 +237,7 @@ namespace Legion {
       void serialize(const LegionProfInstance::PhysicalInstRegionDesc&);
       void serialize(const LegionProfInstance::PhysicalInstLayoutDesc&);
       void serialize(const LegionProfInstance::PhysicalInstDimOrderDesc&);
+      void serialize(const LegionProfInstance::IndexSpaceSizeDesc&);
       void serialize(const LegionProfInstance::TaskKind&);
       void serialize(const LegionProfInstance::TaskVariant&);
       void serialize(const LegionProfInstance::OperationInstance&);

@@ -1859,7 +1859,7 @@ class Instance(Base, TimeRange, HasInitiationDependencies):
             size_pretty = 'Unknown'
         output_str = ""
         for pos in range(0, len(self.ispace)):
-            output_str = output_str + "Region:" + self.ispace[pos].get_short_text()
+            output_str = output_str + "Region: " + self.ispace[pos].get_short_text()
             output_str = output_str + " x " + str(self.fspace[pos])
             max_len = 40
             key = self.fspace[pos]
@@ -1896,7 +1896,7 @@ class Instance(Base, TimeRange, HasInitiationDependencies):
             column_major = 0
             row_major = 0
             dim_last = len(self.dim_order_desc)-1
-            output_str = output_str + "$Layout Order:"
+            output_str = output_str + "$Layout Order: "
             for pos in range(0, len(self.dim_order_desc)):
                 if pos == 0:
                     if self.dim_order_desc[pos] == dim_f:
@@ -2130,7 +2130,7 @@ class Partition(StatObject):
 class IndexSpace(StatObject):
     __slots__ = [
         'is_type', 'unique_id', 'dim', 'point', 'rect_lo', 'rect_hi',
-        'name', 'parent'
+        'name', 'parent', 'is_sparse', 'dense_size', 'sparse_size'
     ]
     def __init__(self, is_type, unique_id, dim, values, max_dim):
         StatObject.__init__(self)
@@ -2140,6 +2140,10 @@ class IndexSpace(StatObject):
         self.point = []
         self.rect_lo = []
         self.rect_hi = []
+        self.is_sparse = False
+        self.dense_size = 0
+        self.sparse_size = 0
+
         if (self.is_type == 0):
             for index in range(self.dim):
                 self.point.append(int(values[index]))
@@ -2180,6 +2184,11 @@ class IndexSpace(StatObject):
         is_type = 2
         self.set_vals(is_type, unique_id, None, None, 0)
 
+    def set_size(self, dense_size, sparse_size, is_sparse):
+        self.dense_size = dense_size
+        self.sparse_size = sparse_size
+        self.is_sparse = is_sparse
+
     @classmethod
     def forPoint(cls, unique_id, dim, values):
         is_type = 0
@@ -2209,6 +2218,7 @@ class IndexSpace(StatObject):
         return 'Index Space '+ str(self.name)
 
     def get_short_text(self):
+        stext = ""
         if self.name != None:
             stext = self.name
         elif self.parent != None and self.parent.parent != None and self.parent.parent.name != None:
@@ -2218,6 +2228,9 @@ class IndexSpace(StatObject):
         else:
             stext = 'ispace:' + str(self.unique_id)
         if (self.is_type == None):
+            return stext
+        if self.is_sparse == True:
+            stext = stext + "[sparse:("  + str(self.sparse_size) + " of " + str(self.dense_size) + " points)]"
             return stext
         if (self.is_type == 0):
             for index in range(self.dim):
@@ -2462,6 +2475,7 @@ class State(object):
             "PhysicalInstRegionDesc": self.log_physical_inst_region_desc,
             "PhysicalInstLayoutDesc": self.log_physical_inst_layout_desc,
             "PhysicalInstDimOrderDesc": self.log_physical_inst_layout_dim_desc,
+            "IndexSpaceSizeDesc": self.log_index_space_size_desc,
             "MaxDimDesc": self.log_max_dim
             #"UserInfo": self.log_user_info
         }
@@ -2517,6 +2531,11 @@ class State(object):
             inst.align_desc[fspace] = []
         inst.tree_id = tree_id
 
+    def log_index_space_size_desc(self, unique_id, dense_size, sparse_size, is_sparse):
+        is_sparse = bool(is_sparse)
+        index_space = self.find_index_space(unique_id)
+        index_space.set_size(dense_size, sparse_size, is_sparse)
+
     def log_physical_inst_layout_dim_desc(self, op_id, inst_id, dim, dim_kind):
         op = self.find_op(op_id)
         inst = self.create_instance(inst_id, op)
@@ -2533,7 +2552,7 @@ class State(object):
             inst.fields[fspace] = []
             inst.align_desc[fspace] = []
         inst.fields[fspace].append(field)
-        align_elem = Align(field_id, eqk, align_desc, has_align)
+        align_elem = Align(field_id, eqk, align_desc, bool(has_align))
         inst.align_desc[fspace].append(align_elem)
 
     def log_task_info(self, op_id, task_id, variant_id, proc_id,
