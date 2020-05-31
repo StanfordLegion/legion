@@ -17087,7 +17087,7 @@ namespace Legion {
     void Runtime::handle_index_space_child_response(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      IndexSpaceNode::handle_node_child_response(derez);
+      IndexSpaceNode::handle_node_child_response(forest, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -17194,7 +17194,7 @@ namespace Legion {
     void Runtime::handle_index_partition_child_response(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      IndexPartNode::handle_node_child_response(derez);
+      IndexPartNode::handle_node_child_response(forest, derez);
     }
 
     //--------------------------------------------------------------------------
