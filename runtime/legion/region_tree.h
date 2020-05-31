@@ -1876,7 +1876,8 @@ namespace Legion {
       static void handle_node_child_request(RegionTreeForest *context,
                             Deserializer &derez, AddressSpaceID source);
       static void defer_node_child_request(const void *args);
-      static void handle_node_child_response(Deserializer &derez);
+      static void handle_node_child_response(RegionTreeForest *forest,
+                                             Deserializer &derez);
       static void handle_colors_request(RegionTreeForest *context,
                             Deserializer &derez, AddressSpaceID source);
       static void handle_colors_response(Deserializer &derez);
@@ -2876,7 +2877,8 @@ namespace Legion {
       static void handle_node_child_request(
           RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source);
       static void defer_node_child_request(const void *args);
-      static void handle_node_child_response(Deserializer &derez);
+      static void handle_node_child_response(RegionTreeForest *forest,
+                                             Deserializer &derez);
       static void handle_node_disjoint_update(RegionTreeForest *forest,
                                               Deserializer &derez);
       static void handle_notification(RegionTreeForest *context, 
