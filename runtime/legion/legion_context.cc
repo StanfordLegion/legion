@@ -11524,6 +11524,75 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition ReplicateContext::create_partition_by_intersection(
+                                                IndexSpace parent,
+                                                IndexPartition partition,
+                                                PartitionKind kind, Color color,
+                                                bool dominates)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      PartitionKind verify_kind = LEGION_COMPUTE_KIND;
+      if (runtime->verify_partitions)
+        SWAP_PART_KINDS(verify_kind, kind)
+#ifdef DEBUG_LEGION
+      if (parent.get_type_tag() != partition.get_type_tag())
+        REPORT_LEGION_ERROR(ERROR_INDEXPARTITION_NOT_SAME_INDEX_TREE,
+            "IndexPartition %d does not have the same type as the "
+            "parent index space %x in task %s (UID %lld)", partition.id,
+            parent.id, get_task_name(), get_unique_id())
+#endif
+      LegionColor partition_color = INVALID_COLOR;
+      bool color_generated = false;
+      if (color != AUTO_GENERATE_ID)
+        partition_color = color;
+      else
+        color_generated = true;
+      IndexPartNode *part_node = runtime->forest->get_node(partition);
+      // See if we can determine disjointness if we weren't told
+      if ((kind == LEGION_COMPUTE_KIND) || 
+          (kind == LEGION_COMPUTE_COMPLETE_KIND) ||
+          (kind == LEGION_COMPUTE_INCOMPLETE_KIND))
+      {
+        if (part_node->is_disjoint(true/*from app*/))
+        {
+          if (kind == LEGION_COMPUTE_KIND)
+            kind = LEGION_DISJOINT_KIND;
+          else if (kind == LEGION_COMPUTE_COMPLETE_KIND)
+            kind = LEGION_DISJOINT_COMPLETE_KIND;
+          else
+            kind = LEGION_DISJOINT_INCOMPLETE_KIND;
+        }
+      }
+      ValueBroadcast<bool> *disjoint_result = NULL;
+      if ((kind == LEGION_COMPUTE_KIND) || 
+          (kind == LEGION_COMPUTE_COMPLETE_KIND) ||
+          (kind == LEGION_COMPUTE_INCOMPLETE_KIND))
+        disjoint_result = new ValueBroadcast<bool>(this, 
+            pending_index_partitions.empty() ? index_partition_allocator_shard :
+            pending_index_partitions.front().second, COLLECTIVE_LOC_62);
+      IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
+      if (create_shard_partition(pid, parent, part_node->color_space->handle,
+            kind, partition_color, color_generated, disjoint_result))
+        log_index.debug("Creating intersection partition %d with parent "
+                        "index space %x in task %s (ID %lld)", pid.id, 
+                        parent.id, get_task_name(), get_unique_id());
+      ReplPendingPartitionOp *part_op = 
+        runtime->get_available_repl_pending_partition_op();
+      const ApEvent term_event = part_op->get_completion_event();
+      part_op->initialize_intersection_partition(this,pid,partition,dominates);
+      // Now we can add the operation to the queue
+      add_to_dependence_queue(part_op);
+      // Update the pending partition barrier
+      Runtime::phase_barrier_arrive(pending_partition_barrier, 
+                                    1/*count*/, term_event);
+      advance_replicate_barrier(pending_partition_barrier, total_shards); 
+      if (runtime->verify_partitions)
+        verify_partition(pid, verify_kind, __func__);
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition ReplicateContext::create_partition_by_difference(
                                                   IndexSpace parent,
                                                   IndexPartition handle1,

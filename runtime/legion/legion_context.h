@@ -1680,6 +1680,12 @@ namespace Legion {
                                             IndexSpace color_space,
                                             PartitionKind kind,
                                             Color color);
+      virtual IndexPartition create_partition_by_intersection(
+                                            IndexSpace parent,
+                                            IndexPartition partition,
+                                            PartitionKind kind,
+                                            Color color,
+                                            bool dominates);
       virtual IndexPartition create_partition_by_difference(
                                             IndexSpace parent,
                                             IndexPartition handle1,
