@@ -342,6 +342,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LegionProfInstance::register_index_space_size(
+                                                       UniqueID id,
+                                                       unsigned long long
+                                                       dense_size,
+                                                       unsigned long long
+                                                       sparse_size,
+                                                       bool is_sparse)
+    //--------------------------------------------------------------------------
+    {
+      index_space_size_desc.push_back(IndexSpaceSizeDesc());
+      IndexSpaceSizeDesc &size_info = index_space_size_desc.back();
+      size_info.id = id;
+      size_info.dense_size = dense_size;
+      size_info.sparse_size = sparse_size;
+      size_info.is_sparse = is_sparse;
+      owner->update_footprint(sizeof(IndexSpaceSizeDesc), this);
+    }
+
+    //--------------------------------------------------------------------------
     void LegionProfInstance::process_task(
             TaskID task_id, VariantID variant_id, UniqueID op_id,
             const Realm::ProfilingMeasurements::OperationTimeline &timeline,
@@ -767,6 +786,13 @@ namespace Legion {
           serializer->serialize(*it);
         }
 
+      for (std::deque<IndexSpaceSizeDesc>::const_iterator it =
+             index_space_size_desc.begin();
+           it != index_space_size_desc.end(); it++)
+        {
+          serializer->serialize(*it);
+        }
+
       for (std::deque<MetaInfo>::const_iterator it = meta_infos.begin();
             it != meta_infos.end(); it++)
       {
@@ -845,6 +871,7 @@ namespace Legion {
       phy_inst_layout_rdesc.clear();
       phy_inst_rdesc.clear();
       phy_inst_dim_order_rdesc.clear();
+      index_space_size_desc.clear();
       meta_infos.clear();
       copy_infos.clear();
       inst_create_infos.clear();
@@ -1053,6 +1080,17 @@ namespace Legion {
         serializer->serialize(front);
         diff += sizeof(front);
         phy_inst_dim_order_rdesc.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if (t_curr >= t_stop)
+          return diff;
+      }
+
+      while (!index_space_size_desc.empty())
+      {
+        IndexSpaceSizeDesc &front = index_space_size_desc.front();
+        serializer->serialize(front);
+        diff += sizeof(front);
+        index_space_size_desc.pop_front();
         const long long t_curr = Realm::Clock::current_time_in_microseconds();
         if (t_curr >= t_stop)
           return diff;
@@ -1429,6 +1467,24 @@ namespace Legion {
         create_thread_local_profiling_instance();
       thread_local_profiling_instance->register_index_partition(parent_id, 
                                               unique_id, disjoint, point);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfiler::record_index_space_size(UniqueID unique_id,
+                                                 unsigned long long
+                                                 dense_size,
+                                                 unsigned long long
+                                                 sparse_size,
+                                                 bool is_sparse)
+    //--------------------------------------------------------------------------
+    {
+      if (thread_local_profiling_instance == NULL)
+        create_thread_local_profiling_instance();
+
+      thread_local_profiling_instance->register_index_space_size(unique_id,
+                                                                 dense_size,
+                                                                 sparse_size,
+                                                                 is_sparse);
     }
 
     //--------------------------------------------------------------------------

@@ -68,8 +68,7 @@ def input_args(filter_runtime_options=False):
     if filter_runtime_options:
         i = 1 # Skip program name
 
-        prefixes = ['-lg:', '-hl:', '-realm:', '-ll:', '-cuda:', '-numa:',
-                    '-dm:', '-bishop:']
+        prefixes = ['-realm:', '-ll:', '-cuda:', '-numa:', '-dm:', '-bishop:']
         while i < len(args):
             match = False
             for prefix in prefixes:
