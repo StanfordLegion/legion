@@ -2016,6 +2016,17 @@ namespace Legion {
     {
       if (!tight_space.empty())
       {
+        bool is_dense = tight_space.dense();
+        size_t dense_volume, sparse_volume;
+        if (is_dense)
+          dense_volume = sparse_volume = tight_space.volume();
+        else
+          {
+            dense_volume = tight_space.bounds.volume();
+            sparse_volume = tight_space.volume();
+          }
+        context->runtime->profiler->record_index_space_size(
+                          handle.get_id(), dense_volume, sparse_volume, !is_dense);
         // Iterate over the rectangles and print them out
         for (Realm::IndexSpaceIterator<DIM,T> itr(tight_space);
               itr.valid; itr.step())

@@ -112,6 +112,7 @@ callbacks = {
     "PhysicalInstRegionDesc": noop,
     "PhysicalInstLayoutDesc": noop,
     "PhysicalInstDimOrderDesc": noop,
+    "IndexSpaceSizeDesc": noop,
     "MaxDimDesc": noop,
 }
 
