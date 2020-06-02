@@ -13,6 +13,8 @@ Version 20.06.0 (June ??, 2020)
         schedules in OpenMP tasks
      - Added support for `cudaStreamLegacy` and `cudaStreamPerThread` in
         CUDA tasks
+     - Realm logs now include a timestamp (relative to runtime init)
+        by default.  This behavior can be disabled with `-logtime 0`
 
 Version 20.03.0 (March 31, 2020)
   * Regent
