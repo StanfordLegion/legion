@@ -10305,7 +10305,7 @@ class GraphPrinter(object):
               "".join([self.wrap_with_trtd(line) for line in lines]) + '</table>'
 
 
-prefix    = "\[(?P<node>[0-9]+) - (?P<thread>[0-9a-f]+)\] \{\w+\}\{legion_spy\}: "
+prefix    = "\[(?P<node>[0-9]+) - (?P<thread>[0-9a-f]+)\](?:\s+[0-9]+\.[0-9]+)? \{\w+\}\{legion_spy\}: "
 prefix_pat               = re.compile(prefix)
 # Configuration patterns
 config_pat               = re.compile(

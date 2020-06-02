@@ -43,6 +43,7 @@ namespace Realm {
   static const LoggerMessageID RESERVED_LOGGER_MESSAGE_ID = 0;
   class LoggerConfig;
   class LoggerOutputStream;
+  struct DelayedMessage;
   
   class Logger {
   public:
@@ -112,6 +113,7 @@ namespace Realm {
     
     void add_stream(LoggerOutputStream *s, LoggingLevel min_level,
                     bool delete_when_done, bool flush_each_write);
+    void configure_done(bool _include_timestamp);
     
     struct LogStream {
       LoggerOutputStream *s;
@@ -123,6 +125,10 @@ namespace Realm {
     std::string name;
     std::vector<LogStream> streams;
     LoggingLevel log_level;  // the min level of any stream
+    bool configured, include_timestamp;
+    // remember messages that are emitted before we're configured
+    DelayedMessage *delayed_message_head;
+    DelayedMessage **delayed_message_tail;
   };
   
   class LoggerMessage {

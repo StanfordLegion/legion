@@ -2626,9 +2626,9 @@ void gasnet_parse_command_line(std::vector<std::string>& cmdline)
   assert(ok);
 }
 
-void init_endpoints(int gasnet_mem_size,
-		    int registered_mem_size,
-		    int registered_ib_mem_size,
+void init_endpoints(size_t gasnet_mem_size,
+		    size_t registered_mem_size,
+		    size_t registered_ib_mem_size,
 		    Realm::CoreReservationSet& crs)
 {
   size_t total_lmb_size = (gasnet_nodes() * 
@@ -2643,13 +2643,13 @@ void init_endpoints(int gasnet_mem_size,
 			total_lmb_size);
 
   if(gasnet_mynode() == 0) {
-    log_amsg.info("Pinned Memory Usage: GASNET=%d MB, RMEM=%d MB, IBRMEM=%d MB, LMB=%zd MB, SDP=%zd MB, total=%zd MB\n",
-		  gasnet_mem_size >> 20,
-		  registered_mem_size >> 20,
-		  registered_ib_mem_size >> 20,
-		  total_lmb_size >> 20,
-		  srcdatapool_size >> 20,
-		  attach_size >> 20);
+    log_amsg.info() << "Pinned Memory Usage: GASNET="
+                    << (gasnet_mem_size << 20) << " MB, RMEM="
+                    << (registered_mem_size >> 20) << " MB, IBRMEM="
+                    << (registered_ib_mem_size >> 20) << " MB, LMB="
+                    << (total_lmb_size >> 20) << " MB, SDP="
+                    << (srcdatapool_size >> 20) << " MB, total="
+                    << (attach_size >> 20) << " MB";
 #ifdef DEBUG_REALM_STARTUP
     Realm::TimeStamp ts("entering gasnet_attach", false);
     fflush(stdout);

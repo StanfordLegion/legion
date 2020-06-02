@@ -81,7 +81,7 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
     """
 
     #               node           thread
-    prefix = r'\[(?:[0-9]+) - (?:[0-9a-f]+)\] \{\w+\}\{legion_prof\}: '
+    prefix = r'\[(?:[0-9]+) - (?:[0-9a-f]+)\](?:\s+[0-9]+\.[0-9]+)? \{\w+\}\{legion_prof\}: '
 
     patterns = {
         "MapperCallDesc": re.compile(prefix + r'Prof Mapper Call Desc (?P<kind>[0-9]+) (?P<name>[a-zA-Z0-9_ ]+)'),

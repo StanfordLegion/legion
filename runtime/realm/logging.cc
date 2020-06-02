@@ -20,6 +20,7 @@
 #include "realm/network.h"
 
 #include "realm/cmdline.h"
+#include "realm/timers.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -157,6 +158,7 @@ namespace Realm {
 
     bool cmdline_read;
     Logger::LoggingLevel default_level, stderr_level;
+    bool include_timestamp;
     std::map<std::string, Logger::LoggingLevel> category_levels;
     std::string cats_enabled;
     std::set<Logger *> pending_configs;
@@ -167,6 +169,7 @@ namespace Realm {
     : cmdline_read(false)
     , default_level(Logger::LEVEL_PRINT)
     , stderr_level(Logger::LEVEL_ERROR)
+    , include_timestamp(true)
     , stream(0)
     , stderr_stream(0)
   {}
@@ -294,6 +297,7 @@ namespace Realm {
       .add_option_string("-logfile", logname)
       .add_option_method("-level", this, &LoggerConfig::parse_level_argument)
       .add_option_int("-errlevel", stderr_level)
+      .add_option_int("-logtime", include_timestamp)
       .parse_command_line(cmdline);
 
     if(!ok) {
@@ -427,14 +431,33 @@ namespace Realm {
 			 ((level > stderr_level) ? level : stderr_level),
 			 false, /* don't delete */
 			 true); /* flush each write */
+
+    logger->configure_done(include_timestamp);
   }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // struct DelayedMessage
+
+  struct DelayedMessage {
+    DelayedMessage *next_msg;
+    Logger::LoggingLevel level;
+    size_t msglen;
+    // string data stored immediately after the fixed-size structure
+    char *msgdata() { return reinterpret_cast<char *>(this + 1); }
+  };
+
 
   ////////////////////////////////////////////////////////////////////////
   //
   // class Logger
 
   Logger::Logger(const std::string& _name)
-    : name(_name), log_level(LEVEL_NONE)
+    : name(_name), log_level(LEVEL_SPEW)
+    , configured(false)
+    , delayed_message_head(0)
+    , delayed_message_tail(&delayed_message_head)
   {
     LoggerConfig::get_config()->configure(this);
   }
@@ -449,6 +472,13 @@ namespace Realm {
 	delete it->s;
 
     streams.clear();
+
+    // if for some reason we never got configured, delete any delayed messages
+    while(delayed_message_head != 0) {
+      DelayedMessage *next = delayed_message_head->next_msg;
+      delete delayed_message_head;
+      delayed_message_head = next;
+    }
   }
 
   /*static*/ void Logger::configure_from_cmdline(std::vector<std::string>& cmdline)
@@ -463,6 +493,21 @@ namespace Realm {
 
   void Logger::log_msg(LoggingLevel level, const char *msgdata, size_t msglen)
   {
+    // if we're not configured yet, delay the message
+    if(!configured) {
+      size_t bytes = sizeof(DelayedMessage) + msglen;
+      void *ptr = malloc(bytes);
+      assert(ptr != 0);
+      DelayedMessage *d = new(ptr) DelayedMessage;
+      d->next_msg = 0;
+      d->level = level;
+      d->msglen = msglen;
+      memcpy(d->msgdata(), msgdata, msglen);
+      *delayed_message_tail = d;
+      delayed_message_tail = &(d->next_msg);
+      return;
+    }
+
     // no logging of empty messages
     if(msglen == 0)
       return;
@@ -470,9 +515,22 @@ namespace Realm {
     // build message string, including prefix
     static const int MAXLEN = 4096;
     char buffer[MAXLEN];
-    int pfxlen = snprintf(buffer, MAXLEN - 2, "[%d - %lx] {%d}{%s}: ",
-			  Network::my_node_id, (unsigned long)pthread_self(),
-			  level, name.c_str());
+    int pfxlen;
+    if(include_timestamp) {
+      // special case - log messages before we've agreed on common time base
+      //  across all nodes show as 0.0
+      double now;
+      if(Clock::get_zero_time() != 0)
+	now = Clock::current_time();
+      else
+	now = 0;
+      pfxlen = snprintf(buffer, MAXLEN - 2, "[%d - %lx] %11.6f {%d}{%s}: ",
+			Network::my_node_id, (unsigned long)pthread_self(),
+			now, level, name.c_str());
+    } else
+      pfxlen = snprintf(buffer, MAXLEN - 2, "[%d - %lx] {%d}{%s}: ",
+			Network::my_node_id, (unsigned long)pthread_self(),
+			level, name.c_str());
 
     // would simply concatenating this message overflow the buffer?
     if((pfxlen + msglen) >= MAXLEN)
@@ -534,10 +592,31 @@ namespace Realm {
     ls.delete_when_done = delete_when_done;
     ls.flush_each_write = flush_each_write;
     streams.push_back(ls);
+  }
 
-    // update our logging level if needed
-    if(log_level > min_level)
-      log_level = min_level;
+  void Logger::configure_done(bool _include_timestamp)
+  {
+    configured = true;
+    include_timestamp = _include_timestamp;
+
+    // compute the minimum logging level we're interested in
+    log_level = LEVEL_NONE;
+    for(std::vector<LogStream>::iterator it = streams.begin();
+	it != streams.end();
+	it++)
+      if(it->min_level < log_level)
+	log_level = it->min_level;
+
+    // and now handle any delayed messages
+    while(delayed_message_head != 0) {
+      DelayedMessage *next = delayed_message_head->next_msg;
+      if(delayed_message_head->level >= log_level)
+	log_msg(delayed_message_head->level,
+		delayed_message_head->msgdata(),
+		delayed_message_head->msglen);
+      delete delayed_message_head;
+      delayed_message_head = next;
+    }
   }
 
   ////////////////////////////////////////////////////////////////////////
