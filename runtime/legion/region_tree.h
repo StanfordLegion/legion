@@ -1971,17 +1971,17 @@ namespace Legion {
                                              IndexPartNode *right,
                                              ShardID shard,
                                              size_t total_shards) = 0;
-      virtual ApEvent create_by_intersection(IndexPartNode *partition,
+      virtual ApEvent create_by_intersection(Operation *op,
+                                             IndexPartNode *partition,
                                              // Left is implicit "this"
                                              IndexPartNode *right,
-                                             Operation *op,
                                              const bool dominates = false) = 0;
       virtual ApEvent create_by_intersection(Operation *op,
                                              IndexPartNode *partition,
                                              // Left is implicit "this"
                                              IndexPartNode *right,
-                                             ShardID shard = 0,
-                                             size_t total_shards = 1,
+                                             ShardID shard,
+                                             size_t total_shards,
                                              const bool dominates = false) = 0;
       virtual ApEvent create_by_difference(Operation *op,
                                            IndexPartNode *partition,
@@ -2190,17 +2190,17 @@ namespace Legion {
                                              IndexPartNode *right,
                                              ShardID shard,
                                              size_t total_shards);
-      virtual ApEvent create_by_intersection(IndexPartNode *partition,
+      virtual ApEvent create_by_intersection(Operation *op,
+                                             IndexPartNode *partition,
                                              // Left is implicit "this"
                                              IndexPartNode *right,
-                                             Operation *op,
                                              const bool dominates = false);
       virtual ApEvent create_by_intersection(Operation *op,
                                              IndexPartNode *partition,
                                              // Left is implicit "this"
                                              IndexPartNode *right,
-                                             ShardID shard = 0,
-                                             size_t total_shards = 1,
+                                             ShardID shard,
+                                             size_t total_shards,
                                              const bool dominates = false);
       virtual ApEvent create_by_difference(Operation *op,
                                            IndexPartNode *partition,

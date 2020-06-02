@@ -865,8 +865,8 @@ namespace Legion {
         {
           IndexSpaceNode *child_node = base_node->get_child(color);
           IndexPartNode *part_node = child_node->get_child(part_color);
-          ApEvent ready = child_node->create_by_intersection(op, part_node, 
-                                                             source_node); 
+          ApEvent ready = 
+            child_node->create_by_intersection(op, part_node, source_node);
           ready_events.insert(ready);
         }
       }
@@ -886,8 +886,8 @@ namespace Legion {
           const LegionColor color = itr->yield_color();
           IndexSpaceNode *child_node = base_node->get_child(color);
           IndexPartNode *part_node = child_node->get_child(part_color);
-          ApEvent ready = child_node->create_by_intersection(op, part_node, 
-                                                             source_node); 
+          ApEvent ready =
+            child_node->create_by_intersection(op, part_node, source_node);
           ready_events.insert(ready);
           // Skip ahead for the next color if necessary
           for (unsigned idx = 0; idx < (total_shards-1); idx++)
@@ -9954,7 +9954,7 @@ namespace Legion {
         return parent->create_by_intersection(op, this, original,
                                               shard, total_shards, dominates);
       else
-        return parent->create_by_intersection(this, original, op, dominates);
+        return parent->create_by_intersection(op, this, original, dominates);
     }
 
     //--------------------------------------------------------------------------

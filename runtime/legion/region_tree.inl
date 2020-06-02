@@ -3214,11 +3214,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    ApEvent IndexSpaceNodeT<DIM,T>::create_by_intersection(
+    ApEvent IndexSpaceNodeT<DIM,T>::create_by_intersection(Operation *op,
                                                       IndexPartNode *partition,
                                                       // Left is implicit "this"
                                                       IndexPartNode *right,
-                                                      Operation *op,
                                                       const bool dominates)
     //--------------------------------------------------------------------------
     {
