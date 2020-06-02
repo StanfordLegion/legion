@@ -1971,6 +1971,11 @@ namespace Legion {
                                              IndexPartNode *right,
                                              ShardID shard,
                                              size_t total_shards) = 0;
+      virtual ApEvent create_by_intersection(IndexPartNode *partition,
+                                             // Left is implicit "this"
+                                             IndexPartNode *right,
+                                             Operation *op,
+                                             const bool dominates = false) = 0;
       virtual ApEvent create_by_intersection(Operation *op,
                                              IndexPartNode *partition,
                                              // Left is implicit "this"
@@ -2185,6 +2190,11 @@ namespace Legion {
                                              IndexPartNode *right,
                                              ShardID shard,
                                              size_t total_shards);
+      virtual ApEvent create_by_intersection(IndexPartNode *partition,
+                                             // Left is implicit "this"
+                                             IndexPartNode *right,
+                                             Operation *op,
+                                             const bool dominates = false);
       virtual ApEvent create_by_intersection(Operation *op,
                                              IndexPartNode *partition,
                                              // Left is implicit "this"

@@ -9954,8 +9954,7 @@ namespace Legion {
         return parent->create_by_intersection(op, this, original,
                                               shard, total_shards, dominates);
       else
-        return parent->create_by_intersection(op, this, original, 0/*shard*/, 
-                                              1/*total shards*/, dominates);
+        return parent->create_by_intersection(this, original, op, dominates);
     }
 
     //--------------------------------------------------------------------------
