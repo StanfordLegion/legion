@@ -459,7 +459,7 @@ namespace Realm {
     {
       size_t c = sp.size();
       return ((s << c) &&
-	      s.enforce_alignment(__alignof__(T)) &&
+	      s.enforce_alignment(REALM_ALIGNOF(T)) &&
 	      s.append_bytes(sp.data(), sizeof(T) * c));
     }
 
@@ -470,7 +470,7 @@ namespace Realm {
       size_t c;
       if(!(s >> c)) return false;
       // TODO: sanity-check size?
-      if(!s.enforce_alignment(__alignof__(T))) return false;
+      if(!s.enforce_alignment(REALM_ALIGNOF(T))) return false;
       T *data = static_cast<T *>(s.peek_bytes(sizeof(T) * c));
       if(!data || !s.extract_bytes(0, sizeof(T) * c)) return false;
       sp = span<T, Extent>(data, c);

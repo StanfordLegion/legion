@@ -533,7 +533,10 @@ namespace Realm {
     //  but that requires the specializations that are defined in the
     //  include of indexspace.inl below...
     static const size_t STORAGE_BYTES = (2*REALM_MAX_DIM + 2) * sizeof(size_t);
-    char raw_storage[STORAGE_BYTES] __attribute((aligned(__alignof__(size_t))));
+    typedef char Storage_unaligned[STORAGE_BYTES];
+    REALM_ALIGNED_TYPE_SAMEAS(Storage_aligned, Storage_unaligned, size_t);
+    Storage_aligned raw_storage;
+
   };
 
   // instances are based around the concept of a "linearization" of some index space, which is

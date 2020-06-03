@@ -44,7 +44,7 @@ namespace Realm {
   class LoggerConfig;
   class LoggerOutputStream;
   struct DelayedMessage;
-  
+
   class Logger {
   public:
     Logger(const std::string& _name);
@@ -62,6 +62,8 @@ namespace Realm {
     };
     
     static void configure_from_cmdline(std::vector<std::string>& cmdline);
+    static void set_default_output(LoggerOutputStream *s);
+    static void set_logger_output(const std::string& name, LoggerOutputStream *s);
     
     const std::string& get_name(void) const;
     LoggingLevel get_level(void) const;
@@ -106,14 +108,13 @@ namespace Realm {
   protected:
     friend class LoggerMessage;
     
-    void log_msg(LoggingLevel level, const std::string& msg);
     void log_msg(LoggingLevel level, const char *msgdata, size_t msglen);
     
     friend class LoggerConfig;
     
     void add_stream(LoggerOutputStream *s, LoggingLevel min_level,
                     bool delete_when_done, bool flush_each_write);
-    void configure_done(bool _include_timestamp);
+    void configure_done(void);
     
     struct LogStream {
       LoggerOutputStream *s;
@@ -125,7 +126,7 @@ namespace Realm {
     std::string name;
     std::vector<LogStream> streams;
     LoggingLevel log_level;  // the min level of any stream
-    bool configured, include_timestamp;
+    bool configured;
     // remember messages that are emitted before we're configured
     DelayedMessage *delayed_message_head;
     DelayedMessage **delayed_message_tail;
@@ -167,6 +168,15 @@ namespace Realm {
     DeferredConstructor<std::ostream> stream;
   };
   
+  class LoggerOutputStream {
+  public:
+    virtual ~LoggerOutputStream() {}
+
+    virtual void log_msg(Logger::LoggingLevel level, const char *name,
+                         const char *msgdata, size_t msglen) = 0;
+    virtual void flush() = 0;
+  };
+
 }; // namespace Realm
 
 #include "realm/logging.inl"

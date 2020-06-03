@@ -65,6 +65,10 @@ inline void makecontext_wrap(ucontext_t *u, void (*fn)(), int args, ...) { makec
 #include <hwloc.h>
 #endif
 
+#ifdef REALM_USE_LIBDL
+#include <dlfcn.h>
+#endif
+
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -670,6 +674,8 @@ namespace Realm {
     virtual void join(void);
     virtual void detach(void);
 
+    static void detect_static_tls_size(void);
+
   protected:
     static void *pthread_entry(void *data);
 
@@ -681,6 +687,7 @@ namespace Realm {
     bool ok_to_delete;
     void *altstack_base;
     size_t altstack_size;
+    static size_t static_tls_size;
   };
 
   KernelThread::KernelThread(void *_target, void (*_entry_wrapper)(void *),
@@ -772,16 +779,9 @@ namespace Realm {
 						 &(rsrv.allocation->allowed_cpus)) );
 #endif
 
-    // pthreads also has min stack size, except that you have to guess what it
-    //  is when using glibc - the PTHREAD_STACK_MIN value is the min size of
-    //  the stack _AFTER_ any space needed for thread-local storage has been 
-    //  subtracted (see https://sourceware.org/bugzilla/show_bug.cgi?id=11787)
-    // glibc won't tell you how much to add, but anecdotally, 128KB seems to
-    //  be enough, so we'll do the greater of 256KB and twice
-    //  PTHREAD_STACK_MIN and hope we never have to debug this again...
-    const ptrdiff_t MIN_STACK_SIZE = ((PTHREAD_STACK_MIN > (128 << 10)) ?
-				        (PTHREAD_STACK_MIN * 2) :
-				        (256 << 10));
+    // now that we try to detect the static TLS size, we can use the
+    //  advertised min stack size from the threading library as is
+    const ptrdiff_t MIN_STACK_SIZE = PTHREAD_STACK_MIN;
 
     ptrdiff_t stack_size = 0;  // 0 == "pthread default"
 
@@ -798,8 +798,12 @@ namespace Realm {
 					 MIN_STACK_SIZE);
       }
     }
-    if(stack_size > 0)
-      CHECK_PTHREAD( pthread_attr_setstacksize(&attr, stack_size) );
+    if(stack_size > 0) {
+      // add in our estimate of the static TLS size
+      CHECK_PTHREAD( pthread_attr_setstacksize(&attr,
+					       (stack_size +
+						KernelThread::static_tls_size)) );
+    }
 
     // TODO: actually use heap size
 
@@ -850,6 +854,119 @@ namespace Realm {
     } else {
       pthread_kill(this->thread, handler_signal);
     }
+  }
+
+  /*static*/ size_t KernelThread::static_tls_size = 0;
+
+  // used in empirical testing of TLS size below
+  static void *empty_thread_body(void *data) { return data; }
+
+  /*static*/ void KernelThread::detect_static_tls_size(void)
+  {
+    // case 1: the environment variable REALM_STATIC_TLS_SIZE can be set to
+    //  skip all auto-detection attempts
+    do {
+      const char *s = getenv("REALM_STATIC_TLS_SIZE");
+      if(!s) break;
+
+      const char *pos = 0;
+      size_t v = strtoull(s, const_cast<char **>(&pos), 10);
+      if((errno != 0) || (v == 0)) {
+	errno = 0;
+	break;
+      }
+
+      switch(*pos) {
+      case 'k': case 'K': { v <<= 10; break; }
+      case 'm': case 'M': { v <<= 20; break; }
+      default: break;
+      }
+      static_tls_size = v;
+      log_thread.debug() << "static tls size = " << static_tls_size << " (from environment)";
+      return;
+    } while(0);
+
+#if defined(REALM_ON_LINUX) && defined(REALM_USE_LIBDL)
+    // case 2: see if we can find glibc's __static_tls_size variable
+    //   (as of glibc 2.2.5, this is not exported, but if/when it is, it's
+    //   simpler than the __pthread_get_minstack version below)
+    do {
+      void *sym = dlsym(RTLD_DEFAULT, "__static_tls_size");
+      if(!sym) break;
+
+      static_tls_size = *reinterpret_cast<const size_t *>(sym);
+      log_thread.debug() << "static tls size = " << static_tls_size << " (from glibc __static_tls_size)";
+      return;
+    } while(0);
+
+    // case 3: try __pthread_get_minstack (subtracting out PTHREAD_STACK_MIN)
+    do {
+      void *sym = dlsym(RTLD_DEFAULT, "__pthread_get_minstack");
+      if(!sym) break;
+
+      pthread_attr_t attr;
+      CHECK_PTHREAD( pthread_attr_init(&attr) );
+      size_t minstack = (reinterpret_cast<size_t (*)(const pthread_attr_t *)>(sym))(&attr);
+      CHECK_PTHREAD( pthread_attr_destroy(&attr) );
+
+      // sanity-check the resulting value
+      if(minstack < PTHREAD_STACK_MIN) break;
+
+      static_tls_size = minstack - PTHREAD_STACK_MIN;
+      log_thread.debug() << "static tls size = " << static_tls_size << " (from glibc __pthread_get_minstack)";
+      return;
+    } while(0);
+#endif
+
+    // case 4: empirically determine it by trying to create threads with small
+    //  stacks (test up to 16MB)
+    {
+      pthread_attr_t attr;
+
+      CHECK_PTHREAD( pthread_attr_init(&attr) );
+
+      for(size_t v = 1024; v <= 16*1024*1024; v <<= 1) {
+	CHECK_PTHREAD( pthread_attr_setstacksize(&attr, PTHREAD_STACK_MIN + v) );
+	pthread_t thread;
+	int ret = pthread_create(&thread, &attr, empty_thread_body, 0);
+	switch(ret) {
+	case 0:
+	  {
+	    // success - this estimate of the TLS size is sufficient
+	    void *result = 0;
+	    CHECK_PTHREAD( pthread_join(thread, &result) );
+	    CHECK_PTHREAD( pthread_attr_destroy(&attr) );
+
+	    static_tls_size = v;
+	    log_thread.debug() << "static tls size = " << static_tls_size << " (from empirical testing)";
+	    return;
+	  }
+
+	case EINVAL:
+	  {
+	    // invalid settings in attr (i.e. our stack size)
+	    //  - clear errno and try again
+	    errno = 0;
+	    break;
+	  }
+
+	default:
+	  {
+	    // unexpected error
+	    std::cerr << "PTHREAD: pthread_create(...) = " << ret << " (" << strerror(ret) << ")" << std::endl;
+	    ::abort();
+	  }
+	}
+
+      }
+
+      // none of the sizes we tried worked...
+      CHECK_PTHREAD( pthread_attr_destroy(&attr) );
+    }
+
+    // if all else fails, guess it's about 32KB
+    static_tls_size = 32768;
+    log_thread.debug() << "static tls size = " << static_tls_size << " (uneducated guess)";
   }
 
   // used when we don't have an allocation yet
@@ -1957,6 +2074,9 @@ namespace Realm {
 	}
       }
 #endif
+
+      KernelThread::detect_static_tls_size();
+
       return true;
     }
 
