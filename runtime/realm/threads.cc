@@ -65,7 +65,9 @@ static void CPU_SET(int index, DWORD_PTR *set)
 #endif
 
 #ifdef REALM_USE_USER_THREADS
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
 #include <ucontext.h>
+
 #ifdef REALM_ON_MACOS
 // MacOS has (loudly) deprecated set/get/make/swapcontext,
 //  despite there being no POSIX replacement for them...
@@ -80,6 +82,7 @@ inline void makecontext_wrap(ucontext_t *u, void (*fn)(), int args, ...) { makec
 #define getcontext getcontext_wrap
 #define swapcontext swapcontext_wrap
 #define makecontext makecontext_wrap
+#endif
 #endif
 #endif
 
@@ -1150,6 +1153,8 @@ namespace Realm {
   // class UserThread
 
 #ifdef REALM_USE_USER_THREADS
+
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
   namespace {
     atomic<int> uswitch_test_check_flag(1);
     ucontext_t uswitch_test_ctx1, uswitch_test_ctx2;
@@ -1211,6 +1216,13 @@ namespace Realm {
     free(stack_base);
     return true;
   }
+#endif
+#ifdef REALM_ON_WINDOWS
+  /*static*/ bool Thread::test_user_switch_support(size_t stack_size /*= 1 << 20*/)
+  {
+    return true;
+  }
+#endif
 
   class UserThread : public Thread {
   public:
@@ -1228,7 +1240,12 @@ namespace Realm {
     static void user_switch(UserThread *switch_to);
 
   protected:
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
     REALM_ATTR_NORETURN(static void uthread_entry(void));
+#endif
+#ifdef REALM_ON_WINDOWS
+    REALM_ATTR_NORETURN(static void uthread_entry(void *));
+#endif
 
     virtual void alert_thread(void);
 
@@ -1237,22 +1254,31 @@ namespace Realm {
     void *target;
     void (*entry_wrapper)(void *);
     int magic;
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
+    pthread_t host_pthread;
     ucontext_t ctx;
 #ifdef REALM_ON_MACOS
     // valgrind says Darwin's getcontext is writing past the end of ctx?
     int padding[512];
 #endif
     void *stack_base;
+#endif
+#ifdef REALM_ON_WINDOWS
+    LPVOID fiber;
+#endif
     size_t stack_size;
     bool ok_to_delete;
     bool running;
-    pthread_t host_pthread;
   };
 
   UserThread::UserThread(void *_target, void (*_entry_wrapper)(void *),
 			 ThreadScheduler *_scheduler)
     : Thread(_scheduler), target(_target), entry_wrapper(_entry_wrapper)
-    , magic(MAGIC_VALUE), stack_base(0), stack_size(0), ok_to_delete(false)
+    , magic(MAGIC_VALUE)
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
+    , stack_base(0)
+#endif
+    , stack_size(0), ok_to_delete(false)
     , running(false)
   {
   }
@@ -1262,24 +1288,41 @@ namespace Realm {
     // cannot delete an active thread...
     assert(!running);
 
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
     if(stack_base != 0)
       free(stack_base);
+#endif
+#ifdef REALM_ON_WINDOWS
+    DeleteFiber(fiber);
+#endif
   }
 
   namespace ThreadLocal {
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
     REALM_THREAD_LOCAL ucontext_t *host_context = 0;
+#endif
+#ifdef REALM_ON_WINDOWS
+    REALM_THREAD_LOCAL LPVOID host_context = 0;
+#endif
     // current_user_thread is redundant with current_thread, but kept for debugging
     //  purposes for now
     REALM_THREAD_LOCAL UserThread *current_user_thread = 0;
     REALM_THREAD_LOCAL Thread *current_host_thread = 0;
   };
 
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
   /*static*/ void UserThread::uthread_entry(void)
+#endif
+#ifdef REALM_ON_WINDOWS
+  /*static*/ void UserThread::uthread_entry(void *)
+#endif
   {
     UserThread *thread = ThreadLocal::current_user_thread;
     assert(thread != 0);
 
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
     thread->host_pthread = pthread_self();
+#endif
     thread->running = true;
 
     log_thread.info() << "thread " << thread << " started";
@@ -1329,6 +1372,7 @@ namespace Realm {
       }
     }
 
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
     stack_base = malloc(stack_size);
     assert(stack_base != 0);
 
@@ -1342,11 +1386,25 @@ namespace Realm {
     // grr...  entry point takes int's, which might not hold a void *
     // we'll just fish our UserThread * out of TLS
     makecontext(&ctx, uthread_entry, 0);
+#endif
+#ifdef REALM_ON_WINDOWS
+    fiber = CreateFiberEx(stack_size, stack_size,
+                          FIBER_FLAG_FLOAT_SWITCH, uthread_entry, 0);
+    if(fiber == 0) {
+      log_thread.fatal() << "fiber creation failed: error=" << GetLastError();
+      ::abort();
+    }
+#endif
 
     update_state(STATE_STARTUP);    
 
     log_thread.info() << "thread created:" << this << " (" << (rsrv ? rsrv->name : "??") << ") - user thread";
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
     log_thread.debug() << "thread stack: " << this << " size=" << stack_size << " base=" << stack_base;
+#endif
+#ifdef REALM_ON_WINDOWS
+    log_thread.debug() << "thread stack: " << this << " size=" << stack_size;
+#endif
   }
 
   void UserThread::join(void)
@@ -1375,18 +1433,38 @@ namespace Realm {
       assert(switch_to->magic == MAGIC_VALUE);
       assert(ThreadLocal::host_context == 0);
 
-      // this holds the host's state
-      ucontext_t host_ctx;
-
-      ThreadLocal::host_context = &host_ctx;
       ThreadLocal::current_user_thread = switch_to;
       ThreadLocal::current_host_thread = ThreadLocal::current_thread;
       ThreadLocal::current_thread = switch_to;
 
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
+      // this holds the host's state
+      ucontext_t host_ctx;
+
+      ThreadLocal::host_context = &host_ctx;
+
       CHECK_LIBC( swapcontext(&host_ctx, &switch_to->ctx) );
+#endif
+#ifdef REALM_ON_WINDOWS
+      LPVOID host_ctx = ConvertThreadToFiberEx(0, 0);
+
+      ThreadLocal::host_context = host_ctx;
+
+      SwitchToFiber(switch_to->fiber);
+#endif
 
       assert(ThreadLocal::current_user_thread == 0);
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
       assert(ThreadLocal::host_context == &host_ctx);
+#endif
+#ifdef REALM_ON_WINDOWS
+      assert(ThreadLocal::host_context == host_ctx);
+      BOOL ok = ConvertFiberToThread();
+      if(!ok) {
+        log_thread.fatal() << "ConvertFiberToThread failed: error=" << GetLastError();
+        ::abort();
+      }
+#endif
       ThreadLocal::host_context = 0;
     } else {
       UserThread *switch_from = ThreadLocal::current_user_thread;
@@ -1402,10 +1480,15 @@ namespace Realm {
 	ThreadLocal::current_thread = switch_to;
 
 	// a switch between two user contexts - nice and simple
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
 	CHECK_LIBC( swapcontext(&switch_from->ctx, &switch_to->ctx) );
+	switch_from->host_pthread = pthread_self();
+#endif
+#ifdef REALM_ON_WINDOWS
+  SwitchToFiber(switch_to->fiber);
+#endif
 
 	assert(switch_from->running == false);
-	switch_from->host_pthread = pthread_self();
 	switch_from->running = true;
       } else {
 	// a return of control to the host thread
@@ -1414,11 +1497,16 @@ namespace Realm {
 	ThreadLocal::current_thread = ThreadLocal::current_host_thread;
 	ThreadLocal::current_host_thread = 0;
 
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
 	CHECK_LIBC( swapcontext(&switch_from->ctx, ThreadLocal::host_context) );
+	switch_from->host_pthread = pthread_self();
+#endif
+#ifdef REALM_ON_WINDOWS
+  SwitchToFiber(ThreadLocal::host_context);
+#endif
 
 	// if we get control back
 	assert(switch_from->running == false);
-	switch_from->host_pthread = pthread_self();
 	switch_from->running = true;
       }
     }
@@ -1432,7 +1520,11 @@ namespace Realm {
     } else {
       // TODO: work out the race conditions inherent in this process
       if(running) {
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
 	pthread_kill(host_pthread, handler_signal);
+#else
+        assert(0);
+#endif
       } else {
         assert(scheduler != 0);
 	if(try_update_state(STATE_BLOCKED, STATE_ALERTED)) {

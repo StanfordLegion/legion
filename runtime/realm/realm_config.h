@@ -32,7 +32,7 @@
 
 // if set, uses ucontext.h for user level thread switching, otherwise falls
 //  back to POSIX threads
-#if !defined(REALM_USE_NATIVE_THREADS) && !defined(REALM_ON_MACOS) && !defined(REALM_ON_WINDOWS)
+#if !defined(REALM_USE_NATIVE_THREADS) && !defined(REALM_ON_MACOS)
 // clang on Mac is generating apparently-broken code in the user thread
 //  scheduler, so disable this code path for now
 #define REALM_USE_USER_THREADS
