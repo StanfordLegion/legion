@@ -567,6 +567,15 @@ gcc49_cxx98_debug_llvm_mpi_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
     <<: [*gcc49, *terra38, *debug, *cxx98_normal, *llvm, *mpi, *regent, *incremental]
+# * Integration: Python + GASNet
+gcc49_cxx98_debug_python_gasnet_legion:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *python, *gasnet, *legion]
+gcc49_cxx98_debug_python_gasnet_regent:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *python, *gasnet, *regent]
 # * Integration: HDF5 + GASNet
 gcc49_cxx98_debug_hdf5_gasnet_legion:
   <<: [*linux_compute, *image, *tests]
@@ -726,6 +735,15 @@ clang38_cxx98_debug_llvm_mpi_regent:
   <<: [*linux_compute, *image_clang, *tests]
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_normal, *llvm, *mpi, *regent, *incremental]
+# * Integration: Python + GASNet
+clang38_cxx98_debug_python_gasnet_legion:
+  <<: [*linux_compute, *image_clang, *tests]
+  variables:
+    <<: [*clang38, *terra38, *debug, *cxx98_normal, *python, *gasnet, *legion]
+clang38_cxx98_debug_python_gasnet_regent:
+  <<: [*linux_compute, *image_clang, *tests]
+  variables:
+    <<: [*clang38, *terra38, *debug, *cxx98_normal, *python, *gasnet, *regent, *incremental]
 # * Integration: HDF5 + GASNet
 clang38_cxx98_debug_hdf5_gasnet_legion:
   <<: [*linux_compute, *image_clang, *tests]
