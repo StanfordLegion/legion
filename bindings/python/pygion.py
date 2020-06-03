@@ -1856,7 +1856,7 @@ class Task (object):
             c.legion_runtime_get_runtime(),
             task_id,
             task_name.encode('utf-8'),
-            self.replicable or not is_script, # Global
+            True, # self.replicable or not is_script, # Global
             execution_constraints,
             layout_constraints,
             options[0],

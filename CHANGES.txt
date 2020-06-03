@@ -2,6 +2,10 @@ This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
 Version 20.06.0 (June ??, 2020)
+  * Regent
+     - Support for `std/format` module for type-safe formatted printing.
+     - Support for documentation with LDoc.
+     - Support for `__future` operator to import a C API future.
   * Realm
      - Subgraphs can be used to capture a template of Realm operations
         that will be executed repeatedly.  Subgraph definitions include
