@@ -847,6 +847,7 @@ namespace Legion {
     public:
       virtual void pack_remote_memoizable(Serializer &rez, 
                                           AddressSpaceID target) const;
+      virtual Memoizable* clone(Operation *op) { return this; }
     };
 
     class RemoteMemoizable : public Memoizable {
@@ -879,6 +880,7 @@ namespace Legion {
     public:
       virtual void pack_remote_memoizable(Serializer &rez, 
                                           AddressSpaceID target) const;
+      virtual Memoizable* clone(Operation *op);
       static Memoizable* unpack_remote_memoizable(Deserializer &derez,
                                       Operation *op, Runtime *runtime);
       static void handle_eq_request(Deserializer &derez, Runtime *runtime,
