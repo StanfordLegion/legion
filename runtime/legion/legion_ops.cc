@@ -14964,6 +14964,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_dependent_op();
+      // Reset this to true after it was cleared by the base call
+      is_index_space = true;
       owner = NULL;
     }
 
