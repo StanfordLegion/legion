@@ -1657,6 +1657,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Memoizable* RemoteMemoizable::clone(Operation *newop)
+    //--------------------------------------------------------------------------
+    {
+      return new RemoteMemoizable(newop, original, origin, kind, trace_local_id,
+                                  completion_event, is_mem_task, is_memo);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ Memoizable* RemoteMemoizable::unpack_remote_memoizable(
                            Deserializer &derez, Operation *op, Runtime *runtime)
     //--------------------------------------------------------------------------

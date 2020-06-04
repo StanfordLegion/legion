@@ -132,6 +132,7 @@ namespace Legion {
       virtual void pack_recorder(Serializer &rez, 
           std::set<RtEvent> &applied, const AddressSpaceID target) = 0; 
       virtual RtEvent get_collect_event(void) const = 0;
+      virtual PhysicalTraceRecorder* clone(Memoizable *memo) { return this; }
     public:
       virtual void record_get_term_event(Memoizable *memo) = 0;
       virtual void record_create_ap_user_event(ApUserEvent lhs, 
@@ -238,6 +239,7 @@ namespace Legion {
       virtual void pack_recorder(Serializer &rez, 
           std::set<RtEvent> &applied, const AddressSpaceID target);
       virtual RtEvent get_collect_event(void) const { return collect_event; }
+      virtual PhysicalTraceRecorder* clone(Memoizable *memo);
     public:
       virtual void record_get_term_event(Memoizable *memo);
       virtual void record_create_ap_user_event(ApUserEvent lhs, 
@@ -343,6 +345,7 @@ namespace Legion {
                                   std::set<RtEvent> &applied) const;
       static TraceInfo* unpack_remote_trace_info(Deserializer &derez,
                                     Operation *op, Runtime *runtime);
+      TraceInfo* clone(Operation *op);
     public:
       inline void record_get_term_event(void) const
         {

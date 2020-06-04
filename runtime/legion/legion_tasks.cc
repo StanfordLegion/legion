@@ -9180,6 +9180,8 @@ namespace Legion {
       result->remote_owner_uid = this->remote_owner_uid;
       result->tpl = tpl;
       result->memo_state = memo_state;
+      if (remote_trace_info != NULL)
+        result->remote_trace_info = remote_trace_info->clone(result);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_slice_slice(get_unique_id(), 
                                    result->get_unique_id());

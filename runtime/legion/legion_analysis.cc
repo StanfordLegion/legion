@@ -346,6 +346,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    PhysicalTraceRecorder* RemoteTraceRecorder::clone(Memoizable *newmemo)
+    //--------------------------------------------------------------------------
+    {
+      RtUserEvent clone_applied = Runtime::create_rt_user_event();
+      PhysicalTraceRecorder* result = new RemoteTraceRecorder(runtime,
+          origin_space, local_space, newmemo, remote_tpl, clone_applied,
+          collect_event);
+      AutoLock a_lock(applied_lock);
+      applied_events.insert(clone_applied);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     void RemoteTraceRecorder::record_get_term_event(Memoizable *memo)
     //--------------------------------------------------------------------------
     {
@@ -1507,6 +1520,20 @@ namespace Legion {
       }
       else
         return new TraceInfo(op, NULL, NULL, false/*recording*/);
+    }
+
+    //--------------------------------------------------------------------------
+    TraceInfo* TraceInfo::clone(Operation *newop)
+    //--------------------------------------------------------------------------
+    {
+      if (recording)
+      {
+        Memoizable *newmemo = memo->clone(newop);
+        PhysicalTraceRecorder *newrec = rec->clone(newmemo);
+        return new TraceInfo(newop, newmemo, newrec, true/*recording*/);
+      }
+      else
+        return new TraceInfo(newop, NULL, NULL, false/*recording*/);
     }
 
     /////////////////////////////////////////////////////////////
