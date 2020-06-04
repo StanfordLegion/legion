@@ -27,6 +27,8 @@ local pretty = require("regent/pretty")
 local profile = require("regent/profile")
 local report = require("common/report")
 
+local log_task_id = log.make_logger("task_id")
+
 local std = {}
 
 std.config, std.args = base.config, base.args
@@ -4077,6 +4079,8 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
   local task_registrations = variants:map(
     function(variant)
       local task = variant.task
+
+      log_task_id:info("%s: %s", task:get_name():concat("."), task:get_task_id())
 
       local options = variant:get_config_options()
 

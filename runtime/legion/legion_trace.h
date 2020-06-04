@@ -867,8 +867,9 @@ namespace Legion {
                                    std::set<unsigned> &users,
                                    std::set<RtEvent> &ready_events);
     public:
-      ApEvent get_fence_completion(void)
-        { return fence_completion; }
+      inline ApEvent get_fence_completion(void) { return fence_completion; }
+      void record_remote_memoizable(Memoizable *memo);
+      void release_remote_memos(void);
     protected:
       PhysicalTrace * const trace;
       volatile bool recording;
@@ -881,6 +882,8 @@ namespace Legion {
     private:
       std::map<TraceLocalID,Memoizable*> operations;
       std::map<TraceLocalID,std::pair<unsigned,bool/*task*/> > memo_entries;
+      // Remote memoizable objects that we have ownership for
+      std::vector<Memoizable*> remote_memos;
     private:
       CachedMappings cached_mappings;
       bool has_virtual_mapping;
