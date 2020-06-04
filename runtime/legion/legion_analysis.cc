@@ -898,7 +898,7 @@ namespace Legion {
             tpl->record_get_term_event(memo);
             Runtime::trigger_event(applied);
             if (memo->get_origin_space() != runtime->address_space)
-              delete memo;
+              tpl->record_remote_memoizable(memo);
             break;
           }
         case REMOTE_TRACE_CREATE_USER_EVENT:

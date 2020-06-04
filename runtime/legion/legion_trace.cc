@@ -2274,6 +2274,8 @@ namespace Legion {
           }
         }
         cached_mappings.clear();
+        if (!remote_memos.empty())
+          release_remote_memos();
       }
     }
 
@@ -2472,6 +2474,8 @@ namespace Legion {
           optimize();
           dump_template();
         }
+        if (!remote_memos.empty())
+          release_remote_memos();
         return;
       }
       generate_conditions();
@@ -2481,6 +2485,8 @@ namespace Legion {
       events.clear();
       events.resize(num_events);
       event_map.clear();
+      if (!remote_memos.empty())
+        release_remote_memos();
     }
 
     //--------------------------------------------------------------------------
@@ -4225,6 +4231,27 @@ namespace Legion {
               users.insert(finder->second);
           }
         }
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_remote_memoizable(Memoizable *memo)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock tpl_lock(template_lock);
+      remote_memos.push_back(memo);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::release_remote_memos(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!remote_memos.empty());
+#endif
+      for (std::vector<Memoizable*>::const_iterator it = 
+            remote_memos.begin(); it != remote_memos.end(); it++)
+        delete (*it);
+      remote_memos.clear();
     }
 
     /////////////////////////////////////////////////////////////
