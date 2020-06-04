@@ -14763,7 +14763,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_dependent_op();
-      is_index_space = true;
       owner = NULL;
     }
 
