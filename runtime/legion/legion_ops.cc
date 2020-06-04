@@ -7073,6 +7073,7 @@ namespace Legion {
       initialize_operation(own->get_context(), false/*track*/, 
           own->src_requirements.size() + own->dst_requirements.size());
       index_point = p;
+      index_domain = own->index_domain;
       sharding_space = own->sharding_space;
       owner = own;
       execution_fence_event = own->get_execution_fence_event();
@@ -14897,7 +14898,7 @@ namespace Legion {
       : DependentPartitionOp(rt), owner(NULL)
     //--------------------------------------------------------------------------
     {
-      is_index_space = false;
+      this->is_index_space = true;
     }
 
     //--------------------------------------------------------------------------
@@ -14932,6 +14933,7 @@ namespace Legion {
       initialize_operation(own->get_context(), false/*track*/, 1/*size*/);
       index_point = p;
       owner = own;
+      index_domain = owner->index_domain;
       requirement = owner->requirement;
       parent_task = owner->parent_task;
       map_id      = owner->map_id;
@@ -16220,6 +16222,7 @@ namespace Legion {
       : FillOp(rt)
     //--------------------------------------------------------------------------
     {
+      this->is_index_space = true;
     }
 
     //--------------------------------------------------------------------------
