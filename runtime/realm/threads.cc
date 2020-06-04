@@ -926,7 +926,12 @@ namespace Realm {
       CHECK_PTHREAD( pthread_attr_init(&attr) );
 
       for(size_t v = 1024; v <= 16*1024*1024; v <<= 1) {
-	CHECK_PTHREAD( pthread_attr_setstacksize(&attr, PTHREAD_STACK_MIN + v) );
+	// if pthreads doesn't like this stack size, skip to the next one
+	if(pthread_attr_setstacksize(&attr, PTHREAD_STACK_MIN + v) != 0) {
+	  // clear errno too
+	  errno = 0;
+	  continue;
+	}
 	pthread_t thread;
 	int ret = pthread_create(&thread, &attr, empty_thread_body, 0);
 	switch(ret) {
