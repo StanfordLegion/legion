@@ -10551,10 +10551,7 @@ namespace Legion {
         program_order_execution(config.program_order_execution),
         dump_physical_traces(config.dump_physical_traces),
         no_tracing(config.no_tracing),
-        // If we're doing program order execution that should also disable
-        // physical tracing since we can't replay correctly in that case
-        no_physical_tracing(config.no_physical_tracing || 
-                            config.program_order_execution),
+        no_physical_tracing(config.no_physical_tracing),
         no_trace_optimization(config.no_trace_optimization),
         no_fence_elision(config.no_fence_elision),
         replay_on_cpus(config.replay_on_cpus),
