@@ -1215,8 +1215,8 @@ namespace Legion {
         if (!result.exists() ||
             sync_preconditions.find(result) != sync_preconditions.end())
         {
-          ApUserEvent rename = Runtime::create_ap_user_event(info);
-          Runtime::trigger_event(info, rename, result);
+          ApUserEvent rename = Runtime::create_ap_user_event(NULL);
+          Runtime::trigger_event(NULL, rename, result);
           result = rename;
         }
       }
@@ -6531,7 +6531,7 @@ namespace Legion {
             TraceInfo(this) : TraceInfo(*remote_trace_info, this);
         deferred_complete_mapping = Runtime::create_rt_user_event();
         applied_condition = deferred_complete_mapping;
-        deferred_effects = Runtime::create_ap_user_event(&trace_info);
+        deferred_effects = Runtime::create_ap_user_event(NULL);
         effects_condition = deferred_effects;
       }
       slice_owner->record_child_mapped(applied_condition, effects_condition);
@@ -9144,11 +9144,10 @@ namespace Legion {
           ApUserEvent to_trigger;
           if (request_early_complete_no_trigger(to_trigger))
           {
-            const TraceInfo trace_info(this);
             const ApEvent done = 
-              Runtime::merge_events(&trace_info, effects_postconditions);
+              Runtime::merge_events(NULL, effects_postconditions);
             effects_postconditions.clear();
-            Runtime::trigger_event(&trace_info, to_trigger, done);
+            Runtime::trigger_event(NULL, to_trigger, done);
           }
           // Don't worry about the else case because that only happens
           // with inorder execution and we'll wait for it before completing

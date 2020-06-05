@@ -5039,7 +5039,6 @@ namespace Legion {
           Runtime::trigger_event(&trace_info, indirect_done, local_done);
         }
       }
-      Runtime::trigger_event(&trace_info, local_completion, copy_done);
       if (is_recording())
       {
 #ifdef DEBUG_LEGION
@@ -5048,8 +5047,8 @@ namespace Legion {
         // This can happen in cases when the copy index space is empty
         if (!copy_done.exists())
           copy_done = execution_fence_event;
-        tpl->record_trigger_event(local_completion, copy_done);
       }
+      Runtime::trigger_event(&trace_info, local_completion, copy_done);
 #ifdef DEBUG_LEGION
       dump_physical_state(&src_requirements[index], index);
       dump_physical_state(&dst_requirements[index], 
@@ -13902,7 +13901,7 @@ namespace Legion {
       index_domain = partition_node->color_space->get_color_space_domain();
       is_index_space = true;
 #ifdef LEGION_SPY
-      intermediate_index_event = Runtime::create_ap_user_event();
+      intermediate_index_event = Runtime::create_ap_user_event(NULL);
 #endif
     }
 
@@ -14078,7 +14077,7 @@ namespace Legion {
               Runtime::merge_events(&info, index_preconditions), instances);
           request_early_complete(done_event);
 #ifdef LEGION_SPY
-          Runtime::trigger_event(intermediate_index_event, done_event);
+          Runtime::trigger_event(NULL, intermediate_index_event, done_event);
 #endif
           complete_execution(Runtime::protect_event(done_event));
         }
