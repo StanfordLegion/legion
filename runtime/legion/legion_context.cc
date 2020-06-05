@@ -7022,7 +7022,10 @@ namespace Legion {
         DependenceArgs args(op, this);
         runtime->issue_runtime_meta_task(args, priority, precondition); 
       }
-      if (runtime->program_order_execution && !unordered && outermost)
+      // We disable program order execution when we are replaying a
+      // fixed trace since it might not be sound to block
+      if (runtime->program_order_execution && !unordered && outermost && 
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         begin_task_wait(true/*from runtime*/);
         term_event.wait();
@@ -14753,7 +14756,10 @@ namespace Legion {
                                                  bool unordered, bool outermost)
     //--------------------------------------------------------------------------
     {
-      if (runtime->program_order_execution && !unordered)
+      // We disable program order execution when we are replaying a
+      // fixed trace since it might not be sound to block
+      if (runtime->program_order_execution && !unordered &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
       {
 #ifdef DEBUG_LEGION
         assert(inorder_barrier.exists());
