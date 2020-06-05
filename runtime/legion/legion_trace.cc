@@ -2982,7 +2982,6 @@ namespace Legion {
                 {
                   unsigned new_crossing_event = events.size();
                   events.resize(events.size() + 1);
-                  user_events.resize(events.size());
                   crossing_events[rh] = new_crossing_event;
                   new_rhs.insert(new_crossing_event);
                   slices[generator_slice].push_back(
@@ -3055,7 +3054,6 @@ namespace Legion {
               {
                 unsigned new_crossing_event = events.size();
                 events.resize(events.size() + 1);
-                user_events.resize(events.size());
                 crossing_events[ev] = new_crossing_event;
                 *event_to_check = new_crossing_event;
                 slices[generator_slice].push_back(
@@ -3651,12 +3649,13 @@ namespace Legion {
       assert(is_recording());
 #endif
 
-      unsigned lhs_ = convert_event(lhs);
-      user_events.resize(events.size());
-      user_events.push_back(lhs);
-
-      insert_instruction(new CreateApUserEvent(*this, lhs_,
-            find_trace_local_id(memo)));
+      unsigned lhs_ = find_or_convert_event(lhs);
+      user_events[lhs_] = lhs;
+#ifdef DEBUG_LEGION
+      assert(instructions[lhs_] == NULL);
+#endif
+      instructions[lhs_] =
+        new CreateApUserEvent(*this, lhs_, find_trace_local_id(memo));
     }
 
     //--------------------------------------------------------------------------
@@ -3673,7 +3672,7 @@ namespace Legion {
 #endif
       // Do this first in case it gets pre-empted
       const unsigned rhs_ = find_event(rhs, tpl_lock);
-      unsigned lhs_ = find_event(lhs, tpl_lock);
+      unsigned lhs_ = find_or_convert_event(lhs);
       events.push_back(ApEvent());
       insert_instruction(new TriggerEvent(*this, lhs_, rhs_,
             instructions[lhs_]->owner));
@@ -4399,6 +4398,26 @@ namespace Legion {
       assert(finder != event_map.end());
 #endif
       return finder->second;
+    }
+
+    //--------------------------------------------------------------------------
+    inline unsigned PhysicalTemplate::find_or_convert_event(const ApEvent &evnt)
+    //--------------------------------------------------------------------------
+    {
+      std::map<ApEvent, unsigned>::const_iterator finder = event_map.find(evnt);
+      if (finder == event_map.end())
+      {
+        unsigned event_ = events.size();
+        events.push_back(evnt);
+#ifdef DEBUG_LEGION
+        assert(event_map.find(evnt) == event_map.end());
+#endif
+        event_map[evnt] = event_;
+        // Put a place holder in for the instruction until we make it
+        insert_instruction(NULL);
+      }
+      else
+        return finder->second;
     }
 
     //--------------------------------------------------------------------------
@@ -6696,7 +6715,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(lhs < events.size());
-      assert(lhs < user_events.size());
+      assert(user_events.find(lhs) != user_events.end());
       assert(rhs < events.size());
 #endif
     }

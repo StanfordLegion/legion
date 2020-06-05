@@ -5834,7 +5834,7 @@ namespace Legion {
       : LgTaskArgs<DeferPerformOutputArgs>(ana->op->get_unique_op_id()), 
         analysis(ana), trace_info(&info),
         applied_event(Runtime::create_rt_user_event()),
-        effects_event(Runtime::create_ap_user_event(trace_info))
+        effects_event(Runtime::create_ap_user_event(NULL))
     //--------------------------------------------------------------------------
     {
       if (analysis->on_heap)
@@ -5851,7 +5851,7 @@ namespace Legion {
       const ApEvent effects = dargs->analysis->perform_output(
           RtEvent::NO_RT_EVENT, applied_events, true/*already deferred*/);
       // Get this before doing anything
-      Runtime::trigger_event(dargs->trace_info, dargs->effects_event, effects);
+      Runtime::trigger_event(NULL, dargs->effects_event, effects);
       if (!applied_events.empty())
         Runtime::trigger_event(dargs->applied_event, 
             Runtime::merge_events(applied_events));
@@ -6514,8 +6514,7 @@ namespace Legion {
         const RtUserEvent updated = Runtime::create_rt_user_event();
         const RtUserEvent applied = Runtime::create_rt_user_event();
         const ApUserEvent effects = track_effects ? 
-          Runtime::create_ap_user_event(&trace_info) : 
-          ApUserEvent::NO_AP_USER_EVENT;
+          Runtime::create_ap_user_event(NULL) : ApUserEvent::NO_AP_USER_EVENT;
         Serializer rez;
         {
           RezCheck z(rez);
@@ -7966,8 +7965,7 @@ namespace Legion {
         const AddressSpace target = rit->first.first;
         const RtUserEvent applied = Runtime::create_rt_user_event();
         const ApUserEvent effects = track_effects ? 
-          Runtime::create_ap_user_event(&trace_info) : 
-          ApUserEvent::NO_AP_USER_EVENT;
+          Runtime::create_ap_user_event(NULL) : ApUserEvent::NO_AP_USER_EVENT;
         Serializer rez;
         {
           RezCheck z(rez);

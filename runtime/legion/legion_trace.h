@@ -849,6 +849,7 @@ namespace Legion {
       unsigned convert_event(const ApEvent &event);
 #endif
       virtual unsigned find_event(const ApEvent &event, AutoLock &tpl_lock);
+      unsigned find_or_convert_event(const ApEvent &event);
       void insert_instruction(Instruction *inst);
     protected:
       // Returns the set of last users for all <view,field mask,index expr>
@@ -889,9 +890,9 @@ namespace Legion {
       CachedMappings cached_mappings;
       bool has_virtual_mapping;
     protected:
-      ApEvent                    fence_completion;
-      std::vector<ApEvent>       events;
-      std::vector<ApUserEvent>   user_events;
+      ApEvent                         fence_completion;
+      std::vector<ApEvent>            events;
+      std::map<unsigned,ApUserEvent>  user_events;
     protected:
       std::map<ApEvent,unsigned> event_map;
     private:
@@ -1262,7 +1263,7 @@ namespace Legion {
     protected:
       std::map<TraceLocalID, Memoizable*> &operations;
       std::vector<ApEvent> &events;
-      std::vector<ApUserEvent> &user_events;
+      std::map<unsigned,ApUserEvent> &user_events;
     public:
       const TraceLocalID owner;
     };
