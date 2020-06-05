@@ -4187,6 +4187,7 @@ namespace Legion {
         event_map[evnt] = event_;
         // Put a place holder in for the instruction until we make it
         insert_instruction(NULL);
+        return event_;
       }
       else
         return finder->second;
