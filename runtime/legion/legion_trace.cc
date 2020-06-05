@@ -6682,7 +6682,6 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(lhs < events.size());
-      assert(user_events.find(lhs) != user_events.end());
 #endif
     }
 
