@@ -705,15 +705,24 @@ local function physical_region_get_base_pointer(cx, region_type, index_type, fie
   end
 end
 
-local function index_space_bounds(cx, is, is_type)
+local function index_space_bounds(cx, is, is_type, is_domain, is_bounds)
   local index_type = is_type.index_type
-  local domain = terralib.newsymbol(c.legion_domain_t, "domain_" .. tostring(is_type))
+
+  local domain
+  if not is_domain then
+    domain = terralib.newsymbol(c.legion_domain_t, "domain_" .. tostring(is_type))
+  else domain = is_domain end
+
   local bounds = false
   local actions = quote
     var [domain] = c.legion_index_space_get_domain([cx.runtime], [is])
   end
+
   if not index_type:is_opaque() then
-    bounds = terralib.newsymbol(std.rect_type(index_type), "bounds_" .. tostring(is_type))
+    if not is_bounds then
+      bounds = terralib.newsymbol(std.rect_type(index_type), "bounds_" .. tostring(is_type))
+    else bounds = is_bounds end
+
     local bounds_actions = nil
     if index_type.dim == 1 then
       bounds_actions = quote
@@ -2950,12 +2959,11 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
 
   -- Hack: Rooting any ispaces present manually
   if free_vars then
-    for _, symbol in ipairs(free_vars) do
+    for _, symbol in pairs(free_vars) do
       local symbol_type = symbol:gettype()
       if cx:has_ispace(symbol_type) then
         local ispace = cx:ispace(symbol_type)
-        local bounds_actions
-        bounds_actions, ispace.domain, ispace.bounds = index_space_bounds(cx, ispace.index_space, symbol_type)
+        local bounds_actions, _ignore1, _ignore2 = index_space_bounds(cx, ispace.index_space, symbol_type, ispace.domain, ispace.bounds)
          free_vars_setup:insert(quote 
            var [ispace.index_space] = [symbol:getsymbol()].impl
            [bounds_actions];
@@ -2977,7 +2985,6 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
                                   idx : uint,
                                   parent : c.legion_logical_partition_t,
                                   [point])
-      var runtime = [cx.runtime]
       var [requirement];
       var mappable_type = c.legion_mappable_get_type(mappable)
       if mappable_type == c.TASK_MAPPABLE then
@@ -3001,7 +3008,7 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
       [free_vars_setup];
       var index : index_type = [value.value];
       var subregion = c.legion_logical_partition_get_logical_subregion_by_color_domain_point(
-        runtime, parent, index)
+        [cx.runtime], parent, index)
       return subregion
     end
 
