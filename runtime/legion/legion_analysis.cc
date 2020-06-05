@@ -7724,7 +7724,7 @@ namespace Legion {
       const ApEvent result = analysis->perform_output(
          Runtime::merge_events(remote_ready, output_ready), applied_events);
       if (effects.exists())
-        Runtime::trigger_event(&trace_info, effects, result);
+        Runtime::trigger_event(NULL, effects, result);
       // Now we can trigger our applied event
       if (!applied_events.empty())
         Runtime::trigger_event(applied, Runtime::merge_events(applied_events));
