@@ -407,7 +407,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteTraceRecorder::record_trigger_event(ApUserEvent lhs, ApEvent rhs)
+    void RemoteTraceRecorder::record_trigger_event(ApUserEvent lhs, ApEvent rhs,
+                                                   Memoizable *memo)
     //--------------------------------------------------------------------------
     {
       if (local_space != origin_space)
@@ -421,13 +422,14 @@ namespace Legion {
           rez.serialize(applied);
           rez.serialize(lhs);
           rez.serialize(rhs);
+          memo->pack_remote_memoizable(rez, origin_space);
         }
         runtime->send_remote_trace_update(origin_space, rez);
         AutoLock a_lock(applied_lock);
         applied_events.insert(applied);
       }
       else
-        remote_tpl->record_trigger_event(lhs, rhs);
+        remote_tpl->record_trigger_event(lhs, rhs, memo);
     }
 
     //--------------------------------------------------------------------------
@@ -923,8 +925,12 @@ namespace Legion {
             derez.deserialize(lhs);
             ApEvent rhs;
             derez.deserialize(rhs);
-            tpl->record_trigger_event(lhs, rhs);
+            Memoizable *memo = RemoteMemoizable::unpack_remote_memoizable(derez,
+                                                           NULL/*op*/, runtime);
+            tpl->record_trigger_event(lhs, rhs, memo);
             Runtime::trigger_event(applied);
+            if (memo->get_origin_space() != runtime->address_space)
+              delete memo;
             break;
           }
         case REMOTE_TRACE_MERGE_EVENTS:

@@ -3500,7 +3500,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_trigger_event(ApUserEvent lhs, ApEvent rhs)
+    void PhysicalTemplate::record_trigger_event(ApUserEvent lhs, ApEvent rhs,
+                                                Memoizable *memo)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3515,7 +3516,7 @@ namespace Legion {
       unsigned lhs_ = find_or_convert_event(lhs);
       events.push_back(ApEvent());
       insert_instruction(new TriggerEvent(*this, lhs_, find_event(rhs),
-            instructions[lhs_]->owner));
+            find_trace_local_id(memo)));
     }
 
     //--------------------------------------------------------------------------
