@@ -1321,7 +1321,7 @@ namespace Legion {
 #endif
         to_replay->execute_all();
         template_completion = to_replay->get_completion();
-        Runtime::trigger_event(completion_event, template_completion);
+        Runtime::trigger_event(NULL, completion_event, template_completion);
         parent_ctx->update_current_fence(this, true, true);
         physical_trace->record_previous_template_completion(
             template_completion);
@@ -2303,7 +2303,7 @@ namespace Legion {
       for (std::map<unsigned, unsigned>::iterator it = crossing_events.begin();
            it != crossing_events.end(); ++it)
       {
-        ApUserEvent ev = Runtime::create_ap_user_event();
+        ApUserEvent ev = Runtime::create_ap_user_event(NULL);
         events[it->second] = ev;
         user_events[it->second] = ev;
       }
@@ -2432,7 +2432,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(slice_idx < slices.size());
 #endif
-      ApUserEvent fence = Runtime::create_ap_user_event();
+      ApUserEvent fence = Runtime::create_ap_user_event(NULL);
       const std::vector<TraceLocalID> &tasks = slice_tasks[slice_idx];
       for (unsigned idx = 0; idx < tasks.size(); ++idx)
         operations[tasks[idx]]
@@ -2441,7 +2441,7 @@ namespace Legion {
       for (std::vector<Instruction*>::const_iterator it = instructions.begin();
            it != instructions.end(); ++it)
         (*it)->execute();
-      Runtime::trigger_event(fence);
+      Runtime::trigger_event(NULL, fence);
     }
 
     //--------------------------------------------------------------------------
@@ -4326,7 +4326,7 @@ namespace Legion {
     void CreateApUserEvent::execute(void)
     //--------------------------------------------------------------------------
     {
-      ApUserEvent ev = Runtime::create_ap_user_event();
+      ApUserEvent ev = Runtime::create_ap_user_event(NULL);
       events[lhs] = ev;
       user_events[lhs] = ev;
     }
@@ -4367,7 +4367,7 @@ namespace Legion {
       assert(user_events[lhs].exists());
       assert(events[lhs].id == user_events[lhs].id);
 #endif
-      Runtime::trigger_event(user_events[lhs], events[rhs]);
+      Runtime::trigger_event(NULL, user_events[lhs], events[rhs]);
     }
 
     //--------------------------------------------------------------------------

@@ -5405,10 +5405,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalAnalysis::DeferPerformOutputArgs::DeferPerformOutputArgs(
-                                                          PhysicalAnalysis *ana)
+                           PhysicalAnalysis *ana, const PhysicalTraceInfo &info)
       : LgTaskArgs<DeferPerformOutputArgs>(ana->op->get_unique_op_id()), 
-        analysis(ana), applied_event(Runtime::create_rt_user_event()),
-        effects_event(Runtime::create_ap_user_event())
+        analysis(ana), trace_info(&info),
+        applied_event(Runtime::create_rt_user_event()),
+        effects_event(Runtime::create_ap_user_event(trace_info))
     //--------------------------------------------------------------------------
     {
       if (analysis->on_heap)
@@ -5425,7 +5426,7 @@ namespace Legion {
       const ApEvent effects = dargs->analysis->perform_output(
           RtEvent::NO_RT_EVENT, applied_events, true/*already deferred*/);
       // Get this before doing anything
-      Runtime::trigger_event(dargs->effects_event, effects);
+      Runtime::trigger_event(dargs->trace_info, dargs->effects_event, effects);
       if (!applied_events.empty())
         Runtime::trigger_event(dargs->applied_event, 
             Runtime::merge_events(applied_events));
@@ -6086,7 +6087,8 @@ namespace Legion {
         const RtUserEvent updated = Runtime::create_rt_user_event();
         const RtUserEvent applied = Runtime::create_rt_user_event();
         const ApUserEvent effects = track_effects ? 
-          Runtime::create_ap_user_event() : ApUserEvent::NO_AP_USER_EVENT;
+          Runtime::create_ap_user_event(&trace_info) : 
+          ApUserEvent::NO_AP_USER_EVENT;
         Serializer rez;
         {
           RezCheck z(rez);
@@ -6195,7 +6197,7 @@ namespace Legion {
           !perform_precondition.has_triggered())
       {
         // Defer this until the precondition is met
-        DeferPerformOutputArgs args(this);
+        DeferPerformOutputArgs args(this, trace_info);
         runtime->issue_runtime_meta_task(args,
             LG_THROUGHPUT_DEFERRED_PRIORITY, perform_precondition);
         applied_events.insert(args.applied_event);
@@ -6344,7 +6346,7 @@ namespace Legion {
       const ApEvent result = 
         analysis->perform_output(remote_user_registered, applied_events);
       if (effects_done.exists())
-        Runtime::trigger_event(effects_done, result);
+        Runtime::trigger_event(&trace_info, effects_done, result);
       // Do the rest of the triggers
       if (!applied_events.empty())
         Runtime::trigger_event(applied, Runtime::merge_events(applied_events));
@@ -7024,7 +7026,7 @@ namespace Legion {
         assert(!rit->second.empty());
 #endif
         const AddressSpaceID target = rit->first.first;
-        const ApUserEvent copy = Runtime::create_ap_user_event();
+        const ApUserEvent copy = Runtime::create_ap_user_event(&trace_info);
         const RtUserEvent applied = Runtime::create_rt_user_event();
         Serializer rez;
         {
@@ -7207,7 +7209,7 @@ namespace Legion {
           !perform_precondition.has_triggered())
       {
         // Defer this until the precondition is met
-        DeferPerformOutputArgs args(this);
+        DeferPerformOutputArgs args(this, trace_info);
         runtime->issue_runtime_meta_task(args,
             LG_THROUGHPUT_DEFERRED_PRIORITY, perform_precondition);
         applied_events.insert(args.applied_event);
@@ -7352,7 +7354,7 @@ namespace Legion {
           analysis->perform_updates(remote_ready, applied_events); 
       const ApEvent result = 
         analysis->perform_output(updates_ready, applied_events);
-      Runtime::trigger_event(copy, result);
+      Runtime::trigger_event(&trace_info, copy, result);
       // Now we can trigger our applied event
       if (!applied_events.empty())
         Runtime::trigger_event(applied, Runtime::merge_events(applied_events));
@@ -7523,7 +7525,8 @@ namespace Legion {
         const AddressSpace target = rit->first.first;
         const RtUserEvent applied = Runtime::create_rt_user_event();
         const ApUserEvent effects = track_effects ? 
-          Runtime::create_ap_user_event() : ApUserEvent::NO_AP_USER_EVENT;
+          Runtime::create_ap_user_event(&trace_info) : 
+          ApUserEvent::NO_AP_USER_EVENT;
         Serializer rez;
         {
           RezCheck z(rez);
@@ -7609,7 +7612,7 @@ namespace Legion {
           !perform_precondition.has_triggered())
       {
         // Defer this until the precondition is met
-        DeferPerformOutputArgs args(this);
+        DeferPerformOutputArgs args(this, trace_info);
         runtime->issue_runtime_meta_task(args,
             LG_THROUGHPUT_DEFERRED_PRIORITY, perform_precondition);
         applied_events.insert(args.applied_event);
@@ -7717,7 +7720,7 @@ namespace Legion {
       const ApEvent result = analysis->perform_output(
          Runtime::merge_events(remote_ready, output_ready), applied_events);
       if (effects.exists())
-        Runtime::trigger_event(effects, result);
+        Runtime::trigger_event(&trace_info, effects, result);
       // Now we can trigger our applied event
       if (!applied_events.empty())
         Runtime::trigger_event(applied, Runtime::merge_events(applied_events));

@@ -357,6 +357,11 @@ namespace Legion {
           base_sanity_check();
           rec->record_create_ap_user_event(result, memo);
         }
+      inline void record_trigger_event(ApUserEvent result, ApEvent rhs) const
+        {
+          base_sanity_check();
+          rec->record_trigger_event(result, rhs);
+        }
       inline void record_merge_events(ApEvent &result, 
                                       ApEvent e1, ApEvent e2) const
         {
@@ -1388,9 +1393,11 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_PERFORM_OUTPUT_TASK_ID;
       public:
-        DeferPerformOutputArgs(PhysicalAnalysis *ana);
+        DeferPerformOutputArgs(PhysicalAnalysis *ana, 
+                               const PhysicalTraceInfo &trace_info);
       public:
         PhysicalAnalysis *const analysis;
+        const PhysicalTraceInfo *trace_info;
         const RtUserEvent applied_event;
         const ApUserEvent effects_event;
       };

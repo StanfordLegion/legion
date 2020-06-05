@@ -471,7 +471,7 @@ namespace Legion {
           if (!runtime->program_order_execution)
           {
             need_completion_trigger = false;
-            Runtime::trigger_event(completion_event, chain_event);
+            Runtime::trigger_event(NULL, completion_event, chain_event);
             return true;
           }
           else

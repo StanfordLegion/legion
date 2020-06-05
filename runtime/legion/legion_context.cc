@@ -4832,7 +4832,7 @@ namespace Legion {
       LegionColor part_color = INVALID_COLOR;
       if (color != AUTO_GENERATE_ID)
         part_color = color;
-      const ApUserEvent partition_ready = Runtime::create_ap_user_event();
+      const ApUserEvent partition_ready = Runtime::create_ap_user_event(NULL);
       RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
                                 parent, color_space, part_color, part_kind, 
                                 did, partition_ready, partition_ready);
@@ -4869,7 +4869,7 @@ namespace Legion {
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
       part_op->initialize_index_space_union(this, result, handles);
-      Runtime::trigger_event(domain_ready, part_op->get_completion_event());
+      Runtime::trigger_event(NULL,domain_ready,part_op->get_completion_event());
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
       return result;
@@ -4893,7 +4893,7 @@ namespace Legion {
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
       part_op->initialize_index_space_union(this, result, handle);
-      Runtime::trigger_event(domain_ready, part_op->get_completion_event());
+      Runtime::trigger_event(NULL,domain_ready,part_op->get_completion_event());
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
       return result;
@@ -4918,7 +4918,7 @@ namespace Legion {
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
       part_op->initialize_index_space_intersection(this, result, handles);
-      Runtime::trigger_event(domain_ready, part_op->get_completion_event());
+      Runtime::trigger_event(NULL,domain_ready,part_op->get_completion_event());
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
       return result;
@@ -4943,7 +4943,7 @@ namespace Legion {
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
       part_op->initialize_index_space_intersection(this, result, handle);
-      Runtime::trigger_event(domain_ready, part_op->get_completion_event());
+      Runtime::trigger_event(NULL,domain_ready,part_op->get_completion_event());
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
       return result;
@@ -4969,7 +4969,7 @@ namespace Legion {
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
       part_op->initialize_index_space_difference(this, result, initial,handles);
-      Runtime::trigger_event(domain_ready, part_op->get_completion_event());
+      Runtime::trigger_event(NULL,domain_ready,part_op->get_completion_event());
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
       return result;
