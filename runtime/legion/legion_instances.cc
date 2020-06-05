@@ -2311,8 +2311,8 @@ namespace Legion {
       // exist so we can uniquely identify the instance
       if (!ready.exists() && runtime->legion_spy_enabled)
       {
-        ApUserEvent rename_ready = Runtime::create_ap_user_event();
-        Runtime::trigger_event(rename_ready);
+        ApUserEvent rename_ready = Runtime::create_ap_user_event(NULL);
+        Runtime::trigger_event(NULL, rename_ready);
         ready = rename_ready;
       }
       // If we successfully made the instance then Realm 
@@ -2379,7 +2379,7 @@ namespace Legion {
                             "Illegal request for a reduction instance "
                             "containing multiple fields. Only a single field "
                             "is currently permitted for reduction instances.")
-            ApUserEvent filled_and_ready = Runtime::create_ap_user_event();
+            ApUserEvent filled_and_ready = Runtime::create_ap_user_event(NULL);
             result = new FoldReductionManager(forest, did, local_space,
                                               memory_manager, 
                                               instance, layout, 
@@ -2395,6 +2395,7 @@ namespace Legion {
             // Don't record this fill operation because it is just part
             // of the semantics of reduction instances and not something
             // that we want Legion Spy to see
+            const PhysicalTraceInfo fake_info(NULL, -1U, false);
             if (!instance_domain->is_empty())
             {
               void *fill_buffer = malloc(reduction_op->sizeof_rhs);
@@ -2405,7 +2406,6 @@ namespace Legion {
                   constraints.field_constraint.get_field_set();
                 layout->compute_copy_offsets(fill_fields, result, dsts);
               }
-              const PhysicalTraceInfo fake_info(NULL, -1U, false);
 #ifdef LEGION_SPY
               ApEvent filled = instance_domain->issue_fill(fake_info, dsts,
                     fill_buffer, reduction_op->sizeof_rhs, 0/*uid*/, 
@@ -2419,10 +2419,10 @@ namespace Legion {
               // We can free the buffer after we've issued the fill
               free(fill_buffer);
               // Trigger our filled_and_ready event
-              Runtime::trigger_event(filled_and_ready, filled);
+              Runtime::trigger_event(&fake_info, filled_and_ready, filled);
             }
             else
-              Runtime::trigger_event(filled_and_ready);
+              Runtime::trigger_event(&fake_info, filled_and_ready);
             break;
           }
         case LEGION_COMPACT_REDUCTION_SPECIALIZE:

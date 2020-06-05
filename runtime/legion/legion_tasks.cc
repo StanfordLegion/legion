@@ -1215,8 +1215,8 @@ namespace Legion {
         if (!result.exists() ||
             sync_preconditions.find(result) != sync_preconditions.end())
         {
-          ApUserEvent rename = Runtime::create_ap_user_event();
-          Runtime::trigger_event(rename, result);
+          ApUserEvent rename = Runtime::create_ap_user_event(info);
+          Runtime::trigger_event(info, rename, result);
           result = rename;
         }
       }
@@ -4179,7 +4179,7 @@ namespace Legion {
             // people to wait on the value
             if (!IS_REDUCE(regions[idx]))
               clone_requirements[idx].privilege = LEGION_READ_WRITE;
-            unmap_events[idx] = Runtime::create_ap_user_event();
+            unmap_events[idx] = Runtime::create_ap_user_event(NULL);
             execution_context->add_physical_region(clone_requirements[idx],
                     false/*mapped*/, map_id, tag, unmap_events[idx],
                     false/*virtual mapped*/, physical_instances[idx]);
@@ -4188,7 +4188,7 @@ namespace Legion {
             std::set<ApEvent> ready_events;
             physical_instances[idx].update_wait_on_events(ready_events);
             ApEvent precondition = Runtime::merge_events(NULL, ready_events);
-            Runtime::trigger_event(unmap_events[idx], precondition);
+            Runtime::trigger_event(NULL, unmap_events[idx], precondition);
           }
           else
           { 
@@ -4198,7 +4198,7 @@ namespace Legion {
             // context of this task
             clone_requirements[idx] = regions[idx];
             localize_region_requirement(clone_requirements[idx]);
-            unmap_events[idx] = Runtime::create_ap_user_event();
+            unmap_events[idx] = Runtime::create_ap_user_event(NULL);
             execution_context->add_physical_region(clone_requirements[idx],
                     true/*mapped*/, map_id, tag, unmap_events[idx],
                     false/*virtual mapped*/, physical_instances[idx]);
@@ -4320,7 +4320,7 @@ namespace Legion {
                                  task_priority, profiling_requests);
       // Finish the chaining optimization if we're doing it
       if (perform_chaining_optimization)
-        Runtime::trigger_event(chain_complete_event, task_launch_event);
+        Runtime::trigger_event(NULL, chain_complete_event, task_launch_event);
       // Finally if this is a predicated task and we have a speculative
       // guard then we need to launch a meta task to handle the case
       // where the task misspeculates
@@ -6056,7 +6056,7 @@ namespace Legion {
       // Save the future result and trigger it
       result.impl->set_result(res, res_size, owned);
       // Trigger our completion event
-      Runtime::trigger_event(completion_event);
+      Runtime::trigger_event(NULL, completion_event);
       // Now we're done, someone else will deactivate us
     }
 
@@ -6514,7 +6514,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(is_remote());
 #endif
-          Runtime::trigger_event(deferred_effects, effects_condition);
+          const TraceInfo info = (remote_trace_info == NULL) ? 
+            TraceInfo(this) : TraceInfo(*remote_trace_info, this);
+          Runtime::trigger_event(&info, deferred_effects, effects_condition);
           effects_condition = deferred_effects;
           deferred_effects = ApUserEvent::NO_AP_USER_EVENT;
         }
@@ -6525,9 +6527,11 @@ namespace Legion {
         assert(!deferred_complete_mapping.exists());
         assert(!deferred_effects.exists());
 #endif
+        const TraceInfo trace_info = (remote_trace_info == NULL) ? 
+            TraceInfo(this) : TraceInfo(*remote_trace_info, this);
         deferred_complete_mapping = Runtime::create_rt_user_event();
         applied_condition = deferred_complete_mapping;
-        deferred_effects = Runtime::create_ap_user_event();
+        deferred_effects = Runtime::create_ap_user_event(&trace_info);
         effects_condition = deferred_effects;
       }
       slice_owner->record_child_mapped(applied_condition, effects_condition);
@@ -6634,10 +6638,10 @@ namespace Legion {
         // because we would have performed the leaf task
         // early complete chaining operation.
         if (!is_leaf())
-          Runtime::trigger_event(point_termination);
+          Runtime::trigger_event(NULL, point_termination);
       }
       else
-        Runtime::trigger_event(point_termination);
+        Runtime::trigger_event(NULL, point_termination);
       if (!preconditions.empty())
         slice_owner->record_child_complete(
             Runtime::merge_events(preconditions));
@@ -6740,15 +6744,15 @@ namespace Legion {
       DETAILED_PROFILER(runtime, POINT_TASK_POST_MAPPED_CALL);
       if (deferred_effects.exists())
       {
+        const TraceInfo trace_info = (remote_trace_info == NULL) ?
+            TraceInfo(this) : TraceInfo(*remote_trace_info, this);
         if (!effects_postconditions.empty())
         {
-          const TraceInfo trace_info = (remote_trace_info == NULL) ?
-            TraceInfo(this) : TraceInfo(*remote_trace_info, this);
-          Runtime::trigger_event(deferred_effects,
+          Runtime::trigger_event(&trace_info, deferred_effects,
             Runtime::merge_events(&trace_info, effects_postconditions));
         }
         else
-          Runtime::trigger_event(deferred_effects);
+          Runtime::trigger_event(&trace_info, deferred_effects);
         deferred_effects = ApUserEvent::NO_AP_USER_EVENT;
       }
 #ifdef DEBUG_LEGION
@@ -6876,7 +6880,7 @@ namespace Legion {
       if ((remote_trace_info != NULL) && (remote_trace_info->recording))
         remote_trace_info->request_term_event(point_termination);
       else // Make a new termination event for this point
-        point_termination = Runtime::create_ap_user_event();
+        point_termination = Runtime::create_ap_user_event(NULL);
     }
 
     //--------------------------------------------------------------------------
@@ -6914,7 +6918,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(!deferred_effects.exists());
 #endif
-        deferred_effects = Runtime::create_ap_user_event();
+        deferred_effects = Runtime::create_ap_user_event(NULL);
         slice_owner->record_child_mapped(RtEvent::NO_RT_EVENT,deferred_effects);
         // This is the remote case, pack it up and ship it over
         // Update our target_proc so that the sending code is correct 
@@ -6945,7 +6949,7 @@ namespace Legion {
         if (effects_postconditions.size() > 0)
           postcondition = Runtime::merge_events(NULL, effects_postconditions);
         if (is_remote())
-          Runtime::trigger_event(deferred_effects, postcondition);
+          Runtime::trigger_event(NULL, deferred_effects, postcondition);
         else
           slice_owner->record_child_mapped(RtEvent::NO_RT_EVENT, postcondition);
       }
@@ -8824,7 +8828,7 @@ namespace Legion {
         reduction_future.impl->set_result(reduction_state,
                                           reduction_state_size,false/*owner*/);
       // Trigger all our events event
-      Runtime::trigger_event(completion_event);
+      Runtime::trigger_event(NULL, completion_event);
     }
 
     //--------------------------------------------------------------------------
@@ -9144,7 +9148,7 @@ namespace Legion {
             const ApEvent done = 
               Runtime::merge_events(&trace_info, effects_postconditions);
             effects_postconditions.clear();
-            Runtime::trigger_event(to_trigger, done);
+            Runtime::trigger_event(&trace_info, to_trigger, done);
           }
           // Don't worry about the else case because that only happens
           // with inorder execution and we'll wait for it before completing

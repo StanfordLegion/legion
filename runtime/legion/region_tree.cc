@@ -1031,7 +1031,7 @@ namespace Legion {
       if (space_ready.has_triggered())
         REPORT_LEGION_ERROR(ERROR_INVALID_PENDING_CHILD,
           "Invalid pending child!")
-      Runtime::trigger_event(space_ready, op->get_completion_event());
+      Runtime::trigger_event(NULL, space_ready, op->get_completion_event());
       return child_node->compute_pending_space(op, handles, is_union);
     }
 
@@ -1052,7 +1052,7 @@ namespace Legion {
       if (space_ready.has_triggered())
         REPORT_LEGION_ERROR(ERROR_INVALID_PENDING_CHILD, 
                             "Invalid pending child!")
-      Runtime::trigger_event(space_ready, op->get_completion_event());
+      Runtime::trigger_event(NULL, space_ready, op->get_completion_event());
       return child_node->compute_pending_space(op, handle, is_union);
     }
 
@@ -1074,7 +1074,7 @@ namespace Legion {
       if (space_ready.has_triggered())
         REPORT_LEGION_ERROR(ERROR_INVALID_PENDING_CHILD,
                             "Invalid pending child!\n")
-      Runtime::trigger_event(space_ready, op->get_completion_event());
+      Runtime::trigger_event(NULL, space_ready, op->get_completion_event());
       return child_node->compute_pending_difference(op, initial, handles);
     }
 
@@ -3918,7 +3918,7 @@ namespace Legion {
               result->remove_base_resource_ref(REMOTE_DID_REF))
             delete result;
           // Free up the event since we didn't use it
-          Runtime::trigger_event(is_ready);
+          Runtime::trigger_event(NULL, is_ready);
           return it->second;
         }
         index_nodes[sp] = result;
@@ -9447,7 +9447,7 @@ namespace Legion {
           IndexSpaceNode *result = NULL;
           if (partial_pending.exists())
           {
-            ApUserEvent partial_event = Runtime::create_ap_user_event();
+            ApUserEvent partial_event = Runtime::create_ap_user_event(NULL);
             result = context->create_node(is, NULL/*realm is*/, this, c, did, 
                                           initialized, partial_event);
             Runtime::phase_barrier_arrive(partial_pending, 

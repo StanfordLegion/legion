@@ -5103,7 +5103,7 @@ namespace Legion {
         RegionNode *node = runtime->forest->get_node(requirement.region);
         ApUserEvent termination_event;
         if (mapping)
-          termination_event = Runtime::create_ap_user_event();
+          termination_event = Runtime::create_ap_user_event(NULL);
         const PhysicalTraceInfo trace_info(this, 0/*idx*/, true/*init*/);
         UpdateAnalysis *analysis = new UpdateAnalysis(runtime, this, 0/*index*/,
           version_info, requirement, node, attach_instances, attach_views,
@@ -5170,7 +5170,7 @@ namespace Legion {
         ApUserEvent termination_event;
         if (mapping)
         {
-          termination_event = Runtime::create_ap_user_event();
+          termination_event = Runtime::create_ap_user_event(NULL);
           Runtime::phase_barrier_arrive(reduce_barrier, 1/*count*/,
                                         termination_event);
         }
@@ -5900,7 +5900,7 @@ namespace Legion {
         Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/,
                                       template_completion);
         need_completion_trigger = false;
-        Runtime::trigger_event(completion_event, execution_fence_barrier);
+        Runtime::trigger_event(NULL, completion_event, execution_fence_barrier);
         local_trace->end_trace_execution(this);
         parent_ctx->update_current_fence(this, true, true);
         parent_ctx->record_previous_trace(local_trace);
@@ -9842,7 +9842,7 @@ namespace Legion {
         const std::set<ApUserEvent> &to_trigger = remote_to_trigger[0];
         for (std::set<ApUserEvent>::const_iterator it = 
               to_trigger.begin(); it != to_trigger.end(); it++)
-          Runtime::trigger_event(*it, complete);
+          Runtime::trigger_event(NULL, *it, complete);
         const ApEvent done = 
           Runtime::merge_events(NULL, local_preconditions.back());
         // If we have a remainder shard then we need to signal them too
@@ -9851,7 +9851,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(remote_to_trigger[shard_collective_stages].size() == 1);
 #endif
-          Runtime::trigger_event(
+          Runtime::trigger_event(NULL,
               *(remote_to_trigger[shard_collective_stages].begin()), done);     
         }
         return done;
@@ -9864,7 +9864,7 @@ namespace Legion {
         assert(remote_to_trigger[0].size() == 1);
         assert(local_preconditions[0].size() == 1);
 #endif
-        Runtime::trigger_event(*(remote_to_trigger[0].begin()), complete);
+        Runtime::trigger_event(NULL, *(remote_to_trigger[0].begin()), complete);
         return *(local_preconditions[0].begin());
       }
     }
@@ -9875,7 +9875,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Always make a stage precondition and send it back
-      ApUserEvent stage_complete = Runtime::create_ap_user_event();
+      ApUserEvent stage_complete = Runtime::create_ap_user_event(NULL);
       rez.serialize(stage_complete);
       if (stage == -1)
       {
@@ -9911,7 +9911,7 @@ namespace Legion {
             const ApEvent stage_pre = Runtime::merge_events(NULL,preconditions);
             for (std::set<ApUserEvent>::const_iterator it = 
                   to_trigger.begin(); it != to_trigger.end(); it++)
-              Runtime::trigger_event(*it, stage_pre);
+              Runtime::trigger_event(NULL, *it, stage_pre);
           }
         }
       }
@@ -10033,7 +10033,7 @@ namespace Legion {
         for (std::set<ApUserEvent>::const_iterator it = 
               remote_complete_events.begin(); it != 
               remote_complete_events.end(); it++)
-          Runtime::trigger_event(*it, complete_event); 
+          Runtime::trigger_event(NULL, *it, complete_event); 
       }
       rez.serialize(complete_event);
       rez.serialize<size_t>(ready_events.size());
@@ -10084,7 +10084,7 @@ namespace Legion {
         assert(!complete_event.exists());
 #endif
         if (!is_target())
-          complete_event = Runtime::create_ap_user_event();
+          complete_event = Runtime::create_ap_user_event(NULL);
       }
       perform_collective_async();
     }
@@ -10111,7 +10111,7 @@ namespace Legion {
         for (std::set<ApUserEvent>::const_iterator it = 
               remote_complete_events.begin(); it != 
               remote_complete_events.end(); it++)
-          Runtime::trigger_event(*it, precondition);
+          Runtime::trigger_event(NULL, *it, precondition);
       }
     }
 
@@ -11794,7 +11794,7 @@ namespace Legion {
       // A little bit of help from the replicate context to complete the future
       context->help_complete_future(to_complete, &next_index, 
                         sizeof(next_index), false/*own*/);
-      Runtime::trigger_event(to_trigger);
+      Runtime::trigger_event(NULL, to_trigger);
     }
 
     template class ConsensusMatchExchange<uint8_t>;

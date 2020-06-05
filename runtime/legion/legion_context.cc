@@ -9932,7 +9932,7 @@ namespace Legion {
                                        size_t num_elements, size_t element_size)
     //--------------------------------------------------------------------------
     {
-      ApUserEvent complete = Runtime::create_ap_user_event();
+      ApUserEvent complete = Runtime::create_ap_user_event(NULL);
       Future result = runtime->help_create_future(complete);
       switch (element_size)
       {
