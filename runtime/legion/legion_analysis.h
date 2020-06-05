@@ -138,7 +138,8 @@ namespace Legion {
       virtual void request_term_event(ApUserEvent &term_event) = 0;
       virtual void record_create_ap_user_event(ApUserEvent lhs, 
                                                Memoizable *memo) = 0;
-      virtual void record_trigger_event(ApUserEvent lhs, ApEvent rhs) = 0;
+      virtual void record_trigger_event(ApUserEvent lhs, ApEvent rhs,
+                                        Memoizable *memo) = 0;
     public:
       virtual void record_merge_events(ApEvent &lhs, 
                                        ApEvent rhs, Memoizable *memo) = 0;
@@ -251,7 +252,8 @@ namespace Legion {
       virtual void request_term_event(ApUserEvent &term_event);
       virtual void record_create_ap_user_event(ApUserEvent lhs, 
                                                Memoizable *memo);
-      virtual void record_trigger_event(ApUserEvent lhs, ApEvent rhs);
+      virtual void record_trigger_event(ApUserEvent lhs, ApEvent rhs,
+                                        Memoizable *memo);
     public:
       virtual void record_merge_events(ApEvent &lhs, 
                                        ApEvent rhs, Memoizable *memo);
@@ -376,7 +378,7 @@ namespace Legion {
       inline void record_trigger_event(ApUserEvent result, ApEvent rhs) const
         {
           base_sanity_check();
-          rec->record_trigger_event(result, rhs);
+          rec->record_trigger_event(result, rhs, memo);
         }
       inline void record_merge_events(ApEvent &result, 
                                       ApEvent e1, ApEvent e2) const
