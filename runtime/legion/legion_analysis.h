@@ -132,11 +132,13 @@ namespace Legion {
       virtual void pack_recorder(Serializer &rez, 
           std::set<RtEvent> &applied, const AddressSpaceID target) = 0; 
       virtual RtEvent get_collect_event(void) const = 0;
+      virtual PhysicalTraceRecorder* clone(Memoizable *memo) { return this; }
     public:
       virtual void record_get_term_event(Memoizable *memo) = 0;
       virtual void record_create_ap_user_event(ApUserEvent lhs, 
                                                Memoizable *memo) = 0;
-      virtual void record_trigger_event(ApUserEvent lhs, ApEvent rhs) = 0;
+      virtual void record_trigger_event(ApUserEvent lhs, ApEvent rhs,
+                                        Memoizable *memo) = 0;
     public:
       virtual void record_merge_events(ApEvent &lhs, 
                                        ApEvent rhs, Memoizable *memo) = 0;
@@ -241,11 +243,13 @@ namespace Legion {
       virtual void pack_recorder(Serializer &rez, 
           std::set<RtEvent> &applied, const AddressSpaceID target);
       virtual RtEvent get_collect_event(void) const { return collect_event; }
+      virtual PhysicalTraceRecorder* clone(Memoizable *memo);
     public:
       virtual void record_get_term_event(Memoizable *memo);
       virtual void record_create_ap_user_event(ApUserEvent lhs, 
                                                Memoizable *memo);
-      virtual void record_trigger_event(ApUserEvent lhs, ApEvent rhs);
+      virtual void record_trigger_event(ApUserEvent lhs, ApEvent rhs,
+                                        Memoizable *memo);
     public:
       virtual void record_merge_events(ApEvent &lhs, 
                                        ApEvent rhs, Memoizable *memo);
@@ -346,6 +350,7 @@ namespace Legion {
                                   std::set<RtEvent> &applied) const;
       static TraceInfo* unpack_remote_trace_info(Deserializer &derez,
                                     Operation *op, Runtime *runtime);
+      TraceInfo* clone(Operation *op);
     public:
       inline void record_get_term_event(void) const
         {
@@ -356,6 +361,11 @@ namespace Legion {
         {
           base_sanity_check();
           rec->record_create_ap_user_event(result, memo);
+        }
+      inline void record_trigger_event(ApUserEvent result, ApEvent rhs) const
+        {
+          base_sanity_check();
+          rec->record_trigger_event(result, rhs, memo);
         }
       inline void record_merge_events(ApEvent &result, 
                                       ApEvent e1, ApEvent e2) const
@@ -1392,9 +1402,11 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_PERFORM_OUTPUT_TASK_ID;
       public:
-        DeferPerformOutputArgs(PhysicalAnalysis *ana);
+        DeferPerformOutputArgs(PhysicalAnalysis *ana, 
+                               const PhysicalTraceInfo &trace_info);
       public:
         PhysicalAnalysis *const analysis;
+        const PhysicalTraceInfo *trace_info;
         const RtUserEvent applied_event;
         const ApUserEvent effects_event;
       };

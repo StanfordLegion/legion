@@ -96,8 +96,8 @@ namespace Legion {
 #ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!result.exists())
       {
-        ApUserEvent new_result = Runtime::create_ap_user_event();
-        Runtime::trigger_event(new_result);
+        ApUserEvent new_result = Runtime::create_ap_user_event(NULL);
+        Runtime::trigger_event(NULL, new_result);
         result = new_result;
       }
 #endif
@@ -216,8 +216,8 @@ namespace Legion {
 #ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!result.exists())
       {
-        ApUserEvent new_result = Runtime::create_ap_user_event();
-        Runtime::trigger_event(new_result);
+        ApUserEvent new_result = Runtime::create_ap_user_event(NULL);
+        Runtime::trigger_event(NULL, new_result);
         result = new_result;
       }
 #endif
@@ -400,8 +400,8 @@ namespace Legion {
 #ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!result.exists())
       {
-        ApUserEvent new_result = Runtime::create_ap_user_event();
-        Runtime::trigger_event(new_result);
+        ApUserEvent new_result = Runtime::create_ap_user_event(NULL);
+        Runtime::trigger_event(NULL, new_result);
         result = new_result;
       }
 #endif
@@ -2195,6 +2195,17 @@ namespace Legion {
     {
       if (!tight_space.empty())
       {
+        bool is_dense = tight_space.dense();
+        size_t dense_volume, sparse_volume;
+        if (is_dense)
+          dense_volume = sparse_volume = tight_space.volume();
+        else
+          {
+            dense_volume = tight_space.bounds.volume();
+            sparse_volume = tight_space.volume();
+          }
+        context->runtime->profiler->record_index_space_size(
+                          handle.get_id(), dense_volume, sparse_volume, !is_dense);
         // Iterate over the rectangles and print them out
         for (Realm::IndexSpaceIterator<DIM,T> itr(tight_space);
               itr.valid; itr.step())
@@ -2730,8 +2741,8 @@ namespace Legion {
 #ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!result.exists() || (result == ready))
       {
-        ApUserEvent new_result = Runtime::create_ap_user_event();
-        Runtime::trigger_event(new_result);
+        ApUserEvent new_result = Runtime::create_ap_user_event(NULL);
+        Runtime::trigger_event(NULL, new_result);
         result = new_result;
       }
 #endif
@@ -2855,8 +2866,8 @@ namespace Legion {
 #ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!result.exists() || (result == precondition))
       {
-        ApUserEvent new_result = Runtime::create_ap_user_event();
-        Runtime::trigger_event(new_result);
+        ApUserEvent new_result = Runtime::create_ap_user_event(NULL);
+        Runtime::trigger_event(NULL, new_result);
         result = new_result;
       }
 #endif
@@ -2981,8 +2992,8 @@ namespace Legion {
 #ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!result.exists() || (result == precondition))
       {
-        ApUserEvent new_result = Runtime::create_ap_user_event();
-        Runtime::trigger_event(new_result);
+        ApUserEvent new_result = Runtime::create_ap_user_event(NULL);
+        Runtime::trigger_event(NULL, new_result);
         result = new_result;
       }
 #endif
@@ -3108,8 +3119,8 @@ namespace Legion {
 #ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!result.exists() || (result == precondition))
       {
-        ApUserEvent new_result = Runtime::create_ap_user_event();
-        Runtime::trigger_event(new_result);
+        ApUserEvent new_result = Runtime::create_ap_user_event(NULL);
+        Runtime::trigger_event(NULL, new_result);
         result = new_result;
       }
 #endif
@@ -3234,8 +3245,8 @@ namespace Legion {
 #ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!result.exists() || (result == precondition))
       {
-        ApUserEvent new_result = Runtime::create_ap_user_event();
-        Runtime::trigger_event(new_result);
+        ApUserEvent new_result = Runtime::create_ap_user_event(NULL);
+        Runtime::trigger_event(NULL, new_result);
         result = new_result;
       }
 #endif
@@ -3577,8 +3588,8 @@ namespace Legion {
 #ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!result.exists() || (result == ready))
       {
-        ApUserEvent new_result = Runtime::create_ap_user_event();
-        Runtime::trigger_event(new_result);
+        ApUserEvent new_result = Runtime::create_ap_user_event(NULL);
+        Runtime::trigger_event(NULL, new_result);
         result = new_result;
       }
 #endif
@@ -3663,8 +3674,8 @@ namespace Legion {
 #ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!result.exists() || (result == precondition))
       {
-        ApUserEvent new_result = Runtime::create_ap_user_event();
-        Runtime::trigger_event(new_result);
+        ApUserEvent new_result = Runtime::create_ap_user_event(NULL);
+        Runtime::trigger_event(NULL, new_result);
         result = new_result;
       }
 #endif
@@ -3796,8 +3807,8 @@ namespace Legion {
 #ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!result.exists() || (result == precondition))
       {
-        ApUserEvent new_result = Runtime::create_ap_user_event();
-        Runtime::trigger_event(new_result);
+        ApUserEvent new_result = Runtime::create_ap_user_event(NULL);
+        Runtime::trigger_event(NULL, new_result);
         result = new_result;
       }
 #endif
@@ -3952,8 +3963,8 @@ namespace Legion {
 #ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!result.exists() || (result == precondition))
       {
-        ApUserEvent new_result = Runtime::create_ap_user_event();
-        Runtime::trigger_event(new_result);
+        ApUserEvent new_result = Runtime::create_ap_user_event(NULL);
+        Runtime::trigger_event(NULL, new_result);
         result = new_result;
       }
 #endif
@@ -4107,8 +4118,8 @@ namespace Legion {
 #ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!result.exists() || (result == precondition))
       {
-        ApUserEvent new_result = Runtime::create_ap_user_event();
-        Runtime::trigger_event(new_result);
+        ApUserEvent new_result = Runtime::create_ap_user_event(NULL);
+        Runtime::trigger_event(NULL, new_result);
         result = new_result;
       }
 #endif
@@ -4263,8 +4274,8 @@ namespace Legion {
 #ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!result.exists() || (result == precondition))
       {
-        ApUserEvent new_result = Runtime::create_ap_user_event();
-        Runtime::trigger_event(new_result);
+        ApUserEvent new_result = Runtime::create_ap_user_event(NULL);
+        Runtime::trigger_event(NULL, new_result);
         result = new_result;
       }
 #endif
@@ -4381,8 +4392,8 @@ namespace Legion {
 #ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!result.exists() || (result == precondition))
       {
-        ApUserEvent new_result = Runtime::create_ap_user_event();
-        Runtime::trigger_event(new_result);
+        ApUserEvent new_result = Runtime::create_ap_user_event(NULL);
+        Runtime::trigger_event(NULL, new_result);
         result = new_result;
       }
 #endif

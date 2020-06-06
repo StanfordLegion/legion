@@ -42,7 +42,7 @@ def iterkeys(obj):
 def itervalues(obj):
     return obj.values() if sys.version_info > (3,) else obj.viewvalues()
 
-prefix = r'\[(?P<realmnode>[0-9]+) - (?P<thread>[0-9a-f]+)\] \{\w+\}\{legion_gc\}: '
+prefix = r'\[(?P<realmnode>[0-9]+) - (?P<thread>[0-9a-f]+)\](?:\s+[0-9]+\.[0-9]+)? \{\w+\}\{legion_gc\}: '
 # References
 add_base_ref_pat = re.compile(prefix + r'GC Add Base Ref (?P<kind>[0-9]+) (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<src>[0-9]+) (?P<cnt>[0-9]+)')
 add_nested_ref_pat = re.compile(prefix + r'GC Add Nested Ref (?P<kind>[0-9]+) (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<src>[0-9]+) (?P<cnt>[0-9]+)')

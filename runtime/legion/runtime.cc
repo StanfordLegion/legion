@@ -687,9 +687,9 @@ namespace Legion {
         // because we still rely on futures to propagate privileges when
         // return region tree types
         if (future_complete != subscription_event)
-          Runtime::trigger_event(subscription_event, future_complete);
+          Runtime::trigger_event(NULL, subscription_event, future_complete);
         else
-          Runtime::trigger_event(subscription_event);
+          Runtime::trigger_event(NULL, subscription_event);
         subscription_event = ApUserEvent::NO_AP_USER_EVENT;
         if (remove_base_resource_ref(RUNTIME_REF))
           assert(false); // should always hold a reference from caller
@@ -715,7 +715,7 @@ namespace Legion {
       empty = false;
       ApEvent complete;
       derez.deserialize(complete);
-      Runtime::trigger_event(subscription_event, complete);
+      Runtime::trigger_event(NULL, subscription_event, complete);
       subscription_event = ApUserEvent::NO_AP_USER_EVENT;
       if (is_owner())
       {
@@ -770,7 +770,7 @@ namespace Legion {
       {
         if (!subscription_event.exists())
         {
-          subscription_event = Runtime::create_ap_user_event();
+          subscription_event = Runtime::create_ap_user_event(NULL);
           // Add a reference to prevent us from being collected
           // until we get the result of the subscription
           add_base_resource_ref(RUNTIME_REF);
@@ -1609,7 +1609,7 @@ namespace Legion {
       if (trigger_on_unmap)
       {
         trigger_on_unmap = false;
-        Runtime::trigger_event(termination_event);
+        Runtime::trigger_event(NULL, termination_event);
       }
       if (!references.empty() && !replaying)
         references.remove_resource_references(PHYSICAL_REGION_REF);
@@ -1896,11 +1896,11 @@ namespace Legion {
         if (!wait_on.empty())
         {
           wait_on.insert(mapped_event);
-          Runtime::trigger_event(termination_event,
+          Runtime::trigger_event(NULL, termination_event,
                                  Runtime::merge_events(NULL, wait_on));
         }
         else
-          Runtime::trigger_event(termination_event, mapped_event);
+          Runtime::trigger_event(NULL, termination_event, mapped_event);
       }
       valid = false;
       mapped = false;
@@ -2654,8 +2654,8 @@ namespace Legion {
         // We can't call external wait directly on the barrier
         // right now, so as a work-around we'll make an event
         // and then wait on that
-        ApUserEvent wait_on = Runtime::create_ap_user_event();
-        Runtime::trigger_event(wait_on, previous);
+        ApUserEvent wait_on = Runtime::create_ap_user_event(NULL);
+        Runtime::trigger_event(NULL, wait_on, previous);
         wait_on.external_wait();
       }
       // Now we can advance our wait barrier
@@ -10650,7 +10650,7 @@ namespace Legion {
         else
         {
           std::vector<Processor> util_group(locals.begin(), locals.end());
-          utility_group = Processor::create_group(util_group);
+          utility_group = ProcessorGroup::create_group(util_group);
         }
       }
       else if (local_utils.size() == 1)
@@ -10658,7 +10658,7 @@ namespace Legion {
       else
       {
         std::vector<Processor> util_g(local_utils.begin(), local_utils.end());
-        utility_group = Processor::create_group(util_g);
+        utility_group = ProcessorGroup::create_group(util_g);
       }
 #ifdef DEBUG_LEGION
       assert(utility_group.exists());
@@ -11253,7 +11253,7 @@ namespace Legion {
       assert(!prof_procs.empty());
 #endif
       const Processor target_proc_for_profiler = prof_procs.size() > 1 ?
-        Processor::create_group(prof_procs) : prof_procs.front();
+        ProcessorGroup::create_group(prof_procs) : prof_procs.front();
       LG_TASK_DESCRIPTIONS(lg_task_descriptions);
       LG_MESSAGE_DESCRIPTIONS(lg_message_descriptions);
       LEGION_STATIC_ASSERT((LG_MESSAGE_ID+1) == LG_LAST_TASK_ID,
@@ -11821,7 +11821,7 @@ namespace Legion {
       // Create a temporary event to name the result since we 
       // have to pack it in the task that runs, but it also depends
       // on the task being reported back to the mapper
-      ApUserEvent result = Runtime::create_ap_user_event();
+      ApUserEvent result = Runtime::create_ap_user_event(NULL);
       // Add a reference to the future impl to prevent it being collected
       f.impl->add_base_gc_ref(FUTURE_HANDLE_REF);
       // Create a meta-task to return the results to the mapper
@@ -11830,7 +11830,7 @@ namespace Legion {
       ApEvent post(issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
                                            Runtime::protect_event(pre)));
       // Chain the events properly
-      Runtime::trigger_event(result, post);
+      Runtime::trigger_event(NULL, result, post);
       // Mark that we have another outstanding top level task
       increment_outstanding_top_level_tasks();
       // Now we can put it on the queue
@@ -13407,7 +13407,7 @@ namespace Legion {
                     "task %s (ID %lld)", tid, ctx->get_task_name(),
                     ctx->get_unique_id());
 #endif
-      const ApUserEvent to_trigger = Runtime::create_ap_user_event();
+      const ApUserEvent to_trigger = Runtime::create_ap_user_event(NULL);
       FutureImpl *result = new FutureImpl(this, true/*register*/,
                               get_available_distributed_id(),
                               address_space, to_trigger,
@@ -13469,7 +13469,7 @@ namespace Legion {
       if ((output.value != NULL) && (output.size > 0))
         args->result->set_result(output.value, output.size, 
                                  output.take_ownership);
-      Runtime::trigger_event(args->to_trigger);
+      Runtime::trigger_event(NULL, args->to_trigger);
     }
 
     //--------------------------------------------------------------------------
@@ -17103,7 +17103,7 @@ namespace Legion {
     void Runtime::handle_index_space_child_response(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      IndexSpaceNode::handle_node_child_response(derez);
+      IndexSpaceNode::handle_node_child_response(forest, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -17210,7 +17210,7 @@ namespace Legion {
     void Runtime::handle_index_partition_child_response(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      IndexPartNode::handle_node_child_response(derez);
+      IndexPartNode::handle_node_child_response(forest, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -18907,7 +18907,7 @@ namespace Legion {
       }
       // If we make it here create a new processor group and add it
       std::vector<Processor> input_procs(procs.begin(), procs.end());
-      Processor group = Processor::create_group(input_procs);
+      Processor group = ProcessorGroup::create_group(input_procs);
       if (finder != processor_groups.end())
         finder->second.push_back(ProcessorGroupInfo(group, local_mask));
       else

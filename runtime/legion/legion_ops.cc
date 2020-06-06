@@ -82,7 +82,7 @@ namespace Legion {
       need_completion_trigger = true;
       mapped_event = Runtime::create_rt_user_event();
       resolved_event = Runtime::create_rt_user_event();
-      completion_event = Runtime::create_ap_user_event();
+      completion_event = Runtime::create_ap_user_event(NULL);
       if (runtime->resilient_mode)
         commit_event = Runtime::create_rt_user_event(); 
       execution_fence_event = ApEvent::NO_AP_EVENT;
@@ -126,7 +126,7 @@ namespace Legion {
       if (!resolved)
         Runtime::trigger_event(resolved_event);
       if (need_completion_trigger && !completion_event.has_triggered())
-        Runtime::trigger_event(completion_event);
+        Runtime::trigger_event(NULL, completion_event);
       if (!commit_event.has_triggered())
         Runtime::trigger_event(commit_event);
     }
@@ -839,7 +839,7 @@ namespace Legion {
         }
       }
       if (need_completion_trigger)
-        Runtime::trigger_event(completion_event);
+        Runtime::trigger_event(NULL, completion_event);
       // finally notify all the operations we dependended on
       // that we validated their regions note we don't need
       // the lock since this was all set when we did our mapping analysis
@@ -1651,6 +1651,14 @@ namespace Legion {
       rez.serialize(completion_event);
       rez.serialize<bool>(is_mem_task);
       rez.serialize<bool>(is_memo);
+    }
+
+    //--------------------------------------------------------------------------
+    Memoizable* RemoteMemoizable::clone(Operation *newop)
+    //--------------------------------------------------------------------------
+    {
+      return new RemoteMemoizable(newop, original, origin, kind, trace_local_id,
+                                  completion_event, is_mem_task, is_memo);
     }
 
     //--------------------------------------------------------------------------
@@ -2694,7 +2702,7 @@ namespace Legion {
                          parent_ctx->get_unique_id());
       }
       requirement = launcher.requirement;
-      termination_event = Runtime::create_ap_user_event();
+      termination_event = Runtime::create_ap_user_event(NULL);
       grants = launcher.grants;
       // Register ourselves with all the grants
       for (unsigned idx = 0; idx < grants.size(); idx++)
@@ -2739,7 +2747,7 @@ namespace Legion {
       map_id = reg.impl->map_id;
       tag = reg.impl->tag;
       region = reg;
-      termination_event = Runtime::create_ap_user_event();
+      termination_event = Runtime::create_ap_user_event(NULL);
       region.impl->remap_region(completion_event);
       // We're only really remapping it if it already had a physical
       // instance that we can use to make a valid value
@@ -4947,7 +4955,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(gather_targets->size() == 1);
 #endif
-        indirect_done = Runtime::create_ap_user_event();
+        indirect_done = Runtime::create_ap_user_event(&trace_info);
         copy_done = exchange_indirect_records(index, indirect_done, trace_info,
             src_targets, src_requirements[index].region.get_index_space(), 
             index_point, src_records, true/*sources*/);
@@ -4958,7 +4966,7 @@ namespace Legion {
         assert(scatter_targets->size() == 1);
 #endif
         if (!indirect_done.exists())
-          indirect_done = Runtime::create_ap_user_event();
+          indirect_done = Runtime::create_ap_user_event(&trace_info);
         // It's alright to overwrite this, it will the same as it was
         // from the gather case if this is a full-on indirection
         copy_done = exchange_indirect_records(index, indirect_done, trace_info,
@@ -4987,7 +4995,7 @@ namespace Legion {
               src_requirements.size() + index, gather_is_range[index],
               local_init_precondition, predication_guard, trace_info,
               possible_src_indirect_out_of_range);
-          Runtime::trigger_event(indirect_done, local_done);
+          Runtime::trigger_event(&trace_info, indirect_done, local_done);
         }
       }
       else
@@ -5002,7 +5010,7 @@ namespace Legion {
               local_init_precondition, predication_guard, trace_info,
               possible_dst_indirect_out_of_range, 
               possible_dst_indirect_aliasing);
-          Runtime::trigger_event(indirect_done, local_done);
+          Runtime::trigger_event(&trace_info, indirect_done, local_done);
         }
         else
         {
@@ -5020,10 +5028,9 @@ namespace Legion {
               possible_src_indirect_out_of_range,
               possible_dst_indirect_out_of_range,
               possible_dst_indirect_aliasing);
-          Runtime::trigger_event(indirect_done, local_done);
+          Runtime::trigger_event(&trace_info, indirect_done, local_done);
         }
       }
-      Runtime::trigger_event(local_completion, copy_done);
       if (is_recording())
       {
 #ifdef DEBUG_LEGION
@@ -5032,8 +5039,8 @@ namespace Legion {
         // This can happen in cases when the copy index space is empty
         if (!copy_done.exists())
           copy_done = execution_fence_event;
-        tpl->record_trigger_event(local_completion, copy_done);
       }
+      Runtime::trigger_event(&trace_info, local_completion, copy_done);
 #ifdef DEBUG_LEGION
       dump_physical_state(&src_requirements[index], index);
       dump_physical_state(&dst_requirements[index], 
@@ -5807,7 +5814,7 @@ namespace Legion {
       }
 
       // Handle the case for marking when the copy completes
-      Runtime::trigger_event(completion_event, copy_complete_event);
+      Runtime::trigger_event(NULL, completion_event, copy_complete_event);
       need_completion_trigger = false;
       complete_execution();
     }
@@ -7047,6 +7054,7 @@ namespace Legion {
       initialize_operation(own->get_context(), false/*track*/, 
           own->src_requirements.size() + own->dst_requirements.size());
       index_point = p;
+      index_domain = own->index_domain;
       owner = own;
       execution_fence_event = own->get_execution_fence_event();
       // From Memoizable
@@ -8844,7 +8852,7 @@ namespace Legion {
       assert(completion_event.exists());
 #endif
       const PhysicalTraceInfo trace_info(this, 0/*index*/, false/*init*/);
-      ApUserEvent close_event = Runtime::create_ap_user_event();
+      ApUserEvent close_event = Runtime::create_ap_user_event(NULL);
       ApEvent effects_done = 
         runtime->forest->physical_perform_updates_and_registration(
                                               requirement, version_info,
@@ -8871,10 +8879,10 @@ namespace Legion {
           close_preconditions.insert(pre);
       }
       if (!close_preconditions.empty())
-        Runtime::trigger_event(close_event, 
+        Runtime::trigger_event(NULL, close_event, 
             Runtime::merge_events(&trace_info, close_preconditions));
       else
-        Runtime::trigger_event(close_event);
+        Runtime::trigger_event(NULL, close_event);
       if (runtime->legion_spy_enabled)
       {
         runtime->forest->log_mapping_decision(unique_op_id, parent_ctx,
@@ -9813,7 +9821,7 @@ namespace Legion {
       }
 
       // Handle the case for marking when the copy completes
-      Runtime::trigger_event(completion_event, acquire_complete_event);
+      Runtime::trigger_event(NULL, completion_event, acquire_complete_event);
       need_completion_trigger = false;
       complete_execution();
     }
@@ -10700,7 +10708,7 @@ namespace Legion {
       }
 
       // Handle the case for marking when the copy completes
-      Runtime::trigger_event(completion_event, release_complete_event);
+      Runtime::trigger_event(NULL, completion_event, release_complete_event);
       need_completion_trigger = false;
       complete_execution();
     }
@@ -13713,7 +13721,7 @@ namespace Legion {
       index_domain = partition_node->color_space->get_color_space_domain();
       is_index_space = true;
 #ifdef LEGION_SPY
-      intermediate_index_event = Runtime::create_ap_user_event();
+      intermediate_index_event = Runtime::create_ap_user_event(NULL);
 #endif
     }
 
@@ -13881,7 +13889,7 @@ namespace Legion {
               Runtime::merge_events(&info, index_preconditions), instances);
           request_early_complete(done_event);
 #ifdef LEGION_SPY
-          Runtime::trigger_event(intermediate_index_event, done_event);
+          Runtime::trigger_event(NULL, intermediate_index_event, done_event);
 #endif
           complete_execution(Runtime::protect_event(done_event));
         }
@@ -14706,7 +14714,6 @@ namespace Legion {
       : DependentPartitionOp(rt), owner(NULL)
     //--------------------------------------------------------------------------
     {
-      is_index_space = false;
     }
 
     //--------------------------------------------------------------------------
@@ -14741,6 +14748,7 @@ namespace Legion {
       initialize_operation(own->get_context(), false/*track*/, 1/*size*/);
       index_point = p;
       owner = own;
+      index_domain = owner->index_domain;
       requirement = owner->requirement;
       parent_task = owner->parent_task;
       map_id      = owner->map_id;
@@ -14772,6 +14780,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_dependent_op();
+      // Reset this to true after it was cleared by the base call
+      is_index_space = true;
       owner = NULL;
     }
 
@@ -15995,6 +16005,7 @@ namespace Legion {
       : FillOp(rt)
     //--------------------------------------------------------------------------
     {
+      this->is_index_space = true;
     }
 
     //--------------------------------------------------------------------------
@@ -16028,6 +16039,7 @@ namespace Legion {
       // Initialize the operation
       initialize_operation(own->get_context(), false/*track*/, 1/*regions*/); 
       index_point = p;
+      index_domain = own->index_domain; 
       owner = own;
       execution_fence_event = own->get_execution_fence_event();
       // From Memoizable
@@ -16494,7 +16506,7 @@ namespace Legion {
       InstanceView *ext_view = external_views[0];
       ApUserEvent termination_event;
       if (mapping)
-        termination_event = Runtime::create_ap_user_event();
+        termination_event = Runtime::create_ap_user_event(NULL);
       ApEvent attach_event = runtime->forest->attach_external(this, 0/*idx*/,
                                                         requirement,
                                                         ext_view, ext_view,
@@ -16646,8 +16658,8 @@ namespace Legion {
         // We always need a unique ready event for Legion Spy
         if (!ready_event.exists())
         {
-          ApUserEvent rename_ready = Runtime::create_ap_user_event();
-          Runtime::trigger_event(rename_ready);
+          ApUserEvent rename_ready = Runtime::create_ap_user_event(NULL);
+          Runtime::trigger_event(NULL, rename_ready);
           ready_event = rename_ready;
         }
         for (std::set<FieldID>::const_iterator it = 

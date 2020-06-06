@@ -697,8 +697,10 @@ namespace Legion {
                              std::deque<InstanceSet> &physical_instances) const;
     public:
       virtual void record_get_term_event(Memoizable *memo);
-      void record_create_ap_user_event(ApUserEvent lhs, Memoizable *memo);
-      void record_trigger_event(ApUserEvent lhs, ApEvent rhs);
+      virtual void record_create_ap_user_event(ApUserEvent lhs, 
+                                               Memoizable *memo);
+      virtual void record_trigger_event(ApUserEvent lhs, ApEvent rhs,
+                                        Memoizable *memo);
     public:
       virtual void record_merge_events(ApEvent &lhs, 
                                        ApEvent rhs, Memoizable *memo);
@@ -801,6 +803,7 @@ namespace Legion {
     private:
       unsigned convert_event(const ApEvent &event);
       unsigned find_event(const ApEvent &event) const;
+      unsigned find_or_convert_event(const ApEvent &event);
       void insert_instruction(Instruction *inst);
     private:
       // Returns the set of last users for all <view,field mask,index expr>
@@ -814,8 +817,9 @@ namespace Legion {
                            const FieldMask &mask,
                            std::set<unsigned> &users);
     public:
-      ApEvent get_fence_completion(void)
-        { return fence_completion; }
+      inline ApEvent get_fence_completion(void) { return fence_completion; }
+      void record_remote_memoizable(Memoizable *memo);
+      void release_remote_memos(void);
     private:
       PhysicalTrace * const trace;
       volatile bool recording;
@@ -826,14 +830,16 @@ namespace Legion {
     private:
       std::map<TraceLocalID,Memoizable*> operations;
       std::map<TraceLocalID,std::pair<unsigned,bool/*task*/> > memo_entries;
+      // Remote memoizable objects that we have ownership for
+      std::vector<Memoizable*> remote_memos;
     private:
       CachedMappings cached_mappings;
       bool has_virtual_mapping;
     private:
-      ApEvent                    fence_completion;
-      std::vector<ApEvent>       events;
-      std::vector<ApUserEvent>   user_events;
-      std::map<ApEvent,unsigned> event_map;
+      ApEvent                         fence_completion;
+      std::vector<ApEvent>            events;
+      std::map<unsigned,ApUserEvent>  user_events;
+      std::map<ApEvent,unsigned>      event_map;
     private:
       std::vector<Instruction*>               instructions;
       std::vector<std::vector<Instruction*> > slices;
@@ -926,7 +932,7 @@ namespace Legion {
     protected:
       std::map<TraceLocalID, Memoizable*> &operations;
       std::vector<ApEvent> &events;
-      std::vector<ApUserEvent> &user_events;
+      std::map<unsigned,ApUserEvent> &user_events;
     public:
       const TraceLocalID owner;
     };

@@ -63,8 +63,10 @@ namespace Realm {
       // Return the address space for this processor
       AddressSpace address_space(void) const;
 
-      static Processor create_group(const std::vector<Processor>& members);
-      void get_group_members(std::vector<Processor>& members);
+      REALM_ATTR_DEPRECATED("use ProcessorGroup::create_group instead",
+      static Processor create_group(const std::vector<Processor>& members));
+
+      void get_group_members(std::vector<Processor>& members) const;
 
       int get_num_cores(void) const;
 
@@ -166,6 +168,19 @@ namespace Realm {
       Processor p;
     };
 #endif
+
+    // a processor group is a set of processors that share a ready task queue
+    //  (in addition to their own processor-specific task queues)
+    // NOTE: processor groups are currently limited to include processors from
+    //  only a single node/rank in a distributed setting
+    class ProcessorGroup : public Processor {
+    public:
+      static ProcessorGroup create_group(const std::vector<Processor>& members);
+
+      void destroy(Event wait_on = Event::NO_EVENT) const;
+
+      static const ProcessorGroup NO_PROC_GROUP;
+    };
 
     inline std::ostream& operator<<(std::ostream& os, Processor p) { return os << std::hex << p.id << std::dec; }
 	

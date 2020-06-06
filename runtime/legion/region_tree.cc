@@ -3556,7 +3556,7 @@ namespace Legion {
               result->remove_base_resource_ref(REMOTE_DID_REF))
             delete result;
           // Free up the event since we didn't use it
-          Runtime::trigger_event(is_ready);
+          Runtime::trigger_event(NULL, is_ready);
           return it->second;
         }
         index_nodes[sp] = result;
@@ -7519,7 +7519,10 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(handle);
         rez.serialize(c);
-        rez.serialize(handle_ptr);
+        if (defer == NULL)
+          rez.serialize(handle_ptr);
+        else
+          rez.serialize<IndexPartition*>(NULL);
         rez.serialize(ready_event);
       }
       context->runtime->send_index_space_child_request(owner_space, rez);
@@ -7951,7 +7954,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void IndexSpaceNode::handle_node_child_response(
-                                                            Deserializer &derez)
+                                  RegionTreeForest *forest, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -7961,8 +7964,17 @@ namespace Legion {
       derez.deserialize(target);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
-      (*target) = handle;
-      Runtime::trigger_event(to_trigger);
+      if (target == NULL)
+      {
+        RtEvent defer; 
+        forest->get_node(handle, &defer);
+        Runtime::trigger_event(to_trigger, defer);
+      }
+      else
+      {
+        (*target) = handle;
+        Runtime::trigger_event(to_trigger);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -8737,7 +8749,7 @@ namespace Legion {
           IndexSpaceNode *result = NULL;
           if (partial_pending.exists())
           {
-            ApUserEvent partial_event = Runtime::create_ap_user_event();
+            ApUserEvent partial_event = Runtime::create_ap_user_event(NULL);
             result = context->create_node(is, NULL/*realm is*/, this, c, did, 
                                           initialized, partial_event);
             add_pending_child(c, partial_event);
@@ -8753,7 +8765,7 @@ namespace Legion {
               }
             }
             if (!child_ready_events.empty())
-              Runtime::trigger_event(partial_pending,
+              Runtime::trigger_event(NULL, partial_pending,
                   Runtime::merge_events(NULL, child_ready_events));
           }
           else
@@ -8780,7 +8792,10 @@ namespace Legion {
           RezCheck z(rez);
           rez.serialize(handle);
           rez.serialize(c);
-          rez.serialize(handle_ptr);
+          if (defer == NULL)
+            rez.serialize(handle_ptr);
+          else
+            rez.serialize<IndexSpace*>(NULL);
           rez.serialize(ready_event);
         }
         context->runtime->send_index_partition_child_request(owner_space, rez);
@@ -9668,7 +9683,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void IndexPartNode::handle_node_child_response(
-                                                            Deserializer &derez)
+                                  RegionTreeForest *forest, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -9678,8 +9693,17 @@ namespace Legion {
       derez.deserialize(target);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
-      (*target) = handle;
-      Runtime::trigger_event(to_trigger);
+      if (target == NULL)
+      {
+        RtEvent defer;
+        forest->get_node(handle, &defer);
+        Runtime::trigger_event(to_trigger, defer);
+      }
+      else
+      {
+        (*target) = handle;
+        Runtime::trigger_event(to_trigger);
+      }
     }
 
     //--------------------------------------------------------------------------

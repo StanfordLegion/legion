@@ -1,6 +1,25 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
+Version 20.06.0 (June ??, 2020)
+  * Regent
+     - Support for `std/format` module for type-safe formatted printing.
+     - Support for documentation with LDoc.
+     - Support for `__future` operator to import a C API future.
+  * Realm
+     - Subgraphs can be used to capture a template of Realm operations
+        that will be executed repeatedly.  Subgraph definitions include
+        support for "interpolating" values into individual operations'
+        arguments on each instantiation of the subgraph template
+     - `create_weighted_subspaces` supports `size_t` weights for precise
+        control over the size of each subspace
+     - Added support for `omp critical` constructs and dynamic loop
+        schedules in OpenMP tasks
+     - Added support for `cudaStreamLegacy` and `cudaStreamPerThread` in
+        CUDA tasks
+     - Realm logs now include a timestamp (relative to runtime init)
+        by default.  This behavior can be disabled with `-logtime 0`
+
 Version 20.03.0 (March 31, 2020)
   * Regent
     - Behavior change: `__fields` and `__physical` now both require

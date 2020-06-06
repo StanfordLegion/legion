@@ -3368,10 +3368,9 @@ namespace Legion {
       static inline RtEvent merge_events(RtEvent e1, RtEvent e2, RtEvent e3);
       static inline RtEvent merge_events(const std::set<RtEvent> &events);
     public:
-      static inline ApUserEvent create_ap_user_event(
-                                                  const TraceInfo *info = NULL);
-      static inline void trigger_event(ApUserEvent to_trigger,
-                                   ApEvent precondition = ApEvent::NO_AP_EVENT);
+      static inline ApUserEvent create_ap_user_event(const TraceInfo *info);
+      static inline void trigger_event(const TraceInfo *info, 
+          ApUserEvent to_trigger, ApEvent precondition = ApEvent::NO_AP_EVENT);
       static inline void poison_event(ApUserEvent to_poison);
     public:
       static inline RtUserEvent create_rt_user_event(void);
@@ -3656,8 +3655,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ inline void Runtime::trigger_event(ApUserEvent to_trigger,
-                                                  ApEvent precondition)
+    /*static*/ inline void Runtime::trigger_event(const TraceInfo *info,
+                                   ApUserEvent to_trigger, ApEvent precondition)
     //--------------------------------------------------------------------------
     {
       Realm::UserEvent copy = to_trigger;
@@ -3667,6 +3666,8 @@ namespace Legion {
       if (precondition.exists())
         LegionSpy::log_event_dependence(precondition, to_trigger);
 #endif
+      if ((info != NULL) && info->recording)
+        info->record_trigger_event(to_trigger, precondition);
     }
 
     //--------------------------------------------------------------------------

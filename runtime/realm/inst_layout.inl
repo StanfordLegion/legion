@@ -1217,17 +1217,6 @@ namespace Realm {
   }
 
 #ifdef REALM_PROVIDE_ACCESSOR_TO_KOKKOS_VIEW_CONVERSION
-  // helper to add the right number of *'s after a T in a type
-  template <typename FT, int N>
-  struct Pointerify {
-    typedef typename Pointerify<FT, N-1>::ptrtype *ptrtype;
-  };
-
-  template <typename FT>
-  struct Pointerify<FT, 0> {
-    typedef FT ptrtype;
-  };
-
   // some compilers like to try to reason about concrete types in template
   //  before it's instantiated, so here's a little wrapper that forces a
   //  dependence on a second type T2 (e.g. a parameter to the calling
@@ -1249,8 +1238,7 @@ namespace Realm {
       kls.stride[i] = strides[i] / sizeof(FT);
       assert((size_t(kls.stride[i]) * sizeof(FT)) == size_t(strides[i]));
     }
-    typedef typename Pointerify<FT, N>::ptrtype ptrtype;
-    ptrtype baseptr = reinterpret_cast<ptrtype>(base);
+
     typedef Kokkos::View<typename Kokkos::View<Args...>::data_type,
 			 Kokkos::LayoutStride,
 			 typename Kokkos::View<Args...>::memory_space,
@@ -1258,6 +1246,22 @@ namespace Realm {
     // verify our Kokkos_Unmanaged enum was right
     static_assert(unmanaged_view::traits::is_managed == 0,
 		  "incorrect value for Kokkos_Unmanaged!");
+
+    // verify the type and rank of the view match us - technically the type
+    //  part would be caught by Kokkos if we passed an FT *, but the error
+    //  messages that result are not easily understood
+    static_assert(std::is_same<typename unmanaged_view::value_type, FT>::value ||
+                  std::is_same<typename unmanaged_view::non_const_value_type, FT>::value,
+                  "base type mismatch between Kokkos view and accessor!");
+    static_assert(unmanaged_view::Rank == N,
+		  "rank mismatch between Kokkos view and accessor!");
+
+    // we're relying on the check above for type safety, so hand the
+    //  view whatever kind of pointer it wants here (eliminating the
+    //  horrible template-y error messages that come if FT * is not
+    //  compatible)
+    typedef typename unmanaged_view::pointer_type ptrtype;
+    ptrtype baseptr = reinterpret_cast<ptrtype>(base);
 
     unmanaged_view v(baseptr, kls);
     return v;

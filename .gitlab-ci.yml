@@ -30,6 +30,12 @@ variables:
 .gcc8: &gcc8
   CXX: "g++-8"
   F90: "gfortran-8"
+.gcc9: &gcc9
+  CXX: "g++-9"
+  F90: "gfortran-9"
+.gcc10: &gcc10
+  CXX: "g++-10"
+  F90: "gfortran-10"
 
 .clang35: &clang35
   CXX: "clang++-3.5"
@@ -43,6 +49,12 @@ variables:
 .clang8: &clang8
   CXX: "clang++-8"
   F90: "gfortran-5"
+.clang9: &clang9
+  CXX: "clang++-9"
+  F90: "gfortran-9"
+.clang10: &clang10
+  CXX: "clang++-10"
+  F90: "gfortran-10"
 
 .terra35: &terra35
   LLVM_CONFIG: "llvm-config-3.5"
@@ -53,6 +65,9 @@ variables:
 .terra70: &terra70
   LLVM_CONFIG: "llvm-config-7"
   TERRA_DIR: "/usr/local/terra70"
+.terra9: &terra9
+  LLVM_CONFIG: "llvm-config-9"
+  TERRA_DIR: "/usr/local/terra9"
 
 .debug: &debug
   DEBUG: "1"
@@ -348,6 +363,8 @@ before_script:
   image: stanfordlegion/gitlab-ci:ubuntu16.04 # i.e. https://hub.docker.com/r/stanfordlegion/gitlab-ci/
 .image_clang: &image_clang
   image: stanfordlegion/gitlab-ci:ubuntu16.04-clang # i.e. https://hub.docker.com/r/stanfordlegion/gitlab-ci/
+.image_2004: &image_2004
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-20.04
 
 ###
 ### Tests
@@ -369,6 +386,10 @@ before_script:
         export MPICH_CXX=`pwd`/tools/cxx_defcheck
       fi
     - free
+    - |
+      if [[ -z "$TEST_PYTHON_EXE" ]]; then
+        export TEST_PYTHON_EXE=`which python python3 | head -1`
+      fi
     - $TEST_PYTHON_EXE ./test.py
   retry:
     max: 0
@@ -386,6 +407,10 @@ before_script:
         ssh-add <(echo "$GITLAB_DEPLOY_KEY")
       fi
     - unset USE_DEFCHECK
+    - |
+      if [[ -z "$TEST_PYTHON_EXE" ]]; then
+        export TEST_PYTHON_EXE=`which python python3 | head -1`
+      fi
     - $TEST_PYTHON_EXE ./test.py --test=external --test=private
   retry:
     max: 0
@@ -839,6 +864,78 @@ gcc8_cxx11_hardened_regent:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*gcc8, *terra38, *release, *cxx11_hardened, *regent, *parallel]
+
+# GCC 9
+gcc9_cxx17_debug_legion:
+  <<: [*linux, *image_2004, *tests]
+  variables:
+    <<: [*gcc9, *terra9, *debug, *cxx17_normal, *legion]
+gcc9_cxx17_release_legion:
+  <<: [*linux, *image_2004, *tests]
+  variables:
+    <<: [*gcc9, *terra9, *release, *cxx17_normal, *legion]
+gcc9_cxx17_debug_regent:
+  <<: [*linux, *image_2004, *tests]
+  variables:
+    <<: [*gcc9, *terra9, *debug, *cxx17_normal, *regent]
+gcc9_cxx17_release_regent:
+  <<: [*linux, *image_2004, *tests]
+  variables:
+    <<: [*gcc9, *terra9, *release, *cxx17_normal, *regent]
+
+# GCC 10
+gcc10_cxx17_debug_legion:
+  <<: [*linux, *image_2004, *tests]
+  variables:
+    <<: [*gcc10, *terra9, *debug, *cxx17_normal, *legion]
+gcc10_cxx17_release_legion:
+  <<: [*linux, *image_2004, *tests]
+  variables:
+    <<: [*gcc10, *terra9, *release, *cxx17_normal, *legion]
+gcc10_cxx17_debug_regent:
+  <<: [*linux, *image_2004, *tests]
+  variables:
+    <<: [*gcc10, *terra9, *debug, *cxx17_normal, *regent]
+gcc10_cxx17_release_regent:
+  <<: [*linux, *image_2004, *tests]
+  variables:
+    <<: [*gcc10, *terra9, *release, *cxx17_normal, *regent]
+
+# Clang 9
+clang9_cxx17_debug_legion:
+  <<: [*linux, *image_2004, *tests]
+  variables:
+    <<: [*clang9, *terra9, *debug, *cxx17_normal, *legion]
+clang9_cxx17_release_legion:
+  <<: [*linux, *image_2004, *tests]
+  variables:
+    <<: [*clang9, *terra9, *release, *cxx17_normal, *legion]
+clang9_cxx17_debug_regent:
+  <<: [*linux, *image_2004, *tests]
+  variables:
+    <<: [*clang9, *terra9, *debug, *cxx17_normal, *regent]
+clang9_cxx17_release_regent:
+  <<: [*linux, *image_2004, *tests]
+  variables:
+    <<: [*clang9, *terra9, *release, *cxx17_normal, *regent]
+
+# Clang 10
+clang10_cxx17_debug_legion:
+  <<: [*linux, *image_2004, *tests]
+  variables:
+    <<: [*clang10, *terra9, *debug, *cxx17_normal, *legion]
+clang10_cxx17_release_legion:
+  <<: [*linux, *image_2004, *tests]
+  variables:
+    <<: [*clang10, *terra9, *release, *cxx17_normal, *legion]
+clang10_cxx17_debug_regent:
+  <<: [*linux, *image_2004, *tests]
+  variables:
+    <<: [*clang10, *terra9, *debug, *cxx17_normal, *regent]
+clang10_cxx17_release_regent:
+  <<: [*linux, *image_2004, *tests]
+  variables:
+    <<: [*clang10, *terra9, *release, *cxx17_normal, *regent]
 
 # Linux with Clang 3.5
 clang35_cxx98_debug_legion:

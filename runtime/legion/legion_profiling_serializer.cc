@@ -155,6 +155,16 @@ namespace Legion {
 	 << "point0:unsigned long long:"    << sizeof(unsigned long long)
          << "}" << std::endl;
 
+      ss << "IndexSpaceSizeDesc {"
+         << "id:" << INDEX_SPACE_SIZE_ID                         << delim
+         << "unique_id:UniqueID:"            << sizeof(UniqueID)  << delim
+         << "dense_size:unsigned long long:" << sizeof(unsigned long long)
+         << delim
+         << "sparse_size:unsigned long long:" << sizeof(unsigned long long) <<
+        delim
+         << "is_sparse:bool:"               << sizeof(bool)
+         << "}" << std::endl;
+
       ss << "LogicalRegionDesc {"
          << "id:" << LOGICAL_REGION_ID                          << delim
 	 << "ispace_id:IDType:"            << sizeof(IDType)    << delim
@@ -650,6 +660,20 @@ namespace Legion {
                 sizeof(unsigned));
       lp_fwrite(f, (char*)&(phy_instance_layout_rdesc.alignment),
                 sizeof(unsigned));
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfBinarySerializer::serialize(
+                              const LegionProfInstance::IndexSpaceSizeDesc
+                                                  &size_desc)
+    //--------------------------------------------------------------------------
+    {
+      int ID = INDEX_SPACE_SIZE_ID;
+      lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*)&(size_desc.id),sizeof(UniqueID));
+      lp_fwrite(f, (char*)&(size_desc.dense_size),sizeof(unsigned long long));
+      lp_fwrite(f, (char*)&(size_desc.sparse_size),sizeof(unsigned long long));
+      lp_fwrite(f, (char*)&(size_desc.is_sparse),sizeof(bool));
     }
 
     //--------------------------------------------------------------------------
@@ -1336,6 +1360,21 @@ namespace Legion {
                      phy_instance_dim_order_rdesc.inst_id,
                      phy_instance_dim_order_rdesc.dim,
                      phy_instance_dim_order_rdesc.k
+                     );
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfASCIISerializer::serialize(
+                 const LegionProfInstance::IndexSpaceSizeDesc
+                                                  &size_desc)
+    //--------------------------------------------------------------------------
+    {
+
+      log_prof.print("Index Space Size Desc " "%llu %llu %llu %u",
+                     size_desc.id,
+                     size_desc.dense_size,
+                     size_desc.sparse_size,
+                     size_desc.is_sparse
                      );
     }
 

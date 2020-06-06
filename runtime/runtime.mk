@@ -300,7 +300,7 @@ ifeq ($(strip $(USE_PYTHON)),1)
   # PYTHON_LIB to specify the path to the shared library directly.
   ifndef PYTHON_LIB
     ifndef PYTHON_ROOT
-      PYTHON_EXE := $(shell which python)
+      PYTHON_EXE := $(shell which python python3 | head -1)
       ifeq ($(PYTHON_EXE),)
         $(error cannot find python - set PYTHON_ROOT if not in PATH)
       endif
@@ -919,7 +919,7 @@ TOUCH	:= touch
 MAKE	:= make
 SSH	:= ssh
 SCP	:= scp
-PYTHON  := python
+PYTHON  := $(shell which python python3 | head -1)
 
 ifneq ($(strip ${MAX_DIM}),)
   DIMS := $(shell bash -c "echo {1..$(strip $(MAX_DIM))}")

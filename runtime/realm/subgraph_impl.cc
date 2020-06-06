@@ -539,7 +539,7 @@ namespace Realm {
 	  break;
 	}
 	unsigned mid = (lo + hi) >> 1;
-	unsigned mid_opkind = defn->interpolations[mid].target_kind >> 8;
+	int mid_opkind = defn->interpolations[mid].target_kind >> 8;
 	if(it->op_kind < mid_opkind) {
 	  hi = mid;
 	} else if(it->op_kind > mid_opkind) {

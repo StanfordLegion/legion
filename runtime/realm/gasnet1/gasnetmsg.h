@@ -116,9 +116,9 @@ typedef void *token_t;
 
 // gasnet_hsl_t in object form for templating goodness
 extern void gasnet_parse_command_line(std::vector<std::string>& cmdline);
-extern void init_endpoints(int gasnet_mem_size,
-			   int registered_mem_size,
-			   int registered_ib_mem_size,
+extern void init_endpoints(size_t gasnet_mem_size,
+			   size_t registered_mem_size,
+			   size_t registered_ib_mem_size,
 			   Realm::CoreReservationSet& crs);
 extern void start_polling_threads(int count);
 extern void start_handler_threads(int count, Realm::CoreReservationSet& crs, size_t stacksize);

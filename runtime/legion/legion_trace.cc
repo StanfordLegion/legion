@@ -1321,7 +1321,7 @@ namespace Legion {
 #endif
         to_replay->execute_all();
         template_completion = to_replay->get_completion();
-        Runtime::trigger_event(completion_event, template_completion);
+        Runtime::trigger_event(NULL, completion_event, template_completion);
         parent_ctx->update_current_fence(this, true, true);
         physical_trace->record_previous_template_completion(
             template_completion);
@@ -2275,6 +2275,8 @@ namespace Legion {
           }
         }
         cached_mappings.clear();
+        if (!remote_memos.empty())
+          release_remote_memos();
       }
     }
 
@@ -2302,7 +2304,7 @@ namespace Legion {
       for (std::map<unsigned, unsigned>::iterator it = crossing_events.begin();
            it != crossing_events.end(); ++it)
       {
-        ApUserEvent ev = Runtime::create_ap_user_event();
+        ApUserEvent ev = Runtime::create_ap_user_event(NULL);
         events[it->second] = ev;
         user_events[it->second] = ev;
       }
@@ -2431,7 +2433,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(slice_idx < slices.size());
 #endif
-      ApUserEvent fence = Runtime::create_ap_user_event();
+      ApUserEvent fence = Runtime::create_ap_user_event(NULL);
       const std::vector<TraceLocalID> &tasks = slice_tasks[slice_idx];
       for (unsigned idx = 0; idx < tasks.size(); ++idx)
         operations[tasks[idx]]
@@ -2440,7 +2442,7 @@ namespace Legion {
       for (std::vector<Instruction*>::const_iterator it = instructions.begin();
            it != instructions.end(); ++it)
         (*it)->execute();
-      Runtime::trigger_event(fence);
+      Runtime::trigger_event(NULL, fence);
     }
 
     //--------------------------------------------------------------------------
@@ -2473,6 +2475,8 @@ namespace Legion {
           optimize();
           dump_template();
         }
+        if (!remote_memos.empty())
+          release_remote_memos();
         return;
       }
       generate_conditions();
@@ -2482,6 +2486,8 @@ namespace Legion {
       events.clear();
       events.resize(num_events);
       event_map.clear();
+      if (!remote_memos.empty())
+        release_remote_memos();
     }
 
     //--------------------------------------------------------------------------
@@ -2868,7 +2874,6 @@ namespace Legion {
                 {
                   unsigned new_crossing_event = events.size();
                   events.resize(events.size() + 1);
-                  user_events.resize(events.size());
                   crossing_events[rh] = new_crossing_event;
                   new_rhs.insert(new_crossing_event);
                   slices[generator_slice].push_back(
@@ -2936,7 +2941,6 @@ namespace Legion {
               {
                 unsigned new_crossing_event = events.size();
                 events.resize(events.size() + 1);
-                user_events.resize(events.size());
                 crossing_events[ev] = new_crossing_event;
                 *event_to_check = new_crossing_event;
                 slices[generator_slice].push_back(
@@ -3487,16 +3491,18 @@ namespace Legion {
       assert(is_recording());
 #endif
 
-      unsigned lhs_ = convert_event(lhs);
-      user_events.resize(events.size());
-      user_events.push_back(lhs);
-
-      insert_instruction(new CreateApUserEvent(*this, lhs_,
-            find_trace_local_id(memo)));
+      unsigned lhs_ = find_or_convert_event(lhs);
+      user_events[lhs_] = lhs;
+#ifdef DEBUG_LEGION
+      assert(instructions[lhs_] == NULL);
+#endif
+      instructions[lhs_] =
+        new CreateApUserEvent(*this, lhs_, find_trace_local_id(memo));
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_trigger_event(ApUserEvent lhs, ApEvent rhs)
+    void PhysicalTemplate::record_trigger_event(ApUserEvent lhs, ApEvent rhs,
+                                                Memoizable *memo)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3508,10 +3514,10 @@ namespace Legion {
       assert(is_recording());
 #endif
 
+      unsigned lhs_ = find_or_convert_event(lhs);
       events.push_back(ApEvent());
-      unsigned lhs_ = find_event(lhs);
       insert_instruction(new TriggerEvent(*this, lhs_, find_event(rhs),
-            instructions[lhs_]->owner));
+            find_trace_local_id(memo)));
     }
 
     //--------------------------------------------------------------------------
@@ -4196,6 +4202,27 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline unsigned PhysicalTemplate::find_or_convert_event(const ApEvent &evnt)
+    //--------------------------------------------------------------------------
+    {
+      std::map<ApEvent, unsigned>::const_iterator finder = event_map.find(evnt);
+      if (finder == event_map.end())
+      {
+        unsigned event_ = events.size();
+        events.push_back(evnt);
+#ifdef DEBUG_LEGION
+        assert(event_map.find(evnt) == event_map.end());
+#endif
+        event_map[evnt] = event_;
+        // Put a place holder in for the instruction until we make it
+        insert_instruction(NULL);
+        return event_;
+      }
+      else
+        return finder->second;
+    }
+
+    //--------------------------------------------------------------------------
     inline void PhysicalTemplate::insert_instruction(Instruction *inst)
     //--------------------------------------------------------------------------
     {
@@ -4253,6 +4280,27 @@ namespace Legion {
               users.insert(finder->second);
           }
         }
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_remote_memoizable(Memoizable *memo)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock tpl_lock(template_lock);
+      remote_memos.push_back(memo);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::release_remote_memos(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!remote_memos.empty());
+#endif
+      for (std::vector<Memoizable*>::const_iterator it = 
+            remote_memos.begin(); it != remote_memos.end(); it++)
+        delete (*it);
+      remote_memos.clear();
     }
 
     /////////////////////////////////////////////////////////////
@@ -4319,7 +4367,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(lhs < events.size());
-      assert(lhs < user_events.size());
+      assert(user_events.find(lhs) != user_events.end());
 #endif
     }
 
@@ -4327,7 +4375,7 @@ namespace Legion {
     void CreateApUserEvent::execute(void)
     //--------------------------------------------------------------------------
     {
-      ApUserEvent ev = Runtime::create_ap_user_event();
+      ApUserEvent ev = Runtime::create_ap_user_event(NULL);
       events[lhs] = ev;
       user_events[lhs] = ev;
     }
@@ -4354,7 +4402,6 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(lhs < events.size());
-      assert(lhs < user_events.size());
       assert(rhs < events.size());
 #endif
     }
@@ -4368,7 +4415,7 @@ namespace Legion {
       assert(user_events[lhs].exists());
       assert(events[lhs].id == user_events[lhs].id);
 #endif
-      Runtime::trigger_event(user_events[lhs], events[rhs]);
+      Runtime::trigger_event(NULL, user_events[lhs], events[rhs]);
     }
 
     //--------------------------------------------------------------------------

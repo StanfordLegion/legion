@@ -185,7 +185,7 @@ void task_launcher(const void *args, size_t arglen,
       targets.push_back(*it);
 
   if(TestConfig::group_procs && !targets.empty()) {
-    Processor p = Processor::create_group(targets);
+    Processor p = ProcessorGroup::create_group(targets);
     la.instances[p] = la.instances[targets[0]];
     if(targets.size() > 1)
       la.finish_barrier.arrive(targets.size() - 1);

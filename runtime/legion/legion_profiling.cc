@@ -342,6 +342,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LegionProfInstance::register_index_space_size(
+                                                       UniqueID id,
+                                                       unsigned long long
+                                                       dense_size,
+                                                       unsigned long long
+                                                       sparse_size,
+                                                       bool is_sparse)
+    //--------------------------------------------------------------------------
+    {
+      index_space_size_desc.push_back(IndexSpaceSizeDesc());
+      IndexSpaceSizeDesc &size_info = index_space_size_desc.back();
+      size_info.id = id;
+      size_info.dense_size = dense_size;
+      size_info.sparse_size = sparse_size;
+      size_info.is_sparse = is_sparse;
+      owner->update_footprint(sizeof(IndexSpaceSizeDesc), this);
+    }
+
+    //--------------------------------------------------------------------------
     void LegionProfInstance::process_task(
             TaskID task_id, VariantID variant_id, UniqueID op_id,
             const Realm::ProfilingMeasurements::OperationTimeline &timeline,
@@ -767,6 +786,13 @@ namespace Legion {
           serializer->serialize(*it);
         }
 
+      for (std::deque<IndexSpaceSizeDesc>::const_iterator it =
+             index_space_size_desc.begin();
+           it != index_space_size_desc.end(); it++)
+        {
+          serializer->serialize(*it);
+        }
+
       for (std::deque<MetaInfo>::const_iterator it = meta_infos.begin();
             it != meta_infos.end(); it++)
       {
@@ -845,6 +871,7 @@ namespace Legion {
       phy_inst_layout_rdesc.clear();
       phy_inst_rdesc.clear();
       phy_inst_dim_order_rdesc.clear();
+      index_space_size_desc.clear();
       meta_infos.clear();
       copy_infos.clear();
       inst_create_infos.clear();
@@ -1053,6 +1080,17 @@ namespace Legion {
         serializer->serialize(front);
         diff += sizeof(front);
         phy_inst_dim_order_rdesc.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if (t_curr >= t_stop)
+          return diff;
+      }
+
+      while (!index_space_size_desc.empty())
+      {
+        IndexSpaceSizeDesc &front = index_space_size_desc.front();
+        serializer->serialize(front);
+        diff += sizeof(front);
+        index_space_size_desc.pop_front();
         const long long t_curr = Realm::Clock::current_time_in_microseconds();
         if (t_curr >= t_stop)
           return diff;
@@ -1429,6 +1467,24 @@ namespace Legion {
         create_thread_local_profiling_instance();
       thread_local_profiling_instance->register_index_partition(parent_id, 
                                               unique_id, disjoint, point);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfiler::record_index_space_size(UniqueID unique_id,
+                                                 unsigned long long
+                                                 dense_size,
+                                                 unsigned long long
+                                                 sparse_size,
+                                                 bool is_sparse)
+    //--------------------------------------------------------------------------
+    {
+      if (thread_local_profiling_instance == NULL)
+        create_thread_local_profiling_instance();
+
+      thread_local_profiling_instance->register_index_space_size(unique_id,
+                                                                 dense_size,
+                                                                 sparse_size,
+                                                                 is_sparse);
     }
 
     //--------------------------------------------------------------------------
@@ -1909,141 +1965,136 @@ namespace Legion {
 
       case LEGION_PROF_GPU_TASK:
         {
-#ifdef DEBUG_LEGION
-	    assert(response.has_measurement<
-	       Realm::ProfilingMeasurements::OperationTimeline>());
-            assert(response.has_measurement<
-		   Realm::ProfilingMeasurements::OperationTimelineGPU>());
-            assert(response.has_measurement<
-                Realm::ProfilingMeasurements::OperationProcessorUsage>());
-#endif
-            Realm::ProfilingMeasurements::OperationTimeline timeline;
-            response.get_measurement<
-                  Realm::ProfilingMeasurements::OperationTimeline>(timeline);
             Realm::ProfilingMeasurements::OperationProcessorUsage usage;
-            const bool has_usage = response.get_measurement<
-                  Realm::ProfilingMeasurements::OperationProcessorUsage>(usage);
-            Realm::ProfilingMeasurements::OperationEventWaits waits;
-            response.get_measurement<
-                  Realm::ProfilingMeasurements::OperationEventWaits>(waits);
-            Realm::ProfilingMeasurements::OperationTimelineGPU timeline_gpu;
-            response.get_measurement<
-	      Realm::ProfilingMeasurements::OperationTimelineGPU>(timeline_gpu);
-            // Ignore anything that was predicated false for now
-            if (has_usage)
+            // Check for predication and speculation
+            if (response.get_measurement<
+                  Realm::ProfilingMeasurements::OperationProcessorUsage>(usage))
+            {
+#ifdef DEBUG_LEGION
+              assert(response.has_measurement<
+                 Realm::ProfilingMeasurements::OperationTimeline>());
+              assert(response.has_measurement<
+                     Realm::ProfilingMeasurements::OperationTimelineGPU>());
+#endif
+              Realm::ProfilingMeasurements::OperationTimeline timeline;
+              response.get_measurement<
+                    Realm::ProfilingMeasurements::OperationTimeline>(timeline);
+              Realm::ProfilingMeasurements::OperationEventWaits waits;
+              response.get_measurement<
+                    Realm::ProfilingMeasurements::OperationEventWaits>(waits);
+              Realm::ProfilingMeasurements::OperationTimelineGPU timeline_gpu;
+              response.get_measurement<
+              Realm::ProfilingMeasurements::OperationTimelineGPU>(timeline_gpu);
               thread_local_profiling_instance->process_gpu_task(info->id,
-		    info->id2, info->op_id, timeline, usage, waits, timeline_gpu);
+                  info->id2, info->op_id, timeline, usage, waits, timeline_gpu);
+            }
             break;
 	  }
 
         case LEGION_PROF_TASK:
           {
-#ifdef DEBUG_LEGION
-            assert(response.has_measurement<
-                Realm::ProfilingMeasurements::OperationTimeline>());
-            assert(response.has_measurement<
-                Realm::ProfilingMeasurements::OperationProcessorUsage>());
-#endif
-            Realm::ProfilingMeasurements::OperationTimeline timeline;
-            response.get_measurement<
-                  Realm::ProfilingMeasurements::OperationTimeline>(timeline);
             Realm::ProfilingMeasurements::OperationProcessorUsage usage;
-            const bool has_usage = response.get_measurement<
-                  Realm::ProfilingMeasurements::OperationProcessorUsage>(usage);
-            Realm::ProfilingMeasurements::OperationEventWaits waits;
-            response.get_measurement<
-                  Realm::ProfilingMeasurements::OperationEventWaits>(waits);
-            // Ignore anything that was predicated false for now
-            if (has_usage)
+            // Check for predication and speculation
+            if (response.get_measurement<
+                  Realm::ProfilingMeasurements::OperationProcessorUsage>(usage))
+            {
+#ifdef DEBUG_LEGION
+              assert(response.has_measurement<
+                  Realm::ProfilingMeasurements::OperationTimeline>());
+#endif
+              Realm::ProfilingMeasurements::OperationTimeline timeline;
+              response.get_measurement<
+                    Realm::ProfilingMeasurements::OperationTimeline>(timeline);
+              Realm::ProfilingMeasurements::OperationEventWaits waits;
+              response.get_measurement<
+                    Realm::ProfilingMeasurements::OperationEventWaits>(waits);
               thread_local_profiling_instance->process_task(info->id, 
                   info->id2, info->op_id, timeline, usage, waits);
+            }
             break;
           }
 
         case LEGION_PROF_META:
           {
-#ifdef DEBUG_LEGION
-            assert(response.has_measurement<
-                Realm::ProfilingMeasurements::OperationTimeline>());
-            assert(response.has_measurement<
-                Realm::ProfilingMeasurements::OperationProcessorUsage>());
-#endif
-            Realm::ProfilingMeasurements::OperationTimeline timeline;
-            response.get_measurement<
-                  Realm::ProfilingMeasurements::OperationTimeline>(timeline);
             Realm::ProfilingMeasurements::OperationProcessorUsage usage;
-            const bool has_usage = response.get_measurement<
-                  Realm::ProfilingMeasurements::OperationProcessorUsage>(usage);
-            Realm::ProfilingMeasurements::OperationEventWaits waits;
-            response.get_measurement<
-                  Realm::ProfilingMeasurements::OperationEventWaits>(waits);
-            // Ignore anything that was predicated false for now
-            if (has_usage)
+            // Check for predication and speculation
+            if (response.get_measurement<
+                  Realm::ProfilingMeasurements::OperationProcessorUsage>(usage))
+            {
+#ifdef DEBUG_LEGION
+              assert(response.has_measurement<
+                  Realm::ProfilingMeasurements::OperationTimeline>());
+#endif
+              Realm::ProfilingMeasurements::OperationTimeline timeline;
+              response.get_measurement<
+                    Realm::ProfilingMeasurements::OperationTimeline>(timeline);
+              Realm::ProfilingMeasurements::OperationEventWaits waits;
+              response.get_measurement<
+                    Realm::ProfilingMeasurements::OperationEventWaits>(waits);
               thread_local_profiling_instance->process_meta(info->id, 
                   info->op_id, timeline, usage, waits);
+            }
             break;
           }
         case LEGION_PROF_MESSAGE:
           {
-#ifdef DEBUG_LEGION
-            assert(response.has_measurement<
-                Realm::ProfilingMeasurements::OperationTimeline>());
-            assert(response.has_measurement<
-                Realm::ProfilingMeasurements::OperationProcessorUsage>());
-#endif
-            Realm::ProfilingMeasurements::OperationTimeline timeline;
-            response.get_measurement<
-                  Realm::ProfilingMeasurements::OperationTimeline>(timeline);
             Realm::ProfilingMeasurements::OperationProcessorUsage usage;
-            const bool has_usage = response.get_measurement<
-                  Realm::ProfilingMeasurements::OperationProcessorUsage>(usage);
-            Realm::ProfilingMeasurements::OperationEventWaits waits;
-            response.get_measurement<
-                  Realm::ProfilingMeasurements::OperationEventWaits>(waits);
-            if (has_usage)
+            // Check for predication and speculation
+            if (response.get_measurement<
+                  Realm::ProfilingMeasurements::OperationProcessorUsage>(usage))
+            {
+#ifdef DEBUG_LEGION
+              assert(response.has_measurement<
+                  Realm::ProfilingMeasurements::OperationTimeline>());
+#endif
+              Realm::ProfilingMeasurements::OperationTimeline timeline;
+              response.get_measurement<
+                    Realm::ProfilingMeasurements::OperationTimeline>(timeline);
+              Realm::ProfilingMeasurements::OperationEventWaits waits;
+              response.get_measurement<
+                    Realm::ProfilingMeasurements::OperationEventWaits>(waits);
               thread_local_profiling_instance->process_message(info->id,
                   info->op_id, timeline, usage, waits);
+            }
             break;
           }
 
         case LEGION_PROF_COPY:
           {
-#ifdef DEBUG_LEGION
-            assert(response.has_measurement<
-                Realm::ProfilingMeasurements::OperationTimeline>());
-            assert(response.has_measurement<
-                Realm::ProfilingMeasurements::OperationMemoryUsage>());
-#endif
-            Realm::ProfilingMeasurements::OperationTimeline timeline;
-            response.get_measurement<
-                  Realm::ProfilingMeasurements::OperationTimeline>(timeline);
             Realm::ProfilingMeasurements::OperationMemoryUsage usage;
-            const bool has_usage = response.get_measurement<
-                  Realm::ProfilingMeasurements::OperationMemoryUsage>(usage);
-            // Ignore anything that was predicated false for now
-            if (has_usage)
+            // Check for predication and speculation
+            if (response.get_measurement<
+                  Realm::ProfilingMeasurements::OperationMemoryUsage>(usage))
+            {
+#ifdef DEBUG_LEGION
+              assert(response.has_measurement<
+                  Realm::ProfilingMeasurements::OperationTimeline>());
+#endif
+              Realm::ProfilingMeasurements::OperationTimeline timeline;
+              response.get_measurement<
+                    Realm::ProfilingMeasurements::OperationTimeline>(timeline);
               thread_local_profiling_instance->process_copy(info->op_id,
                                                             timeline, usage);
+            }
             break;
           }
         case LEGION_PROF_FILL:
           {
-#ifdef DEBUG_LEGION
-            assert(response.has_measurement<
-                Realm::ProfilingMeasurements::OperationTimeline>());
-            assert(response.has_measurement<
-                Realm::ProfilingMeasurements::OperationMemoryUsage>());
-#endif
-            Realm::ProfilingMeasurements::OperationTimeline timeline;
-            response.get_measurement<
-                  Realm::ProfilingMeasurements::OperationTimeline>(timeline);
             Realm::ProfilingMeasurements::OperationMemoryUsage usage;
-            const bool has_usage = response.get_measurement<
-                    Realm::ProfilingMeasurements::OperationMemoryUsage>(usage);
-            // Ignore anything that was predicated false for now
-            if (has_usage)
+            // Check for predication and speculation
+            if (response.get_measurement<
+                    Realm::ProfilingMeasurements::OperationMemoryUsage>(usage))
+            {
+#ifdef DEBUG_LEGION
+              assert(response.has_measurement<
+                  Realm::ProfilingMeasurements::OperationTimeline>());
+#endif
+              Realm::ProfilingMeasurements::OperationTimeline timeline;
+              response.get_measurement<
+                    Realm::ProfilingMeasurements::OperationTimeline>(timeline);
               thread_local_profiling_instance->process_fill(info->op_id,
                                                             timeline, usage);
+            }
             break;
           }
         case LEGION_PROF_INST:

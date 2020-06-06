@@ -171,7 +171,7 @@ namespace Legion {
                                              collect_event, applied_events, 
                                              trace_info, source);
       if (ready_event.exists())
-        Runtime::trigger_event(ready_event, pre);
+        Runtime::trigger_event(&trace_info, ready_event, pre);
       if (!applied_events.empty())
       {
         const RtEvent precondition = Runtime::merge_events(applied_events);
@@ -2464,7 +2464,7 @@ namespace Legion {
           // If we're not the logical owner send a message there 
           // to do the analysis and provide a user event to trigger
           // with the precondition
-          ready_event = Runtime::create_ap_user_event();
+          ready_event = Runtime::create_ap_user_event(&trace_info);
           RtUserEvent applied_event = Runtime::create_rt_user_event();
           Serializer rez;
           {
@@ -4441,7 +4441,7 @@ namespace Legion {
         // If we're not the logical owner send a message there 
         // to do the analysis and provide a user event to trigger
         // with the precondition
-        ApUserEvent ready_event = Runtime::create_ap_user_event();
+        ApUserEvent ready_event = Runtime::create_ap_user_event(&trace_info);
         RtUserEvent applied_event = Runtime::create_rt_user_event();
         Serializer rez;
         {

@@ -20,6 +20,7 @@
 #include "realm/network.h"
 
 #include "realm/cmdline.h"
+#include "realm/timers.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -32,20 +33,10 @@
 
 namespace Realm {
 
-  // abstract class for an output stream
-  class LoggerOutputStream {
-  public:
-    LoggerOutputStream(void) {}
-    virtual ~LoggerOutputStream(void) {}
-
-    virtual void write(const char *buffer, size_t len) = 0;
-    virtual void flush(void) = 0;
-  };
-
   class LoggerFileStream : public LoggerOutputStream {
   public:
-    LoggerFileStream(FILE *_f, bool _close_file)
-      : f(_f), close_file(_close_file)
+    LoggerFileStream(FILE *_f, bool _close_file, bool _include_timestamp)
+      : f(_f), close_file(_close_file), include_timestamp(_include_timestamp)
     {}
 
     virtual ~LoggerFileStream(void)
@@ -54,86 +45,80 @@ namespace Realm {
 	fclose(f);
     }
 
-    virtual void write(const char *buffer, size_t len)
+    virtual void log_msg(Logger::LoggingLevel level, const char *name, const char *msgdata, size_t msglen)
     {
-#ifndef NDEBUG
-      size_t amt =
-#endif
-	fwrite(buffer, 1, len, f);
-      assert(amt == len);
+      // build message string, including prefix
+      static const int MAXLEN = 4096;
+      char buffer[MAXLEN];
+      int pfxlen;
+      if(include_timestamp) {
+	// special case - log messages before we've agreed on common time base
+	//  across all nodes show as 0.0
+	double now;
+	if(Clock::get_zero_time() != 0)
+	  now = Clock::current_time();
+	else
+	  now = 0;
+	pfxlen = snprintf(buffer, MAXLEN - 2, "[%d - %lx] %11.6f {%d}{%s}: ",
+			  Network::my_node_id,
+			  (unsigned long)pthread_self(),
+			  now, level, name);
+      } else
+	pfxlen = snprintf(buffer, MAXLEN - 2, "[%d - %lx] {%d}{%s}: ",
+			  Network::my_node_id,
+			  (unsigned long)pthread_self(),
+			  level, name);
+
+      // would simply concatenating this message overflow the buffer?
+      if((pfxlen + msglen) >= MAXLEN)
+      {
+        // if this is an error or a warning, print out the
+        // whole message no matter what
+        if ((level == Logger::LEVEL_FATAL) ||
+            (level == Logger::LEVEL_ERROR) || (level == Logger::LEVEL_WARNING))
+        {
+          const size_t full_len = pfxlen + msglen + 1;
+          char *full_buffer = (char*)malloc(full_len);
+          memcpy(full_buffer, buffer, pfxlen);
+          memcpy(full_buffer + pfxlen, msgdata, msglen);
+          full_buffer[pfxlen + msglen] = '\n';
+
+          write(full_buffer, full_len);
+
+          free(full_buffer);
+          return;
+        } else {
+                // less critical messages are truncated
+                msglen = MAXLEN - pfxlen - 1;
+        }
+      }
+      memcpy(buffer + pfxlen, msgdata, msglen);
+      buffer[pfxlen + msglen] = '\n';
+      size_t total_len = pfxlen + msglen + 1;
+
+      write(buffer, total_len);
     }
 
-    virtual void flush(void)
+    virtual void flush()
     {
+      AutoLock<> al(mutex);
       fflush(f);
     }
 
   protected:
-    FILE *f;
-    bool close_file;
-  };
-
-  // use a pthread mutex to prevent simultaneous writes to a stream
-  template <typename T>
-  class LoggerStreamSerialized : public LoggerOutputStream {
-  public:
-    LoggerStreamSerialized(T *_stream, bool _delete_inner)
-      : stream(_stream), delete_inner(_delete_inner)
-    {
-#ifndef NDEBUG
-      int ret =
-#endif
-	pthread_mutex_init(&mutex, 0);
-      assert(ret == 0);
-    }
-
-    virtual ~LoggerStreamSerialized(void)
-    {
-#ifndef NDEBUG
-      int ret =
-#endif
-	pthread_mutex_destroy(&mutex);
-      assert(ret == 0);
-      if(delete_inner)
-	delete stream;
-    }
-
     virtual void write(const char *buffer, size_t len)
     {
+      AutoLock<> al(mutex);
 #ifndef NDEBUG
-      int ret;
-      ret =
+      size_t amt =
 #endif
-	pthread_mutex_lock(&mutex);
-      assert(ret == 0);
-      stream->write(buffer, len);
-#ifndef NDEBUG
-      ret =
-#endif
-	pthread_mutex_unlock(&mutex);
-      assert(ret == 0);
+      fwrite(buffer, 1, len, f);
+      assert(amt == len);
     }
 
-    virtual void flush(void)
-    {
-#ifndef NDEBUG
-      int ret;
-      ret =
-#endif
-	pthread_mutex_lock(&mutex);
-      assert(ret == 0);
-      stream->flush();
-#ifndef NDEBUG
-      ret =
-#endif
-	pthread_mutex_unlock(&mutex);
-      assert(ret == 0);
-    }
-
-  protected:
-    LoggerOutputStream *stream;
-    bool delete_inner;
-    pthread_mutex_t mutex;
+    FILE *f;
+    bool close_file, include_timestamp;
+    Mutex mutex;
   };
 
   class LoggerConfig {
@@ -147,6 +132,8 @@ namespace Realm {
     static void flush_all_streams(void);
 
     void read_command_line(std::vector<std::string>& cmdline);
+    void set_default_output(LoggerOutputStream *s);
+    void set_logger_output(const std::string& name, LoggerOutputStream *s);
 
     // either configures a logger right away or remembers it to config once
     //   we know the desired settings
@@ -157,10 +144,12 @@ namespace Realm {
 
     bool cmdline_read;
     Logger::LoggingLevel default_level, stderr_level;
+    bool include_timestamp;
     std::map<std::string, Logger::LoggingLevel> category_levels;
     std::string cats_enabled;
     std::set<Logger *> pending_configs;
-    LoggerOutputStream *stream, *stderr_stream;
+    LoggerOutputStream *stream, *stderr_stream, *default_output;
+    std::map<std::string, LoggerOutputStream *> logger_output;
   };
 
   LoggerConfig::LoggerConfig(void)
@@ -169,6 +158,7 @@ namespace Realm {
     , stderr_level(Logger::LEVEL_ERROR)
     , stream(0)
     , stderr_stream(0)
+    , default_output(0)
   {}
 
   LoggerConfig::~LoggerConfig(void)
@@ -250,16 +240,16 @@ namespace Realm {
       // numbers may be preceeded by name= to specify a per-category level
       std::string catname;
       if(!isdigit(*p1)) {
-	const char *p2 = p1;
-	while(*p2 != '=') {
-	  if(!*p2) {
-	    fprintf(stderr, "ERROR: category name in -level must be followed by =\n");
-	    return false;
-	  }
-	  p2++;
-	}
-	catname.assign(p1, p2 - p1);
-	p1 = p2 + 1;
+        const char *p2 = p1;
+        while(*p2 != '=') {
+          if(!*p2) {
+            fprintf(stderr, "ERROR: category name in -level must be followed by =\n");
+            return false;
+          }
+          p2++;
+        }
+        catname.assign(p1, p2 - p1);
+        p1 = p2 + 1;
       }
 
       // levels are small integers or words - scan forward to the first thing
@@ -268,14 +258,14 @@ namespace Realm {
       const char *p2 = p1;
       while(*p2 && isalnum(*p2)) p2++;
       if((!*p2 || (*p2 == ',')) &&
-	 convert_integer_cmdline_argument(std::string(p1, p2-p1), lvl)) {
-	if(catname.empty())
-	  default_level = lvl;
-	else
-	  category_levels[catname] = lvl;
+         convert_integer_cmdline_argument(std::string(p1, p2-p1), lvl)) {
+        if(catname.empty())
+          default_level = lvl;
+        else
+          category_levels[catname] = lvl;
 
-	p1 = p2;
-	continue;
+        p1 = p2;
+        continue;
       }
 
       fprintf(stderr, "ERROR: logger level malformed or out of range: '%s'\n", p1);
@@ -294,6 +284,7 @@ namespace Realm {
       .add_option_string("-logfile", logname)
       .add_option_method("-level", this, &LoggerConfig::parse_level_argument)
       .add_option_int("-errlevel", stderr_level)
+      .add_option_int("-logtime", include_timestamp)
       .parse_command_line(cmdline);
 
     if(!ok) {
@@ -305,18 +296,14 @@ namespace Realm {
     if(logname.empty()) {
       // the gasnet UDP job spawner (amudprun) seems to buffer stdout, so make stderr the default
 #ifdef GASNET_CONDUIT_UDP
-      stream = new LoggerStreamSerialized<LoggerFileStream>(new LoggerFileStream(stderr, false),
-							    true);
+      stream = new LoggerFileStream(stderr, false, include_timestamp);
 #else
-      stream = new LoggerStreamSerialized<LoggerFileStream>(new LoggerFileStream(stdout, false),
-							    true);
+      stream = new LoggerFileStream(stdout, false, include_timestamp);
 #endif
     } else if(logname == "stdout") {
-      stream = new LoggerStreamSerialized<LoggerFileStream>(new LoggerFileStream(stdout, false),
-							    true);
+      stream = new LoggerFileStream(stdout, false, include_timestamp);
     } else if(logname == "stderr") {
-      stream = new LoggerStreamSerialized<LoggerFileStream>(new LoggerFileStream(stderr, false),
-							    true);
+      stream = new LoggerFileStream(stderr, false, include_timestamp);
     } else {
       // we're going to open a file, but key off a + for appending and
       //  look for a % for node number insertion
@@ -324,48 +311,46 @@ namespace Realm {
       size_t start = 0;
 
       if(logname[0] == '+') {
-	append = true;
-	start++;
+        append = true;
+        start++;
       }
 
       FILE *f = 0;
       size_t pct = logname.find_first_of('%', start);
       if(pct == std::string::npos) {
-	// no node number - everybody uses the same file
-	if(Network::max_node_id > 0) {
-	  if(!append) {
-	    if(Network::my_node_id == 0)
-	      fprintf(stderr, "WARNING: all ranks are logging to the same output file - appending is forced and output may be jumbled\n");
-	    append = true;
-	  }
-	}
-	const char *fn = logname.c_str() + start;
-	f = fopen(fn, append ? "a" : "w");
-	if(!f) {
-	  fprintf(stderr, "could not open log file '%s': %s\n", fn, strerror(errno));
-	  exit(1);
-	}
+        // no node number - everybody uses the same file
+        if(Network::max_node_id > 0) {
+          if(!append) {
+            if(Network::my_node_id == 0)
+              fprintf(stderr, "WARNING: all ranks are logging to the same output file - appending is forced and output may be jumbled\n");
+            append = true;
+          }
+        }
+        const char *fn = logname.c_str() + start;
+        f = fopen(fn, append ? "a" : "w");
+        if(!f) {
+          fprintf(stderr, "could not open log file '%s': %s\n", fn, strerror(errno));
+          exit(1);
+        }
       } else {
-	// replace % with node number
-	char filename[256];
-	sprintf(filename, "%.*s%d%s",
-		(int)(pct - start), logname.c_str() + start, Network::my_node_id, logname.c_str() + pct + 1);
+        // replace % with node number
+        char filename[256];
+        sprintf(filename, "%.*s%d%s",
+                (int)(pct - start), logname.c_str() + start, Network::my_node_id, logname.c_str() + pct + 1);
 
-	f = fopen(filename, append ? "a" : "w");
-	if(!f) {
-	  fprintf(stderr, "could not open log file '%s': %s\n", filename, strerror(errno));
-	  exit(1);
-	}
+        f = fopen(filename, append ? "a" : "w");
+        if(!f) {
+          fprintf(stderr, "could not open log file '%s': %s\n", filename, strerror(errno));
+          exit(1);
+        }
       }
       // TODO: consider buffering in some cases?
       setbuf(f, 0); // disable output buffering
-      stream = new LoggerStreamSerialized<LoggerFileStream>(new LoggerFileStream(f, true),
-							    true);
+      stream = new LoggerFileStream(f, true, include_timestamp);
 
       // when logging to a file, also sent critical-enough messages to stderr
       if(stderr_level < Logger::LEVEL_NONE)
-	stderr_stream = new LoggerStreamSerialized<LoggerFileStream>(new LoggerFileStream(stderr, false),
-								     true);
+        stderr_stream = new LoggerFileStream(stderr, false, include_timestamp);
     }
 
     atexit(LoggerConfig::flush_all_streams);
@@ -373,11 +358,25 @@ namespace Realm {
     cmdline_read = true;
     if(!pending_configs.empty()) {
       for(std::set<Logger *>::iterator it = pending_configs.begin();
-	  it != pending_configs.end();
-	  it++)
-	configure(*it);
+          it != pending_configs.end();
+          it++)
+        configure(*it);
       pending_configs.clear();
     }
+  }
+
+  void LoggerConfig::set_default_output(LoggerOutputStream *s)
+  {
+    // must be called before command line is parsed
+    assert(!cmdline_read);
+    default_output = s;
+  }
+
+  void LoggerConfig::set_logger_output(const std::string& name, LoggerOutputStream *s)
+  {
+    // must be called before command line is read
+    assert(!cmdline_read);
+    logger_output[name] = s;
   }
 
   void LoggerConfig::configure(Logger *logger)
@@ -395,46 +394,84 @@ namespace Realm {
       int l = logger->get_name().length();
       const char *n = logger->get_name().c_str();
       while(*p) {
-	if(((p[l] == '\0') || (p[l] == ',')) && !strncmp(p, n, l)) {
-	  found = true;
-	  break;
-	}
-	// skip to after next comma
-	while(*p && (*p != ',')) p++;
-	while(*p && (*p == ',')) p++;
+        if(((p[l] == '\0') || (p[l] == ',')) && !strncmp(p, n, l)) {
+          found = true;
+          break;
+        }
+        // skip to after next comma
+        while(*p && (*p != ',')) p++;
+        while(*p && (*p == ',')) p++;
       }
       if(!found) {
-	//printf("'%s' not in '%s'\n", n, cats_enabled);
-	return;
+        //printf("'%s' not in '%s'\n", n, cats_enabled);
+        return;
       }
     }
 
     // see if the level for this category has been customized
     Logger::LoggingLevel level = default_level;
-    std::map<std::string, Logger::LoggingLevel>::const_iterator it = category_levels.find(logger->get_name());
-    if(it != category_levels.end())
-      level = it->second;
+    {
+      std::map<std::string, Logger::LoggingLevel>::const_iterator it = category_levels.find(logger->get_name());
+      if(it != category_levels.end())
+        level = it->second;
+    }
 
-    // give this logger a copy of the global stream
-    logger->add_stream(stream, level, 
-		       false,  /* don't delete */
-		       false); /* don't flush each write */
+    // figure out which stream(s) to use for this logger
+    {
+      std::map<std::string, LoggerOutputStream *>::const_iterator it = logger_output.find(logger->get_name());
+      if(it != logger_output.end()) {
+        // specific stream for this module
+        logger->add_stream(it->second, level,
+                           false,  /* don't delete */
+                           false); /* don't flush each write */
+      } else if(default_output != 0) {
+        // app-provided default stream for this module
+        logger->add_stream(default_output, level,
+                           false,  /* don't delete */
+                           false); /* don't flush each write */
 
-    // also use the stderr_stream, if present
-    // make sure not to log at a level noisier than requested for this category
-    if(stderr_stream)
-      logger->add_stream(stderr_stream, 
-			 ((level > stderr_level) ? level : stderr_level),
-			 false, /* don't delete */
-			 true); /* flush each write */
+      } else {
+        // give this logger a copy of the global stream
+        logger->add_stream(stream, level,
+                           false,  /* don't delete */
+                           false); /* don't flush each write */
+
+        // also use the stderr_stream, if present
+        // make sure not to log at a level noisier than requested for this category
+        if(stderr_stream)
+          logger->add_stream(stderr_stream, 
+                             ((level > stderr_level) ? level : stderr_level),
+                             false, /* don't delete */
+                             true); /* flush each write */
+      }
+    }
+
+    logger->configure_done();
   }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // struct DelayedMessage
+
+  struct DelayedMessage {
+    DelayedMessage *next_msg;
+    Logger::LoggingLevel level;
+    size_t msglen;
+    // string data stored immediately after the fixed-size structure
+    char *msgdata() { return reinterpret_cast<char *>(this + 1); }
+  };
+
 
   ////////////////////////////////////////////////////////////////////////
   //
   // class Logger
 
   Logger::Logger(const std::string& _name)
-    : name(_name), log_level(LEVEL_NONE)
+    : name(_name), log_level(LEVEL_SPEW)
+    , configured(false)
+    , delayed_message_head(0)
+    , delayed_message_tail(&delayed_message_head)
   {
     LoggerConfig::get_config()->configure(this);
   }
@@ -443,12 +480,19 @@ namespace Realm {
   {
     // go through our streams and delete any we're supposed to
     for(std::vector<LogStream>::iterator it = streams.begin();
-	it != streams.end();
-	it++)
+        it != streams.end();
+        it++)
       if(it->delete_when_done)
-	delete it->s;
+        delete it->s;
 
     streams.clear();
+
+    // if for some reason we never got configured, delete any delayed messages
+    while(delayed_message_head != 0) {
+      DelayedMessage *next = delayed_message_head->next_msg;
+      delete delayed_message_head;
+      delayed_message_head = next;
+    }
   }
 
   /*static*/ void Logger::configure_from_cmdline(std::vector<std::string>& cmdline)
@@ -456,77 +500,53 @@ namespace Realm {
     LoggerConfig::get_config()->read_command_line(cmdline);
   }
 
-  void Logger::log_msg(LoggingLevel level, const std::string& msg)
+  /*static*/ void Logger::set_default_output(LoggerOutputStream *s)
   {
-    log_msg(level, msg.c_str(), msg.length());
+    LoggerConfig::get_config()->set_default_output(s);
+  }
+
+  /*static*/ void Logger::set_logger_output(const std::string& name, LoggerOutputStream *s)
+  {
+    LoggerConfig::get_config()->set_logger_output(name, s);
   }
 
   void Logger::log_msg(LoggingLevel level, const char *msgdata, size_t msglen)
   {
+    // if we're not configured yet, delay the message
+    if(!configured) {
+      size_t bytes = sizeof(DelayedMessage) + msglen;
+      void *ptr = malloc(bytes);
+      assert(ptr != 0);
+      DelayedMessage *d = new(ptr) DelayedMessage;
+      d->next_msg = 0;
+      d->level = level;
+      d->msglen = msglen;
+      memcpy(d->msgdata(), msgdata, msglen);
+      *delayed_message_tail = d;
+      delayed_message_tail = &(d->next_msg);
+      return;
+    }
+
     // no logging of empty messages
     if(msglen == 0)
       return;
 
-    // build message string, including prefix
-    static const int MAXLEN = 4096;
-    char buffer[MAXLEN];
-    int pfxlen = snprintf(buffer, MAXLEN - 2, "[%d - %lx] {%d}{%s}: ",
-			  Network::my_node_id, (unsigned long)pthread_self(),
-			  level, name.c_str());
-
-    // would simply concatenating this message overflow the buffer?
-    if((pfxlen + msglen) >= MAXLEN)
-    {
-      // if this is an error or a warning, print out the 
-      // whole message no matter what
-      if ((level == LEVEL_FATAL) || 
-          (level == LEVEL_ERROR) || (level == LEVEL_WARNING))
-      {
-        const size_t full_len = pfxlen + msglen + 1;
-        char *full_buffer = (char*)malloc(full_len);
-        memcpy(full_buffer, buffer, pfxlen); 
-        memcpy(full_buffer + pfxlen, msgdata, msglen);
-        full_buffer[pfxlen + msglen] = '\n';
-
-        // go through all the streams
-        for(std::vector<LogStream>::iterator it = streams.begin();
-            it != streams.end();
-            it++) {
-          if(level < it->min_level)
-            continue;
-
-          it->s->write(full_buffer, full_len);
-
-          if(it->flush_each_write)
-            it->s->flush();
-        }
-        free(full_buffer);
-        return;
-      } else {
-	// less critical messages are truncated
-	msglen = MAXLEN - pfxlen - 1;
-      }
-    }
-    memcpy(buffer + pfxlen, msgdata, msglen);
-    buffer[pfxlen + msglen] = '\n';
-    size_t total_len = pfxlen + msglen + 1;
-
     // go through all the streams
     for(std::vector<LogStream>::iterator it = streams.begin();
-	it != streams.end();
-	it++) {
+              it != streams.end();
+              it++) {
       if(level < it->min_level)
-	continue;
+              continue;
 
-      it->s->write(buffer, total_len);
+      it->s->log_msg(level, name.c_str(), msgdata, msglen);
 
       if(it->flush_each_write)
-	it->s->flush();
+        it->s->flush();
     }
   }
 
   void Logger::add_stream(LoggerOutputStream *s, LoggingLevel min_level,
-			  bool delete_when_done, bool flush_each_write)
+                          bool delete_when_done, bool flush_each_write)
   {
     LogStream ls;
     ls.s = s;
@@ -534,10 +554,30 @@ namespace Realm {
     ls.delete_when_done = delete_when_done;
     ls.flush_each_write = flush_each_write;
     streams.push_back(ls);
+  }
 
-    // update our logging level if needed
-    if(log_level > min_level)
-      log_level = min_level;
+  void Logger::configure_done(void)
+  {
+    configured = true;
+
+    // compute the minimum logging level we're interested in
+    log_level = LEVEL_NONE;
+    for(std::vector<LogStream>::iterator it = streams.begin();
+	it != streams.end();
+	it++)
+      if(it->min_level < log_level)
+	log_level = it->min_level;
+
+    // and now handle any delayed messages
+    while(delayed_message_head != 0) {
+      DelayedMessage *next = delayed_message_head->next_msg;
+      if(delayed_message_head->level >= log_level)
+	log_msg(delayed_message_head->level,
+		delayed_message_head->msgdata(),
+		delayed_message_head->msglen);
+      delete delayed_message_head;
+      delayed_message_head = next;
+    }
   }
 
   ////////////////////////////////////////////////////////////////////////
@@ -569,7 +609,7 @@ namespace Realm {
             sprintf(full_msg, "[%d] ", messageID);
             vsnprintf(full_msg + strlen(full_msg), full+1, fmt, args);
          }
-	 get_stream() << full_msg;
+         get_stream() << full_msg;
         free(full_msg);
       } else {
         get_stream() << msg;

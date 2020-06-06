@@ -239,6 +239,12 @@ namespace Legion {
         unsigned dim;
         DimensionKind k;
       };
+      struct IndexSpaceSizeDesc {
+      public:
+        UniqueID id;
+        unsigned long long dense_size, sparse_size;
+        bool is_sparse;
+      };
       struct MetaInfo {
       public:
         UniqueID op_id;
@@ -350,6 +356,12 @@ namespace Legion {
                                                 IDType inst_id,
                                                 unsigned dim,
                                                 DimensionKind k);
+      void register_index_space_size(UniqueID id,
+                                     unsigned long long
+                                     dense_size,
+                                     unsigned long long
+                                     sparse_size,
+                                     bool is_sparse);
     public:
       void process_task(TaskID task_id, VariantID variant_id, UniqueID op_id, 
             const Realm::ProfilingMeasurements::OperationTimeline &timeline,
@@ -419,6 +431,7 @@ namespace Legion {
       std::deque<PhysicalInstRegionDesc> phy_inst_rdesc;
       std::deque<PhysicalInstLayoutDesc> phy_inst_layout_rdesc;
       std::deque<PhysicalInstDimOrderDesc> phy_inst_dim_order_rdesc;
+      std::deque<IndexSpaceSizeDesc> index_space_size_desc;
       std::deque<MetaInfo> meta_infos;
       std::deque<CopyInfo> copy_infos;
       std::deque<FillInfo> fill_infos;
@@ -555,6 +568,12 @@ namespace Legion {
       void record_index_part(UniqueID id, const char* name);
       void record_index_partition(UniqueID parent_id, UniqueID id, 
                                   bool disjoint, LegionColor c);
+      void record_index_space_size(UniqueID unique_id,
+                                   unsigned long long
+                                   dense_size,
+                                   unsigned long long
+                                   sparse_size,
+                                   bool is_sparse);
     public:
       void record_mapper_call_kinds(const char *const *const mapper_call_names,
                                     unsigned int num_mapper_call_kinds);
