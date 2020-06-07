@@ -1672,11 +1672,11 @@ namespace Legion {
       struct ProcessorGroupInfo {
       public:
         ProcessorGroupInfo(void)
-          : processor_group(Processor::NO_PROC) { }
-        ProcessorGroupInfo(Processor p, const ProcessorMask &m)
+          : processor_group(ProcessorGroup::NO_PROC_GROUP) { }
+        ProcessorGroupInfo(ProcessorGroup p, const ProcessorMask &m)
           : processor_group(p), processor_mask(m) { }
       public:
-        Processor           processor_group;
+        ProcessorGroup      processor_group;
         ProcessorMask       processor_mask;
       };
     public:
