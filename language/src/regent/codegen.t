@@ -705,23 +705,24 @@ local function physical_region_get_base_pointer(cx, region_type, index_type, fie
   end
 end
 
-local function index_space_bounds(cx, is, is_type, is_domain, is_bounds)
+local function index_space_bounds(cx, is, is_type, domain, bounds)
   local index_type = is_type.index_type
 
-  local domain
-  if not is_domain then
+  if not domain then
     domain = terralib.newsymbol(c.legion_domain_t, "domain_" .. tostring(is_type))
-  else domain = is_domain end
+  end
 
-  local bounds = false
+  if not bounds then
+    bounds = false
+  end
   local actions = quote
     var [domain] = c.legion_index_space_get_domain([cx.runtime], [is])
   end
 
   if not index_type:is_opaque() then
-    if not is_bounds then
+    if not bounds then
       bounds = terralib.newsymbol(std.rect_type(index_type), "bounds_" .. tostring(is_type))
-    else bounds = is_bounds end
+    end
 
     local bounds_actions = nil
     if index_type.dim == 1 then
@@ -2964,10 +2965,11 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
       if cx:has_ispace(symbol_type) then
         local ispace = cx:ispace(symbol_type)
         local bounds_actions, _ignore1, _ignore2 = index_space_bounds(cx, ispace.index_space, symbol_type, ispace.domain, ispace.bounds)
-         free_vars_setup:insert(quote 
-           var [ispace.index_space] = [symbol:getsymbol()].impl
-           [bounds_actions];
-         end)
+        free_vars_setup:insert(
+          quote
+            var [ispace.index_space] = [symbol:getsymbol()].impl
+            [bounds_actions];
+          end)
       end
     end
   end
