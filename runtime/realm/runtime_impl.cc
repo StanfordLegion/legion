@@ -2203,6 +2203,11 @@ namespace Realm {
 	      it != n.subgraphs.end();
 	      ++it)
 	    delete it->load();
+
+	  for(std::vector<atomic<DynamicTable<ProcessorGroupTableAllocator> *> >::iterator it = n.proc_groups.begin();
+	      it != n.proc_groups.end();
+	      ++it)
+	    delete it->load();
 	}
 	
 	delete[] nodes;

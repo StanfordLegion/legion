@@ -576,7 +576,9 @@ namespace Realm {
 	log_msg(delayed_message_head->level,
 		delayed_message_head->msgdata(),
 		delayed_message_head->msglen);
-      delete delayed_message_head;
+      // was allocated with malloc, not new
+      delayed_message_head->~DelayedMessage();
+      free(delayed_message_head);
       delayed_message_head = next;
     }
   }
