@@ -149,8 +149,8 @@ namespace Realm {
     IndexSpace(const Rect<N,T>& _bounds, SparsityMap<N,T> _sparsity);
 
     // construct an index space from a list of points or rects
-    IndexSpace(const std::vector<Point<N,T> >& points);
-    IndexSpace(const std::vector<Rect<N,T> >& rects);
+    explicit IndexSpace(const std::vector<Point<N,T> >& points);
+    explicit IndexSpace(const std::vector<Rect<N,T> >& rects);
 
     // constructs a guaranteed-empty index space
     static IndexSpace<N,T> make_empty(void);
