@@ -11108,6 +11108,12 @@ namespace Legion {
           redop_table.erase(it);
         }
       }
+      for (LegionMap<uint64_t,LegionDeque<ProcessorGroupInfo>::aligned,
+            PROCESSOR_GROUP_ALLOC>::aligned::const_iterator git = 
+            processor_groups.begin(); git != processor_groups.end(); git++)
+        for (LegionDeque<ProcessorGroupInfo>::aligned::const_iterator it = 
+              git->second.begin(); it != git->second.end(); it++)
+          it->processor_group.destroy();
       for (std::map<Memory,MemoryManager*>::const_iterator it =
             memory_managers.begin(); it != memory_managers.end(); it++)
       {
@@ -18906,8 +18912,7 @@ namespace Legion {
         }
       }
       // If we make it here create a new processor group and add it
-      std::vector<Processor> input_procs(procs.begin(), procs.end());
-      Processor group = ProcessorGroup::create_group(input_procs);
+      ProcessorGroup group = ProcessorGroup::create_group(procs);
       if (finder != processor_groups.end())
         finder->second.push_back(ProcessorGroupInfo(group, local_mask));
       else

@@ -9472,7 +9472,6 @@ namespace Legion {
         parent->send_node(target, true/*up*/);
       // Always send the color space ahead of this 
       color_space->send_node(target, false/*up*/);
-      std::map<LegionColor,IndexSpaceNode*> valid_copy;
       {
         AutoLock n_lock(node_lock);
         // Check to see if we have computed the disjointness result
