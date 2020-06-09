@@ -2013,6 +2013,123 @@ namespace Legion {
     return true;
   }
 
+  // Specialization for Span with READ_ONLY privileges
+  template<typename FT>
+  class Span<FT,LEGION_READ_ONLY> {
+  public:
+    class iterator : 
+      public std::iterator<std::random_access_iterator_tag,FT> {
+    public:
+      iterator(void) : ptr(NULL), stride(0) { } 
+    private:
+      iterator(const char *p, size_t s) : ptr(p), stride(s) { }
+    public:
+      inline iterator& operator=(const iterator &rhs) 
+        { ptr = rhs.ptr; stride = rhs.stride; return *this; }
+      inline iterator& operator+=(int rhs) { ptr += stride; return *this; }
+      inline iterator& operator-=(int rhs) { ptr -= stride; return *this; }
+      inline const FT& operator*(void) { return *static_cast<const FT*>(ptr); }
+      inline const FT* operator->(void) { return static_cast<const FT*>(ptr); }
+      inline const FT& operator[](int rhs) 
+        { return *static_cast<const FT*>(ptr + rhs * stride); }
+    public:
+      inline iterator& operator++(void) { ptr += stride; return *this; }
+      inline iterator& operator--(void) { ptr -= stride; return *this; }
+      inline iterator operator++(int) 
+        { iterator it(ptr, stride); ptr += stride; return it; }
+      inline iterator operator--(int) 
+        { iterator it(ptr, stride); ptr -= stride; return it; }
+      inline iterator operator+(int rhs) const 
+        { return iterator(ptr + stride * rhs, stride); }
+      inline iterator operator-(int rhs) const 
+        { return iterator(ptr - stride * rhs, stride); }
+    public:
+      inline bool operator==(const iterator &rhs) { return (ptr == rhs.ptr); }
+      inline bool operator!=(const iterator &rhs) { return (ptr != rhs.ptr); }
+      inline bool operator<(const iterator &rhs) { return (ptr < rhs.ptr); }
+      inline bool operator>(const iterator &rhs) { return (ptr > rhs.ptr); }
+      inline bool operator<=(const iterator &rhs) { return (ptr <= rhs.ptr); }
+      inline bool operator>=(const iterator &rhs) { return (ptr >= rhs.ptr); }
+    private:
+      const char *ptr;
+      size_t stride;
+    };
+    class reverse_iterator : 
+      public std::iterator<std::random_access_iterator_tag,FT> {
+    public:
+      reverse_iterator(void) : ptr(NULL), stride(0) { } 
+    private:
+      reverse_iterator(const char *p, size_t s) : ptr(p), stride(s) { }
+    public:
+      inline reverse_iterator& operator=(const reverse_iterator &rhs) 
+        { ptr = rhs.ptr; stride = rhs.stride; return *this; }
+      inline reverse_iterator& operator+=(int rhs) 
+        { ptr -= stride; return *this; }
+      inline reverse_iterator& operator-=(int rhs) 
+        { ptr += stride; return *this; }
+      inline const FT& operator*(void) { return *static_cast<const FT*>(ptr); }
+      inline const FT* operator->(void) { return static_cast<const FT*>(ptr); }
+      inline const FT& operator[](int rhs) 
+        { return *static_cast<const FT*>(ptr - rhs * stride); }
+    public:
+      inline reverse_iterator& operator++(void) 
+        { ptr -= stride; return *this; }
+      inline reverse_iterator& operator--(void) 
+        { ptr += stride; return *this; }
+      inline reverse_iterator operator++(int) 
+        { reverse_iterator it(ptr, stride); ptr -= stride; return it; }
+      inline reverse_iterator operator--(int) 
+        { reverse_iterator it(ptr, stride); ptr += stride; return it; }
+      inline reverse_iterator operator+(int rhs) const 
+        { return reverse_iterator(ptr - stride * rhs, stride); }
+      inline reverse_iterator operator-(int rhs) const 
+        { return reverse_iterator(ptr + stride * rhs, stride); }
+    public:
+      inline bool operator==(const reverse_iterator &rhs) 
+        { return (ptr == rhs.ptr); }
+      inline bool operator!=(const reverse_iterator &rhs) 
+        { return (ptr != rhs.ptr); }
+      inline bool operator<(const reverse_iterator &rhs) 
+        { return (ptr > rhs.ptr); }
+      inline bool operator>(const reverse_iterator &rhs) 
+        { return (ptr < rhs.ptr); }
+      inline bool operator<=(const reverse_iterator &rhs) 
+        { return (ptr >= rhs.ptr); }
+      inline bool operator>=(const reverse_iterator &rhs) 
+        { return (ptr <= rhs.ptr); }
+    private:
+      const char *ptr;
+      size_t stride;
+    };
+  public:
+    Span(void) : base(NULL), extent(0), stride(0) { }
+    Span(const FT *b, size_t e, size_t s = sizeof(FT))
+      : base(static_cast<const char*>(b)), extent(e), stride(s) { }
+  public:
+    inline iterator begin(void) const { return iterator(base, stride); }
+    inline iterator end(void) const 
+      { return iterator(base + extent*stride, stride); }
+    inline reverse_iterator rbegin(void) const
+      { return reverse_iterator(base + (extent-1) * stride, stride); }
+    inline reverse_iterator rend(void) const
+      { return reverse_iterator(base - stride, stride); }
+  public:
+    inline const FT& front(void) { return *static_cast<const FT*>(base); }
+    inline const FT& back(void) 
+      { return *static_cast<const FT*>(base + (extent-1)*stride); }
+    inline const FT& operator[](int index)
+      { return *static_cast<const FT*>(base + index * stride); }
+    inline const FT* data(void) { return static_cast<const FT*>(base); }
+  public:
+    inline size_t size(void) const { return extent; }
+    inline size_t step(void) const { return stride; }
+    inline bool empty(void) const { return (extent == 0); }
+  private:
+    const char *base;
+    size_t extent; // number of elements
+    size_t stride; // byte stride
+  };
+
 }; // namespace Legion
 
 // Specializations of std::less<T> for Point,Rect,DomainT for use in containers

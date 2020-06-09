@@ -2273,7 +2273,7 @@ namespace Legion {
                                        PrivilegeMode mode); 
     protected:
       void get_bounds(void *realm_is, TypeTag type_tag) const;
-    };
+    }; 
 
     /**
      * \class FieldAccessor
@@ -2547,6 +2547,95 @@ namespace Legion {
       typedef FT& reference;
       typedef const FT& const_reference;
       static const int dim = N;
+    };
+
+    /**
+     * \class PieceIterator
+     * When mappers create a physical instance of a logical region, they have
+     * the option of choosing a layout that is affine or compact. Affine 
+     * layouts have space for the convex hull of a logical region and support
+     * O(1) memory accesses. Compact layouts have affine "pieces" of memory
+     * for subsets of the points in the logical region. A PieceIterator object 
+     * supports iteration over all such affine pieces in a compact instance so
+     * that an accessor can be made for each one. Note that you can also make
+     * a PieceIterator for a instance with an affine layout: it is just a 
+     * special case that contains a single piece. Note that the pieces are
+     * rectangles which maybe different than the the rectangles in the original
+     * index space for the logical region of this physical region. Furthermore,
+     * the pieces are iterated in the order that they are laid out in memory
+     * which is unrelated to the order rectangles are iterated for the index 
+     * space of the logical region for the physical region. Only pieces for 
+     * which the task has privileges will be enumerated and domains/rects will
+     * be automatically restricted to ones on which the application has 
+     * requested privileges.
+     */
+    class PieceIterator {
+    public:
+      PieceIterator(void);
+      PieceIterator(const PhysicalRegion &region);
+    public:
+      inline bool valid(void) const;
+      bool step(void);
+    public:
+      inline operator bool(void) const;
+      inline bool operator()(void) const;
+      inline Domain operator*(void) const;
+      inline PieceIterator& operator++(void);
+      inline PieceIterator operator++(int/*postfix*/);
+    public:
+      bool operator<(const PieceIterator &rhs) const;
+      bool operator==(const PieceIterator &rhs) const;
+      bool operator!=(const PieceIterator &rhs) const;
+    };
+
+    /**
+     * \class PieceIteratorT
+     * This is the typed version of a PieceIterator for users that want
+     * to get explicit rectangles instead of domains.
+     */
+    template<int DIM, typename COORD_T = coord_t>
+    class PieceIteratorT : public PieceIterator {
+    public:
+      PieceIteratorT(void);
+      PieceIteratorT(const PhysicalRegion &region);
+    public:
+      inline Rect<DIM,COORD_T> operator*(void) const;
+      inline PieceIteratorT<DIM,COORD_T>& operator++(void);
+      inline PieceIteratorT<DIM,COORD_T> operator++(int/*postfix*/);
+    };
+
+    /**
+     * \class SpanIterator
+     * While the common model for compact instances is to use a piece iterator
+     * to walk over pieces and create a field accessor to index the elements in
+     * each piece, some applications want to transpose these loops and walk 
+     * linearly over all spans of a field with a common stride without needing 
+     * to know which piece they belong to. The SpanIterator class allows this 
+     * piece-agnostic traversal of a field.
+     */
+    template<PrivilegeMode PM, typename FT, int DIM, typename COORD_T = coord_t>
+    class SpanIterator {
+    public:
+      SpanIterator(const PhysicalRegion &region, FieldID fid,
+                   // The actual field size in case it is different from the 
+                   // one being used in FT and we still want to check it
+                   size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL) { }
+    public:
+      inline bool valid(void) const;
+      inline bool step(void);
+    public:
+      inline operator bool(void) const;
+      inline bool operator()(void) const;
+      inline Span<FT,PM> operator*(void) const;
+      inline SpanIterator<PM,FT,DIM,COORD_T>& operator++(void);
+      inline SpanIterator<PM,FT,DIM,COORD_T> operator++(int);
     };
 
     /**
