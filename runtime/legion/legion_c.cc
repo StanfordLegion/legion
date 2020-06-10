@@ -1867,12 +1867,12 @@ legion_field_space_create_with_fields(legion_runtime_t runtime_,
 }
 
 legion_field_space_t
-legion_field_space_create_with_fields(legion_runtime_t runtime_,
-                                      legion_context_t ctx_,
-                                      legion_future_t *field_sizes,
-                                      legion_field_id_t *field_ids,
-                                      size_t num_fields,
-                                      legion_custom_serdez_id_t serdez)
+legion_field_space_create_with_futures(legion_runtime_t runtime_,
+                                       legion_context_t ctx_,
+                                       legion_future_t *field_sizes,
+                                       legion_field_id_t *field_ids,
+                                       size_t num_fields,
+                                       legion_custom_serdez_id_t serdez)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
