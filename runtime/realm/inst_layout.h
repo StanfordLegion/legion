@@ -430,6 +430,47 @@ namespace Realm {
   template <typename FT, int N, typename T>
   std::ostream& operator<<(std::ostream& os, const AffineAccessor<FT,N,T>& a);
 
+  template <typename FT, int N, typename T = int>
+  class MultiAffineAccessor {
+  public:
+    REALM_CUDA_HD
+    MultiAffineAccessor(void);
+
+    MultiAffineAccessor(RegionInstance inst,
+		        FieldID field_id, size_t subfield_offset = 0);
+
+    MultiAffineAccessor(RegionInstance inst,
+		        FieldID field_id, const Rect<N,T>& subrect,
+		        size_t subfield_offset = 0);
+
+    REALM_CUDA_HD
+    ~MultiAffineAccessor(void);
+
+    static bool is_compatible(RegionInstance inst, FieldID field_id);
+    static bool is_compatible(RegionInstance inst, FieldID field_id, const Rect<N,T>& subrect);
+
+    REALM_CUDA_HD
+    void reset();
+    void reset(RegionInstance inst,
+	       FieldID field_id, size_t subfield_offset = 0);
+    void reset(RegionInstance inst,
+	       FieldID field_id, const Rect<N,T>& subrect,
+	       size_t subfield_offset = 0);
+  
+    REALM_CUDA_HD
+    FT *ptr(const Point<N,T>& p) const;
+    REALM_CUDA_HD
+    FT read(const Point<N,T>& p) const;
+    REALM_CUDA_HD
+    void write(const Point<N,T>& p, FT newval) const;
+
+    REALM_CUDA_HD
+    FT& operator[](const Point<N,T>& p) const;
+
+    REALM_CUDA_HD
+    bool find_strides(const Rect<N,T>& subrect, size_t strides[N]) const;
+  };
+
 }; // namespace Realm
 
 #include "realm/inst_layout.inl"
