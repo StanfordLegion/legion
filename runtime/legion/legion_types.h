@@ -1360,6 +1360,7 @@ namespace Legion {
     class FutureImpl;
     class FutureMapImpl;
     class PhysicalRegionImpl;
+    class PieceIteratorImpl;
     class GrantImpl;
     class PredicateImpl;
     class LegionHandshakeImpl;

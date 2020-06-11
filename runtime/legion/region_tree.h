@@ -878,6 +878,33 @@ namespace Legion {
     };
 
     /**
+     * \class PieceIteratorImpl
+     * This is an interface for iterating over pieces 
+     * which in this case are just a list of rectangles
+     */
+    class PieceIteratorImpl : public Collectable {
+    public:
+      virtual ~PieceIteratorImpl(void) { }
+      virtual int get_next(int index, Domain &next_piece) = 0;
+    };
+
+    /**
+     * \class PieceIteratorImplT
+     * This is the templated version of this class that is
+     * instantiated for each cominbation of type and dimensoinality
+     */
+    template<int DIM, typename T>
+    class PieceIteratorImplT : public PieceIteratorImpl {
+    public:
+      PieceIteratorImplT(const void *piece_list, size_t piece_list_size,
+                         IndexSpaceNodeT<DIM,T> *privilege_node); 
+      virtual ~PieceIteratorImplT(void) { }
+      virtual int get_next(int index, Domain &next_piece);
+    protected:
+      std::vector<Rect<DIM,T> > pieces;
+    };
+
+    /**
      * \class IndexSpaceExpression
      * An IndexSpaceExpression represents a set computation
      * one on or more index spaces. IndexSpaceExpressions
@@ -968,6 +995,8 @@ namespace Legion {
       virtual IndexSpaceNode* create_node(IndexSpace handle,
                       DistributedID did, RtEvent initialized,
                       std::set<RtEvent> *applied) = 0;
+      virtual PieceIteratorImpl* create_piece_iterator(const void *piece_list,
+                    size_t piece_list_size, IndexSpaceNode *privilege_node) = 0;
     public:
       virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
@@ -1015,7 +1044,8 @@ namespace Legion {
                            const LayoutConstraintSet &constraints,
                            const std::vector<FieldID> &field_ids,
                            const std::vector<size_t> &field_sizes,
-                           bool compact) = 0;
+                           bool compact, void **piece_list = NULL,
+                           size_t *piece_list_size = NULL) = 0;
     public:
       static void handle_tighten_index_space(const void *args);
       static AddressSpaceID get_owner_space(IndexSpaceExprID id, Runtime *rt);
@@ -1096,7 +1126,8 @@ namespace Legion {
                                const LayoutConstraintSet &constraints,
                                const std::vector<FieldID> &field_ids,
                                const std::vector<size_t> &field_sizes,
-                               bool compact) const;
+                               bool compact, void **piece_list = NULL,
+                               size_t *piece_list_size = NULL) const;
     public:
       static IndexSpaceExpression* unpack_expression(Deserializer &derez,
                          RegionTreeForest *forest, AddressSpaceID source);
@@ -1229,6 +1260,8 @@ namespace Legion {
       virtual IndexSpaceNode* create_node(IndexSpace handle,
                           DistributedID did, RtEvent initialized,
                           std::set<RtEvent> *applied);
+      virtual PieceIteratorImpl* create_piece_iterator(const void *piece_list,
+                      size_t piece_list_size, IndexSpaceNode *privilege_node);
       virtual IndexSpaceExpression* find_congruence(void) = 0;
     public:
       virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
@@ -1277,7 +1310,8 @@ namespace Legion {
                            const LayoutConstraintSet &constraints,
                            const std::vector<FieldID> &field_ids,
                            const std::vector<size_t> &field_sizes,
-                           bool compact);
+                           bool compact, void **piece_list = NULL, 
+                           size_t *piece_list_size = NULL);
     public:
       ApEvent get_realm_index_space(Realm::IndexSpace<DIM,T> &space,
                                     bool need_tight_result);
@@ -1781,6 +1815,8 @@ namespace Legion {
       virtual IndexSpaceNode* create_node(IndexSpace handle,
                     DistributedID did, RtEvent initialized,
                     std::set<RtEvent> *applied) = 0; 
+      virtual PieceIteratorImpl* create_piece_iterator(const void *piece_list,
+                    size_t piece_list_size, IndexSpaceNode *privilege_node) = 0;
     public:
       virtual ApEvent compute_pending_space(Operation *op,
             const std::vector<IndexSpace> &handles, bool is_union) = 0;
@@ -1956,6 +1992,8 @@ namespace Legion {
       virtual IndexSpaceNode* create_node(IndexSpace handle,
                                 DistributedID did, RtEvent initialized,
                                 std::set<RtEvent> *applied);
+      virtual PieceIteratorImpl* create_piece_iterator(const void *piece_list,
+                      size_t piece_list_size, IndexSpaceNode *privilege_node);
     public:
       void log_index_space_points(const Realm::IndexSpace<DIM,T> &space) const;
       void log_profiler_index_space_points(
@@ -2163,7 +2201,8 @@ namespace Legion {
                            const LayoutConstraintSet &constraints,
                            const std::vector<FieldID> &field_ids,
                            const std::vector<size_t> &field_sizes,
-                           bool compact);
+                           bool compact, void **piece_list = NULL, 
+                           size_t *piece_list_size = NULL);
     public:
       virtual void get_launch_space_domain(Domain &launch_domain);
       virtual void validate_slicing(const std::vector<IndexSpace> &slice_spaces,

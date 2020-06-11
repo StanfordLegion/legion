@@ -228,6 +228,7 @@ namespace Legion {
                       const size_t footprint, ReductionOpID redop_id, 
                       const ReductionOp *rop, FieldSpaceNode *node,
                       IndexSpaceExpression *index_domain, 
+                      const void *piece_list, size_t piece_list_size,
                       RegionTreeID tree_id, ApEvent unique, bool register_now);
       virtual ~PhysicalManager(void);
     public:
@@ -279,6 +280,7 @@ namespace Legion {
       void register_active_context(InnerContext *context);
       void unregister_active_context(InnerContext *context); 
     public:
+      PieceIteratorImpl* create_piece_iterator(IndexSpaceNode *privilege_node);
       void defer_collect_user(CollectableView *view, ApEvent term_event,
                               RtEvent collect, std::set<ApEvent> &to_collect, 
                               bool &add_ref, bool &remove_ref);
@@ -293,6 +295,8 @@ namespace Legion {
       const ReductionOpID redop;
       // Unique identifier event that is common across nodes
       const ApEvent unique_event;
+      const void *const piece_list;
+      const size_t piece_list_size;
     protected:
       mutable LocalLock inst_lock;
       std::set<InnerContext*> active_contexts;
@@ -349,7 +353,7 @@ namespace Legion {
             IndexSpaceExpression *lx, bool is, IndexSpace dh, 
             IndexSpaceExprID dx, FieldSpace h, RegionTreeID tid, 
             LayoutConstraintID l, PointerConstraint &p, ApEvent use, 
-            ReductionOpID redop);
+            ReductionOpID redop, const void *piece_list,size_t piece_list_size);
       public:
         const DistributedID did;
         const AddressSpaceID owner;
@@ -367,12 +371,15 @@ namespace Legion {
         PointerConstraint *const pointer;
         const ApEvent use_event;
         const ReductionOpID redop;
+        const void *const piece_list;
+        const size_t piece_list_size;
       };
     public:
       IndividualManager(RegionTreeForest *ctx, DistributedID did,
                         AddressSpaceID owner_space,
                         MemoryManager *memory, PhysicalInstance inst, 
                         IndexSpaceExpression *instance_domain,
+                        const void *piece_list, size_t piece_list_size,
                         FieldSpaceNode *node, RegionTreeID tree_id,
                         LayoutDescription *desc, ReductionOpID redop, 
                         const PointerConstraint &constraint,
@@ -436,6 +443,7 @@ namespace Legion {
       static void create_remote_manager(Runtime *runtime, DistributedID did,
           AddressSpaceID owner_space, Memory mem, PhysicalInstance inst,
           size_t inst_footprint, IndexSpaceExpression *inst_domain,
+          const void *piece_list, size_t piece_list_size,
           FieldSpaceNode *space_node, RegionTreeID tree_id,
           LayoutConstraints *constraints, ApEvent use_event,
           PointerConstraint &pointer_constraint, ReductionOpID redop);
@@ -494,7 +502,8 @@ namespace Legion {
             std::vector<AddressSpaceID> &right_spaces, AddressSpaceID left,
             size_t f, bool local, IndexSpaceExpression *lx, bool is, 
             IndexSpace dh, IndexSpaceExprID dx, FieldSpace h, RegionTreeID tid,
-            LayoutConstraintID l, ApEvent use, ReductionOpID redop);
+            LayoutConstraintID l, ApEvent use, ReductionOpID redop,
+            const void *piece_list, size_t piece_list_size);
       public:
         const DistributedID did;
         const AddressSpaceID owner;
@@ -513,6 +522,8 @@ namespace Legion {
         const LayoutConstraintID layout_id;
         const ApEvent use_event;
         const ReductionOpID redop;
+        const void *const piece_list;
+        const size_t piece_list_size;
       };
     public:
       CollectiveManager(RegionTreeForest *ctx, DistributedID did,
@@ -522,6 +533,7 @@ namespace Legion {
                         const std::vector<AddressSpaceID> &right,
                         const AddressSpaceID left,
                         IndexSpaceExpression *instance_domain,
+                        const void *piece_list, size_t piece_list_size,
                         FieldSpaceNode *node, RegionTreeID tree_id,
                         LayoutDescription *desc, ReductionOpID redop, 
                         bool register_now, size_t footprint,
@@ -613,10 +625,10 @@ namespace Legion {
           const std::vector<PhysicalInstance> &instances,
           const std::vector<AddressSpaceID> &right_spaces, 
           AddressSpaceID left_space, size_t inst_footprint, 
-          IndexSpaceExpression *inst_domain,
-          FieldSpaceNode *space_node, RegionTreeID tree_id,
-          LayoutConstraints *constraints, ApEvent use_event,
-          ReductionOpID redop);
+          IndexSpaceExpression *inst_domain, const void *piece_list,
+          size_t piece_list_size, FieldSpaceNode *space_node, 
+          RegionTreeID tree_id, LayoutConstraints *constraints, 
+          ApEvent use_event, ReductionOpID redop);
     protected:
       const std::vector<MemoryManager*> memories; // local memories
       const std::vector<PhysicalInstance> instances; // local instances
@@ -677,7 +689,8 @@ namespace Legion {
         : regions(regs), constraints(cons), runtime(rt), memory_manager(memory),
           creator_id(cid), instance(PhysicalInstance::NO_INST), 
           field_space_node(NULL), instance_domain(NULL), tree_id(0),
-          redop_id(0), reduction_op(NULL), realm_layout(NULL), valid(false) { }
+          redop_id(0), reduction_op(NULL), realm_layout(NULL), piece_list(NULL),
+          piece_list_size(0), valid(false) { }
       virtual ~InstanceBuilder(void);
     public:
       void initialize(RegionTreeForest *forest);
@@ -712,6 +725,8 @@ namespace Legion {
       ReductionOpID redop_id;
       const ReductionOp *reduction_op;
       Realm::InstanceLayoutGeneric *realm_layout;
+      void *piece_list;
+      size_t piece_list_size;
     public:
       bool valid;
     };

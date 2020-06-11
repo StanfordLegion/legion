@@ -2250,6 +2250,7 @@ namespace Legion {
       friend class ArraySyntax::AccessorRefHelper;
       template<typename>
       friend class ArraySyntax::AffineRefHelper;
+      friend class PieceIterator;
       Realm::RegionInstance get_instance_info(PrivilegeMode mode, 
                                               FieldID fid, size_t field_size,
                                               void *realm_is, TypeTag type_tag,
@@ -2286,27 +2287,30 @@ namespace Legion {
      *
      * READ_ONLY
      *  - FT read(const Point<N,T>&) const
-     *  - const FT* ptr(const Point<N,T>&) const (Affine Accessor only)
-     *  - const FT* ptr(const Rect<N,T>&) const (Affine Accessor only)
-     *  - FT* ptr(const Rect<N,T>&, size_t strides[N]) const (Affine only)
-     *  - const FT& operator[](const Point<N,T>&) const (Affine Accessor only)
+     *  ------ Methods below here for [Multi-]Affine Accessors only ------
+     *  - const FT* ptr(const Point<N,T>&) const 
+     *  - const FT* ptr(const Rect<N,T>&) const (must be dense)
+     *  - const FT* ptr(const Rect<N,T>&, size_t strides[N]) const
+     *  - const FT& operator[](const Point<N,T>&) const
      *
      * READ_WRITE
      *  - FT read(const Point<N,T>&) const
      *  - void write(const Point<N,T>&, FT val) const
-     *  - FT* ptr(const Point<N,T>&) const (Affine Accessor only)
-     *  - FT* ptr(const Rect<N,T>&) const (Affine Accessor only, must be dense)
-     *  - FT* ptr(const Rect<N,T>&, size_t strides[N]) const (Affine only)
-     *  - FT& operator[](const Point<N,T>&) const (Affine Accessor only)
+     *  ------ Methods below here for [Multi-]Affine Accessors only ------
+     *  - FT* ptr(const Point<N,T>&) const
+     *  - FT* ptr(const Rect<N,T>&) const (must be dense)
+     *  - FT* ptr(const Rect<N,T>&, size_t strides[N]) const
+     *  - FT& operator[](const Point<N,T>&) const
      *  - template<typename REDOP, bool EXCLUSIVE> 
-     *      void reduce(const Point<N,T>&, REDOP::RHS); (Affine Accessor only)
+     *      void reduce(const Point<N,T>&, REDOP::RHS) const
      *
      *  WRITE_DISCARD
      *  - void write(const Point<N,T>&, FT val) const
-     *  - FT* ptr(const Point<N,T>&) const (Affine Accessor only)
-     *  - FT* ptr(const Rect<N,T>&) const (Affine Accessor only)
-     *  - FT* ptr(const Rect<N,T>&, size_t strides[N]) const (Affine only)
-     *  - FT& operator[](const Point<N,T>&) const (Affine Accessor only)
+     *  ------ Methods below here for [Multi-]Affine Accessors only ------
+     *  - FT* ptr(const Point<N,T>&) const
+     *  - FT* ptr(const Rect<N,T>&) const (must be dense)
+     *  - FT* ptr(const Rect<N,T>&, size_t strides[N]) const
+     *  - FT& operator[](const Point<N,T>&) const
      */
     template<PrivilegeMode MODE, typename FT, int N, typename COORD_T = coord_t,
              typename A = Realm::GenericAccessor<FT,N,COORD_T>,
@@ -2346,6 +2350,7 @@ namespace Legion {
                     bool silence_warnings = false,
                     const char *warning_string = NULL) { }
       // Specify a specific Affine transform to use for interpreting points
+      // Not avalable for Realm::MultiAffineAccessor specializations
       template<int M>
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     const AffineTransform<M,N,COORD_T> transform,
@@ -2360,6 +2365,7 @@ namespace Legion {
                     bool silence_warnings = false,
                     const char *warning_string = NULL) { }
       // Specify both a transform and a bounds to use
+      // Not avalable for Realm::MultiAffineAccessor specializations
       template<int M>
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     const AffineTransform<M,N,COORD_T> transform,
@@ -2416,6 +2422,7 @@ namespace Legion {
                         bool silence_warnings = false,
                         const char *warning_string = NULL) { }
       // Specify a specific Affine transform to use for interpreting points
+      // Not available for Realm::MultiAffineAccessor specializations
       template<int M>
       ReductionAccessor(const PhysicalRegion &region, FieldID fid,
                         ReductionOpID redop,
@@ -2423,6 +2430,7 @@ namespace Legion {
                         bool silence_warnings = false,
                         const char *warning_string = NULL) { }
       // Specify both a transform and a bounds to use
+      // Not available for Realm::MultiAffineAccessor specializations
       template<int M>
       ReductionAccessor(const PhysicalRegion &region, FieldID fid,
                         ReductionOpID redop,
@@ -2564,15 +2572,23 @@ namespace Legion {
      * index space for the logical region of this physical region. Furthermore,
      * the pieces are iterated in the order that they are laid out in memory
      * which is unrelated to the order rectangles are iterated for the index 
-     * space of the logical region for the physical region. Only pieces for 
-     * which the task has privileges will be enumerated and domains/rects will
-     * be automatically restricted to ones on which the application has 
-     * requested privileges.
+     * space of the logical region for the physical region. The application can
+     * control whether only rectangles with privileges are presented with the
+     * privilege_only flag. If the privilege_only flag is set to true then each
+     * rectangles will be for a dense set of points for which the task has
+     * privileges. If it is set to false, the the iterator will just return
+     * the rectangles for the pieces of the instance regardless of whether
+     * the application has privileges on them or not.
      */
     class PieceIterator {
     public:
       PieceIterator(void);
-      PieceIterator(const PhysicalRegion &region);
+      PieceIterator(const PieceIterator &rhs);
+      PieceIterator(const PhysicalRegion &region, FieldID fid,
+                    bool privilege_only);
+      ~PieceIterator(void);
+    public:
+      PieceIterator& operator=(const PieceIterator &rhs);
     public:
       inline bool valid(void) const;
       bool step(void);
@@ -2586,6 +2602,11 @@ namespace Legion {
       bool operator<(const PieceIterator &rhs) const;
       bool operator==(const PieceIterator &rhs) const;
       bool operator!=(const PieceIterator &rhs) const;
+    private:
+      Internal::PieceIteratorImpl *impl;
+      int index;
+    protected:
+      Domain current_piece;
     };
 
     /**
@@ -2597,7 +2618,9 @@ namespace Legion {
     class PieceIteratorT : public PieceIterator {
     public:
       PieceIteratorT(void);
-      PieceIteratorT(const PhysicalRegion &region);
+      PieceIteratorT(const PieceIteratorT &rhs);
+      PieceIteratorT(const PhysicalRegion &region, FieldID fid,
+                     bool privilege_only);
     public:
       inline Rect<DIM,COORD_T> operator*(void) const;
       inline PieceIteratorT<DIM,COORD_T>& operator++(void);

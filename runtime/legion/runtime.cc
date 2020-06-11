@@ -2045,6 +2045,36 @@ namespace Legion {
       runtime->get_index_space_domain(req.region.get_index_space(),
                                       realm_is, type_tag);
     }
+
+    //--------------------------------------------------------------------------
+    PieceIteratorImpl* PhysicalRegionImpl::get_piece_iterator(FieldID fid,
+                                                            bool privilege_only)
+    //--------------------------------------------------------------------------
+    {
+      if (req.privilege_fields.find(fid) == req.privilege_fields.end())
+        REPORT_LEGION_ERROR(ERROR_INVALID_FIELD_PRIVILEGES, 
+                       "Piece iterator construction in task %s on "
+                       "PhysicalRegion that does not contain field %d!", 
+                       context->get_task_name(), fid)
+      for (unsigned idx = 0; idx < references.size(); idx++)
+      {
+        const InstanceRef &ref = references[idx];
+        if (ref.is_field_set(fid))
+        {
+          PhysicalManager *manager = ref.get_instance_manager();
+          if (privilege_only)
+          {
+            IndexSpaceNode *privilege_node =
+              runtime->forest->get_node(req.region.get_index_space());
+            return manager->create_piece_iterator(privilege_node);
+          }
+          else
+            return manager->create_piece_iterator(NULL);
+        }
+      }
+      assert(false);
+      return NULL;
+    }
     
     //--------------------------------------------------------------------------
     PhysicalInstance PhysicalRegionImpl::get_instance_info(PrivilegeMode mode, 
@@ -2207,9 +2237,9 @@ namespace Legion {
                             "originally allocated with a size of %zd bytes "
                             "in task %s (UID %lld)",
                             fid, field_size, actual_size, 
-                            context->get_task_name(), context->get_unique_id())
+                            context->get_task_name(), context->get_unique_id()) 
           }
-          return manager->get_instance(DomainPoint());
+          return manager->get_instance(context->owner_task->index_point);
         }
       }
       // should never get here at worst there should have been an

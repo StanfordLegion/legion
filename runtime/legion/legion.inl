@@ -11755,6 +11755,134 @@ namespace Legion {
       return result.bounds;
     }
 
+    //--------------------------------------------------------------------------
+    inline bool PieceIterator::valid(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (impl != NULL) && (index >= 0);
+    }
+
+    //--------------------------------------------------------------------------
+    inline PieceIterator::operator bool(void) const
+    //--------------------------------------------------------------------------
+    {
+      return valid();
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool PieceIterator::operator()(void) const
+    //--------------------------------------------------------------------------
+    {
+      return valid();
+    }
+
+    //--------------------------------------------------------------------------
+    inline Domain PieceIterator::operator*(void) const
+    //--------------------------------------------------------------------------
+    {
+      return current_piece;
+    }
+
+    //--------------------------------------------------------------------------
+    inline PieceIterator& PieceIterator::operator++(void)
+    //--------------------------------------------------------------------------
+    {
+      step();
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    inline PieceIterator PieceIterator::operator++(int)
+    //--------------------------------------------------------------------------
+    {
+      PieceIterator result = *this;
+      step();
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool PieceIterator::operator<(const PieceIterator &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      if (impl < rhs.impl)
+        return true;
+      if (impl > rhs.impl)
+        return false;
+      if (index < rhs.index)
+        return true;
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool PieceIterator::operator==(const PieceIterator &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      if (impl != rhs.impl)
+        return false;
+      return index == rhs.index;
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool PieceIterator::operator!=(const PieceIterator &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      if (impl != rhs.impl)
+        return true;
+      return index != rhs.index;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    inline PieceIteratorT<DIM,T>::PieceIteratorT(void) : PieceIterator()
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    inline PieceIteratorT<DIM,T>::PieceIteratorT(const PieceIteratorT &rhs)
+      : PieceIterator(rhs)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    inline PieceIteratorT<DIM,T>::PieceIteratorT(const PhysicalRegion &region,
+                                               FieldID fid, bool privilege_only)
+      : PieceIterator(region, fid, privilege_only)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    inline Rect<DIM,T> PieceIteratorT<DIM,T>::operator*(void) const
+    //--------------------------------------------------------------------------
+    {
+      const Rect<DIM,T> result = current_piece;
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    inline PieceIteratorT<DIM,T>& PieceIteratorT<DIM,T>::operator++(void)
+    //--------------------------------------------------------------------------
+    {
+      step();
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    inline PieceIteratorT<DIM,T> PieceIteratorT<DIM,T>::operator++(int)
+    //--------------------------------------------------------------------------
+    {
+      PieceIteratorT<DIM,T> result = *this;
+      step();
+      return result;
+    }
+
 #ifdef __GNUC__
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"

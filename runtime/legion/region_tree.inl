@@ -20,6 +20,67 @@ namespace Legion {
 
 #ifdef DEFINE_NT_TEMPLATES
     /////////////////////////////////////////////////////////////
+    // PieceIteratorImplT
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    PieceIteratorImplT<DIM,T>::PieceIteratorImplT(const void *piece_list,
+                 size_t piece_list_size, IndexSpaceNodeT<DIM,T> *privilege_node)
+      : PieceIteratorImpl()
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert((piece_list_size % sizeof(Rect<DIM,T>)) == 0);
+#endif
+      const size_t num_pieces = piece_list_size / sizeof(Rect<DIM,T>);
+      const Rect<DIM,T> *rects = static_cast<const Rect<DIM,T>*>(piece_list);
+      if (privilege_node != NULL)
+      {
+        Realm::IndexSpace<DIM,T> privilege_space;
+        const ApEvent ready = 
+          privilege_node->get_realm_index_space(privilege_space, true/*tight*/);
+        if (ready.exists() && !ready.has_triggered())
+          ready.wait();
+        for (unsigned idx = 0; idx < num_pieces; idx++)
+        {
+          const Rect<DIM,T> &rect = rects[idx];
+          for (Realm::IndexSpaceIterator<DIM,T> itr(privilege_space); 
+                itr.valid; itr.step())
+          {
+            const Rect<DIM,T> overlap = rect.intersection(itr.rect);
+            if (!overlap.empty())
+              pieces.push_back(overlap);
+          }
+        }
+      }
+      else
+      {
+        pieces.resize(num_pieces);
+        for (unsigned idx = 0; idx < num_pieces; idx++)
+          pieces[idx] = rects[idx];
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    int PieceIteratorImplT<DIM,T>::get_next(int index, Domain &next_piece)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(index >= -1);
+#endif
+      const unsigned next = index + 1;
+      if (next < pieces.size())
+      {
+        next_piece = pieces[next];
+        return int(next);
+      }
+      else
+        return -1;
+    }
+
+    /////////////////////////////////////////////////////////////
     // Index Space Expression 
     /////////////////////////////////////////////////////////////
 
@@ -463,7 +524,8 @@ namespace Legion {
                                    const LayoutConstraintSet &constraints,
                                    const std::vector<FieldID> &field_ids,
                                    const std::vector<size_t> &field_sizes,
-                                   bool compact) const
+                                   bool compact, void **piece_list,
+                                   size_t *piece_list_size) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -483,9 +545,23 @@ namespace Legion {
       }
       else
       {
+#ifdef DEBUG_LEGION
+        assert(piece_list != NULL);
+        assert((*piece_list) == NULL);
+        assert(piece_list_size != NULL);
+        assert((*piece_list_size) == 0);
+#endif
         for (Realm::IndexSpaceIterator<DIM,T> itr(space); itr.valid; itr.step())
           if (!itr.rect.empty())
             piece_bounds.push_back(itr.rect);
+        if (!piece_bounds.empty())
+        {
+          *piece_list_size = piece_bounds.size() * sizeof(Rect<DIM,T>);
+          *piece_list = malloc(*piece_list_size);
+          Rect<DIM,T> *pieces = static_cast<Rect<DIM,T>*>(*piece_list);
+          for (unsigned idx = 0; idx < piece_bounds.size(); idx++)
+            pieces[idx] = piece_bounds[idx];
+        }
       }
 
       // If the bounds are empty we can use the same piece list for all fields
@@ -1055,6 +1131,24 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    PieceIteratorImpl* IndexSpaceOperationT<DIM,T>::create_piece_iterator(
+      const void *piece_list, size_t piece_list_size, IndexSpaceNode *priv_node)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      IndexSpaceNodeT<DIM,T> *privilege_node = 
+        dynamic_cast<IndexSpaceNodeT<DIM,T>*>(priv_node);
+      assert(privilege_node != NULL);
+#else
+      IndexSpaceNodeT<DIM,T> *privilege_node = 
+        static_cast<IndexSpaceNodeT<DIM,T>*>(priv_node);
+#endif
+      return new PieceIteratorImplT<DIM,T>(piece_list, piece_list_size, 
+                                           privilege_node);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     ApEvent IndexSpaceOperationT<DIM,T>::issue_fill(
                                  const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
@@ -1216,7 +1310,8 @@ namespace Legion {
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<FieldID> &field_ids,
                                     const std::vector<size_t> &field_sizes,
-                                    bool compact)
+                                    bool compact, void **piece_list,
+                                    size_t *piece_list_size)
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> local_is;
@@ -1224,7 +1319,7 @@ namespace Legion {
       if (space_ready.exists())
         space_ready.wait();
       return create_layout_internal(local_is, constraints, field_ids,
-                                    field_sizes, compact);
+                  field_sizes, compact, piece_list, piece_list_size);
     }
 
     //--------------------------------------------------------------------------
@@ -2152,6 +2247,24 @@ namespace Legion {
       return context->create_node(new_handle, &local_space, false/*domain*/,
                                   NULL/*parent*/, 0/*color*/, did, initialized,
                                   ready, expr_id, applied);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    PieceIteratorImpl* IndexSpaceNodeT<DIM,T>::create_piece_iterator(
+      const void *piece_list, size_t piece_list_size, IndexSpaceNode *priv_node)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      IndexSpaceNodeT<DIM,T> *privilege_node = 
+        dynamic_cast<IndexSpaceNodeT<DIM,T>*>(priv_node);
+      assert(privilege_node != NULL);
+#else
+      IndexSpaceNodeT<DIM,T> *privilege_node = 
+        static_cast<IndexSpaceNodeT<DIM,T>*>(priv_node);
+#endif
+      return new PieceIteratorImplT<DIM,T>(piece_list, piece_list_size, 
+                                           privilege_node);
     }
 
     //--------------------------------------------------------------------------
@@ -4671,7 +4784,8 @@ namespace Legion {
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<FieldID> &field_ids,
                                     const std::vector<size_t> &field_sizes,
-                                    bool compact)
+                                    bool compact, void **piece_list, 
+                                    size_t *piece_list_size)
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> local_is;
@@ -4679,7 +4793,7 @@ namespace Legion {
       if (space_ready.exists())
         space_ready.wait();
       return create_layout_internal(local_is, constraints, field_ids,
-                                    field_sizes, compact);
+                  field_sizes, compact, piece_list, piece_list_size);
     }
     
     //--------------------------------------------------------------------------
