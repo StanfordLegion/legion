@@ -165,7 +165,7 @@ ast.unspecialized:leaf("Condition", {"conditions", "variables"})
 
 ast.unspecialized:leaf("Effect", {"expr"})
 
-ast.unspecialized:inner("expr", {"annotations"})
+ast.unspecialized:inner("expr", {"annotations", "has_parens"})
 ast.unspecialized.expr:leaf("ID", {"name"})
 ast.unspecialized.expr:leaf("Escape", {"expr"})
 ast.unspecialized.expr:leaf("FieldAccess", {"value", "field_names"})
