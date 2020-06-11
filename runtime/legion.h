@@ -2289,8 +2289,9 @@ namespace Legion {
      *  - FT read(const Point<N,T>&) const
      *  ------ Methods below here for [Multi-]Affine Accessors only ------
      *  - const FT* ptr(const Point<N,T>&) const 
-     *  - const FT* ptr(const Rect<N,T>&) const (must be dense)
-     *  - const FT* ptr(const Rect<N,T>&, size_t strides[N]) const
+     *  - const FT* ptr(const Rect<N,T>&, size_t = sizeof(FT)) const (dense)
+     *  - const FT* ptr(const Rect<N,T>&, size_t strides[N], 
+     *                  size_t=sizeof(FT)) const
      *  - const FT& operator[](const Point<N,T>&) const
      *
      * READ_WRITE
@@ -2298,8 +2299,8 @@ namespace Legion {
      *  - void write(const Point<N,T>&, FT val) const
      *  ------ Methods below here for [Multi-]Affine Accessors only ------
      *  - FT* ptr(const Point<N,T>&) const
-     *  - FT* ptr(const Rect<N,T>&) const (must be dense)
-     *  - FT* ptr(const Rect<N,T>&, size_t strides[N]) const
+     *  - FT* ptr(const Rect<N,T>&, size_t = sizeof(FT)) const (must be dense)
+     *  - FT* ptr(const Rect<N,T>&, size_t strides[N], size_t=sizeof(FT)) const
      *  - FT& operator[](const Point<N,T>&) const
      *  - template<typename REDOP, bool EXCLUSIVE> 
      *      void reduce(const Point<N,T>&, REDOP::RHS) const
@@ -2308,8 +2309,8 @@ namespace Legion {
      *  - void write(const Point<N,T>&, FT val) const
      *  ------ Methods below here for [Multi-]Affine Accessors only ------
      *  - FT* ptr(const Point<N,T>&) const
-     *  - FT* ptr(const Rect<N,T>&) const (must be dense)
-     *  - FT* ptr(const Rect<N,T>&, size_t strides[N]) const
+     *  - FT* ptr(const Rect<N,T>&, size_t = sizeof(FT)) const (must be dense)
+     *  - FT* ptr(const Rect<N,T>&, size_t strides[N], size_t=sizeof(FT)) const
      *  - FT& operator[](const Point<N,T>&) const
      */
     template<PrivilegeMode MODE, typename FT, int N, typename COORD_T = coord_t,

@@ -2179,6 +2179,28 @@ namespace Legion {
     // Specializations for Affine Accessors
     ////////////////////////////////////////////////////////////
 
+    template<int N, typename T> __CUDA_HD__
+    static inline bool __legion_is_dense_layout(const Rect<N,T> &bounds,
+                              const size_t strides[N], size_t field_size)
+    {
+      ptrdiff_t exp_offset = field_size;
+      int used_mask = 0; // keep track of which dimensions we've already matched
+      for (int i = 0; i < N; i++) {
+        bool found = false;
+        for (int j = 0; j < N; j++) {
+          if ((used_mask >> j) & 1) continue;
+          if (strides[j] != exp_offset) continue;
+          found = true;
+          used_mask |= (1 << j);
+          exp_offset *= (bounds.hi[j] - bounds.lo[j] + 1);
+          break;
+        }
+        if (!found)
+          return false;
+      }
+      return true;
+    }
+
     // Read-only FieldAccessor specialization
     template<typename FT, int N, typename T, bool CB>
     class FieldAccessor<LEGION_READ_ONLY,FT,N,T,
@@ -2289,30 +2311,31 @@ namespace Legion {
           return accessor.ptr(p); 
         }
       __CUDA_HD__
-      inline const FT* ptr(const Rect<N,T>& r) const
+      inline const FT* ptr(const Rect<N,T>& r, 
+                           size_t field_size = sizeof(FT)) const
         {
-          if (!accessor.is_dense_arbitrary(r))
-          {
 #ifdef __CUDA_ARCH__
-            printf(
-                "ERROR: Illegal request for pointer of non-dense rectangle\n");
-            assert(false);
+          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
 #else
+          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
+          {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
-#endif
+#else
             exit(ERROR_NON_DENSE_RECTANGLE);
 #endif
           }
+#endif
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
-      inline const FT* ptr(const Rect<N,T>& r, size_t strides[N]) const
+      inline const FT* ptr(const Rect<N,T>& r, size_t strides[N],
+                           size_t field_size = sizeof(FT)) const
         {
           for (int i = 0; i < N; i++)
-            strides[i] = accessor.strides[i] / sizeof(FT);
+            strides[i] = accessor.strides[i] / field_size;
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
@@ -2473,34 +2496,32 @@ namespace Legion {
           return accessor.ptr(p);
         }
       __CUDA_HD__
-      inline const FT* ptr(const Rect<N,T>& r) const
+      inline const FT* ptr(const Rect<N,T>& r, 
+                           size_t field_size = sizeof(FT)) const
         {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
+          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
                                               LEGION_READ_ONLY);
-#endif
-          if (!accessor.is_dense_arbitrary(r))
+          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
           {
-#ifdef __CUDA_ARCH__
-            printf(
-                "ERROR: Illegal request for pointer of non-dense rectangle\n");
-            assert(false);
-#else
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
-#endif
+#else
             exit(ERROR_NON_DENSE_RECTANGLE);
 #endif
           }
+#endif
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
-      inline const FT* ptr(const Rect<N,T>& r, size_t strides[N]) const
+      inline const FT* ptr(const Rect<N,T>& r, size_t strides[N],
+                           size_t field_size = sizeof(FT)) const
         {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
@@ -2510,7 +2531,7 @@ namespace Legion {
                                               LEGION_READ_ONLY);
 #endif
           for (int i = 0; i < N; i++)
-            strides[i] = accessor.strides[i] / sizeof(FT);
+            strides[i] = accessor.strides[i] / field_size;
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
@@ -2658,29 +2679,30 @@ namespace Legion {
           return accessor.ptr(p); 
         }
       __CUDA_HD__
-      inline const FT* ptr(const Rect<1,T>& r) const
+      inline const FT* ptr(const Rect<1,T>& r, 
+                           size_t field_size = sizeof(FT)) const
         {
-          if (!accessor.is_dense_arbitrary(r))
-          {
 #ifdef __CUDA_ARCH__
-            printf(
-                "ERROR: Illegal request for pointer of non-dense rectangle\n");
-            assert(false);
+          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
 #else
+          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
+          {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
-#endif
+#else
             exit(ERROR_NON_DENSE_RECTANGLE);
 #endif
           }
+#endif
           return accessor.ptr(r.lo); 
         }
       __CUDA_HD__
-      inline const FT* ptr(const Rect<1,T>& r, size_t strides[1]) const
+      inline const FT* ptr(const Rect<1,T>& r, size_t strides[1],
+                           size_t field_size = sizeof(FT)) const
         {
-          strides[0] = accessor.strides[0] / sizeof(FT);
+          strides[0] = accessor.strides[0] / field_size;
           return accessor.ptr(r.lo); 
         }
       __CUDA_HD__
@@ -2830,34 +2852,32 @@ namespace Legion {
           return accessor.ptr(p); 
         }
       __CUDA_HD__
-      inline const FT* ptr(const Rect<1,T>& r) const
+      inline const FT* ptr(const Rect<1,T>& r,
+                           size_t field_size = sizeof(FT)) const
         {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
+          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
                                               LEGION_READ_ONLY);
-#endif
-          if (!accessor.is_dense_arbitrary(r))
+          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
           {
-#ifdef __CUDA_ARCH__
-            printf(
-                "ERROR: Illegal request for pointer of non-dense rectangle\n");
-            assert(false);
-#else
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
-#endif
+#else
             exit(ERROR_NON_DENSE_RECTANGLE);
 #endif
           }
+#endif
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
-      inline const FT* ptr(const Rect<1,T>& r, size_t strides[1]) const
+      inline const FT* ptr(const Rect<1,T>& r, size_t strides[1],
+                           size_t field_size = sizeof(FT)) const
         {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
@@ -2866,7 +2886,7 @@ namespace Legion {
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
                                               LEGION_READ_ONLY);
 #endif
-          strides[0] = accessor.strides[0] / sizeof(FT);
+          strides[0] = accessor.strides[0] / field_size;
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
@@ -3007,30 +3027,30 @@ namespace Legion {
           return accessor.ptr(p); 
         }
       __CUDA_HD__
-      inline FT* ptr(const Rect<N,T>& r) const
+      inline FT* ptr(const Rect<N,T>& r, size_t field_size = sizeof(FT)) const
         {
-          if (!accessor.is_dense_arbitrary(r))
-          {
 #ifdef __CUDA_ARCH__
-            printf(
-                "ERROR: Illegal request for pointer of non-dense rectangle\n");
-            assert(false);
+          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
 #else
+          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
+          {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
-#endif
+#else
             exit(ERROR_NON_DENSE_RECTANGLE);
 #endif
           }
+#endif
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
-      inline FT* ptr(const Rect<N,T>& r, size_t strides[N]) const
+      inline FT* ptr(const Rect<N,T>& r, size_t strides[N],
+                     size_t field_size = sizeof(FT)) const
         {
           for (int i = 0; i < N; i++)
-            strides[i] = accessor.strides[i] / sizeof(FT);
+            strides[i] = accessor.strides[i] / field_size;
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
@@ -3209,34 +3229,31 @@ namespace Legion {
           return accessor.ptr(p); 
         }
       __CUDA_HD__
-      inline FT* ptr(const Rect<N,T>& r) const
+      inline FT* ptr(const Rect<N,T>& r, size_t field_size = sizeof(FT)) const
         {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
+          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
                                               LEGION_READ_WRITE);
-#endif
-          if (!accessor.is_dense_arbitrary(r))
+          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
           {
-#ifdef __CUDA_ARCH__
-            printf(
-                "ERROR: Illegal request for pointer of non-dense rectangle\n");
-            assert(false);
-#else
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
-#endif
+#else
             exit(ERROR_NON_DENSE_RECTANGLE);
 #endif
           }
+#endif
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
-      inline FT* ptr(const Rect<N,T>& r, size_t strides[N]) const
+      inline FT* ptr(const Rect<N,T>& r, size_t strides[N],
+                     size_t field_size = sizeof(FT)) const
         {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
@@ -3246,7 +3263,7 @@ namespace Legion {
                                               LEGION_READ_WRITE);
 #endif
           for (int i = 0; i < N; i++)
-            strides[i] = accessor.strides[i] / sizeof(FT);
+            strides[i] = accessor.strides[i] / field_size;
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
@@ -3412,29 +3429,29 @@ namespace Legion {
           return accessor.ptr(p); 
         }
       __CUDA_HD__
-      inline FT* ptr(const Rect<1,T>& r) const
+      inline FT* ptr(const Rect<1,T>& r, size_t field_size = sizeof(FT)) const
         {
-          if (!accessor.is_dense_arbitrary(r))
-          {
 #ifdef __CUDA_ARCH__
-            printf(
-                "ERROR: Illegal request for pointer of non-dense rectangle\n");
-            assert(false);
+          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
 #else
+          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
+          {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
-#endif
+#else
             exit(ERROR_NON_DENSE_RECTANGLE);
 #endif
           }
+#endif
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
-      inline FT* ptr(const Rect<1,T>& r, size_t strides[1]) const
+      inline FT* ptr(const Rect<1,T>& r, size_t strides[1],
+                     size_t field_size = sizeof(FT)) const
         {
-          strides[0] = accessor.strides[0] / sizeof(FT);
+          strides[0] = accessor.strides[0] / field_size;
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
@@ -3602,34 +3619,31 @@ namespace Legion {
           return accessor.ptr(p); 
         }
       __CUDA_HD__
-      inline FT* ptr(const Rect<1,T>& r) const
+      inline FT* ptr(const Rect<1,T>& r, size_t field_size = sizeof(FT)) const
         {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
+          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
                                               LEGION_READ_WRITE);
-#endif
-          if (!accessor.is_dense_arbitrary(r))
+          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
           {
-#ifdef __CUDA_ARCH__
-            printf(
-                "ERROR: Illegal request for pointer of non-dense rectangle\n");
-            assert(false);
-#else
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
-#endif
+#else
             exit(ERROR_NON_DENSE_RECTANGLE);
 #endif
           }
+#endif
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
-      inline FT* ptr(const Rect<1,T>& r, size_t strides[1]) const
+      inline FT* ptr(const Rect<1,T>& r, size_t strides[1],
+                     size_t field_size = sizeof(FT)) const
         {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
@@ -3638,7 +3652,7 @@ namespace Legion {
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
                                               LEGION_READ_WRITE);
 #endif
-          strides[0] = accessor.strides[0] / sizeof(FT);
+          strides[0] = accessor.strides[0] / field_size;
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
@@ -3792,30 +3806,30 @@ namespace Legion {
           return accessor.ptr(p); 
         }
       __CUDA_HD__
-      inline FT* ptr(const Rect<N,T>& r) const
+      inline FT* ptr(const Rect<N,T>& r, size_t field_size = sizeof(FT)) const
         {
-          if (!accessor.is_dense_arbitrary(r))
-          {
 #ifdef __CUDA_ARCH__
-            printf(
-                "ERROR: Illegal request for pointer of non-dense rectangle\n");
-            assert(false);
+          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
 #else
+          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
+          {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
-#endif
+#else
             exit(ERROR_NON_DENSE_RECTANGLE);
 #endif
           }
+#endif
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
-      inline FT* ptr(const Rect<N,T>& r, size_t strides[N]) const
+      inline FT* ptr(const Rect<N,T>& r, size_t strides[N],
+                     size_t field_size = sizeof(FT)) const
         {
           for (int i = 0; i < N; i++)
-            strides[i] = accessor.strides[i] / sizeof(FT);
+            strides[i] = accessor.strides[i] / field_size;
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
@@ -3988,34 +4002,31 @@ namespace Legion {
           return accessor.ptr(p); 
         }
       __CUDA_HD__
-      inline FT* ptr(const Rect<N,T>& r) const 
+      inline FT* ptr(const Rect<N,T>& r, size_t field_size = sizeof(FT)) const
         {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
+          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
                                               LEGION_READ_WRITE);
-#endif
-          if (!accessor.is_dense_arbitrary(r))
+          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
           {
-#ifdef __CUDA_ARCH__
-            printf(
-                "ERROR: Illegal request for pointer of non-dense rectangle\n");
-            assert(false);
-#else
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
-#endif
+#else
             exit(ERROR_NON_DENSE_RECTANGLE);
 #endif
           }
+#endif
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
-      inline FT* ptr(const Rect<N,T>& r, size_t strides[N]) const 
+      inline FT* ptr(const Rect<N,T>& r, size_t strides[N],
+                     size_t field_size = sizeof(FT)) const 
         {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
@@ -4025,7 +4036,7 @@ namespace Legion {
                                               LEGION_READ_WRITE);
 #endif
           for (int i = 0; i < N; i++)
-            strides[i] = accessor.strides[i] / sizeof(FT);
+            strides[i] = accessor.strides[i] / field_size;
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
@@ -4178,29 +4189,29 @@ namespace Legion {
           return accessor.ptr(p); 
         }
       __CUDA_HD__
-      inline FT* ptr(const Rect<1,T>& r) const
+      inline FT* ptr(const Rect<1,T>& r, size_t field_size = sizeof(FT)) const
         {
-          if (!accessor.is_dense_arbitrary(r))
-          {
 #ifdef __CUDA_ARCH__
-            printf(
-                "ERROR: Illegal request for pointer of non-dense rectangle\n");
-            assert(false);
+          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
 #else
+          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
+          {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
-#endif
+#else
             exit(ERROR_NON_DENSE_RECTANGLE);
 #endif
           }
+#endif
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
-      inline FT* ptr(const Rect<1,T>& r, size_t strides[1]) const
+      inline FT* ptr(const Rect<1,T>& r, size_t strides[1],
+                     size_t field_size = sizeof(FT)) const
         {
-          strides[0] = accessor.strides[0] / sizeof(FT);
+          strides[0] = accessor.strides[0] / field_size;
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
@@ -4362,34 +4373,31 @@ namespace Legion {
           return accessor.ptr(p); 
         }
       __CUDA_HD__
-      inline FT* ptr(const Rect<1,T>& r) const
+      inline FT* ptr(const Rect<1,T>& r, size_t field_size = sizeof(FT)) const
         {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
+          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
                                               LEGION_READ_WRITE);
-#endif
-          if (!accessor.is_dense_arbitrary(r))
+          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
           {
-#ifdef __CUDA_ARCH__
-            printf(
-                "ERROR: Illegal request for pointer of non-dense rectangle\n");
-            assert(false);
-#else
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
-#endif
+#else
             exit(ERROR_NON_DENSE_RECTANGLE);
 #endif
           }
+#endif
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
-      inline FT* ptr(const Rect<1,T>& r, size_t strides[1]) const
+      inline FT* ptr(const Rect<1,T>& r, size_t strides[1],
+                     size_t field_size = sizeof(FT)) const
         {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
@@ -4398,7 +4406,7 @@ namespace Legion {
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
                                               LEGION_READ_WRITE);
 #endif
-          strides[0] = accessor.strides[0] / sizeof(FT);
+          strides[0] = accessor.strides[0] / field_size;
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
@@ -4534,30 +4542,30 @@ namespace Legion {
           return accessor.ptr(p); 
         }
       __CUDA_HD__
-      inline FT* ptr(const Rect<N,T>& r) const
+      inline FT* ptr(const Rect<N,T>& r, size_t field_size = sizeof(FT)) const
         {
-          if (!accessor.is_dense_arbitrary(r))
-          {
 #ifdef __CUDA_ARCH__
-            printf(
-                "ERROR: Illegal request for pointer of non-dense rectangle\n");
-            assert(false);
+          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
 #else
+          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
+          {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
-#endif
+#else
             exit(ERROR_NON_DENSE_RECTANGLE);
 #endif
           }
+#endif
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
-      inline FT* ptr(const Rect<N,T>& r, size_t strides[N]) const
+      inline FT* ptr(const Rect<N,T>& r, size_t strides[N],
+                     size_t field_size = sizeof(FT)) const
         {
           for (int i = 0; i < N; i++)
-            strides[i] = accessor.strides[i] / sizeof(FT);
+            strides[i] = accessor.strides[i] / field_size;
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
@@ -4715,34 +4723,31 @@ namespace Legion {
           return accessor.ptr(p); 
         }
       __CUDA_HD__
-      inline FT* ptr(const Rect<N,T>& r) const 
+      inline FT* ptr(const Rect<N,T>& r, size_t field_size = sizeof(FT)) const
         {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
+          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
                                               LEGION_READ_WRITE);
-#endif
-          if (!accessor.is_dense_arbitrary(r))
+          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
           {
-#ifdef __CUDA_ARCH__
-            printf(
-                "ERROR: Illegal request for pointer of non-dense rectangle\n");
-            assert(false);
-#else
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
-#endif
+#else
             exit(ERROR_NON_DENSE_RECTANGLE);
 #endif
           }
+#endif
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
-      inline FT* ptr(const Rect<N,T>& r, size_t strides[N]) const 
+      inline FT* ptr(const Rect<N,T>& r, size_t strides[N],
+                     size_t field_size = sizeof(FT)) const 
         {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
@@ -4752,7 +4757,7 @@ namespace Legion {
                                               LEGION_READ_WRITE);
 #endif
           for (int i = 0; i < N; i++)
-            strides[i] = accessor.strides[i] / sizeof(FT);
+            strides[i] = accessor.strides[i] / field_size;
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
@@ -4900,29 +4905,29 @@ namespace Legion {
           return accessor.ptr(p); 
         }
       __CUDA_HD__
-      inline FT* ptr(const Rect<1,T>& r) const
+      inline FT* ptr(const Rect<1,T>& r, size_t field_size = sizeof(FT)) const
         {
-          if (!accessor.is_dense_arbitrary(r))
-          {
 #ifdef __CUDA_ARCH__
-            printf(
-                "ERROR: Illegal request for pointer of non-dense rectangle\n");
-            assert(false);
+          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
 #else
+          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
+          {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
-#endif
+#else
             exit(ERROR_NON_DENSE_RECTANGLE);
 #endif
           }
+#endif
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
-      inline FT* ptr(const Rect<1,T>& r, size_t strides[1]) const
+      inline FT* ptr(const Rect<1,T>& r, size_t strides[1],
+                     size_t field_size = sizeof(FT)) const
         {
-          strides[0] = accessor.strides[0] / sizeof(FT);
+          strides[0] = accessor.strides[0] / field_size;
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
@@ -5072,34 +5077,31 @@ namespace Legion {
           return accessor.ptr(p); 
         }
       __CUDA_HD__
-      inline FT* ptr(const Rect<1,T>& r) const
+      inline FT* ptr(const Rect<1,T>& r, size_t field_size = sizeof(FT)) const
         {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
+          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
                                               LEGION_READ_WRITE);
-#endif
-          if (!accessor.is_dense_arbitrary(r))
+          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
           {
-#ifdef __CUDA_ARCH__
-            printf(
-                "ERROR: Illegal request for pointer of non-dense rectangle\n");
-            assert(false);
-#else
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
-#endif
+#else
             exit(ERROR_NON_DENSE_RECTANGLE);
 #endif
           }
+#endif
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
-      inline FT* ptr(const Rect<1,T>& r, size_t strides[1]) const
+      inline FT* ptr(const Rect<1,T>& r, size_t strides[1],
+                     size_t field_size = sizeof(FT)) const
         {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
@@ -5108,7 +5110,7 @@ namespace Legion {
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
                                               LEGION_READ_WRITE);
 #endif
-          strides[0] = accessor.strides[0] / sizeof(FT);
+          strides[0] = accessor.strides[0] / field_size;
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
@@ -5230,31 +5232,31 @@ namespace Legion {
           return accessor.ptr(p);
         }
       __CUDA_HD__
-      inline typename REDOP::RHS* ptr(const Rect<N,T>& r) const
+      inline typename REDOP::RHS* ptr(const Rect<N,T>& r,
+              size_t field_size = sizeof(REDOP::RHS)) const
         {
-          if (!accessor.is_dense_arbitrary(r))
-          {
 #ifdef __CUDA_ARCH__
-            printf(
-                "ERROR: Illegal request for pointer of non-dense rectangle\n");
-            assert(false);
+          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
 #else
+          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
+          {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
-#endif
+#else
             exit(ERROR_NON_DENSE_RECTANGLE);
 #endif
           }
+#endif
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Rect<N,T>& r, 
-                                      size_t strides[N]) const
+              size_t strides[N], size_t field_size = sizeof(REDOP::RHS)) const
         {
           for (int i = 0; i < N; i++)
-            strides[i] = accessor.strides[i] / sizeof(typename REDOP::RHS);
+            strides[i] = accessor.strides[i] / field_size;
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
@@ -5406,35 +5408,32 @@ namespace Legion {
           return accessor.ptr(p); 
         }
       __CUDA_HD__
-      inline typename REDOP::RHS* ptr(const Rect<N,T>& r) const
+      inline typename REDOP::RHS* ptr(const Rect<N,T>& r,
+              size_t field_size = sizeof(REDOP::RHS)) const
         {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
+          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
                                               LEGION_REDUCE);
-#endif
-          if (!accessor.is_dense_arbitrary(r))
+          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
           {
-#ifdef __CUDA_ARCH__
-            printf(
-                "ERROR: Illegal request for pointer of non-dense rectangle\n");
-            assert(false);
-#else
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
-#endif
+#else
             exit(ERROR_NON_DENSE_RECTANGLE);
 #endif
           }
+#endif
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Rect<N,T>& r,
-                                      size_t strides[N]) const
+              size_t strides[N], size_t field_size = sizeof(REDOP::RHS)) const
         {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
@@ -5444,7 +5443,7 @@ namespace Legion {
                                               LEGION_REDUCE);
 #endif
           for (int i = 0; i < N; i++)
-            strides[i] = accessor.strides[i] / sizeof(typename REDOP::RHS);
+            strides[i] = accessor.strides[i] / field_size;
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
@@ -5576,30 +5575,30 @@ namespace Legion {
           return accessor.ptr(p);
         }
       __CUDA_HD__
-      inline typename REDOP::RHS* ptr(const Rect<1,T>& r) const
+      inline typename REDOP::RHS* ptr(const Rect<1,T>& r,
+              size_t field_size = sizeof(REDOP::RHS)) const
         {
-          if (!accessor.is_dense_arbitrary(r))
-          {
 #ifdef __CUDA_ARCH__
-            printf(
-                "ERROR: Illegal request for pointer of non-dense rectangle\n");
-            assert(false);
+          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
 #else
+          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
+          {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
-#endif
+#else
             exit(ERROR_NON_DENSE_RECTANGLE);
 #endif
           }
+#endif
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Rect<1,T>& r, 
-                                      size_t strides[1]) const
+              size_t strides[1], size_t field_size = sizeof(REDOP::RHS)) const
         {
-          strides[0] = accessor.strides[0] / sizeof(typename REDOP::RHS);
+          strides[0] = accessor.strides[0] / field_size;
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
@@ -5740,34 +5739,31 @@ namespace Legion {
           return accessor.ptr(p); 
         }
       __CUDA_HD__
-      inline typename REDOP::RHS* ptr(const Rect<1,T>& r) const
+      inline typename REDOP::RHS* ptr(const Rect<1,T>& r,
+              size_t field_size = sizeof(REDOP::RHS)) const
         {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
+          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, LEGION_REDUCE);
-#endif
-          if (!accessor.is_dense_arbitrary(r))
+          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
           {
-#ifdef __CUDA_ARCH__
-            printf(
-                "ERROR: Illegal request for pointer of non-dense rectangle\n");
-            assert(false);
-#else
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
-#endif
+#else
             exit(ERROR_NON_DENSE_RECTANGLE);
 #endif
           }
+#endif
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Rect<1,T>& r,
-                                      size_t strides[1]) const
+              size_t strides[1], size_t field_size = sizeof(REDOP::RHS)) const
         {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
@@ -5775,7 +5771,7 @@ namespace Legion {
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, LEGION_REDUCE);
 #endif
-          strides[0] = accessor.strides[0] / sizeof(typename REDOP::RHS);
+          strides[0] = accessor.strides[0] / field_size;
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
@@ -5790,6 +5786,3168 @@ namespace Legion {
         }
     public:
       Realm::AffineAccessor<typename REDOP::RHS,1,T> accessor;
+      FieldID field;
+      AffineBounds::Tester<1,T> bounds;
+    public:
+      typedef typename REDOP::RHS value_type;
+      typedef typename REDOP::RHS& reference;
+      typedef const typename REDOP::RHS& const_reference;
+      static const int dim = 1;
+    };
+
+    ////////////////////////////////////////////////////////////
+    // Specializations for Multi Affine Accessors
+    ////////////////////////////////////////////////////////////
+
+    // Read-only FieldAccessor specialization
+    template<typename FT, int N, typename T, bool CB>
+    class FieldAccessor<LEGION_READ_ONLY,FT,N,T,
+                        Realm::MultiAffineAccessor<FT,N,T>,CB> {
+    public:
+      __CUDA_HD__
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                               is.bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<FT,N,T>(instance, fid, is.bounds);
+      }
+      // With explicit bounds
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    const Rect<N,T> source_bounds,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                               source_bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = 
+          Realm::MultiAffineAccessor<FT,N,T>(instance, fid, source_bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<N,T>& p) const 
+        { 
+          return accessor.read(p); 
+        }
+      __CUDA_HD__
+      inline const FT* ptr(const Point<N,T>& p) const
+        { 
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline const FT* ptr(const Rect<N,T>& r, 
+                           size_t field_size = sizeof(FT)) const
+        {
+          size_t strides[N];
+#ifdef __CUDA_ARCH__
+          assert(accessor.find_strides(r, strides));
+          assert(__legion_is_dense_layout(r, strides, field_size));
+#else
+          if (!accessor.find_strides(r, strides))
+          {
+            fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
+                            "not contained within the bounds of a piece\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_PIECE_RECTANGLE);
+#endif
+          }
+          if (!__legion_is_dense_layout(r, strides, field_size))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
+          }
+#endif
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline const FT* ptr(const Rect<N,T>& r, size_t strides[N],
+                           size_t field_size = sizeof(FT)) const
+        {
+#ifdef __CUDA_ARCH__
+          assert(accessor.find_strides(r, strides));
+#else
+          if (!accessor.find_strides(r, strides))
+          {
+            fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
+                            "not contained within the bounds of a piece\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_PIECE_RECTANGLE);
+#endif
+          }
+#endif
+          for (int i = 0; i < N; i++)
+            strides[i] /= field_size;
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline const FT& operator[](const Point<N,T>& p) const
+        { 
+          return accessor[p]; 
+        }
+      __CUDA_HD__
+      inline ArraySyntax::AffineSyntaxHelper<
+          FieldAccessor<LEGION_READ_ONLY,FT,N,T,
+            Realm::MultiAffineAccessor<FT,N,T>,CB>,FT,N,T,2,LEGION_READ_ONLY>
+          operator[](T index) const
+      {
+        return ArraySyntax::AffineSyntaxHelper<
+            FieldAccessor<LEGION_READ_ONLY,FT,N,T,
+              Realm::MultiAffineAccessor<FT,N,T>,CB>,FT,N,T,2,LEGION_READ_ONLY>(
+              *this, Point<1,T>(index));
+      }
+    public:
+      Realm::MultiAffineAccessor<FT,N,T> accessor;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = N;
+    };
+
+    // Read-only FieldAccessor specialization
+    // with bounds checks
+    template<typename FT, int N, typename T>
+    class FieldAccessor<LEGION_READ_ONLY,FT,N,T,
+                        Realm::MultiAffineAccessor<FT,N,T>,true> {
+    public:
+      // No CUDA support due to PhysicalRegion constructor
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+        : field(fid)
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                               is.bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<FT,N,T>(instance, fid, is.bounds);
+        bounds = AffineBounds::Tester<N,T>(is);
+      }
+      // With explicit bounds
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    const Rect<N,T> source_bounds,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+        : field(fid)
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string, 
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                               source_bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = 
+          Realm::MultiAffineAccessor<FT,N,T>(instance, fid, source_bounds);
+        bounds = AffineBounds::Tester<N,T>(is, source_bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<N,T>& p) const 
+        { 
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                              LEGION_READ_ONLY);
+#endif
+          return accessor.read(p);
+        }
+      __CUDA_HD__
+      inline const FT* ptr(const Point<N,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                              LEGION_READ_ONLY);
+#endif
+          return accessor.ptr(p);
+        }
+      __CUDA_HD__
+      inline const FT* ptr(const Rect<N,T>& r, 
+                           size_t field_size = sizeof(FT)) const
+        {
+          size_t strides[N];
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains_all(r));
+          assert(accessor.find_strides(r, strides));
+          assert(__legion_is_dense_layout(r, strides, field_size));
+#else
+          if (!bounds.contains_all(r)) 
+            PhysicalRegion::fail_bounds_check(Domain(r), field, 
+                                              LEGION_READ_ONLY);
+          if (!accessor.find_strides(r, strides))
+          {
+            fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
+                            "not contained within the bounds of a piece\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_PIECE_RECTANGLE);
+#endif
+          }
+          if (!__legion_is_dense_layout(r, strides, field_size))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
+          }
+#endif
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline const FT* ptr(const Rect<N,T>& r, size_t strides[N],
+                           size_t field_size = sizeof(FT)) const
+        {
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains_all(r));
+          assert(accessor.find_strides(r, strides));
+#else
+          if (!bounds.contains_all(r)) 
+            PhysicalRegion::fail_bounds_check(Domain(r), field, 
+                                              LEGION_READ_ONLY);
+          if (!accessor.find_strides(r, strides))
+          {
+            fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
+                            "not contained within the bounds of a piece\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_PIECE_RECTANGLE);
+#endif
+          }
+#endif
+          for (int i = 0; i < N; i++)
+            strides[i] /= field_size;
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline const FT& operator[](const Point<N,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                              LEGION_READ_ONLY);
+#endif
+          return accessor[p]; 
+        }
+      __CUDA_HD__
+      inline ArraySyntax::AffineSyntaxHelper<
+          FieldAccessor<LEGION_READ_ONLY,FT,N,T,
+             Realm::MultiAffineAccessor<FT,N,T>,true>,FT,N,T,2,LEGION_READ_ONLY>
+          operator[](T index) const
+      {
+        return ArraySyntax::AffineSyntaxHelper<
+          FieldAccessor<LEGION_READ_ONLY,FT,N,T,
+            Realm::MultiAffineAccessor<FT,N,T>,true>,FT,N,T,2,LEGION_READ_ONLY>(
+              *this, Point<1,T>(index));
+      }
+    public:
+      Realm::MultiAffineAccessor<FT,N,T> accessor;
+      FieldID field;
+      AffineBounds::Tester<N,T> bounds;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = N;
+    };
+
+    // Read-only FieldAccessor specialization 
+    // with N==1 to avoid array ambiguity
+    template<typename FT, typename T, bool CB>
+    class FieldAccessor<LEGION_READ_ONLY,FT,1,T,
+                        Realm::MultiAffineAccessor<FT,1,T>,CB> {
+    public:
+      __CUDA_HD__
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+      {
+        DomainT<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                               is.bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = 
+          Realm::MultiAffineAccessor<FT,1,T>(instance, fid, is.bounds);
+      }
+      // With explicit bounds
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    const Rect<1,T> source_bounds,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+      {
+        DomainT<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                               source_bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = 
+          Realm::MultiAffineAccessor<FT,1,T>(instance, fid, source_bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<1,T>& p) const 
+        { 
+          return accessor.read(p); 
+        }
+      __CUDA_HD__
+      inline const FT* ptr(const Point<1,T>& p) const
+        { 
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline const FT* ptr(const Rect<1,T>& r, 
+                           size_t field_size = sizeof(FT)) const
+        {
+          size_t strides[1];
+#ifdef __CUDA_ARCH__
+          assert(accessor.find_strides(r, strides));
+          assert(__legion_is_dense_layout(r, strides, field_size));
+#else
+          if (!accessor.find_strides(r, strides))
+          {
+            fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
+                            "not contained within the bounds of a piece\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_PIECE_RECTANGLE);
+#endif
+          }
+          if (!__legion_is_dense_layout(r, strides, field_size))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
+          }
+#endif
+          return accessor.ptr(r.lo); 
+        }
+      __CUDA_HD__
+      inline const FT* ptr(const Rect<1,T>& r, size_t strides[1],
+                           size_t field_size = sizeof(FT)) const
+        {
+#ifdef __CUDA_ARCH__
+          assert(accessor.find_strides(r, strides));
+#else
+          if (!accessor.find_strides(r, strides))
+          {
+            fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
+                            "not contained within the bounds of a piece\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_PIECE_RECTANGLE);
+#endif
+          }
+#endif
+          strides[0] /= field_size;
+          return accessor.ptr(r.lo); 
+        }
+      __CUDA_HD__
+      inline const FT& operator[](const Point<1,T>& p) const
+        { 
+          return accessor[p]; 
+        }
+    public:
+      Realm::MultiAffineAccessor<FT,1,T> accessor;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = 1;
+    };
+
+    // Read-only FieldAccessor specialization 
+    // with N==1 to avoid array ambiguity and bounds checks
+    template<typename FT, typename T>
+    class FieldAccessor<LEGION_READ_ONLY,FT,1,T,
+                        Realm::MultiAffineAccessor<FT,1,T>,true> {
+    public:
+      // No CUDA support due to PhysicalRegion constructor
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+        : field(fid) 
+      {
+        DomainT<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                               is.bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<FT,1,T>(instance, fid, is.bounds);
+        bounds = AffineBounds::Tester<1,T>(is);
+      }
+      // With explicit bounds
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    const Rect<1,T> source_bounds,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+        : field(fid) 
+      {
+        DomainT<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                               source_bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = 
+          Realm::MultiAffineAccessor<FT,1,T>(instance, fid, source_bounds);
+        bounds = AffineBounds::Tester<1,T>(is, source_bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<1,T>& p) const 
+        { 
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                              LEGION_READ_ONLY);
+#endif
+          return accessor.read(p); 
+        }
+      __CUDA_HD__
+      inline const FT* ptr(const Point<1,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                              LEGION_READ_ONLY);
+#endif
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline const FT* ptr(const Rect<1,T>& r,
+                           size_t field_size = sizeof(FT)) const
+        {
+          size_t strides[1];
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains_all(r));
+          assert(accessor.find_strides(r, strides));
+          assert(__legion_is_dense_layout(r, strides, field_size));
+#else
+          if (!bounds.contains_all(r)) 
+            PhysicalRegion::fail_bounds_check(Domain(r), field, 
+                                              LEGION_READ_ONLY);
+          if (!accessor.find_strides(r, strides))
+          {
+            fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
+                            "not contained within the bounds of a piece\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_PIECE_RECTANGLE);
+#endif
+          }
+          if (!__legion_is_dense_layout(r, strides, field_size))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
+          }
+#endif
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline const FT* ptr(const Rect<1,T>& r, size_t strides[1],
+                           size_t field_size = sizeof(FT)) const
+        {
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains_all(r));
+          assert(accessor.find_strides(r, strides));
+#else
+          if (!bounds.contains_all(r)) 
+            PhysicalRegion::fail_bounds_check(Domain(r), field, 
+                                              LEGION_READ_ONLY);
+          if (!accessor.find_strides(r, strides))
+          {
+            fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
+                            "not contained within the bounds of a piece\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_PIECE_RECTANGLE);
+#endif
+          }
+#endif
+          strides[0] /= field_size;
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline const FT& operator[](const Point<1,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                              LEGION_READ_ONLY);
+#endif
+          return accessor[p]; 
+        }
+    public:
+      Realm::MultiAffineAccessor<FT,1,T> accessor;
+      FieldID field;
+      AffineBounds::Tester<1,T> bounds;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = 1;
+    };
+
+    // Read-write FieldAccessor specialization
+    template<typename FT, int N, typename T, bool CB>
+    class FieldAccessor<LEGION_READ_WRITE,FT,N,T,
+                        Realm::MultiAffineAccessor<FT,N,T>,CB> {
+    public:
+      __CUDA_HD__
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                               is.bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<FT,N,T>(instance, fid, is.bounds);
+      }
+      // With explicit bounds
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    const Rect<N,T> source_bounds,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                               source_bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = 
+          Realm::MultiAffineAccessor<FT,N,T>(instance, fid, source_bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<N,T>& p) const
+        { 
+          return accessor.read(p); 
+        }
+      __CUDA_HD__
+      inline void write(const Point<N,T>& p, FT val) const
+        { 
+          accessor.write(p, val); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Point<N,T>& p) const
+        { 
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<N,T>& r, size_t field_size = sizeof(FT)) const
+        {
+          size_t strides[N];
+#ifdef __CUDA_ARCH__
+          assert(accessor.find_strides(r, strides));
+          assert(__legion_is_dense_layout(r, strides, field_size));
+#else
+          if (!accessor.find_strides(r, strides))
+          {
+            fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
+                            "not contained within the bounds of a piece\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_PIECE_RECTANGLE);
+#endif
+          }
+          if (!__legion_is_dense_layout(r, strides, field_size))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
+          }
+#endif
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<N,T>& r, size_t strides[N],
+                     size_t field_size = sizeof(FT)) const
+        {
+#ifdef __CUDA_ARCH__
+          assert(accessor.find_strides(r, strides));
+#else
+          if (!accessor.find_strides(r, strides))
+          {
+            fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
+                            "not contained within the bounds of a piece\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_PIECE_RECTANGLE);
+#endif
+          }
+#endif
+          for (int i = 0; i < N; i++)
+            strides[i] /= field_size;
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Point<N,T>& p) const
+        { 
+          return accessor[p]; 
+        }
+      __CUDA_HD__
+      inline ArraySyntax::AffineSyntaxHelper<
+          FieldAccessor<LEGION_READ_WRITE,FT,N,T,
+             Realm::MultiAffineAccessor<FT,N,T>,CB>,FT,N,T,2,LEGION_READ_WRITE>
+          operator[](T index) const
+      {
+        return ArraySyntax::AffineSyntaxHelper<
+            FieldAccessor<LEGION_READ_WRITE,FT,N,T,
+             Realm::MultiAffineAccessor<FT,N,T>,CB>,FT,N,T,2,LEGION_READ_WRITE>(
+              *this, Point<1,T>(index));
+      }
+      template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
+      inline void reduce(const Point<N,T>& p, 
+                         typename REDOP::RHS val) const
+        { 
+          REDOP::template apply<EXCLUSIVE>(accessor[p], val);
+        }
+    public:
+      Realm::MultiAffineAccessor<FT,N,T> accessor;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = N;
+    };
+
+    // Read-write FieldAccessor specialization
+    // with bounds checks
+    template<typename FT, int N, typename T>
+    class FieldAccessor<LEGION_READ_WRITE,FT,N,T,
+                        Realm::MultiAffineAccessor<FT,N,T>,true> {
+    public:
+      // No CUDA support due to PhysicalRegion constructor
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+        : field(fid)
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                               is.bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<FT,N,T>(instance, fid, is.bounds);
+        bounds = AffineBounds::Tester<N,T>(is);
+      }
+      // With explicit bounds
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    const Rect<N,T> source_bounds,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+        : field(fid)
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                               source_bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = 
+          Realm::MultiAffineAccessor<FT,N,T>(instance, fid, source_bounds);
+        bounds = AffineBounds::Tester<N,T>(is, source_bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<N,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                              LEGION_READ_ONLY);
+#endif
+          return accessor.read(p); 
+        }
+      __CUDA_HD__
+      inline void write(const Point<N,T>& p, FT val) const
+        { 
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            PhysicalRegion::fail_bounds_check(DomainPoint(p),
+                                              field, LEGION_WRITE_DISCARD);
+#endif
+          accessor.write(p, val); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Point<N,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                              LEGION_READ_WRITE);
+#endif
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<N,T>& r, size_t field_size = sizeof(FT)) const
+        {
+          size_t strides[N];
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains_all(r));
+          assert(accessor.find_strides(r, strides));
+          assert(__legion_is_dense_layout(r, strides, field_size));
+#else
+          if (!bounds.contains_all(r)) 
+            PhysicalRegion::fail_bounds_check(Domain(r), field, 
+                                              LEGION_READ_WRITE);
+          if (!accessor.find_strides(r, strides))
+          {
+            fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
+                            "not contained within the bounds of a piece\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_PIECE_RECTANGLE);
+#endif
+          }
+          if (!__legion_is_dense_layout(r, strides, field_size))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
+          }
+#endif
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<N,T>& r, size_t strides[N],
+                     size_t field_size = sizeof(FT)) const
+        {
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains_all(r));
+          assert(accessor.find_strides(r, strides));
+#else
+          if (!bounds.contains_all(r)) 
+            PhysicalRegion::fail_bounds_check(Domain(r), field, 
+                                              LEGION_READ_WRITE);
+          if (!accessor.find_strides(r, strides))
+          {
+            fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
+                            "not contained within the bounds of a piece\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_PIECE_RECTANGLE);
+#endif
+          }
+#endif
+          for (int i = 0; i < N; i++)
+            strides[i] /= field_size;
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Point<N,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                              LEGION_READ_WRITE);
+#endif
+          return accessor[p]; 
+        }
+      __CUDA_HD__
+      inline ArraySyntax::AffineSyntaxHelper<
+          FieldAccessor<LEGION_READ_WRITE,FT,N,T,
+            Realm::MultiAffineAccessor<FT,N,T>,true>,FT,N,T,2,LEGION_READ_WRITE>
+          operator[](T index) const
+      {
+        return ArraySyntax::AffineSyntaxHelper<
+          FieldAccessor<LEGION_READ_WRITE,FT,N,T,
+           Realm::MultiAffineAccessor<FT,N,T>,true>,FT,N,T,2,LEGION_READ_WRITE>(
+              *this, Point<1,T>(index));
+      }
+      template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__ 
+      inline void reduce(const Point<N,T>& p, 
+                         typename REDOP::RHS val) const
+        { 
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                              LEGION_REDUCE);
+#endif
+          REDOP::template apply<EXCLUSIVE>(accessor[p], val);
+        }
+    public:
+      Realm::MultiAffineAccessor<FT,N,T> accessor;
+      FieldID field;
+      AffineBounds::Tester<N,T> bounds;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = N;
+    };
+
+    // Read-write FieldAccessor specialization 
+    // with N==1 to avoid array ambiguity
+    template<typename FT, typename T, bool CB>
+    class FieldAccessor<LEGION_READ_WRITE,FT,1,T,
+                        Realm::MultiAffineAccessor<FT,1,T>,CB> {
+    public:
+      __CUDA_HD__
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+      {
+        DomainT<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                               is.bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = 
+          Realm::MultiAffineAccessor<FT,1,T>(instance, fid, is.bounds);
+      }
+      // With explicit bounds
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    const Rect<1,T> source_bounds,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+      {
+        DomainT<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string, 
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                               source_bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = 
+          Realm::MultiAffineAccessor<FT,1,T>(instance, fid, source_bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<1,T>& p) const
+        { 
+          return accessor.read(p); 
+        }
+      __CUDA_HD__
+      inline void write(const Point<1,T>& p, FT val) const
+        { 
+          accessor.write(p, val); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Point<1,T>& p) const
+        { 
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<1,T>& r, size_t field_size = sizeof(FT)) const
+        {
+          size_t strides[1];
+#ifdef __CUDA_ARCH__
+          assert(accessor.find_strides(r, strides));
+          assert(__legion_is_dense_layout(r, strides, field_size));
+#else
+          if (!accessor.find_strides(r, strides))
+          {
+            fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
+                            "not contained within the bounds of a piece\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_PIECE_RECTANGLE);
+#endif
+          }
+          if (!__legion_is_dense_layout(r, strides, field_size))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
+          }
+#endif
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<1,T>& r, size_t strides[1],
+                     size_t field_size = sizeof(FT)) const
+        {
+#ifdef __CUDA_ARCH__
+          assert(accessor.find_strides(r, strides));
+#else
+          if (!accessor.find_strides(r, strides))
+          {
+            fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
+                            "not contained within the bounds of a piece\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_PIECE_RECTANGLE);
+#endif
+          }
+#endif
+          strides[0] /= field_size;
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Point<1,T>& p) const
+        { 
+          return accessor[p]; 
+        }
+      template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
+      inline void reduce(const Point<1,T>& p, 
+                         typename REDOP::RHS val) const
+        { 
+          REDOP::template apply<EXCLUSIVE>(accessor[p], val);
+        }
+    public:
+      Realm::MultiAffineAccessor<FT,1,T> accessor;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = 1;
+    };
+
+    // Read-write FieldAccessor specialization 
+    // with N==1 to avoid array ambiguity and bounds checks
+    template<typename FT, typename T>
+    class FieldAccessor<LEGION_READ_WRITE,FT,1,T,
+                        Realm::MultiAffineAccessor<FT,1,T>,true> {
+    public:
+      // No CUDA support due to PhysicalRegion constructor
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+        : field(fid)
+      {
+        DomainT<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                               is.bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = 
+          Realm::MultiAffineAccessor<FT,1,T>(instance, fid, is.bounds);
+        bounds = AffineBounds::Tester<1,T>(is);
+      }
+      // With explicit bounds
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    const Rect<1,T> source_bounds,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+        : field(fid)
+      {
+        DomainT<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                               source_bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = 
+          Realm::MultiAffineAccessor<FT,1,T>(instance, fid, source_bounds);
+        bounds = AffineBounds::Tester<1,T>(is, source_bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<1,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                              LEGION_READ_ONLY);
+#endif
+          return accessor.read(p); 
+        }
+      __CUDA_HD__
+      inline void write(const Point<1,T>& p, FT val) const
+        { 
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            PhysicalRegion::fail_bounds_check(DomainPoint(p),
+                                              field, LEGION_WRITE_DISCARD);
+#endif
+          accessor.write(p, val); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Point<1,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                              LEGION_READ_WRITE);
+#endif
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<1,T>& r, size_t field_size = sizeof(FT)) const
+        {
+          size_t strides[1];
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains_all(r));
+          assert(accessor.find_strides(r, strides));
+          assert(__legion_is_dense_layout(r, strides, field_size));
+#else
+          if (!bounds.contains_all(r)) 
+            PhysicalRegion::fail_bounds_check(Domain(r), field, 
+                                              LEGION_READ_WRITE);
+          if (!accessor.find_strides(r, strides))
+          {
+            fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
+                            "not contained within the bounds of a piece\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_PIECE_RECTANGLE);
+#endif
+          }
+          if (!__legion_is_dense_layout(r, strides, field_size))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
+          }
+#endif
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<1,T>& r, size_t strides[1],
+                     size_t field_size = sizeof(FT)) const
+        {
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains_all(r));
+          assert(accessor.find_strides(r, strides));
+#else
+          if (!bounds.contains_all(r)) 
+            PhysicalRegion::fail_bounds_check(Domain(r), field, 
+                                              LEGION_READ_WRITE);
+          if (!accessor.find_strides(r, strides))
+          {
+            fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
+                            "not contained within the bounds of a piece\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_PIECE_RECTANGLE);
+#endif
+          }
+#endif
+          strides[0] /= field_size;
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Point<1,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                              LEGION_READ_WRITE);
+#endif
+          return accessor[p]; 
+        }
+      template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
+      inline void reduce(const Point<1,T>& p, 
+                         typename REDOP::RHS val) const
+        { 
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                              LEGION_REDUCE);
+#endif
+          REDOP::template apply<EXCLUSIVE>(accessor[p], val);
+        }
+    public:
+      Realm::MultiAffineAccessor<FT,1,T> accessor;
+      FieldID field;
+      AffineBounds::Tester<1,T> bounds;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = 1;
+    };
+
+    // Write-discard FieldAccessor specialization
+    template<typename FT, int N, typename T, bool CB>
+    class FieldAccessor<LEGION_WRITE_DISCARD,FT,N,T,
+                        Realm::MultiAffineAccessor<FT,N,T>,CB> {
+    public:
+      __CUDA_HD__
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size, 
+              &is,Internal::NT_TemplateHelper::encode_tag<N,T>(),warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                               is.bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<FT,N,T>(instance, fid, is.bounds);
+      }
+      // With explicit bounds
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    const Rect<N,T> source_bounds,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<N,T>(),warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                               source_bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = 
+          Realm::MultiAffineAccessor<FT,N,T>(instance, fid, source_bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<N,T>& p) const
+        { 
+          return accessor.read(p); 
+        }
+      __CUDA_HD__
+      inline void write(const Point<N,T>& p, FT val) const
+        { 
+          accessor.write(p, val); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Point<N,T>& p) const
+        { 
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<N,T>& r, size_t field_size = sizeof(FT)) const
+        {
+          size_t strides[N];
+#ifdef __CUDA_ARCH__
+          assert(accessor.find_strides(r, strides));
+          assert(__legion_is_dense_layout(r, strides, field_size));
+#else
+          if (!accessor.find_strides(r, strides))
+          {
+            fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
+                            "not contained within the bounds of a piece\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_PIECE_RECTANGLE);
+#endif
+          }
+          if (!__legion_is_dense_layout(r, strides, field_size))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
+          }
+#endif
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<N,T>& r, size_t strides[N],
+                     size_t field_size = sizeof(FT)) const
+        {
+#ifdef __CUDA_ARCH__
+          assert(accessor.find_strides(r, strides));
+#else
+          if (!accessor.find_strides(r, strides))
+          {
+            fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
+                            "not contained within the bounds of a piece\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_PIECE_RECTANGLE);
+#endif
+          }
+#endif
+          for (int i = 0; i < N; i++)
+            strides[i] /= field_size;
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Point<N,T>& p) const
+        { 
+          return accessor[p]; 
+        }
+      __CUDA_HD__
+      inline ArraySyntax::AffineSyntaxHelper<
+        FieldAccessor<LEGION_WRITE_DISCARD,FT,N,T,
+           Realm::MultiAffineAccessor<FT,N,T>,CB>,FT,N,T,2,LEGION_WRITE_DISCARD>
+          operator[](T index) const
+      {
+        return ArraySyntax::AffineSyntaxHelper<
+         FieldAccessor<LEGION_WRITE_DISCARD,FT,N,T,
+          Realm::MultiAffineAccessor<FT,N,T>,CB>,FT,N,T,2,LEGION_WRITE_DISCARD>(
+              *this, Point<1,T>(index));
+      }
+    public:
+      Realm::MultiAffineAccessor<FT,N,T> accessor;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = N;
+    };
+
+    // Write-discard FieldAccessor specialization
+    // with bounds checks
+    template<typename FT, int N, typename T>
+    class FieldAccessor<LEGION_WRITE_DISCARD,FT,N,T,
+                        Realm::MultiAffineAccessor<FT,N,T>,true> {
+    public:
+      // No CUDA support due to PhysicalRegion constructor
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+        : field(fid)
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<N,T>(),warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                               is.bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<FT,N,T>(instance, fid, is.bounds);
+        bounds = AffineBounds::Tester<N,T>(is);
+      }
+      // With explicit bounds
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    const Rect<N,T> source_bounds,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+        : field(fid)
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<N,T>(),warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                               source_bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = 
+          Realm::MultiAffineAccessor<FT,N,T>(instance, fid, source_bounds);
+        bounds = AffineBounds::Tester<N,T>(is, source_bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<N,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                              LEGION_READ_ONLY);
+#endif
+          return accessor.read(p); 
+        }
+      __CUDA_HD__
+      inline void write(const Point<N,T>& p, FT val) const
+        { 
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            PhysicalRegion::fail_bounds_check(DomainPoint(p),
+                                              field, LEGION_WRITE_DISCARD);
+#endif
+          accessor.write(p, val); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Point<N,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                              LEGION_READ_WRITE);
+#endif
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<N,T>& r, size_t field_size = sizeof(FT)) const
+        {
+          size_t strides[N];
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains_all(r));
+          assert(accessor.find_strides(r, strides));
+          assert(__legion_is_dense_layout(r, strides, field_size));
+#else
+          if (!bounds.contains_all(r)) 
+            PhysicalRegion::fail_bounds_check(Domain(r), field, 
+                                              LEGION_READ_WRITE);
+          if (!accessor.find_strides(r, strides))
+          {
+            fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
+                            "not contained within the bounds of a piece\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_PIECE_RECTANGLE);
+#endif
+          }
+          if (!__legion_is_dense_layout(r, strides, field_size))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
+          }
+#endif
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<N,T>& r, size_t strides[N],
+                     size_t field_size = sizeof(FT)) const 
+        {
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains_all(r));
+          assert(accessor.find_strides(r, strides));
+#else
+          if (!bounds.contains_all(r)) 
+            PhysicalRegion::fail_bounds_check(Domain(r), field, 
+                                              LEGION_READ_WRITE);
+          if (!accessor.find_strides(r, strides))
+          {
+            fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
+                            "not contained within the bounds of a piece\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_PIECE_RECTANGLE);
+#endif
+          }
+#endif
+          for (int i = 0; i < N; i++)
+            strides[i] /= field_size;
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Point<N,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                              LEGION_READ_WRITE);
+#endif
+          return accessor[p]; 
+        }
+      __CUDA_HD__
+      inline ArraySyntax::AffineSyntaxHelper<
+        FieldAccessor<LEGION_WRITE_DISCARD,FT,N,T,
+         Realm::MultiAffineAccessor<FT,N,T>,true>,FT,N,T,2,LEGION_WRITE_DISCARD>
+          operator[](T index) const
+      {
+        return ArraySyntax::AffineSyntaxHelper<
+          FieldAccessor<LEGION_WRITE_DISCARD,FT,N,T,
+            Realm::MultiAffineAccessor<FT,N,T>,true>,FT,N,T,2,
+              LEGION_WRITE_DISCARD>(*this, Point<1,T>(index));
+      }
+    public:
+      Realm::MultiAffineAccessor<FT,N,T> accessor;
+      FieldID field;
+      AffineBounds::Tester<N,T> bounds;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = N;
+    };
+
+    // Write-discard FieldAccessor specialization with
+    // N == 1 to avoid array ambiguity
+    template<typename FT, typename T, bool CB>
+    class FieldAccessor<LEGION_WRITE_DISCARD,FT,1,T,
+                        Realm::MultiAffineAccessor<FT,1,T>,CB> {
+    public:
+      __CUDA_HD__
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+      {
+        DomainT<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<1,T>(),warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                               is.bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<FT,1,T>(instance, fid, is.bounds);
+      }
+      // With explicit bounds
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    const Rect<1,T> source_bounds,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+      {
+        DomainT<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<1,T>(),warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                               source_bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = 
+          Realm::MultiAffineAccessor<FT,1,T>(instance, fid, source_bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<1,T>& p) const
+        { 
+          return accessor.read(p); 
+        }
+      __CUDA_HD__
+      inline void write(const Point<1,T>& p, FT val) const
+        { 
+          accessor.write(p, val); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Point<1,T>& p) const
+        { 
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<1,T>& r, size_t field_size = sizeof(FT)) const
+        {
+          size_t strides[1];
+#ifdef __CUDA_ARCH__
+          assert(accessor.find_strides(r, strides));
+          assert(__legion_is_dense_layout(r, strides, field_size));
+#else
+          if (!accessor.find_strides(r, strides))
+          {
+            fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
+                            "not contained within the bounds of a piece\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_PIECE_RECTANGLE);
+#endif
+          }
+          if (!__legion_is_dense_layout(r, strides, field_size))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
+          }
+#endif
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<1,T>& r, size_t strides[1],
+                     size_t field_size = sizeof(FT)) const
+        {
+#ifdef __CUDA_ARCH__
+          assert(accessor.find_strides(r, strides));
+#else
+          if (!accessor.find_strides(r, strides))
+          {
+            fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
+                            "not contained within the bounds of a piece\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_PIECE_RECTANGLE);
+#endif
+          }
+#endif
+          strides[0] /= field_size;
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Point<1,T>& p) const
+        { 
+          return accessor[p]; 
+        }
+    public:
+      Realm::MultiAffineAccessor<FT,1,T> accessor;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = 1;
+    };
+
+    // Write-discard FieldAccessor specialization with
+    // N == 1 to avoid array ambiguity and bounds checks
+    template<typename FT, typename T>
+    class FieldAccessor<LEGION_WRITE_DISCARD,FT,1,T,
+                        Realm::MultiAffineAccessor<FT,1,T>,true> {
+    public:
+      // No CUDA support due to PhysicalRegion constructor
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+        : field(fid)
+      {
+        DomainT<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<1,T>(),warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                               is.bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<FT,1,T>(instance, fid, is.bounds);
+        bounds = AffineBounds::Tester<1,T>(is);
+      }
+      // With explicit bounds
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    const Rect<1,T> source_bounds,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+        : field(fid)
+      {
+        DomainT<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<1,T>(),warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                               source_bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                               instance, fid);
+        accessor = 
+          Realm::MultiAffineAccessor<FT,1,T>(instance, fid, source_bounds);
+        bounds = AffineBounds::Tester<1,T>(is, source_bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<1,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                              LEGION_READ_ONLY);
+#endif
+          return accessor.read(p); 
+        }
+      __CUDA_HD__
+      inline void write(const Point<1,T>& p, FT val) const
+        { 
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            PhysicalRegion::fail_bounds_check(DomainPoint(p),
+                                              field, LEGION_WRITE_DISCARD);
+#endif
+          accessor.write(p, val); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Point<1,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                              LEGION_READ_WRITE);
+#endif
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<1,T>& r, size_t field_size = sizeof(FT)) const
+        {
+          size_t strides[1];
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains_all(r));
+          assert(accessor.find_strides(r, strides));
+          assert(__legion_is_dense_layout(r, strides, field_size));
+#else
+          if (!bounds.contains_all(r)) 
+            PhysicalRegion::fail_bounds_check(Domain(r), field, 
+                                              LEGION_READ_WRITE);
+          if (!accessor.find_strides(r, strides))
+          {
+            fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
+                            "not contained within the bounds of a piece\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_PIECE_RECTANGLE);
+#endif
+          }
+          if (!__legion_is_dense_layout(r, strides, field_size))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
+          }
+#endif
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<1,T>& r, size_t strides[1],
+                     size_t field_size = sizeof(FT)) const
+        {
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains_all(r));
+          assert(accessor.find_strides(r, strides));
+#else
+          if (!bounds.contains_all(r)) 
+            PhysicalRegion::fail_bounds_check(Domain(r), field, 
+                                              LEGION_READ_WRITE);
+          if (!accessor.find_strides(r, strides))
+          {
+            fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
+                            "not contained within the bounds of a piece\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_PIECE_RECTANGLE);
+#endif
+          }
+#endif
+          strides[0] /= field_size;
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Point<1,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                              LEGION_READ_WRITE);
+#endif
+          return accessor[p]; 
+        }
+    public:
+      Realm::MultiAffineAccessor<FT,1,T> accessor;
+      FieldID field;
+      AffineBounds::Tester<1,T> bounds;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = 1;
+    };
+
+    // Write-only FieldAccessor specialization
+    template<typename FT, int N, typename T, bool CB>
+    class FieldAccessor<LEGION_WRITE_ONLY,FT,N,T,
+                        Realm::MultiAffineAccessor<FT,N,T>,CB> {
+    public:
+      __CUDA_HD__
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<N,T>(),warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                               is.bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<FT,N,T>(instance, fid, is.bounds);
+      }
+      // With explicit bounds
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    const Rect<N,T> source_bounds,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<N,T>(),warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                               source_bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = 
+          Realm::MultiAffineAccessor<FT,N,T>(instance, fid, source_bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline void write(const Point<N,T>& p, FT val) const
+        { 
+          accessor.write(p, val); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Point<N,T>& p) const
+        { 
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<N,T>& r, size_t field_size = sizeof(FT)) const
+        {
+          size_t strides[N];
+#ifdef __CUDA_ARCH__
+          assert(accessor.find_strides(r, strides));
+          assert(__legion_is_dense_layout(r, strides, field_size));
+#else
+          if (!accessor.find_strides(r, strides))
+          {
+            fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
+                            "not contained within the bounds of a piece\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_PIECE_RECTANGLE);
+#endif
+          }
+          if (!__legion_is_dense_layout(r, strides, field_size))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
+          }
+#endif
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<N,T>& r, size_t strides[N],
+                     size_t field_size = sizeof(FT)) const
+        {
+#ifdef __CUDA_ARCH__
+          assert(accessor.find_strides(r, strides));
+#else
+          if (!accessor.find_strides(r, strides))
+          {
+            fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
+                            "not contained within the bounds of a piece\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_PIECE_RECTANGLE);
+#endif
+          }
+#endif
+          for (int i = 0; i < N; i++)
+            strides[i] /= field_size;
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Point<N,T>& p) const
+        { 
+          return accessor[p]; 
+        }
+      __CUDA_HD__
+      inline ArraySyntax::AffineSyntaxHelper<
+        FieldAccessor<LEGION_WRITE_DISCARD,FT,N,T,
+           Realm::MultiAffineAccessor<FT,N,T>,CB>,FT,N,T,2,LEGION_WRITE_DISCARD>
+          operator[](T index) const
+      {
+        return ArraySyntax::AffineSyntaxHelper<
+         FieldAccessor<LEGION_WRITE_DISCARD,FT,N,T,
+          Realm::MultiAffineAccessor<FT,N,T>,CB>,FT,N,T,2,LEGION_WRITE_DISCARD>(
+              *this, Point<1,T>(index));
+      }
+    public:
+      Realm::MultiAffineAccessor<FT,N,T> accessor;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = N;
+    };
+
+    // Write-only FieldAccessor specialization
+    // with bounds checks
+    template<typename FT, int N, typename T>
+    class FieldAccessor<LEGION_WRITE_ONLY,FT,N,T,
+                        Realm::MultiAffineAccessor<FT,N,T>,true> {
+    public:
+      // No CUDA support due to PhysicalRegion constructor
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+        : field(fid)
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<N,T>(),warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                               is.bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = 
+          Realm::MultiAffineAccessor<FT,N,T>(instance, fid, is.bounds);
+        bounds = AffineBounds::Tester<N,T>(is);
+      }
+      // With explicit bounds
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    const Rect<N,T> source_bounds,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+        : field(fid)
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<N,T>(),warning_string, 
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                               source_bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = 
+          Realm::MultiAffineAccessor<FT,N,T>(instance, fid, source_bounds);
+        bounds = AffineBounds::Tester<N,T>(is, source_bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline void write(const Point<N,T>& p, FT val) const
+        { 
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            PhysicalRegion::fail_bounds_check(DomainPoint(p),
+                                              field, LEGION_WRITE_DISCARD);
+#endif
+          accessor.write(p, val); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Point<N,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                              LEGION_READ_WRITE);
+#endif
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<N,T>& r, size_t field_size = sizeof(FT)) const
+        {
+          size_t strides[N];
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains_all(r));
+          assert(accessor.find_strides(r, strides));
+          assert(__legion_is_dense_layout(r, strides, field_size));
+#else
+          if (!bounds.contains_all(r)) 
+            PhysicalRegion::fail_bounds_check(Domain(r), field, 
+                                              LEGION_READ_WRITE);
+          if (!accessor.find_strides(r, strides))
+          {
+            fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
+                            "not contained within the bounds of a piece\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_PIECE_RECTANGLE);
+#endif
+          }
+          if (!__legion_is_dense_layout(r, strides, field_size))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
+          }
+#endif
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<N,T>& r, size_t strides[N],
+                     size_t field_size = sizeof(FT)) const 
+        {
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains_all(r));
+          assert(accessor.find_strides(r, strides));
+#else
+          if (!bounds.contains_all(r)) 
+            PhysicalRegion::fail_bounds_check(Domain(r), field, 
+                                              LEGION_READ_WRITE);
+          if (!accessor.find_strides(r, strides))
+          {
+            fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
+                            "not contained within the bounds of a piece\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_PIECE_RECTANGLE);
+#endif
+          }
+#endif
+          for (int i = 0; i < N; i++)
+            strides[i] /= field_size;
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Point<N,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                              LEGION_READ_WRITE);
+#endif
+          return accessor[p]; 
+        }
+      __CUDA_HD__
+      inline ArraySyntax::AffineSyntaxHelper<
+        FieldAccessor<LEGION_WRITE_DISCARD,FT,N,T,
+         Realm::MultiAffineAccessor<FT,N,T>,true>,FT,N,T,2,LEGION_WRITE_DISCARD>
+          operator[](T index) const
+      {
+        return ArraySyntax::AffineSyntaxHelper<
+          FieldAccessor<LEGION_WRITE_DISCARD,FT,N,T,
+            Realm::MultiAffineAccessor<FT,N,T>,true>,FT,N,T,2,
+              LEGION_WRITE_DISCARD>(*this, Point<1,T>(index));
+      }
+    public:
+      Realm::MultiAffineAccessor<FT,N,T> accessor;
+      FieldID field;
+      AffineBounds::Tester<N,T> bounds;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = N;
+    };
+
+    // Write-only FieldAccessor specialization with
+    // N == 1 to avoid array ambiguity
+    template<typename FT, typename T, bool CB>
+    class FieldAccessor<LEGION_WRITE_ONLY,FT,1,T,
+                        Realm::MultiAffineAccessor<FT,1,T>,CB> {
+    public:
+      __CUDA_HD__
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+      {
+        DomainT<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<1,T>(),warning_string, 
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                               is.bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<FT,1,T>(instance, fid, is.bounds);
+      }
+      // With explicit bounds
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    const Rect<1,T> source_bounds,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+      {
+        DomainT<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<1,T>(),warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                               source_bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = 
+          Realm::MultiAffineAccessor<FT,1,T>(instance, fid, source_bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline void write(const Point<1,T>& p, FT val) const
+        { 
+          accessor.write(p, val); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Point<1,T>& p) const
+        { 
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<1,T>& r, size_t field_size = sizeof(FT)) const
+        {
+          size_t strides[1];
+#ifdef __CUDA_ARCH__
+          assert(accessor.find_strides(r, strides));
+          assert(__legion_is_dense_layout(r, strides, field_size));
+#else
+          if (!accessor.find_strides(r, strides))
+          {
+            fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
+                            "not contained within the bounds of a piece\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_PIECE_RECTANGLE);
+#endif
+          }
+          if (!__legion_is_dense_layout(r, strides, field_size))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
+          }
+#endif
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<1,T>& r, size_t strides[1],
+                     size_t field_size = sizeof(FT)) const
+        {
+#ifdef __CUDA_ARCH__
+          assert(accessor.find_strides(r, strides));
+#else
+          if (!accessor.find_strides(r, strides))
+          {
+            fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
+                            "not contained within the bounds of a piece\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_PIECE_RECTANGLE);
+#endif
+          }
+#endif
+          strides[0] /= field_size;
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Point<1,T>& p) const
+        { 
+          return accessor[p]; 
+        }
+    public:
+      Realm::MultiAffineAccessor<FT,1,T> accessor;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = 1;
+    };
+
+    // Write-only FieldAccessor specialization with
+    // N == 1 to avoid array ambiguity and bounds checks
+    template<typename FT, typename T>
+    class FieldAccessor<LEGION_WRITE_ONLY,FT,1,T,
+                        Realm::MultiAffineAccessor<FT,1,T>,true> {
+    public:
+      // No CUDA support due to PhysicalRegion constructor
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+        : field(fid)
+      {
+        DomainT<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<1,T>(),warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                               is.bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<FT,1,T>(instance, fid, is.bounds);
+        bounds = AffineBounds::Tester<1,T>(is);
+      }
+      // With explicit bounds
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    const Rect<1,T> source_bounds,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
+        : field(fid)
+      {
+        DomainT<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
+              &is,Internal::NT_TemplateHelper::encode_tag<1,T>(),warning_string, 
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                               source_bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = 
+          Realm::MultiAffineAccessor<FT,1,T>(instance, fid, source_bounds);
+        bounds = AffineBounds::Tester<1,T>(is, source_bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline void write(const Point<1,T>& p, FT val) const
+        { 
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            PhysicalRegion::fail_bounds_check(DomainPoint(p),
+                                              field, LEGION_WRITE_DISCARD);
+#endif
+          accessor.write(p, val); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Point<1,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                              LEGION_READ_WRITE);
+#endif
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<1,T>& r, size_t field_size = sizeof(FT)) const
+        {
+          size_t strides[1];
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains_all(r));
+          assert(accessor.find_strides(r, strides));
+          assert(__legion_is_dense_layout(r, strides, field_size));
+#else
+          if (!bounds.contains_all(r)) 
+            PhysicalRegion::fail_bounds_check(Domain(r), field, 
+                                              LEGION_READ_WRITE);
+          if (!accessor.find_strides(r, strides))
+          {
+            fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
+                            "not contained within the bounds of a piece\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_PIECE_RECTANGLE);
+#endif
+          }
+          if (!__legion_is_dense_layout(r, strides, field_size))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
+          }
+#endif
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<1,T>& r, size_t strides[1],
+                     size_t field_size = sizeof(FT)) const
+        {
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains_all(r));
+          assert(accessor.find_strides(r, strides));
+#else
+          if (!bounds.contains_all(r)) 
+            PhysicalRegion::fail_bounds_check(Domain(r), field, 
+                                              LEGION_READ_WRITE);
+          if (!accessor.find_strides(r, strides))
+          {
+            fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
+                            "not contained within the bounds of a piece\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_PIECE_RECTANGLE);
+#endif
+          }
+#endif
+          strides[0] /= field_size;
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Point<1,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                              LEGION_READ_WRITE);
+#endif
+          return accessor[p]; 
+        }
+    public:
+      Realm::MultiAffineAccessor<FT,1,T> accessor;
+      FieldID field;
+      AffineBounds::Tester<1,T> bounds;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = 1;
+    };
+
+    // Reduce FieldAccessor specialization
+    template<typename REDOP, bool EXCLUSIVE, int N, typename T, bool CB>
+    class ReductionAccessor<REDOP,EXCLUSIVE,N,T,
+                      Realm::MultiAffineAccessor<typename REDOP::RHS,N,T>,CB> {
+    public:
+      __CUDA_HD__
+      ReductionAccessor(void) { }
+      ReductionAccessor(const PhysicalRegion &region, FieldID fid,
+                        ReductionOpID redop, bool silence_warnings = false,
+                        const char *warning_string = NULL)
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
+              &is, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              warning_string, silence_warnings, false/*generic accessor*/, 
+              false/*check field size*/, redop);
+        if (!Realm::MultiAffineAccessor<typename REDOP::RHS,N,T>::is_compatible(
+              instance, fid, is.bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<typename REDOP::RHS,N,T>(
+            instance, fid, is.bounds);
+      }
+      // With explicit bounds
+      ReductionAccessor(const PhysicalRegion &region, FieldID fid,
+                        ReductionOpID redop, 
+                        const Rect<N,T> source_bounds,
+                        bool silence_warnings = false,
+                        const char *warning_string = NULL)
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
+              &is, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              warning_string, silence_warnings, false/*generic accessor*/, 
+              false/*check field size*/, redop);
+        if (!Realm::MultiAffineAccessor<typename REDOP::RHS,N,T>::is_compatible(
+              instance, fid, source_bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<typename REDOP::RHS,N,T>(
+            instance, fid, source_bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline void reduce(const Point<N,T>& p, 
+                         typename REDOP::RHS val) const
+        { 
+          REDOP::template fold<EXCLUSIVE>(accessor[p], val);
+        }
+      __CUDA_HD__
+      inline typename REDOP::RHS* ptr(const Point<N,T>& p) const
+        {
+          return accessor.ptr(p);
+        }
+      __CUDA_HD__
+      inline typename REDOP::RHS* ptr(const Rect<N,T>& r,
+              size_t field_size = sizeof(REDOP::RHS)) const
+        {
+          size_t strides[N];
+#ifdef __CUDA_ARCH__
+          assert(accessor.find_strides(r, strides));
+          assert(__legion_is_dense_layout(r, strides, field_size));
+#else
+          if (!accessor.find_strides(r, strides))
+          {
+            fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
+                            "not contained within the bounds of a piece\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_PIECE_RECTANGLE);
+#endif
+          }
+          if (!__legion_is_dense_layout(r, strides, field_size))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
+          }
+#endif
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline typename REDOP::RHS* ptr(const Rect<N,T>& r, 
+              size_t strides[N], size_t field_size = sizeof(REDOP::RHS)) const
+        {
+#ifdef __CUDA_ARCH__
+          assert(accessor.find_strides(r, strides));
+#else
+          if (!accessor.find_strides(r, strides))
+          {
+            fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
+                            "not contained within the bounds of a piece\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_PIECE_RECTANGLE);
+#endif
+          }
+#endif
+          for (int i = 0; i < N; i++)
+            strides[i] /= field_size;
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline ArraySyntax::ReductionHelper<ReductionAccessor<REDOP,EXCLUSIVE,N,
+             T,Realm::MultiAffineAccessor<typename REDOP::RHS,N,T>,CB>,
+             typename REDOP::RHS,N,T>
+               operator[](const Point<N,T>& p) const
+        { 
+          return ArraySyntax::ReductionHelper<ReductionAccessor<REDOP,EXCLUSIVE,
+            N,T,Realm::MultiAffineAccessor<typename REDOP::RHS,N,T>,CB>,
+            typename REDOP::RHS,N,T>(*this, p);
+        }
+      __CUDA_HD__
+      inline ArraySyntax::AffineSyntaxHelper<ReductionAccessor<REDOP,EXCLUSIVE,
+         N,T,Realm::MultiAffineAccessor<typename REDOP::RHS,N,T>,CB>,
+         typename REDOP::RHS,N,T,2,LEGION_REDUCE>
+          operator[](T index) const
+      {
+        return ArraySyntax::AffineSyntaxHelper<ReductionAccessor<REDOP,
+          EXCLUSIVE,N,T,Realm::MultiAffineAccessor<typename REDOP::RHS,N,T>,CB>,
+          typename REDOP::RHS,N,T,2,LEGION_REDUCE>(
+              *this, Point<1,T>(index));
+      }
+    public:
+      Realm::MultiAffineAccessor<typename REDOP::RHS,N,T> accessor;
+    public:
+      typedef typename REDOP::RHS value_type;
+      typedef typename REDOP::RHS& reference;
+      typedef const typename REDOP::RHS& const_reference;
+      static const int dim = N;
+    };
+
+    // Reduce ReductionAccessor specialization with bounds checks
+    template<typename REDOP, bool EXCLUSIVE, int N, typename T>
+    class ReductionAccessor<REDOP,EXCLUSIVE,N,T,
+                    Realm::MultiAffineAccessor<typename REDOP::RHS,N,T>,true> {
+    public:
+      // No CUDA support due to PhysicalRegion constructor
+      ReductionAccessor(void) { }
+      ReductionAccessor(const PhysicalRegion &region, FieldID fid,
+                        ReductionOpID redop, bool silence_warnings = false,
+                        const char *warning_string = NULL)
+        : field(fid)
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
+              &is, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              warning_string, silence_warnings, false/*generic accessor*/, 
+              false/*check field size*/, redop);
+        if (!Realm::MultiAffineAccessor<typename REDOP::RHS,N,T>::is_compatible(
+              instance, fid, is.bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<typename REDOP::RHS,N,T>(
+            instance, fid, is.bounds);
+        bounds = AffineBounds::Tester<N,T>(is);
+      }
+      // With explicit bounds
+      ReductionAccessor(const PhysicalRegion &region, FieldID fid,
+                        ReductionOpID redop, 
+                        const Rect<N,T> source_bounds,
+                        bool silence_warnings = false,
+                        const char *warning_string = NULL)
+        : field(fid)
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
+              &is, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              warning_string, silence_warnings, false/*generic accessor*/, 
+              false/*check field size*/, redop);
+        if (!Realm::MultiAffineAccessor<typename REDOP::RHS,N,T>::is_compatible(
+              instance, fid, source_bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<typename REDOP::RHS,N,T>(
+            instance, fid, source_bounds);
+        bounds = AffineBounds::Tester<N,T>(is, source_bounds);
+      }
+    public:
+      __CUDA_HD__ 
+      inline void reduce(const Point<N,T>& p, 
+                         typename REDOP::RHS val) const
+        { 
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                              LEGION_REDUCE);
+#endif
+          REDOP::template fold<EXCLUSIVE>(accessor[p], val);
+        }
+      __CUDA_HD__
+      inline typename REDOP::RHS* ptr(const Point<N,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                              LEGION_REDUCE);
+#endif
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline typename REDOP::RHS* ptr(const Rect<N,T>& r,
+              size_t field_size = sizeof(REDOP::RHS)) const
+        {
+          size_t strides[N];
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains_all(r));
+          assert(accessor.find_strides(r, strides));
+          assert(__legion_is_dense_layout(r, strides, field_size));
+#else
+          if (!bounds.contains_all(r)) 
+            PhysicalRegion::fail_bounds_check(Domain(r), field, 
+                                              LEGION_REDUCE);
+          if (!accessor.find_strides(r, strides))
+          {
+            fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
+                            "not contained within the bounds of a piece\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_PIECE_RECTANGLE);
+#endif
+          }
+          if (!__legion_is_dense_layout(r, strides, field_size))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
+          }
+#endif
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline typename REDOP::RHS* ptr(const Rect<N,T>& r,
+              size_t strides[N], size_t field_size = sizeof(REDOP::RHS)) const
+        {
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains_all(r));
+          assert(accessor.find_strides(r, strides));
+#else
+          if (!bounds.contains_all(r)) 
+            PhysicalRegion::fail_bounds_check(Domain(r), field, 
+                                              LEGION_REDUCE);
+          if (!accessor.find_strides(r, strides))
+          {
+            fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
+                            "not contained within the bounds of a piece\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_PIECE_RECTANGLE);
+#endif
+          }
+#endif
+          for (int i = 0; i < N; i++)
+            strides[i] /= field_size;
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline ArraySyntax::ReductionHelper<ReductionAccessor<REDOP,EXCLUSIVE,N,
+             T,Realm::MultiAffineAccessor<typename REDOP::RHS,N,T>,true>,
+             typename REDOP::RHS,N,T>
+               operator[](const Point<N,T>& p) const
+        { 
+          return ArraySyntax::ReductionHelper<ReductionAccessor<REDOP,EXCLUSIVE,
+            N,T,Realm::MultiAffineAccessor<typename REDOP::RHS,N,T>,true>,
+            typename REDOP::RHS,N,T>(*this, p);
+        }
+      __CUDA_HD__
+      inline ArraySyntax::AffineSyntaxHelper<ReductionAccessor<REDOP,EXCLUSIVE,
+             N,T, Realm::MultiAffineAccessor<typename REDOP::RHS,N,T>,true>,
+             typename REDOP::RHS,N,T,2,LEGION_REDUCE>
+          operator[](T index) const
+      {
+        return ArraySyntax::AffineSyntaxHelper<ReductionAccessor<REDOP,
+          EXCLUSIVE,N,T,Realm::MultiAffineAccessor<typename REDOP::RHS,N,T>,
+            true>,typename REDOP::RHS,N,T,2,LEGION_REDUCE>(
+              *this, Point<1,T>(index));
+      }
+    public:
+      Realm::MultiAffineAccessor<typename REDOP::RHS,N,T> accessor;
+      FieldID field;
+      AffineBounds::Tester<N,T> bounds;
+    public:
+      typedef typename REDOP::RHS value_type;
+      typedef typename REDOP::RHS& reference;
+      typedef const typename REDOP::RHS& const_reference;
+      static const int dim = N;
+    };
+    
+    // Reduce Field Accessor specialization with N==1
+    // to avoid array ambiguity
+    template<typename REDOP, bool EXCLUSIVE, typename T, bool CB>
+    class ReductionAccessor<REDOP,EXCLUSIVE,1,T,
+                      Realm::MultiAffineAccessor<typename REDOP::RHS,1,T>,CB> {
+    public:
+      __CUDA_HD__
+      ReductionAccessor(void) { }
+      ReductionAccessor(const PhysicalRegion &region, FieldID fid,
+                        ReductionOpID redop, bool silence_warnings = false,
+                        const char *warning_string = NULL)
+      {
+        DomainT<1,T> is;
+        const Realm::RegionInstance instance = 
+         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
+              &is, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              warning_string, silence_warnings, false/*generic accessor*/, 
+              false/*check field size*/, redop);
+        if (!Realm::MultiAffineAccessor<typename REDOP::RHS,1,T>::is_compatible(
+              instance, fid, is.bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<typename REDOP::RHS,1,T>(
+            instance, fid, is.bounds);
+      }
+      // With explicit bounds
+      ReductionAccessor(const PhysicalRegion &region, FieldID fid,
+                        ReductionOpID redop, 
+                        const Rect<1,T> source_bounds,
+                        bool silence_warnings = false,
+                        const char *warning_string = NULL)
+      {
+        DomainT<1,T> is;
+        const Realm::RegionInstance instance = 
+         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
+              &is, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              warning_string, silence_warnings, false/*generic accessor*/, 
+              false/*check field size*/, redop);
+        if (!Realm::MultiAffineAccessor<typename REDOP::RHS,1,T>::is_compatible(
+              instance, fid, source_bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<typename REDOP::RHS,1,T>(
+            instance, fid, source_bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline void reduce(const Point<1,T>& p, 
+                         typename REDOP::RHS val) const
+        { 
+          REDOP::template fold<EXCLUSIVE>(accessor[p], val);
+        }
+      __CUDA_HD__
+      inline typename REDOP::RHS* ptr(const Point<1,T>& p) const
+        {
+          return accessor.ptr(p);
+        }
+      __CUDA_HD__
+      inline typename REDOP::RHS* ptr(const Rect<1,T>& r,
+              size_t field_size = sizeof(REDOP::RHS)) const
+        {
+          size_t strides[1];
+#ifdef __CUDA_ARCH__
+          assert(accessor.find_strides(r, strides));
+          assert(__legion_is_dense_layout(r, strides, field_size));
+#else
+          if (!accessor.find_strides(r, strides))
+          {
+            fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
+                            "not contained within the bounds of a piece\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_PIECE_RECTANGLE);
+#endif
+          }
+          if (!__legion_is_dense_layout(r, strides, field_size))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
+          }
+#endif
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline typename REDOP::RHS* ptr(const Rect<1,T>& r, 
+              size_t strides[1], size_t field_size = sizeof(REDOP::RHS)) const
+        {
+#ifdef __CUDA_ARCH__
+          assert(accessor.find_strides(r, strides));
+#else
+          if (!accessor.find_strides(r, strides))
+          {
+            fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
+                            "not contained within the bounds of a piece\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_PIECE_RECTANGLE);
+#endif
+          }
+#endif
+          strides[0] /= field_size;
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline ArraySyntax::ReductionHelper<ReductionAccessor<REDOP,EXCLUSIVE,1,
+             T,Realm::MultiAffineAccessor<typename REDOP::RHS,1,T>,CB>,
+             typename REDOP::RHS,1,T>
+               operator[](const Point<1,T>& p) const
+        { 
+          return ArraySyntax::ReductionHelper<ReductionAccessor<REDOP,EXCLUSIVE,
+            1,T,Realm::MultiAffineAccessor<typename REDOP::RHS,1,T>,CB>,
+            typename REDOP::RHS,1,T>(*this, p);
+        }
+    public:
+      Realm::MultiAffineAccessor<typename REDOP::RHS,1,T> accessor;
+    public:
+      typedef typename REDOP::RHS value_type;
+      typedef typename REDOP::RHS& reference;
+      typedef const typename REDOP::RHS& const_reference;
+      static const int dim = 1;
+    };
+
+    // Reduce Field Accessor specialization with N==1
+    // to avoid array ambiguity and bounds checks
+    template<typename REDOP, bool EXCLUSIVE, typename T>
+    class ReductionAccessor<REDOP,EXCLUSIVE,1,T,
+                    Realm::MultiAffineAccessor<typename REDOP::RHS,1,T>,true> {
+    public:
+      // No CUDA support due to PhysicalRegion constructor
+      ReductionAccessor(void) { }
+      ReductionAccessor(const PhysicalRegion &region, FieldID fid,
+                        ReductionOpID redop, bool silence_warnings = false,
+                        const char *warning_string = NULL)
+        : field(fid)
+      {
+        DomainT<1,T> is;
+        const Realm::RegionInstance instance = 
+         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
+              &is, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              warning_string, silence_warnings, false/*generic accessor*/, 
+              false/*check field size*/, redop);
+        if (!Realm::MultiAffineAccessor<typename REDOP::RHS,1,T>::is_compatible(
+              instance, fid, is.bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<typename REDOP::RHS,1,T>(
+            instance, fid, is.bounds);
+        bounds = AffineBounds::Tester<1,T>(is);
+      }
+      // With explicit bounds
+      ReductionAccessor(const PhysicalRegion &region, FieldID fid,
+                        ReductionOpID redop, 
+                        const Rect<1,T> source_bounds,
+                        bool silence_warnings = false,
+                        const char *warning_string = NULL)
+        : field(fid)
+      {
+        DomainT<1,T> is;
+        const Realm::RegionInstance instance = 
+         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
+              &is, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              warning_string, silence_warnings, false/*generic accessor*/, 
+              false/*check field size*/, redop);
+        if (!Realm::MultiAffineAccessor<typename REDOP::RHS,1,T>::is_compatible(
+              instance, fid, source_bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<typename REDOP::RHS,1,T>(
+              instance, fid, source_bounds);
+        bounds = AffineBounds::Tester<1,T>(is, source_bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline void reduce(const Point<1,T>& p, 
+                         typename REDOP::RHS val) const
+        { 
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                              LEGION_REDUCE);
+#endif
+          REDOP::template fold<EXCLUSIVE>(accessor[p], val);
+        }
+      __CUDA_HD__
+      inline typename REDOP::RHS* ptr(const Point<1,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field, 
+                                              LEGION_REDUCE);
+#endif
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline typename REDOP::RHS* ptr(const Rect<1,T>& r,
+              size_t field_size = sizeof(REDOP::RHS)) const
+        {
+          size_t strides[1];
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains_all(r));
+          assert(accessor.find_strides(r, strides));
+          assert(__legion_is_dense_layout(r, strides, field_size));
+#else
+          if (!bounds.contains_all(r)) 
+            PhysicalRegion::fail_bounds_check(Domain(r), field, LEGION_REDUCE);
+          if (!accessor.find_strides(r, strides))
+          {
+            fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
+                            "not contained within the bounds of a piece\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_PIECE_RECTANGLE);
+#endif
+          }
+          if (!__legion_is_dense_layout(r, strides, field_size))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
+          }
+#endif
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline typename REDOP::RHS* ptr(const Rect<1,T>& r,
+              size_t strides[1], size_t field_size = sizeof(REDOP::RHS)) const
+        {
+#ifdef __CUDA_ARCH__
+          assert(bounds.contains_all(r));
+          assert(accessor.find_strides(r, strides));
+#else
+          if (!bounds.contains_all(r)) 
+            PhysicalRegion::fail_bounds_check(Domain(r), field, LEGION_REDUCE);
+          if (!accessor.find_strides(r, strides))
+          {
+            fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
+                            "not contained within the bounds of a piece\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_PIECE_RECTANGLE);
+#endif
+          }
+#endif
+          strides[0] /= field_size;
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline ArraySyntax::ReductionHelper<ReductionAccessor<REDOP,EXCLUSIVE,1,
+             T,Realm::MultiAffineAccessor<typename REDOP::RHS,1,T>,true>,
+             typename REDOP::RHS,1,T>
+               operator[](const Point<1,T>& p) const
+        { 
+          return ArraySyntax::ReductionHelper<ReductionAccessor<REDOP,EXCLUSIVE,
+            1,T,Realm::MultiAffineAccessor<typename REDOP::RHS,1,T>,true>,
+            typename REDOP::RHS,1,T>(*this, p);
+        }
+    public:
+      Realm::MultiAffineAccessor<typename REDOP::RHS,1,T> accessor;
       FieldID field;
       AffineBounds::Tester<1,T> bounds;
     public:
@@ -7907,6 +11065,1078 @@ namespace Legion {
       static const int dim = 1;
     };
 
+    ////////////////////////////////////////////////////////////
+    // Multi Region Accessor with Multi Affine Accessors
+    ////////////////////////////////////////////////////////////
+
+    // Multi-Accessor, multi affine, N, with privilege checks 
+    // (implies bounds checks)
+    template<typename FT, int N, typename T, bool CB, int MR>
+    class MultiRegionAccessor<FT,N,T,
+                              Realm::MultiAffineAccessor<FT,N,T>,CB,true,MR> {
+    public:
+      MultiRegionAccessor(void) { }
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          FieldID fid, size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+        : field(fid), total_regions(regions.size())
+      {
+        if (regions.empty())
+          return;
+        assert(regions.size() == privileges.size());
+        DomainT<N,T> is;
+        const PhysicalRegion &region = regions.front();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(privileges.front(),fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        region_privileges[0] = privileges.front();
+        region_bounds[0] = AffineBounds::Tester<N,T>(is); 
+        Rect<N,T> bounds = is.bounds;
+        for (unsigned idx = 1; idx < regions.size(); idx++)
+        {
+          const Realm::RegionInstance inst = regions[idx].get_instance_info(
+                privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          region_privileges[idx] = privileges[idx];
+          region_bounds[idx] = AffineBounds::Tester<N,T>(is);
+          bounds = bounds.union_bbox(is.bounds);
+        }
+        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance,
+                                                               fid, bounds)) 
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<FT,N,T>(instance, fid, bounds);
+      }
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          const Rect<N,T> source_bounds, FieldID fid,
+                          size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+        : field(fid), total_regions(regions.size())
+      {
+        if (regions.empty())
+          return;
+        assert(regions.size() == privileges.size());
+        DomainT<N,T> is;
+        const PhysicalRegion &region = regions.front();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(privileges.front(),fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        region_privileges[0] = privileges.front();
+        region_bounds[0] = AffineBounds::Tester<N,T>(is, source_bounds);
+        Rect<N,T> bounds = source_bounds.intersection(is.bounds); 
+        for (unsigned idx = 1; idx < regions.size(); idx++)
+        {
+          const Realm::RegionInstance inst = regions[idx].get_instance_info(
+                privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          region_privileges[idx] = privileges[idx];
+          region_bounds[idx] = AffineBounds::Tester<N,T>(is, source_bounds);
+          bounds = bounds.union_bbox(source_bounds.inersection(is.bounds));
+        }
+        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance,
+                                                               fid, bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<FT,N,T>(instance, fid, bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<N,T>& p) const
+        {
+          bool found = false;
+          for (unsigned idx = 0; idx < total_regions; idx++)
+          {
+            if (!region_bounds[idx].contains(p))
+              continue;
+            if ((region_privileges[idx] & LEGION_READ_ONLY) == 0)
+            {
+#ifdef __CUDA_ARCH__
+              // bounds checks are not precise for CUDA so keep going to 
+              // see if there is another region that has it with the privileges
+              continue;
+#else
+              PhysicalRegion::fail_privilege_check(DomainPoint(p), field,
+                                                   region_privileges[idx]);
+#endif
+            }
+            found = true;
+            break;
+          }
+#ifdef __CUDA_ARCH__
+          assert(found);
+#else
+          if (!found)
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                region_privileges[0], true/*multi*/);
+#endif
+          return accessor.read(p);
+        }
+      __CUDA_HD__
+      inline void write(const Point<N,T>& p, FT val) const
+        {
+          bool found = false;
+          for (unsigned idx = 0; idx < total_regions; idx++)
+          {
+            if (!region_bounds[idx].contains(p))
+              continue;
+            if ((region_privileges[idx] & LEGION_WRITE_PRIV) == 0)
+            {
+#ifdef __CUDA_ARCH__
+              // bounds checks are not precise for CUDA so keep going to 
+              // see if there is another region that has it with the privileges
+              continue;
+#else
+              PhysicalRegion::fail_privilege_check(DomainPoint(p), field,
+                                                   region_privileges[idx]);
+#endif
+            }
+            found = true;
+            break;
+          }
+#ifdef __CUDA_ARCH__
+          assert(found);
+#else
+          if (!found)
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                region_privileges[0], true/*multi*/);
+#endif
+          return accessor.write(p, val);
+        }
+      __CUDA_HD__
+      inline ArraySyntax::AffineRefHelper<FT>
+                operator[](const Point<N,T>& p) const
+        { 
+          int index = -1;
+          for (unsigned idx = 0; idx < total_regions; idx++)
+          {
+            if (!region_bounds[idx].contains(p))
+              continue;
+            index = idx;
+            break;
+          }
+#ifdef __CUDA_ARCH__
+          assert(index >= 0);
+#else
+          if (index < 0)
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                region_privileges[0], true/*multi*/);
+#endif
+          return ArraySyntax::AffineRefHelper<FT>(accessor[p], field,
+                            DomainPoint(p), region_privileges[index]);
+        }
+      __CUDA_HD__
+      inline ArraySyntax::AffineSyntaxHelper<MultiRegionAccessor<FT,N,T,
+       Realm::MultiAffineAccessor<FT,N,T>,CB,true,MR>,FT,N,T,2,LEGION_NO_ACCESS>
+          operator[](T index) const
+      {
+        return ArraySyntax::AffineSyntaxHelper<MultiRegionAccessor<FT,N,T,
+          Realm::MultiAffineAccessor<FT,N,T>,CB,true,MR>,FT,N,T,2,
+            LEGION_NO_ACCESS>(*this, Point<1,T>(index));
+      }
+      template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
+      inline void reduce(const Point<N,T>& p, 
+                         typename REDOP::RHS val) const
+        { 
+          bool found = false;
+          for (unsigned idx = 0; idx < total_regions; idx++)
+          {
+            if (!region_bounds[idx].contains(p))
+              continue;
+            if ((region_privileges[idx] & LEGION_REDUCE_PRIV) == 0)
+            {
+#ifdef __CUDA_ARCH__
+              // bounds checks are not precise for CUDA so keep going to 
+              // see if there is another region that has it with the privileges
+              continue;
+#else
+              PhysicalRegion::fail_privilege_check(DomainPoint(p), field,
+                                                   region_privileges[idx]);
+#endif
+            }
+            found = true;
+            break;
+          }
+#ifdef __CUDA_ARCH__
+          assert(found);
+#else
+          if (!found)
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                region_privileges[0], true/*multi*/);
+#endif
+          REDOP::template apply<EXCLUSIVE>(accessor[p], val);
+        }
+    public:
+      mutable Realm::MultiAffineAccessor<FT,N,T> accessor;
+      FieldID field;
+      PrivilegeMode region_privileges[MR];
+      AffineBounds::Tester<N,T> region_bounds[MR];
+      unsigned total_regions;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = N;
+    };
+
+    // Multi-Accessor, multi affine, 1, with privilege checks 
+    // (implies bounds checks)
+    template<typename FT, typename T, bool CB, int MR>
+    class MultiRegionAccessor<FT,1,T,
+                              Realm::MultiAffineAccessor<FT,1,T>,CB,true,MR> {
+    public:
+      MultiRegionAccessor(void) { }
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          FieldID fid, size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+        : field(fid), total_regions(regions.size())
+      {
+        if (regions.empty())
+          return;
+        assert(regions.size() == privileges.size());
+        DomainT<1,T> is;
+        const PhysicalRegion &region = regions.front();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(privileges.front(),fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        region_privileges[0] = privileges.front();
+        region_bounds[0] = AffineBounds::Tester<1,T>(is); 
+        Rect<1,T> bounds = is.bounds;
+        for (unsigned idx = 1; idx < regions.size(); idx++)
+        {
+          const Realm::RegionInstance inst = regions[idx].get_instance_info(
+                privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          region_privileges[idx] = privileges[idx];
+          region_bounds[idx] = AffineBounds::Tester<1,T>(is);
+          bounds = bounds.union_bbox(is.bounds);
+        }
+        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance,
+                                                               fid, bounds)) 
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<FT,1,T>(instance, fid, bounds);
+      }
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          const Rect<1,T> source_bounds, FieldID fid,
+                          size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+        : field(fid), total_regions(regions.size())
+      {
+        if (regions.empty())
+          return;
+        assert(regions.size() == privileges.size());
+        DomainT<1,T> is;
+        const PhysicalRegion &region = regions.front();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(privileges.front(),fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        region_privileges[0] = privileges.front();
+        region_bounds[0] = AffineBounds::Tester<1,T>(is, source_bounds);
+        Rect<1,T> bounds = source_bounds.intersection(is.bounds); 
+        for (unsigned idx = 1; idx < regions.size(); idx++)
+        {
+          const Realm::RegionInstance inst = regions[idx].get_instance_info(
+                privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          region_privileges[idx] = privileges[idx];
+          region_bounds[idx] = AffineBounds::Tester<1,T>(is, source_bounds);
+          bounds = bounds.union_bbox(source_bounds.inersection(is.bounds));
+        }
+        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance,
+                                                               fid, bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<FT,1,T>(instance, fid, bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<1,T>& p) const
+        {
+          bool found = false;
+          for (unsigned idx = 0; idx < total_regions; idx++)
+          {
+            if (!region_bounds[idx].contains(p))
+              continue;
+            if ((region_privileges[idx] & LEGION_READ_ONLY) == 0)
+            {
+#ifdef __CUDA_ARCH__
+              // bounds checks are not precise for CUDA so keep going to 
+              // see if there is another region that has it with the privileges
+              continue;
+#else
+              PhysicalRegion::fail_privilege_check(DomainPoint(p), field,
+                                                   region_privileges[idx]);
+#endif
+            }
+            found = true;
+            break;
+          }
+#ifdef __CUDA_ARCH__
+          assert(found);
+#else
+          if (!found)
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                region_privileges[0], true/*multi*/);
+#endif
+          return accessor.read(p);
+        }
+      __CUDA_HD__
+      inline void write(const Point<1,T>& p, FT val) const
+        {
+          bool found = false;
+          for (unsigned idx = 0; idx < total_regions; idx++)
+          {
+            if (!region_bounds[idx].contains(p))
+              continue;
+            if ((region_privileges[idx] & LEGION_WRITE_PRIV) == 0)
+            {
+#ifdef __CUDA_ARCH__
+              // bounds checks are not precise for CUDA so keep going to 
+              // see if there is another region that has it with the privileges
+              continue;
+#else
+              PhysicalRegion::fail_privilege_check(DomainPoint(p), field,
+                                                   region_privileges[idx]);
+#endif
+            }
+            found = true;
+            break;
+          }
+#ifdef __CUDA_ARCH__
+          assert(found);
+#else
+          if (!found)
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                region_privileges[0], true/*multi*/);
+#endif
+          return accessor.write(p, val);
+        }
+      __CUDA_HD__
+      inline ArraySyntax::AffineRefHelper<FT>
+                operator[](const Point<1,T>& p) const
+        { 
+          int index = -1;
+          for (unsigned idx = 0; idx < total_regions; idx++)
+          {
+            if (!region_bounds[idx].contains(p))
+              continue;
+            index = idx;
+            break;
+          }
+#ifdef __CUDA_ARCH__
+          assert(index >= 0);
+#else
+          if (index < 0)
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                region_privileges[0], true/*multi*/);
+#endif
+          return ArraySyntax::AffineRefHelper<FT>(accessor[p], field,
+                            DomainPoint(p), region_privileges[index]);
+        }
+      template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
+      inline void reduce(const Point<1,T>& p, 
+                         typename REDOP::RHS val) const
+        { 
+          bool found = false;
+          for (unsigned idx = 0; idx < total_regions; idx++)
+          {
+            if (!region_bounds[idx].contains(p))
+              continue;
+            if ((region_privileges[idx] & LEGION_REDUCE_PRIV) == 0)
+            {
+#ifdef __CUDA_ARCH__
+              // bounds checks are not precise for CUDA so keep going to 
+              // see if there is another region that has it with the privileges
+              continue;
+#else
+              PhysicalRegion::fail_privilege_check(DomainPoint(p), field,
+                                                   region_privileges[idx]);
+#endif
+            }
+            found = true;
+            break;
+          }
+#ifdef __CUDA_ARCH__
+          assert(found);
+#else
+          if (!found)
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                region_privileges[0], true/*multi*/);
+#endif
+          REDOP::template apply<EXCLUSIVE>(accessor[p], val);
+        }
+    public:
+      mutable Realm::MultiAffineAccessor<FT,1,T> accessor;
+      FieldID field;
+      PrivilegeMode region_privileges[MR];
+      AffineBounds::Tester<1,T> region_bounds[MR];
+      unsigned total_regions;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = 1;
+    };
+
+    // Multi-Accessor, multi affine, N, bounds checks only
+    template<typename FT, int N, typename T, int MR>
+    class MultiRegionAccessor<FT,N,T,Realm::MultiAffineAccessor<FT,N,T>,
+                      true/*check bounds*/,false/*check privileges*/,MR> {
+    public:
+      MultiRegionAccessor(void) { }
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          FieldID fid, size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+        : field(fid), total_regions(regions.size())
+      {
+        if (regions.empty())
+          return;
+        assert(regions.size() == privileges.size());
+        DomainT<N,T> is;
+        const PhysicalRegion &region = regions.front();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(privileges.front(),fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        region_privileges[0] = privileges.front();
+        region_bounds[0] = AffineBounds::Tester<N,T>(is); 
+        Rect<N,T> bounds = is.bounds;
+        for (unsigned idx = 1; idx < regions.size(); idx++)
+        {
+          const Realm::RegionInstance inst = regions[idx].get_instance_info(
+                privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          region_privileges[idx] = privileges[idx];
+          region_bounds[idx] = AffineBounds::Tester<N,T>(is);
+          bounds = bounds.union_bbox(is.bounds);
+        }
+        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance,
+                                                               fid, bounds)) 
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<FT,N,T>(instance, fid, bounds);
+      }
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          const Rect<N,T> source_bounds, FieldID fid,
+                          size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+        : field(fid), total_regions(regions.size())
+      {
+        if (regions.empty())
+          return;
+        assert(regions.size() == privileges.size());
+        DomainT<N,T> is;
+        const PhysicalRegion &region = regions.front();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(privileges.front(),fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        region_privileges[0] = privileges.front();
+        region_bounds[0] = AffineBounds::Tester<N,T>(is, source_bounds);
+        Rect<N,T> bounds = source_bounds.intersection(is.bounds); 
+        for (unsigned idx = 1; idx < regions.size(); idx++)
+        {
+          const Realm::RegionInstance inst = regions[idx].get_instance_info(
+                privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          region_privileges[idx] = privileges[idx];
+          region_bounds[idx] = AffineBounds::Tester<N,T>(is, source_bounds);
+          bounds = bounds.union_bbox(source_bounds.inersection(is.bounds));
+        }
+        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance,
+                                                               fid, bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<FT,N,T>(instance, fid, bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<N,T>& p) const
+        {
+          bool found = false;
+          for (unsigned idx = 0; idx < total_regions; idx++)
+          {
+            if (!region_bounds[idx].contains(p))
+              continue;
+            found = true;
+            break;
+          }
+#ifdef __CUDA_ARCH__
+          assert(found);
+#else
+          if (!found)
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                region_privileges[0], true/*multi*/);
+#endif
+          return accessor.read(p);
+        }
+      __CUDA_HD__
+      inline void write(const Point<N,T>& p, FT val) const
+        {
+          bool found = false;
+          for (unsigned idx = 0; idx < total_regions; idx++)
+          {
+            if (!region_bounds[idx].contains(p))
+              continue;
+            found = true;
+            break;
+          }
+#ifdef __CUDA_ARCH__
+          assert(found);
+#else
+          if (!found)
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                region_privileges[0], true/*multi*/);
+#endif
+          return accessor.write(p, val);
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Point<N,T>& p) const
+        { 
+          int index = -1;
+          for (unsigned idx = 0; idx < total_regions; idx++)
+          {
+            if (!region_bounds[idx].contains(p))
+              continue;
+            index = idx;
+            break;
+          }
+#ifdef __CUDA_ARCH__
+          assert(index >= 0);
+#else
+          if (index < 0)
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                region_privileges[0], true/*multi*/);
+#endif
+          return accessor[p];
+        }
+      __CUDA_HD__
+      inline ArraySyntax::AffineSyntaxHelper<MultiRegionAccessor<FT,N,T,
+             Realm::MultiAffineAccessor<FT,N,T>,true,false,MR>,
+             FT,N,T,2,LEGION_READ_WRITE>
+          operator[](T index) const
+      {
+        return ArraySyntax::AffineSyntaxHelper<MultiRegionAccessor<FT,N,T,
+              Realm::MultiAffineAccessor<FT,N,T>,true,false,MR>,
+              FT,N,T,2,LEGION_READ_WRITE>(*this, Point<1,T>(index));
+      }
+      template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
+      inline void reduce(const Point<N,T>& p, 
+                         typename REDOP::RHS val) const
+        { 
+          bool found = false;
+          for (unsigned idx = 0; idx < total_regions; idx++)
+          {
+            if (!region_bounds[idx].contains(p))
+              continue;
+            found = true;
+            break;
+          }
+#ifdef __CUDA_ARCH__
+          assert(found);
+#else
+          if (!found)
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                region_privileges[0], true/*multi*/);
+#endif
+          REDOP::template apply<EXCLUSIVE>(accessor[p], val);
+        }
+    public:
+      mutable Realm::MultiAffineAccessor<FT,N,T> accessor;
+      FieldID field;
+      PrivilegeMode region_privileges[MR];
+      AffineBounds::Tester<N,T> region_bounds[MR];
+      unsigned total_regions;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = N;
+    };
+
+    // Multi-Accessor, multi affine, 1, bounds checks only
+    template<typename FT, typename T, int MR>
+    class MultiRegionAccessor<FT,1,T,Realm::MultiAffineAccessor<FT,1,T>,
+                      true/*check bounds*/,false/*check privileges*/,MR> {
+    public:
+      MultiRegionAccessor(void) { }
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          FieldID fid, size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+        : field(fid), total_regions(regions.size())
+      {
+        if (regions.empty())
+          return;
+        assert(regions.size() == privileges.size());
+        DomainT<1,T> is;
+        const PhysicalRegion &region = regions.front();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(privileges.front(),fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        region_privileges[0] = privileges.front();
+        region_bounds[0] = AffineBounds::Tester<1,T>(is); 
+        Rect<1,T> bounds = is.bounds;
+        for (unsigned idx = 1; idx < regions.size(); idx++)
+        {
+          const Realm::RegionInstance inst = regions[idx].get_instance_info(
+                privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          region_privileges[idx] = privileges[idx];
+          region_bounds[idx] = AffineBounds::Tester<1,T>(is);
+          bounds = bounds.union_bbox(is.bounds);
+        }
+        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance,
+                                                               fid, bounds)) 
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<FT,1,T>(instance, fid, bounds);
+      }
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          const Rect<1,T> source_bounds, FieldID fid,
+                          size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+        : field(fid), total_regions(regions.size())
+      {
+        if (regions.empty())
+          return;
+        assert(regions.size() == privileges.size());
+        DomainT<1,T> is;
+        const PhysicalRegion &region = regions.front();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(privileges.front(),fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        region_privileges[0] = privileges.front();
+        region_bounds[0] = AffineBounds::Tester<1,T>(is, source_bounds);
+        Rect<1,T> bounds = source_bounds.intersection(is.bounds); 
+        for (unsigned idx = 1; idx < regions.size(); idx++)
+        {
+          const Realm::RegionInstance inst = regions[idx].get_instance_info(
+                privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          region_privileges[idx] = privileges[idx];
+          region_bounds[idx] = AffineBounds::Tester<1,T>(is, source_bounds);
+          bounds = bounds.union_bbox(source_bounds.inersection(is.bounds));
+        }
+        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance,
+                                                               fid, bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<FT,1,T>(instance, fid, bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<1,T>& p) const
+        {
+          bool found = false;
+          for (unsigned idx = 0; idx < total_regions; idx++)
+          {
+            if (!region_bounds[idx].contains(p))
+              continue;
+            found = true;
+            break;
+          }
+#ifdef __CUDA_ARCH__
+          assert(found);
+#else
+          if (!found)
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                region_privileges[0], true/*multi*/);
+#endif
+          return accessor.read(p);
+        }
+      __CUDA_HD__
+      inline void write(const Point<1,T>& p, FT val) const
+        {
+          bool found = false;
+          for (unsigned idx = 0; idx < total_regions; idx++)
+          {
+            if (!region_bounds[idx].contains(p))
+              continue;
+            found = true;
+            break;
+          }
+#ifdef __CUDA_ARCH__
+          assert(found);
+#else
+          if (!found)
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                region_privileges[0], true/*multi*/);
+#endif
+          return accessor.write(p, val);
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Point<1,T>& p) const
+        { 
+          int index = -1;
+          for (unsigned idx = 0; idx < total_regions; idx++)
+          {
+            if (!region_bounds[idx].contains(p))
+              continue;
+            index = idx;
+            break;
+          }
+#ifdef __CUDA_ARCH__
+          assert(index >= 0);
+#else
+          if (index < 0)
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                region_privileges[0], true/*multi*/);
+#endif
+          return accessor[p];
+        }
+      template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
+      inline void reduce(const Point<1,T>& p, 
+                         typename REDOP::RHS val) const
+        { 
+          bool found = false;
+          for (unsigned idx = 0; idx < total_regions; idx++)
+          {
+            if (!region_bounds[idx].contains(p))
+              continue;
+            found = true;
+            break;
+          }
+#ifdef __CUDA_ARCH__
+          assert(found);
+#else
+          if (!found)
+            PhysicalRegion::fail_bounds_check(DomainPoint(p), field,
+                                region_privileges[0], true/*multi*/);
+#endif
+          REDOP::template apply<EXCLUSIVE>(accessor[p], val);
+        }
+    public:
+      mutable Realm::MultiAffineAccessor<FT,1,T> accessor;
+      FieldID field;
+      PrivilegeMode region_privileges[MR];
+      AffineBounds::Tester<1,T> region_bounds[MR];
+      unsigned total_regions;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = 1;
+    };
+
+    // Multi-Accessor, multi affine, N, no bounds, no privileges
+    template<typename FT, int N, typename T, int MR>
+    class MultiRegionAccessor<FT,N,T,Realm::MultiAffineAccessor<FT,N,T>,
+                    false/*check bounds*/,false/*check privileges*/,MR> {
+    public:
+      MultiRegionAccessor(void) { }
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          FieldID fid, size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+      {
+        if (regions.empty())
+          return;
+        assert(regions.size() == privileges.size());
+        DomainT<N,T> is;
+        const PhysicalRegion &region = regions.front();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(privileges.front(),fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        Rect<N,T> bounds = is.bounds;
+        for (unsigned idx = 1; idx < regions.size(); idx++)
+        {
+          const Realm::RegionInstance inst = regions[idx].get_instance_info(
+                privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          bounds = bounds.union_bbox(is.bounds);
+        }
+        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance,
+                                                               fid, bounds)) 
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<FT,N,T>(instance, fid, bounds);
+      }
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          const Rect<N,T> source_bounds, FieldID fid,
+                          size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+      {
+        if (regions.empty())
+          return;
+        assert(regions.size() == privileges.size());
+        DomainT<N,T> is;
+        const PhysicalRegion &region = regions.front();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(privileges.front(),fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        Rect<N,T> bounds = source_bounds.intersection(is.bounds); 
+        for (unsigned idx = 1; idx < regions.size(); idx++)
+        {
+          const Realm::RegionInstance inst = regions[idx].get_instance_info(
+                privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          bounds = bounds.union_bbox(source_bounds.inersection(is.bounds));
+        }
+        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance,
+                                                               fid, bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<FT,N,T>(instance, fid, bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<N,T>& p) const
+        {
+          return accessor.read(p);
+        }
+      __CUDA_HD__
+      inline void write(const Point<N,T>& p, FT val) const
+        {
+          return accessor.write(p, val);
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Point<N,T>& p) const
+        { 
+          return accessor[p]; 
+        }
+      __CUDA_HD__
+      inline ArraySyntax::AffineSyntaxHelper<MultiRegionAccessor<FT,N,T,
+        Realm::MultiAffineAccessor<FT,N,T>,false,false,MR>,FT,N,T,2,
+          LEGION_READ_WRITE> operator[](T index) const
+      {
+        return ArraySyntax::AffineSyntaxHelper<MultiRegionAccessor<FT,N,T,
+            Realm::MultiAffineAccessor<FT,N,T>,false,false,MR>,
+            FT,N,T,2,LEGION_READ_WRITE>(*this, Point<1,T>(index));
+      }
+      template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
+      inline void reduce(const Point<N,T>& p, 
+                         typename REDOP::RHS val) const
+        { 
+          REDOP::template apply<EXCLUSIVE>(accessor[p], val);
+        }
+    public:
+      mutable Realm::MultiAffineAccessor<FT,N,T> accessor;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = N;
+    };
+
+    // Multi-Accessor, multi affine, 1, no bounds, no privileges
+    template<typename FT, typename T, int MR>
+    class MultiRegionAccessor<FT,1,T,Realm::MultiAffineAccessor<FT,1,T>,
+                    false/*check bounds*/,false/*check privileges*/,MR> {
+    public:
+      MultiRegionAccessor(void) { }
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          FieldID fid, size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+      {
+        if (regions.empty())
+          return;
+        assert(regions.size() == privileges.size());
+        DomainT<1,T> is;
+        const PhysicalRegion &region = regions.front();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(privileges.front(),fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        Rect<1,T> bounds = is.bounds;
+        for (unsigned idx = 1; idx < regions.size(); idx++)
+        {
+          const Realm::RegionInstance inst = regions[idx].get_instance_info(
+                privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          bounds = bounds.union_bbox(is.bounds);
+        }
+        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance, 
+                                                               fid, bounds)) 
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<FT,1,T>(instance, fid, bounds);
+      }
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          const Rect<1,T> source_bounds, FieldID fid,
+                          size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+      {
+        if (regions.empty())
+          return;
+        assert(regions.size() == privileges.size());
+        DomainT<1,T> is;
+        const PhysicalRegion &region = regions.front();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(privileges.front(),fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        Rect<1,T> bounds = source_bounds.intersection(is.bounds); 
+        for (unsigned idx = 1; idx < regions.size(); idx++)
+        {
+          const Realm::RegionInstance inst = regions[idx].get_instance_info(
+                privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          bounds = bounds.union_bbox(source_bounds.inersection(is.bounds));
+        }
+        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance,
+                                                               fid, bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<FT,1,T>(instance, fid, bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<1,T>& p) const
+        {
+          return accessor.read(p);
+        }
+      __CUDA_HD__
+      inline void write(const Point<1,T>& p, FT val) const
+        {
+          return accessor.write(p, val);
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Point<1,T>& p) const
+        { 
+          return accessor[p]; 
+        }
+      template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
+      inline void reduce(const Point<1,T>& p, 
+                         typename REDOP::RHS val) const
+        { 
+          REDOP::template apply<EXCLUSIVE>(accessor[p], val);
+        }
+    public:
+      mutable Realm::MultiAffineAccessor<FT,1,T> accessor;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = 1;
+    };
+
     // A hidden class for users that really know what they are doing
     /**
      * \class UnsafeFieldAccessor
@@ -8101,30 +12331,30 @@ namespace Legion {
           return accessor.ptr(p);
         }
       __CUDA_HD__
-      inline FT* ptr(const Rect<N,T>& r) const
+      inline FT* ptr(const Rect<N,T>& r, size_t field_size = sizeof(FT)) const
         {
-          if (!accessor.is_dense_arbitrary(r))
-          {
 #ifdef __CUDA_ARCH__
-            printf(
-                "ERROR: Illegal request for pointer of non-dense rectangle\n");
-            assert(false);
+          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
 #else
+          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
+          {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
             assert(false);
-#endif
+#else
             exit(ERROR_NON_DENSE_RECTANGLE);
 #endif
           }
+#endif
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
-      inline FT* ptr(const Rect<N,T>& r, size_t strides[N]) const
+      inline FT* ptr(const Rect<N,T>& r, size_t strides[N],
+                     size_t field_size = sizeof(FT)) const
         {
           for (int i = 0; i < N; i++)
-            strides[i] = accessor.strides[i] / sizeof(FT);
+            strides[i] = accessor.strides[i] / field_size;
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
@@ -8242,6 +12472,32 @@ namespace Legion {
           return accessor.ptr(p);
         }
       __CUDA_HD__
+      inline FT* ptr(const Rect<1,T> &r, size_t field_size = sizeof(FT)) const
+        {
+#ifdef __CUDA_ARCH__
+          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
+#else
+          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
+          }
+#endif
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<1,T> &r, size_t strides[1], 
+                     size_t field_size = sizeof(FT)) const
+        {
+          strides[0] = accessor.strides[0] / field_size;
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
       inline FT& operator[](const Point<1,T> &p) const
         {
           return accessor[p];
@@ -8254,6 +12510,206 @@ namespace Legion {
       typedef const FT& const_reference;
       static const int dim = 1;
     }; 
+
+    template<typename FT, int N, typename T>
+    class UnsafeFieldAccessor<FT, N, T, Realm::MultiAffineAccessor<FT,N,T> > {
+    public:
+      UnsafeFieldAccessor(void) { }
+      UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(LEGION_NO_ACCESS, fid, sizeof(FT), &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              warning_string, silence_warnings,
+              false/*generic accessor*/, false/*check field size*/);
+        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                               is.bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<FT,N,T>(instance, fid, is.bounds);
+      }
+      // With explicit bounds
+      UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
+                          const Rect<N,T> source_bounds,
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+      {
+        DomainT<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(LEGION_NO_ACCESS, fid, sizeof(FT), &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              warning_string, silence_warnings,
+              false/*generic accessor*/, false/*check field size*/);
+        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                               source_bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                               instance, fid);
+        accessor = 
+          Realm::MultiAffineAccessor<FT,N,T>(instance, fid, source_bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<N,T> &p) const
+        {
+          return accessor.read(p);
+        }
+      __CUDA_HD__
+      inline void write(const Point<N,T> &p, FT val) const
+        {
+          accessor.write(p, val);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Point<N,T> &p) const
+        {
+          return accessor.ptr(p);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<N,T>& r, size_t field_size = sizeof(FT)) const
+        {
+          size_t strides[N];
+#ifdef __CUDA_ARCH__
+          assert(accessor.find_strides(r, strides));
+          assert(__legion_is_dense_layout(r, strides, field_size));
+#else
+          if (!accessor.find_strides(r, strides))
+          {
+            fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
+                            "not contained within the bounds of a piece\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_PIECE_RECTANGLE);
+#endif
+          }
+          if (!__legion_is_dense_layout(r, strides, field_size))
+          {
+            fprintf(stderr, 
+                "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
+          }
+#endif
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<N,T>& r, size_t strides[N],
+                     size_t field_size = sizeof(FT)) const
+        {
+#ifdef __CUDA_ARCH__
+          assert(accessor.find_strides(r, strides));
+#else
+          if (!accessor.find_strides(r, strides))
+          {
+            fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
+                            "not contained within the bounds of a piece\n");
+#ifdef DEBUG_LEGION
+            assert(false);
+#else
+            exit(ERROR_NON_PIECE_RECTANGLE);
+#endif
+          }
+#endif
+          for (int i = 0; i < N; i++)
+            strides[i] /= field_size;
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Point<N,T> &p) const
+        {
+          return accessor[p];
+        }
+      __CUDA_HD__
+      inline FT& operator[](T index) const
+        {
+          return ArraySyntax::AffineSyntaxHelper<UnsafeFieldAccessor<FT,N,T,
+                 Realm::MultiAffineAccessor<FT,N,T> >,
+                  FT,N,T,2,LEGION_READ_WRITE>(*this, Point<1,T>(index));
+        }
+    public:
+      Realm::MultiAffineAccessor<FT,N,T> accessor;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = N;
+    };
+
+    // Specialization for UnsafeFieldAccessor for dimension 1 
+    // to avoid ambiguity for array access
+    template<typename FT, typename T>
+    class UnsafeFieldAccessor<FT,1,T,Realm::MultiAffineAccessor<FT,1,T> > {
+    public:
+      UnsafeFieldAccessor(void) { }
+      UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+      {
+        DomainT<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(LEGION_NO_ACCESS, fid, sizeof(FT), &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              warning_string, silence_warnings,
+              false/*generic accessor*/, false/*check field size*/);
+        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                               is.bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<FT,1,T>(instance, fid, is.bounds);
+      }
+      // With explicit bounds
+      UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
+                          const Rect<1,T> source_bounds,
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+      {
+        DomainT<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(LEGION_NO_ACCESS, fid, sizeof(FT), &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              warning_string, silence_warnings,
+              false/*generic accessor*/, false/*check field size*/);
+        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                               source_bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = 
+          Realm::MultiAffineAccessor<FT,1,T>(instance, fid, source_bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<1,T> &p) const
+        {
+          return accessor.read(p); 
+        }
+      __CUDA_HD__
+      inline void write(const Point<1,T> &p, FT val) const
+        {
+          accessor.write(p, val);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Point<1,T> &p) const
+        {
+          return accessor.ptr(p);
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Point<1,T> &p) const
+        {
+          return accessor[p];
+        }
+    public:
+      Realm::MultiAffineAccessor<FT,1,T> accessor;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = 1;
+    };
 
     //--------------------------------------------------------------------------
     template<typename T>
@@ -9256,21 +13712,20 @@ namespace Legion {
               >::ptr(const Rect<N,T> &r) const
     //--------------------------------------------------------------------------
     {
-      if (!accessor.is_dense_arbitrary(r))
-      {
 #ifdef __CUDA_ARCH__
-        printf(
-            "ERROR: Illegal request for pointer of non-dense rectangle\n");
-        assert(false);
+      assert(__legion_is_dense_layout(r, accessor.strides, sizeof(FT)));
 #else
+      if (!__legion_is_dense_layout(r, accessor.strides, sizeof(FT)))
+      {
         fprintf(stderr, 
             "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
         assert(false);
-#endif
+#else
         exit(ERROR_NON_DENSE_RECTANGLE);
 #endif
       }
+#endif
       return accessor.ptr(r);
     }
 
@@ -10038,7 +14493,7 @@ namespace Legion {
 #else
       assert(bounds.contains_all(r));
 #endif
-      if (!accessor.is_dense_arbitrary(r))
+      if (!is_dense_layout(r, accessor.strides, sizeof(FT)))
       {
 #ifdef __CUDA_ARCH__
         printf(
