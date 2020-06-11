@@ -323,9 +323,30 @@ namespace Realm {
     callback_priorities.push_back(higher_than);
   }
 
+  void TaskQueue::remove_subscription(NotificationCallback *callback)
+  {
+    AutoLock<> al(mutex);
+    std::vector<NotificationCallback *>::iterator cit = callbacks.begin();
+    std::vector<priority_t>::iterator cpit = callback_priorities.begin();
+    while (cit != callbacks.end()) {
+      if( *cit == callback) {
+        callbacks.erase(cit);
+        callback_priorities.erase(cpit);
+        break;
+      }
+      ++cit; ++cpit;
+    }
+  }
+  
   void TaskQueue::set_gauge(ProfilingGauges::AbsoluteRangeGauge<int> *new_gauge)
   {
     task_count_gauge = new_gauge;
+  }
+
+  void TaskQueue::free_gauge()
+  {
+    delete task_count_gauge;
+    task_count_gauge = 0;
   }
 
   // gets highest priority task available from any task queue
@@ -608,6 +629,21 @@ namespace Realm {
 
     // hook up the work counter updates for this queue
     queue->add_subscription(&wcu_task_queues);
+  }
+
+  void ThreadedTaskScheduler::remove_task_queue(TaskQueue *queue)
+  {
+    AutoLock<> al(lock);
+    for (std::vector<TaskQueue *>::iterator it = task_queues.begin(); it != task_queues.end();++it) {
+      if (*it == queue) {
+        //found; we erase and exit
+        task_queues.erase(it);
+        break;
+      }
+    }
+    
+    // un-hook up the work counter updates for this queue
+    queue->remove_subscription(&wcu_task_queues);
   }
 
   // helper for tracking/sanity-checking worker counts
@@ -1079,6 +1115,12 @@ namespace Realm {
     ThreadedTaskScheduler::add_task_queue(queue);
   }
 
+  void  KernelThreadTaskScheduler::remove_task_queue(TaskQueue *queue)
+  {
+    // call the parent implementation first
+    ThreadedTaskScheduler::remove_task_queue(queue);
+  }
+
   void KernelThreadTaskScheduler::start(void)
   {
     // fire up the minimum number of workers
@@ -1306,6 +1348,12 @@ namespace Realm {
   {
     // call the parent implementation first
     ThreadedTaskScheduler::add_task_queue(queue);
+  }
+
+  void UserThreadTaskScheduler::remove_task_queue(TaskQueue *queue)
+  {
+    // call the parent implementation first
+    ThreadedTaskScheduler::remove_task_queue(queue);
   }
 
   void UserThreadTaskScheduler::start(void)

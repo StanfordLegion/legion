@@ -319,6 +319,16 @@ if(Legion_USE_Kokkos)
   string(REGEX REPLACE "\\$<\\$<COMPILE_LANGUAGE:CXX>:([^<>]*)>" \\1 kokkos_compile_options "${kokkos_compile_options}")
   string(REGEX REPLACE "\\$<\\$<COMPILE_LANGUAGE:.+>:([^<>]*)>" "" kokkos_compile_options "${kokkos_compile_options}")
 
+  # also do kokkos' compile features (or at least the one we understand)
+  get_property(kokkos_compile_features TARGET Kokkos::kokkoscore PROPERTY INTERFACE_COMPILE_FEATURES)
+  foreach(feature IN LISTS kokkos_compile_features)
+    if(feature MATCHES "cxx_std_([0-9]+)")
+      list(APPEND kokkos_compile_options "-std=c++${CMAKE_MATCH_1}")
+    else()
+      message(WARNING "unrecognized Kokkos compile feature: ${feature}")
+    endif()
+  endforeach()
+
   # now add on our own cxx flags, dealing with the whole strings vs lists thing
   set(cxx_flags_as_list ${CMAKE_CXX_FLAGS} -fPIC ${CXX_BUILD_WARNING_FLAGS})
   if(CMAKE_BUILD_TYPE STREQUAL "Debug")

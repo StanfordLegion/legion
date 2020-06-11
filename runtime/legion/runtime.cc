@@ -12245,7 +12245,7 @@ namespace Legion {
         else
         {
           std::vector<Processor> util_group(locals.begin(), locals.end());
-          utility_group = Processor::create_group(util_group);
+          utility_group = ProcessorGroup::create_group(util_group);
         }
       }
       else if (local_utils.size() == 1)
@@ -12253,7 +12253,7 @@ namespace Legion {
       else
       {
         std::vector<Processor> util_g(local_utils.begin(), local_utils.end());
-        utility_group = Processor::create_group(util_g);
+        utility_group = ProcessorGroup::create_group(util_g);
       }
 #ifdef DEBUG_LEGION
       assert(utility_group.exists());
@@ -12869,6 +12869,12 @@ namespace Legion {
           redop_table.erase(it);
         }
       }
+      for (LegionMap<uint64_t,LegionDeque<ProcessorGroupInfo>::aligned,
+            PROCESSOR_GROUP_ALLOC>::aligned::const_iterator git = 
+            processor_groups.begin(); git != processor_groups.end(); git++)
+        for (LegionDeque<ProcessorGroupInfo>::aligned::const_iterator it = 
+              git->second.begin(); it != git->second.end(); it++)
+          it->processor_group.destroy();
       for (std::map<Memory,MemoryManager*>::const_iterator it =
             memory_managers.begin(); it != memory_managers.end(); it++)
       {
@@ -13030,7 +13036,7 @@ namespace Legion {
       assert(!prof_procs.empty());
 #endif
       const Processor target_proc_for_profiler = prof_procs.size() > 1 ?
-        Processor::create_group(prof_procs) : prof_procs.front();
+        ProcessorGroup::create_group(prof_procs) : prof_procs.front();
       LG_TASK_DESCRIPTIONS(lg_task_descriptions);
       LG_MESSAGE_DESCRIPTIONS(lg_message_descriptions);
       LEGION_STATIC_ASSERT((LG_MESSAGE_ID+1) == LG_LAST_TASK_ID,
@@ -21318,8 +21324,7 @@ namespace Legion {
         }
       }
       // If we make it here create a new processor group and add it
-      std::vector<Processor> input_procs(procs.begin(), procs.end());
-      Processor group = Processor::create_group(input_procs);
+      ProcessorGroup group = ProcessorGroup::create_group(procs);
       if (finder != processor_groups.end())
         finder->second.push_back(ProcessorGroupInfo(group, local_mask));
       else
