@@ -1895,6 +1895,17 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
+    std::string TraceViewSet::FailedPrecondition::to_string(void) const
+    //--------------------------------------------------------------------------
+    {
+      char *m = mask.to_string();
+      std::stringstream ss;
+      ss << "view: " << view << ", Index expr: " << eq->set_expr->expr_id
+         << ", Field Mask: " << m;
+      return ss.str();
+    }
+
+    //--------------------------------------------------------------------------
     TraceViewSet::TraceViewSet(RegionTreeForest *f)
       : forest(f), view_references(f->runtime->dump_physical_traces)
     //--------------------------------------------------------------------------
@@ -2012,7 +2023,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool TraceViewSet::subsumed_by(const TraceViewSet &set) const
+    bool TraceViewSet::subsumed_by(const TraceViewSet &set,
+                                   FailedPrecondition *condition) const
     //--------------------------------------------------------------------------
     {
       for (ViewSet::const_iterator it = conditions.begin();
@@ -2022,7 +2034,15 @@ namespace Legion {
       {
         FieldMask mask = eit->second;
         if (!set.dominates(it->first, eit->first, mask))
+        {
+          if (condition != NULL)
+          {
+            condition->view = it->first;
+            condition->eq = eit->first;
+            condition->mask = mask;
+          }
           return false;
+        }
       }
 
       return true;
@@ -2388,14 +2408,32 @@ namespace Legion {
       if (!pre_reductions.empty())
         return Replayable(false, "external reduction views");
 
-      if (!post_reductions.subsumed_by(consumed_reductions))
-        return Replayable(false, "escaping reduction views");
+      TraceViewSet::FailedPrecondition condition;
+      if (!post_reductions.subsumed_by(consumed_reductions, &condition))
+      {
+        if (trace->runtime->dump_physical_traces)
+        {
+          return Replayable(
+              false, "escaping reduction view: " + condition.to_string());
+        }
+        else
+          return Replayable(false, "escaping reduction views");
+      }
 
       if (pre.has_refinements() || post.has_refinements())
         return Replayable(false, "found refined equivalence sets");
 
-      if (!pre.subsumed_by(post))
-        return Replayable(false, "precondition not subsumed by postcondition");
+      if (!pre.subsumed_by(post, &condition))
+      {
+        if (trace->runtime->dump_physical_traces)
+        {
+          return Replayable(
+              false, "precondition not subsumed: " + condition.to_string());
+        }
+        else
+          return Replayable(
+              false, "precondition not subsumed by postcondition");
+      }
 
       return Replayable(true);
     }

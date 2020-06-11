@@ -508,6 +508,14 @@ namespace Legion {
      */
     class TraceViewSet {
     public:
+      struct FailedPrecondition {
+        InstanceView *view;
+        EquivalenceSet *eq;
+        FieldMask mask;
+
+        std::string to_string(void) const;
+      };
+    public:
       TraceViewSet(RegionTreeForest *forest);
       virtual ~TraceViewSet(void);
     public:
@@ -521,7 +529,8 @@ namespace Legion {
       bool dominates(InstanceView *view,
                      EquivalenceSet *eq,
                      FieldMask &non_dominated) const;
-      bool subsumed_by(const TraceViewSet &set) const;
+      bool subsumed_by(const TraceViewSet &set,
+                       FailedPrecondition *condition = NULL) const;
       bool has_refinements(void) const;
       bool empty(void) const;
     public:
@@ -631,6 +640,9 @@ namespace Legion {
           : replayable(r), message()
         {}
         Replayable(bool r, const char *m)
+          : replayable(r), message(m)
+        {}
+        Replayable(bool r, const std::string &m)
           : replayable(r), message(m)
         {}
         Replayable(const Replayable &r)
