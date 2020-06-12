@@ -2931,6 +2931,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalTemplate::initialize_eliminate_dead_code_frontiers(
+                      const std::vector<unsigned> &gen, std::vector<bool> &used)
+    //--------------------------------------------------------------------------
+    {
+      for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
+          it != frontiers.end(); ++it)
+      {
+        unsigned g = gen[it->first];
+        if (g != -1U && g < instructions.size())
+          used[g] = true;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::initialize_eliminate_dead_code_frontiers(
+                                                 std::vector<unsigned> &new_gen)
+    //--------------------------------------------------------------------------
+    {
+      initialize_propagate_merges_frontiers(new_gen);
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalTemplate::prepare_parallel_replay(
                                                const std::vector<unsigned> &gen)
     //--------------------------------------------------------------------------
@@ -3589,6 +3611,15 @@ namespace Legion {
               used[gen[complete->rhs]] = true;
               break;
             }
+          case BARRIER_ARRIVAL:
+            {
+              BarrierArrival *arrival = inst->as_barrier_arrival();
+#ifdef DEBUG_LEGION
+              assert(gen[arrival->rhs] != -1U);
+#endif
+              used[gen[arrival->rhs]] = true;
+              break;
+            }
           case GET_TERM_EVENT:
           case CREATE_AP_USER_EVENT:
           case SET_OP_SYNC_EVENT:
@@ -3603,13 +3634,7 @@ namespace Legion {
             }
         }
       }
-      for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
-          it != frontiers.end(); ++it)
-      {
-        unsigned g = gen[it->first];
-        if (g != -1U && g < instructions.size())
-          used[g] = true;
-      }
+      initialize_eliminate_dead_code_frontiers(gen, used);
 
       std::vector<unsigned> inv_gen(instructions.size(), -1U);
       for (unsigned idx = 0; idx < gen.size(); ++idx)
@@ -3622,9 +3647,7 @@ namespace Legion {
       std::vector<Instruction*> new_instructions;
       std::vector<Instruction*> to_delete;
       std::vector<unsigned> new_gen(gen.size(), -1U);
-      for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
-          it != frontiers.end(); ++it)
-        new_gen[it->second] = 0;
+      initialize_eliminate_dead_code_frontiers(new_gen);
       for (unsigned idx = 0; idx < instructions.size(); ++idx)
       {
         if (used[idx])

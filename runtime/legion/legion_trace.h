@@ -677,6 +677,11 @@ namespace Legion {
     protected:
       virtual void initialize_propagate_merges_frontiers(
                           std::vector<unsigned> &new_gen);
+      virtual void initialize_eliminate_dead_code_frontiers(
+                          const std::vector<unsigned> &gen,
+                                std::vector<bool> &used);
+      virtual void initialize_eliminate_dead_code_frontiers(
+                          std::vector<unsigned> &new_gen);
       virtual void initialize_transitive_reduction_frontiers(
                           std::vector<unsigned> &topo_order,
                           std::vector<unsigned> &inv_topo_order);
