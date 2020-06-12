@@ -731,6 +731,7 @@ namespace Legion {
     inline FT& operator[](int index)
       { return *static_cast<FT*>(base + index * stride); }
     inline FT* data(void) { return static_cast<FT*>(base); }
+    inline uintptr_t get_base(void) const { return uintptr_t(base); }
   public:
     inline size_t size(void) const { return extent; }
     inline size_t step(void) const { return stride; }

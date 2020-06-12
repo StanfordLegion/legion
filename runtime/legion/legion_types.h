@@ -150,6 +150,11 @@ namespace Legion {
     template<typename, PrivilegeMode> class AccessorRefHelper;
     template<typename> class AffineRefHelper;
   }
+  class PieceIterator;
+  template<int,typename>
+  class PieceIteratorT;
+  template<PrivilegeMode,typename,int,typename>
+  class SpanIterator;
   class IndexIterator;
   template<typename T> struct ColoredPoints; 
   struct InputArgs;

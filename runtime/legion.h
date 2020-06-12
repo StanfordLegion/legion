@@ -2251,6 +2251,8 @@ namespace Legion {
       template<typename>
       friend class ArraySyntax::AffineRefHelper;
       friend class PieceIterator;
+      template<PrivilegeMode, typename, int, typename>
+      friend class SpanIterator;
       Realm::RegionInstance get_instance_info(PrivilegeMode mode, 
                                               FieldID fid, size_t field_size,
                                               void *realm_is, TypeTag type_tag,
@@ -2597,6 +2599,7 @@ namespace Legion {
       inline operator bool(void) const;
       inline bool operator()(void) const;
       inline Domain operator*(void) const;
+      inline const Domain* operator->(void) const;
       inline PieceIterator& operator++(void);
       inline PieceIterator operator++(int/*postfix*/);
     public:
@@ -2623,9 +2626,15 @@ namespace Legion {
       PieceIteratorT(const PhysicalRegion &region, FieldID fid,
                      bool privilege_only);
     public:
+      PieceIteratorT<DIM,COORD_T>& operator=(const PieceIteratorT &rhs);
+    public:
+      inline bool step(void);
       inline Rect<DIM,COORD_T> operator*(void) const;
+      inline const Rect<DIM,COORD_T>* operator->(void) const;
       inline PieceIteratorT<DIM,COORD_T>& operator++(void);
       inline PieceIteratorT<DIM,COORD_T> operator++(int/*postfix*/);
+    protected:
+      Rect<DIM,COORD_T> current_rect;
     };
 
     /**
@@ -2640,6 +2649,7 @@ namespace Legion {
     template<PrivilegeMode PM, typename FT, int DIM, typename COORD_T = coord_t>
     class SpanIterator {
     public:
+      SpanIterator(void) { }
       SpanIterator(const PhysicalRegion &region, FieldID fid,
                    // The actual field size in case it is different from the 
                    // one being used in FT and we still want to check it
@@ -2650,7 +2660,7 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL) { }
+                    const char *warning_string = NULL);
     public:
       inline bool valid(void) const;
       inline bool step(void);
@@ -2658,8 +2668,17 @@ namespace Legion {
       inline operator bool(void) const;
       inline bool operator()(void) const;
       inline Span<FT,PM> operator*(void) const;
+      inline const Span<FT,PM>* operator->(void) const;
       inline SpanIterator<PM,FT,DIM,COORD_T>& operator++(void);
       inline SpanIterator<PM,FT,DIM,COORD_T> operator++(int);
+    private:
+      PieceIteratorT<DIM,COORD_T> piece_iterator;
+      Realm::MultiAffineAccessor<FT,DIM,COORD_T> accessor;
+      Span<FT,PM> current;
+      Point<DIM,COORD_T> partial_step_point;
+      int dim_order[DIM];
+      int partial_step_dim;
+      bool partial_piece;
     };
 
     /**

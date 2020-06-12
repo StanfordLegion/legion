@@ -16239,6 +16239,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline const Domain* PieceIterator::operator->(void) const
+    //--------------------------------------------------------------------------
+    {
+      return &current_piece;
+    }
+
+    //--------------------------------------------------------------------------
     inline PieceIterator& PieceIterator::operator++(void)
     //--------------------------------------------------------------------------
     {
@@ -16296,7 +16303,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     inline PieceIteratorT<DIM,T>::PieceIteratorT(const PieceIteratorT &rhs)
-      : PieceIterator(rhs)
+      : PieceIterator(rhs), current_rect(rhs.current_rect)
     //--------------------------------------------------------------------------
     {
     }
@@ -16312,11 +16319,39 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    inline PieceIteratorT<DIM,T>& PieceIteratorT<DIM,T>::operator=(
+                                                      const PieceIteratorT &rhs)
+    //--------------------------------------------------------------------------
+    {
+      PieceIterator::operator=(rhs);
+      current_rect = rhs.current_rect;
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    inline bool PieceIteratorT<DIM,T>::step(void)
+    //--------------------------------------------------------------------------
+    {
+      const bool result = PieceIterator::step();
+      current_rect = current_piece;
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     inline Rect<DIM,T> PieceIteratorT<DIM,T>::operator*(void) const
     //--------------------------------------------------------------------------
     {
-      const Rect<DIM,T> result = current_piece;
-      return result;
+      return current_rect;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    inline const Rect<DIM,T>* PieceIteratorT<DIM,T>::operator->(void) const
+    //--------------------------------------------------------------------------
+    {
+      return &current_rect;
     }
 
     //--------------------------------------------------------------------------
@@ -16334,6 +16369,223 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       PieceIteratorT<DIM,T> result = *this;
+      step();
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<PrivilegeMode PM, typename FT, int DIM, typename T>
+    inline SpanIterator<PM,FT,DIM,T>::SpanIterator(const PhysicalRegion &region,
+                   FieldID fid, size_t actual_field_size, bool check_field_size, 
+                   bool silence_warnings, const char *warning_string)
+      : piece_iterator(PieceIteratorT<DIM,T>(region, fid, true/*priv only*/)),
+        partial_piece(false)
+    //--------------------------------------------------------------------------
+    {
+      DomainT<DIM,T> is;
+      const Realm::RegionInstance instance = 
+        region.get_instance_info(PM, fid, actual_field_size, &is,
+            Internal::NT_TemplateHelper::encode_tag<DIM,T>(), warning_string,
+            silence_warnings, false/*generic accessor*/, check_field_size);
+      if (!Realm::MultiAffineAccessor<FT,DIM,T>::is_compatible(instance, fid, 
+                                                               is.bounds))
+        region.report_incompatible_accessor("SpanIterator", instance, fid);
+      accessor = Realm::MultiAffineAccessor<FT,DIM,T>(instance, fid, is.bounds);
+      // initialize the first span
+      step();
+    }
+
+    //--------------------------------------------------------------------------
+    template<PrivilegeMode PM, typename FT, int DIM, typename T>
+    inline bool SpanIterator<PM,FT,DIM,T>::valid(void) const
+    //--------------------------------------------------------------------------
+    {
+      return !current.empty();
+    }
+
+    //--------------------------------------------------------------------------
+    template<PrivilegeMode PM, typename FT, int DIM, typename T>
+    inline bool SpanIterator<PM,FT,DIM,T>::step(void)
+    //--------------------------------------------------------------------------
+    {
+      // Handle the remains of a partial piece if that is what we're doing
+      if (partial_piece)
+      {
+        bool carry = false;
+        for (int idx = 0; idx < DIM; idx++)
+        {
+          const int dim = dim_order[idx];
+          if (carry || (dim == partial_step_dim))
+          {
+            if (partial_step_point[dim] < piece_iterator->hi[dim])
+            {
+              partial_step_point[dim] += 1;
+              carry = false;
+              break;
+            }
+            // carry case so reset and roll-over
+            partial_step_point[dim] = piece_iterator->lo[dim];
+            carry = true;
+          }
+          // Skip any dimensions before the partial step dim
+        }
+        // Make the next span
+        current = Span<FT,PM>(accessor.ptr(partial_step_point),
+                              current.size(), current.step());
+        // See if we are done with this partial piece
+        if (carry)
+          partial_piece = false; 
+        return true;
+      }
+      current = Span<FT,PM>(); // clear this for the next iteration
+      // Otherwise try to group as many rectangles together as we can
+      while (piece_iterator.valid())
+      {
+        size_t strides[DIM];
+#ifdef DEBUG_LEGION
+        bool good_strides = 
+#endif
+          accessor.find_strides(*piece_iterator, strides); 
+#ifdef DEBUG_LEGION
+        // If we ever hit this it is a runtime error because the 
+        // runtime should already be guaranteeing these rectangles
+        // are inside of pieces for the instance
+        assert(good_strides);
+#endif         
+        // Find the minimum stride and see if this piece is dense
+        size_t min_stride = SIZE_MAX;
+        for (int dim = 0; dim < DIM; dim++)
+          if (strides[dim] < min_stride)
+            min_stride = strides[dim];
+        if (__legion_is_dense_layout(*piece_iterator, strides, min_stride))
+        {
+          FT *ptr = accessor.ptr(piece_iterator->lo);
+          const size_t volume = piece_iterator->volume();
+          if (!current.empty())
+          {
+            uintptr_t base = current.get_base();
+            // See if we can append to the current span
+            if ((current.step() == min_stride) &&
+                ((base + (current.size() * min_stride)) == uintptr_t(ptr)))
+              current = 
+                Span<FT,PM>(current.data(), current.size() + volume, min_stride);
+            else // Save this rectangle for the next iteration
+              break;
+          }
+          else // Start a new span
+            current = Span<FT,PM>(ptr, volume, min_stride);
+        }
+        else
+        {
+          // Not a uniform stride, so go to the partial piece case
+          if (current.empty())
+          {
+            partial_piece = true;
+            // Compute the dimension order from smallest to largest
+            size_t stride_floor = 0;
+            for (int idx = 0; idx < DIM; idx++)
+            {
+              int index = -1;
+              size_t local_min = SIZE_MAX;
+              for (int dim = 0; dim < DIM; dim++)
+              {
+                if (strides[dim] <= stride_floor)
+                  continue;
+                if (strides[dim] < local_min)
+                {
+                  local_min = strides[dim];
+                  index = dim;
+                }
+              }
+#ifdef DEBUG_LEGION
+              assert(index >= 0); 
+#endif
+              dim_order[idx] = index;
+              stride_floor = local_min;
+            }
+            // See which dimensions we can handle at once and which ones
+            // we are going to need to walk over
+            size_t extent = 1;
+            size_t exp_offset = min_stride;
+            partial_step_dim = -1;
+            for (int idx = 0; idx < DIM; idx++)
+            {
+              const int dim = dim_order[idx];
+              if (strides[dim] == exp_offset)
+              {
+                size_t pitch =
+                  ((piece_iterator->hi[dim] - piece_iterator->lo[dim]) + 1); 
+                exp_offset *= pitch;
+                extent *= pitch;
+              }
+              // First dimension that is not contiguous
+              partial_step_dim = dim;
+              break;
+            }
+#ifdef DEBUG_LEGION
+            assert(partial_step_dim >= 0);
+#endif
+            partial_step_point = piece_iterator->lo;
+            current = 
+              Span<FT,PM>(accessor.ptr(partial_step_point), extent, min_stride);
+          }
+          // No matter what we are breaking out here
+          break;
+        }
+        // Step the piece iterator for the next iteration
+        piece_iterator.step();
+      }
+      return valid();
+    }
+
+    //--------------------------------------------------------------------------
+    template<PrivilegeMode PM, typename FT, int DIM, typename T>
+    inline SpanIterator<PM,FT,DIM,T>::operator bool(void) const
+    //--------------------------------------------------------------------------
+    {
+      return valid();
+    }
+
+    //--------------------------------------------------------------------------
+    template<PrivilegeMode PM, typename FT, int DIM, typename T>
+    inline bool SpanIterator<PM,FT,DIM,T>::operator()(void) const
+    //--------------------------------------------------------------------------
+    {
+      return valid();
+    }
+
+    //--------------------------------------------------------------------------
+    template<PrivilegeMode PM, typename FT, int DIM, typename T>
+    inline Span<FT,PM> SpanIterator<PM,FT,DIM,T>::operator*(void) const
+    //--------------------------------------------------------------------------
+    {
+      return current;
+    }
+
+    //--------------------------------------------------------------------------
+    template<PrivilegeMode PM, typename FT, int DIM, typename T>
+    inline const Span<FT,PM>* SpanIterator<PM,FT,DIM,T>::operator->(void) const
+    //--------------------------------------------------------------------------
+    {
+      return &current;
+    }
+
+    //--------------------------------------------------------------------------
+    template<PrivilegeMode PM, typename FT, int DIM, typename T>
+    inline SpanIterator<PM,FT,DIM,T>& SpanIterator<PM,FT,DIM,T>::operator++(
+                                                                           void)
+    //--------------------------------------------------------------------------
+    {
+      step();
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    template<PrivilegeMode PM, typename FT, int DIM, typename T>
+    inline SpanIterator<PM,FT,DIM,T> SpanIterator<PM,FT,DIM,T>::operator++(int)
+    //--------------------------------------------------------------------------
+    {
+      SpanIterator<PM,FT,DIM,T> result = *this;
       step();
       return result;
     }
