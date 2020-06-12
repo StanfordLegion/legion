@@ -362,7 +362,9 @@ namespace Legion {
       SpecializedConstraint(SpecializedKind kind = LEGION_AFFINE_SPECIALIZE,
                             ReductionOpID redop = 0, 
                             bool no_access = false,
-                            bool exact = false);
+                            bool exact = false,
+                            size_t max_pieces = SIZE_MAX,
+                            int max_overhead = 0);
     public:
       bool operator==(const SpecializedConstraint &other) const;
     public:
@@ -388,6 +390,8 @@ namespace Legion {
     public:
       SpecializedKind kind;
       ReductionOpID  redop;
+      size_t    max_pieces;
+      int     max_overhead;
       bool       no_access;
       bool           exact;
     };

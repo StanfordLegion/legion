@@ -611,8 +611,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     SpecializedConstraint::SpecializedConstraint(SpecializedKind k,
-                                             ReductionOpID r, bool no, bool ext)
-      : kind(k), redop(r), no_access(no), exact(ext)
+                ReductionOpID r, bool no, bool ext, size_t pieces, int overhead)
+      : kind(k), redop(r), max_pieces(pieces), max_overhead(overhead), 
+        no_access(no), exact(ext)
     //--------------------------------------------------------------------------
     {
       if (redop != 0)
@@ -634,8 +635,9 @@ namespace Legion {
                                        const SpecializedConstraint &other) const
     //--------------------------------------------------------------------------
     {
-      return kind == other.kind && redop == other.redop
-          && no_access == other.no_access && exact == other.exact;
+      return ((kind == other.kind) && (redop == other.redop) &&
+        (max_pieces == other.max_pieces) && (max_overhead == other.max_overhead)
+          && (no_access == other.no_access) && (exact == other.exact));
     }
 
     //--------------------------------------------------------------------------
@@ -649,6 +651,10 @@ namespace Legion {
         return false;
       // Make sure we also handle the unspecialized case of redop 0
       if ((redop != other.redop) && (other.redop != 0))
+        return false;
+      if (max_pieces > other.max_pieces)
+        return false;
+      if (max_overhead > other.max_overhead)
         return false;
       if (no_access && !other.no_access)
         return false;
@@ -670,6 +676,10 @@ namespace Legion {
       // Only conflicts if we both have non-zero redops that don't equal
       if ((redop != other.redop) && (redop != 0) && (other.redop != 0))
         return true;
+      if (max_pieces != other.max_pieces)
+        return true;
+      if (max_overhead != other.max_overhead)
+        return true;
       // No access never causes a conflict
       // We'll test for exactness inside the runtime
       return false;
@@ -681,6 +691,8 @@ namespace Legion {
     {
       SWAP_HELPER(SpecializedKind, kind)
       SWAP_HELPER(ReductionOpID, redop)
+      SWAP_HELPER(size_t, max_pieces)
+      SWAP_HELPER(int, max_overhead)
       SWAP_HELPER(bool, no_access)
       SWAP_HELPER(bool, exact)
     }
@@ -693,6 +705,12 @@ namespace Legion {
       if ((kind == LEGION_AFFINE_REDUCTION_SPECIALIZE) || 
           (kind == LEGION_COMPACT_REDUCTION_SPECIALIZE))
         rez.serialize(redop);
+      if ((kind == LEGION_COMPACT_SPECIALIZE) ||
+          (kind == LEGION_COMPACT_REDUCTION_SPECIALIZE)) 
+      {
+        rez.serialize(max_pieces);
+        rez.serialize(max_overhead);
+      }
       rez.serialize<bool>(no_access);
       rez.serialize<bool>(exact);
     }
@@ -705,6 +723,12 @@ namespace Legion {
       if ((kind == LEGION_AFFINE_REDUCTION_SPECIALIZE) || 
           (kind == LEGION_COMPACT_REDUCTION_SPECIALIZE))
         derez.deserialize(redop);
+      if ((kind == LEGION_COMPACT_SPECIALIZE) ||
+          (kind == LEGION_COMPACT_REDUCTION_SPECIALIZE))
+      {
+        derez.deserialize(max_pieces);
+        derez.deserialize(max_overhead);
+      }
       derez.deserialize<bool>(no_access);
       derez.deserialize<bool>(exact);
     }
