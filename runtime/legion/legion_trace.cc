@@ -2639,6 +2639,7 @@ namespace Legion {
         propagate_merges(gen);
         transitive_reduction();
         propagate_copies(gen);
+        eliminate_dead_code(gen);
       }
       prepare_parallel_replay(gen);
       push_complete_replays();
@@ -2877,15 +2878,19 @@ namespace Legion {
         }
       }
 
-      std::vector<unsigned> inv_gen;
-      inv_gen.resize(instructions.size());
+      std::vector<unsigned> inv_gen(instructions.size(), -1U);
       for (unsigned idx = 0; idx < gen.size(); ++idx)
-        inv_gen[gen[idx]] = idx;
+      {
+        unsigned g = gen[idx];
+#ifdef DEBUG_LEGION
+        assert(inv_gen[g] == -1U || g == fence_completion_id);
+#endif
+        if (g != -1U && g < instructions.size() && inv_gen[g] == -1U)
+          inv_gen[g] = idx;
+      }
       std::vector<Instruction*> to_delete;
-      std::vector<unsigned> new_gen;
-      new_gen.resize(gen.size());
-      new_gen[fence_completion_id] = 0;
-      initialize_propagate_merges_frontiers(new_gen); 
+      std::vector<unsigned> new_gen(gen.size(), -1U);
+      initialize_propagate_merges_frontiers(new_gen);
       for (unsigned idx = 0; idx < instructions.size(); ++idx)
         if (used[idx])
         {
@@ -2899,7 +2904,12 @@ namespace Legion {
                 merge->rhs.erase(fence_completion_id);
             }
           }
-          new_gen[inv_gen[idx]] = new_instructions.size();
+          unsigned e = inv_gen[idx];
+#ifdef DEBUG_LEGION
+          assert(e == -1U || (e < new_gen.size() && new_gen[e] == -1U));
+#endif
+          if (e != -1U)
+            new_gen[e] = new_instructions.size();
           new_instructions.push_back(inst);
         }
         else
@@ -3005,6 +3015,9 @@ namespace Legion {
               new_rhs.insert(rh);
             else
             {
+#ifdef DEBUG_LEGION
+              assert(gen[rh] != -1U);
+#endif
               unsigned generator_slice = slice_indices_by_inst[gen[rh]];
 #ifdef DEBUG_LEGION
               assert(generator_slice != -1U);
@@ -3078,7 +3091,11 @@ namespace Legion {
           if (event_to_check != NULL)
           {
             unsigned ev = *event_to_check;
-            unsigned generator_slice = slice_indices_by_inst[gen[ev]];
+            unsigned g = gen[ev];
+#ifdef DEBUG_LEGION
+            assert(g != -1U && g < instructions.size());
+#endif
+            unsigned generator_slice = slice_indices_by_inst[g];
 #ifdef DEBUG_LEGION
             assert(generator_slice != -1U);
 #endif
@@ -3096,7 +3113,7 @@ namespace Legion {
                 *event_to_check = new_crossing_event;
                 slices[generator_slice].push_back(
                     new TriggerEvent(*this, new_crossing_event, ev,
-                      instructions[gen[ev]]->owner));
+                      instructions[g]->owner));
               }
             }
           }
@@ -3128,10 +3145,8 @@ namespace Legion {
       std::vector<unsigned> topo_order;
       topo_order.reserve(instructions.size());
       std::vector<unsigned> inv_topo_order(events.size(), -1U);
-      std::vector<std::vector<unsigned> > incoming;
-      std::vector<std::vector<unsigned> > outgoing;
-      incoming.resize(events.size());
-      outgoing.resize(events.size());
+      std::vector<std::vector<unsigned> > incoming(events.size());
+      std::vector<std::vector<unsigned> > outgoing(events.size());
 
       initialize_transitive_reduction_frontiers(topo_order, inv_topo_order);
 
@@ -3241,8 +3256,7 @@ namespace Legion {
       }
 
       // Second, do a toposort on nodes via BFS
-      std::vector<unsigned> remaining_edges;
-      remaining_edges.resize(incoming.size());
+      std::vector<unsigned> remaining_edges(incoming.size());
       for (unsigned idx = 0; idx < incoming.size(); ++idx)
         remaining_edges[idx] = incoming[idx].size();
 
@@ -3300,10 +3314,8 @@ namespace Legion {
       }
 
       // Fourth, find the frontiers of chains that are connected to each node
-      std::vector<std::vector<int> > all_chain_frontiers;
-      std::vector<std::vector<unsigned> > incoming_reduced;
-      all_chain_frontiers.resize(topo_order.size());
-      incoming_reduced.resize(topo_order.size());
+      std::vector<std::vector<int> > all_chain_frontiers(topo_order.size());
+      std::vector<std::vector<unsigned> > incoming_reduced(topo_order.size());
       for (unsigned idx = 0; idx < topo_order.size(); ++idx)
       {
         std::vector<int> chain_frontiers(num_chains, -1);
@@ -3394,6 +3406,11 @@ namespace Legion {
       if (instructions.size() == new_instructions.size()) return;
 
       instructions.swap(new_instructions);
+
+      std::vector<unsigned> new_gen(gen.size(), -1U);
+      for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
+          it != frontiers.end(); ++it)
+        new_gen[it->second] = 0;
 
       for (unsigned idx = 0; idx < instructions.size(); ++idx)
       {
@@ -3495,8 +3512,139 @@ namespace Legion {
             }
         }
         if (lhs != -1)
-          gen[lhs] = idx;
+          new_gen[lhs] = idx;
       }
+      gen.swap(new_gen);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::eliminate_dead_code(std::vector<unsigned> &gen)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<bool> used(instructions.size(), false);
+      for (unsigned idx = 0; idx < instructions.size(); ++idx)
+      {
+        Instruction *inst = instructions[idx];
+        InstructionKind kind = inst->get_kind();
+        // We only eliminate two kinds of instructions:
+        // GetTermEvent and SetOpSyncEvent
+        used[idx] = kind != SET_OP_SYNC_EVENT;
+        switch (kind)
+        {
+          case MERGE_EVENT:
+            {
+              MergeEvent *merge = inst->as_merge_event();
+              for (std::set<unsigned>::iterator it = merge->rhs.begin();
+                   it != merge->rhs.end(); ++it)
+              {
+#ifdef DEBUG_LEGION
+                assert(gen[*it] != -1U);
+#endif
+                used[gen[*it]] = true;
+              }
+              break;
+            }
+          case TRIGGER_EVENT:
+            {
+              TriggerEvent *trigger = inst->as_trigger_event();
+#ifdef DEBUG_LEGION
+              assert(gen[trigger->rhs] != -1U);
+#endif
+              used[gen[trigger->rhs]] = true;
+              break;
+            }
+          case ISSUE_COPY:
+            {
+              IssueCopy *copy = inst->as_issue_copy();
+#ifdef DEBUG_LEGION
+              assert(gen[copy->precondition_idx] != -1U);
+#endif
+              used[gen[copy->precondition_idx]] = true;
+              break;
+            }
+          case ISSUE_FILL:
+            {
+              IssueFill *fill = inst->as_issue_fill();
+#ifdef DEBUG_LEGION
+              assert(gen[fill->precondition_idx] != -1U);
+#endif
+              used[gen[fill->precondition_idx]] = true;
+              break;
+            }
+          case SET_EFFECTS:
+            {
+              SetEffects *effects = inst->as_set_effects();
+#ifdef DEBUG_LEGION
+              assert(gen[effects->rhs] != -1U);
+#endif
+              used[gen[effects->rhs]] = true;
+              break;
+            }
+          case COMPLETE_REPLAY:
+            {
+              CompleteReplay *complete = inst->as_complete_replay();
+#ifdef DEBUG_LEGION
+              assert(gen[complete->rhs] != -1U);
+#endif
+              used[gen[complete->rhs]] = true;
+              break;
+            }
+          case GET_TERM_EVENT:
+          case CREATE_AP_USER_EVENT:
+          case SET_OP_SYNC_EVENT:
+          case ASSIGN_FENCE_COMPLETION:
+            {
+              break;
+            }
+          default:
+            {
+              // unreachable
+              assert(false);
+            }
+        }
+      }
+      for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
+          it != frontiers.end(); ++it)
+      {
+        unsigned g = gen[it->first];
+        if (g != -1U && g < instructions.size())
+          used[g] = true;
+      }
+
+      std::vector<unsigned> inv_gen(instructions.size(), -1U);
+      for (unsigned idx = 0; idx < gen.size(); ++idx)
+      {
+        unsigned g = gen[idx];
+        if (g != -1U && g < instructions.size() && inv_gen[g] == -1U)
+          inv_gen[g] = idx;
+      }
+
+      std::vector<Instruction*> new_instructions;
+      std::vector<Instruction*> to_delete;
+      std::vector<unsigned> new_gen(gen.size(), -1U);
+      for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
+          it != frontiers.end(); ++it)
+        new_gen[it->second] = 0;
+      for (unsigned idx = 0; idx < instructions.size(); ++idx)
+      {
+        if (used[idx])
+        {
+          unsigned e = inv_gen[idx];
+#ifdef DEBUG_LEGION
+          assert(e == -1U || (e < new_gen.size() && new_gen[e] == -1U));
+#endif
+          if (e != -1U)
+            new_gen[e] = new_instructions.size();
+          new_instructions.push_back(instructions[idx]);
+        }
+        else
+          to_delete.push_back(instructions[idx]);
+      }
+
+      instructions.swap(new_instructions);
+      gen.swap(new_gen);
+      for (unsigned idx = 0; idx < to_delete.size(); ++idx)
+        delete to_delete[idx];
     }
 
     //--------------------------------------------------------------------------
