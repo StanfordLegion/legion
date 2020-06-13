@@ -1879,9 +1879,13 @@ namespace Realm {
 	    if(src_gpu == dst_gpu) {
 	      kind = XFER_GPU_IN_FB;
 	      channel = channel_manager->get_gpu_in_fb_channel(src_gpu);
+	      // ignore max_req_size value passed in - it's probably too small
+	      max_req_size = 1 << 30;
 	    } else {
 	      kind = XFER_GPU_PEER_FB;
 	      channel = channel_manager->get_gpu_peer_fb_channel(src_gpu);
+	      // ignore max_req_size value passed in - it's probably too small
+	      max_req_size = 256 << 20;
 	    }
 	  } else {
 	    kind = XFER_GPU_FROM_FB;
@@ -1907,7 +1911,8 @@ namespace Realm {
       {
         GPURequest** reqs = (GPURequest**) requests;
 	// TODO: add support for 3D CUDA copies (just 1D and 2D for now)
-	unsigned flags = TransferIterator::LINES_OK;
+	unsigned flags = (TransferIterator::LINES_OK |
+			  TransferIterator::PLANES_OK);
         long new_nr = default_get_requests(requests, nr, flags);
         for (long i = 0; i < new_nr; i++) {
           reqs[i]->event.reset();
@@ -3250,58 +3255,104 @@ namespace Realm {
 	    continue;
 	  }
 
-          if (req->dim == Request::DIM_1D) { 
-            switch (kind) {
-              case XFER_GPU_TO_FB:
-                src_gpu->copy_to_fb(req->dst_off, req->src_base,
-                                    req->nbytes, &req->event);
-                break;
-              case XFER_GPU_FROM_FB:
-                src_gpu->copy_from_fb(req->dst_base, req->src_off,
-                                      req->nbytes, &req->event);
-                break;
-              case XFER_GPU_IN_FB:
-                src_gpu->copy_within_fb(req->dst_off, req->src_off,
-                                        req->nbytes, &req->event);
-                break;
-              case XFER_GPU_PEER_FB:
-                src_gpu->copy_to_peer(req->dst_gpu, req->dst_off,
-                                      req->src_off, req->nbytes,
-                                      &req->event);
-                break;
-              default:
-                assert(0);
-            }
-          } else {
-            assert(req->dim == Request::DIM_2D);
-            switch (kind) {
-              case XFER_GPU_TO_FB:
-                src_gpu->copy_to_fb_2d(req->dst_off, req->src_base,
-                                       req->dst_str, req->src_str,
-                                       req->nbytes, req->nlines, &req->event);
-                break;
-              case XFER_GPU_FROM_FB:
-                src_gpu->copy_from_fb_2d(req->dst_base, req->src_off,
-                                         req->dst_str, req->src_str,
-                                         req->nbytes, req->nlines,
-                                         &req->event);
-                break;
-              case XFER_GPU_IN_FB:
-                src_gpu->copy_within_fb_2d(req->dst_off, req->src_off,
-                                           req->dst_str, req->src_str,
-                                           req->nbytes, req->nlines,
-                                           &req->event);
-                break;
-              case XFER_GPU_PEER_FB:
-                src_gpu->copy_to_peer_2d(req->dst_gpu, req->dst_off,
-                                         req->src_off, req->dst_str,
-                                         req->src_str, req->nbytes,
-                                         req->nlines, &req->event);
-                break;
-              default:
-                assert(0);
-            }
-          }
+	  switch(req->dim) {
+	    case Request::DIM_1D: {
+	      switch (kind) {
+                case XFER_GPU_TO_FB:
+		  src_gpu->copy_to_fb(req->dst_off, req->src_base,
+				      req->nbytes, &req->event);
+		  break;
+                case XFER_GPU_FROM_FB:
+		  src_gpu->copy_from_fb(req->dst_base, req->src_off,
+					req->nbytes, &req->event);
+		  break;
+                case XFER_GPU_IN_FB:
+		  src_gpu->copy_within_fb(req->dst_off, req->src_off,
+					  req->nbytes, &req->event);
+		  break;
+                case XFER_GPU_PEER_FB:
+		  src_gpu->copy_to_peer(req->dst_gpu, req->dst_off,
+					req->src_off, req->nbytes,
+					&req->event);
+		  break;
+                default:
+		  assert(0);
+	      }
+	      break;
+	    }
+
+	    case Request::DIM_2D: {
+              switch (kind) {
+	        case XFER_GPU_TO_FB:
+		  src_gpu->copy_to_fb_2d(req->dst_off, req->src_base,
+					 req->dst_str, req->src_str,
+					 req->nbytes, req->nlines, &req->event);
+		  break;
+	        case XFER_GPU_FROM_FB:
+		  src_gpu->copy_from_fb_2d(req->dst_base, req->src_off,
+					   req->dst_str, req->src_str,
+					   req->nbytes, req->nlines,
+					   &req->event);
+		  break;
+                case XFER_GPU_IN_FB:
+		  src_gpu->copy_within_fb_2d(req->dst_off, req->src_off,
+					     req->dst_str, req->src_str,
+					     req->nbytes, req->nlines,
+					     &req->event);
+		  break;
+                case XFER_GPU_PEER_FB:
+		  src_gpu->copy_to_peer_2d(req->dst_gpu, req->dst_off,
+					   req->src_off, req->dst_str,
+					   req->src_str, req->nbytes,
+					   req->nlines, &req->event);
+		  break;
+                default:
+		  assert(0);
+	      }
+	      break;
+	    }
+
+	    case Request::DIM_3D: {
+              switch (kind) {
+	        case XFER_GPU_TO_FB:
+		  src_gpu->copy_to_fb_3d(req->dst_off, req->src_base,
+					 req->dst_str, req->src_str,
+					 req->dst_pstr, req->src_pstr,
+					 req->nbytes, req->nlines, req->nplanes,
+					 &req->event);
+		  break;
+	        case XFER_GPU_FROM_FB:
+		  src_gpu->copy_from_fb_3d(req->dst_base, req->src_off,
+					   req->dst_str, req->src_str,
+					   req->dst_pstr, req->src_pstr,
+					   req->nbytes, req->nlines, req->nplanes,
+					   &req->event);
+		  break;
+                case XFER_GPU_IN_FB:
+		  src_gpu->copy_within_fb_3d(req->dst_off, req->src_off,
+					     req->dst_str, req->src_str,
+					     req->dst_pstr, req->src_pstr,
+					     req->nbytes, req->nlines, req->nplanes,
+					     &req->event);
+		  break;
+                case XFER_GPU_PEER_FB:
+		  src_gpu->copy_to_peer_3d(req->dst_gpu,
+					   req->dst_off, req->src_off,
+					   req->dst_str, req->src_str,
+					   req->dst_pstr, req->src_pstr,
+					   req->nbytes, req->nlines, req->nplanes,
+					   &req->event);
+		  break;
+                default:
+		  assert(0);
+	      }
+	      break;
+	    }
+
+	    default:
+	      assert(0);
+	  }
+
           pending_copies.push_back(req);
         }
         return nr;
