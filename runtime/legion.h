@@ -2253,6 +2253,8 @@ namespace Legion {
       friend class PieceIterator;
       template<PrivilegeMode, typename, int, typename>
       friend class SpanIterator;
+      template<typename, int, typename>
+      friend class UnsafeSpanIterator;
       Realm::RegionInstance get_instance_info(PrivilegeMode mode, 
                                               FieldID fid, size_t field_size,
                                               void *realm_is, TypeTag type_tag,
@@ -2655,12 +2657,14 @@ namespace Legion {
                    // one being used in FT and we still want to check it
                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
+                   bool check_field_size = true,
 #else
-                    bool check_field_size = false,
+                   bool check_field_size = false,
 #endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL);
+                   // Iterate only the spans that we have privileges on
+                   bool privileges_only = true,
+                   bool silence_warnings = false,
+                   const char *warning_string = NULL);
     public:
       inline bool valid(void) const;
       inline bool step(void);

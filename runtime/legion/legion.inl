@@ -12711,6 +12711,210 @@ namespace Legion {
       static const int dim = 1;
     };
 
+    /**
+     * \class UnsafeSpanIterator
+     * This is a hidden class analogous to the UnsafeFieldAccessor that
+     * allows for traversals over spans of elements in compact instances
+     */
+    template<typename FT, int DIM, typename T = coord_t>
+    class UnsafeSpanIterator {
+    public:
+      UnsafeSpanIterator(void) { }
+      UnsafeSpanIterator(const PhysicalRegion &region, FieldID fid,
+                         bool privileges_only = true,
+                         bool silence_warnings = false,
+                         const char *warning_string = NULL)
+        : piece_iterator(PieceIteratorT<DIM,T>(region, fid, privileges_only)),
+          partial_piece(false)
+      {
+        DomainT<DIM,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(LEGION_NO_ACCESS, fid, sizeof(FT), &is,
+              Internal::NT_TemplateHelper::encode_tag<DIM,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, false/*check size*/);
+        if (!Realm::MultiAffineAccessor<FT,DIM,T>::is_compatible(instance, fid, 
+                                                                 is.bounds))
+          region.report_incompatible_accessor("UnsafeSpanIterator", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<FT,DIM,T>(instance,fid,is.bounds);
+        // initialize the first span
+        step();
+      }
+    public:
+      inline bool valid(void) const
+        {
+          return !current.empty();
+        }
+      inline bool step(void)
+        {
+          // Handle the remains of a partial piece if that is what we're doing
+          if (partial_piece)
+          {
+            bool carry = false;
+            for (int idx = 0; idx < DIM; idx++)
+            {
+              const int dim = dim_order[idx];
+              if (carry || (dim == partial_step_dim))
+              {
+                if (partial_step_point[dim] < piece_iterator->hi[dim])
+                {
+                  partial_step_point[dim] += 1;
+                  carry = false;
+                  break;
+                }
+                // carry case so reset and roll-over
+                partial_step_point[dim] = piece_iterator->lo[dim];
+                carry = true;
+              }
+              // Skip any dimensions before the partial step dim
+            }
+            // Make the next span
+            current = Span<FT,LEGION_READ_WRITE>(
+              accessor.ptr(partial_step_point), current.size(), current.step());
+            // See if we are done with this partial piece
+            if (carry)
+              partial_piece = false; 
+            return true;
+          }
+          // clear this for the next iteration
+          current = Span<FT,LEGION_READ_WRITE>(); 
+          // Otherwise try to group as many rectangles together as we can
+          while (piece_iterator.valid())
+          {
+            size_t strides[DIM];
+#ifdef DEBUG_LEGION
+            bool good_strides = 
+#endif
+              accessor.find_strides(*piece_iterator, strides); 
+#ifdef DEBUG_LEGION
+            // If we ever hit this it is a runtime error because the 
+            // runtime should already be guaranteeing these rectangles
+            // are inside of pieces for the instance
+            assert(good_strides);
+#endif         
+            // Find the minimum stride and see if this piece is dense
+            size_t min_stride = SIZE_MAX;
+            for (int dim = 0; dim < DIM; dim++)
+              if (strides[dim] < min_stride)
+                min_stride = strides[dim];
+            if (__legion_is_dense_layout(*piece_iterator, strides, min_stride))
+            {
+              FT *ptr = accessor.ptr(piece_iterator->lo);
+              const size_t volume = piece_iterator->volume();
+              if (!current.empty())
+              {
+                uintptr_t base = current.get_base();
+                // See if we can append to the current span
+                if ((current.step() == min_stride) &&
+                    ((base + (current.size() * min_stride)) == uintptr_t(ptr)))
+                  current = Span<FT,LEGION_READ_WRITE>(current.data(), 
+                                  current.size() + volume, min_stride);
+                else // Save this rectangle for the next iteration
+                  break;
+              }
+              else // Start a new span
+                current = Span<FT,LEGION_READ_WRITE>(ptr, volume, min_stride);
+            }
+            else
+            {
+              // Not a uniform stride, so go to the partial piece case
+              if (current.empty())
+              {
+                partial_piece = true;
+                // Compute the dimension order from smallest to largest
+                size_t stride_floor = 0;
+                for (int idx = 0; idx < DIM; idx++)
+                {
+                  int index = -1;
+                  size_t local_min = SIZE_MAX;
+                  for (int dim = 0; dim < DIM; dim++)
+                  {
+                    if (strides[dim] <= stride_floor)
+                      continue;
+                    if (strides[dim] < local_min)
+                    {
+                      local_min = strides[dim];
+                      index = dim;
+                    }
+                  }
+#ifdef DEBUG_LEGION
+                  assert(index >= 0); 
+#endif
+                  dim_order[idx] = index;
+                  stride_floor = local_min;
+                }
+                // See which dimensions we can handle at once and which ones
+                // we are going to need to walk over
+                size_t extent = 1;
+                size_t exp_offset = min_stride;
+                partial_step_dim = -1;
+                for (int idx = 0; idx < DIM; idx++)
+                {
+                  const int dim = dim_order[idx];
+                  if (strides[dim] == exp_offset)
+                  {
+                    size_t pitch =
+                     ((piece_iterator->hi[dim] - piece_iterator->lo[dim]) + 1); 
+                    exp_offset *= pitch;
+                    extent *= pitch;
+                  }
+                  // First dimension that is not contiguous
+                  partial_step_dim = dim;
+                  break;
+                }
+#ifdef DEBUG_LEGION
+                assert(partial_step_dim >= 0);
+#endif
+                partial_step_point = piece_iterator->lo;
+                current = Span<FT,LEGION_READ_WRITE>(
+                    accessor.ptr(partial_step_point), extent, min_stride);
+              }
+              // No matter what we are breaking out here
+              break;
+            }
+            // Step the piece iterator for the next iteration
+            piece_iterator.step();
+          }
+          return valid();
+        }
+    public:
+      inline operator bool(void) const
+        {
+          return valid();
+        }
+      inline bool operator()(void) const
+        {
+          return valid();
+        }
+      inline Span<FT,LEGION_READ_WRITE> operator*(void) const
+        {
+          return current;
+        }
+      inline const Span<FT,LEGION_READ_WRITE>* operator->(void) const
+        {
+          return &current;
+        }
+      inline UnsafeSpanIterator<FT,DIM,T>& operator++(void)
+        {
+          step();
+          return *this;
+        }
+      inline UnsafeSpanIterator<FT,DIM,T> operator++(int)
+        {
+          UnsafeSpanIterator<FT,DIM,T> result = *this;
+          step();
+          return result;
+        }
+    private:
+      PieceIteratorT<DIM,T> piece_iterator;
+      Realm::MultiAffineAccessor<FT,DIM,T> accessor;
+      Span<FT,LEGION_READ_WRITE> current;
+      Point<DIM,T> partial_step_point;
+      int dim_order[DIM];
+      int partial_step_dim;
+      bool partial_piece;
+    };
+
     //--------------------------------------------------------------------------
     template<typename T>
     inline DeferredValue<T>::DeferredValue(T initial_value, size_t alignment)
@@ -16377,8 +16581,8 @@ namespace Legion {
     template<PrivilegeMode PM, typename FT, int DIM, typename T>
     inline SpanIterator<PM,FT,DIM,T>::SpanIterator(const PhysicalRegion &region,
                    FieldID fid, size_t actual_field_size, bool check_field_size, 
-                   bool silence_warnings, const char *warning_string)
-      : piece_iterator(PieceIteratorT<DIM,T>(region, fid, true/*priv only*/)),
+                   bool priv, bool silence_warnings, const char *warning_string)
+      : piece_iterator(PieceIteratorT<DIM,T>(region, fid, priv)),
         partial_piece(false)
     //--------------------------------------------------------------------------
     {
