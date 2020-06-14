@@ -29,10 +29,6 @@
 #include "realm/event_impl.h"
 #include "realm/rsrv_impl.h"
 
-#ifdef REALM_USE_HDF5
-#include <hdf5.h>
-#endif
-
 namespace Realm {
 
   namespace Config {
