@@ -4707,6 +4707,10 @@ namespace Legion {
       Mapper::SliceTaskInput input;
       Mapper::SliceTaskOutput output;
       input.domain_is = internal_space;
+      if (sharding_space.exists())
+        input.sharding_is = sharding_space;
+      else
+        input.sharding_is = launch_space->handle;
       runtime->forest->find_launch_space_domain(internal_space, input.domain);
       output.verify_correctness = false;
       if (mapper == NULL)
