@@ -279,7 +279,7 @@ if(NOT GASNet_FOUND AND NOT TARGET GASNet::GASNet)
   if(GASNet_FOUND)
     # Reorder preferred conduits to place local preferences first
     set(GASNet_ALL_PREFERRED_CONDUITS
-      "mxm;psm;gemini;aries;pami;ibv;shmem;portals4;ofi;mpi;udp;smp,ucx")
+      "mxm;psm;gemini;aries;pami;ibv;shmem;portals4;ofi;mpi;udp;smp;ucx")
     set(GASNet_PREFERRED_CONDUITS "${GASNet_ALL_PREFERRED_CONDUITS}"
       CACHE STRING "")
     mark_as_advanced(GASNet_PREFERRED_CONDUITS)

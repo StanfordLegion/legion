@@ -535,7 +535,8 @@ ifneq ($(findstring gasnet1,$(REALM_NETWORKS)),)
   ifeq ($(strip $(CONDUIT)),ucx)
     INC_FLAGS 	+= -I$(GASNET)/include/ucx-conduit
     REALM_CC_FLAGS	+= -DGASNET_CONDUIT_UCX
-    LEGION_LD_FLAGS	+= -lgasnet-ucx-par -lucp -luct -lucs -lucm
+    include $(GASNET)/include/ucx-conduit/ucx-par.mak
+    LEGION_LD_FLAGS	+= -lgasnet-ucx-par $(CONDUIT_LIBS)
     # GASNet needs MPI for interop support
     USE_MPI	= 1
   endif
