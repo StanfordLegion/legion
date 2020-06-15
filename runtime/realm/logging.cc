@@ -156,6 +156,7 @@ namespace Realm {
     : cmdline_read(false)
     , default_level(Logger::LEVEL_PRINT)
     , stderr_level(Logger::LEVEL_ERROR)
+    , include_timestamp(true)
     , stream(0)
     , stderr_stream(0)
     , default_output(0)
