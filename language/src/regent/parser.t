@@ -493,7 +493,7 @@ function parser.expr_prefix(p)
   if p:nextif("(") then
     local expr = p:expr()
     p:expect(")")
-    return expr {has_parens = true}
+    return expr { has_parens = true }
 
   elseif p:nextif("[") then
     local expr = p:luaexpr()
@@ -1675,13 +1675,13 @@ parser.expr_binary_left = function(p, lhs)
     if (lhs_has_op and (lhs_op == ">>" or lhs_op == "<<") and not lhs.has_parens) or
        (rhs_has_op and (rhs_op == ">>" or rhs_op == "<<") and not rhs.has_parens)
     then
-      p:error("inconsistent order of bitwise operations, please add parentheses")
+      p:error("order of operations between ^ and << or >> is unspecified, please add parentheses")
     end
   elseif op == "<<" or op == ">>" then
     if (lhs_has_op and lhs_op == "^" and not lhs.has_parens) or
        (rhs_has_op and rhs_op == "^" and not rhs.has_parens)
     then
-      p:error("inconsistent order of bitwise operations, please add parentheses")
+      p:error("order of operations between ^ and << or >> is unspecified, please add parentheses")
     end
   end
 
