@@ -2547,7 +2547,6 @@ namespace Legion {
                           const char *warning_string = NULL) { }
     public: // explicit data structure versions of the implicit iterators above
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
-                          const std::vector<PrivilegeMode> &privileges,
                           // The actual field size in case it is different from 
                           // the one being used in FT and we still want to check
                           FieldID fid, size_t actual_field_size = sizeof(FT),
@@ -2560,7 +2559,6 @@ namespace Legion {
                           const char *warning_string = NULL) { }
       // Specify a specific bounds rectangle to use for the accessor
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
-                          const std::vector<PrivilegeMode> &privileges,
                           const Rect<N,COORD_T> bounds, FieldID fid,
                           // The actual field size in case it is different from 
                           // the one being used in FT and we still want to check
@@ -2575,7 +2573,6 @@ namespace Legion {
       // Specify a specific Affine transform to use for interpreting points
       template<int M>
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
-                          const std::vector<PrivilegeMode> &privileges,
                           const AffineTransform<M,N,COORD_T> transform,
                           // The actual field size in case it is different from 
                           // the one being used in FT and we still want to check
@@ -2590,7 +2587,6 @@ namespace Legion {
       // Specify both a transform and a bounds to use
       template<int M>
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
-                          const std::vector<PrivilegeMode> &privileges,
                           const AffineTransform<M,N,COORD_T> transform,
                           const Rect<N,COORD_T> bounds, FieldID fid, 
                           // The actual field size in case it is different from the
