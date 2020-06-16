@@ -331,22 +331,10 @@ namespace Realm {
             break;
           }
         case GPU_MEMCPY_DEVICE_TO_DEVICE:
+        case GPU_MEMCPY_PEER_TO_PEER:
           {
             CHECK_CU( cuMemcpyDtoDAsync((CUdeviceptr)(((char*)dst)+span_start),
                                         (CUdeviceptr)(((char*)src)+span_start),
-                                        span_bytes,
-                                        raw_stream) );
-            break;
-          }
-        case GPU_MEMCPY_PEER_TO_PEER:
-          {
-            CUcontext src_ctx, dst_ctx;
-            CHECK_CU( cuPointerGetAttribute(&src_ctx, 
-                  CU_POINTER_ATTRIBUTE_CONTEXT, (CUdeviceptr)src) );
-            CHECK_CU( cuPointerGetAttribute(&dst_ctx, 
-                  CU_POINTER_ATTRIBUTE_CONTEXT, (CUdeviceptr)dst) );
-            CHECK_CU( cuMemcpyPeerAsync((CUdeviceptr)(((char*)dst)+span_start), dst_ctx,
-                                        (CUdeviceptr)(((char*)src)+span_start), src_ctx,
                                         span_bytes,
                                         raw_stream) );
             break;
@@ -385,8 +373,8 @@ namespace Realm {
 			     GPUMemcpyKind _kind,
 			     GPUCompletionNotification *_notification)
       : GPUMemcpy(_gpu, _kind), dst(_dst), src(_src),
-	dst_stride((_dst_stride < (off_t)_bytes) ? _bytes : _dst_stride), 
-	src_stride((_src_stride < (off_t)_bytes) ? _bytes : _src_stride),
+	dst_stride(_dst_stride),
+	src_stride(_src_stride),
 	bytes(_bytes), lines(_lines), notification(_notification)
     {}
 
@@ -398,18 +386,15 @@ namespace Realm {
       log_gpudma.info("gpu memcpy 2d: dst=%p src=%p "
                    "dst_off=%ld src_off=%ld bytes=%ld lines=%ld kind=%d",
 		      dst, src, (long)dst_stride, (long)src_stride, (long)bytes, (long)lines, kind); 
+
       CUDA_MEMCPY2D copy_info;
-      if (kind == GPU_MEMCPY_PEER_TO_PEER) {
-        // If we're doing peer to peer, just let unified memory it deal with it
-        copy_info.srcMemoryType = CU_MEMORYTYPE_UNIFIED;
-        copy_info.dstMemoryType = CU_MEMORYTYPE_UNIFIED;
-      } else {
-        // otherwise we know the answers here 
-        copy_info.srcMemoryType = (kind == GPU_MEMCPY_HOST_TO_DEVICE) ?
-          CU_MEMORYTYPE_HOST : CU_MEMORYTYPE_DEVICE;
-        copy_info.dstMemoryType = (kind == GPU_MEMCPY_DEVICE_TO_HOST) ? 
-          CU_MEMORYTYPE_HOST : CU_MEMORYTYPE_DEVICE;
-      }
+
+      // peer memory counts as DEVICE here
+      copy_info.srcMemoryType = (kind == GPU_MEMCPY_HOST_TO_DEVICE) ?
+	CU_MEMORYTYPE_HOST : CU_MEMORYTYPE_DEVICE;
+      copy_info.dstMemoryType = (kind == GPU_MEMCPY_DEVICE_TO_HOST) ?
+	CU_MEMORYTYPE_HOST : CU_MEMORYTYPE_DEVICE;
+
       copy_info.srcDevice = (CUdeviceptr)src;
       copy_info.srcHost = src;
       copy_info.srcPitch = src_stride;
@@ -438,15 +423,15 @@ namespace Realm {
     GPUMemcpy3D::GPUMemcpy3D(GPU *_gpu,
                              void *_dst, const void *_src,
                              off_t _dst_stride, off_t _src_stride,
-                             off_t _dst_height, off_t _src_height,
+                             off_t _dst_pstride, off_t _src_pstride,
                              size_t _bytes, size_t _height, size_t _depth,
                              GPUMemcpyKind _kind,
                              GPUCompletionNotification *_notification)
        : GPUMemcpy(_gpu, _kind), dst(_dst), src(_src),
-	dst_stride((_dst_stride < (off_t)_bytes) ? _bytes : _dst_stride), 
-	src_stride((_src_stride < (off_t)_bytes) ? _bytes : _src_stride),
-        dst_height((_dst_height < (off_t)_height) ? _height : _dst_height),
-        src_height((_src_height < (off_t)_height) ? _height : _src_height),
+	dst_stride(_dst_stride),
+	src_stride(_src_stride),
+        dst_pstride(_dst_pstride),
+        src_pstride(_src_pstride),
 	bytes(_bytes), height(_height), depth(_depth),
         notification(_notification)
     {}
@@ -456,54 +441,108 @@ namespace Realm {
     
     void GPUMemcpy3D::execute(GPUStream *stream)
     {
-      log_gpudma.info("gpu memcpy 3d: dst=%p src=%p"
-                      "dst_off=%ld src_off=%ld dst_hei = %ld src_hei = %ld"
+      log_gpudma.info("gpu memcpy 3d: dst=%p src=%p "
+                      "dst_str=%ld src_str=%ld dst_pstr=%ld src_pstr=%ld "
                       "bytes=%ld height=%ld depth=%ld kind=%d",
                       dst, src, (long)dst_stride, (long)src_stride,
-                      (long)dst_height, (long)src_height, (long)bytes, (long)height,
-                      (long)depth, kind);
-      CUDA_MEMCPY3D copy_info;
-      if (kind == GPU_MEMCPY_PEER_TO_PEER) {
-        // If we're doing peer to peer, just let unified memory it deal with it
-        copy_info.srcMemoryType = CU_MEMORYTYPE_UNIFIED;
-        copy_info.dstMemoryType = CU_MEMORYTYPE_UNIFIED;
+                      (long)dst_pstride, (long)src_pstride,
+		      (long)bytes, (long)height, (long)depth, kind);
+
+      // cuMemcpy3D requires that the src/dst plane strides must be multiples
+      //  of the src/dst line strides - if that doesn't hold (e.g. transpose
+      //  copies), we fall back to a bunch of 2d copies for now, but should
+      //  consider specialized kernels in the future
+      if(((src_pstride % src_stride) == 0) && ((dst_pstride % dst_stride) == 0)) {
+	CUDA_MEMCPY3D copy_info;
+
+	// peer memory counts as DEVICE here
+	copy_info.srcMemoryType = (kind == GPU_MEMCPY_HOST_TO_DEVICE) ?
+	  CU_MEMORYTYPE_HOST : CU_MEMORYTYPE_DEVICE;
+	copy_info.dstMemoryType = (kind == GPU_MEMCPY_DEVICE_TO_HOST) ?
+	  CU_MEMORYTYPE_HOST : CU_MEMORYTYPE_DEVICE;
+
+	copy_info.srcDevice = (CUdeviceptr)src;
+	copy_info.srcHost = src;
+	copy_info.srcPitch = src_stride;
+	copy_info.srcHeight = src_pstride / src_stride;
+	copy_info.srcY = 0;
+	copy_info.srcZ = 0;
+	copy_info.srcXInBytes = 0;
+	copy_info.srcLOD = 0;
+	copy_info.dstDevice = (CUdeviceptr)dst;
+	copy_info.dstHost = dst;
+	copy_info.dstPitch = dst_stride;
+	copy_info.dstHeight = dst_pstride / dst_stride;
+	copy_info.dstY = 0;
+	copy_info.dstZ = 0;
+	copy_info.dstXInBytes = 0;
+	copy_info.dstLOD = 0;
+	copy_info.WidthInBytes = bytes;
+	copy_info.Height = height;
+	copy_info.Depth = depth;
+	CHECK_CU( cuMemcpy3DAsync(&copy_info, stream->get_stream()) );
       } else {
-        // otherwise we know the answers here 
-        copy_info.srcMemoryType = (kind == GPU_MEMCPY_HOST_TO_DEVICE) ?
-          CU_MEMORYTYPE_HOST : CU_MEMORYTYPE_DEVICE;
-        copy_info.dstMemoryType = (kind == GPU_MEMCPY_DEVICE_TO_HOST) ? 
-          CU_MEMORYTYPE_HOST : CU_MEMORYTYPE_DEVICE;
+	// we can unroll either lines (height) or planes (depth) - choose the
+	//  smaller of the two to minimize API calls
+	size_t count, lines_2d;
+	off_t src_pitch, dst_pitch, src_delta, dst_delta;
+	if(height <= depth) {
+	  // 2d copies use depth
+	  lines_2d = depth;
+	  src_pitch = src_pstride;
+	  dst_pitch = dst_pstride;
+	  // and we'll step in height between those copies
+	  count = height;
+	  src_delta = src_stride;
+	  dst_delta = dst_stride;
+	} else {
+	  // 2d copies use height
+	  lines_2d = height;
+	  src_pitch = src_stride;
+	  dst_pitch = dst_stride;
+	  // and we'll step in depth between those copies
+	  count = depth;
+	  src_delta = src_pstride;
+	  dst_delta = dst_pstride;
+	}
+
+	CUDA_MEMCPY2D copy_info;
+
+	// peer memory counts as DEVICE here
+	copy_info.srcMemoryType = (kind == GPU_MEMCPY_HOST_TO_DEVICE) ?
+	  CU_MEMORYTYPE_HOST : CU_MEMORYTYPE_DEVICE;
+	copy_info.dstMemoryType = (kind == GPU_MEMCPY_DEVICE_TO_HOST) ?
+	  CU_MEMORYTYPE_HOST : CU_MEMORYTYPE_DEVICE;
+
+	copy_info.srcDevice = (CUdeviceptr)src;
+	copy_info.srcHost = src;
+	copy_info.srcPitch = src_pitch;
+	copy_info.srcY = 0;
+	copy_info.srcXInBytes = 0;
+	copy_info.dstDevice = (CUdeviceptr)dst;
+	copy_info.dstHost = dst;
+	copy_info.dstPitch = dst_pitch;
+	copy_info.dstY = 0;
+	copy_info.dstXInBytes = 0;
+	copy_info.WidthInBytes = bytes;
+	copy_info.Height = lines_2d;
+
+	for(size_t i = 0; i < count; i++) {
+	  CHECK_CU( cuMemcpy2DAsync(&copy_info, stream->get_stream()) );
+	  copy_info.srcDevice += src_delta;
+	  copy_info.dstDevice += dst_delta;
+	}
       }
-      copy_info.srcDevice = (CUdeviceptr)src;
-      copy_info.srcHost = src;
-      copy_info.srcPitch = src_stride;
-      copy_info.srcHeight = src_height;
-      copy_info.srcY = 0;
-      copy_info.srcZ = 0;
-      copy_info.srcXInBytes = 0;
-      copy_info.srcLOD = 0;
-      copy_info.dstDevice = (CUdeviceptr)dst;
-      copy_info.dstHost = dst;
-      copy_info.dstPitch = dst_stride;
-      copy_info.dstHeight = dst_height;
-      copy_info.dstY = 0;
-      copy_info.dstZ = 0;
-      copy_info.dstXInBytes = 0;
-      copy_info.dstLOD = 0;
-      copy_info.WidthInBytes = bytes;
-      copy_info.Height = height;
-      copy_info.Depth = depth;
-      CHECK_CU( cuMemcpy3DAsync(&copy_info, stream->get_stream()) );
 
       if(notification)
         stream->add_notification(notification);
 
-       log_gpudma.info("gpu memcpy 3d complete: dst=%p src=%p"
-		       "dst_off=%ld src_off=%ld dst_hei = %ld src_hei = %ld"
-		       "bytes=%ld height=%ld depth=%ld kind=%d",
-		       dst, src, (long)dst_stride, (long)src_stride,
-		       (long)dst_height, (long)src_height, (long)bytes, (long)height,
-		       (long)depth, kind);
+      log_gpudma.info("gpu memcpy 3d complete: dst=%p src=%p "
+                      "dst_str=%ld src_str=%ld dst_pstr=%ld src_pstr=%ld "
+                      "bytes=%ld height=%ld depth=%ld kind=%d",
+                      dst, src, (long)dst_stride, (long)src_stride,
+                      (long)dst_pstride, (long)src_pstride,
+		      (long)bytes, (long)height, (long)depth, kind);
     }
 
 
@@ -647,7 +686,7 @@ namespace Realm {
     void GPUMemset2D::execute(GPUStream *stream)
     {
       DetailedTimer::ScopedPush sp(TIME_COPY);
-      log_gpudma.info("gpu memset 2d: dst=%p dst_off=%ld bytes=%zd lines=%zd fill_data_size=%zd",
+      log_gpudma.info("gpu memset 2d: dst=%p dst_str=%ld bytes=%zd lines=%zd fill_data_size=%zd",
 		      dst, dst_stride, bytes, lines, fill_data_size);
 
       CUstream raw_stream = stream->get_stream();
@@ -722,8 +761,157 @@ namespace Realm {
       if(notification)
 	stream->add_notification(notification);
 
-      log_gpudma.info("gpu memset 2d complete: dst=%p dst_off=%ld bytes=%zd lines=%zd fill_data_size=%zd",
+      log_gpudma.info("gpu memset 2d complete: dst=%p dst_str=%ld bytes=%zd lines=%zd fill_data_size=%zd",
 		      dst, dst_stride, bytes, lines, fill_data_size);
+    }
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class GPUMemset3D
+
+    GPUMemset3D::GPUMemset3D(GPU *_gpu,
+			     void *_dst, size_t _dst_stride, size_t _dst_pstride,
+			     size_t _bytes, size_t _height, size_t _depth,
+			     const void *_fill_data, size_t _fill_data_size,
+			     GPUCompletionNotification *_notification)
+      : GPUMemcpy(_gpu, GPU_MEMCPY_DEVICE_TO_DEVICE)
+      , dst(_dst), dst_stride(_dst_stride), dst_pstride(_dst_pstride)
+      , bytes(_bytes), height(_height), depth(_depth)
+      , fill_data_size(_fill_data_size)
+      , notification(_notification)
+    {
+      if(fill_data_size <= MAX_DIRECT_SIZE) {
+	memcpy(fill_data.direct, _fill_data, fill_data_size);
+      } else {
+	fill_data.indirect = new char[fill_data_size];
+	assert(fill_data.indirect != 0);
+	memcpy(fill_data.indirect, _fill_data, fill_data_size);
+      }
+    }
+
+    GPUMemset3D::~GPUMemset3D(void)
+    {
+      if(fill_data_size > MAX_DIRECT_SIZE)
+	delete[] fill_data.indirect;
+    }
+
+    void GPUMemset3D::execute(GPUStream *stream)
+    {
+      DetailedTimer::ScopedPush sp(TIME_COPY);
+      log_gpudma.info("gpu memset 3d: dst=%p dst_str=%ld dst_pstr=%ld bytes=%zd height=%zd depth=%zd fill_data_size=%zd",
+		      dst, dst_stride, dst_pstride,
+		      bytes, height, depth, fill_data_size);
+
+      CUstream raw_stream = stream->get_stream();
+
+      // there don't appear to be cuMemsetD3D... calls, so we'll do
+      //  cuMemsetD2D...'s on the first plane and then memcpy3d to the other
+      switch(fill_data_size) {
+      case 1:
+	{
+	  CHECK_CU( cuMemsetD2D8Async(CUdeviceptr(dst), dst_stride,
+				      *reinterpret_cast<const unsigned char *>(fill_data.direct),
+				      bytes, height,
+				      raw_stream) );
+	  break;
+	}
+      case 2:
+	{
+	  CHECK_CU( cuMemsetD2D16Async(CUdeviceptr(dst), dst_stride,
+				       *reinterpret_cast<const unsigned short *>(fill_data.direct),
+				       bytes >> 1, height,
+				       raw_stream) );
+	  break;
+	}
+      case 4:
+	{
+	  CHECK_CU( cuMemsetD2D32Async(CUdeviceptr(dst), dst_stride,
+				       *reinterpret_cast<const unsigned int *>(fill_data.direct),
+				       bytes >> 2, height,
+				       raw_stream) );
+	  break;
+	}
+      default:
+	{
+	  // use strided 2D memsets to deal with larger patterns
+	  size_t elements = bytes / fill_data_size;
+	  const char *srcdata = ((fill_data_size <= MAX_DIRECT_SIZE) ?
+				   fill_data.direct :
+				   fill_data.indirect);
+	  // 16- and 32-bit fills must be aligned on every piece
+	  if((fill_data_size & 3) == 0) {
+	    for(size_t offset = 0; offset < fill_data_size; offset += 4) {
+	      unsigned int val = *reinterpret_cast<const unsigned int *>(srcdata + offset);
+	      for(size_t l = 0; l < height; l++)
+		CHECK_CU( cuMemsetD2D32Async(CUdeviceptr(dst) + offset + (l * dst_stride),
+					     fill_data_size /*pitch*/,
+					     val,
+					     1 /*width*/, elements /*height*/,
+					     raw_stream) );
+	    }
+	  } else if((fill_data_size & 1) == 0) {
+	    for(size_t offset = 0; offset < fill_data_size; offset += 2) {
+	      unsigned short val = *reinterpret_cast<const unsigned short *>(srcdata + offset);
+	      for(size_t l = 0; l < height; l++)
+		CHECK_CU( cuMemsetD2D16Async(CUdeviceptr(dst) + offset + (l * dst_stride),
+					     fill_data_size /*pitch*/,
+					     val,
+					     1 /*width*/, elements /*height*/,
+					     raw_stream) );
+	    }
+	  } else {
+	    for(size_t offset = 0; offset < fill_data_size; offset += 1) {
+	      unsigned int val = *(srcdata + offset);
+	      for(size_t l = 0; l < height; l++)
+		CHECK_CU( cuMemsetD2D8Async(CUdeviceptr(dst) + offset + (l * dst_stride),
+					    fill_data_size /*pitch*/,
+					    val,
+					    1 /*width*/, elements /*height*/,
+					    raw_stream) );
+	    }
+	  }
+	}
+      }
+
+      if(depth > 1) {
+	CUDA_MEMCPY3D copy_info;
+	assert((dst_pstride % dst_stride) == 0);
+	copy_info.srcMemoryType = CU_MEMORYTYPE_DEVICE;
+	copy_info.dstMemoryType = CU_MEMORYTYPE_DEVICE;
+	copy_info.srcDevice = (CUdeviceptr)dst;
+	copy_info.srcHost = 0 /*unused*/;
+	copy_info.srcPitch = dst_stride;
+	copy_info.srcHeight = dst_pstride / dst_stride;
+	copy_info.srcY = 0;
+	copy_info.srcZ = 0;
+	copy_info.srcXInBytes = 0;
+	copy_info.srcLOD = 0;
+	copy_info.dstHost = 0 /*unused*/;
+	copy_info.dstPitch = dst_stride;
+	copy_info.dstHeight = dst_pstride / dst_stride;
+	copy_info.dstY = 0;
+	copy_info.dstZ = 0;
+	copy_info.dstXInBytes = 0;
+	copy_info.dstLOD = 0;
+	copy_info.WidthInBytes = bytes;
+	copy_info.Height = height;
+	// can't use a srcHeight of 0 to reuse planes, so fill N-1 remaining
+	//  planes in log(N) copies
+	for(size_t done = 1; done < depth; done <<= 1) {
+	  size_t todo = std::min(done, depth - done);
+	  copy_info.dstDevice = ((CUdeviceptr)dst +
+				 (done * dst_pstride));
+	  copy_info.Depth = todo;
+	  CHECK_CU( cuMemcpy3DAsync(&copy_info, raw_stream) );
+	}
+      }
+
+      if(notification)
+	stream->add_notification(notification);
+
+      log_gpudma.info("gpu memset 3d complete: dst=%p dst_str=%ld dst_pstr=%ld bytes=%zd height=%zd depth=%zd fill_data_size=%zd",
+		      dst, dst_stride, dst_pstride,
+		      bytes, height, depth, fill_data_size);
     }
 
     ////////////////////////////////////////////////////////////////////////
@@ -1763,6 +1951,23 @@ namespace Realm {
 					(void *)(fbmem->base + dst_offset),
 					dst_stride,
 					bytes, lines,
+					fill_data,
+					reduce_fill_size(fill_data, fill_data_size),
+					notification);
+      device_to_device_stream->add_copy(copy);
+    }
+
+    void GPU::fill_within_fb_3d(off_t dst_offset, off_t dst_stride,
+				off_t dst_height,
+				size_t bytes, size_t height, size_t depth,
+				const void *fill_data, size_t fill_data_size,
+				GPUCompletionNotification *notification /*= 0*/)
+    {
+      GPUMemcpy *copy = new GPUMemset3D(this,
+					(void *)(fbmem->base + dst_offset),
+					dst_stride,
+					dst_height,
+					bytes, height, depth,
 					fill_data,
 					reduce_fill_size(fill_data, fill_data_size),
 					notification);

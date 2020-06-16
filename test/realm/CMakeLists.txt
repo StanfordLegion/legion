@@ -40,17 +40,21 @@ list(APPEND REALM_TESTS
   test_nodeset
   subgraphs
   large_tls
+  memspeed
   )
 
-# TODO: build memspeed properly with cuda enabled...
-if(NOT Legion_USE_CUDA)
-  list(APPEND REALM_TESTS
-    memspeed
-    )
+if(Legion_USE_CUDA)
+  # some tests have CUDA source files too
+  set(CUDASRC_memspeed memspeed_gpu.cu)
 endif()
 
 foreach(test IN LISTS REALM_TESTS)
-  add_executable(${test} ${test}.cc)
+  if(CUDASRC_${test})
+    set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -Wno-deprecated-gpu-targets)
+    cuda_add_executable(${test} ${test} ${CUDASRC_${test}})
+  else()
+    add_executable(${test} ${test}.cc)
+  endif()
   target_link_libraries(${test} Legion::Realm)
 endforeach()
 

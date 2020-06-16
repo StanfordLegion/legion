@@ -2815,6 +2815,10 @@ namespace Realm {
       if(dsts[i].inst != dsts[idx].inst) continue;
       if(dsts[i].serdez_id != dsts[idx].serdez_id) continue;
       if(dsts[i].indirect_index != dsts[idx].indirect_index) continue;
+      // only merge fields of the same size to avoid issues with wrapping
+      //  around in intermediate buffers
+      if(srcs[i].size != srcs[idx].size) continue;
+      if(dsts[i].size != dsts[idx].size) continue;
       fields_to_merge.insert(i);
     }
   }
