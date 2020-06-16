@@ -3624,6 +3624,7 @@ namespace Legion {
           case CREATE_AP_USER_EVENT:
           case SET_OP_SYNC_EVENT:
           case ASSIGN_FENCE_COMPLETION:
+          case BARRIER_ADVANCE:
             {
               break;
             }
