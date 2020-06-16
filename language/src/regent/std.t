@@ -2610,7 +2610,7 @@ do
       local ispace = self.ispace_symbol:gettype()
       assert(terralib.types.istype(ispace) and
                std.is_ispace(ispace),
-             "Parition type requires ispace")
+             "Partition type requires ispace")
       return ispace
     end
 
@@ -2726,14 +2726,14 @@ do
     if region_symbol:hastype() then
       assert(terralib.types.istype(region_symbol:gettype()) and
                std.is_region(region_symbol:gettype()),
-             "Parition type requires region")
+             "Partition type requires region")
     end
     assert(std.is_symbol(colors_symbol),
            "Partition type requires colors to be a symbol")
     if colors_symbol:hastype() then
       assert(terralib.types.istype(colors_symbol:gettype()) and
                std.is_ispace(colors_symbol:gettype()),
-             "Parition type requires colors")
+             "Partition type requires colors")
     end
 
     local st = terralib.types.newstruct("partition")
@@ -2765,7 +2765,7 @@ do
       local region = self.parent_region_symbol:gettype()
       assert(terralib.types.istype(region) and
                std.is_region(region),
-             "Parition type requires region")
+             "Partition type requires region")
       return region
     end
 
@@ -2773,7 +2773,7 @@ do
       local colors = self.colors_symbol:gettype()
       assert(terralib.types.istype(colors) and
                std.is_ispace(colors),
-             "Parition type requires colors")
+             "Partition type requires colors")
       return colors
     end
 

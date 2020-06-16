@@ -319,6 +319,16 @@ namespace Realm {
       }
 #endif
 
+      cudaError_t cudaMemGetInfo(size_t *free, size_t *total)
+      {
+	/*GPUProcessor *p =*/ get_gpu_or_die("cudaMalloc");
+
+	CUresult ret = cuMemGetInfo(free, total);
+	if(ret == CUDA_SUCCESS) return cudaSuccess;
+	assert(ret == CUDA_ERROR_INVALID_VALUE);
+	return cudaErrorInvalidValue;
+      }
+
       cudaError_t cudaMalloc(void **ptr, size_t size)
       {
 	/*GPUProcessor *p =*/ get_gpu_or_die("cudaMalloc");

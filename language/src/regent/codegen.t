@@ -4642,7 +4642,7 @@ function codegen.expr_partition_equal(cx, node)
              local block = `(region_rect.hi.x[ [i] ] - region_rect.lo.x[ [i] ] + 1)
              local colors = `(color_rect.hi.x[ [i] ] - color_rect.lo.x[ [i] ] + 1)
              return quote
-               var block_size = ([block] + [colors] - 1) / [colors]
+               var block_size = [block] / [colors] + ([block] % [colors] + [colors] - 1) / [colors]
                for j = 0, dim do
                  if i == j then
                    [transform].trans[i][j] = block_size

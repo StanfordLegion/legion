@@ -474,103 +474,99 @@ namespace Realm {
   void ThreadedTaskScheduler::WorkCounter::increment_counter(void)
   {
     // common case is that we'll bump the counter and nobody cares, so do
-    //  this without a lock - have to make certain order of these two loads
-    //  is preserved though
-    long long old_value = counter.fetch_add_acqrel(1);
+    //  this without a lock - if the LSB is set, we'll need to look at the
+    //  wait value (and the RMW on counter makes that read synchronize
+    //  properly with the write)
+    long long old_value = counter.fetch_add_acqrel(2);
+    if(REALM_LIKELY((old_value & 1) == 0)) return;
+
+    // second non-locked check - read the wait_value and skip out if it's
+    //  not our job to signal it
     long long wv_snapshot = wait_value.load();
+    if(REALM_LIKELY(wv_snapshot != old_value)) return;
 
-//define DEBUG_WORK_COUNTER
-#ifdef DEBUG_WORK_COUNTER
-    printf("WC(%p) increment %lld (%lld)\n", this, old_value, wv_snapshot);
-#endif
-
-    // if the wait value snapshot does not equal the old value, there are no waiters, and
-    //  there can be no new waiters, because they will retest the counter after setting the
-    //  wait value and must (due to __sync_* usage) observe our update of the counter, so
-    //  we're done
-    if(old_value != wv_snapshot) return;
-
-    // if there are waiters, broadcast to wake them all up
-    // because of the race condition with pthreads (i.e. a waiter may have decided to
-    //  wait but not actually called pthread_cond_wait), this must be done while holding
-    //  the mutex - we'll use that opportunity to retest the wait value and skip the
-    //  broadcast (and associated syscall) if it has changed
     {
       AutoLock<> al(mutex);
+
+      // now that we hold the lock, wait_value cannot change - it might not
+      //  be the one expect though if a later waiter signaled ours for us
       long long wv_reread = wait_value.load();
-      if(old_value == wv_reread) {
-#ifdef DEBUG_WORK_COUNTER
-	printf("WC(%p) broadcast(1) %lld\n", this, old_value);
-#endif
-	condvar.broadcast();
 #ifdef DEBUG_REALM
-	long long wv_expected = wv_reread;
-	bool ok = wait_value.compare_exchange(wv_expected, -1);
-	assert(ok);
-#else
-	// blind store - nobody's allowed to change wait_value outside the lock
-	wait_value.store(-1);
+      assert(wv_reread >= old_value);
 #endif
+      if(wv_reread == old_value) {
+	long long check = counter.fetch_add(1);  // clear LSB, moving it forward
+	assert((check & 1) != 0);
+	wait_value.store(-1);
+	condvar.broadcast();
       }
     }
-
-#ifdef DEBUG_REALM
-    // sanity-check: a wait value earlier than the number we just incremented
-    //  from should not be possible
-#ifndef NDEBUG
-    long long wv_check = wait_value.load();
-#endif
-    assert((wv_check == -1) || (wv_check > old_value));
-#endif
   }
 
   // waits until new work arrives - this will possibly take the counter lock and 
   // sleep, so should not be called while holding another lock
   void ThreadedTaskScheduler::WorkCounter::wait_for_work(long long old_counter)
   {
+    // the old counter with the LSB set will be our wait value
+    long long oc_w_lsb = old_counter | 1;
+    
     // we assume the caller tried check_for_work() before dropping
     //  their locks and calling us, so take and hold the lock the entire time
     AutoLock<> al(mutex);
 
-    // an early out is still needed to make sure the counter hasn't moved on and somebody
-    //  isn't trying to wait on a later value
-    if(counter.load_acquire() != old_counter)
-      return;
-
-    // first, see if we catch anybody waiting on an older version of the counter - they can
-    //  definitely be awakened
+    // see if there's already a waiter
     long long wv_read = wait_value.load();
-    if((wv_read >= 0) && (wv_read < old_counter)) {
-#ifdef DEBUG_WORK_COUNTER
-      printf("WC(%p) broadcast(2) %lld\n", this, wv_read);
-#endif
-      condvar.broadcast();
-    }
-    assert(wv_read <= old_counter);
-#ifdef DEBUG_REALM
-    long long wv_expected = wv_read;
-    bool ok = wait_value.compare_exchange(wv_expected, old_counter);
-    assert(ok);
-#else
-    // blind store - nobody's allowed to change wait_value outside the lock
-    wait_value.store(old_counter);
-#endif
 
-    // now that people know we're waiting, wait until the counter updates -
-    //  check before each wait and use a fetch_add to force the reload
-    while(counter.fetch_add(0) == old_counter) {
-      // sanity-check
-#ifndef NDEBUG
-      long long wv_check = wait_value.load();
-      assert(wv_check == old_counter);
+    // unlikely case - there's a waiter on a FUTURE counter
+    if(wv_read > oc_w_lsb) {
+#ifdef DEBUG_REALM
+      assert(counter.load() > oc_w_lsb);
 #endif
-#ifdef DEBUG_WORK_COUNTER
-      printf("WC(%p) wait %lld (%lld)\n", this, old_counter, wait_value.load());
+      return;
+    }
+
+    // waiters on an older counter should be woken before we go to sleep
+    if((wv_read >= 0) && (wv_read < oc_w_lsb)) {
+      condvar.broadcast();
+#ifdef DEBUG_REALM
+      // LSB should already be set, but we still have to do the fetch_or below
+      assert((counter.load() & 1) == 1);
 #endif
+    }
+
+    if(wv_read == oc_w_lsb) {
+      // somebody's already waiting on this counter, and the eventual waker
+      //   is already going to know it, so we can just sleep along with them
+      long long wc_reread = counter.load();
+#ifdef DEBUG_REALM
+      assert((wc_reread & 1) == 1);
+#endif
+      // if we observe the count has moved on, we can return early - somebody
+      //  else will still signal the other waiters and clear wait_value
+      if(wc_reread > oc_w_lsb)
+	return;
+    } else {
+      wait_value.store(oc_w_lsb);
+      long long wc_prev = counter.fetch_or_acqrel(1);
+#ifdef DEBUG_REALM
+      // LSB should not have already been set
+      assert((wc_prev & 1) == 0);
+#endif
+      // if the counter has already moved on, cancel the wait ourselves
+      if(wc_prev > oc_w_lsb) {
+	wait_value.store(-1);
+	counter.fetch_add(1);
+	return;
+      }
+    }
+
+    // we've already done our early out on a counter bump, so just spin here
+    //  until the wait_value is changed by somebody else
+    while(wait_value.load() == oc_w_lsb) {
 #define WORK_COUNTER_TIMEOUT_CHECK
 #ifdef WORK_COUNTER_TIMEOUT_CHECK
       bool awakened = condvar.timedwait(1000000000LL);
-      if(!awakened && (counter.load_acquire() != old_counter)) {
+      if(!awakened && (counter.load() != oc_w_lsb)) {
 	static atomic<int> warncount(0);
 	static const int MAX_WARNINGS = 10;
 	int c = warncount.fetch_add(1) + 1;
@@ -582,14 +578,13 @@ namespace Realm {
 #else
       condvar.wait();
 #endif
-      //while(counter == old_counter) { mutex.unlock(); Thread::yield(); mutex.lock(); }
-#ifdef DEBUG_WORK_COUNTER
-      printf("WC(%p) ready %lld\n", this, old_counter);
-#endif
     }
 
-    // once we're done, clear the wait value, but only if it's for us
-    wait_value.compare_exchange(old_counter, -1);
+#ifdef DEBUG_REALM
+    // wait value should have moved on, or been set back to -1
+    long long wv_check = wait_value.load();
+    assert((wv_check == -1) || (wv_check > oc_w_lsb));
+#endif
   }
 
 
