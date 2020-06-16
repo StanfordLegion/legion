@@ -2890,7 +2890,7 @@ namespace Legion {
       }
       std::vector<Instruction*> to_delete;
       std::vector<unsigned> new_gen(gen.size(), -1U);
-      initialize_propagate_merges_frontiers(new_gen);
+      initialize_generators(new_gen);
       for (unsigned idx = 0; idx < instructions.size(); ++idx)
         if (used[idx])
         {
@@ -2921,8 +2921,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::initialize_propagate_merges_frontiers(
-                                                 std::vector<unsigned> &new_gen)
+    void PhysicalTemplate::initialize_generators(std::vector<unsigned> &new_gen)
     //--------------------------------------------------------------------------
     {
       for (std::map<unsigned, unsigned>::iterator it = 
@@ -2942,14 +2941,6 @@ namespace Legion {
         if (g != -1U && g < instructions.size())
           used[g] = true;
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTemplate::initialize_eliminate_dead_code_frontiers(
-                                                 std::vector<unsigned> &new_gen)
-    //--------------------------------------------------------------------------
-    {
-      initialize_propagate_merges_frontiers(new_gen);
     }
 
     //--------------------------------------------------------------------------
@@ -3430,9 +3421,7 @@ namespace Legion {
       instructions.swap(new_instructions);
 
       std::vector<unsigned> new_gen(gen.size(), -1U);
-      for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
-          it != frontiers.end(); ++it)
-        new_gen[it->second] = 0;
+      initialize_generators(new_gen);
 
       for (unsigned idx = 0; idx < instructions.size(); ++idx)
       {
@@ -3648,7 +3637,7 @@ namespace Legion {
       std::vector<Instruction*> new_instructions;
       std::vector<Instruction*> to_delete;
       std::vector<unsigned> new_gen(gen.size(), -1U);
-      initialize_eliminate_dead_code_frontiers(new_gen);
+      initialize_generators(new_gen);
       for (unsigned idx = 0; idx < instructions.size(); ++idx)
       {
         if (used[idx])
@@ -6803,11 +6792,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardedPhysicalTemplate::initialize_propagate_merges_frontiers(
+    void ShardedPhysicalTemplate::initialize_generators(
                                                  std::vector<unsigned> &new_gen)
     //--------------------------------------------------------------------------
     {
-      PhysicalTemplate::initialize_propagate_merges_frontiers(new_gen);
+      PhysicalTemplate::initialize_generators(new_gen);
       for (std::vector<std::pair<ApBarrier,unsigned> >::const_iterator it =
             remote_frontiers.begin(); it != remote_frontiers.end(); it++)
         new_gen[it->second] = 0;
