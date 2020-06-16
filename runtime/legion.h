@@ -2190,6 +2190,10 @@ namespace Legion {
        */
       LogicalRegion get_logical_region(void) const;
       /**
+       * @return the privilege mode for this physical region
+       */
+      PrivilegeMode get_privilege(void) const;
+      /**
        * @deprecated
        * Return a generic accessor for the entire physical region.
        * This method is now deprecated. Please use the 'get_field_accessor'
@@ -2224,7 +2228,7 @@ namespace Legion {
       /**
        * Return a list of fields that the physical region contains.
        */
-      void get_fields(std::vector<FieldID>& fields) const;
+      void get_fields(std::vector<FieldID>& fields) const; 
     public:
       template<int DIM, typename COORD_T>
       DomainT<DIM,COORD_T> get_bounds(void) const;
@@ -2485,6 +2489,63 @@ namespace Legion {
     class MultiRegionAccessor {
     public:
       MultiRegionAccessor(void) { }
+    public: // iterator based construction of the multi-region accessors
+      template<typename InputIterator>
+      MultiRegionAccessor(InputIterator start, InputIterator stop,
+                          // The actual field size in case it is different from 
+                          // the one being used in FT and we still want to check
+                          FieldID fid, size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL) { }
+      // Specify a specific bounds rectangle to use for the accessor
+      template<typename InputIterator>
+      MultiRegionAccessor(InputIterator start, InputIterator stop,
+                          const Rect<N,COORD_T> bounds, FieldID fid,
+                          // The actual field size in case it is different from 
+                          // the one being used in FT and we still want to check
+                          size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL) { }
+      // Specify a specific Affine transform to use for interpreting points
+      template<int M, typename InputIterator>
+      MultiRegionAccessor(InputIterator start, InputIterator stop,
+                          const AffineTransform<M,N,COORD_T> transform,
+                          // The actual field size in case it is different from 
+                          // the one being used in FT and we still want to check
+                          FieldID fid, size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL) { }
+      // Specify both a transform and a bounds to use
+      template<int M, typename InputIterator>
+      MultiRegionAccessor(InputIterator start, InputIterator stop,
+                          const AffineTransform<M,N,COORD_T> transform,
+                          const Rect<N,COORD_T> bounds, FieldID fid, 
+                          // The actual field size in case it is different from the
+                          // one being used in FT and we still want to check it
+                          size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL) { }
+    public: // explicit data structure versions of the implicit iterators above
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
                           const std::vector<PrivilegeMode> &privileges,
                           // The actual field size in case it is different from 
