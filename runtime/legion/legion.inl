@@ -8966,6 +8966,91 @@ namespace Legion {
     class MultiRegionAccessor<FT,N,T,Realm::GenericAccessor<FT,N,T>,CB,CP,MR> {
     public:
       MultiRegionAccessor(void) { }
+    public:
+      template<typename InputIterator>
+      MultiRegionAccessor(InputIterator start, InputIterator stop,
+                          FieldID fid, size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+        : field(fid)
+      {
+        if (start == stop)
+          return;
+        const PhysicalRegion &region = *start; 
+        region_privileges[0] = region.get_privilege();
+        const Realm::RegionInstance instance = region.get_instance_info(
+          region_privileges[0], fid, actual_field_size, &region_bounds[0],
+          Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+          silence_warnings, true/*generic accessor*/, check_field_size);
+        Rect<N,T> bounds = region_bounds[0].bounds;
+        unsigned idx = 1;
+        while (++start != stop)
+        {
+          assert(idx < MR);
+          region_privileges[idx] = start->get_privilege();
+          const Realm::RegionInstance inst = start->get_instance_info(
+            region_privileges[idx], fid, actual_field_size, &region_bounds[idx],
+            Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+            silence_warnings, true/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          bounds = bounds.union_bbox(region_bounds[idx].bounds);
+          idx++; 
+        }
+        if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance,fid,bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
+        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, bounds);
+        total_regions = idx;
+      }
+      template<typename InputIterator>
+      MultiRegionAccessor(InputIterator start, InputIterator stop,
+                          const Rect<N,T> source_bounds, FieldID fid,
+                          size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+        : field(fid)
+      {
+        if (start == stop)
+          return;
+        const PhysicalRegion &region = *start;
+        region_privileges[0] = region.get_privilege();
+        const Realm::RegionInstance instance = region.get_instance_info(
+            region_privileges[0], fid, actual_field_size, &region_bounds[0],
+            Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+            silence_warnings, true/*generic accessor*/, check_field_size);
+        Rect<N,T> bounds = region_bounds[0].bounds;
+        unsigned idx = 1;
+        while (++start != stop)
+        {
+          assert(idx < MR);
+          region_privileges[idx] = start->get_privilege();
+          const Realm::RegionInstance inst = start->get_instance_info(
+            region_privileges[idx], fid, actual_field_size, &region_bounds[idx],
+            Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+            silence_warnings, true/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          region_bounds[idx].bounds = 
+            source_bounds.intersection(region_bounds[idx].bounds);
+          bounds = bounds.union_bbox(region_bounds[idx].bounds);
+          idx++; 
+        }
+        if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance,fid,bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
+        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, bounds);
+        total_regions = idx;
+      }
+    public:
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
                           const std::vector<PrivilegeMode> &privileges,
                           FieldID fid, size_t actual_field_size = sizeof(FT),
@@ -9129,6 +9214,91 @@ namespace Legion {
     class MultiRegionAccessor<FT,1,T,Realm::GenericAccessor<FT,1,T>,CB,CP,MR> {
     public:
       MultiRegionAccessor(void) { }
+    public:
+      template<typename InputIterator>
+      MultiRegionAccessor(InputIterator start, InputIterator stop,
+                          FieldID fid, size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+        : field(fid)
+      {
+        if (start == stop)
+          return;
+        const PhysicalRegion &region = *start; 
+        region_privileges[0] = region.get_privilege();
+        const Realm::RegionInstance instance = region.get_instance_info(
+            region_privileges[0], fid, actual_field_size, &region_bounds[0],
+            Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+            silence_warnings, true/*generic accessor*/, check_field_size);
+        Rect<1,T> bounds = region_bounds[0].bounds;
+        unsigned idx = 1;
+        while (++start != stop)
+        {
+          assert(idx < MR);
+          region_privileges[idx] = start->get_privilege();
+          const Realm::RegionInstance inst = start->get_instance_info(
+            region_privileges[idx], fid, actual_field_size, &region_bounds[idx],
+            Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+            silence_warnings, true/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          bounds = bounds.union_bbox(region_bounds[idx].bounds);
+          idx++; 
+        }
+        if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance,fid,bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
+        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, bounds);
+        total_regions = idx;
+      }
+      template<typename InputIterator>
+      MultiRegionAccessor(InputIterator start, InputIterator stop,
+                          const Rect<1,T> source_bounds, FieldID fid,
+                          size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+        : field(fid)
+      {
+        if (start == stop)
+          return;
+        const PhysicalRegion &region = *start; 
+        region_privileges[0] = region.get_privilege();
+        const Realm::RegionInstance instance = region.get_instance_info(
+            region_privileges[0], fid, actual_field_size, &region_bounds[0],
+            Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+            silence_warnings, true/*generic accessor*/, check_field_size);
+        Rect<1,T> bounds = region_bounds[0].bounds;
+        unsigned idx = 1;
+        while (++start != stop)
+        {
+          assert(idx < MR);
+          region_privileges[idx] = start->get_privilege();
+          const Realm::RegionInstance inst = start->get_instance_info(
+            region_privileges[idx], fid, actual_field_size, &region_bounds[idx],
+            Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+            silence_warnings, true/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          region_bounds[idx].bounds = 
+            source_bounds.intersection(region_bounds[idx].bounds);
+          bounds = bounds.union_bbox(region_bounds[idx].bounds);
+          idx++; 
+        }
+        if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance,fid,bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
+        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, bounds);
+        total_regions = idx;
+      }
+    public:
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
                           const std::vector<PrivilegeMode> &privileges,
                           FieldID fid, size_t actual_field_size = sizeof(FT),
@@ -9285,6 +9455,85 @@ namespace Legion {
                               false,false,MR> {
     public:
       MultiRegionAccessor(void) { }
+    public:
+      template<typename InputIterator>
+      MultiRegionAccessor(InputIterator start, InputIterator stop,
+                          FieldID fid, size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+      {
+        if (start == stop)
+          return;
+        DomainT<N,T> is;
+        const PhysicalRegion &region = *start;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(region.get_privilege(), fid,
+              actual_field_size, &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, true/*generic accessor*/, check_field_size);
+        Rect<N,T> bounds = is.bounds; 
+        unsigned idx = 1;
+        while (++start != stop)
+        {
+          assert(idx < MR);
+          const Realm::RegionInstance inst = start->get_instance_info(
+                start->get_privilege(), fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+                silence_warnings, true/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          bounds = bounds.union_bbox(is.bounds);
+          idx++;
+        }
+        if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance,fid,bounds)) 
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
+        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, bounds);
+      }
+      template<typename InputIterator>
+      MultiRegionAccessor(InputIterator start, InputIterator stop,
+                          const Rect<N,T> source_bounds, FieldID fid,
+                          size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+      {
+        if (start == stop)
+          return;
+        DomainT<N,T> is;
+        const PhysicalRegion &region = *start;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(start->get_privilege(), fid,
+              actual_field_size, &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, true/*generic accessor*/, check_field_size);
+        Rect<N,T> bounds = source_bounds.intersection(is.bounds); 
+        unsigned idx = 1;
+        while (++start != stop)
+        {
+          assert(idx < MR);
+          const Realm::RegionInstance inst = start->get_instance_info(
+                start->get_privilege(), fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+                silence_warnings, true/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          bounds = bounds.union_bbox(source_bounds.intersection(is.bounds));
+          idx++;
+        }
+        if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance,fid,bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
+        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, bounds);
+      }
+    public:
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
                           const std::vector<PrivilegeMode> &privileges,
                           FieldID fid, size_t actual_field_size = sizeof(FT),
@@ -9396,6 +9645,85 @@ namespace Legion {
                               false,false,MR> {
     public:
       MultiRegionAccessor(void) { }
+    public:
+      template<typename InputIterator>
+      MultiRegionAccessor(InputIterator start, InputIterator stop,
+                          FieldID fid, size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+      {
+        if (start == stop)
+          return;
+        DomainT<1,T> is;
+        const PhysicalRegion &region = *start;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(region.get_privilege(), fid,
+              actual_field_size, &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, true/*generic accessor*/, check_field_size);
+        Rect<1,T> bounds = is.bounds; 
+        unsigned idx = 1;
+        while (++start != stop)
+        {
+          assert(idx < MR);
+          const Realm::RegionInstance inst = start->get_instance_info(
+                start->get_privilege(), fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+                silence_warnings, true/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          bounds = bounds.union_bbox(is.bounds);
+          idx++;
+        }
+        if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance,fid,bounds)) 
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
+        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, bounds);
+      }
+      template<typename InputIterator>
+      MultiRegionAccessor(InputIterator start, InputIterator stop,
+                          const Rect<1,T> source_bounds, FieldID fid,
+                          size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+      {
+        if (start == stop)
+          return;
+        DomainT<1,T> is;
+        const PhysicalRegion &region = *start;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(start->get_privilege(), fid,
+              actual_field_size, &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, true/*generic accessor*/, check_field_size);
+        Rect<1,T> bounds = source_bounds.intersection(is.bounds); 
+        unsigned idx = 1;
+        while (++start != stop)
+        {
+          assert(idx < MR);
+          const Realm::RegionInstance inst = start->get_instance_info(
+                start->get_privilege(), fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+                silence_warnings, true/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          bounds = bounds.union_bbox(source_bounds.intersection(is.bounds));
+          idx++;
+        }
+        if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance,fid,bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
+        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, bounds);
+      }
+    public:
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
                           const std::vector<PrivilegeMode> &privileges,
                           FieldID fid, size_t actual_field_size = sizeof(FT),
@@ -9500,6 +9828,195 @@ namespace Legion {
     class MultiRegionAccessor<FT,N,T,Realm::AffineAccessor<FT,N,T>,CB,true,MR> {
     public:
       MultiRegionAccessor(void) { }
+    public:
+      template<typename InputIterator>
+      MultiRegionAccessor(InputIterator start, InputIterator stop,
+                          FieldID fid, size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+        : field(fid)
+      {
+        if (start == stop)
+          return;
+        DomainT<N,T> is;
+        const PhysicalRegion &region = *start;
+        region_privileges[0] = region.get_privilege();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(region_privileges[0], fid, 
+              actual_field_size, &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        region_bounds[0] = AffineBounds::Tester<N,T>(is); 
+        Rect<N,T> bounds = is.bounds;
+        unsigned idx = 1;
+        while (++start != stop)
+        {
+          assert(idx < MR);
+          region_privileges[idx] = start->get_privilege();
+          const Realm::RegionInstance inst = start->get_instance_info(
+                region_privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          region_bounds[idx] = AffineBounds::Tester<N,T>(is);
+          bounds = bounds.union_bbox(is.bounds);
+          idx++;
+        }
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,fid,bounds)) 
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, bounds);
+        total_regions = idx;
+      }
+      template<typename InputIterator>
+      MultiRegionAccessor(InputIterator start, InputIterator stop,
+                          const Rect<N,T> source_bounds, FieldID fid,
+                          size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+        : field(fid)
+      {
+        if (start == stop)
+          return;
+        DomainT<N,T> is;
+        const PhysicalRegion &region = *start;
+        region_privileges[0] = region.get_privilege();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(region_privileges[0], fid,
+              actual_field_size, &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        region_bounds[0] = AffineBounds::Tester<N,T>(is, source_bounds);
+        Rect<N,T> bounds = source_bounds.intersection(is.bounds); 
+        unsigned idx = 1;
+        while (++start != stop)
+        {
+          assert(idx < MR);
+          region_privileges[idx] = start->get_privilege(); 
+          const Realm::RegionInstance inst = start->get_instance_info(
+                region_privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          region_bounds[idx] = AffineBounds::Tester<N,T>(is, source_bounds);
+          bounds = bounds.union_bbox(source_bounds.inersection(is.bounds));
+          idx++;
+        }
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,fid,bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, bounds);
+        total_regions = idx;
+      }
+      template<int M, typename InputIterator>
+      MultiRegionAccessor(InputIterator start, InputIterator stop,
+                          const AffineTransform<M,N,T> transform,
+                          FieldID fid, size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+        : field(fid)
+      {
+        if (start == stop)
+          return;
+        DomainT<N,T> is;
+        const PhysicalRegion &region = *start;
+        region_privileges[0] = region.get_privilege();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(region_privileges[0], fid,
+              actual_field_size, &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        region_bounds[0] = AffineBounds::Tester<N,T>(is, transform);
+        Rect<N,T> bounds = is.bounds;
+        unsigned idx = 1;
+        while (++start != stop)
+        {
+          assert(idx < MR);
+          region_privileges[idx] = start->get_privilege();
+          const Realm::RegionInstance inst = start->get_instance_info(
+                region_privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          region_bounds[idx] = AffineBounds::Tester<N,T>(is, transform);
+          bounds = bounds.union_bbox(is.bounds);
+          idx++;
+        }
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,
+              transform.transform, transform.offset, fid, bounds)) 
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
+            transform.offset, fid, bounds);
+        total_regions = idx;
+      }
+      template<int M, typename InputIterator>
+      MultiRegionAccessor(InputIterator start, InputIterator stop,
+                          const AffineTransform<M,N,T> transform,
+                          const Rect<N,T> source_bounds, FieldID fid, 
+                          // The actual field size in case it is different from the
+                          // one being used in FT and we still want to check it
+                          size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+        : field(fid)
+      {
+        if (start == stop)
+          return;
+        DomainT<N,T> is;
+        const PhysicalRegion &region = *start;
+        region_privileges[0] = region.get_privilege();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(region_privileges[0], fid,
+              actual_field_size, &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        region_bounds[0] =AffineBounds::Tester<N,T>(is,source_bounds,transform);
+        Rect<N,T> bounds = source_bounds.intersection(is.bounds); 
+        unsigned idx = 1;
+        while (++start != stop)
+        {
+          assert(idx < MR);
+          region_privileges[idx] = start->get_privilege();
+          const Realm::RegionInstance inst = start->get_instance_info(
+                region_privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          region_bounds[idx] = 
+            AffineBounds::Tester<N,T>(is, transform, source_bounds);
+          bounds = bounds.union_bbox(source_bounds.inersection(is.bounds));
+          idx++;
+        }
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,
+              transform.transform, transform.offset, fid, bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
+            transform.offset, fid, bounds);
+        total_regions = idx;
+      }
+    public:
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
                           const std::vector<PrivilegeMode> &privileges,
                           FieldID fid, size_t actual_field_size = sizeof(FT),
@@ -10799,37 +11316,43 @@ namespace Legion {
 #endif
                           bool silence_warnings = false,
                           const char *warning_string = NULL)
+        : field(fid)
       {
         if (start == stop)
           return;
-        DomainT<N,T> is;
+        DomainT<1,T> is;
         const PhysicalRegion &region = *start;
+        region_privileges[0] = region.get_privilege();
         const Realm::RegionInstance instance = 
-          region.get_instance_info(region.get_privilege(), fid,
+          region.get_instance_info(region_privileges[0], fid,
               actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
-              silence_warnings, true/*generic accessor*/, check_field_size);
-        Rect<N,T> bounds = is.bounds; 
-        unsigned idx = 1;
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        region_bounds[0] = AffineBounds::Tester<1,T>(is); 
+        Rect<1,T> bounds = is.bounds;
+        unsigned idx = 0;
         while (++start != stop)
         {
           assert(idx < MR);
+          region_privileges[idx] = start->get_privilege();
           const Realm::RegionInstance inst = start->get_instance_info(
-                start->get_privilege(), fid, actual_field_size, &is,
-                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
-                silence_warnings, true/*generic accessor*/, check_field_size);
+                region_privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
           if (inst != instance)
             region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          region_bounds[idx] = AffineBounds::Tester<1,T>(is);
           bounds = bounds.union_bbox(is.bounds);
           idx++;
         }
-        if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance,fid,bounds)) 
-          region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, bounds);
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,fid,bounds)) 
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, bounds);
+        total_regions = idx;
       }
       template<typename InputIterator>
       MultiRegionAccessor(InputIterator start, InputIterator stop,
-                          const Rect<N,T> source_bounds, FieldID fid,
+                          const Rect<1,T> source_bounds, FieldID fid,
                           size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
                           bool check_field_size = true,
@@ -10838,33 +11361,137 @@ namespace Legion {
 #endif
                           bool silence_warnings = false,
                           const char *warning_string = NULL)
+        : field(fid)
       {
         if (start == stop)
           return;
-        DomainT<N,T> is;
+        DomainT<1,T> is;
         const PhysicalRegion &region = *start;
+        region_privileges[0] = region.get_privilege();
         const Realm::RegionInstance instance = 
-          region.get_instance_info(start->get_privilege(), fid,
+          region.get_instance_info(region_privileges[0], fid,
               actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
-              silence_warnings, true/*generic accessor*/, check_field_size);
-        Rect<N,T> bounds = source_bounds.intersection(is.bounds); 
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        region_bounds[0] = AffineBounds::Tester<1,T>(is, source_bounds);
+        Rect<1,T> bounds = source_bounds.intersection(is.bounds); 
         unsigned idx = 1;
         while (++start != stop)
         {
           assert(idx < MR);
+          region_privileges[idx] = start->get_privilege();
           const Realm::RegionInstance inst = start->get_instance_info(
-                start->get_privilege(), fid, actual_field_size, &is,
-                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
-                silence_warnings, true/*generic accessor*/, check_field_size);
+                region_privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
           if (inst != instance)
             region.report_incompatible_multi_accessor(idx, fid, instance, inst);
-          bounds = bounds.union_bbox(source_bounds.intersection(is.bounds));
+          region_bounds[idx] = AffineBounds::Tester<1,T>(is, source_bounds);
+          bounds = bounds.union_bbox(source_bounds.inersection(is.bounds));
           idx++;
         }
-        if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance,fid,bounds))
-          region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, bounds);
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,fid,bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, bounds);
+        total_regions = idx;
+      }
+      template<int M, typename InputIterator>
+      MultiRegionAccessor(InputIterator start, InputIterator stop,
+                          const AffineTransform<M,1,T> transform,
+                          FieldID fid, size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+        : field(fid)
+      {
+        if (start == stop)
+          return;
+        DomainT<1,T> is;
+        const PhysicalRegion &region = *start;
+        region_privileges[0] = region.get_privilege();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(region_privileges[0], fid,
+              actual_field_size, &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        region_bounds[0] = AffineBounds::Tester<1,T>(is, transform);
+        Rect<1,T> bounds = is.bounds;
+        unsigned idx = 1;
+        while (++start != stop)
+        {
+          assert(idx < MR);
+          region_privileges[idx] = start->get_privilege();
+          const Realm::RegionInstance inst = start->get_instance_info(
+                region_privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          region_bounds[idx] = AffineBounds::Tester<1,T>(is, transform);
+          bounds = bounds.union_bbox(is.bounds);
+          idx++;
+        }
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,
+              transform.transform, transform.offset, fid, bounds)) 
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
+            transform.offset, fid, bounds);
+        total_regions = idx;
+      }
+      template<int M, typename InputIterator>
+      MultiRegionAccessor(InputIterator start, InputIterator stop,
+                          const AffineTransform<M,1,T> transform,
+                          const Rect<1,T> source_bounds, FieldID fid, 
+                          // The actual field size in case it is different from the
+                          // one being used in FT and we still want to check it
+                          size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+        : field(fid)
+      {
+        if (start == stop)
+          return;
+        DomainT<1,T> is;
+        const PhysicalRegion &region = *start;
+        region_privileges[0] = region.get_privilege();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(region_privileges[0], fid,
+              actual_field_size, &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        region_bounds[0] =AffineBounds::Tester<1,T>(is,source_bounds,transform);
+        Rect<1,T> bounds = source_bounds.intersection(is.bounds); 
+        unsigned idx = 1;
+        while (++start != stop)
+        {
+          assert(idx < MR);
+          region_privileges[idx] = start->get_privilege();
+          const Realm::RegionInstance inst = start->get_instance_info(
+                region_privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          region_bounds[idx] = 
+            AffineBounds::Tester<1,T>(is, transform, source_bounds);
+          bounds = bounds.union_bbox(source_bounds.inersection(is.bounds));
+          idx++;
+        }
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,
+              transform.transform, transform.offset, fid, bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
+            transform.offset, fid, bounds);
+        total_regions = idx;
       }
     public:
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
@@ -11157,9 +11784,8 @@ namespace Legion {
           return;
         DomainT<N,T> is;
         const PhysicalRegion &region = *start;
-        region_privileges[0] = region.get_privilege();
         const Realm::RegionInstance instance = 
-          region.get_instance_info(region_privileges[0], fid, 
+          region.get_instance_info(region.get_privilege(), fid,
               actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
@@ -11168,9 +11794,8 @@ namespace Legion {
         while (++start != stop)
         {
           assert(idx < MR);
-          region_privileges[idx] = start->get_privilege();
           const Realm::RegionInstance inst = start->get_instance_info(
-                region_privileges[idx], fid, actual_field_size, &is,
+                start->get_privilege(), fid, actual_field_size, &is,
                 Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
                 silence_warnings, false/*generic accessor*/, check_field_size);
           if (inst != instance)
@@ -11181,7 +11806,6 @@ namespace Legion {
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,fid,bounds)) 
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, bounds);
-        total_regions = idx;
       }
       template<typename InputIterator>
       MultiRegionAccessor(InputIterator start, InputIterator stop,
@@ -11199,9 +11823,8 @@ namespace Legion {
           return;
         DomainT<N,T> is;
         const PhysicalRegion &region = *start;
-        region_privileges[0] = region.get_privilege();
         const Realm::RegionInstance instance = 
-          region.get_instance_info(region_privileges[0], fid,
+          region.get_instance_info(region.get_privilege(), fid,
               actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
@@ -11210,9 +11833,8 @@ namespace Legion {
         while (++start != stop)
         {
           assert(idx < MR);
-          region_privileges[idx] = start->get_privilege(); 
           const Realm::RegionInstance inst = start->get_instance_info(
-                region_privileges[idx], fid, actual_field_size, &is,
+                start->get_privilege(), fid, actual_field_size, &is,
                 Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
                 silence_warnings, false/*generic accessor*/, check_field_size);
           if (inst != instance)
@@ -11223,7 +11845,6 @@ namespace Legion {
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,fid,bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, bounds);
-        total_regions = idx;
       }
       template<int M, typename InputIterator>
       MultiRegionAccessor(InputIterator start, InputIterator stop,
@@ -11241,9 +11862,8 @@ namespace Legion {
           return;
         DomainT<N,T> is;
         const PhysicalRegion &region = *start;
-        region_privileges[0] = region.get_privilege();
         const Realm::RegionInstance instance = 
-          region.get_instance_info(region_privileges[0], fid,
+          region.get_instance_info(region.get_privilege(), fid,
               actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
@@ -11252,9 +11872,8 @@ namespace Legion {
         while (++start != stop)
         {
           assert(idx < MR);
-          region_privileges[idx] = start->get_privilege();
           const Realm::RegionInstance inst = start->get_instance_info(
-                region_privileges[idx], fid, actual_field_size, &is,
+                start->get_privilege(), fid, actual_field_size, &is,
                 Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
                 silence_warnings, false/*generic accessor*/, check_field_size);
           if (inst != instance)
@@ -11267,7 +11886,6 @@ namespace Legion {
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
             transform.offset, fid, bounds);
-        total_regions = idx;
       }
       template<int M, typename InputIterator>
       MultiRegionAccessor(InputIterator start, InputIterator stop,
@@ -11288,9 +11906,8 @@ namespace Legion {
           return;
         DomainT<N,T> is;
         const PhysicalRegion &region = *start;
-        region_privileges[0] = region.get_privilege();
         const Realm::RegionInstance instance = 
-          region.get_instance_info(region_privileges[0], fid,
+          region.get_instance_info(region.get_privilege(), fid,
               actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
@@ -11299,9 +11916,8 @@ namespace Legion {
         while (++start != stop)
         {
           assert(idx < MR);
-          region_privileges[idx] = start->get_privilege();
           const Realm::RegionInstance inst = start->get_instance_info(
-                region_privileges[idx], fid, actual_field_size, &is,
+                start->get_privilege(), fid, actual_field_size, &is,
                 Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
                 silence_warnings, false/*generic accessor*/, check_field_size);
           if (inst != instance)
@@ -11314,7 +11930,159 @@ namespace Legion {
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
             transform.offset, fid, bounds);
-        total_regions = idx;
+      }
+    public:
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          FieldID fid, size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+      {
+        if (regions.empty())
+          return;
+        assert(regions.size() == privileges.size());
+        DomainT<N,T> is;
+        const PhysicalRegion &region = regions.front();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(privileges.front(),fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        Rect<N,T> bounds = is.bounds;
+        for (unsigned idx = 1; idx < regions.size(); idx++)
+        {
+          const Realm::RegionInstance inst = regions[idx].get_instance_info(
+                privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          bounds = bounds.union_bbox(is.bounds);
+        }
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,fid,bounds)) 
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, bounds);
+      }
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          const Rect<N,T> source_bounds, FieldID fid,
+                          size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+      {
+        if (regions.empty())
+          return;
+        assert(regions.size() == privileges.size());
+        DomainT<N,T> is;
+        const PhysicalRegion &region = regions.front();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(privileges.front(),fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        Rect<N,T> bounds = source_bounds.intersection(is.bounds); 
+        for (unsigned idx = 1; idx < regions.size(); idx++)
+        {
+          const Realm::RegionInstance inst = regions[idx].get_instance_info(
+                privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          bounds = bounds.union_bbox(source_bounds.inersection(is.bounds));
+        }
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,fid,bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, bounds);
+      }
+      template<int M>
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          const AffineTransform<M,N,T> transform,
+                          FieldID fid, size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+      {
+        if (regions.empty())
+          return;
+        assert(regions.size() == privileges.size());
+        DomainT<N,T> is;
+        const PhysicalRegion &region = regions.front();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(privileges.front(),fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        Rect<N,T> bounds = is.bounds;
+        for (unsigned idx = 1; idx < regions.size(); idx++)
+        {
+          const Realm::RegionInstance inst = regions[idx].get_instance_info(
+                privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          bounds = bounds.union_bbox(is.bounds);
+        }
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,
+              transform.transform, transform.offset, fid, bounds)) 
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
+            transform.offset, fid, bounds);
+      }
+      template<int M>
+      MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
+                          const std::vector<PrivilegeMode> &privileges,
+                          const AffineTransform<M,N,T> transform,
+                          const Rect<N,T> source_bounds, FieldID fid, 
+                          // The actual field size in case it is different from the
+                          // one being used in FT and we still want to check it
+                          size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+      {
+        if (regions.empty())
+          return;
+        assert(regions.size() == privileges.size());
+        DomainT<N,T> is;
+        const PhysicalRegion &region = regions.front();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(privileges.front(),fid,actual_field_size,&is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        Rect<N,T> bounds = source_bounds.intersection(is.bounds); 
+        for (unsigned idx = 1; idx < regions.size(); idx++)
+        {
+          const Realm::RegionInstance inst = regions[idx].get_instance_info(
+                privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          bounds = bounds.union_bbox(source_bounds.inersection(is.bounds));
+        }
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,
+              transform.transform, transform.offset, fid, bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
+            transform.offset, fid, bounds);
       }
     public:
       __CUDA_HD__
@@ -11362,6 +12130,170 @@ namespace Legion {
           false/*check bounds*/,false/*check privileges*/,MR> {
     public:
       MultiRegionAccessor(void) { }
+    public:
+      template<typename InputIterator>
+      MultiRegionAccessor(InputIterator start, InputIterator stop,
+                          FieldID fid, size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+      {
+        if (start == stop)
+          return;
+        DomainT<1,T> is;
+        const PhysicalRegion &region = *start;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(region.get_privilege(), fid,
+              actual_field_size, &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        Rect<1,T> bounds = is.bounds;
+        unsigned idx = 1;
+        while (++start != stop)
+        {
+          assert(idx < MR);
+          const Realm::RegionInstance inst = start->get_instance_info(
+                start->get_privilege(), fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          bounds = bounds.union_bbox(is.bounds);
+          idx++;
+        }
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,fid,bounds)) 
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, bounds);
+      }
+      template<typename InputIterator>
+      MultiRegionAccessor(InputIterator start, InputIterator stop,
+                          const Rect<1,T> source_bounds, FieldID fid,
+                          size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+      {
+        if (start == stop)
+          return;
+        DomainT<1,T> is;
+        const PhysicalRegion &region = *start;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(region.get_privilege(), fid,
+              actual_field_size, &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        Rect<1,T> bounds = source_bounds.intersection(is.bounds); 
+        unsigned idx = 1;
+        while (++start != stop)
+        {
+          assert(idx < MR);
+          const Realm::RegionInstance inst = start->get_instance_info(
+                start->get_privilege(), fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          bounds = bounds.union_bbox(source_bounds.inersection(is.bounds));
+          idx++;
+        }
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,fid,bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, bounds);
+      }
+      template<int M, typename InputIterator>
+      MultiRegionAccessor(InputIterator start, InputIterator stop,
+                          const AffineTransform<M,1,T> transform,
+                          FieldID fid, size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+      {
+        if (start == stop)
+          return;
+        DomainT<1,T> is;
+        const PhysicalRegion &region = *start;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(region.get_privilege(), fid,
+              actual_field_size, &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        Rect<1,T> bounds = is.bounds;
+        unsigned idx = 1;
+        while (++start != stop)
+        {
+          assert(idx < MR);
+          const Realm::RegionInstance inst = start->get_instance_info(
+                start->get_privilege(), fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          bounds = bounds.union_bbox(is.bounds);
+          idx++;
+        }
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,
+              transform.transform, transform.offset, fid, bounds)) 
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
+            transform.offset, fid, bounds);
+      }
+      template<int M, typename InputIterator>
+      MultiRegionAccessor(InputIterator start, InputIterator stop,
+                          const AffineTransform<M,1,T> transform,
+                          const Rect<1,T> source_bounds, FieldID fid, 
+                          // The actual field size in case it is different from the
+                          // one being used in FT and we still want to check it
+                          size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+      {
+        if (start == stop)
+          return;
+        DomainT<1,T> is;
+        const PhysicalRegion &region = *start;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(region.get_privilege(), fid,
+              actual_field_size, &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        Rect<1,T> bounds = source_bounds.intersection(is.bounds); 
+        unsigned idx = 1;
+        while (++start != stop)
+        {
+          assert(idx < MR);
+          const Realm::RegionInstance inst = start->get_instance_info(
+                start->get_privilege(), fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          bounds = bounds.union_bbox(source_bounds.inersection(is.bounds));
+          idx++;
+        }
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,
+              transform.transform, transform.offset, fid, bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
+            transform.offset, fid, bounds);
+      }
+    public:
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
                           const std::vector<PrivilegeMode> &privileges,
                           FieldID fid, size_t actual_field_size = sizeof(FT),
@@ -11376,30 +12308,30 @@ namespace Legion {
         if (regions.empty())
           return;
         assert(regions.size() == privileges.size());
-        DomainT<N,T> is;
+        DomainT<1,T> is;
         const PhysicalRegion &region = regions.front();
         const Realm::RegionInstance instance = 
           region.get_instance_info(privileges.front(),fid,actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         Rect<1,T> bounds = is.bounds;
         for (unsigned idx = 1; idx < regions.size(); idx++)
         {
           const Realm::RegionInstance inst = regions[idx].get_instance_info(
                 privileges[idx], fid, actual_field_size, &is,
-                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+                Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
                 silence_warnings, false/*generic accessor*/, check_field_size);
           if (inst != instance)
             region.report_incompatible_multi_accessor(idx, fid, instance, inst);
           bounds = bounds.union_bbox(is.bounds);
         }
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,fid,bounds)) 
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,fid,bounds)) 
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, bounds);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, bounds);
       }
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
                           const std::vector<PrivilegeMode> &privileges,
-                          const Rect<N,T> source_bounds, FieldID fid,
+                          const Rect<1,T> source_bounds, FieldID fid,
                           size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
                           bool check_field_size = true,
@@ -11412,31 +12344,31 @@ namespace Legion {
         if (regions.empty())
           return;
         assert(regions.size() == privileges.size());
-        DomainT<N,T> is;
+        DomainT<1,T> is;
         const PhysicalRegion &region = regions.front();
         const Realm::RegionInstance instance = 
           region.get_instance_info(privileges.front(),fid,actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         Rect<1,T> bounds = source_bounds.intersection(is.bounds); 
         for (unsigned idx = 1; idx < regions.size(); idx++)
         {
           const Realm::RegionInstance inst = regions[idx].get_instance_info(
                 privileges[idx], fid, actual_field_size, &is,
-                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+                Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
                 silence_warnings, false/*generic accessor*/, check_field_size);
           if (inst != instance)
             region.report_incompatible_multi_accessor(idx, fid, instance, inst);
           bounds = bounds.union_bbox(source_bounds.inersection(is.bounds));
         }
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,fid,bounds))
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,fid,bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, bounds);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, bounds);
       }
       template<int M>
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
                           const std::vector<PrivilegeMode> &privileges,
-                          const AffineTransform<M,N,T> transform,
+                          const AffineTransform<M,1,T> transform,
                           FieldID fid, size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
                           bool check_field_size = true,
@@ -11449,34 +12381,34 @@ namespace Legion {
         if (regions.empty())
           return;
         assert(regions.size() == privileges.size());
-        DomainT<N,T> is;
+        DomainT<1,T> is;
         const PhysicalRegion &region = regions.front();
         const Realm::RegionInstance instance = 
           region.get_instance_info(privileges.front(),fid,actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         Rect<1,T> bounds = is.bounds;
         for (unsigned idx = 1; idx < regions.size(); idx++)
         {
           const Realm::RegionInstance inst = regions[idx].get_instance_info(
                 privileges[idx], fid, actual_field_size, &is,
-                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+                Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
                 silence_warnings, false/*generic accessor*/, check_field_size);
           if (inst != instance)
             region.report_incompatible_multi_accessor(idx, fid, instance, inst);
           bounds = bounds.union_bbox(is.bounds);
         }
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,
               transform.transform, transform.offset, fid, bounds)) 
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
             transform.offset, fid, bounds);
       }
       template<int M>
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
                           const std::vector<PrivilegeMode> &privileges,
-                          const AffineTransform<M,N,T> transform,
-                          const Rect<N,T> source_bounds, FieldID fid, 
+                          const AffineTransform<M,1,T> transform,
+                          const Rect<1,T> source_bounds, FieldID fid, 
                           // The actual field size in case it is different from the
                           // one being used in FT and we still want to check it
                           size_t actual_field_size = sizeof(FT),
@@ -11491,37 +12423,37 @@ namespace Legion {
         if (regions.empty())
           return;
         assert(regions.size() == privileges.size());
-        DomainT<N,T> is;
+        DomainT<1,T> is;
         const PhysicalRegion &region = regions.front();
         const Realm::RegionInstance instance = 
           region.get_instance_info(privileges.front(),fid,actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         Rect<1,T> bounds = source_bounds.intersection(is.bounds); 
         for (unsigned idx = 1; idx < regions.size(); idx++)
         {
           const Realm::RegionInstance inst = regions[idx].get_instance_info(
                 privileges[idx], fid, actual_field_size, &is,
-                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+                Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
                 silence_warnings, false/*generic accessor*/, check_field_size);
           if (inst != instance)
             region.report_incompatible_multi_accessor(idx, fid, instance, inst);
           bounds = bounds.union_bbox(source_bounds.inersection(is.bounds));
         }
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,
               transform.transform, transform.offset, fid, bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
             transform.offset, fid, bounds);
       }
     public:
       __CUDA_HD__
-      inline FT read(const Point<N,T>& p) const
+      inline FT read(const Point<1,T>& p) const
         {
           return accessor.read(p);
         }
       __CUDA_HD__
-      inline void write(const Point<N,T>& p, FT val) const
+      inline void write(const Point<1,T>& p, FT val) const
         {
           return accessor.write(p, val);
         }
@@ -11530,17 +12462,8 @@ namespace Legion {
         { 
           return accessor[p]; 
         }
-      __CUDA_HD__
-      inline ArraySyntax::AffineSyntaxHelper<MultiRegionAccessor<FT,N,T,
-           Realm::AffineAccessor<FT,N,T>,CB,true,MR>,FT,N,T,2,LEGION_NO_ACCESS>
-          operator[](T index) const
-      {
-        return ArraySyntax::AffineSyntaxHelper<MultiRegionAccessor<FT,N,T,
-          Realm::AffineAccessor<FT,N,T>,CB,true,MR>,FT,N,T,2,LEGION_NO_ACCESS>(
-              *this, Point<1,T>(index));
-      }
       template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
-      inline void reduce(const Point<N,T>& p, 
+      inline void reduce(const Point<1,T>& p, 
                          typename REDOP::RHS val) const
         { 
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
@@ -11565,6 +12488,101 @@ namespace Legion {
                               Realm::MultiAffineAccessor<FT,N,T>,CB,true,MR> {
     public:
       MultiRegionAccessor(void) { }
+    public:
+      template<typename InputIterator>
+      MultiRegionAccessor(InputIterator start, InputIterator stop,
+                          FieldID fid, size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+        : field(fid)
+      {
+        if (start == stop)
+          return;
+        DomainT<N,T> is;
+        const PhysicalRegion &region = *start;
+        region_privileges[0] = region.get_privilege();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(region_privileges[0], fid, 
+              actual_field_size, &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        region_bounds[0] = AffineBounds::Tester<N,T>(is); 
+        Rect<N,T> bounds = is.bounds;
+        unsigned idx = 1;
+        while (++start != stop)
+        {
+          assert(idx < MR);
+          region_privileges[idx] = start->get_privilege();
+          const Realm::RegionInstance inst = start->get_instance_info(
+                region_privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          region_bounds[idx] = AffineBounds::Tester<N,T>(is);
+          bounds = bounds.union_bbox(is.bounds);
+          idx++;
+        }
+        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance,
+                                                               fid, bounds)) 
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<FT,N,T>(instance, fid, bounds);
+        total_regions = idx;
+      }
+      template<typename InputIterator>
+      MultiRegionAccessor(InputIterator start, InputIterator stop,
+                          const Rect<N,T> source_bounds, FieldID fid,
+                          size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+        : field(fid)
+      {
+        if (start == stop)
+          return;
+        DomainT<N,T> is;
+        const PhysicalRegion &region = *start;
+        region_privileges[0] = region.get_privilege();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(region_privileges[0], fid,
+              actual_field_size, &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        region_bounds[0] = AffineBounds::Tester<N,T>(is, source_bounds);
+        Rect<N,T> bounds = source_bounds.intersection(is.bounds); 
+        unsigned idx = 1;
+        while (++start != stop)
+        {
+          assert(idx < MR);
+          region_privileges[idx] = start->get_privilege(); 
+          const Realm::RegionInstance inst = start->get_instance_info(
+                region_privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          region_bounds[idx] = AffineBounds::Tester<N,T>(is, source_bounds);
+          bounds = bounds.union_bbox(source_bounds.inersection(is.bounds));
+          idx++;
+        }
+        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance,
+                                                               fid, bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<FT,N,T>(instance, fid, bounds);
+        total_regions = idx;
+      } 
+    public:
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
                           const std::vector<PrivilegeMode> &privileges,
                           FieldID fid, size_t actual_field_size = sizeof(FT),
@@ -11777,11 +12795,7 @@ namespace Legion {
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
-<<<<<<< HEAD
       mutable Realm::MultiAffineAccessor<FT,N,T> accessor;
-=======
-      mutable Realm::AffineAccessor<FT,N,T> accessor;
->>>>>>> master
       FieldID field;
       PrivilegeMode region_privileges[MR];
       AffineBounds::Tester<N,T> region_bounds[MR];
@@ -11793,19 +12807,11 @@ namespace Legion {
       static const int dim = N;
     };
 
-<<<<<<< HEAD
     // Multi-Accessor, multi affine, 1, with privilege checks 
     // (implies bounds checks)
     template<typename FT, typename T, bool CB, int MR>
     class MultiRegionAccessor<FT,1,T,
                               Realm::MultiAffineAccessor<FT,1,T>,CB,true,MR> {
-    public:
-      MultiRegionAccessor(void) { }
-=======
-    // Multi-Accessor, affine, 1, bounds checks only
-    template<typename FT, typename T, int MR>
-    class MultiRegionAccessor<FT,1,T,Realm::AffineAccessor<FT,1,T>,
-                  true/*check bounds*/,false/*check privileges*/,MR> {
     public:
       MultiRegionAccessor(void) { }
     public:
@@ -11827,13 +12833,13 @@ namespace Legion {
         const PhysicalRegion &region = *start;
         region_privileges[0] = region.get_privilege();
         const Realm::RegionInstance instance = 
-          region.get_instance_info(region_privileges[0], fid,
+          region.get_instance_info(region_privileges[0], fid, 
               actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         region_bounds[0] = AffineBounds::Tester<1,T>(is); 
         Rect<1,T> bounds = is.bounds;
-        unsigned idx = 0;
+        unsigned idx = 1;
         while (++start != stop)
         {
           assert(idx < MR);
@@ -11848,9 +12854,11 @@ namespace Legion {
           bounds = bounds.union_bbox(is.bounds);
           idx++;
         }
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,fid,bounds)) 
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, bounds);
+        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance,
+                                                               fid, bounds)) 
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<FT,1,T>(instance, fid, bounds);
         total_regions = idx;
       }
       template<typename InputIterator>
@@ -11882,7 +12890,7 @@ namespace Legion {
         while (++start != stop)
         {
           assert(idx < MR);
-          region_privileges[idx] = start->get_privilege();
+          region_privileges[idx] = start->get_privilege(); 
           const Realm::RegionInstance inst = start->get_instance_info(
                 region_privileges[idx], fid, actual_field_size, &is,
                 Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
@@ -11893,111 +12901,14 @@ namespace Legion {
           bounds = bounds.union_bbox(source_bounds.inersection(is.bounds));
           idx++;
         }
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,fid,bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, bounds);
-        total_regions = idx;
-      }
-      template<int M, typename InputIterator>
-      MultiRegionAccessor(InputIterator start, InputIterator stop,
-                          const AffineTransform<M,1,T> transform,
-                          FieldID fid, size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                          bool check_field_size = true,
-#else
-                          bool check_field_size = false,
-#endif
-                          bool silence_warnings = false,
-                          const char *warning_string = NULL)
-        : field(fid)
-      {
-        if (start == stop)
-          return;
-        DomainT<1,T> is;
-        const PhysicalRegion &region = *start;
-        region_privileges[0] = region.get_privilege();
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(region_privileges[0], fid,
-              actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        region_bounds[0] = AffineBounds::Tester<1,T>(is, transform);
-        Rect<1,T> bounds = is.bounds;
-        unsigned idx = 1;
-        while (++start != stop)
-        {
-          assert(idx < MR);
-          region_privileges[idx] = start->get_privilege();
-          const Realm::RegionInstance inst = start->get_instance_info(
-                region_privileges[idx], fid, actual_field_size, &is,
-                Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
-                silence_warnings, false/*generic accessor*/, check_field_size);
-          if (inst != instance)
-            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
-          region_bounds[idx] = AffineBounds::Tester<1,T>(is, transform);
-          bounds = bounds.union_bbox(is.bounds);
-          idx++;
-        }
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,
-              transform.transform, transform.offset, fid, bounds)) 
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid, bounds);
-        total_regions = idx;
-      }
-      template<int M, typename InputIterator>
-      MultiRegionAccessor(InputIterator start, InputIterator stop,
-                          const AffineTransform<M,1,T> transform,
-                          const Rect<1,T> source_bounds, FieldID fid, 
-                          // The actual field size in case it is different from the
-                          // one being used in FT and we still want to check it
-                          size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                          bool check_field_size = true,
-#else
-                          bool check_field_size = false,
-#endif
-                          bool silence_warnings = false,
-                          const char *warning_string = NULL)
-        : field(fid)
-      {
-        if (start == stop)
-          return;
-        DomainT<1,T> is;
-        const PhysicalRegion &region = *start;
-        region_privileges[0] = region.get_privilege();
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(region_privileges[0], fid,
-              actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        region_bounds[0] =AffineBounds::Tester<1,T>(is,source_bounds,transform);
-        Rect<1,T> bounds = source_bounds.intersection(is.bounds); 
-        unsigned idx = 1;
-        while (++start != stop)
-        {
-          assert(idx < MR);
-          region_privileges[idx] = start->get_privilege();
-          const Realm::RegionInstance inst = start->get_instance_info(
-                region_privileges[idx], fid, actual_field_size, &is,
-                Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
-                silence_warnings, false/*generic accessor*/, check_field_size);
-          if (inst != instance)
-            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
-          region_bounds[idx] = 
-            AffineBounds::Tester<1,T>(is, transform, source_bounds);
-          bounds = bounds.union_bbox(source_bounds.inersection(is.bounds));
-          idx++;
-        }
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,
-              transform.transform, transform.offset, fid, bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid, bounds);
+        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance,
+                                                               fid, bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<FT,1,T>(instance, fid, bounds);
         total_regions = idx;
       }
     public:
->>>>>>> master
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
                           const std::vector<PrivilegeMode> &privileges,
                           FieldID fid, size_t actual_field_size = sizeof(FT),
@@ -12219,6 +13130,101 @@ namespace Legion {
                       true/*check bounds*/,false/*check privileges*/,MR> {
     public:
       MultiRegionAccessor(void) { }
+    public:
+      template<typename InputIterator>
+      MultiRegionAccessor(InputIterator start, InputIterator stop,
+                          FieldID fid, size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+        : field(fid)
+      {
+        if (start == stop)
+          return;
+        DomainT<N,T> is;
+        const PhysicalRegion &region = *start;
+        region_privileges[0] = region.get_privilege();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(region_privileges[0], fid,
+              actual_field_size, &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        region_bounds[0] = AffineBounds::Tester<N,T>(is); 
+        Rect<N,T> bounds = is.bounds;
+        unsigned idx = 0;
+        while (++start != stop)
+        {
+          assert(idx < MR);
+          region_privileges[idx] = start->get_privilege();
+          const Realm::RegionInstance inst = start->get_instance_info(
+                region_privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          region_bounds[idx] = AffineBounds::Tester<N,T>(is);
+          bounds = bounds.union_bbox(is.bounds);
+          idx++;
+        }
+        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance,
+                                                               fid, bounds)) 
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<FT,N,T>(instance, fid, bounds);
+        total_regions = idx;
+      }
+      template<typename InputIterator>
+      MultiRegionAccessor(InputIterator start, InputIterator stop,
+                          const Rect<N,T> source_bounds, FieldID fid,
+                          size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+        : field(fid)
+      {
+        if (start == stop)
+          return;
+        DomainT<N,T> is;
+        const PhysicalRegion &region = *start;
+        region_privileges[0] = region.get_privilege();
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(region_privileges[0], fid,
+              actual_field_size, &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        region_bounds[0] = AffineBounds::Tester<N,T>(is, source_bounds);
+        Rect<N,T> bounds = source_bounds.intersection(is.bounds); 
+        unsigned idx = 1;
+        while (++start != stop)
+        {
+          assert(idx < MR);
+          region_privileges[idx] = start->get_privilege();
+          const Realm::RegionInstance inst = start->get_instance_info(
+                region_privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          region_bounds[idx] = AffineBounds::Tester<N,T>(is, source_bounds);
+          bounds = bounds.union_bbox(source_bounds.inersection(is.bounds));
+          idx++;
+        }
+        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance,
+                                                               fid, bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<FT,N,T>(instance, fid, bounds);
+        total_regions = idx;
+      }
+    public:
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
                           const std::vector<PrivilegeMode> &privileges,
                           FieldID fid, size_t actual_field_size = sizeof(FT),
@@ -12426,37 +13432,45 @@ namespace Legion {
 #endif
                           bool silence_warnings = false,
                           const char *warning_string = NULL)
+        : field(fid)
       {
         if (start == stop)
           return;
-        DomainT<N,T> is;
+        DomainT<1,T> is;
         const PhysicalRegion &region = *start;
+        region_privileges[0] = region.get_privilege();
         const Realm::RegionInstance instance = 
-          region.get_instance_info(region.get_privilege(), fid,
+          region.get_instance_info(region_privileges[0], fid,
               actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
-        Rect<N,T> bounds = is.bounds;
-        unsigned idx = 1;
+        region_bounds[0] = AffineBounds::Tester<1,T>(is); 
+        Rect<1,T> bounds = is.bounds;
+        unsigned idx = 0;
         while (++start != stop)
         {
           assert(idx < MR);
+          region_privileges[idx] = start->get_privilege();
           const Realm::RegionInstance inst = start->get_instance_info(
-                start->get_privilege(), fid, actual_field_size, &is,
-                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+                region_privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
                 silence_warnings, false/*generic accessor*/, check_field_size);
           if (inst != instance)
             region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          region_bounds[idx] = AffineBounds::Tester<1,T>(is);
           bounds = bounds.union_bbox(is.bounds);
           idx++;
         }
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,fid,bounds)) 
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, bounds);
+        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance,
+                                                               fid, bounds)) 
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<FT,1,T>(instance, fid, bounds);
+        total_regions = idx;
       }
       template<typename InputIterator>
       MultiRegionAccessor(InputIterator start, InputIterator stop,
-                          const Rect<N,T> source_bounds, FieldID fid,
+                          const Rect<1,T> source_bounds, FieldID fid,
                           size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
                           bool check_field_size = true,
@@ -12465,118 +13479,41 @@ namespace Legion {
 #endif
                           bool silence_warnings = false,
                           const char *warning_string = NULL)
+        : field(fid)
       {
         if (start == stop)
           return;
-        DomainT<N,T> is;
+        DomainT<1,T> is;
         const PhysicalRegion &region = *start;
+        region_privileges[0] = region.get_privilege();
         const Realm::RegionInstance instance = 
-          region.get_instance_info(region.get_privilege(), fid,
+          region.get_instance_info(region_privileges[0], fid,
               actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
-        Rect<N,T> bounds = source_bounds.intersection(is.bounds); 
+        region_bounds[0] = AffineBounds::Tester<1,T>(is, source_bounds);
+        Rect<1,T> bounds = source_bounds.intersection(is.bounds); 
         unsigned idx = 1;
         while (++start != stop)
         {
           assert(idx < MR);
+          region_privileges[idx] = start->get_privilege();
           const Realm::RegionInstance inst = start->get_instance_info(
-                start->get_privilege(), fid, actual_field_size, &is,
-                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
+                region_privileges[idx], fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
                 silence_warnings, false/*generic accessor*/, check_field_size);
           if (inst != instance)
             region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          region_bounds[idx] = AffineBounds::Tester<1,T>(is, source_bounds);
           bounds = bounds.union_bbox(source_bounds.inersection(is.bounds));
           idx++;
         }
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,fid,bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, bounds);
-      }
-      template<int M, typename InputIterator>
-      MultiRegionAccessor(InputIterator start, InputIterator stop,
-                          const AffineTransform<M,N,T> transform,
-                          FieldID fid, size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                          bool check_field_size = true,
-#else
-                          bool check_field_size = false,
-#endif
-                          bool silence_warnings = false,
-                          const char *warning_string = NULL)
-      {
-        if (start == stop)
-          return;
-        DomainT<N,T> is;
-        const PhysicalRegion &region = *start;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(region.get_privilege(), fid,
-              actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        Rect<N,T> bounds = is.bounds;
-        unsigned idx = 1;
-        while (++start != stop)
-        {
-          assert(idx < MR);
-          const Realm::RegionInstance inst = start->get_instance_info(
-                start->get_privilege(), fid, actual_field_size, &is,
-                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
-                silence_warnings, false/*generic accessor*/, check_field_size);
-          if (inst != instance)
-            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
-          bounds = bounds.union_bbox(is.bounds);
-          idx++;
-        }
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,
-              transform.transform, transform.offset, fid, bounds)) 
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid, bounds);
-      }
-      template<int M, typename InputIterator>
-      MultiRegionAccessor(InputIterator start, InputIterator stop,
-                          const AffineTransform<M,N,T> transform,
-                          const Rect<N,T> source_bounds, FieldID fid, 
-                          // The actual field size in case it is different from the
-                          // one being used in FT and we still want to check it
-                          size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                          bool check_field_size = true,
-#else
-                          bool check_field_size = false,
-#endif
-                          bool silence_warnings = false,
-                          const char *warning_string = NULL)
-      {
-        if (start == stop)
-          return;
-        DomainT<N,T> is;
-        const PhysicalRegion &region = *start;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(region.get_privilege(), fid,
-              actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        Rect<N,T> bounds = source_bounds.intersection(is.bounds); 
-        unsigned idx = 1;
-        while (++start != stop)
-        {
-          assert(idx < MR);
-          const Realm::RegionInstance inst = start->get_instance_info(
-                start->get_privilege(), fid, actual_field_size, &is,
-                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
-                silence_warnings, false/*generic accessor*/, check_field_size);
-          if (inst != instance)
-            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
-          bounds = bounds.union_bbox(source_bounds.inersection(is.bounds));
-          idx++;
-        }
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,
-              transform.transform, transform.offset, fid, bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid, bounds);
+        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance,
+                                                               fid, bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<FT,1,T>(instance, fid, bounds);
+        total_regions = idx;
       }
     public:
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
@@ -12779,34 +13716,36 @@ namespace Legion {
       {
         if (start == stop)
           return;
-        DomainT<1,T> is;
+        DomainT<N,T> is;
         const PhysicalRegion &region = *start;
         const Realm::RegionInstance instance = 
           region.get_instance_info(region.get_privilege(), fid,
               actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
-        Rect<1,T> bounds = is.bounds;
+        Rect<N,T> bounds = is.bounds;
         unsigned idx = 1;
         while (++start != stop)
         {
           assert(idx < MR);
           const Realm::RegionInstance inst = start->get_instance_info(
                 start->get_privilege(), fid, actual_field_size, &is,
-                Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
                 silence_warnings, false/*generic accessor*/, check_field_size);
           if (inst != instance)
             region.report_incompatible_multi_accessor(idx, fid, instance, inst);
           bounds = bounds.union_bbox(is.bounds);
           idx++;
         }
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,fid,bounds)) 
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, bounds);
+        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance,
+                                                               fid, bounds)) 
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<FT,N,T>(instance, fid, bounds);
       }
       template<typename InputIterator>
       MultiRegionAccessor(InputIterator start, InputIterator stop,
-                          const Rect<1,T> source_bounds, FieldID fid,
+                          const Rect<N,T> source_bounds, FieldID fid,
                           size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
                           bool check_field_size = true,
@@ -12818,115 +13757,32 @@ namespace Legion {
       {
         if (start == stop)
           return;
-        DomainT<1,T> is;
+        DomainT<N,T> is;
         const PhysicalRegion &region = *start;
         const Realm::RegionInstance instance = 
           region.get_instance_info(region.get_privilege(), fid,
               actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
-        Rect<1,T> bounds = source_bounds.intersection(is.bounds); 
+        Rect<N,T> bounds = source_bounds.intersection(is.bounds); 
         unsigned idx = 1;
         while (++start != stop)
         {
           assert(idx < MR);
           const Realm::RegionInstance inst = start->get_instance_info(
                 start->get_privilege(), fid, actual_field_size, &is,
-                Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+                Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
                 silence_warnings, false/*generic accessor*/, check_field_size);
           if (inst != instance)
             region.report_incompatible_multi_accessor(idx, fid, instance, inst);
           bounds = bounds.union_bbox(source_bounds.inersection(is.bounds));
           idx++;
         }
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,fid,bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, bounds);
-      }
-      template<int M, typename InputIterator>
-      MultiRegionAccessor(InputIterator start, InputIterator stop,
-                          const AffineTransform<M,1,T> transform,
-                          FieldID fid, size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                          bool check_field_size = true,
-#else
-                          bool check_field_size = false,
-#endif
-                          bool silence_warnings = false,
-                          const char *warning_string = NULL)
-      {
-        if (start == stop)
-          return;
-        DomainT<1,T> is;
-        const PhysicalRegion &region = *start;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(region.get_privilege(), fid,
-              actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        Rect<1,T> bounds = is.bounds;
-        unsigned idx = 1;
-        while (++start != stop)
-        {
-          assert(idx < MR);
-          const Realm::RegionInstance inst = start->get_instance_info(
-                start->get_privilege(), fid, actual_field_size, &is,
-                Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
-                silence_warnings, false/*generic accessor*/, check_field_size);
-          if (inst != instance)
-            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
-          bounds = bounds.union_bbox(is.bounds);
-          idx++;
-        }
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,
-              transform.transform, transform.offset, fid, bounds)) 
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid, bounds);
-      }
-      template<int M, typename InputIterator>
-      MultiRegionAccessor(InputIterator start, InputIterator stop,
-                          const AffineTransform<M,1,T> transform,
-                          const Rect<1,T> source_bounds, FieldID fid, 
-                          // The actual field size in case it is different from the
-                          // one being used in FT and we still want to check it
-                          size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                          bool check_field_size = true,
-#else
-                          bool check_field_size = false,
-#endif
-                          bool silence_warnings = false,
-                          const char *warning_string = NULL)
-      {
-        if (start == stop)
-          return;
-        DomainT<1,T> is;
-        const PhysicalRegion &region = *start;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(region.get_privilege(), fid,
-              actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        Rect<1,T> bounds = source_bounds.intersection(is.bounds); 
-        unsigned idx = 1;
-        while (++start != stop)
-        {
-          assert(idx < MR);
-          const Realm::RegionInstance inst = start->get_instance_info(
-                start->get_privilege(), fid, actual_field_size, &is,
-                Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
-                silence_warnings, false/*generic accessor*/, check_field_size);
-          if (inst != instance)
-            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
-          bounds = bounds.union_bbox(source_bounds.inersection(is.bounds));
-          idx++;
-        }
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,
-              transform.transform, transform.offset, fid, bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid, bounds);
+        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance,
+                                                               fid, bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<FT,N,T>(instance, fid, bounds);
       }
     public:
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
@@ -13050,6 +13906,89 @@ namespace Legion {
                     false/*check bounds*/,false/*check privileges*/,MR> {
     public:
       MultiRegionAccessor(void) { }
+    public:
+      template<typename InputIterator>
+      MultiRegionAccessor(InputIterator start, InputIterator stop,
+                          FieldID fid, size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+      {
+        if (start == stop)
+          return;
+        DomainT<1,T> is;
+        const PhysicalRegion &region = *start;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(region.get_privilege(), fid,
+              actual_field_size, &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        Rect<1,T> bounds = is.bounds;
+        unsigned idx = 1;
+        while (++start != stop)
+        {
+          assert(idx < MR);
+          const Realm::RegionInstance inst = start->get_instance_info(
+                start->get_privilege(), fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          bounds = bounds.union_bbox(is.bounds);
+          idx++;
+        }
+        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance,
+                                                               fid, bounds)) 
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<FT,1,T>(instance, fid, bounds);
+      }
+      template<typename InputIterator>
+      MultiRegionAccessor(InputIterator start, InputIterator stop,
+                          const Rect<1,T> source_bounds, FieldID fid,
+                          size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                          bool check_field_size = true,
+#else
+                          bool check_field_size = false,
+#endif
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
+      {
+        if (start == stop)
+          return;
+        DomainT<1,T> is;
+        const PhysicalRegion &region = *start;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(region.get_privilege(), fid,
+              actual_field_size, &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+              silence_warnings, false/*generic accessor*/, check_field_size);
+        Rect<1,T> bounds = source_bounds.intersection(is.bounds); 
+        unsigned idx = 1;
+        while (++start != stop)
+        {
+          assert(idx < MR);
+          const Realm::RegionInstance inst = start->get_instance_info(
+                start->get_privilege(), fid, actual_field_size, &is,
+                Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
+                silence_warnings, false/*generic accessor*/, check_field_size);
+          if (inst != instance)
+            region.report_incompatible_multi_accessor(idx, fid, instance, inst);
+          bounds = bounds.union_bbox(source_bounds.inersection(is.bounds));
+          idx++;
+        }
+        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance,
+                                                               fid, bounds))
+          region.report_incompatible_accessor("MultiAffineAccessor", 
+                                              instance, fid);
+        accessor = Realm::MultiAffineAccessor<FT,1,T>(instance, fid, bounds);
+      }
+    public:
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
                           const std::vector<PrivilegeMode> &privileges,
                           FieldID fid, size_t actual_field_size = sizeof(FT),
