@@ -105,6 +105,369 @@ namespace Realm {
   
   ////////////////////////////////////////////////////////////////////////
   //
+  // class CompiledInstanceLayout
+  //
+
+  CompiledInstanceLayout::CompiledInstanceLayout()
+    : program_base(0), program_size(0)
+  {}
+
+  CompiledInstanceLayout::~CompiledInstanceLayout()
+  {
+    if(program_base)
+      free(program_base);
+  }
+
+  void *CompiledInstanceLayout::allocate_memory(size_t bytes)
+  {
+    // TODO: allocate where GPUs can see it
+    assert(program_base == 0);
+    int ret = posix_memalign(&program_base, 16, bytes);
+    assert(ret == 0);
+    program_size = bytes;
+    return program_base;
+  }
+
+  void CompiledInstanceLayout::reset()
+  {
+    if(program_base)
+      free(program_base);
+    program_base = 0;
+    program_size = 0;
+    fields.clear();
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class InstanceLayout<N,T>
+  //
+
+  static size_t roundup(size_t n, size_t mult)
+  {
+    n += mult - 1;
+    n -= (n % mult);
+    return n;
+  }
+
+  template <typename T>
+  struct PieceSplitNode {
+    std::vector<int> presplit_pieces;
+    int split_dim;
+    T split_plane;
+    PieceSplitNode<T> *low_child, *high_child;
+    size_t total_splits;
+
+    PieceSplitNode() : low_child(0), high_child(0), total_splits(0) {}
+    ~PieceSplitNode() { delete low_child; delete high_child; }
+
+    template <int N>
+    static PieceSplitNode<T> *compute_split(const std::vector<InstanceLayoutPiece<N,T> *>& pieces,
+					    std::vector<int>& idxs)
+    {
+      PieceSplitNode<T> *n = new PieceSplitNode<T>;
+
+      while(true) {
+	// base case
+	if(idxs.size() == 1) {
+	  n->presplit_pieces.push_back(idxs[0]);
+	  return n;
+	}
+
+	// we can either split in one of the dimensions as long as it doesn't
+	//  cut through any given piece, or we can take the largest piece and
+	//  test for it explicitly
+	int best_dim = -1;
+	T best_plane = 0;
+	int best_idx = idxs[0];
+	size_t best_vol = pieces[idxs[0]]->bounds.volume();
+	size_t total_vol = best_vol;
+	for(size_t i = 1; i < idxs.size(); i++) {
+	  size_t v = pieces[idxs[i]]->bounds.volume();
+	  total_vol += v;
+	  if(v > best_vol) {
+	    best_idx = idxs[i];
+	    best_vol = v;
+	  }
+	}
+
+	for(int dim = 0; dim < N; dim++) {
+	  // make a list of the start/stop points for each piece in the
+	  //  current dimension
+	  std::vector<std::pair<T, int> > ss;
+	  ss.reserve(idxs.size() * 2);
+	  for(size_t i = 0; i < idxs.size(); i++) {
+	    ss.push_back(std::make_pair(pieces[idxs[i]]->bounds.lo[dim],
+					-1 - idxs[i]));
+	    ss.push_back(std::make_pair(pieces[idxs[i]]->bounds.hi[dim],
+					idxs[i]));
+	  }
+
+	  // sort list from lowest to highest (with starts before stops)
+	  std::sort(ss.begin(), ss.end());
+
+	  // now walk and consider any place with zero open intervals as a
+	  //  cut point
+	  int opens = 0;
+	  size_t cur_vol = 0;
+	  for(size_t i = 0; i < ss.size(); i++) {
+	    if(opens == 0) {
+	      // what's the smaller volume of this split?
+	      size_t v = std::min(cur_vol, total_vol - cur_vol);
+	      if(v > best_vol) {
+		best_dim = dim;
+		best_plane = ss[i].first;
+		best_vol = v;
+	      }
+	    }
+	    if(ss[i].second < 0) {
+	      // beginning of an interval
+	      opens++;
+	      cur_vol += pieces[(-1 - ss[i].second)]->bounds.volume();
+	    } else {
+	      assert(opens > 0);
+	      opens--;
+	    }
+	  }
+	  assert(cur_vol == total_vol);
+	  assert(opens == 0);
+	}
+
+	if(best_dim >= 0) {
+	  n->split_dim = best_dim;
+	  n->split_plane = best_plane;
+
+	  // build two new idx lists
+	  std::vector<int> lo_idxs, hi_idxs;
+	  for(size_t i = 0; i < idxs.size(); i++)
+	    if(pieces[idxs[i]]->bounds.hi[best_dim] < best_plane)
+	      lo_idxs.push_back(idxs[i]);
+	    else
+	      hi_idxs.push_back(idxs[i]);
+
+	  // and recursively divide them
+	  n->low_child = compute_split(pieces, lo_idxs);
+	  n->high_child = compute_split(pieces, hi_idxs);
+	  n->total_splits = (1 +
+			     n->low_child->total_splits +
+			     n->high_child->total_splits);
+	  return n;
+	} else {
+	  // best was to just grab the biggest piece, so do that
+	  n->presplit_pieces.push_back(best_idx);
+	  // find and remove best_idx from idxs
+	  for(size_t i = 0; i < idxs.size() - 1; i++)
+	    if(idxs[i] == best_idx) {
+	      idxs[i] = idxs[idxs.size() - 1];
+	      break;
+	    }
+	  idxs.resize(idxs.size() - 1);
+	  // wrap around and try again
+	}
+      }
+    }
+
+    template <int N>
+    void print(const std::vector<InstanceLayoutPiece<N,T> *>& pieces, int indent)
+    {
+      for(size_t i = 0; i < presplit_pieces.size(); i++) {
+	for(int j = 0; j < indent; j++) std::cout << ' ';
+	std::cout << "piece[" << presplit_pieces[i] << "]: " << pieces[presplit_pieces[i]]->bounds << "\n";
+      }
+      if(total_splits > 0) {
+	for(int j = 0; j < indent; j++) std::cout << ' ';
+	std::cout << "split " << split_dim << " " << split_plane << "\n";
+	low_child->print(pieces, indent + 2);
+	for(int j = 0; j < indent; j++) std::cout << ' ';
+	std::cout << "---\n";
+	high_child->print(pieces, indent + 2);
+      }
+    }
+
+    template <int N>
+    char *generate_instructions(const std::vector<InstanceLayoutPiece<N,T> *>& pieces, char *next_inst, unsigned& usage_mask)
+    {
+      // generate tests against presplit pieces
+      for(size_t i = 0; i < presplit_pieces.size(); i++) {
+	switch(pieces[presplit_pieces[i]]->layout_type) {
+	  case InstanceLayoutPiece<N,T>::AffineLayoutType: {
+	    usage_mask |= PieceLookup::Instruction::ALLOW_AFFINE_PIECE;
+	    size_t size = roundup(sizeof(PieceLookup::AffinePiece<N,T>), 16);
+	    PieceLookup::AffinePiece<N,T> *ap = new(next_inst) PieceLookup::AffinePiece<N,T>;
+	    ap->data = PieceLookup::Instruction::OP_AFFINE_PIECE;
+	    // unless we're the last piece AND there's not subsequent split,
+	    //  we point at the next isntruction
+	    // all pieces but the last point to the next instruction
+	    if((i < (presplit_pieces.size() - 1)) || (total_splits > 0))
+	      ap->data += (size >> 4) << 8;
+	    const AffineLayoutPiece<N,T> *alp = checked_cast<AffineLayoutPiece<N,T> *>(pieces[presplit_pieces[i]]);
+	    ap->bounds = alp->bounds;
+	    ap->base = alp->offset;
+	    ap->strides = alp->strides;
+	    next_inst += size;
+	    break;
+	  }
+
+#ifdef REALM_USE_HDF5
+	  case InstanceLayoutPiece<N,T>::HDF5LayoutType: {
+	    usage_mask |= PieceLookup::Instruction::ALLOW_HDF5_PIECE;
+	    size_t size = roundup(sizeof(PieceLookup::AffinePiece<N,T>), 16);
+	    PieceLookup::HDF5Piece<N,T> *hp = new(next_inst) PieceLookup::HDF5Piece<N,T>;
+	    hp->data = PieceLookup::Instruction::OP_HDF5_PIECE;
+	    // unless we're the last piece AND there's not subsequent split,
+	    //  we point at the next isntruction
+	    // all pieces but the last point to the next instruction
+	    if((i < (presplit_pieces.size() - 1)) || (total_splits > 0))
+	      hp->data += (size >> 4) << 8;
+	    const HDF5LayoutPiece<N,T> *hlp = checked_cast<HDF5LayoutPiece<N,T> *>(pieces[presplit_pieces[i]]);
+	    hp->bounds = hlp->bounds;
+	    hp->offset = hlp->offset;
+	    for(int i = 0; i < N; i++)
+	      hp->dim_order[i] = hlp->dim_order[i];
+	    hp->read_only = hlp->read_only;
+	    size = sizeof(PieceLookup::HDF5Piece<N,T>);
+	    hp->filename_len = hlp->filename.size();
+	    memcpy(next_inst + size, hlp->filename.c_str(),
+		   hp->filename_len + 1);
+	    size += (hp->filename_len + 1);
+	    hp->dsetname_len = hlp->dsetname.size();
+	    memcpy(next_inst + size, hlp->dsetname.c_str(),
+		   hp->dsetname_len + 1);
+	    size += (hp->dsetname_len + 1);
+	    next_inst += roundup(size, 16);
+	    break;
+	  }
+#endif
+
+	  default: assert(0);
+	}
+      }
+
+      if(total_splits > 0) {
+	usage_mask |= PieceLookup::Instruction::ALLOW_SPLIT1;
+	size_t size = roundup(sizeof(PieceLookup::SplitPlane<N,T>), 16);
+	char *cur_inst = next_inst;
+	PieceLookup::SplitPlane<N,T> *sp = new(next_inst) PieceLookup::SplitPlane<N,T>;
+	sp->data = (PieceLookup::Instruction::OP_SPLIT1 |
+		    (split_dim << 8));
+	// we'll patch up the delta once we know it
+	sp->split_plane = split_plane;
+	next_inst += size;
+
+	// generate low half of tree then record delta for high tree
+	next_inst = low_child->generate_instructions(pieces, next_inst,
+						     usage_mask);
+	size_t delta_bytes = next_inst - cur_inst;
+	assert((delta_bytes & 15) == 0);
+	assert(delta_bytes < (1 << 20));
+	sp->data |= ((delta_bytes >> 4) << 16);
+
+	next_inst = high_child->generate_instructions(pieces, next_inst,
+						      usage_mask);
+      }
+
+      return next_inst;
+    }
+
+  };
+
+  template <int N, typename T>
+  void InstanceLayout<N,T>::compile_lookup_program(PieceLookup::CompiledProgram& p) const
+  {
+    // first, count up how many bytes we're going to need
+
+    size_t total_bytes = 0;
+
+    // each piece list that's used will turn into a program
+    std::map<int, size_t> piece_list_starts;
+    std::map<int, PieceSplitNode<T> *> piece_list_plans;
+    for(std::map<FieldID, FieldLayout>::const_iterator it = fields.begin();
+	it != fields.end();
+	++it) {
+      // did we already do this piece list?
+      if(piece_list_starts.count(it->second.list_idx) > 0)
+	continue;
+
+      piece_list_starts[it->second.list_idx] = total_bytes;
+
+      const InstancePieceList<N,T>& pl = piece_lists[it->second.list_idx];
+
+      if(pl.pieces.empty()) {
+	// need room for one abort instruction
+	total_bytes += 16;
+      } else {
+	// each piece will need a corresponding instruction
+	for(typename std::vector<InstanceLayoutPiece<N,T> *>::const_iterator it2 = pl.pieces.begin();
+	    it2 != pl.pieces.end();
+	    ++it2)
+	  switch((*it2)->layout_type) {
+	    case InstanceLayoutPiece<N,T>::AffineLayoutType:
+	      total_bytes += roundup(sizeof(PieceLookup::AffinePiece<N,T>), 16);
+	      break;
+#ifdef REALM_USE_HDF5
+	    case InstanceLayoutPiece<N,T>::HDF5LayoutType: {
+	      const HDF5LayoutPiece<N,T> *hlp = checked_cast<HDF5LayoutPiece<N,T> *>(*it2);
+	      total_bytes += roundup(sizeof(PieceLookup::HDF5Piece<N,T>) +
+				     hlp->filename.size() + 1 +
+				     hlp->dsetname.size() + 1, 16);
+	      break;
+	    }
+#endif
+	    default:
+	      assert(0);
+	  }
+
+	std::vector<int> idxs(pl.pieces.size());
+	for(size_t i = 0; i < pl.pieces.size(); i++)
+	  idxs[i] = i;
+	PieceSplitNode<T> *plan = PieceSplitNode<T>::compute_split(pl.pieces,
+								   idxs);
+	piece_list_plans[it->second.list_idx] = plan;
+	//plan->print(pl.pieces, 2);
+	total_bytes += (plan->total_splits *
+			roundup(sizeof(PieceLookup::SplitPlane<N,T>), 16));
+      }
+    }
+
+    void *base = p.allocate_memory(total_bytes);
+    // zero things out for sanity
+    memset(base, 0, total_bytes);
+
+    std::map<int, unsigned> piece_list_masks;
+    // now generate programs
+    for(std::map<int, size_t>::const_iterator it = piece_list_starts.begin();
+	it != piece_list_starts.end();
+	++it) {
+      const InstancePieceList<N,T>& pl = piece_lists[it->first];
+      char *next_inst = static_cast<char *>(base) + it->second;
+
+      unsigned usage_mask = 0;
+
+      if(pl.pieces.empty()) {
+	// all zeros is ok for now
+      } else {
+	PieceSplitNode<T> *plan = piece_list_plans[it->first];
+	plan->generate_instructions(pl.pieces, next_inst, usage_mask);
+	delete plan;
+      }
+
+      piece_list_masks[it->first] = usage_mask;
+    }
+
+    // fill in per field info
+    for(std::map<FieldID, FieldLayout>::const_iterator it = fields.begin();
+	it != fields.end();
+	++it) {
+      PieceLookup::CompiledProgram::PerField& pf = p.fields[it->first];
+      pf.start_inst = reinterpret_cast<const PieceLookup::Instruction *>(reinterpret_cast<uintptr_t>(base) + piece_list_starts[it->second.list_idx]);
+      pf.inst_usage_mask = piece_list_masks[it->second.list_idx];
+      pf.field_offset = it->second.rel_offset;
+    }
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class RegionInstance
   //
 
@@ -173,6 +536,7 @@ namespace Realm {
       inst = impl->me;
 
       impl->metadata.layout = ilg;
+      ilg->compile_lookup_program(impl->metadata.lookup_program);
 
       bool need_alloc_result = false;
       if (!prs.empty()) {
@@ -289,6 +653,7 @@ namespace Realm {
       // This actually doesn't have any bytes used in realm land
       ilg->bytes_used = 0;
       impl->metadata.layout = ilg;
+      ilg->compile_lookup_program(impl->metadata.lookup_program);
       
       bool need_alloc_result = false;
       if (!prs.empty()) {
@@ -379,6 +744,82 @@ namespace Realm {
 	     "instance metadata must be valid before accesses are performed");
       assert(r_impl->metadata.layout);
       return r_impl->metadata.layout;
+    }
+
+    // gets a compiled piece lookup program for a given field
+    template <int N, typename T>
+    const PieceLookup::Instruction *RegionInstance::get_lookup_program(FieldID field_id,
+								       unsigned allowed_mask,
+								       uintptr_t& field_offset)
+    {
+      RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(*this);
+      // metadata must already be available
+      assert(r_impl->metadata.is_valid() &&
+	     "instance metadata must be valid before accesses are performed");
+      std::map<FieldID, PieceLookup::CompiledProgram::PerField>::const_iterator it;
+      it = r_impl->metadata.lookup_program.fields.find(field_id);
+      assert(it != r_impl->metadata.lookup_program.fields.end());
+
+      // bail out if the program requires unsupported instructions
+      if((it->second.inst_usage_mask & ~allowed_mask) != 0)
+	return 0;
+
+      // the "field offset" picks up both the actual per-field offset but also
+      //  the base of the instance itself
+      MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
+      void *ptr = mem->get_direct_ptr(r_impl->metadata.inst_offset,
+				      r_impl->metadata.layout->bytes_used);
+      assert(ptr != 0);
+      field_offset = (reinterpret_cast<uintptr_t>(ptr) +
+		      it->second.field_offset);
+
+      return it->second.start_inst;
+    }
+
+    template <int N, typename T>
+    const PieceLookup::Instruction *RegionInstance::get_lookup_program(FieldID field_id,
+								       const Rect<N,T>& subrect,
+								       unsigned allowed_mask,
+								       size_t& field_offset)
+    {
+      RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(*this);
+      // metadata must already be available
+      assert(r_impl->metadata.is_valid() &&
+	     "instance metadata must be valid before accesses are performed");
+      std::map<FieldID, PieceLookup::CompiledProgram::PerField>::const_iterator it;
+      it = r_impl->metadata.lookup_program.fields.find(field_id);
+      assert(it != r_impl->metadata.lookup_program.fields.end());
+
+      // bail out if the program requires unsupported instructions
+      if((it->second.inst_usage_mask & ~allowed_mask) != 0)
+	return 0;
+
+      // the "field offset" picks up both the actual per-field offset but also
+      //  the base of the instance itself
+      MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
+      void *ptr = mem->get_direct_ptr(r_impl->metadata.inst_offset,
+				      r_impl->metadata.layout->bytes_used);
+      assert(ptr != 0);
+      field_offset = (reinterpret_cast<uintptr_t>(ptr) +
+		      it->second.field_offset);
+
+      // try to pre-execute part of the program based on the subrect given
+      const PieceLookup::Instruction *i = it->second.start_inst;
+      while(true) {
+	if(i->opcode() == PieceLookup::Instruction::OP_SPLIT1) {
+	  const PieceLookup::SplitPlane<N,T> *sp = static_cast<const PieceLookup::SplitPlane<N,T> *>(i);
+	  // if our subrect straddles the split plane, we have to stop here
+	  if(sp->splits_rect(subrect))
+	    break;
+
+	  // otherwise all points in the rect go the same way and we can do
+	  //  that now
+	  i = sp->next(subrect.lo);
+	} else
+	  break;
+      }
+
+      return i;
     }
 
     void RegionInstance::read_untyped(size_t offset, void *data, size_t datalen) const
@@ -533,8 +974,10 @@ namespace Realm {
 
     RegionInstanceImpl::~RegionInstanceImpl(void)
     {
-      if(metadata.is_valid())
+      if(metadata.is_valid()) {
 	delete metadata.layout;
+	metadata.lookup_program.reset();
+      }
     }
 
   void RegionInstanceImpl::notify_allocation(MemoryImpl::AllocationResult result,
@@ -776,6 +1219,7 @@ namespace Realm {
       if(metadata.layout) {
 	delete metadata.layout;
 	metadata.layout = 0;
+	metadata.lookup_program.reset();
       }
 
       // set the offset back to the "unallocated" value
@@ -950,8 +1394,10 @@ namespace Realm {
 		 (fbd >> parent_inst) &&
 		 (fbd >> inst_offset) &&
 		 (fbd >> filename));
-      if(ok)
+      if(ok) {
 	layout = InstanceLayoutGeneric::deserialize_new(fbd);
+	layout->compile_lookup_program(lookup_program);
+      }
       assert(ok && (layout != 0) && (fbd.bytes_left() == 0));
     }
 
@@ -961,6 +1407,7 @@ namespace Realm {
       if(layout) {
 	delete layout;
 	layout = 0;
+	lookup_program.reset();
       }
 
       // set the offset back to the "unallocated" value
@@ -975,7 +1422,9 @@ namespace Realm {
 
 #define DOIT(N,T) \
   template class AffineLayoutPiece<N,T>; \
-  template class InstanceLayout<N,T>;
+  template class InstanceLayout<N,T>; \
+  template const PieceLookup::Instruction *RegionInstance::get_lookup_program<N,T>(FieldID, unsigned, uintptr_t&); \
+  template const PieceLookup::Instruction *RegionInstance::get_lookup_program<N,T>(FieldID, const Rect<N,T>&, unsigned, uintptr_t&);
   FOREACH_NT(DOIT)
 #undef DOIT
 
