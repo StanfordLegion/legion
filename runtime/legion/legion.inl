@@ -2201,6 +2201,29 @@ namespace Legion {
       return true;
     }
 
+    // Same method as above but for realm points from affine accessors
+    template<int N, typename T> __CUDA_HD__
+    static inline bool __legion_is_dense_layout(const Rect<N,T> &bounds,
+              const Realm::Point<N,ptrdiff_t> &strides, size_t field_size)
+    {
+      ptrdiff_t exp_offset = field_size;
+      int used_mask = 0; // keep track of which dimensions we've already matched
+      for (int i = 0; i < N; i++) {
+        bool found = false;
+        for (int j = 0; j < N; j++) {
+          if ((used_mask >> j) & 1) continue;
+          if (strides[j] != exp_offset) continue;
+          found = true;
+          used_mask |= (1 << j);
+          exp_offset *= (bounds.hi[j] - bounds.lo[j] + 1);
+          break;
+        }
+        if (!found)
+          return false;
+      }
+      return true;
+    }
+
     // Read-only FieldAccessor specialization
     template<typename FT, int N, typename T, bool CB>
     class FieldAccessor<LEGION_READ_ONLY,FT,N,T,
