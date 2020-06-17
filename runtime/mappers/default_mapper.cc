@@ -2406,10 +2406,10 @@ namespace Legion {
       // as soon as possible, otherwise we are ambivalent
       // Only have higher priority for things we cache
       if (reduction)
-        return GC_FIRST_PRIORITY;
+        return LEGION_GC_FIRST_PRIORITY;
       if (meets_fill_constraints && (kind == TASK_MAPPING))
-        return GC_NEVER_PRIORITY;
-      return GC_DEFAULT_PRIORITY;
+        return LEGION_GC_NEVER_PRIORITY;
+      return LEGION_GC_DEFAULT_PRIORITY;
     }
 
     //--------------------------------------------------------------------------

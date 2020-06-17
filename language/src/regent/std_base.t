@@ -239,6 +239,12 @@ function base.quote_binary_op(op, lhs, rhs)
     return `([lhs] < [rhs])
   elseif op == ">" then
     return `([lhs] > [rhs])
+  elseif op == "^" then
+    return `([lhs] ^ [rhs])
+  elseif op == "<<" then
+    return `([lhs] << [rhs])
+  elseif op == ">>" then
+    return `([lhs] >> [rhs])
   elseif op == "<=" then
     return `([lhs] <= [rhs])
   elseif op == ">=" then

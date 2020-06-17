@@ -4748,18 +4748,18 @@ namespace Legion {
           if (it->second.current_state != COLLECTABLE_STATE)
           {
 #ifdef DEBUG_LEGION
-            // We might have lost a race with adding NEVER_GC_REF
+            // We might have lost a race with adding LEGION_NEVER_GC_REF
             // after release the manager lock if we hit this assertion
-            if (it->second.min_priority == GC_NEVER_PRIORITY)
+            if (it->second.min_priority == LEGION_GC_NEVER_PRIORITY)
               assert(it->second.current_state == VALID_STATE);
 #endif
             bool remove_valid_ref = false;
             it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
             // Remove any NEVER GC references if necessary
-            if (it->second.min_priority == GC_NEVER_PRIORITY)
+            if (it->second.min_priority == LEGION_GC_NEVER_PRIORITY)
               remove_valid_ref = true;
             it->second.mapper_priorities.clear();
-            it->second.min_priority = GC_MAX_PRIORITY;
+            it->second.min_priority = LEGION_GC_MAX_PRIORITY;
             // Go to the pending collectable state
             RtUserEvent deferred_collect = Runtime::create_rt_user_event();
             it->second.current_state = PENDING_COLLECTED_STATE;
@@ -4821,7 +4821,7 @@ namespace Legion {
         bool remove_never_gc_ref = false;
         std::pair<MapperID,Processor> key(mapper_id,processor);
         // Check to see if this is or is going to be a max priority instance
-        if (priority == GC_NEVER_PRIORITY)
+        if (priority == LEGION_GC_NEVER_PRIORITY)
         {
           // See if we need a handback
           AutoLock m_lock(manager_lock,1,false);
@@ -4852,7 +4852,7 @@ namespace Legion {
               tree_finder->second.find(manager);
             if (finder != tree_finder->second.end())
             {
-              if (finder->second.min_priority == GC_NEVER_PRIORITY)
+              if (finder->second.min_priority == LEGION_GC_NEVER_PRIORITY)
               {
                 finder->second.mapper_priorities.erase(key);
                 if (finder->second.mapper_priorities.empty())
@@ -4910,11 +4910,11 @@ namespace Legion {
                     current_instances[manager->tree_id].end());
 #endif
             InstanceInfo &info = current_instances[manager->tree_id][manager];
-            if (info.min_priority == GC_NEVER_PRIORITY)
+            if (info.min_priority == LEGION_GC_NEVER_PRIORITY)
               remove_duplicate = true; // lost the race
             else
-              info.min_priority = GC_NEVER_PRIORITY;
-            info.mapper_priorities[key] = GC_NEVER_PRIORITY;
+              info.min_priority = LEGION_GC_NEVER_PRIORITY;
+            info.mapper_priorities[key] = LEGION_GC_NEVER_PRIORITY;
           }
           if (remove_duplicate && 
               manager->remove_base_valid_ref(NEVER_GC_REF, &mutator))
@@ -4925,7 +4925,7 @@ namespace Legion {
       {
         // If this a max priority, try adding the reference beforehand, if
         // it fails then we know the instance is already deleted so whatever
-        if ((priority == GC_NEVER_PRIORITY) &&
+        if ((priority == LEGION_GC_NEVER_PRIORITY) &&
             !manager->acquire_instance(NEVER_GC_REF, &mutator))
           return;
         // Do the update locally 
@@ -4943,8 +4943,8 @@ namespace Legion {
             std::pair<MapperID,Processor> key(mapper_id,processor);
             // If the new priority is NEVER_GC and we were already at NEVER_GC
             // then we need to remove the redundant reference when we are done
-            if ((priority == GC_NEVER_PRIORITY) && 
-                (finder->second.min_priority == GC_NEVER_PRIORITY))
+            if ((priority == LEGION_GC_NEVER_PRIORITY) && 
+                (finder->second.min_priority == LEGION_GC_NEVER_PRIORITY))
               remove_min_reference = true;
             // See if we can find the current priority  
             std::map<std::pair<MapperID,Processor>,GCPriority>::iterator 
@@ -4983,8 +4983,8 @@ namespace Legion {
                     if (it->second < new_min)
                       new_min = it->second;
                   }
-                  if ((finder->second.min_priority == GC_NEVER_PRIORITY) &&
-                      (new_min > GC_NEVER_PRIORITY))
+                  if ((finder->second.min_priority == LEGION_GC_NEVER_PRIORITY)
+                        && (new_min > LEGION_GC_NEVER_PRIORITY))
                     remove_min_reference = true;
                   finder->second.min_priority = new_min;
                 }
@@ -5101,7 +5101,7 @@ namespace Legion {
                   rez.serialize(remote_target);
                   rez.serialize(remote_success);
                   rez.serialize(kind);
-                  bool min_priority = (priority == GC_NEVER_PRIORITY);
+                  bool min_priority = (priority == LEGION_GC_NEVER_PRIORITY);
                   rez.serialize<bool>(min_priority);
                   if (min_priority)
                   {
@@ -5162,7 +5162,7 @@ namespace Legion {
                   rez.serialize(remote_target);
                   rez.serialize(remote_success);
                   rez.serialize(kind);
-                  bool min_priority = (priority == GC_NEVER_PRIORITY);
+                  bool min_priority = (priority == LEGION_GC_NEVER_PRIORITY);
                   rez.serialize<bool>(min_priority);
                   if (min_priority)
                   {
@@ -5227,7 +5227,7 @@ namespace Legion {
                   rez.serialize<bool>(created);
                   if (created)
                   {
-                    bool min_priority = (priority == GC_NEVER_PRIORITY);
+                    bool min_priority = (priority == LEGION_GC_NEVER_PRIORITY);
                     rez.serialize<bool>(min_priority);
                     if (min_priority)
                     {
@@ -5295,7 +5295,7 @@ namespace Legion {
                   rez.serialize<bool>(created);
                   if (created)
                   {
-                    bool min_priority = (priority == GC_NEVER_PRIORITY);
+                    bool min_priority = (priority == LEGION_GC_NEVER_PRIORITY);
                     rez.serialize<bool>(min_priority);
                     if (min_priority)
                     {
@@ -5483,11 +5483,11 @@ namespace Legion {
             {
               std::pair<MapperID,Processor> key(mapper_id,processor);
               InstanceInfo &info = current_instances[manager->tree_id][manager];
-              if (info.min_priority == GC_NEVER_PRIORITY)
+              if (info.min_priority == LEGION_GC_NEVER_PRIORITY)
                 remove_duplicate_valid = true;
               else
-                info.min_priority = GC_NEVER_PRIORITY;
-              info.mapper_priorities[key] = GC_NEVER_PRIORITY;
+                info.min_priority = LEGION_GC_NEVER_PRIORITY;
+              info.mapper_priorities[key] = LEGION_GC_NEVER_PRIORITY;
             }
           }
           if (remove_duplicate_valid && 
@@ -5526,11 +5526,11 @@ namespace Legion {
             if (min_priority)
             {
               InstanceInfo &info = current_instances[manager->tree_id][manager];
-              if (info.min_priority == GC_NEVER_PRIORITY)
+              if (info.min_priority == LEGION_GC_NEVER_PRIORITY)
                 remove_duplicate_valid = true;
               else
-                info.min_priority = GC_NEVER_PRIORITY;
-              info.mapper_priorities[key] = GC_NEVER_PRIORITY;
+                info.min_priority = LEGION_GC_NEVER_PRIORITY;
+              info.mapper_priorities[key] = LEGION_GC_NEVER_PRIORITY;
             }
           }
           if (remove_duplicate_valid && 
@@ -6155,7 +6155,7 @@ namespace Legion {
       // First do the insertion
       // If we're going to add a valid reference, mark this valid early
       // to avoid races with deletions
-      bool early_valid = acquire || (priority == GC_NEVER_PRIORITY);
+      bool early_valid = acquire || (priority == LEGION_GC_NEVER_PRIORITY);
       size_t instance_size = manager->get_instance_size();
       // Since we're going to put this in the table add a reference
       manager->add_base_resource_ref(MEMORY_MANAGER_REF);
@@ -6181,7 +6181,7 @@ namespace Legion {
         else
           manager->add_base_valid_ref(MAPPING_ACQUIRE_REF);
       }
-      if (priority == GC_NEVER_PRIORITY)
+      if (priority == LEGION_GC_NEVER_PRIORITY)
         manager->add_base_valid_ref(NEVER_GC_REF);
     }
 
@@ -13282,7 +13282,7 @@ namespace Legion {
     {
       // Easy case if the user asks for no IDs
       if (count == 0)
-        return AUTO_GENERATE_ID;
+        return LEGION_AUTO_GENERATE_ID;
       const std::string library_name(name); 
       // Take the lock in read only mode and see if we can find the result
       RtEvent wait_on;
@@ -13710,7 +13710,7 @@ namespace Legion {
     {
       // Easy case if the user asks for no IDs
       if (cnt == 0)
-        return AUTO_GENERATE_ID;
+        return LEGION_AUTO_GENERATE_ID;
       const std::string library_name(name); 
       // Take the lock in read only mode and see if we can find the result
       RtEvent wait_on;
@@ -13950,7 +13950,7 @@ namespace Legion {
     {
       // Easy case if the user asks for no IDs
       if (cnt == 0)
-        return AUTO_GENERATE_ID;
+        return LEGION_AUTO_GENERATE_ID;
       const std::string library_name(name); 
       // Take the lock in read only mode and see if we can find the result
       RtEvent wait_on;
@@ -14407,7 +14407,7 @@ namespace Legion {
     {
       // Easy case if the user asks for no IDs
       if (cnt == 0)
-        return AUTO_GENERATE_ID;
+        return LEGION_AUTO_GENERATE_ID;
       const std::string library_name(name); 
       // Take the lock in read only mode and see if we can find the result
       RtEvent wait_on;
@@ -14537,7 +14537,7 @@ namespace Legion {
       // First find the task implementation
       TaskImpl *task_impl = find_or_create_task_impl(registrar.task_id);
       // See if we need to make a new variant ID
-      if (vid == AUTO_GENERATE_ID) // Make a variant ID to use
+      if (vid == LEGION_AUTO_GENERATE_ID) // Make a variant ID to use
         vid = task_impl->get_unique_variant_id();
       else if (vid == 0)
         REPORT_LEGION_ERROR(ERROR_RESERVED_VARIANT_ID,
@@ -14639,7 +14639,7 @@ namespace Legion {
     {
       // Easy case if the user asks for no IDs
       if (count == 0)
-        return AUTO_GENERATE_ID;
+        return LEGION_AUTO_GENERATE_ID;
       const std::string library_name(name); 
       // Take the lock in read only mode and see if we can find the result
       RtEvent wait_on;
@@ -14766,7 +14766,7 @@ namespace Legion {
     {
       // Easy case if the user asks for no IDs
       if (count == 0)
-        return AUTO_GENERATE_ID;
+        return LEGION_AUTO_GENERATE_ID;
       const std::string library_name(name); 
       // Take the lock in read only mode and see if we can find the result
       RtEvent wait_on;
@@ -21398,7 +21398,7 @@ namespace Legion {
                                 LayoutConstraintID layout_id, DistributedID did)
     //--------------------------------------------------------------------------
     {
-      if (layout_id == AUTO_GENERATE_ID)
+      if (layout_id == LEGION_AUTO_GENERATE_ID)
         layout_id = get_unique_constraint_id();
       // Now make our entry and then return the result
       LayoutConstraints *constraints = 
@@ -21502,7 +21502,7 @@ namespace Legion {
       std::map<LayoutConstraintID,LayoutConstraintRegistrar> 
         &pending_constraints = get_pending_constraint_table();
       // See if we have to generate an ID
-      if (layout_id == AUTO_GENERATE_ID)
+      if (layout_id == LEGION_AUTO_GENERATE_ID)
       {
         // Find the first available layout ID
         layout_id = 1;
@@ -23015,7 +23015,7 @@ namespace Legion {
       std::deque<PendingVariantRegistration*> &pending_table = 
         get_pending_variant_table();
       // See if we need to pick a variant
-      if (vid == AUTO_GENERATE_ID)
+      if (vid == LEGION_AUTO_GENERATE_ID)
         vid = pending_table.size() + 1;
       else if (vid == 0)
         REPORT_LEGION_ERROR(ERROR_RESERVED_VARIANT_ID,

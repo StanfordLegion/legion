@@ -12,14 +12,16 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- fails-with:
--- type_mismatch_arithmetic1.rg:23: type mismatch between int32 and bool
---   var z = x + y
---           ^
-
 import "regent"
 
-task f(x : int, y : bool)
-  var z = x + y
+task main()
+  var x = 0xAD
+  var y = 0xD4
+  var z = 3
+
+  regentlib.assert((x and y) == 0x84, "test failed")
+  regentlib.assert((x or y) == 0xFD, "test failed")
+  regentlib.assert((x ^ y) == 0x79, "test failed")
+  regentlib.assert(((x << z) ^ y) == 0x5BC, "test failed")
 end
-f:compile()
+regentlib.start(main)
