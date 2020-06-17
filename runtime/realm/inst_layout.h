@@ -271,8 +271,8 @@ namespace Realm {
 
     ~GenericAccessor(void);
 
-    static bool is_compatible(RegionInstance inst, ptrdiff_t field_offset);
-    static bool is_compatible(RegionInstance inst, ptrdiff_t field_offset, const Rect<N,T>& subrect);
+    static bool is_compatible(RegionInstance inst, size_t field_offset);
+    static bool is_compatible(RegionInstance inst, size_t field_offset, const Rect<N,T>& subrect);
 
     template <typename INST>
     static bool is_compatible(const INST &instance, unsigned field_id);
@@ -420,8 +420,8 @@ namespace Realm {
 #error "REALM_ACCESSOR_DEBUG macro for AffineAccessor not supported for GPU code"
 #endif
 #endif
-    intptr_t base;
-    Point<N, ptrdiff_t> strides;
+    uintptr_t base;
+    Point<N, size_t> strides;
   protected:
     REALM_CUDA_HD
     FT* get_ptr(const Point<N,T>& p) const;

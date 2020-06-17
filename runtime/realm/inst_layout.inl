@@ -667,14 +667,14 @@ namespace Realm {
 
   template <typename FT, int N, typename T>
   inline /*static*/ bool GenericAccessor<FT,N,T>::is_compatible(RegionInstance inst,
-								ptrdiff_t field_offset)
+								size_t field_offset)
   {
     return true;
   }
 
   template <typename FT, int N, typename T>
   inline /*static*/ bool GenericAccessor<FT,N,T>::is_compatible(RegionInstance inst,
-								ptrdiff_t field_offset,
+								size_t field_offset,
 								const Rect<N,T>& subrect)
   {
     return true;
@@ -796,8 +796,8 @@ namespace Realm {
     const InstanceLayoutPiece<N,T> *ilp = ipl.pieces[0];
     assert((ilp->layout_type == InstanceLayoutPiece<N,T>::AffineLayoutType));
     const AffineLayoutPiece<N,T> *alp = static_cast<const AffineLayoutPiece<N,T> *>(ilp);
-    base = reinterpret_cast<intptr_t>(inst.pointer_untyped(0,
-							   layout->bytes_used));
+    base = reinterpret_cast<uintptr_t>(inst.pointer_untyped(0,
+							    layout->bytes_used));
     assert(base != 0);
     base += alp->offset + it->second.rel_offset + subfield_offset;
     strides = alp->strides;
@@ -839,8 +839,8 @@ namespace Realm {
       assert(ilp && ilp->bounds.contains(subrect));
       assert((ilp->layout_type == InstanceLayoutPiece<N,T>::AffineLayoutType));
       const AffineLayoutPiece<N,T> *alp = static_cast<const AffineLayoutPiece<N,T> *>(ilp);
-      base = reinterpret_cast<intptr_t>(inst.pointer_untyped(0,
-							     layout->bytes_used));
+      base = reinterpret_cast<uintptr_t>(inst.pointer_untyped(0,
+							      layout->bytes_used));
       assert(base != 0);
       base += alp->offset + it->second.rel_offset + subfield_offset;
       strides = alp->strides;
@@ -892,8 +892,8 @@ namespace Realm {
     const InstanceLayoutPiece<N2,T2> *ilp = ipl.pieces[0];
     assert((ilp->layout_type == InstanceLayoutPiece<N2,T2>::AffineLayoutType));
     const AffineLayoutPiece<N2,T2> *alp = static_cast<const AffineLayoutPiece<N2,T2> *>(ilp);
-    base = reinterpret_cast<intptr_t>(inst.pointer_untyped(0,
-							   layout->bytes_used));
+    base = reinterpret_cast<uintptr_t>(inst.pointer_untyped(0,
+							    layout->bytes_used));
     assert(base != 0);
     base += alp->offset + it->second.rel_offset + subfield_offset;
     // to get the effect of transforming every accessed x to Ax+b, we
@@ -974,8 +974,8 @@ namespace Realm {
       assert(ilp && ilp->bounds.contains(subrect_image));
       assert((ilp->layout_type == InstanceLayoutPiece<N2,T2>::AffineLayoutType));
       const AffineLayoutPiece<N2,T2> *alp = static_cast<const AffineLayoutPiece<N2,T2> *>(ilp);
-      base = reinterpret_cast<intptr_t>(inst.pointer_untyped(0,
-							     layout->bytes_used));
+      base = reinterpret_cast<uintptr_t>(inst.pointer_untyped(0,
+							      layout->bytes_used));
       assert(base != 0);
       base += alp->offset + it->second.rel_offset + subfield_offset;
       // to get the effect of transforming every accessed x to Ax+b, we
@@ -1165,7 +1165,7 @@ namespace Realm {
   REALM_CUDA_HD
   inline bool AffineAccessor<FT,N,T>::is_dense_arbitrary(const Rect<N,T> &bounds) const
   {
-    ptrdiff_t exp_offset = sizeof(FT);
+    size_t exp_offset = sizeof(FT);
     int used_mask = 0; // keep track of which dimensions we've already matched
     for (int i = 0; i < N; i++) {
       bool found = false;
@@ -1187,7 +1187,7 @@ namespace Realm {
   REALM_CUDA_HD
   inline bool AffineAccessor<FT,N,T>::is_dense_col_major(const Rect<N,T> &bounds) const
   {
-    ptrdiff_t exp_offset = sizeof(FT);
+    size_t exp_offset = sizeof(FT);
     for (int i = 0; i < N; i++) {
       if (strides[i] != exp_offset) return false;
       exp_offset *= (bounds.hi[i] - bounds.lo[i] + 1);
@@ -1199,7 +1199,7 @@ namespace Realm {
   REALM_CUDA_HD
   inline bool AffineAccessor<FT,N,T>::is_dense_row_major(const Rect<N,T> &bounds) const
   {
-    ptrdiff_t exp_offset = sizeof(FT);
+    size_t exp_offset = sizeof(FT);
     for (int i = N-1; i >= 0; i--) {
       if (strides[i] != exp_offset) return false;
       exp_offset *= (bounds.hi[i] - bounds.lo[i] + 1);
@@ -1211,7 +1211,7 @@ namespace Realm {
   REALM_CUDA_HD
   inline FT *AffineAccessor<FT,N,T>::get_ptr(const Point<N,T>& p) const
   {
-    intptr_t rawptr = base;
+    uintptr_t rawptr = base;
     for(int i = 0; i < N; i++) rawptr += p[i] * strides[i];
     return reinterpret_cast<FT *>(rawptr);
   }
