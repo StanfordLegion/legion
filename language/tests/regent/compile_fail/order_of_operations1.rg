@@ -13,13 +13,11 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_arithmetic1.rg:23: type mismatch between int32 and bool
---   var z = x + y
---           ^
+-- order_of_operations1.rg:22: order of operations between ^ and << or >> is unspecified, please add parentheses near 'end'
 
 import "regent"
 
-task f(x : int, y : bool)
-  var z = x + y
+task f(x : uint32, y : uint32, z : uint32)
+  var z = x ^ y << z
 end
 f:compile()
