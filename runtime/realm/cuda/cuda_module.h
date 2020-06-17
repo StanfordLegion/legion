@@ -274,7 +274,7 @@ namespace Realm {
       GPUMemcpy3D(GPU *_gpu,
                   void *_dst, const void *_src,
                   off_t _dst_stride, off_t _src_stride,
-                  off_t _dst_height, off_t _src_height,
+                  off_t _dst_pstride, off_t _src_pstride,
                   size_t _bytes, size_t _height, size_t _depth,
                   GPUMemcpyKind _kind,
                   GPUCompletionNotification *_notification);
@@ -286,7 +286,7 @@ namespace Realm {
     protected:
       void *dst;
       const void *src;
-      off_t dst_stride, src_stride, dst_height, src_height;
+      off_t dst_stride, src_stride, dst_pstride, src_pstride;
       size_t bytes, height, depth;
       GPUCompletionNotification *notification;
     };
@@ -331,6 +331,32 @@ namespace Realm {
       void *dst;
       size_t dst_stride;
       size_t bytes, lines;
+      static const size_t MAX_DIRECT_SIZE = 8;
+      union {
+	char direct[8];
+	char *indirect;
+      } fill_data;
+      size_t fill_data_size;
+      GPUCompletionNotification *notification;
+    };
+
+    class GPUMemset3D : public GPUMemcpy {
+    public:
+      GPUMemset3D(GPU *_gpu,
+		  void *_dst, size_t _dst_stride, size_t _dst_pstride,
+		  size_t _bytes, size_t _height, size_t _depth,
+		  const void *_fill_data, size_t _fill_data_size,
+		  GPUCompletionNotification *_notification);
+
+      virtual ~GPUMemset3D(void);
+
+    public:
+      void do_span(off_t pos, size_t len);
+      virtual void execute(GPUStream *stream);
+    protected:
+      void *dst;
+      size_t dst_stride, dst_pstride;
+      size_t bytes, height, depth;
       static const size_t MAX_DIRECT_SIZE = 8;
       union {
 	char direct[8];
@@ -548,6 +574,12 @@ namespace Realm {
 
       void fill_within_fb_2d(off_t dst_offset, off_t dst_stride,
 			     size_t bytes, size_t lines,
+			     const void *fill_data, size_t fill_data_size,
+			     GPUCompletionNotification *notification = 0);
+
+      void fill_within_fb_3d(off_t dst_offset, off_t dst_stride,
+			     off_t dst_height,
+			     size_t bytes, size_t height, size_t depth,
 			     const void *fill_data, size_t fill_data_size,
 			     GPUCompletionNotification *notification = 0);
 

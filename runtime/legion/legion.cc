@@ -2328,20 +2328,30 @@ namespace Legion {
     bool PhysicalRegion::is_valid(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(impl != NULL);
-#endif
-      return impl->is_valid();
+      if (impl != NULL)
+        return impl->is_valid();
+      else
+        return false;
     }
 
     //--------------------------------------------------------------------------
     LogicalRegion PhysicalRegion::get_logical_region(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(impl != NULL);
-#endif
-      return impl->get_logical_region();
+      if (impl != NULL)
+        return impl->get_logical_region();
+      else
+        return LogicalRegion::NO_REGION;
+    }
+
+    //--------------------------------------------------------------------------
+    PrivilegeMode PhysicalRegion::get_privilege(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+        return impl->get_privilege();
+      else
+        return LEGION_NO_ACCESS;
     }
 
     //--------------------------------------------------------------------------

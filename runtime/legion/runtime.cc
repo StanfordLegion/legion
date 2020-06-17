@@ -2450,6 +2450,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    PrivilegeMode PhysicalRegionImpl::get_privilege(void) const
+    //--------------------------------------------------------------------------
+    {
+      return req.privilege;
+    }
+
+    //--------------------------------------------------------------------------
     LegionRuntime::Accessor::RegionAccessor<
       LegionRuntime::Accessor::AccessorType::Generic>
         PhysicalRegionImpl::get_accessor(bool silence_warnings)

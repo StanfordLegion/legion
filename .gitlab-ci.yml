@@ -127,17 +127,25 @@ variables:
   USE_CUDA: "1"
 .gasnet: &gasnet
   REALM_NETWORKS: "gasnet1"
+  CONDUIT: "mpi"
 .gasnetdbg: &gasnetdbg
   REALM_NETWORKS: "gasnet1"
+  CONDUIT: "mpi"
   GASNET_DEBUG: "1"
   # GASNet headers are not guaranteed to be warning-free in debug mode
   WARN_AS_ERROR: "0"
 .gasnetex: &gasnetex
   REALM_NETWORKS: "gasnet1"
+  CONDUIT: "mpi"
   GASNET_VERSION: "GASNet-EX-snapshot"
   # source URL is set by a GitLab CI variable as the GASNet-EX team prefers
   #  it not to be public at this time
   #GASNETEX_SNAPSHOT_SOURCE_URL: ...
+.gasnet_ucx : &gasnet_ucx
+  REALM_NETWORKS: "gasnet1"
+  CONDUIT: "ucx"
+  UCX_SOURCE: "https://github.com/openucx/ucx/releases/download/v1.8.0/ucx-1.8.0.tar.gz"
+  UCX_WARN_UNUSED_ENV_VARS: "n"
 .mpi: &mpi
   REALM_NETWORKS: "mpi"
   # mpich-3.2
@@ -199,6 +207,20 @@ before_script:
   #     brew install pypy homebrew/versions/llvm35
   #   fi
   - |
+    if [[ "$UCX_SOURCE" != "" ]]; then
+      mkdir ucx
+      cd ucx
+      wget -O - $UCX_SOURCE | tar --strip-components=1 -zxf -
+      UCX_INSTALL_ROOT=$PWD/install
+      UCX_CONFIG_OPTS="--disable-numa"
+      contrib/configure-release --prefix=$UCX_INSTALL_ROOT $UCX_CONFIG_OPTS
+      make -j8 install
+      PATH=$PATH:$UCX_INSTALL_ROOT/bin
+      export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$UCX_INSTALL_ROOT/lib
+      # force inter-rank communication through tcp to make it "slow"
+      export UCX_TLS=tcp
+      cd ..
+    fi
     if [[ "$REALM_NETWORKS" != "" && "$(hostname)" != n0003 ]]; then
       # OpenMPI:
       # export LAUNCHER="mpirun -n 2 -x TERRA_PATH -x INCLUDE_PATH -x LD_LIBRARY_PATH -x LG_RT_DIR -x USE_RDIR"
@@ -206,7 +228,6 @@ before_script:
       export LAUNCHER="mpirun -n 2"
       export MPICH_CXX=${CXX}
       if [[ "$REALM_NETWORKS" = "gasnet1" ]]; then
-        export CONDUIT=mpi
         if [[ "$GASNET_DEBUG" -eq 1 ]]; then
           export GASNET_ROOT="$PWD/gasnet/debug"
         else
@@ -552,6 +573,19 @@ gcc49_cxx98_debug_gasnetex_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
     <<: [*gcc49, *terra38, *debug, *cxx98_normal, *gasnetex, *regent, *incremental]
+#   * GASNet (UCX conduit)
+gcc49_cxx98_release_gasnet_ucx_legion:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra38, *release, *cxx98_normal, *gasnet_ucx, *legion]
+gcc49_cxx98_release_gasnet_ucx_cmake_legion:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra38, *release, *cxx98_normal, *gasnet_ucx, *cmake, *legion, *ctest]
+gcc49_cxx98_release_gasnet_ucx_regent:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra38, *release, *cxx98_normal, *gasnet_ucx, *regent, *incremental]
 #   * MPI
 gcc49_cxx98_release_mpi_legion:
   <<: [*linux_compute, *image, *tests]

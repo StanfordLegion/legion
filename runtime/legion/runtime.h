@@ -513,6 +513,7 @@ namespace Legion {
       bool is_mapped(void) const;
       bool is_external_region(void) const;
       LogicalRegion get_logical_region(void) const;
+      PrivilegeMode get_privilege(void) const;
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>
           get_accessor(bool silence_warnings = true);
