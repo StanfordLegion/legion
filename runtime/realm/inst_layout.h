@@ -458,7 +458,9 @@ namespace Realm {
 	       size_t subfield_offset = 0);
   
     REALM_CUDA_HD
-    FT *ptr(const Point<N,T>& p) const;
+    FT* ptr(const Point<N,T>& p) const;
+    REALM_CUDA_HD
+    FT* ptr(const Rect<N,T>& r, size_t strides[N]) const;
     REALM_CUDA_HD
     FT read(const Point<N,T>& p) const;
     REALM_CUDA_HD
@@ -466,9 +468,6 @@ namespace Realm {
 
     REALM_CUDA_HD
     FT& operator[](const Point<N,T>& p) const;
-
-    REALM_CUDA_HD
-    bool find_strides(const Rect<N,T>& subrect, size_t strides[N]) const;
   };
 
 }; // namespace Realm

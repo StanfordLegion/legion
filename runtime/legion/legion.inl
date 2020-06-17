@@ -5890,11 +5890,12 @@ namespace Legion {
                            size_t field_size = sizeof(FT)) const
         {
           size_t strides[N];
+          FT *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
-          assert(accessor.find_strides(r, strides));
+          assert(result != NULL);
           assert(__legion_is_dense_layout(r, strides, field_size));
 #else
-          if (!accessor.find_strides(r, strides))
+          if (result == NULL)
           {
             fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
                             "not contained within the bounds of a piece\n");
@@ -5915,16 +5916,17 @@ namespace Legion {
 #endif
           }
 #endif
-          return accessor.ptr(r.lo);
+          return result;
         }
       __CUDA_HD__
       inline const FT* ptr(const Rect<N,T>& r, size_t strides[N],
                            size_t field_size = sizeof(FT)) const
         {
+          FT *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
-          assert(accessor.find_strides(r, strides));
+          assert(result != NULL);
 #else
-          if (!accessor.find_strides(r, strides))
+          if (result == NULL)
           {
             fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
                             "not contained within the bounds of a piece\n");
@@ -5937,7 +5939,7 @@ namespace Legion {
 #endif
           for (int i = 0; i < N; i++)
             strides[i] /= field_size;
-          return accessor.ptr(r.lo);
+          return result;
         }
       __CUDA_HD__
       inline const FT& operator[](const Point<N,T>& p) const
@@ -6051,15 +6053,16 @@ namespace Legion {
                            size_t field_size = sizeof(FT)) const
         {
           size_t strides[N];
+          FT *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
-          assert(accessor.find_strides(r, strides));
+          assert(result != NULL);
           assert(__legion_is_dense_layout(r, strides, field_size));
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
                                               LEGION_READ_ONLY);
-          if (!accessor.find_strides(r, strides))
+          if (result == NULL)
           {
             fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
                             "not contained within the bounds of a piece\n");
@@ -6080,20 +6083,21 @@ namespace Legion {
 #endif
           }
 #endif
-          return accessor.ptr(r.lo);
+          return result;
         }
       __CUDA_HD__
       inline const FT* ptr(const Rect<N,T>& r, size_t strides[N],
                            size_t field_size = sizeof(FT)) const
         {
+          FT *result = accessor.prt(r, strides);
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
-          assert(accessor.find_strides(r, strides));
+          assert(result != NULL);
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
                                               LEGION_READ_ONLY);
-          if (!accessor.find_strides(r, strides))
+          if (result == NULL)
           {
             fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
                             "not contained within the bounds of a piece\n");
@@ -6106,7 +6110,7 @@ namespace Legion {
 #endif
           for (int i = 0; i < N; i++)
             strides[i] /= field_size;
-          return accessor.ptr(r.lo);
+          return result;
         }
       __CUDA_HD__
       inline const FT& operator[](const Point<N,T>& p) const
@@ -6212,11 +6216,12 @@ namespace Legion {
                            size_t field_size = sizeof(FT)) const
         {
           size_t strides[1];
+          FT *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
-          assert(accessor.find_strides(r, strides));
+          assert(result != NULL);
           assert(__legion_is_dense_layout(r, strides, field_size));
 #else
-          if (!accessor.find_strides(r, strides))
+          if (result == NULL)
           {
             fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
                             "not contained within the bounds of a piece\n");
@@ -6237,16 +6242,17 @@ namespace Legion {
 #endif
           }
 #endif
-          return accessor.ptr(r.lo); 
+          return result;
         }
       __CUDA_HD__
       inline const FT* ptr(const Rect<1,T>& r, size_t strides[1],
                            size_t field_size = sizeof(FT)) const
         {
+          FT *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
-          assert(accessor.find_strides(r, strides));
+          assert(result != NULL);
 #else
-          if (!accessor.find_strides(r, strides))
+          if (result == NULL)
           {
             fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
                             "not contained within the bounds of a piece\n");
@@ -6258,7 +6264,7 @@ namespace Legion {
           }
 #endif
           strides[0] /= field_size;
-          return accessor.ptr(r.lo); 
+          return result;
         }
       __CUDA_HD__
       inline const FT& operator[](const Point<1,T>& p) const
@@ -6361,15 +6367,16 @@ namespace Legion {
                            size_t field_size = sizeof(FT)) const
         {
           size_t strides[1];
+          FT *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
-          assert(accessor.find_strides(r, strides));
+          assert(result != NULL);
           assert(__legion_is_dense_layout(r, strides, field_size));
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
                                               LEGION_READ_ONLY);
-          if (!accessor.find_strides(r, strides))
+          if (result == NULL)
           {
             fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
                             "not contained within the bounds of a piece\n");
@@ -6390,20 +6397,21 @@ namespace Legion {
 #endif
           }
 #endif
-          return accessor.ptr(r.lo);
+          return result;
         }
       __CUDA_HD__
       inline const FT* ptr(const Rect<1,T>& r, size_t strides[1],
                            size_t field_size = sizeof(FT)) const
         {
+          FT *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
-          assert(accessor.find_strides(r, strides));
+          assert(result != NULL);
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
                                               LEGION_READ_ONLY);
-          if (!accessor.find_strides(r, strides))
+          if (result == NULL)
           {
             fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
                             "not contained within the bounds of a piece\n");
@@ -6415,7 +6423,7 @@ namespace Legion {
           }
 #endif
           strides[0] /= field_size;
-          return accessor.ptr(r.lo);
+          return result;
         }
       __CUDA_HD__
       inline const FT& operator[](const Point<1,T>& p) const
@@ -6512,11 +6520,12 @@ namespace Legion {
       inline FT* ptr(const Rect<N,T>& r, size_t field_size = sizeof(FT)) const
         {
           size_t strides[N];
+          FT *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
-          assert(accessor.find_strides(r, strides));
+          assert(result != NULL);
           assert(__legion_is_dense_layout(r, strides, field_size));
 #else
-          if (!accessor.find_strides(r, strides))
+          if (result == NULL)
           {
             fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
                             "not contained within the bounds of a piece\n");
@@ -6537,16 +6546,17 @@ namespace Legion {
 #endif
           }
 #endif
-          return accessor.ptr(r.lo);
+          return result;
         }
       __CUDA_HD__
       inline FT* ptr(const Rect<N,T>& r, size_t strides[N],
                      size_t field_size = sizeof(FT)) const
         {
+          FT *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
-          assert(accessor.find_strides(r, strides));
+          assert(result != NULL);
 #else
-          if (!accessor.find_strides(r, strides))
+          if (result == NULL)
           {
             fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
                             "not contained within the bounds of a piece\n");
@@ -6559,7 +6569,7 @@ namespace Legion {
 #endif
           for (int i = 0; i < N; i++)
             strides[i] /= field_size;
-          return accessor.ptr(r.lo);
+          return result;
         }
       __CUDA_HD__
       inline FT& operator[](const Point<N,T>& p) const
@@ -6690,15 +6700,16 @@ namespace Legion {
       inline FT* ptr(const Rect<N,T>& r, size_t field_size = sizeof(FT)) const
         {
           size_t strides[N];
+          FT *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
-          assert(accessor.find_strides(r, strides));
+          assert(result != NULL);
           assert(__legion_is_dense_layout(r, strides, field_size));
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
                                               LEGION_READ_WRITE);
-          if (!accessor.find_strides(r, strides))
+          if (result == NULL)
           {
             fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
                             "not contained within the bounds of a piece\n");
@@ -6719,20 +6730,21 @@ namespace Legion {
 #endif
           }
 #endif
-          return accessor.ptr(r.lo);
+          return result;
         }
       __CUDA_HD__
       inline FT* ptr(const Rect<N,T>& r, size_t strides[N],
                      size_t field_size = sizeof(FT)) const
         {
+          FT *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
-          assert(accessor.find_strides(r, strides));
+          assert(result != NULL);
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
                                               LEGION_READ_WRITE);
-          if (!accessor.find_strides(r, strides))
+          if (result == NULL)
           {
             fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
                             "not contained within the bounds of a piece\n");
@@ -6745,7 +6757,7 @@ namespace Legion {
 #endif
           for (int i = 0; i < N; i++)
             strides[i] /= field_size;
-          return accessor.ptr(r.lo);
+          return result;
         }
       __CUDA_HD__
       inline FT& operator[](const Point<N,T>& p) const
@@ -6868,11 +6880,12 @@ namespace Legion {
       inline FT* ptr(const Rect<1,T>& r, size_t field_size = sizeof(FT)) const
         {
           size_t strides[1];
+          FT *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
-          assert(accessor.find_strides(r, strides));
+          assert(result != NULL);
           assert(__legion_is_dense_layout(r, strides, field_size));
 #else
-          if (!accessor.find_strides(r, strides))
+          if (result == NULL)
           {
             fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
                             "not contained within the bounds of a piece\n");
@@ -6893,16 +6906,17 @@ namespace Legion {
 #endif
           }
 #endif
-          return accessor.ptr(r.lo);
+          return result;
         }
       __CUDA_HD__
       inline FT* ptr(const Rect<1,T>& r, size_t strides[1],
                      size_t field_size = sizeof(FT)) const
         {
+          FT *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
-          assert(accessor.find_strides(r, strides));
+          assert(result != NULL);
 #else
-          if (!accessor.find_strides(r, strides))
+          if (result == NULL)
           {
             fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
                             "not contained within the bounds of a piece\n");
@@ -6914,7 +6928,7 @@ namespace Legion {
           }
 #endif
           strides[0] /= field_size;
-          return accessor.ptr(r.lo);
+          return result;
         }
       __CUDA_HD__
       inline FT& operator[](const Point<1,T>& p) const
@@ -7035,15 +7049,16 @@ namespace Legion {
       inline FT* ptr(const Rect<1,T>& r, size_t field_size = sizeof(FT)) const
         {
           size_t strides[1];
+          FT *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
-          assert(accessor.find_strides(r, strides));
+          assert(result != NULL);
           assert(__legion_is_dense_layout(r, strides, field_size));
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
                                               LEGION_READ_WRITE);
-          if (!accessor.find_strides(r, strides))
+          if (result == NULL)
           {
             fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
                             "not contained within the bounds of a piece\n");
@@ -7064,20 +7079,21 @@ namespace Legion {
 #endif
           }
 #endif
-          return accessor.ptr(r.lo);
+          return result;
         }
       __CUDA_HD__
       inline FT* ptr(const Rect<1,T>& r, size_t strides[1],
                      size_t field_size = sizeof(FT)) const
         {
+          FT *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
-          assert(accessor.find_strides(r, strides));
+          assert(result != NULL);
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
                                               LEGION_READ_WRITE);
-          if (!accessor.find_strides(r, strides))
+          if (result == NULL)
           {
             fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
                             "not contained within the bounds of a piece\n");
@@ -7089,7 +7105,7 @@ namespace Legion {
           }
 #endif
           strides[0] /= field_size;
-          return accessor.ptr(r.lo);
+          return result;
         }
       __CUDA_HD__
       inline FT& operator[](const Point<1,T>& p) const
@@ -7199,11 +7215,12 @@ namespace Legion {
       inline FT* ptr(const Rect<N,T>& r, size_t field_size = sizeof(FT)) const
         {
           size_t strides[N];
+          FT *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
-          assert(accessor.find_strides(r, strides));
+          assert(result != NULL);
           assert(__legion_is_dense_layout(r, strides, field_size));
 #else
-          if (!accessor.find_strides(r, strides))
+          if (result == NULL)
           {
             fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
                             "not contained within the bounds of a piece\n");
@@ -7224,16 +7241,17 @@ namespace Legion {
 #endif
           }
 #endif
-          return accessor.ptr(r.lo);
+          return result;
         }
       __CUDA_HD__
       inline FT* ptr(const Rect<N,T>& r, size_t strides[N],
                      size_t field_size = sizeof(FT)) const
         {
+          FT *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
-          assert(accessor.find_strides(r, strides));
+          assert(result != NULL);
 #else
-          if (!accessor.find_strides(r, strides))
+          if (result == NULL)
           {
             fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
                             "not contained within the bounds of a piece\n");
@@ -7246,7 +7264,7 @@ namespace Legion {
 #endif
           for (int i = 0; i < N; i++)
             strides[i] /= field_size;
-          return accessor.ptr(r.lo);
+          return result;
         }
       __CUDA_HD__
       inline FT& operator[](const Point<N,T>& p) const
@@ -7371,15 +7389,16 @@ namespace Legion {
       inline FT* ptr(const Rect<N,T>& r, size_t field_size = sizeof(FT)) const
         {
           size_t strides[N];
+          FT *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
-          assert(accessor.find_strides(r, strides));
+          assert(result != NULL);
           assert(__legion_is_dense_layout(r, strides, field_size));
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
                                               LEGION_READ_WRITE);
-          if (!accessor.find_strides(r, strides))
+          if (result == NULL)
           {
             fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
                             "not contained within the bounds of a piece\n");
@@ -7400,20 +7419,21 @@ namespace Legion {
 #endif
           }
 #endif
-          return accessor.ptr(r.lo);
+          return result;
         }
       __CUDA_HD__
       inline FT* ptr(const Rect<N,T>& r, size_t strides[N],
                      size_t field_size = sizeof(FT)) const 
         {
+          FT *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
-          assert(accessor.find_strides(r, strides));
+          assert(result != NULL);
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
                                               LEGION_READ_WRITE);
-          if (!accessor.find_strides(r, strides))
+          if (result == NULL)
           {
             fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
                             "not contained within the bounds of a piece\n");
@@ -7426,7 +7446,7 @@ namespace Legion {
 #endif
           for (int i = 0; i < N; i++)
             strides[i] /= field_size;
-          return accessor.ptr(r.lo);
+          return result;
         }
       __CUDA_HD__
       inline FT& operator[](const Point<N,T>& p) const
@@ -7535,11 +7555,12 @@ namespace Legion {
       inline FT* ptr(const Rect<1,T>& r, size_t field_size = sizeof(FT)) const
         {
           size_t strides[1];
+          FT *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
-          assert(accessor.find_strides(r, strides));
+          assert(result != NULL);
           assert(__legion_is_dense_layout(r, strides, field_size));
 #else
-          if (!accessor.find_strides(r, strides))
+          if (result == NULL)
           {
             fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
                             "not contained within the bounds of a piece\n");
@@ -7560,16 +7581,17 @@ namespace Legion {
 #endif
           }
 #endif
-          return accessor.ptr(r.lo);
+          return result;
         }
       __CUDA_HD__
       inline FT* ptr(const Rect<1,T>& r, size_t strides[1],
                      size_t field_size = sizeof(FT)) const
         {
+          FT *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
-          assert(accessor.find_strides(r, strides));
+          assert(result != NULL);
 #else
-          if (!accessor.find_strides(r, strides))
+          if (result == NULL)
           {
             fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
                             "not contained within the bounds of a piece\n");
@@ -7581,7 +7603,7 @@ namespace Legion {
           }
 #endif
           strides[0] /= field_size;
-          return accessor.ptr(r.lo);
+          return result;
         }
       __CUDA_HD__
       inline FT& operator[](const Point<1,T>& p) const
@@ -7695,15 +7717,16 @@ namespace Legion {
       inline FT* ptr(const Rect<1,T>& r, size_t field_size = sizeof(FT)) const
         {
           size_t strides[1];
+          FT *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
-          assert(accessor.find_strides(r, strides));
+          assert(result != NULL);
           assert(__legion_is_dense_layout(r, strides, field_size));
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
                                               LEGION_READ_WRITE);
-          if (!accessor.find_strides(r, strides))
+          if (result == NULL)
           {
             fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
                             "not contained within the bounds of a piece\n");
@@ -7724,20 +7747,21 @@ namespace Legion {
 #endif
           }
 #endif
-          return accessor.ptr(r.lo);
+          return result;
         }
       __CUDA_HD__
       inline FT* ptr(const Rect<1,T>& r, size_t strides[1],
                      size_t field_size = sizeof(FT)) const
         {
+          FT *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
-          assert(accessor.find_strides(r, strides));
+          assert(result != NULL);
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
                                               LEGION_READ_WRITE);
-          if (!accessor.find_strides(r, strides))
+          if (result == NULL)
           {
             fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
                             "not contained within the bounds of a piece\n");
@@ -7749,7 +7773,7 @@ namespace Legion {
           }
 #endif
           strides[0] /= field_size;
-          return accessor.ptr(r.lo);
+          return result;
         }
       __CUDA_HD__
       inline FT& operator[](const Point<1,T>& p) const
@@ -7841,11 +7865,12 @@ namespace Legion {
       inline FT* ptr(const Rect<N,T>& r, size_t field_size = sizeof(FT)) const
         {
           size_t strides[N];
+          FT *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
-          assert(accessor.find_strides(r, strides));
+          assert(result != NULL);
           assert(__legion_is_dense_layout(r, strides, field_size));
 #else
-          if (!accessor.find_strides(r, strides))
+          if (result == NULL)
           {
             fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
                             "not contained within the bounds of a piece\n");
@@ -7866,16 +7891,17 @@ namespace Legion {
 #endif
           }
 #endif
-          return accessor.ptr(r.lo);
+          return result;
         }
       __CUDA_HD__
       inline FT* ptr(const Rect<N,T>& r, size_t strides[N],
                      size_t field_size = sizeof(FT)) const
         {
+          FT *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
-          assert(accessor.find_strides(r, strides));
+          assert(result != NULL);
 #else
-          if (!accessor.find_strides(r, strides))
+          if (result == NULL)
           {
             fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
                             "not contained within the bounds of a piece\n");
@@ -7888,7 +7914,7 @@ namespace Legion {
 #endif
           for (int i = 0; i < N; i++)
             strides[i] /= field_size;
-          return accessor.ptr(r.lo);
+          return result;
         }
       __CUDA_HD__
       inline FT& operator[](const Point<N,T>& p) const
@@ -8002,15 +8028,16 @@ namespace Legion {
       inline FT* ptr(const Rect<N,T>& r, size_t field_size = sizeof(FT)) const
         {
           size_t strides[N];
+          FT *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
-          assert(accessor.find_strides(r, strides));
+          assert(result != NULL);
           assert(__legion_is_dense_layout(r, strides, field_size));
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
                                               LEGION_READ_WRITE);
-          if (!accessor.find_strides(r, strides))
+          if (result == NULL)
           {
             fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
                             "not contained within the bounds of a piece\n");
@@ -8031,20 +8058,21 @@ namespace Legion {
 #endif
           }
 #endif
-          return accessor.ptr(r.lo);
+          return result;
         }
       __CUDA_HD__
       inline FT* ptr(const Rect<N,T>& r, size_t strides[N],
                      size_t field_size = sizeof(FT)) const 
         {
+          FT *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
-          assert(accessor.find_strides(r, strides));
+          assert(result != NULL);
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
                                               LEGION_READ_WRITE);
-          if (!accessor.find_strides(r, strides))
+          if (result == NULL)
           {
             fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
                             "not contained within the bounds of a piece\n");
@@ -8057,7 +8085,7 @@ namespace Legion {
 #endif
           for (int i = 0; i < N; i++)
             strides[i] /= field_size;
-          return accessor.ptr(r.lo);
+          return result;
         }
       __CUDA_HD__
       inline FT& operator[](const Point<N,T>& p) const
@@ -8161,11 +8189,12 @@ namespace Legion {
       inline FT* ptr(const Rect<1,T>& r, size_t field_size = sizeof(FT)) const
         {
           size_t strides[1];
+          FT *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
-          assert(accessor.find_strides(r, strides));
+          assert(result != NULL);
           assert(__legion_is_dense_layout(r, strides, field_size));
 #else
-          if (!accessor.find_strides(r, strides))
+          if (result == NULL)
           {
             fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
                             "not contained within the bounds of a piece\n");
@@ -8192,10 +8221,11 @@ namespace Legion {
       inline FT* ptr(const Rect<1,T>& r, size_t strides[1],
                      size_t field_size = sizeof(FT)) const
         {
+          FT *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
-          assert(accessor.find_strides(r, strides));
+          assert(result != NULL);
 #else
-          if (!accessor.find_strides(r, strides))
+          if (result == NULL)
           {
             fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
                             "not contained within the bounds of a piece\n");
@@ -8309,15 +8339,16 @@ namespace Legion {
       inline FT* ptr(const Rect<1,T>& r, size_t field_size = sizeof(FT)) const
         {
           size_t strides[1];
+          FT *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
-          assert(accessor.find_strides(r, strides));
+          assert(result != NULL);
           assert(__legion_is_dense_layout(r, strides, field_size));
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
                                               LEGION_READ_WRITE);
-          if (!accessor.find_strides(r, strides))
+          if (result == NULL)
           {
             fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
                             "not contained within the bounds of a piece\n");
@@ -8338,20 +8369,21 @@ namespace Legion {
 #endif
           }
 #endif
-          return accessor.ptr(r.lo);
+          return result;
         }
       __CUDA_HD__
       inline FT* ptr(const Rect<1,T>& r, size_t strides[1],
                      size_t field_size = sizeof(FT)) const
         {
+          FT *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
-          assert(accessor.find_strides(r, strides));
+          assert(result != NULL);
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
                                               LEGION_READ_WRITE);
-          if (!accessor.find_strides(r, strides))
+          if (result == NULL)
           {
             fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
                             "not contained within the bounds of a piece\n");
@@ -8363,7 +8395,7 @@ namespace Legion {
           }
 #endif
           strides[0] /= field_size;
-          return accessor.ptr(r.lo);
+          return result;
         }
       __CUDA_HD__
       inline FT& operator[](const Point<1,T>& p) const
@@ -8449,11 +8481,12 @@ namespace Legion {
               size_t field_size = sizeof(REDOP::RHS)) const
         {
           size_t strides[N];
+          typename REDOP::RHS *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
-          assert(accessor.find_strides(r, strides));
+          assert(result != NULL);
           assert(__legion_is_dense_layout(r, strides, field_size));
 #else
-          if (!accessor.find_strides(r, strides))
+          if (result == NULL)
           {
             fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
                             "not contained within the bounds of a piece\n");
@@ -8474,16 +8507,17 @@ namespace Legion {
 #endif
           }
 #endif
-          return accessor.ptr(r.lo);
+          return result;
         }
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Rect<N,T>& r, 
               size_t strides[N], size_t field_size = sizeof(REDOP::RHS)) const
         {
+          typename REDOP::RHS *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
-          assert(accessor.find_strides(r, strides));
+          assert(result != NULL);
 #else
-          if (!accessor.find_strides(r, strides))
+          if (result == NULL)
           {
             fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
                             "not contained within the bounds of a piece\n");
@@ -8496,7 +8530,7 @@ namespace Legion {
 #endif
           for (int i = 0; i < N; i++)
             strides[i] /= field_size;
-          return accessor.ptr(r.lo);
+          return result;
         }
       __CUDA_HD__
       inline ArraySyntax::ReductionHelper<ReductionAccessor<REDOP,EXCLUSIVE,N,
@@ -8607,15 +8641,16 @@ namespace Legion {
               size_t field_size = sizeof(REDOP::RHS)) const
         {
           size_t strides[N];
+          typename REDOP::RHS *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
-          assert(accessor.find_strides(r, strides));
+          assert(result != NULL);
           assert(__legion_is_dense_layout(r, strides, field_size));
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
                                               LEGION_REDUCE);
-          if (!accessor.find_strides(r, strides))
+          if (result == NULL)
           {
             fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
                             "not contained within the bounds of a piece\n");
@@ -8636,20 +8671,21 @@ namespace Legion {
 #endif
           }
 #endif
-          return accessor.ptr(r.lo);
+          return result;
         }
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Rect<N,T>& r,
               size_t strides[N], size_t field_size = sizeof(REDOP::RHS)) const
         {
+          typename REDOP::RHS *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
-          assert(accessor.find_strides(r, strides));
+          assert(result != NULL);
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
                                               LEGION_REDUCE);
-          if (!accessor.find_strides(r, strides))
+          if (result == NULL)
           {
             fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
                             "not contained within the bounds of a piece\n");
@@ -8662,7 +8698,7 @@ namespace Legion {
 #endif
           for (int i = 0; i < N; i++)
             strides[i] /= field_size;
-          return accessor.ptr(r.lo);
+          return result;
         }
       __CUDA_HD__
       inline ArraySyntax::ReductionHelper<ReductionAccessor<REDOP,EXCLUSIVE,N,
@@ -8758,11 +8794,12 @@ namespace Legion {
               size_t field_size = sizeof(REDOP::RHS)) const
         {
           size_t strides[1];
+          typename REDOP::RHS *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
-          assert(accessor.find_strides(r, strides));
+          assert(result != NULL);
           assert(__legion_is_dense_layout(r, strides, field_size));
 #else
-          if (!accessor.find_strides(r, strides))
+          if (result == NULL)
           {
             fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
                             "not contained within the bounds of a piece\n");
@@ -8783,16 +8820,17 @@ namespace Legion {
 #endif
           }
 #endif
-          return accessor.ptr(r.lo);
+          return result;
         }
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Rect<1,T>& r, 
               size_t strides[1], size_t field_size = sizeof(REDOP::RHS)) const
         {
+          typename REDOP::RHS *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
-          assert(accessor.find_strides(r, strides));
+          assert(result != NULL);
 #else
-          if (!accessor.find_strides(r, strides))
+          if (result == NULL)
           {
             fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
                             "not contained within the bounds of a piece\n");
@@ -8804,7 +8842,7 @@ namespace Legion {
           }
 #endif
           strides[0] /= field_size;
-          return accessor.ptr(r.lo);
+          return result;
         }
       __CUDA_HD__
       inline ArraySyntax::ReductionHelper<ReductionAccessor<REDOP,EXCLUSIVE,1,
@@ -8905,14 +8943,15 @@ namespace Legion {
               size_t field_size = sizeof(REDOP::RHS)) const
         {
           size_t strides[1];
+          typename REDOP::RHS *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
-          assert(accessor.find_strides(r, strides));
+          assert(result != NULL);
           assert(__legion_is_dense_layout(r, strides, field_size));
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, LEGION_REDUCE);
-          if (!accessor.find_strides(r, strides))
+          if (result == NULL)
           {
             fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
                             "not contained within the bounds of a piece\n");
@@ -8933,19 +8972,20 @@ namespace Legion {
 #endif
           }
 #endif
-          return accessor.ptr(r.lo);
+          return result;
         }
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Rect<1,T>& r,
               size_t strides[1], size_t field_size = sizeof(REDOP::RHS)) const
         {
+          typename REDOP::RHS *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
-          assert(accessor.find_strides(r, strides));
+          assert(result != NULL);
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, LEGION_REDUCE);
-          if (!accessor.find_strides(r, strides))
+          if (result == NULL)
           {
             fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
                             "not contained within the bounds of a piece\n");
@@ -8957,7 +8997,7 @@ namespace Legion {
           }
 #endif
           strides[0] /= field_size;
-          return accessor.ptr(r.lo);
+          return result;
         }
       __CUDA_HD__
       inline ArraySyntax::ReductionHelper<ReductionAccessor<REDOP,EXCLUSIVE,1,
@@ -14503,11 +14543,12 @@ namespace Legion {
       inline FT* ptr(const Rect<N,T>& r, size_t field_size = sizeof(FT)) const
         {
           size_t strides[N];
+          FT *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
-          assert(accessor.find_strides(r, strides));
+          assert(result != NULL);
           assert(__legion_is_dense_layout(r, strides, field_size));
 #else
-          if (!accessor.find_strides(r, strides))
+          if (result == NULL)
           {
             fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
                             "not contained within the bounds of a piece\n");
@@ -14528,16 +14569,17 @@ namespace Legion {
 #endif
           }
 #endif
-          return accessor.ptr(r.lo);
+          return result;
         }
       __CUDA_HD__
       inline FT* ptr(const Rect<N,T>& r, size_t strides[N],
                      size_t field_size = sizeof(FT)) const
         {
+          FT *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
-          assert(accessor.find_strides(r, strides));
+          assert(result != NULL);
 #else
-          if (!accessor.find_strides(r, strides))
+          if (result == NULL)
           {
             fprintf(stderr, "ERROR: Illegal request for pointer of rectangle "
                             "not contained within the bounds of a piece\n");
@@ -14550,7 +14592,7 @@ namespace Legion {
 #endif
           for (int i = 0; i < N; i++)
             strides[i] /= field_size;
-          return accessor.ptr(r.lo);
+          return result;
         }
       __CUDA_HD__
       inline FT& operator[](const Point<N,T> &p) const
@@ -14715,15 +14757,12 @@ namespace Legion {
           while (piece_iterator.valid())
           {
             size_t strides[DIM];
-#ifdef DEBUG_LEGION
-            bool good_strides = 
-#endif
-              accessor.find_strides(*piece_iterator, strides); 
+            FT *ptr = accessor.ptr(*piece_iterator, strides); 
 #ifdef DEBUG_LEGION
             // If we ever hit this it is a runtime error because the 
             // runtime should already be guaranteeing these rectangles
             // are inside of pieces for the instance
-            assert(good_strides);
+            assert(ptr != NULL);
 #endif         
             // Find the minimum stride and see if this piece is dense
             size_t min_stride = SIZE_MAX;
@@ -14732,7 +14771,6 @@ namespace Legion {
                 min_stride = strides[dim];
             if (__legion_is_dense_layout(*piece_iterator, strides, min_stride))
             {
-              FT *ptr = accessor.ptr(piece_iterator->lo);
               const size_t volume = piece_iterator->volume();
               if (!current.empty())
               {
@@ -18579,15 +18617,12 @@ namespace Legion {
       while (piece_iterator.valid())
       {
         size_t strides[DIM];
-#ifdef DEBUG_LEGION
-        bool good_strides = 
-#endif
-          accessor.find_strides(*piece_iterator, strides); 
+        FT *ptr = accessor.ptr(*piece_iterator, strides); 
 #ifdef DEBUG_LEGION
         // If we ever hit this it is a runtime error because the 
         // runtime should already be guaranteeing these rectangles
         // are inside of pieces for the instance
-        assert(good_strides);
+        assert(ptr != NULL);
 #endif         
         // Find the minimum stride and see if this piece is dense
         size_t min_stride = SIZE_MAX;
@@ -18596,7 +18631,6 @@ namespace Legion {
             min_stride = strides[dim];
         if (__legion_is_dense_layout(*piece_iterator, strides, min_stride))
         {
-          FT *ptr = accessor.ptr(piece_iterator->lo);
           const size_t volume = piece_iterator->volume();
           if (!current.empty())
           {
