@@ -199,6 +199,44 @@ namespace Realm {
     //   actual volume)
     size_t volume_approx(void) const;
 
+    // attempts to compute a set of covering rectangles for the index space
+    //  with the following properties:
+    // a) every point in the index space is included in (exactly) one rect
+    // b) none of the resulting rectangles overlap each other
+    // c) no more than 'max_rects' rectangles are used (0 = no limit)
+    // d) the relative storage overhead (%) is less than 'max_overhead'
+    //     i.e. 100*(volume(covering)/volume(space) - 1) <= max_overhead
+    //
+    // if successful, this function returns true and fills in 'covering'
+    //   vector
+    // if unsuccessful, it returns false and leaves 'covering' unchanged
+    //
+    // for N=1 (i.e. 1-D index spaces), this function is optimal, returning
+    //  a zero-overhead covering using a minimal number of rectangles if
+    //  that satisfies the 'max_rects' bound, or a covering (using
+    //  'max_rects' rectangles) with minimal overhead if that overhead is
+    //  acceptable, or fails if no covering exists
+    //
+    // for N>1, heuristics are used, and the guarantees are much weaker:
+    // a) a request with 'max_rects'==1 will precisely compute the overhead
+    //   and succeed/fail appropriately
+    // b) a request with 'max_rects'== 0 (no limit) will always succeed with
+    //   zero overhead, although the number of rectangles used may not be
+    //   minimal
+    // c) the computational complexity of the attempt will bounded at:
+    //      O(nm log m + nmk^2), where:
+    //         n = dimension of index space
+    //         m = size of exact internal representation (which itself is
+    //               computed by heuristics and may not be optimal for some
+    //               dependent-partitioning results)
+    //         k = maximum output rectangles
+    //      this allows for sorting the inputs and/or outputs as well as
+    //       dynamic programming approaches but precludes more "heroic"
+    //       optimizations - a use case that requires better results and/or
+    //       admits specific optimizations will need to compute its own
+    //       coverings
+    bool compute_covering(size_t max_rects, int max_overhead,
+			  std::vector<Rect<N,T> >& covering) const;
 
     // as an alternative to IndexSpaceIterator's, this will internally iterate over rectangles
     //  and call your callable/lambda for each subrectangle

@@ -74,16 +74,10 @@ namespace Realm {
   {}
 
   template <int N, typename T>
-  inline /*static*/ InstanceLayoutGeneric *InstanceLayoutGeneric::choose_instance_layout(IndexSpace<N,T> is,
-											 const InstanceLayoutConstraints& ilc,
-                                                                                         const int dim_order[N])
+  /*static*/ InstanceLayoutGeneric *InstanceLayoutGeneric::choose_instance_layout(IndexSpace<N,T> is,
+										  const InstanceLayoutConstraints& ilc,
+										  const int dim_order[N])
   {
-    InstanceLayout<N,T> *layout = new InstanceLayout<N,T>;
-    layout->bytes_used = 0;
-    // require 32B alignment of each instance piece for vectorizing goodness
-    layout->alignment_reqd = 32;
-    layout->space = is;
-
     std::vector<Rect<N,T> > piece_bounds;
     if(is.dense()) {
       // dense case is nice and simple
@@ -105,9 +99,24 @@ namespace Realm {
       }
     }
 
+    return choose_instance_layout<N,T>(is, piece_bounds, ilc, dim_order);
+  }
+
+  template <int N, typename T>
+  /*static*/ InstanceLayoutGeneric *InstanceLayoutGeneric::choose_instance_layout(IndexSpace<N,T> is,
+										  const std::vector<Rect<N,T> >& covering,
+										  const InstanceLayoutConstraints& ilc,
+										  const int dim_order[N])
+  {
+    InstanceLayout<N,T> *layout = new InstanceLayout<N,T>;
+    layout->bytes_used = 0;
+    // require 32B alignment of each instance piece for vectorizing goodness
+    layout->alignment_reqd = 32;
+    layout->space = is;
+
     // if the index space is empty, all fields can use the same empty
     //  piece list
-    if(piece_bounds.empty()) {
+    if(covering.empty()) {
       layout->piece_lists.resize(1);
       for(std::vector<InstanceLayoutConstraints::FieldGroup>::const_iterator it = ilc.field_groups.begin();
 	  it != ilc.field_groups.end();
@@ -188,11 +197,11 @@ namespace Realm {
 
 	// create the piece list
 	InstancePieceList<N,T>& pl = layout->piece_lists[li];
-	pl.pieces.reserve(piece_bounds.size());
+	pl.pieces.reserve(covering.size());
 
 	size_t pl_start = round_up(layout->bytes_used, galign);
-	for(typename std::vector<Rect<N,T> >::const_iterator it = piece_bounds.begin();
-	    it != piece_bounds.end();
+	for(typename std::vector<Rect<N,T> >::const_iterator it = covering.begin();
+	    it != covering.end();
 	    ++it) {
 	  Rect<N,T> bbox = *it;
 	  // TODO: bloat bbox for block size if desired

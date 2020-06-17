@@ -52,9 +52,6 @@ namespace Realm {
 			      size_t block_size);
     InstanceLayoutConstraints(const std::vector<size_t>& field_sizes,
 			      size_t block_size);
-#ifdef REALM_USE_LEGION_LAYOUT_CONSTRAINTS
-    InstanceLayoutConstraints(const Legion::LayoutConstraintSet& lcs);
-#endif
 
     struct FieldInfo {
       FieldID field_id;
@@ -89,8 +86,20 @@ namespace Realm {
 
     virtual void print(std::ostream& os) const = 0;
 
+    // creates an affine layout using the bounds of 'is' (i.e. one piece)
+    //  using the requested dimension ordering and respecting the field
+    //  size/alignment constraints provided
     template <int N, typename T>
     static InstanceLayoutGeneric *choose_instance_layout(IndexSpace<N,T> is,
+							 const InstanceLayoutConstraints& ilc,
+                                                         const int dim_order[N]);
+
+    // creates a multi-affine layout using one piece for each rectangle in
+    //  'covering', using the requested dimension ordering and respecting
+    //  the field size/alignment constraints provided
+    template <int N, typename T>
+    static InstanceLayoutGeneric *choose_instance_layout(IndexSpace<N,T> is,
+							 const std::vector<Rect<N,T> >& covering,
 							 const InstanceLayoutConstraints& ilc,
                                                          const int dim_order[N]);
 

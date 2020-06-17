@@ -117,6 +117,11 @@ namespace Realm {
     bool overlaps(SparsityMapPublicImpl<N,T> *other,
 		  const Rect<N,T>& bounds, bool approx);
 
+    // see IndexSpace<N,T>::compute_covering for a description of this
+    bool compute_covering(const Rect<N,T> &bounds,
+			  size_t max_rects, int max_overhead,
+			  std::vector<Rect<N,T> >& covering);
+
   protected:
     bool entries_valid, approx_valid;
     std::vector<SparsityMapEntry<N,T> > entries;
