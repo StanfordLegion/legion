@@ -6767,7 +6767,7 @@ namespace Legion {
                                      const LayoutConstraintRegistrar &registrar)
     //--------------------------------------------------------------------------
     {
-      return runtime->register_layout(registrar, AUTO_GENERATE_ID);
+      return runtime->register_layout(registrar, LEGION_AUTO_GENERATE_ID);
     }
 
     //--------------------------------------------------------------------------

@@ -400,10 +400,10 @@ namespace Legion {
       runtime->forest->create_field_space(space, did);
       register_field_space_creation(space);
       if (resulting_fields.size() < sizes.size())
-        resulting_fields.resize(sizes.size(), AUTO_GENERATE_ID);
+        resulting_fields.resize(sizes.size(), LEGION_AUTO_GENERATE_ID);
       for (unsigned idx = 0; idx < resulting_fields.size(); idx++)
       {
-        if (resulting_fields[idx] == AUTO_GENERATE_ID)
+        if (resulting_fields[idx] == LEGION_AUTO_GENERATE_ID)
           resulting_fields[idx] = runtime->get_unique_field_id();
 #ifdef DEBUG_LEGION
         else if (resulting_fields[idx] >= LEGION_MAX_APPLICATION_FIELD_ID)
@@ -488,7 +488,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (fid == AUTO_GENERATE_ID)
+      if (fid == LEGION_AUTO_GENERATE_ID)
         fid = runtime->get_unique_field_id();
 #ifdef DEBUG_LEGION
       else if (fid >= LEGION_MAX_APPLICATION_FIELD_ID)
@@ -524,10 +524,10 @@ namespace Legion {
     {
       AutoRuntimeCall call(this);
       if (resulting_fields.size() < sizes.size())
-        resulting_fields.resize(sizes.size(), AUTO_GENERATE_ID);
+        resulting_fields.resize(sizes.size(), LEGION_AUTO_GENERATE_ID);
       for (unsigned idx = 0; idx < resulting_fields.size(); idx++)
       {
-        if (resulting_fields[idx] == AUTO_GENERATE_ID)
+        if (resulting_fields[idx] == LEGION_AUTO_GENERATE_ID)
           resulting_fields[idx] = runtime->get_unique_field_id();
 #ifdef DEBUG_LEGION
         else if (resulting_fields[idx] >= LEGION_MAX_APPLICATION_FIELD_ID)
@@ -2133,7 +2133,7 @@ namespace Legion {
         // If we make it in here then we know we have at least found
         // the parent name so we can set the bad index
         bad_index = local_index;
-        bad_field = AUTO_GENERATE_ID; // set it to an invalid field
+        bad_field = LEGION_AUTO_GENERATE_ID; // set it to an invalid field
         if ((req.handle_type == LEGION_SINGULAR_PROJECTION) || 
             (req.handle_type == LEGION_REGION_PROJECTION))
         {
@@ -3901,7 +3901,7 @@ namespace Legion {
                       get_task_name(), get_unique_id());
 #endif
       LegionColor partition_color = INVALID_COLOR;
-      if (color != AUTO_GENERATE_ID)
+      if (color != LEGION_AUTO_GENERATE_ID)
         partition_color = color;
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
@@ -3936,7 +3936,7 @@ namespace Legion {
                       get_task_name(), get_unique_id());
 #endif
       LegionColor partition_color = INVALID_COLOR;
-      if (color != AUTO_GENERATE_ID)
+      if (color != LEGION_AUTO_GENERATE_ID)
         partition_color = color;
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
@@ -3987,7 +3987,7 @@ namespace Legion {
                         "partition by union!", handle2.id, parent.id)
 #endif
       LegionColor partition_color = INVALID_COLOR;
-      if (color != AUTO_GENERATE_ID)
+      if (color != LEGION_AUTO_GENERATE_ID)
         partition_color = color;
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
@@ -4068,7 +4068,7 @@ namespace Legion {
                         "intersection!", handle2.id, parent.id)
 #endif
       LegionColor partition_color = INVALID_COLOR;
-      if (color != AUTO_GENERATE_ID)
+      if (color != LEGION_AUTO_GENERATE_ID)
         partition_color = color;
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
@@ -4142,7 +4142,7 @@ namespace Legion {
             parent.id, get_task_name(), get_unique_id())
 #endif
       LegionColor partition_color = INVALID_COLOR;
-      if (color != AUTO_GENERATE_ID)
+      if (color != LEGION_AUTO_GENERATE_ID)
         partition_color = color;
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
@@ -4212,7 +4212,7 @@ namespace Legion {
                               handle2.id, parent.id)
 #endif
       LegionColor partition_color = INVALID_COLOR;
-      if (color != AUTO_GENERATE_ID)
+      if (color != LEGION_AUTO_GENERATE_ID)
         partition_color = color;
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
@@ -4271,7 +4271,7 @@ namespace Legion {
       if (runtime->verify_partitions)
         SWAP_PART_KINDS(verify_kind, kind)
       LegionColor partition_color = INVALID_COLOR;
-      if (color != AUTO_GENERATE_ID)
+      if (color != LEGION_AUTO_GENERATE_ID)
         partition_color = color;
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
@@ -4397,7 +4397,7 @@ namespace Legion {
                       get_task_name(), get_unique_id());
 #endif
       LegionColor part_color = INVALID_COLOR;
-      if (color != AUTO_GENERATE_ID)
+      if (color != LEGION_AUTO_GENERATE_ID)
         part_color = color; 
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
@@ -4439,7 +4439,7 @@ namespace Legion {
                       get_task_name(), get_unique_id());
 #endif
       LegionColor part_color = INVALID_COLOR;
-      if (color != AUTO_GENERATE_ID)
+      if (color != LEGION_AUTO_GENERATE_ID)
         part_color = color; 
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
@@ -4483,7 +4483,7 @@ namespace Legion {
                       get_task_name(), get_unique_id());
 #endif
       LegionColor part_color = INVALID_COLOR;
-      if (color != AUTO_GENERATE_ID)
+      if (color != LEGION_AUTO_GENERATE_ID)
         part_color = color;
       // Allocate the partition operation
       DependentPartitionOp *part_op = 
@@ -4549,7 +4549,7 @@ namespace Legion {
                       get_task_name(), get_unique_id());
 #endif
       LegionColor part_color = INVALID_COLOR;
-      if (color != AUTO_GENERATE_ID)
+      if (color != LEGION_AUTO_GENERATE_ID)
         part_color = color;
       // Allocate the partition operation
       DependentPartitionOp *part_op = 
@@ -4615,7 +4615,7 @@ namespace Legion {
                       get_task_name(), get_unique_id());
 #endif
       LegionColor part_color = INVALID_COLOR;
-      if (color != AUTO_GENERATE_ID)
+      if (color != LEGION_AUTO_GENERATE_ID)
         part_color = color;
       // Allocate the partition operation
       DependentPartitionOp *part_op = 
@@ -4682,7 +4682,7 @@ namespace Legion {
                       get_task_name(), get_unique_id());
 #endif
       LegionColor part_color = INVALID_COLOR;
-      if (color != AUTO_GENERATE_ID)
+      if (color != LEGION_AUTO_GENERATE_ID)
         part_color = color;
       // Allocate the partition operation
       DependentPartitionOp *part_op = 
@@ -4767,7 +4767,7 @@ namespace Legion {
                       "(ID %lld)", get_task_name(), get_unique_id());
 #endif
       LegionColor part_color = INVALID_COLOR;
-      if (color != AUTO_GENERATE_ID)
+      if (color != LEGION_AUTO_GENERATE_ID)
         part_color = color;
       // Allocate the partition operation
       DependentPartitionOp *part_op = 
@@ -4830,7 +4830,7 @@ namespace Legion {
                       get_task_name(), get_unique_id());
 #endif
       LegionColor part_color = INVALID_COLOR;
-      if (color != AUTO_GENERATE_ID)
+      if (color != LEGION_AUTO_GENERATE_ID)
         part_color = color;
       const ApUserEvent partition_ready = Runtime::create_ap_user_event(NULL);
       RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
@@ -5309,7 +5309,7 @@ namespace Legion {
       if (local)
         REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
             "Local fields do no support allocation with future sizes yet.")
-      if (fid == AUTO_GENERATE_ID)
+      if (fid == LEGION_AUTO_GENERATE_ID)
         fid = runtime->get_unique_field_id();
 #ifdef DEBUG_LEGION
       else if (fid >= LEGION_MAX_APPLICATION_FIELD_ID)
@@ -5408,10 +5408,10 @@ namespace Legion {
         REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
             "Local fields do no support allocation with future sizes yet.") 
       if (resulting_fields.size() < sizes.size())
-        resulting_fields.resize(sizes.size(), AUTO_GENERATE_ID);
+        resulting_fields.resize(sizes.size(), LEGION_AUTO_GENERATE_ID);
       for (unsigned idx = 0; idx < resulting_fields.size(); idx++)
       {
-        if (resulting_fields[idx] == AUTO_GENERATE_ID)
+        if (resulting_fields[idx] == LEGION_AUTO_GENERATE_ID)
           resulting_fields[idx] = runtime->get_unique_field_id();
 #ifdef DEBUG_LEGION
         else if (resulting_fields[idx] >= LEGION_MAX_APPLICATION_FIELD_ID)

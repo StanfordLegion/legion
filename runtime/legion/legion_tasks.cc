@@ -1326,7 +1326,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         // Verify that the requirement is self-consistent
-        FieldID bad_field = AUTO_GENERATE_ID;
+        FieldID bad_field = LEGION_AUTO_GENERATE_ID;
         int bad_index = -1;
         LegionErrorType et = runtime->verify_requirement(regions[idx], 
                                                          bad_field); 
@@ -1434,7 +1434,7 @@ namespace Legion {
                                  regions[idx].parent.index_space.id,
                                  regions[idx].parent.field_space.id,
                                  regions[idx].parent.tree_id, idx)
-              else if (bad_field == AUTO_GENERATE_ID) 
+              else if (bad_field == LEGION_AUTO_GENERATE_ID) 
                 REPORT_LEGION_ERROR(ERROR_PARENT_TASK_TASK,
                                  "Parent task %s (ID %lld) of task %s "
                                  "(ID %lld) does not have a region "
