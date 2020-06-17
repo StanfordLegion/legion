@@ -15913,7 +15913,7 @@ namespace Legion {
     {
       // Easy case if the user asks for no IDs
       if (cnt == 0)
-        return AUTO_GENERATE_ID;
+        return LEGION_AUTO_GENERATE_ID;
       const std::string library_name(name); 
       // Take the lock in read only mode and see if we can find the result
       RtEvent wait_on;

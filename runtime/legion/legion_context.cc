@@ -11293,7 +11293,7 @@ namespace Legion {
       IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
       LegionColor partition_color = INVALID_COLOR;
       bool color_generated = false; 
-      if (color != AUTO_GENERATE_ID)
+      if (color != LEGION_AUTO_GENERATE_ID)
         partition_color = color;
       else
         color_generated = true;
@@ -11327,7 +11327,7 @@ namespace Legion {
       IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
       LegionColor partition_color = INVALID_COLOR;
       bool color_generated = false;
-      if (color != AUTO_GENERATE_ID)
+      if (color != LEGION_AUTO_GENERATE_ID)
         partition_color = color;
       else
         color_generated = true;
@@ -11376,7 +11376,7 @@ namespace Legion {
 #endif
       LegionColor partition_color = INVALID_COLOR;
       bool color_generated = false;
-      if (color != AUTO_GENERATE_ID)
+      if (color != LEGION_AUTO_GENERATE_ID)
         partition_color = color;
       else
         color_generated = true; 
@@ -11465,7 +11465,7 @@ namespace Legion {
 #endif
       LegionColor partition_color = INVALID_COLOR;
       bool color_generated = false;
-      if (color != AUTO_GENERATE_ID)
+      if (color != LEGION_AUTO_GENERATE_ID)
         partition_color = color;
       else
         color_generated = true; 
@@ -11547,7 +11547,7 @@ namespace Legion {
 #endif
       LegionColor partition_color = INVALID_COLOR;
       bool color_generated = false;
-      if (color != AUTO_GENERATE_ID)
+      if (color != LEGION_AUTO_GENERATE_ID)
         partition_color = color;
       else
         color_generated = true;
@@ -11625,7 +11625,7 @@ namespace Legion {
 #endif
       LegionColor partition_color = INVALID_COLOR;
       bool color_generated = false;
-      if (color != AUTO_GENERATE_ID)
+      if (color != LEGION_AUTO_GENERATE_ID)
         partition_color = color;
       else
         color_generated = true; 
@@ -11697,7 +11697,7 @@ namespace Legion {
                             handle1.id, handle2.id)
 #endif
       LegionColor partition_color = INVALID_COLOR;
-      if (color != AUTO_GENERATE_ID)
+      if (color != LEGION_AUTO_GENERATE_ID)
         partition_color = color;
       ReplPendingPartitionOp *part_op = 
         runtime->get_available_repl_pending_partition_op();
@@ -11867,7 +11867,7 @@ namespace Legion {
         SWAP_PART_KINDS(verify_kind, part_kind)
       LegionColor part_color = INVALID_COLOR;
       bool color_generated = false;
-      if (color != AUTO_GENERATE_ID)
+      if (color != LEGION_AUTO_GENERATE_ID)
         part_color = color; 
       else
         color_generated = true;
@@ -11978,7 +11978,7 @@ namespace Legion {
         SWAP_PART_KINDS(verify_kind, part_kind)
       LegionColor part_color = INVALID_COLOR;
       bool color_generated = false;
-      if (color != AUTO_GENERATE_ID)
+      if (color != LEGION_AUTO_GENERATE_ID)
         part_color = color; 
       else
         color_generated = true;
@@ -12028,7 +12028,7 @@ namespace Legion {
       IndexSpace parent = handle.get_index_space();  
       LegionColor part_color = INVALID_COLOR;
       bool color_generated = false;
-      if (color != AUTO_GENERATE_ID)
+      if (color != LEGION_AUTO_GENERATE_ID)
         part_color = color;
       else
         color_generated = true;
@@ -12095,7 +12095,7 @@ namespace Legion {
         SWAP_PART_KINDS(verify_kind, part_kind)
       LegionColor part_color = INVALID_COLOR;
       bool color_generated = false;
-      if (color != AUTO_GENERATE_ID)
+      if (color != LEGION_AUTO_GENERATE_ID)
         part_color = color;
       else
         color_generated = true;
@@ -12173,7 +12173,7 @@ namespace Legion {
         SWAP_PART_KINDS(verify_kind, part_kind)
       LegionColor part_color = INVALID_COLOR;
       bool color_generated = false;
-      if (color != AUTO_GENERATE_ID)
+      if (color != LEGION_AUTO_GENERATE_ID)
         part_color = color;
       else
         color_generated = true;
@@ -12250,7 +12250,7 @@ namespace Legion {
         SWAP_PART_KINDS(verify_kind, part_kind)
       LegionColor part_color = INVALID_COLOR;
       bool color_generated = false;
-      if (color != AUTO_GENERATE_ID)
+      if (color != LEGION_AUTO_GENERATE_ID)
         part_color = color;
       else
         color_generated = true; 
@@ -12342,7 +12342,7 @@ namespace Legion {
         SWAP_PART_KINDS(verify_kind, part_kind)
       LegionColor part_color = INVALID_COLOR;
       bool color_generated = false;
-      if (color != AUTO_GENERATE_ID)
+      if (color != LEGION_AUTO_GENERATE_ID)
         part_color = color;
       else
         color_generated = true; 
@@ -12414,7 +12414,7 @@ namespace Legion {
         SWAP_PART_KINDS(verify_kind, part_kind)
       LegionColor part_color = INVALID_COLOR;
       bool color_generated = false;
-      if (color != AUTO_GENERATE_ID)
+      if (color != LEGION_AUTO_GENERATE_ID)
         part_color = color; 
       else
         color_generated = true;
@@ -13077,7 +13077,7 @@ namespace Legion {
                       "Local field creation is not currently supported "
                       "for control replication with task %s (UID %lld)",
                       get_task_name(), get_unique_id())
-      if (fid == AUTO_GENERATE_ID)
+      if (fid == LEGION_AUTO_GENERATE_ID)
       {
         if (pending_fields.empty())
           increase_pending_fields(1/*count*/, false/*double*/);
@@ -13188,7 +13188,7 @@ namespace Legion {
                       "Local field creation is not currently supported "
                       "for control replication with task %s (UID %lld)",
                       get_task_name(), get_unique_id())
-      if (fid == AUTO_GENERATE_ID)
+      if (fid == LEGION_AUTO_GENERATE_ID)
       {
         if (pending_fields.empty())
           increase_pending_fields(1/*count*/, false/*double*/);
@@ -13313,10 +13313,10 @@ namespace Legion {
                       "for control replication with task %s (UID %lld)",
                       get_task_name(), get_unique_id())
       if (resulting_fields.size() < sizes.size())
-        resulting_fields.resize(sizes.size(), AUTO_GENERATE_ID);
+        resulting_fields.resize(sizes.size(), LEGION_AUTO_GENERATE_ID);
       for (unsigned idx = 0; idx < resulting_fields.size(); idx++)
       {
-        if (resulting_fields[idx] == AUTO_GENERATE_ID)
+        if (resulting_fields[idx] == LEGION_AUTO_GENERATE_ID)
         {
           if (pending_fields.empty())
             increase_pending_fields(1/*count*/, false/*double*/);
@@ -13398,7 +13398,7 @@ namespace Legion {
                       get_task_name(), get_unique_id())
       for (unsigned idx = 0; idx < resulting_fields.size(); idx++)
       {
-        if (resulting_fields[idx] == AUTO_GENERATE_ID)
+        if (resulting_fields[idx] == LEGION_AUTO_GENERATE_ID)
         {
           if (pending_fields.empty())
             increase_pending_fields(1/*count*/, false/*double*/);
