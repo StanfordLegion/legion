@@ -2426,7 +2426,8 @@ namespace Legion {
       VariantID register_variant(const TaskVariantRegistrar &registrar,
                                  const void *user_data, size_t user_data_size,
                                  const CodeDescriptor &realm_desc,
-                                 bool ret, VariantID vid = AUTO_GENERATE_ID,
+                                 bool ret, VariantID vid = 
+                                                      LEGION_AUTO_GENERATE_ID,
                                  bool check_task_id = true,
                                  bool check_context = true,
                                  bool preregistered = false);

@@ -1463,7 +1463,7 @@ namespace Legion {
         // Make the instance
         if (!runtime->create_physical_instance(ctx, target_memory, 
               layout_constraints, regions, instance, 
-              false/*acquire*/, GC_NEVER_PRIORITY))
+              false/*acquire*/, LEGION_GC_NEVER_PRIORITY))
         {
           log_replay.error("Failed to create instance");
           assert(false);
@@ -1525,7 +1525,7 @@ namespace Legion {
         // If we're done using it, we can set a high GC priority
         if (num_uses == 0)
           runtime->set_garbage_collection_priority(ctx, instance, 
-                                                   GC_MAX_PRIORITY);
+                                                   LEGION_GC_MAX_PRIORITY);
       }
       else if (first)
       {

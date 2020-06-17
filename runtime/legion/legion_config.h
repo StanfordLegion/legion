@@ -49,38 +49,79 @@
 //                                Constants
 //==========================================================================
 
+#ifndef LEGION_AUTO_GENERATE_ID
+#define LEGION_AUTO_GENERATE_ID   UINT_MAX
+#else
+#error "legion.h requires the ability to define the macro 'LEGION_AUTO_GENERATE_ID' but it has already been defined"
+#endif
+// This is for backwards compatibility
+// Try to be nice in case someone else defined this
+#ifndef LEGION_DISABLE_DEPRECATED_ENUMS
 #ifndef AUTO_GENERATE_ID
-#define AUTO_GENERATE_ID   UINT_MAX
-#else
-#error "legion.h requires the ability to define the macro 'AUTO_GENERATE_ID' but it has already been defined"
+#define AUTO_GENERATE_ID  LEGION_AUTO_GENERATE_ID
+#endif
 #endif
 
+#ifndef LEGION_GC_MIN_PRIORITY
+#define LEGION_GC_MIN_PRIORITY    INT_MIN
+#else
+#error "legion.h requires the ability to define the macro 'LEGION_GC_MIN_PRIORITY' but it has already been defined"
+#endif
+// This is for backwards compatibility
+// Try to be nice in case someone else defined this
+#ifndef LEGION_DISABLE_DEPRECATED_ENUMS
 #ifndef GC_MIN_PRIORITY
-#define GC_MIN_PRIORITY    INT_MIN
-#else
-#error "legion.h requires the ability to define the macro 'GC_MIN_PRIORITY' but it has already been defined"
+#define GC_MIN_PRIORITY  LEGION_GC_MIN_PRIORITY
+#endif
 #endif
 
+#ifndef LEGION_GC_MAX_PRIORITY
+#define LEGION_GC_MAX_PRIORITY    INT_MAX
+#else
+#error "legion.h requires the ability to define the macro 'LEGION_GC_MAX_PRIORITY' but it has already been defined"
+#endif
+// This is for backwards compatibility
+// Try to be nice in case someone else defined this
+#ifndef LEGION_DISABLE_DEPRECATED_ENUMS
 #ifndef GC_MAX_PRIORITY
-#define GC_MAX_PRIORITY    INT_MAX
-#else
-#error "legion.h requires the ability to define the macro 'GC_MAX_PRIORITY' but it has already been defined"
+#define GC_MAX_PRIORITY  LEGION_GC_MAX_PRIORITY
+#endif
 #endif
 
+#ifndef LEGION_GC_NEVER_PRIORITY
+#define LEGION_GC_NEVER_PRIORITY  LEGION_GC_MIN_PRIORITY
+#else
+#error "legion.h requires the ability to define the macro 'LEGION_GC_NEVER_PRIORITY' but it has already been defined"
+#endif
+// This is for backwards compatibility
+// Try to be nice in case someone else defined this
+#ifndef LEGION_DISABLE_DEPRECATED_ENUMS
 #ifndef GC_NEVER_PRIORITY
-#define GC_NEVER_PRIORITY  GC_MIN_PRIORITY
-#else
-#error "legion.h requires the ability to define the macro 'GC_NEVER_PRIORITY' but it has already been defined"
+#define GC_NEVER_PRIORITY  LEGION_GC_NEVER_PRIORITY
+#endif
 #endif
 
+#ifndef LEGION_GC_FIRST_PRIORITY
+#define LEGION_GC_FIRST_PRIORITY  LEGION_GC_MAX_PRIORITY
+#endif
+#ifndef LEGION_GC_DEFAULT_PRIORITY
+#define LEGION_GC_DEFAULT_PRIORITY 0
+#endif
+#ifndef LEGION_GC_LAST_PRIORITY
+#define LEGION_GC_LAST_PRIORITY   (LEGION_GC_MIN_PRIORITY+1)
+#endif
+// This is for backwards compatibility
+// Try to be nice in case someone else defined this
+#ifndef LEGION_DISABLE_DEPRECATED_ENUMS
 #ifndef GC_FIRST_PRIORITY
-#define GC_FIRST_PRIORITY  GC_MAX_PRIORITY
+#define GC_FIRST_PRIORITY  LEGION_GC_MAX_PRIORITY
 #endif
 #ifndef GC_DEFAULT_PRIORITY
 #define GC_DEFAULT_PRIORITY 0
 #endif
 #ifndef GC_LAST_PRIORITY
-#define GC_LAST_PRIORITY   (GC_MIN_PRIORITY+1)
+#define GC_LAST_PRIORITY   (LEGION_GC_MIN_PRIORITY+1)
+#endif
 #endif
 
 #ifndef LEGION_MAX_DIM

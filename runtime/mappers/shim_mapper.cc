@@ -364,9 +364,9 @@ namespace Legion {
             bool single, bool index, bool inner, bool leaf, VariantID vid)
     //--------------------------------------------------------------------------
     {
-      if (vid == AUTO_GENERATE_ID)
+      if (vid == LEGION_AUTO_GENERATE_ID)
       {
-        for (unsigned idx = 0; idx < AUTO_GENERATE_ID; idx++)
+        for (unsigned idx = 0; idx < LEGION_AUTO_GENERATE_ID; idx++)
         {
           if (variants.find(idx) == variants.end())
           {
@@ -1250,7 +1250,7 @@ namespace Legion {
       std::set<FieldID> fields = req.privilege_fields;
       GCPriority gc_priority = 0;
       if (req.make_persistent)
-        gc_priority = GC_NEVER_PRIORITY; 
+        gc_priority = LEGION_GC_NEVER_PRIORITY; 
       if (!req.additional_fields.empty())
         fields.insert(req.additional_fields.begin(),
                       req.additional_fields.end());

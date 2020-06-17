@@ -2593,7 +2593,7 @@ legion_field_allocator_destroy(legion_field_allocator_t handle_)
 legion_field_id_t
 legion_auto_generate_id(void)
 {
-  return AUTO_GENERATE_ID;
+  return LEGION_AUTO_GENERATE_ID;
 }
 
 legion_field_id_t
@@ -6638,7 +6638,7 @@ legion_runtime_register_task_variant_fnptr(
   TaskLayoutConstraintSet *layout_constraints =
     CObjectWrapper::unwrap(layout_constraints_);
 
-  if (id == AUTO_GENERATE_ID)
+  if (id == LEGION_AUTO_GENERATE_ID)
     id = runtime->generate_dynamic_task_id();
 
   TaskVariantRegistrar registrar(id, variant_name, global);
@@ -6680,7 +6680,7 @@ legion_runtime_preregister_task_variant_fnptr(
   TaskLayoutConstraintSet *layout_constraints =
     CObjectWrapper::unwrap(layout_constraints_);
 
-  if (id == AUTO_GENERATE_ID)
+  if (id == LEGION_AUTO_GENERATE_ID)
     id = Runtime::generate_static_task_id();
 
   TaskVariantRegistrar registrar(id, variant_name);

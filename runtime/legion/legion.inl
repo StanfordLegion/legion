@@ -14509,7 +14509,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       bool check_task_id = true;
-      if (id == AUTO_GENERATE_ID)
+      if (id == LEGION_AUTO_GENERATE_ID)
       {
         id = generate_static_task_id();
         check_task_id = false;
@@ -14538,7 +14538,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       bool check_task_id = true;
-      if (id == AUTO_GENERATE_ID)
+      if (id == LEGION_AUTO_GENERATE_ID)
       {
         id = generate_static_task_id();
         check_task_id = false;
@@ -14568,7 +14568,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       bool check_task_id = true;
-      if (id == AUTO_GENERATE_ID)
+      if (id == LEGION_AUTO_GENERATE_ID)
       {
         id = generate_static_task_id();
         check_task_id = false;
@@ -14599,7 +14599,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       bool check_task_id = true;
-      if (id == AUTO_GENERATE_ID)
+      if (id == LEGION_AUTO_GENERATE_ID)
       {
         id = generate_static_task_id();
         check_task_id = false;
