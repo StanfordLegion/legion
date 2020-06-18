@@ -32,6 +32,19 @@
 
 namespace Realm {
 
+    class CompiledInstanceLayout : public PieceLookup::CompiledProgram {
+    public:
+      CompiledInstanceLayout();
+      ~CompiledInstanceLayout();
+
+      virtual void *allocate_memory(size_t bytes);
+
+      void reset();
+
+      void *program_base;
+      size_t program_size;
+    };
+
     class RegionInstanceImpl {
     protected:
       // RegionInstanceImpl creation/deletion is handled by MemoryImpl
@@ -130,6 +143,8 @@ namespace Realm {
 	bool need_alloc_result, need_notify_dealloc;
 	InstanceLayoutGeneric *layout;
 	std::string filename; // temp hack for attached files
+
+	CompiledInstanceLayout lookup_program;
       };
 
       // used for atomic access to metadata

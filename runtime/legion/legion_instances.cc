@@ -2218,7 +2218,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalManager* InstanceBuilder::create_physical_instance(
-                                    RegionTreeForest *forest, size_t *footprint)
+                    RegionTreeForest *forest, LayoutConstraintKind *unsat_kind,
+                    unsigned *unsat_index, size_t *footprint)
     //--------------------------------------------------------------------------
     {
       if (!valid)
@@ -2232,6 +2233,10 @@ namespace Legion {
                         memory_manager->memory.id);
         if (footprint != NULL)
           *footprint = 0;
+        if (unsat_kind != NULL)
+          *unsat_kind = LEGION_FIELD_CONSTRAINT;
+        if (unsat_index != NULL)
+          *unsat_index = 0;
         return NULL;
       }
       if (realm_layout == NULL)
@@ -2299,14 +2304,26 @@ namespace Legion {
         base_ptr = 
           memory_manager->allocate_legion_instance(instance_footprint);
         if (base_ptr == 0)
+        {
+          if (unsat_kind != NULL)
+            *unsat_kind = LEGION_MEMORY_CONSTRAINT;
+          if (unsat_index != NULL)
+            *unsat_index = 0;
           return NULL;
+        }
       }
       ready = ApEvent(PhysicalInstance::create_external(instance,
             memory_manager->memory, base_ptr, inst_layout, requests));
 #endif
       // If we couldn't make it then we are done
       if (!instance.exists())
+      {
+        if (unsat_kind != NULL)
+          *unsat_kind = LEGION_MEMORY_CONSTRAINT;
+        if (unsat_index != NULL)
+          *unsat_index = 0;
         return NULL;
+      }
       // For Legion Spy we need a unique ready event if it doesn't already
       // exist so we can uniquely identify the instance
       if (!ready.exists() && runtime->legion_spy_enabled)

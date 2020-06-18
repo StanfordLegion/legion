@@ -92,4 +92,41 @@ namespace Realm {
   }
 
 
+  namespace PieceLookup {
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class PieceLookup::HDF5Piece<N,T>
+
+    template <int N, typename T>
+    unsigned HDF5Piece<N,T>::delta() const
+    {
+      return (data >> 8);
+    }
+
+    template <int N, typename T>
+    const char *HDF5Piece<N,T>::filename() const
+    {
+      return (reinterpret_cast<const char *>(this) +
+	      sizeof(HDF5Piece<N,T>));
+    }
+
+    template <int N, typename T>
+    const char *HDF5Piece<N,T>::dsetname() const
+    {
+      return (reinterpret_cast<const char *>(this) +
+	      sizeof(HDF5Piece<N,T>) +
+	      this->filename_len + 1);
+    }
+
+    template <int N, typename T>
+    const Instruction *HDF5Piece<N,T>::next() const
+    {
+      return this->skip(sizeof(HDF5Piece<N,T>) +
+			this->filename_len +
+			this->dsetname_len + 2);
+    }
+
+  }; // namespace PieceLookup
+
 }; // namespace Realm

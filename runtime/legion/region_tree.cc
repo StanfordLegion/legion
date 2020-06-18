@@ -3710,63 +3710,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool RegionTreeForest::are_colocated(
-                            const std::vector<InstanceSet*> &instances,
-                            FieldSpace handle, const std::set<FieldID> &fields,
-                            unsigned &bad1, unsigned &bad2)
-    //--------------------------------------------------------------------------
-    {
-      FieldSpaceNode *node = get_node(handle);
-      const FieldMask coloc_mask = node->get_field_mask(fields);
-      FieldMaskSet<PhysicalManager> colocate_instances;
-      // Figure out the first set
-      InstanceSet &first_set = *(instances[0]);
-      for (unsigned idx = 0; idx < first_set.size(); idx++)
-      {
-        FieldMask overlap = coloc_mask & first_set[idx].get_valid_fields();
-        if (!overlap)
-          continue;
-        PhysicalManager *manager = first_set[idx].get_manager();
-        // Not allowed to have virtual views here
-        if (manager->is_virtual_manager())
-        {
-          bad1 = 0;
-          bad2 = 0;
-          return false;
-        }
-        colocate_instances.insert(manager, overlap);
-      }
-      // Now we've got the first set, check all the rest
-      for (unsigned idx1 = 0; idx1 < instances.size(); idx1++)
-      {
-        InstanceSet &next_set = *(instances[idx1]);
-        for (unsigned idx2 = 0; idx2 < next_set.size(); idx2++)
-        {
-          FieldMask overlap = coloc_mask & next_set[idx2].get_valid_fields();
-          if (!overlap)
-            continue;
-          PhysicalManager *manager = next_set[idx2].get_manager();
-          if (manager->is_virtual_manager())
-          {
-            bad1 = idx1;
-            bad2 = idx1;
-            return false;
-          }
-          FieldMaskSet<PhysicalManager>::const_iterator finder = 
-            colocate_instances.find(manager);
-          if ((finder == colocate_instances.end()) ||
-              (!!(overlap - finder->second)))
-          {
-            bad1 = 0;
-            bad2 = idx1;
-            return false;
-          }
-        }
-      }
-      return true;
-    } 
-
-    //--------------------------------------------------------------------------
     void RegionTreeForest::check_context_state(RegionTreeContext ctx)
     //--------------------------------------------------------------------------
     {

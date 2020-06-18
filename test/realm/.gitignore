@@ -18,3 +18,4 @@ deferred_allocs
 test_nodeset
 subgraphs
 large_tls
+coverings

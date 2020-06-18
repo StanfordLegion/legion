@@ -378,7 +378,30 @@ namespace Realm {
     return wait_on;
   }
 
+  template <int N, typename T>
+  bool IndexSpace<N,T>::compute_covering(size_t max_rects, int max_overhead,
+					 std::vector<Rect<N,T> >& covering) const
+  {
+    // handle really simple cases first
+    if(empty()) {
+      covering.clear();
+      return true;
+    }
 
+    if(dense()) {
+      covering.resize(1);
+      covering[0] = bounds;
+      return true;
+    }
+
+    // anything else requires sparsity data - we'd better have it
+    SparsityMapPublicImpl<N,T> *impl = sparsity.impl();
+    assert(impl->is_valid(true /*precise*/) &&
+	   "IndexSpace<N,T>::compute_covering called without waiting for valid metadata");
+
+    return impl->compute_covering(bounds, max_rects, max_overhead,
+				  covering);
+  }
 
 
   ////////////////////////////////////////////////////////////////////////

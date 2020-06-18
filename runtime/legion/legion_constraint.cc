@@ -430,6 +430,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ColocationConstraint::ColocationConstraint(unsigned idx1, unsigned idx2)
+    //--------------------------------------------------------------------------
+    {
+      indexes.insert(idx1);
+      indexes.insert(idx2);
+    }
+
+    //--------------------------------------------------------------------------
+    ColocationConstraint::ColocationConstraint(unsigned idx1, unsigned idx2,
+                                               FieldID fid)
+    //--------------------------------------------------------------------------
+    {
+      indexes.insert(idx1);
+      indexes.insert(idx2);
+      fields.insert(fid);
+    }
+
+    //--------------------------------------------------------------------------
     ColocationConstraint::ColocationConstraint(unsigned index1, unsigned index2,
                                                const std::set<FieldID> &fids)
     //--------------------------------------------------------------------------
@@ -1967,6 +1985,37 @@ namespace Legion {
           }
       }
       return false;
+    }
+
+    //--------------------------------------------------------------------------
+    const LayoutConstraint* LayoutConstraintSet::convert_unsatisfied(
+                                LayoutConstraintKind kind, unsigned index) const
+    //--------------------------------------------------------------------------
+    {
+      switch (kind)
+      {
+        case LEGION_SPECIALIZED_CONSTRAINT:
+          return &specialized_constraint;
+        case LEGION_MEMORY_CONSTRAINT:
+          return &memory_constraint;
+        case LEGION_FIELD_CONSTRAINT:
+          return &field_constraint;
+        case LEGION_ORDERING_CONSTRAINT:
+          return &ordering_constraint;
+        case LEGION_POINTER_CONSTRAINT:
+          return &pointer_constraint;
+        case LEGION_SPLITTING_CONSTRAINT:
+          return &splitting_constraints[index];
+        case LEGION_DIMENSION_CONSTRAINT:
+          return &dimension_constraints[index];
+        case LEGION_ALIGNMENT_CONSTRAINT:
+          return &alignment_constraints[index];
+        case LEGION_OFFSET_CONSTRAINT:
+          return &offset_constraints[index];
+        default:
+          assert(false);
+      }
+      return NULL;
     }
 
     //--------------------------------------------------------------------------

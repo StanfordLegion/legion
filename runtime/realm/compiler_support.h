@@ -72,6 +72,13 @@
 // REALM_THREAD_LOCAL - type modifier for a thread-local variable
 #define REALM_THREAD_LOCAL __thread
 
+// REALM_ASSERT(cond, message) - abort program if 'cond' is not true
+#ifdef __CUDACC__
+#define REALM_ASSERT(cond, message)  assert(cond)
+#else
+#define REALM_ASSERT(cond, message)  assert((cond) && (message))
+#endif
+
 // REALM_LIKELY(expr) - suggest that `expr` is usually true
 // REALM_UNLILELY(expr) - suggest that `expr` is usually false
 // REALM_EXPECT(expr, expval) - suggest that `expr` usually evaluates to `expval`

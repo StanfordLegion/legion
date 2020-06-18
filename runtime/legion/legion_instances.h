@@ -645,7 +645,8 @@ namespace Legion {
     public:
       void initialize(RegionTreeForest *forest);
       PhysicalManager* create_physical_instance(RegionTreeForest *forest,
-                                                size_t *footprint = NULL);
+                        LayoutConstraintKind *unsat_kind,
+                        unsigned *unsat_index, size_t *footprint = NULL);
     public:
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
                                       const Realm::ProfilingResponse &response,

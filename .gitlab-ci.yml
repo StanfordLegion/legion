@@ -999,27 +999,31 @@ clang8_cxx17_debug_legion:
 #     <<: [*gcc49, *terra38, *release, *cxx98_normal]
 
 # CUDA tests:
-n0003_gcc48_cxx98_release_legion_cuda:
+n0003_gcc48_cxx98_release_cuda_legion:
   <<: [*n0003, *image, *tests]
   variables:
     <<: [*gcc48, *terra38, *release, *cxx98_normal, *cuda, *legion]
-# n0003_gcc48_cxx98_release_regent_cuda:
+# n0003_gcc48_cxx98_release_cuda_regent:
 #   <<: [*n0003, *image, *tests]
 #   variables:
 #     <<: [*gcc48, *terra38, *release, *cxx98_normal, *cuda, *regent]
-p100_gcc7_cxx11_release_legion_cuda:
+p100_gcc7_cxx11_release_cuda_legion:
   <<: [*p100, *tests]
   variables:
     <<: [*gcc7, *release, *cxx11_normal, *cuda_p100, *legion]
-p100_clang7_cxx11_release_regent_cuda:
+p100_gcc7_cxx11_debug_checks_cuda_legion:
+  <<: [*p100, *tests]
+  variables:
+    <<: [*gcc7, *debug, *cxx11_normal, *checks, *cuda_p100, *legion]
+p100_clang7_cxx11_release_cuda_regent:
   <<: [*p100, *tests]
   variables:
     <<: [*clang7, *terra70, *release, *cxx11_normal, *cuda_p100, *regent]
-p100_gcc7_cxx11_release_legion_cmake_cuda:
+p100_gcc7_cxx11_release_cmake_cuda_legion:
   <<: [*p100, *tests]
   variables:
     <<: [*gcc7, *release, *cxx11_normal, *cuda_p100, *cmake, *legion, *ctest]
-p100_clang7_cxx11_release_regent_cmake_cuda:
+p100_clang7_cxx11_release_cmake_cuda_regent:
   <<: [*p100, *tests]
   variables:
     <<: [*clang7, *terra70, *release, *cxx11_normal, *cuda_p100, *cmake, *regent]
