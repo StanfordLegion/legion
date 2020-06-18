@@ -67,16 +67,16 @@ namespace Realm {
   template <int N, typename T>
   inline const std::vector<SparsityMapEntry<N,T> >& SparsityMapPublicImpl<N,T>::get_entries(void)
   {
-    assert(entries_valid &&
-	   "get_entries called on sparsity map without valid data");
+    REALM_ASSERT(entries_valid,
+		 "get_entries called on sparsity map without valid data");
     return entries;
   }
     
   template <int N, typename T>
   inline const std::vector<Rect<N,T> >& SparsityMapPublicImpl<N,T>::get_approx_rects(void)
   {
-    assert(approx_valid &&
-	   "get_approx_rects called on sparsity map without valid data");
+    REALM_ASSERT(approx_valid,
+		 "get_approx_rects called on sparsity map without valid data");
     return approx_rects;
   }
 
