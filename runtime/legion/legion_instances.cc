@@ -3043,9 +3043,9 @@ namespace Legion {
         realm_layout =
           instance_domain->create_layout(constraints, field_set, 
              field_sizes, compact, &piece_list, &piece_list_size);
-#ifdef DEBUG_LEGION
-        assert(realm_layout != NULL);
-#endif
+        // If constraints were unsatisfied then return now
+        if (realm_layout == NULL)
+          return NULL;
       }
       // Clone the realm layout each time since (realm will take ownership 
       // after every instance call, so we need a new one each time)

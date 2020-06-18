@@ -551,9 +551,27 @@ namespace Legion {
         assert(piece_list_size != NULL);
         assert((*piece_list_size) == 0);
 #endif
-        for (Realm::IndexSpaceIterator<DIM,T> itr(space); itr.valid; itr.step())
-          if (!itr.rect.empty())
-            piece_bounds.push_back(itr.rect);
+        const SpecializedConstraint &spec = constraints.specialized_constraint;
+        if (spec.max_overhead > 0)
+        {
+          std::vector<Realm::Rect<DIM,T> > covering;
+          if (!space.compute_covering(spec.max_pieces, spec.max_overhead,
+                                      covering))
+            return NULL;
+          // Container problem is stupid
+          piece_bounds.resize(covering.size());
+          for (unsigned idx = 0; idx < covering.size(); idx++)
+            piece_bounds[idx] = covering[idx];
+        }
+        else
+        {
+          for (Realm::IndexSpaceIterator<DIM,T> itr(space); 
+                itr.valid; itr.step())
+            if (!itr.rect.empty())
+              piece_bounds.push_back(itr.rect);
+          if (spec.max_pieces < piece_bounds.size())
+            return NULL;
+        }
         if (!piece_bounds.empty())
         {
           *piece_list_size = piece_bounds.size() * sizeof(Rect<DIM,T>);
