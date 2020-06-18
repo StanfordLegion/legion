@@ -704,6 +704,8 @@ namespace Legion {
       bool conflicts(const LayoutConstraintSet &other,
                      unsigned total_dims = 0,
                      const LayoutConstraint **conflict_constraint = NULL) const;
+      const LayoutConstraint* convert_unsatisfied(LayoutConstraintKind kind,
+                                                  unsigned index) const;
     public:
       void swap(LayoutConstraintSet &rhs);
       void serialize(Serializer &rez) const;
