@@ -1748,6 +1748,7 @@ namespace Legion {
                                            IndexPartNode *right); 
     public:
       virtual void send_node(AddressSpaceID target, bool up);
+      void remove_send_reference(void);
       static void handle_node_creation(RegionTreeForest *context,
                                        Deserializer &derez, 
                                        AddressSpaceID source);
@@ -1912,6 +1913,7 @@ namespace Legion {
       IndexPartNode *const parent;
       const ApEvent index_space_ready;
     protected:
+      unsigned                  send_references;
       // On the owner node track when the index space is set
       RtUserEvent               realm_index_space_set;
       // Keep track of whether we've tightened these bounds
