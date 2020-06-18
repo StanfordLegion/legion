@@ -3180,6 +3180,7 @@ namespace Legion {
       {
         case LEGION_NO_SPECIALIZE:
         case LEGION_AFFINE_SPECIALIZE:
+        case LEGION_COMPACT_SPECIALIZE:
           {
             // Now we can make the manager
             result = new IndividualManager(forest, did, local_space,
