@@ -94,8 +94,8 @@ void calc_new_currents_kernel(Point<1> first,
                               const AccessorROfloat fa_pvt_voltage,
                               const AccessorROfloat fa_shr_voltage,
                               const AccessorROfloat fa_ghost_voltage,
-                              const SegmentAccessors<AccessorRWfloat,WIRE_SEGMENTS> fa_currents,
-                              const SegmentAccessors<AccessorRWfloat,WIRE_SEGMENTS-1> fa_voltages)
+                              const SegmentAccessors<AccessorRWfloat_nobounds,WIRE_SEGMENTS> fa_currents,
+                              const SegmentAccessors<AccessorRWfloat_nobounds,WIRE_SEGMENTS-1> fa_voltages)
 {
   const int tid = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -167,12 +167,15 @@ void CalcNewCurrentsTask::gpu_base_impl(const CircuitPiece &piece,
                                         const std::vector<PhysicalRegion> &regions)
 {
 #ifndef DISABLE_MATH
-  SegmentAccessors<AccessorRWfloat,WIRE_SEGMENTS> fa_currents;
+  // the segment accessors don't need to pay for bounds checks because
+  //  other wire accessors below will use the same bounds and be checked
+  //  first
+  SegmentAccessors<AccessorRWfloat_nobounds,WIRE_SEGMENTS> fa_currents;
   for (int i = 0; i < WIRE_SEGMENTS; i++)
-    fa_currents[i] = AccessorRWfloat(regions[0], FID_CURRENT+i);
-  SegmentAccessors<AccessorRWfloat,WIRE_SEGMENTS-1> fa_voltages;
+    fa_currents[i] = AccessorRWfloat_nobounds(regions[0], FID_CURRENT+i);
+  SegmentAccessors<AccessorRWfloat_nobounds,WIRE_SEGMENTS-1> fa_voltages;
   for (int i = 0; i < (WIRE_SEGMENTS-1); i++)
-    fa_voltages[i] = AccessorRWfloat(regions[0], FID_WIRE_VOLTAGE+i);
+    fa_voltages[i] = AccessorRWfloat_nobounds(regions[0], FID_WIRE_VOLTAGE+i);
 
   const AccessorROpoint fa_in_ptr(regions[1], FID_IN_PTR);
   const AccessorROpoint fa_out_ptr(regions[1], FID_OUT_PTR);

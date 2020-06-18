@@ -86,6 +86,12 @@ typedef FieldAccessor<READ_ONLY,float,1,coord_t,Realm::AffineAccessor<float,1,co
 typedef FieldAccessor<READ_WRITE,float,1,coord_t,Realm::AffineAccessor<float,1,coord_t> > AccessorRWfloat;
 typedef FieldAccessor<WRITE_ONLY,float,1,coord_t,Realm::AffineAccessor<float,1,coord_t> > AccessorWOfloat;
 
+// accessors with bounds checks are large enough to cause problems with
+//  total parameter sizes to CUDA kernels, and as long as one accessor for
+//  each region has bounds checks, that's enough to catch errors, so define
+//  an accessor type that explicitly does NOT have bounds checks
+typedef FieldAccessor<READ_WRITE,float,1,coord_t,Realm::AffineAccessor<float,1,coord_t>, false> AccessorRWfloat_nobounds;
+
 typedef FieldAccessor<READ_ONLY,Point<1>,1,coord_t,Realm::AffineAccessor<Point<1>,1,coord_t> > AccessorROpoint;
 typedef FieldAccessor<READ_WRITE,Point<1>,1,coord_t,Realm::AffineAccessor<Point<1>,1,coord_t> > AccessorRWpoint;
 typedef FieldAccessor<WRITE_ONLY,Point<1>,1,coord_t,Realm::AffineAccessor<Point<1>,1,coord_t> > AccessorWOpoint;
