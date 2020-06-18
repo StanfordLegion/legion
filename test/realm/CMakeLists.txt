@@ -41,6 +41,7 @@ list(APPEND REALM_TESTS
   subgraphs
   large_tls
   memspeed
+  coverings
   )
 
 if(Legion_USE_CUDA)

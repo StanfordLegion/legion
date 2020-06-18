@@ -48,6 +48,10 @@ namespace Realm {
   class InstanceLayoutGeneric;
   class ProfilingRequestSet;
 
+  namespace PieceLookup {
+    struct Instruction;
+  };
+
   class RegionInstance {
   public:
     typedef ::realm_id_t id_t;
@@ -64,6 +68,17 @@ namespace Realm {
     Memory get_location(void) const;
     //const LinearizedIndexSpaceIntfc& get_lis(void) const;
     const InstanceLayoutGeneric *get_layout(void) const;
+
+    // gets a compiled piece lookup program for a given field
+    template <int N, typename T>
+    const PieceLookup::Instruction *get_lookup_program(FieldID field_id,
+						       unsigned allowed_mask,
+						       uintptr_t& field_offset);
+    template <int N, typename T>
+    const PieceLookup::Instruction *get_lookup_program(FieldID field_id,
+						       const Rect<N,T>& subrect,
+						       unsigned allowed_mask,
+						       uintptr_t& field_offset);
 
     // these methods may be used to access the contents of an instance, but
     //  users are encouraged to use various accessors which make repeated

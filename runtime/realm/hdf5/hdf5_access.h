@@ -76,6 +76,30 @@ namespace Realm {
     bool read_only;
   };
 
+
+  namespace PieceLookup {
+
+    template <int N, typename T>
+    struct HDF5Piece : public Instruction {
+      // data is: { delta[23:0], opcode[7:0] }
+      // top 24 bits of data is jump delta
+      unsigned delta() const;
+
+      unsigned short filename_len, dsetname_len;
+      const char *filename() const;
+      const char *dsetname() const;
+
+      Rect<N,T> bounds;
+      Point<N, hsize_t> offset;
+      int dim_order[N];
+      bool read_only;
+
+      const Instruction *next() const;
+    };
+
+  };
+
+
 }; // namespace Realm
 
 #include "realm/hdf5/hdf5_access.inl"

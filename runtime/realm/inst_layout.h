@@ -52,9 +52,6 @@ namespace Realm {
 			      size_t block_size);
     InstanceLayoutConstraints(const std::vector<size_t>& field_sizes,
 			      size_t block_size);
-#ifdef REALM_USE_LEGION_LAYOUT_CONSTRAINTS
-    InstanceLayoutConstraints(const Legion::LayoutConstraintSet& lcs);
-#endif
 
     struct FieldInfo {
       FieldID field_id;
@@ -68,6 +65,26 @@ namespace Realm {
     std::vector<FieldGroup> field_groups;
   };
 
+  namespace PieceLookup {
+
+    class CompiledProgram {
+    public:
+      virtual ~CompiledProgram() {}
+
+      // used during compilation to request memory to store instructions
+      //  in - can only be used once
+      virtual void *allocate_memory(size_t bytes) = 0;
+
+      struct PerField {
+	const PieceLookup::Instruction *start_inst;
+	unsigned inst_usage_mask;
+	uintptr_t field_offset;
+      };
+
+      std::map<FieldID, PerField> fields;
+    };
+
+  };
 
   // instance layouts are templated on the type of the IndexSpace used to
   //  index them, but they all inherit from a generic version
@@ -89,10 +106,24 @@ namespace Realm {
 
     virtual void print(std::ostream& os) const = 0;
 
+    // creates an affine layout using the bounds of 'is' (i.e. one piece)
+    //  using the requested dimension ordering and respecting the field
+    //  size/alignment constraints provided
     template <int N, typename T>
     static InstanceLayoutGeneric *choose_instance_layout(IndexSpace<N,T> is,
 							 const InstanceLayoutConstraints& ilc,
                                                          const int dim_order[N]);
+
+    // creates a multi-affine layout using one piece for each rectangle in
+    //  'covering', using the requested dimension ordering and respecting
+    //  the field size/alignment constraints provided
+    template <int N, typename T>
+    static InstanceLayoutGeneric *choose_instance_layout(IndexSpace<N,T> is,
+							 const std::vector<Rect<N,T> >& covering,
+							 const InstanceLayoutConstraints& ilc,
+                                                         const int dim_order[N]);
+
+    virtual void compile_lookup_program(PieceLookup::CompiledProgram& p) const = 0;
 
     size_t bytes_used;
     size_t alignment_reqd;
@@ -216,6 +247,8 @@ namespace Realm {
 
     virtual void print(std::ostream& os) const;
 
+    virtual void compile_lookup_program(PieceLookup::CompiledProgram& p) const;
+
     // computes the offset of the specified field for an element - this
     //  is generally much less efficient than using a layout-specific accessor
     size_t calculate_offset(Point<N,T> p, FieldID fid) const;
@@ -229,7 +262,83 @@ namespace Realm {
     bool serialize(S& serializer) const;
   };
 
-  // accessor stuff should eventually move to a different header file I think
+  // instance layouts are compiled into "piece lookup programs" for fast
+  //  access on both CPU and accelerators
+
+  namespace PieceLookup {
+
+    struct Instruction {
+      // all instructions are at least 4 bytes and aligned to 16 bytes, but
+      //  the only data common to all is the opcode, which appears in the low
+      //  8 bits
+      REALM_ALIGNED_TYPE_CONST(uint32_aligned_16, uint32_t, 16);
+      uint32_aligned_16 data;
+
+      enum Opcode {
+	OP_INVALID = 0,
+	OP_AFFINE_PIECE = 1,  // this is an AffinePiece<N,T>
+	OP_SPLIT1 = 2,        // this is a SplitPlane<N,T>
+	OP_HDF5_PIECE = 3,    // this is an HDF5Piece<N,T>
+      };
+
+      // some processors are limited in which instruction types they can
+      //  support, so we build masks to describe usage/capabilities
+      static const unsigned ALLOW_AFFINE_PIECE = 1U << OP_AFFINE_PIECE;
+      static const unsigned ALLOW_SPLIT1       = 1U << OP_SPLIT1;
+      static const unsigned ALLOW_HDF5_PIECE   = 1U << OP_HDF5_PIECE;
+
+      REALM_CUDA_HD
+      Opcode opcode() const;
+
+      // two helper methods that get you to another instruction
+
+      // skip() gets the next instruction in sequence, which requires knowing
+      //  the size of the current instruction - instructions below take care
+      //  of this in most cases
+      REALM_CUDA_HD
+      const Instruction *skip(size_t bytes) const;
+
+      // jump(N) jumps forward in the instruction stream by N 16-B chunks
+      //   special case: a delta of 0 is "end of program" and returns null
+      REALM_CUDA_HD
+      const Instruction *jump(unsigned delta) const;
+    };
+
+    template <int N, typename T>
+    struct AffinePiece : public Instruction {
+      // data is: { delta[23:0], opcode[7:0] }
+      // top 24 bits of data is jump delta
+      REALM_CUDA_HD
+      unsigned delta() const;
+
+      Rect<N,T> bounds;
+      uintptr_t base;
+      Point<N, size_t> strides;
+
+      REALM_CUDA_HD
+      const Instruction *next() const;
+    };
+
+    template <int N, typename T>
+    struct SplitPlane : public Instruction {
+      // data is: { delta[15:0], dim[7:0], opcode[7:0] }
+      REALM_CUDA_HD
+      unsigned delta() const;
+      REALM_CUDA_HD
+      int split_dim() const;
+
+      // if point's coord is less than split_plane, go to next, else jump
+      T split_plane;
+
+      REALM_CUDA_HD
+      const Instruction *next(const Point<N,T>& p) const;
+
+      REALM_CUDA_HD
+      bool splits_rect(const Rect<N,T>& r) const;
+    };
+
+  }; // namespace PieceLookup
+
 
   template <typename FT>
   class AccessorRefHelper {
@@ -271,8 +380,8 @@ namespace Realm {
 
     ~GenericAccessor(void);
 
-    static bool is_compatible(RegionInstance inst, ptrdiff_t field_offset);
-    static bool is_compatible(RegionInstance inst, ptrdiff_t field_offset, const Rect<N,T>& subrect);
+    static bool is_compatible(RegionInstance inst, size_t field_offset);
+    static bool is_compatible(RegionInstance inst, size_t field_offset, const Rect<N,T>& subrect);
 
     template <typename INST>
     static bool is_compatible(const INST &instance, unsigned field_id);
@@ -420,8 +529,8 @@ namespace Realm {
 #error "REALM_ACCESSOR_DEBUG macro for AffineAccessor not supported for GPU code"
 #endif
 #endif
-    intptr_t base;
-    Point<N, ptrdiff_t> strides;
+    uintptr_t base;
+    Point<N, size_t> strides;
   protected:
     REALM_CUDA_HD
     FT* get_ptr(const Point<N,T>& p) const;
@@ -430,25 +539,45 @@ namespace Realm {
   template <typename FT, int N, typename T>
   std::ostream& operator<<(std::ostream& os, const AffineAccessor<FT,N,T>& a);
 
+  // a multi-affine accessor handles instances with multiple pieces, but only
+  //  if all of them are affine
   template <typename FT, int N, typename T = int>
+  class MultiAffineAccessor;
+
+  template <typename FT, int N, typename T>
+  std::ostream& operator<<(std::ostream& os, const MultiAffineAccessor<FT,N,T>& a);
+
+  template <typename FT, int N, typename T>
   class MultiAffineAccessor {
   public:
+    // multi-affine accessors may be accessed and copied in CUDA device code
+    //  but must be initially constructed on the host
+
     REALM_CUDA_HD
     MultiAffineAccessor(void);
 
-    MultiAffineAccessor(RegionInstance inst,
-		        FieldID field_id, size_t subfield_offset = 0);
+    // NOTE: these constructors will die horribly if the conversion is not
+    //  allowed - call is_compatible(...) first if you're not sure
 
+    // implicitly tries to cover the entire instance's domain
     MultiAffineAccessor(RegionInstance inst,
-		        FieldID field_id, const Rect<N,T>& subrect,
-		        size_t subfield_offset = 0);
+			FieldID field_id, size_t subfield_offset = 0);
+
+    // limits domain to a subrectangle (NOTE: subrect need not be entirely
+    //  covered by the instance - a legal access must be both within the
+    //  subrect AND within the coverage of the instance)
+    MultiAffineAccessor(RegionInstance inst,
+			FieldID field_id, const Rect<N,T>& subrect,
+			size_t subfield_offset = 0);
 
     REALM_CUDA_HD
     ~MultiAffineAccessor(void);
 
     static bool is_compatible(RegionInstance inst, FieldID field_id);
-    static bool is_compatible(RegionInstance inst, FieldID field_id, const Rect<N,T>& subrect);
+    static bool is_compatible(RegionInstance inst, FieldID field_id,
+			      const Rect<N,T>& subrect);
 
+    // used by constructors or can be called directly
     REALM_CUDA_HD
     void reset();
     void reset(RegionInstance inst,
@@ -456,11 +585,13 @@ namespace Realm {
     void reset(RegionInstance inst,
 	       FieldID field_id, const Rect<N,T>& subrect,
 	       size_t subfield_offset = 0);
-  
+
+    // ptr/read/write/operator[] come in const and nonconst versions -
+    //  nonconst ones are allowed to remember the most-recently-accessed piece
     REALM_CUDA_HD
-    FT* ptr(const Point<N,T>& p) const;
+    FT *ptr(const Point<N,T>& p) const;
     REALM_CUDA_HD
-    FT* ptr(const Rect<N,T>& r, size_t strides[N]) const;
+    FT *ptr(const Rect<N,T>& r, size_t strides[N]) const;
     REALM_CUDA_HD
     FT read(const Point<N,T>& p) const;
     REALM_CUDA_HD
@@ -468,7 +599,33 @@ namespace Realm {
 
     REALM_CUDA_HD
     FT& operator[](const Point<N,T>& p) const;
+
+    REALM_CUDA_HD
+    FT *ptr(const Point<N,T>& p);
+    REALM_CUDA_HD
+    FT *ptr(const Rect<N,T>& r, size_t strides[N]);
+    REALM_CUDA_HD
+    FT read(const Point<N,T>& p);
+    REALM_CUDA_HD
+    void write(const Point<N,T>& p, FT newval);
+
+    REALM_CUDA_HD
+    FT& operator[](const Point<N,T>& p);
+
+  protected:
+    friend std::ostream& operator<< <FT,N,T>(std::ostream& os, const MultiAffineAccessor<FT,N,T>& a);
+
+    // cached info from the most recent piece, or authoritative info for
+    //  a single piece
+    bool piece_valid;
+    Rect<N,T> piece_bounds;
+    uintptr_t piece_base;
+    Point<N, size_t> piece_strides;
+    // if we need to do a new lookup, this is where we start
+    const PieceLookup::Instruction *start_inst;
+    size_t field_offset;
   };
+
 
 }; // namespace Realm
 

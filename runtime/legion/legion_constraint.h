@@ -171,7 +171,9 @@ namespace Legion {
      * \class ColocationConstraint
      * Co-location constraints can be used to specify that two
      * region requirements for a task need to be located in the 
-     * same physical instance for layout purposes.
+     * same physical instance for layout purposes. A colocation
+     * constraint without fields will apply to all such fields
+     * in the region requirements at those indexes.
      */
     class ColocationConstraint {
     public:
@@ -179,6 +181,8 @@ namespace Legion {
                                             LEGION_COLOCATION_CONSTRAINT;
     public:
       ColocationConstraint(void);
+      ColocationConstraint(unsigned index1, unsigned index2);
+      ColocationConstraint(unsigned index1, unsigned index2, FieldID fid);
       ColocationConstraint(unsigned index1, unsigned index2,
                            const std::set<FieldID> &fields);
       ColocationConstraint(const std::vector<unsigned> &indexes,

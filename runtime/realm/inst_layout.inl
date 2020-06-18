@@ -74,16 +74,10 @@ namespace Realm {
   {}
 
   template <int N, typename T>
-  inline /*static*/ InstanceLayoutGeneric *InstanceLayoutGeneric::choose_instance_layout(IndexSpace<N,T> is,
-											 const InstanceLayoutConstraints& ilc,
-                                                                                         const int dim_order[N])
+  /*static*/ InstanceLayoutGeneric *InstanceLayoutGeneric::choose_instance_layout(IndexSpace<N,T> is,
+										  const InstanceLayoutConstraints& ilc,
+										  const int dim_order[N])
   {
-    InstanceLayout<N,T> *layout = new InstanceLayout<N,T>;
-    layout->bytes_used = 0;
-    // require 32B alignment of each instance piece for vectorizing goodness
-    layout->alignment_reqd = 32;
-    layout->space = is;
-
     std::vector<Rect<N,T> > piece_bounds;
     if(is.dense()) {
       // dense case is nice and simple
@@ -105,9 +99,24 @@ namespace Realm {
       }
     }
 
+    return choose_instance_layout<N,T>(is, piece_bounds, ilc, dim_order);
+  }
+
+  template <int N, typename T>
+  /*static*/ InstanceLayoutGeneric *InstanceLayoutGeneric::choose_instance_layout(IndexSpace<N,T> is,
+										  const std::vector<Rect<N,T> >& covering,
+										  const InstanceLayoutConstraints& ilc,
+										  const int dim_order[N])
+  {
+    InstanceLayout<N,T> *layout = new InstanceLayout<N,T>;
+    layout->bytes_used = 0;
+    // require 32B alignment of each instance piece for vectorizing goodness
+    layout->alignment_reqd = 32;
+    layout->space = is;
+
     // if the index space is empty, all fields can use the same empty
     //  piece list
-    if(piece_bounds.empty()) {
+    if(covering.empty()) {
       layout->piece_lists.resize(1);
       for(std::vector<InstanceLayoutConstraints::FieldGroup>::const_iterator it = ilc.field_groups.begin();
 	  it != ilc.field_groups.end();
@@ -188,11 +197,11 @@ namespace Realm {
 
 	// create the piece list
 	InstancePieceList<N,T>& pl = layout->piece_lists[li];
-	pl.pieces.reserve(piece_bounds.size());
+	pl.pieces.reserve(covering.size());
 
 	size_t pl_start = round_up(layout->bytes_used, galign);
-	for(typename std::vector<Rect<N,T> >::const_iterator it = piece_bounds.begin();
-	    it != piece_bounds.end();
+	for(typename std::vector<Rect<N,T> >::const_iterator it = covering.begin();
+	    it != covering.end();
 	    ++it) {
 	  Rect<N,T> bbox = *it;
 	  // TODO: bloat bbox for block size if desired
@@ -609,6 +618,92 @@ namespace Realm {
   }
 
 
+  namespace PieceLookup {
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class PieceLookup::Instruction
+
+    REALM_CUDA_HD
+    inline Instruction::Opcode Instruction::opcode() const
+    {
+      return static_cast<Opcode>(data & 0xff);
+    }
+
+    REALM_CUDA_HD
+    inline const Instruction *Instruction::skip(size_t bytes) const
+    {
+      unsigned delta = (bytes + 15) >> 4;
+      return this->jump(delta);
+    }
+
+    REALM_CUDA_HD
+    inline const Instruction *Instruction::jump(unsigned delta) const
+    {
+      return reinterpret_cast<const Instruction *>(reinterpret_cast<uintptr_t>(this) +
+						   (delta << 4));
+    }
+
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class PieceLookup::AffinePiece<N,T>
+
+    template <int N, typename T>
+    REALM_CUDA_HD
+    unsigned AffinePiece<N,T>::delta() const
+    {
+      return (data >> 8);
+    }
+
+    template <int N, typename T>
+    REALM_CUDA_HD
+    const Instruction *AffinePiece<N,T>::next() const
+    {
+      return this->skip(sizeof(AffinePiece<N,T>));
+    }
+
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class PieceLookup::SplitPlane<N,T>
+
+    template <int N, typename T>
+    REALM_CUDA_HD
+    unsigned SplitPlane<N,T>::delta() const
+    {
+      return (data >> 16);
+    }
+
+    template <int N, typename T>
+    REALM_CUDA_HD
+    int SplitPlane<N,T>::split_dim() const
+    {
+      return (data >> 8) & 0xff;
+    }
+
+    template <int N, typename T>
+    REALM_CUDA_HD
+    const Instruction *SplitPlane<N,T>::next(const Point<N,T>& p) const
+    {
+      if(p[this->split_dim()] < split_plane)
+	return this->skip(sizeof(SplitPlane<N,T>));
+      else
+	return this->jump(this->delta());
+    }
+
+    template <int N, typename T>
+    REALM_CUDA_HD
+    bool SplitPlane<N,T>::splits_rect(const Rect<N,T>& r) const
+    {
+      return ((r.lo[this->split_dim()] < split_plane) &&
+	      (r.hi[this->split_dim()] >= split_plane));
+    }
+
+
+  };
+
+
   ////////////////////////////////////////////////////////////////////////
   //
   // class GenericAccessor<FT,N,T>
@@ -667,14 +762,14 @@ namespace Realm {
 
   template <typename FT, int N, typename T>
   inline /*static*/ bool GenericAccessor<FT,N,T>::is_compatible(RegionInstance inst,
-								ptrdiff_t field_offset)
+								size_t field_offset)
   {
     return true;
   }
 
   template <typename FT, int N, typename T>
   inline /*static*/ bool GenericAccessor<FT,N,T>::is_compatible(RegionInstance inst,
-								ptrdiff_t field_offset,
+								size_t field_offset,
 								const Rect<N,T>& subrect)
   {
     return true;
@@ -796,8 +891,8 @@ namespace Realm {
     const InstanceLayoutPiece<N,T> *ilp = ipl.pieces[0];
     assert((ilp->layout_type == InstanceLayoutPiece<N,T>::AffineLayoutType));
     const AffineLayoutPiece<N,T> *alp = static_cast<const AffineLayoutPiece<N,T> *>(ilp);
-    base = reinterpret_cast<intptr_t>(inst.pointer_untyped(0,
-							   layout->bytes_used));
+    base = reinterpret_cast<uintptr_t>(inst.pointer_untyped(0,
+							    layout->bytes_used));
     assert(base != 0);
     base += alp->offset + it->second.rel_offset + subfield_offset;
     strides = alp->strides;
@@ -839,8 +934,8 @@ namespace Realm {
       assert(ilp && ilp->bounds.contains(subrect));
       assert((ilp->layout_type == InstanceLayoutPiece<N,T>::AffineLayoutType));
       const AffineLayoutPiece<N,T> *alp = static_cast<const AffineLayoutPiece<N,T> *>(ilp);
-      base = reinterpret_cast<intptr_t>(inst.pointer_untyped(0,
-							     layout->bytes_used));
+      base = reinterpret_cast<uintptr_t>(inst.pointer_untyped(0,
+							      layout->bytes_used));
       assert(base != 0);
       base += alp->offset + it->second.rel_offset + subfield_offset;
       strides = alp->strides;
@@ -892,8 +987,8 @@ namespace Realm {
     const InstanceLayoutPiece<N2,T2> *ilp = ipl.pieces[0];
     assert((ilp->layout_type == InstanceLayoutPiece<N2,T2>::AffineLayoutType));
     const AffineLayoutPiece<N2,T2> *alp = static_cast<const AffineLayoutPiece<N2,T2> *>(ilp);
-    base = reinterpret_cast<intptr_t>(inst.pointer_untyped(0,
-							   layout->bytes_used));
+    base = reinterpret_cast<uintptr_t>(inst.pointer_untyped(0,
+							    layout->bytes_used));
     assert(base != 0);
     base += alp->offset + it->second.rel_offset + subfield_offset;
     // to get the effect of transforming every accessed x to Ax+b, we
@@ -974,8 +1069,8 @@ namespace Realm {
       assert(ilp && ilp->bounds.contains(subrect_image));
       assert((ilp->layout_type == InstanceLayoutPiece<N2,T2>::AffineLayoutType));
       const AffineLayoutPiece<N2,T2> *alp = static_cast<const AffineLayoutPiece<N2,T2> *>(ilp);
-      base = reinterpret_cast<intptr_t>(inst.pointer_untyped(0,
-							     layout->bytes_used));
+      base = reinterpret_cast<uintptr_t>(inst.pointer_untyped(0,
+							      layout->bytes_used));
       assert(base != 0);
       base += alp->offset + it->second.rel_offset + subfield_offset;
       // to get the effect of transforming every accessed x to Ax+b, we
@@ -1165,7 +1260,7 @@ namespace Realm {
   REALM_CUDA_HD
   inline bool AffineAccessor<FT,N,T>::is_dense_arbitrary(const Rect<N,T> &bounds) const
   {
-    ptrdiff_t exp_offset = sizeof(FT);
+    size_t exp_offset = sizeof(FT);
     int used_mask = 0; // keep track of which dimensions we've already matched
     for (int i = 0; i < N; i++) {
       bool found = false;
@@ -1187,7 +1282,7 @@ namespace Realm {
   REALM_CUDA_HD
   inline bool AffineAccessor<FT,N,T>::is_dense_col_major(const Rect<N,T> &bounds) const
   {
-    ptrdiff_t exp_offset = sizeof(FT);
+    size_t exp_offset = sizeof(FT);
     for (int i = 0; i < N; i++) {
       if (strides[i] != exp_offset) return false;
       exp_offset *= (bounds.hi[i] - bounds.lo[i] + 1);
@@ -1199,7 +1294,7 @@ namespace Realm {
   REALM_CUDA_HD
   inline bool AffineAccessor<FT,N,T>::is_dense_row_major(const Rect<N,T> &bounds) const
   {
-    ptrdiff_t exp_offset = sizeof(FT);
+    size_t exp_offset = sizeof(FT);
     for (int i = N-1; i >= 0; i--) {
       if (strides[i] != exp_offset) return false;
       exp_offset *= (bounds.hi[i] - bounds.lo[i] + 1);
@@ -1211,7 +1306,7 @@ namespace Realm {
   REALM_CUDA_HD
   inline FT *AffineAccessor<FT,N,T>::get_ptr(const Point<N,T>& p) const
   {
-    intptr_t rawptr = base;
+    uintptr_t rawptr = base;
     for(int i = 0; i < N; i++) rawptr += p[i] * strides[i];
     return reinterpret_cast<FT *>(rawptr);
   }
@@ -1282,5 +1377,342 @@ namespace Realm {
     os << " }";
     return os;
   }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class MultiAffineAccessor<FT,N,T>
+
+  template <typename FT, int N, typename T>
+  REALM_CUDA_HD
+  MultiAffineAccessor<FT,N,T>::MultiAffineAccessor(void)
+  {
+    reset();
+  }
+
+  template <typename FT, int N, typename T>
+  MultiAffineAccessor<FT,N,T>::MultiAffineAccessor(RegionInstance inst,
+						   FieldID field_id,
+						   size_t subfield_offset /*= 0*/)
+  {
+    reset(inst, field_id, subfield_offset);
+  }
+
+  template <typename FT, int N, typename T>
+  MultiAffineAccessor<FT,N,T>::MultiAffineAccessor(RegionInstance inst,
+						   FieldID field_id,
+						   const Rect<N,T>& subrect,
+						   size_t subfield_offset /*= 0*/)
+  {
+    reset(inst, field_id, subrect, subfield_offset);
+  }
+
+  template <typename FT, int N, typename T>
+  REALM_CUDA_HD
+  MultiAffineAccessor<FT,N,T>::~MultiAffineAccessor(void)
+  {}
+
+  template <typename FT, int N, typename T>
+  /*static*/ bool MultiAffineAccessor<FT,N,T>::is_compatible(RegionInstance inst,
+							     FieldID field_id)
+  {
+    size_t field_offset = 0;
+    unsigned allowed_mask = (PieceLookup::Instruction::ALLOW_AFFINE_PIECE |
+			     PieceLookup::Instruction::ALLOW_SPLIT1);
+    const PieceLookup::Instruction *start_inst =
+      inst.get_lookup_program<N,T>(field_id, allowed_mask, field_offset);
+    return (start_inst != 0);
+  }
+
+  template <typename FT, int N, typename T>
+  /*static*/ bool MultiAffineAccessor<FT,N,T>::is_compatible(RegionInstance inst,
+							     FieldID field_id,
+							     const Rect<N,T>& subrect)
+  {
+    size_t field_offset = 0;
+    unsigned allowed_mask = (PieceLookup::Instruction::ALLOW_AFFINE_PIECE |
+			     PieceLookup::Instruction::ALLOW_SPLIT1);
+    const PieceLookup::Instruction *start_inst =
+      inst.get_lookup_program<N,T>(field_id, subrect, allowed_mask,
+				   field_offset);
+    return (start_inst != 0);
+  }
+
+  // used by constructors or can be called directly
+  template <typename FT, int N, typename T>
+  REALM_CUDA_HD
+  void MultiAffineAccessor<FT,N,T>::reset()
+  {
+    start_inst = 0;
+    piece_bounds = Rect<N,T>::make_empty();
+  }
+
+  template <typename FT, int N, typename T>
+  void MultiAffineAccessor<FT,N,T>::reset(RegionInstance inst,
+					  FieldID field_id,
+					  size_t subfield_offset /*= 0*/)
+  {
+    unsigned allowed_mask = (PieceLookup::Instruction::ALLOW_AFFINE_PIECE |
+			     PieceLookup::Instruction::ALLOW_SPLIT1);
+    start_inst = inst.get_lookup_program<N,T>(field_id, allowed_mask,
+					      field_offset);
+    assert(start_inst != 0);
+
+    // special case: if the first instruction is an AffinePiece and there's
+    //  no next instruction, we cache the answer and forget the program
+    if(start_inst->opcode() == PieceLookup::Instruction::OP_AFFINE_PIECE) {
+      const PieceLookup::AffinePiece<N,T> *ap_inst =
+	static_cast<const PieceLookup::AffinePiece<N,T> *>(start_inst);
+      if(ap_inst->delta() == 0) {
+	piece_valid = true;
+	piece_bounds = ap_inst->bounds;
+	piece_base = ap_inst->base + field_offset + subfield_offset;
+	piece_strides = ap_inst->strides;
+	start_inst = 0;
+	return;
+      }
+    }
+
+    // otherwise make sure we incorporate the subfield offset and make the
+    //  initial cache invalid
+    field_offset += subfield_offset;
+    piece_valid = false;
+  }
+
+  template <typename FT, int N, typename T>
+  void MultiAffineAccessor<FT,N,T>::reset(RegionInstance inst,
+					  FieldID field_id,
+					  const Rect<N,T>& subrect,
+					  size_t subfield_offset /*= 0*/)
+  {
+    unsigned allowed_mask = (PieceLookup::Instruction::ALLOW_AFFINE_PIECE |
+			     PieceLookup::Instruction::ALLOW_SPLIT1);
+    start_inst = inst.get_lookup_program<N,T>(field_id, subrect, allowed_mask,
+					      field_offset);
+    assert(start_inst != 0);
+
+    // special case: if the first instruction is an AffinePiece and there's
+    //  no next instruction, we cache the answer and forget the program
+    if(start_inst->opcode() == PieceLookup::Instruction::OP_AFFINE_PIECE) {
+      const PieceLookup::AffinePiece<N,T> *ap_inst =
+	static_cast<const PieceLookup::AffinePiece<N,T> *>(start_inst);
+      if(ap_inst->delta() == 0) {
+	piece_valid = true;
+	piece_bounds = ap_inst->bounds;
+	piece_base = ap_inst->base + field_offset + subfield_offset;
+	piece_strides = ap_inst->strides;
+	start_inst = 0;
+	return;
+      }
+    }
+
+    // otherwise make sure we incorporate the subfield offset and make the
+    //  initial cache invalid
+    field_offset += subfield_offset;
+    piece_valid = false;
+  }
+
+  template <typename FT, int N, typename T>
+  REALM_CUDA_HD
+  FT *MultiAffineAccessor<FT,N,T>::ptr(const Point<N,T>& p) const
+  {
+    // have we cached the right piece?
+    if(piece_valid && piece_bounds.contains(p)) {
+      uintptr_t rawptr = piece_base;
+      for(int i = 0; i < N; i++) rawptr += p[i] * piece_strides[i];
+      return reinterpret_cast<FT *>(rawptr);
+    } else {
+      const PieceLookup::Instruction *i = start_inst;
+      while(true) {
+#ifdef DEBUG_REALM
+	assert(i != 0);
+#endif
+	if(i->opcode() == PieceLookup::Instruction::OP_AFFINE_PIECE) {
+	  const PieceLookup::AffinePiece<N,T> *ap =
+	    static_cast<const PieceLookup::AffinePiece<N,T> *>(i);
+	  if(ap->bounds.contains(p)) {
+	    // hit, but we can't cache it
+	    uintptr_t rawptr = ap->base + field_offset;
+	    for(int i = 0; i < N; i++) rawptr += p[i] * ap->strides[i];
+	    return reinterpret_cast<FT *>(rawptr);
+	  } else
+	    i = ap->next();
+	} else {
+	  assert(i->opcode() == PieceLookup::Instruction::OP_SPLIT1);
+	  i = static_cast<const PieceLookup::SplitPlane<N,T> *>(i)->next(p);
+	}
+      }
+    }
+  }
+
+  template <typename FT, int N, typename T>
+  REALM_CUDA_HD
+  FT *MultiAffineAccessor<FT,N,T>::ptr(const Rect<N,T>& r, size_t strides[N]) const
+  {
+    // have we cached the right piece?
+    if(piece_valid && piece_bounds.contains(r)) {
+      uintptr_t rawptr = piece_base;
+      for(int i = 0; i < N; i++) rawptr += r.lo[i] * piece_strides[i];
+      for(int i = 0; i < N; i++) strides[i] = piece_strides[i];
+      return reinterpret_cast<FT *>(rawptr);
+    } else {
+      const PieceLookup::Instruction *i = start_inst;
+      while(true) {
+#ifdef DEBUG_REALM
+	assert(i != 0);
+#endif
+	if(i->opcode() == PieceLookup::Instruction::OP_AFFINE_PIECE) {
+	  const PieceLookup::AffinePiece<N,T> *ap =
+	    static_cast<const PieceLookup::AffinePiece<N,T> *>(i);
+	  if(ap->bounds.contains(r)) {
+	    // hit, but we can't cache it
+	    uintptr_t rawptr = ap->base + field_offset;
+	    for(int i = 0; i < N; i++) rawptr += r.lo[i] * ap->strides[i];
+	    for(int i = 0; i < N; i++) strides[i] = piece_strides[i];
+	    return reinterpret_cast<FT *>(rawptr);
+	  } else
+	    i = ap->next();
+	} else {
+	  assert(i->opcode() == PieceLookup::Instruction::OP_SPLIT1);
+	  const PieceLookup::SplitPlane<N,T> *sp =
+	    static_cast<const PieceLookup::SplitPlane<N,T> *>(i);
+	  if(sp->splits_rect(r))
+	    return 0; // failure
+	  i = sp->next(r.lo);
+	}
+      }
+    }
+  }
+
+  template <typename FT, int N, typename T>
+  REALM_CUDA_HD
+  FT MultiAffineAccessor<FT,N,T>::read(const Point<N,T>& p) const
+  {
+    return *(this->ptr(p));
+  }
+
+  template <typename FT, int N, typename T>
+  REALM_CUDA_HD
+  void MultiAffineAccessor<FT,N,T>::write(const Point<N,T>& p, FT newval) const
+  {
+    *(this->ptr(p)) = newval;
+  }
+
+  template <typename FT, int N, typename T>
+  REALM_CUDA_HD
+  FT& MultiAffineAccessor<FT,N,T>::operator[](const Point<N,T>& p) const
+  {
+    return *(this->ptr(p));
+  }
+
+  template <typename FT, int N, typename T>
+  REALM_CUDA_HD
+  FT *MultiAffineAccessor<FT,N,T>::ptr(const Point<N,T>& p)
+  {
+    // do we need to do (and cache) a lookup?
+    if(!piece_valid || !piece_bounds.contains(p)) {
+      const PieceLookup::Instruction *i = start_inst;
+      while(true) {
+#ifdef DEBUG_REALM
+	assert(i != 0);
+#endif
+	if(i->opcode() == PieceLookup::Instruction::OP_AFFINE_PIECE) {
+	  const PieceLookup::AffinePiece<N,T> *ap =
+	    static_cast<const PieceLookup::AffinePiece<N,T> *>(i);
+	  if(ap->bounds.contains(p)) {
+	    // hit - cache the result
+	    piece_valid = true;
+	    piece_bounds = ap->bounds;
+	    piece_base = ap->base + field_offset;
+	    piece_strides = ap->strides;
+	    break;
+	  } else
+	    i = ap->next();
+	} else {
+	  assert(i->opcode() == PieceLookup::Instruction::OP_SPLIT1);
+	  i = static_cast<const PieceLookup::SplitPlane<N,T> *>(i)->next(p);
+	}
+      }
+    }
+
+    uintptr_t rawptr = piece_base;
+    for(int i = 0; i < N; i++) rawptr += p[i] * piece_strides[i];
+    return reinterpret_cast<FT *>(rawptr);
+  }
+
+  template <typename FT, int N, typename T>
+  REALM_CUDA_HD
+  FT *MultiAffineAccessor<FT,N,T>::ptr(const Rect<N,T>& r, size_t strides[N])
+  {
+    // do we need to do (and cache) a lookup?
+    if(!piece_valid || !piece_bounds.contains(r)) {
+      const PieceLookup::Instruction *i = start_inst;
+      while(true) {
+#ifdef DEBUG_REALM
+	assert(i != 0);
+#endif
+	if(i->opcode() == PieceLookup::Instruction::OP_AFFINE_PIECE) {
+	  const PieceLookup::AffinePiece<N,T> *ap =
+	    static_cast<const PieceLookup::AffinePiece<N,T> *>(i);
+	  if(ap->bounds.contains(r)) {
+	    // hit - cache the result
+	    piece_valid = true;
+	    piece_bounds = ap->bounds;
+	    piece_base = ap->base + field_offset;
+	    piece_strides = ap->strides;
+	    break;
+	  } else
+	    i = ap->next();
+	} else {
+	  assert(i->opcode() == PieceLookup::Instruction::OP_SPLIT1);
+	  const PieceLookup::SplitPlane<N,T> *sp =
+	    static_cast<const PieceLookup::SplitPlane<N,T> *>(i);
+	  if(sp->splits_rect(r))
+	    return 0; // failure
+	  i = sp->next(r.lo);
+	}
+      }
+    }
+
+    uintptr_t rawptr = piece_base;
+    for(int i = 0; i < N; i++) rawptr += r.lo[i] * piece_strides[i];
+    for(int i = 0; i < N; i++) strides[i] = piece_strides[i];
+    return reinterpret_cast<FT *>(rawptr);
+  }
+
+  template <typename FT, int N, typename T>
+  REALM_CUDA_HD
+  FT MultiAffineAccessor<FT,N,T>::read(const Point<N,T>& p)
+  {
+    return *(this->ptr(p));
+  }
+
+  template <typename FT, int N, typename T>
+  REALM_CUDA_HD
+  void MultiAffineAccessor<FT,N,T>::write(const Point<N,T>& p, FT newval)
+  {
+    *(this->ptr(p)) = newval;
+  }
+
+  template <typename FT, int N, typename T>
+  REALM_CUDA_HD
+  FT& MultiAffineAccessor<FT,N,T>::operator[](const Point<N,T>& p)
+  {
+    return *(this->ptr(p));
+  }
+
+  template <typename FT, int N, typename T>
+  std::ostream& operator<<(std::ostream& os, const MultiAffineAccessor<FT,N,T>& a)
+  {
+    os << "MultiAffineAccessor{ start=" << std::hex << a.start_inst
+       << " offset=" << a.field_offset << std::dec;
+    if(a.piece_valid)
+      os << " cache={ bounds=" << a.piece_bounds
+	 << " base=" << std::hex << a.piece_base << std::dec
+	 << " strides=" << a.piece_strides << " }";
+    os << " }";
+    return os;
+  }
+
 
 }; // namespace Realm

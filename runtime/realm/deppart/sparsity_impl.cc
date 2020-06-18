@@ -107,10 +107,22 @@ namespace Realm {
     : me((ID::IDType)-1), owner(-1), type_tag(0), map_impl(0)
   {}
 
+  SparsityMapImplWrapper::~SparsityMapImplWrapper(void)
+  {
+    if(map_impl.load() != 0)
+      (*map_deleter)(map_impl.load());
+  }
+
   void SparsityMapImplWrapper::init(ID _me, unsigned _init_owner)
   {
     me = _me;
     owner = _init_owner;
+  }
+
+  template <int N, typename T>
+  static void delete_sparsity_map_impl(void *ptr)
+  {
+    delete reinterpret_cast<SparsityMapImpl<N,T> *>(ptr);
   }
 
   template <int N, typename T>
@@ -135,6 +147,7 @@ namespace Realm {
     SparsityMapImpl<N,T> *new_impl = new SparsityMapImpl<N,T>(me);
     if(map_impl.compare_exchange(impl, new_impl)) {
       // ours is the winner - return it
+      map_deleter = &delete_sparsity_map_impl<N,T>;
       return new_impl;
     } else {
       // we lost the race - free the one we made and return the winner
@@ -207,6 +220,445 @@ namespace Realm {
     }
 
     return false;
+  }
+
+  template <int N, typename T>
+  class SparsityMapToRectAdapter {
+  public:
+    SparsityMapToRectAdapter(const std::vector<SparsityMapEntry<N,T> >& _entries)
+      : entries(_entries) {}
+    size_t size() const { return entries.size(); }
+    const Rect<N,T>& operator[](size_t i) const { return entries[i].bounds; }
+  protected:
+    const std::vector<SparsityMapEntry<N,T> >& entries;
+  };
+
+  // NOTE: for N > 1, this is only safe to use if you know all rectangles
+  //  have the same extent in the non-merged dimensions
+  // ENTRIES should look like a std::vector<Rect<N,T> > - use the
+  //   SparsityMapToRectAdapter above if needed
+  template <int N, typename T, typename ENTRIES>
+  bool merge_1d_gaps(const Rect<N,T> *bounds,
+		     int merge_dim,
+		     size_t max_waste,
+		     size_t max_rects,
+		     const ENTRIES& entries,
+		     //const std::vector<SparsityMapEntry<N,T> >& entries,
+		     std::vector<Rect<N,T> >& approx_rects)
+  {
+    assert(max_rects > 1);
+
+    // do a scan through the entries and remember the max_rects-1 largest
+    //  gaps - those are the ones we'll keep
+    std::vector<T> gap_sizes(max_rects - 1, 0);
+    std::vector<int> gap_idxs(max_rects - 1, -1);
+    size_t first_span = 0;
+    size_t last_span = 0;
+    size_t waste = 0;
+    for(size_t i = 0; i < entries.size(); i++) {
+      const Rect<N,T>& e = entries[i];
+
+      // the first span doesn't cause a gap, but we might have to find
+      //  the first one
+      if(first_span == i) {
+	// are we completely off the bottom end?
+	if((bounds != 0) && (e.hi[merge_dim] < bounds->lo[merge_dim]))
+	  first_span = i + 1;  // maybe next one then
+	continue;
+      }
+
+      // we know we're not the first, but see if we were off the back end
+      //  of the range
+      if((bounds != 0) && (e.lo[merge_dim] > bounds->hi[merge_dim]))
+	break;
+
+      last_span = i; // will update on subsequent iterations if needed
+
+      T gap = entries[i].lo.x - entries[i - 1].hi.x - 1;
+      assert(gap > 0);  // if not, rectangles should have been merged
+      if(gap <= gap_sizes[0]) {
+	// this gap is smaller than any other, so we'll merge it, but
+	//  track the waste
+	waste += gap;
+	if((max_waste > 0) && (waste > max_waste))
+	  return false;
+	continue;
+      }
+
+      // the smallest gap is discarded and we insertion-sort this new value in
+      waste += gap_sizes[0];
+      if((max_waste > 0) && (waste > max_waste))
+	return false;
+      size_t j = 0;
+      while((j < (max_rects - 2) && (gap > gap_sizes[j+1]))) {
+	gap_sizes[j] = gap_sizes[j+1];
+	gap_idxs[j] = gap_idxs[j+1];
+	j++;
+      }
+      gap_sizes[j] = gap;
+      gap_idxs[j] = i;
+    }
+
+    // now just sort the gap indices so we can emit the right rectangles
+    std::sort(gap_idxs.begin(), gap_idxs.end());
+    approx_rects.resize(gap_idxs.size() + 1);
+
+    // first rect starts with the first span in range
+    approx_rects[0].lo = entries[first_span].lo;
+    if((bounds != 0) &&
+       (entries[first_span].lo[merge_dim] > bounds->lo[merge_dim]))
+      approx_rects[0].lo[merge_dim] = bounds->lo[merge_dim];
+
+    for(size_t i = 0; i < gap_idxs.size(); i++) {
+      approx_rects[i].hi = entries[gap_idxs[i] - 1].hi;
+      approx_rects[i+1].lo = entries[gap_idxs[i]].lo;
+    }
+
+    // last rect ends with the last span in range
+    approx_rects[gap_idxs.size()].hi = entries[last_span].hi;
+    if((bounds != 0) &&
+       (entries[last_span].hi[merge_dim] < bounds->hi[merge_dim]))
+      approx_rects[gap_idxs.size()].hi[merge_dim] = bounds->hi[merge_dim];
+
+    return true;
+  }
+
+  Logger log_cover("covering");
+
+  template <int N, typename T>
+  static bool any_overlaps(const Rect<N,T>& r,
+			   const std::vector<Rect<N,T> >& other,
+			   size_t skip_idx = ~size_t(0))
+  {
+    for(size_t i = 0; i < other.size(); i++)
+      if((i != skip_idx) && r.overlaps(other[i]))
+	return true;
+    return false;
+  }
+
+  template <int N, typename T>
+  struct PerClumpCountState {
+    size_t waste;
+    std::vector<Rect<N,T> > clumps;
+  };
+
+  template <int N, typename T>
+  class LexicographicRectCompare {
+  public:
+    LexicographicRectCompare(const int _dim_order[N])
+      : dim_order(_dim_order) {}
+
+    bool operator()(const Rect<N,T>& a, const Rect<N,T>& b) const
+    {
+      for(int i = 0; i < N; i++) {
+	if(a.lo[dim_order[i]] < b.lo[dim_order[i]]) return true;
+	if(a.lo[dim_order[i]] > b.lo[dim_order[i]]) return false;
+      }
+      return true;
+    }
+  protected:
+    const int *dim_order;
+  };
+
+  template <int N, typename T>
+  bool SparsityMapPublicImpl<N,T>::compute_covering(const Rect<N,T>& bounds,
+						    size_t max_rects,
+						    int max_overhead,
+						    std::vector<Rect<N,T> >& covering)
+  {
+    assert(entries_valid);
+
+    // start with a scan over all of our pieces see which ones are within
+    //  the given bounds
+    std::vector<size_t> in_bounds;
+    in_bounds.reserve(entries.size());
+    for(size_t i = 0; i < entries.size(); i++) {
+      assert(!entries[i].sparsity.exists() && (entries[i].bitmap == 0));
+      if(bounds.overlaps(entries[i].bounds))
+	in_bounds.push_back(i);
+    }
+    // does this fit within the 'max_rects' constraint?
+    if((max_rects == 0) || (in_bounds.size() <= max_rects)) {
+      // yay!  copy (intersected) rectangles over and we're done - there was
+      //  no storage overhead
+      covering.resize(in_bounds.size());
+      for(size_t i = 0; i < in_bounds.size(); i++)
+	covering[i] = bounds.intersection(entries[in_bounds[i]].bounds);
+      return true;
+    }
+
+    // we know some approximation is required - early out if that's not
+    //  allowed
+    if(max_overhead == 0)
+      return false;
+
+    // next, handle the special case where only one rectangle is allowed,
+    //  which means everything has to be glommed together
+    if(max_rects == 1) {
+      // compute our actual bounding box, which may be smaller than what
+      //  we were given
+      Rect<N,T> bbox = bounds.intersection(entries[in_bounds[0]].bounds);
+      size_t vol = bbox.volume();
+      for(size_t i = 1; i < in_bounds.size(); i++) {
+	Rect<N,T> r = bounds.intersection(entries[in_bounds[i]].bounds);
+	bbox = bbox.union_bbox(r);
+	vol += r.volume();
+      }
+      // check overhead limit
+      if(max_overhead >= 0) {
+	size_t extra = bbox.volume() - vol;
+	if(extra > (vol * max_overhead / 100))
+	  return false;  // doesn't fit
+      }
+      covering.resize(1);
+      covering[0] = bbox;
+      return true;
+    }
+
+    // 1-D has an optimal (and reasonably efficient) algorithm
+    if(N == 1) {
+      // if we have an overhead limit, compute the max wastage
+      size_t max_waste = 0;
+      if(max_overhead >= 0) {
+	size_t vol = 0;
+	for(size_t i = 0; i < in_bounds.size(); i++) {
+	  Rect<N,T> r = bounds.intersection(entries[in_bounds[i]].bounds);
+	  vol += r.volume();
+	}
+	// round up to be as permissive as possible
+	max_waste = (vol * max_overhead + 99) / 100;
+      }
+      std::vector<Rect<N,T> > merged;
+      bool ok = merge_1d_gaps(&bounds,
+			      0 /*merge_dim*/,
+			      max_waste,
+			      max_rects,
+			      SparsityMapToRectAdapter<N,T>(entries),
+			      merged);
+      if(ok) {
+	covering.swap(merged);
+	return true;
+      } else
+	return false;
+    } else {
+      // create the list of (intersected, if necessary) rectangles we're
+      //  trying to cover
+      // along the way, pay attention to which dimensions have variability
+      //  across the rectangles in order to detect cases that are actually
+      //  N-D masquerading as 1-D, since we can handle those optimally
+      std::vector<Rect<N,T> > to_cover(in_bounds.size());
+      size_t vol = 0;
+      int mismatched_dim = -1;
+      int num_mismatched = 0;
+      for(size_t i = 0; i < in_bounds.size(); i++) {
+	Rect<N,T> r = bounds.intersection(entries[in_bounds[i]].bounds);
+	to_cover[i] = r;
+	vol += r.volume();
+	if((i > 0) && (num_mismatched < 2))
+	  for(int j = 0; j < N; j++)
+	    if((mismatched_dim != j) &&
+	       ((to_cover[0].lo[j] != r.lo[j]) ||
+		(to_cover[0].hi[j] != r.hi[j]))) {
+	      mismatched_dim = j;
+	      num_mismatched++;
+	    }
+      }
+      assert(num_mismatched > 0);  // can't all be the same...
+
+      // perform a sort of the rectangles using a lexicographic ordering
+      //  of the lo points - the goal is just to have some locality as
+      //  we traverse them
+      int sort_order[N];
+      for(int i = 0; i < N; i++)
+	sort_order[i] = i;
+      std::sort(to_cover.begin(), to_cover.end(),
+		LexicographicRectCompare<N,T>(sort_order));
+
+      if(num_mismatched == 1) {
+	size_t max_waste = 0;
+	if(max_overhead >= 0) {
+	  // we're measuring volume and waste just in one dimension, so
+	  //  divide out the others
+	  for(int i = 0; i < N; i++)
+	    if(i != mismatched_dim) {
+	      assert((vol % (to_cover[0].hi[i] - to_cover[0].lo[i] + 1)) == 0);
+	      vol /= (to_cover[0].hi[i] - to_cover[0].lo[i] + 1);
+	    }
+	  // round up to be as permissive as possible
+	  max_waste = (vol * max_overhead + 99) / 100;
+	}
+	std::vector<Rect<N,T> > merged;
+	// this function relies on the 'to_cover' list being sorted!
+	bool ok = merge_1d_gaps(&bounds,
+				mismatched_dim,
+				max_waste,
+				max_rects,
+				to_cover,
+				merged);
+	if(ok) {
+	  covering.swap(merged);
+	  return true;
+	} else
+	  return false;
+      }
+
+      size_t max_waste;
+      if(max_overhead >= 0) {
+	// round up since the waste calculation truncates later
+	max_waste = (vol * max_overhead + 99) / 100;
+      } else {
+	// 2^N-1 is reserved for "illegal" below, so use 2^N-2 as the max
+	max_waste = ~size_t(1);
+      }
+      log_cover.debug() << "vol=" << vol << " max_overhead=" << max_overhead << " max_waste=" << max_waste;
+
+      // time for heuristics...  use a dynamic programming approach to
+      //  go through the rectangles we want to cover - for each rectangle,
+      //  decide if we want to merge with an existing clump or start a
+      //  new clump, based on minimizing wastage
+      //
+      // after each new rectangle, the state is, for each number clumps
+      // used:
+      //    current wastage (which can actually improve if a rect lands
+      //       in an existing clump)
+      //    bounds of all clumps
+      std::vector<PerClumpCountState<N,T> > state;
+      state.reserve(max_rects);
+
+      // first rectangle is trivial
+      state.resize(1);
+      state[0].waste = 0;
+      state[0].clumps.resize(1);
+      state[0].clumps[0] = to_cover[0];
+
+      for(size_t i = 1; i < to_cover.size(); i++) {
+	log_cover.debug() << "starting to_cover[" << i << "]: " << to_cover[i];
+	for(size_t k = 0; k < state.size(); k++)
+	  log_cover.debug() << "state[" << k << "]: waste=" << state[k].waste << " clumps=" << PrettyVector<Rect<N,T> >(state[k].clumps);
+
+	// work our way from the top count down because we'll overwrite
+	//  state as we go
+	size_t start_count = state.size();
+	if(start_count < max_rects) {
+	  // we can be the first to create a new clump, as long as it
+	  //  doesn't overlap with somebody
+	  if(!any_overlaps(to_cover[i], state[start_count-1].clumps)) {
+	    state.resize(start_count + 1);
+	    state[start_count].waste = state[start_count - 1].waste;
+	    state[start_count].clumps.resize(start_count + 1);
+	    state[start_count].clumps = state[start_count - 1].clumps;
+	    state[start_count].clumps.push_back(to_cover[i]);
+	  }
+	}
+
+	size_t c = start_count;
+	while(c-- > 0) {
+	  PerClumpCountState<N,T>& pc = state[c];
+
+	  // at each existing count, we have a choice of combining with
+	  //  one of the existing clumps at that count, or using the result
+	  //  from the next count down and starting a new clump
+
+	  size_t best_waste = ~size_t(0);
+	  size_t merge_idx;
+	  Rect<N,T> merge_rect;
+
+	  // if state was illegal, no modifications to it are legal
+	  if(pc.waste < ~size_t(0)) {
+	    // scan the clumps first to see which one(s) we touch, or even
+	    //  better, if we're contained in one
+	    size_t touch_idx;
+	    size_t touch_count = 0;
+	    bool contained = false;
+	    for(size_t j = 0; j <= c; j++) {
+	      if(!pc.clumps[j].overlaps(to_cover[i])) continue;
+	      touch_idx = j;
+	      contained = pc.clumps[j].contains(to_cover[i]);
+	      touch_count++;
+	      if(contained || (touch_count > 1)) break;  // early outs
+	    }
+
+	    // if we're contained by an existing clump, that's the best
+	    //  choice as it reduces the waste
+	    if(contained) {
+	      log_cover.debug() << "count " << c << ": contained in " << touch_idx;
+	      assert(pc.waste > to_cover[i].volume());
+	      pc.waste -= to_cover[i].volume();
+	      continue;
+	    }
+
+	    if(touch_count == 1) {
+	      Rect<N,T> r = pc.clumps[touch_idx].union_bbox(to_cover[i]);
+	      if(!any_overlaps(r, pc.clumps, touch_idx)) {
+		// no conflicts - this is at least an option
+		merge_idx = touch_idx;
+		merge_rect = r;
+		best_waste = (pc.waste +
+			      (r.volume() - pc.clumps[touch_idx].volume()) -
+			      to_cover[i].volume());
+	      }
+	    }
+
+	    if(touch_count == 0) {
+	      // can potentially merge with anybody
+	      for(size_t j = 0; j <= c; j++) {
+		Rect<N,T> r = pc.clumps[j].union_bbox(to_cover[i]);
+		if(!any_overlaps(r, pc.clumps, j)) {
+		  // no conflicts - this is at least an option
+		  size_t waste = (pc.waste +
+				  (r.volume() - pc.clumps[j].volume()) -
+				  to_cover[i].volume());
+		  if(waste < best_waste) {
+		    best_waste = waste;
+		    merge_idx = j;
+		    merge_rect = r;
+		  }
+		}
+	      }
+	    }
+
+	    // if touch_count > 1, any merge would cause a conflict
+	  }
+
+	  // are we better off starting a new clump?
+	  if((c > 0) && (state[c - 1].waste < best_waste) &&
+	     !any_overlaps(to_cover[i], state[c - 1].clumps)) {
+	    log_cover.debug() << "count " << c << ": starting new clump";
+	    pc.waste = state[c - 1].waste;
+	    pc.clumps = state[c - 1].clumps;
+	    pc.clumps.push_back(to_cover[i]);
+	    continue;
+	  }
+
+	  // was there a valid merge?
+	  // TODO: trim by max overhead
+	  if(best_waste < ~size_t(0)) {
+	    log_cover.debug() << "count " << c << ": merging with clump " << merge_idx;
+	    pc.waste = best_waste;
+	    pc.clumps[merge_idx] = merge_rect;
+	    continue;
+	  }
+
+	  // if neither, we've painted ourselves into a corner
+	  pc.waste = best_waste;
+	  // TODO: check for being completely busted and give up?
+	}
+      }
+
+      // now look over the final state and choose the clump count with the
+      //  lowest waste (in general, it should be the largest count)
+      size_t best_count = 0;
+      for(size_t i = 1; i < state.size(); i++) {
+	log_cover.debug() << "state[" << i << "]: waste=" << state[i].waste << " clumps=" << PrettyVector<Rect<N,T> >(state[i].clumps);
+	if(state[i].waste < state[best_count].waste)
+	  best_count = i;
+      }
+      if(state[best_count].waste <= max_waste) {
+	covering = state[best_count].clumps;
+	return true;
+      } else
+	return false;
+    }
   }
 
 
