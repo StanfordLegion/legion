@@ -430,6 +430,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ColocationConstraint::ColocationConstraint(unsigned idx1, unsigned idx2)
+    //--------------------------------------------------------------------------
+    {
+      indexes.insert(idx1);
+      indexes.insert(idx2);
+    }
+
+    //--------------------------------------------------------------------------
+    ColocationConstraint::ColocationConstraint(unsigned idx1, unsigned idx2,
+                                               FieldID fid)
+    //--------------------------------------------------------------------------
+    {
+      indexes.insert(idx1);
+      indexes.insert(idx2);
+      fields.insert(fid);
+    }
+
+    //--------------------------------------------------------------------------
     ColocationConstraint::ColocationConstraint(unsigned index1, unsigned index2,
                                                const std::set<FieldID> &fids)
     //--------------------------------------------------------------------------

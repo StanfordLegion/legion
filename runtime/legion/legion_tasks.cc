@@ -3109,70 +3109,161 @@ namespace Legion {
       {
         if (con_it->indexes.size() < 2)
           continue;
-        if (con_it->fields.empty())
-          continue;
-        // First check to make sure that all these region requirements have
-        // the same region tree ID.
-        bool first = true;
-        FieldSpace handle = FieldSpace::NO_SPACE;
-        std::vector<InstanceSet*> instances(con_it->indexes.size());
         unsigned idx = 0;
-        for (std::set<unsigned>::const_iterator it = con_it->indexes.begin();
-              it != con_it->indexes.end(); it++, idx++)
+        bool first = true;
+        RegionTreeID tree_id = 0;
+        FieldSpaceNode *field_space_node = NULL;
+        std::map<unsigned/*field index*/,
+          std::pair<PhysicalManager*,unsigned> > colocation_instances;
+        for (std::set<unsigned>::const_iterator iit = con_it->indexes.begin();
+              iit != con_it->indexes.end(); iit++, idx++)
         {
 #ifdef DEBUG_LEGION
-          assert(regions[*it].handle_type == LEGION_SINGULAR_PROJECTION);
-          for (std::set<FieldID>::const_iterator fit = con_it->fields.begin();
-                fit != con_it->fields.end(); fit++)
-          {
-            if (regions[*it].privilege_fields.find(*fit) ==
-                regions[*it].privilege_fields.end())
-            {
-              REPORT_LEGION_ERROR(ERROR_INVALID_LOCATION_CONSTRAINT,
-                            "Invalid location constraint. Location constraint "
-                            "specifies field %d which is not included in "
-                            "region requirement %d of task %s (ID %lld).",
-                            *fit, *it, get_task_name(), get_unique_id());
-              assert(false);
-            }
-          }
+          assert(regions[*iit].handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
+          const RegionRequirement &req = regions[*iit];
           if (first)
           {
-            handle = regions[*it].region.get_field_space();
             first = false;
+            tree_id = req.region.get_tree_id();
+            field_space_node = runtime->forest->get_node(
+                                req.region.get_field_space());
+            const InstanceSet &insts = physical_instances[*iit];
+            FieldMask colocation_mask;
+            if (con_it->fields.empty())
+            {
+              // If there are no explicit fields then we are
+              // just going through and checking all of them
+              for (std::set<FieldID>::const_iterator it = 
+                    req.privilege_fields.begin(); it != 
+                    req.privilege_fields.end(); it++)
+              {
+                unsigned index = field_space_node->get_field_index(*it);
+                colocation_instances[index] = 
+                  std::pair<PhysicalManager*,unsigned>(NULL, *iit);
+                colocation_mask.set_bit(index);
+              }
+            }
+            else
+            {
+              for (std::set<FieldID>::const_iterator it = 
+                    con_it->fields.begin(); it != con_it->fields.end(); it++)
+              {
+                if (req.privilege_fields.find(*it) == 
+                    req.privilege_fields.end())
+                  continue;
+                unsigned index = field_space_node->get_field_index(*it);
+                colocation_instances[index] = 
+                  std::pair<PhysicalManager*,unsigned>(NULL, *iit);
+                colocation_mask.set_bit(index);
+              }
+            }
+            for (unsigned idx = 0; idx < insts.size(); idx++)
+            {
+              const InstanceRef &ref = insts[idx];
+              const FieldMask overlap = 
+                colocation_mask & ref.get_valid_fields();
+              if (!overlap)
+                continue;
+              PhysicalManager *manager = ref.get_manager();
+              if (manager->is_virtual_manager())
+                REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                    "Invalid mapper output. Mapper %s selected a virtual "
+                    "instance for region requirement %d of task %s (UID %lld), "
+                    "but also selected variant %d which contains a colocation "
+                    "constraint for this region requirement. It is illegal to "
+                    "request a virtual mapping for a region requirement with a "
+                    "colocation constraint.", local_mapper->get_mapper_name(),
+                    *iit, get_task_name(), get_unique_id(), impl->vid)
+              int index = overlap.find_first_set();
+              while (index >= 0)
+              {
+                std::map<unsigned,
+                  std::pair<PhysicalManager*,unsigned> >::iterator finder = 
+                    colocation_instances.find(index);
+#ifdef DEBUG_LEGION
+                assert(finder != colocation_instances.end());
+                assert(finder->second.first == NULL);
+                assert(finder->second.second == *iit);
+#endif
+                finder->second.first = manager;
+                index = overlap.find_next_set(index+1);
+              }
+            }
           }
           else
           {
-            if (regions[*it].region.get_field_space() != handle)
-              REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                            "Invalid mapper output. Mapper %s selected variant "
-                            "%d for task %s (ID %lld). However, this variant "
-                            "has colocation constraints for indexes %d and %d "
-                            "which have region requirements with different "
-                            "field spaces which is illegal.",
-                            local_mapper->get_mapper_name(), impl->vid, 
-                            get_task_name(), get_unique_id(), 
-                            *(con_it->indexes.begin()), *it)
+            // check to make sure that all these region requirements have
+            // the same region tree ID.
+            if (req.region.get_tree_id() != tree_id)
+              REPORT_LEGION_ERROR(ERROR_INVALID_LOCATION_CONSTRAINT,
+                            "Invalid location constraint. Location constraint "
+                            "specified on region requirements %d and %d of "
+                            "variant %d of task %s, but region requirements "
+                            "contain regions that from different region trees "
+                            "(%d and %d). Colocation constraints must always "
+                            "be specified on region requirements with regions "
+                            "from the same region tree.", 
+                            *(con_it->indexes.begin()), *iit, impl->vid,
+                            get_task_name(), tree_id, 
+                            req.region.get_tree_id())
+            const InstanceSet &insts = physical_instances[*iit];
+            for (unsigned idx = 0; idx < insts.size(); idx++)
+            {
+              const InstanceRef &ref = insts[idx];
+              PhysicalManager *manager = ref.get_manager();
+              if (manager->is_virtual_manager())
+                REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                    "Invalid mapper output. Mapper %s selected a virtual "
+                    "instance for region requirement %d of task %s (UID %lld), "
+                    "but also selected variant %d which contains a colocation "
+                    "constraint for this region requirement. It is illegal to "
+                    "request a virtual mapping for a region requirement with a "
+                    "colocation constraint.", local_mapper->get_mapper_name(),
+                    *iit, get_task_name(), get_unique_id(), impl->vid)
+              const FieldMask &inst_mask = ref.get_valid_fields();
+              std::vector<FieldID> field_names;
+              field_space_node->get_field_set(inst_mask,parent_ctx,field_names);
+              unsigned name_index = 0;
+              int index = inst_mask.find_first_set();
+              while (index >= 0)
+              {
+                std::map<unsigned,
+                  std::pair<PhysicalManager*,unsigned> >::const_iterator
+                    finder = colocation_instances.find(index);
+                if (finder != colocation_instances.end())
+                {
+                  if (finder->second.first->instance != manager->instance)
+                    REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                          "Invalid mapper output. Mapper %s selected variant "
+                          "%d for task %s (ID %lld). However, this variant "
+                          "requires that field %d of region requirements %d be "
+                          "co-located with prior requirement %d but it is not. "
+                          "Requirement %d mapped to instance " IDFMT " while "
+                          "prior requirement %d mapped to instance " IDFMT "",
+                          local_mapper->get_mapper_name(), impl->vid, 
+                          get_task_name(), get_unique_id(), 
+                          field_names[name_index], *iit, finder->second.second,
+                          *iit, manager->instance.id, finder->second.second,
+                          finder->second.first->instance.id)
+                }
+                else
+                {
+                  if (!con_it->fields.empty())
+                  {
+                    if (con_it->fields.find(field_names[name_index]) !=
+                        con_it->fields.end())
+                      colocation_instances[index] = 
+                        std::make_pair(manager, *iit);
+                  }
+                  else
+                    colocation_instances[index] = std::make_pair(manager, *iit);
+                }
+                index = inst_mask.find_next_set(index+1);
+                name_index++;
+              }
+            }
           }
-          instances[idx] = const_cast<InstanceSet*>(&physical_instances[*it]);
-        }
-        // Now do the test for colocation
-        unsigned bad1 = 0, bad2 = 0; 
-        if (!runtime->forest->are_colocated(instances, handle, 
-                                            con_it->fields, bad1, bad2))
-        {
-          // Used for translating the indexes back from their linearized form
-          std::vector<unsigned> lin_indexes(con_it->indexes.begin(),
-                                            con_it->indexes.end());
-          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                        "Invalid mapper output. Mapper %s selected variant "
-                        "%d for task %s (ID %lld). However, this variant "
-                        "requires that region requirements %d and %d be "
-                        "co-located for some set of field, but they are not.",
-                        local_mapper->get_mapper_name(), impl->vid, 
-                        get_task_name(), get_unique_id(), lin_indexes[bad1],
-                        lin_indexes[bad2])
         }
       }
     }

@@ -623,10 +623,6 @@ namespace Legion {
                  std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired,
                                const std::vector<PhysicalManager*> &unacquired);
     public:
-      bool are_colocated(const std::vector<InstanceSet*> &instances,
-                         FieldSpace handle, const std::set<FieldID> &fields,
-                         unsigned &idx1, unsigned &idx2);
-    public:
       // Debugging method for checking context state
       void check_context_state(RegionTreeContext ctx);
     public:
