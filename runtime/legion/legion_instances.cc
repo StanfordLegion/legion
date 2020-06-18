@@ -3047,7 +3047,8 @@ namespace Legion {
         }
         realm_layout =
           instance_domain->create_layout(constraints, field_set, 
-             field_sizes, compact, &piece_list, &piece_list_size);
+             field_sizes, compact, unsat_kind, unsat_index, 
+             &piece_list, &piece_list_size);
         // If constraints were unsatisfied then return now
         if (realm_layout == NULL)
           return NULL;

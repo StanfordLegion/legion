@@ -1040,7 +1040,8 @@ namespace Legion {
                            const LayoutConstraintSet &constraints,
                            const std::vector<FieldID> &field_ids,
                            const std::vector<size_t> &field_sizes,
-                           bool compact, void **piece_list = NULL,
+                           bool compact,LayoutConstraintKind *unsat_kind = NULL,
+                           unsigned *unsat_index = NULL,void **piece_list =NULL,
                            size_t *piece_list_size = NULL) = 0;
     public:
       static void handle_tighten_index_space(const void *args);
@@ -1122,7 +1123,8 @@ namespace Legion {
                                const LayoutConstraintSet &constraints,
                                const std::vector<FieldID> &field_ids,
                                const std::vector<size_t> &field_sizes,
-                               bool compact, void **piece_list = NULL,
+                               bool compact, LayoutConstraintKind *unsat_kind,
+                               unsigned *unsat_index, void **piece_list = NULL,
                                size_t *piece_list_size = NULL) const;
     public:
       static IndexSpaceExpression* unpack_expression(Deserializer &derez,
@@ -1306,7 +1308,8 @@ namespace Legion {
                            const LayoutConstraintSet &constraints,
                            const std::vector<FieldID> &field_ids,
                            const std::vector<size_t> &field_sizes,
-                           bool compact, void **piece_list = NULL, 
+                           bool compact,LayoutConstraintKind *unsat_kind = NULL,
+                           unsigned *unsat_index = NULL,void **piece_list =NULL, 
                            size_t *piece_list_size = NULL);
     public:
       ApEvent get_realm_index_space(Realm::IndexSpace<DIM,T> &space,
@@ -2197,7 +2200,8 @@ namespace Legion {
                            const LayoutConstraintSet &constraints,
                            const std::vector<FieldID> &field_ids,
                            const std::vector<size_t> &field_sizes,
-                           bool compact, void **piece_list = NULL, 
+                           bool compact,LayoutConstraintKind *unsat_kind = NULL,
+                           unsigned *unsat_index = NULL,void **piece_list =NULL, 
                            size_t *piece_list_size = NULL);
     public:
       virtual void get_launch_space_domain(Domain &launch_domain);

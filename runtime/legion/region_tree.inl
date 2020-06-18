@@ -520,12 +520,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     Realm::InstanceLayoutGeneric* IndexSpaceExpression::create_layout_internal(
-                                   const Realm::IndexSpace<DIM,T> &space,
-                                   const LayoutConstraintSet &constraints,
-                                   const std::vector<FieldID> &field_ids,
-                                   const std::vector<size_t> &field_sizes,
-                                   bool compact, void **piece_list,
-                                   size_t *piece_list_size) const
+                                 const Realm::IndexSpace<DIM,T> &space,
+                                 const LayoutConstraintSet &constraints,
+                                 const std::vector<FieldID> &field_ids,
+                                 const std::vector<size_t> &field_sizes,
+                                 bool compact, LayoutConstraintKind *unsat_kind,
+                                 unsigned *unsat_index, void **piece_list,
+                                 size_t *piece_list_size) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -557,7 +558,13 @@ namespace Legion {
           std::vector<Realm::Rect<DIM,T> > covering;
           if (!space.compute_covering(spec.max_pieces, spec.max_overhead,
                                       covering))
+          {
+            if (unsat_kind != NULL)
+              *unsat_kind = LEGION_SPECIALIZED_CONSTRAINT;
+            if (unsat_index != NULL)
+              *unsat_index = 0;
             return NULL;
+          }
           // Container problem is stupid
           piece_bounds.resize(covering.size());
           for (unsigned idx = 0; idx < covering.size(); idx++)
@@ -570,7 +577,13 @@ namespace Legion {
             if (!itr.rect.empty())
               piece_bounds.push_back(itr.rect);
           if (spec.max_pieces < piece_bounds.size())
+          {
+            if (unsat_kind != NULL)
+              *unsat_kind = LEGION_SPECIALIZED_CONSTRAINT;
+            if (unsat_index != NULL)
+              *unsat_index = 0;
             return NULL;
+          }
         }
         if (!piece_bounds.empty())
         {
@@ -1328,7 +1341,9 @@ namespace Legion {
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<FieldID> &field_ids,
                                     const std::vector<size_t> &field_sizes,
-                                    bool compact, void **piece_list,
+                                    bool compact, 
+                                    LayoutConstraintKind *unsat_kind,
+                                    unsigned *unsat_index, void **piece_list,
                                     size_t *piece_list_size)
     //--------------------------------------------------------------------------
     {
@@ -1336,8 +1351,8 @@ namespace Legion {
       ApEvent space_ready = get_realm_index_space(local_is, true/*tight*/);
       if (space_ready.exists())
         space_ready.wait();
-      return create_layout_internal(local_is, constraints, field_ids,
-                  field_sizes, compact, piece_list, piece_list_size);
+      return create_layout_internal(local_is, constraints,field_ids,field_sizes,
+                 compact, unsat_kind, unsat_index, piece_list, piece_list_size);
     }
 
     //--------------------------------------------------------------------------
@@ -4802,7 +4817,9 @@ namespace Legion {
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<FieldID> &field_ids,
                                     const std::vector<size_t> &field_sizes,
-                                    bool compact, void **piece_list, 
+                                    bool compact, 
+                                    LayoutConstraintKind *unsat_kind,
+                                    unsigned *unsat_index, void **piece_list, 
                                     size_t *piece_list_size)
     //--------------------------------------------------------------------------
     {
@@ -4810,8 +4827,8 @@ namespace Legion {
       ApEvent space_ready = get_realm_index_space(local_is, true/*tight*/);
       if (space_ready.exists())
         space_ready.wait();
-      return create_layout_internal(local_is, constraints, field_ids,
-                  field_sizes, compact, piece_list, piece_list_size);
+      return create_layout_internal(local_is, constraints,field_ids,field_sizes,
+                 compact, unsat_kind, unsat_index, piece_list, piece_list_size);
     }
     
     //--------------------------------------------------------------------------

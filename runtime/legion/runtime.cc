@@ -5562,7 +5562,7 @@ namespace Legion {
                 rez.serialize<size_t>(results.size());
                 for (unsigned idx = 0; idx < results.size(); idx++)
                 {
-                  PhysicalManager *manager = results[idx].impl;
+                  InstanceManager *manager = results[idx].impl;
                   rez.serialize(manager->did);
                 }
                 // No things for us to pass back here
@@ -5608,7 +5608,7 @@ namespace Legion {
                 rez.serialize<size_t>(results.size());
                 for (unsigned idx = 0; idx < results.size(); idx++)
                 {
-                  PhysicalManager *manager = results[idx].impl;
+                  InstanceManager *manager = results[idx].impl;
                   rez.serialize(manager->did);
                 }
                 // No things for us to pass back here
@@ -5793,7 +5793,7 @@ namespace Legion {
             derez.deserialize(did);
             RtEvent manager_ready = RtEvent::NO_RT_EVENT;
             PhysicalManager *manager = 
-              runtime->find_or_request_physical_manager(did, manager_ready);
+              runtime->find_or_request_instance_manager(did, manager_ready);
             // If the manager isn't ready yet, then we need to wait for it
             if (manager_ready.exists())
               manager_ready.wait();
@@ -6226,7 +6226,7 @@ namespace Legion {
         {
           if (!(*it)->meets_expression(space_expr, tight_region_bounds))
             continue;
-          if ((*it)->entails(constraints, NULL))
+          if ((*it)->entails(constraints, DomainPoint(), NULL))
           {
             // Check to see if we need to acquire
             // If we fail to acquire then keep going
@@ -6292,7 +6292,7 @@ namespace Legion {
         {
           if (!(*it)->meets_expression(space_expr, tight_region_bounds))
             continue;
-          if ((*it)->entails(constraints, NULL))
+          if ((*it)->entails(constraints, DomainPoint(), NULL))
           {
             // Check to see if we need to acquire
             // If we fail to acquire then keep going
