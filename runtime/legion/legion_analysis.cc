@@ -2195,6 +2195,9 @@ namespace Legion {
     void ProjectionTree::add_child(ProjectionTree *child)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(child != this);
+#endif
       children[child->node] = child;
     }
 

@@ -11967,7 +11967,7 @@ namespace Legion {
         if (finder == node_map.end())
         {
           next = new ProjectionTree(parent);
-          node_map[parent] = current;
+          node_map[parent] = next;
         }
         else
           next = finder->second;
