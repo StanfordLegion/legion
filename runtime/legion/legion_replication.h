@@ -1783,7 +1783,8 @@ namespace Legion {
     public:
       ReplTraceCaptureOp& operator=(const ReplTraceCaptureOp &rhs);
     public:
-      void initialize_capture(ReplicateContext *ctx, bool has_blocking_call);
+      void initialize_capture(ReplicateContext *ctx, 
+          bool has_blocking_call, bool remove_trace_reference);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1796,13 +1797,13 @@ namespace Legion {
       virtual void elide_fences_pre_sync(void);
       virtual void elide_fences_post_sync(void);
     protected:
-      DynamicTrace *dynamic_trace;
       PhysicalTemplate *current_template;
       CollectiveID replayable_collective_id;
       CollectiveID replay_sync_collective_id;
       CollectiveID pre_elide_fences_collective_id;
       CollectiveID post_elide_fences_collective_id;
       bool has_blocking_call;
+      bool remove_trace_reference;
     };
 
     /**

@@ -426,11 +426,9 @@ namespace Legion {
                                         bool mapping, bool execution) = 0;
       virtual void update_current_implicit(Operation *op) = 0;
     public:
-      virtual void begin_trace(TraceID tid, bool logical_only) = 0;
-      virtual void end_trace(TraceID tid) = 0;
-      virtual void begin_static_trace(
-                                     const std::set<RegionTreeID> *managed) = 0;
-      virtual void end_static_trace(void) = 0;
+      virtual void begin_trace(TraceID tid, bool logical_only,
+        bool static_trace, const std::set<RegionTreeID> *managed, bool dep) = 0;
+      virtual void end_trace(TraceID tid, bool deprecated) = 0;
       virtual void record_previous_trace(LegionTrace *trace) = 0;
       virtual void invalidate_trace_cache(LegionTrace *trace,
                                           Operation *invalidator) = 0;
@@ -1182,10 +1180,9 @@ namespace Legion {
                                         bool mapping, bool execution);
       virtual void update_current_implicit(Operation *op);
     public:
-      virtual void begin_trace(TraceID tid, bool logical_only);
-      virtual void end_trace(TraceID tid);
-      virtual void begin_static_trace(const std::set<RegionTreeID> *managed);
-      virtual void end_static_trace(void);
+      virtual void begin_trace(TraceID tid, bool logical_only,
+          bool static_trace, const std::set<RegionTreeID> *managed, bool dep);
+      virtual void end_trace(TraceID tid, bool deprecated);
       virtual void record_previous_trace(LegionTrace *trace);
       virtual void invalidate_trace_cache(LegionTrace *trace,
                                           Operation *invalidator);
@@ -1348,7 +1345,7 @@ namespace Legion {
       CompletionQueue                                 post_task_comp_queue;
     protected:
       // Traces for this task's execution
-      LegionMap<TraceID,DynamicTrace*,TASK_TRACES_ALLOC>::tracked traces;
+      LegionMap<TraceID,LegionTrace*,TASK_TRACES_ALLOC>::tracked traces;
       LegionTrace *current_trace;
       LegionTrace *previous_trace;
       bool valid_wait_event;
@@ -1867,8 +1864,9 @@ namespace Legion {
       virtual Future issue_timing_measurement(const TimingLauncher &launcher);
       virtual Future issue_mapping_fence(void);
       virtual Future issue_execution_fence(void);
-      virtual void begin_trace(TraceID tid, bool logical_only);
-      virtual void end_trace(TraceID tid);
+      virtual void begin_trace(TraceID tid, bool logical_only,
+          bool static_trace, const std::set<RegionTreeID> *managed, bool dep);
+      virtual void end_trace(TraceID tid, bool deprecated);
       virtual ApEvent add_to_dependence_queue(Operation *op, 
                                               bool unordered = false,
                                               bool outermost = true);
@@ -2552,10 +2550,9 @@ namespace Legion {
                                         bool mapping, bool execution);
       virtual void update_current_implicit(Operation *op);
     public:
-      virtual void begin_trace(TraceID tid, bool logical_only);
-      virtual void end_trace(TraceID tid);
-      virtual void begin_static_trace(const std::set<RegionTreeID> *managed);
-      virtual void end_static_trace(void);
+      virtual void begin_trace(TraceID tid, bool logical_only,
+          bool static_trace, const std::set<RegionTreeID> *managed, bool dep);
+      virtual void end_trace(TraceID tid, bool deprecated);
       virtual void record_previous_trace(LegionTrace *trace);
       virtual void invalidate_trace_cache(LegionTrace *trace,
                                           Operation *invalidator);
@@ -2956,10 +2953,9 @@ namespace Legion {
                                         bool mapping, bool execution);
       virtual void update_current_implicit(Operation *op);
     public:
-      virtual void begin_trace(TraceID tid, bool logical_only);
-      virtual void end_trace(TraceID tid);
-      virtual void begin_static_trace(const std::set<RegionTreeID> *managed);
-      virtual void end_static_trace(void);
+      virtual void begin_trace(TraceID tid, bool logical_only,
+          bool static_trace, const std::set<RegionTreeID> *managed, bool dep);
+      virtual void end_trace(TraceID tid, bool deprecated);
       virtual void record_previous_trace(LegionTrace *trace);
       virtual void invalidate_trace_cache(LegionTrace *trace,
                                           Operation *invalidator);

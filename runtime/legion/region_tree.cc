@@ -7718,6 +7718,7 @@ namespace Legion {
         IndexSpaceExpression(h.type_tag, exp_id > 0 ? exp_id : 
             runtime->get_unique_index_space_expr_id(), node_lock),
         handle(h), parent(par), index_space_ready(ready), 
+        send_references((parent != NULL) ? 1 : 0),
         realm_index_space_set(Runtime::create_rt_user_event()), 
         tight_index_space_set(Runtime::create_rt_user_event()),
         tight_index_space(false)
@@ -7731,6 +7732,11 @@ namespace Legion {
       log_garbage.info("GC Index Space %lld %d %d",
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space, handle.id);
 #endif
+      // We keep a resource reference on the parent until the parent
+      // removes it saying that we no longer need to traverse it as
+      // part of sending this index space to remote nodes
+      if (send_references > 0)
+        parent->add_nested_resource_ref(did);
       if (is_owner() && ctx->runtime->legion_spy_enabled)
         LegionSpy::log_index_space_expr(handle.get_id(), this->expr_id);
     }
@@ -8391,21 +8397,29 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Go up first so we know those nodes will be there
+      IndexPartition parent_handle = IndexPartition::NO_PART;
       if (up && (parent != NULL))
-        parent->send_node(target, true/*up*/);
-      if (!has_remote_instance(target))
       {
         AutoLock n_lock(node_lock);
+        if (send_references > 0)
+        {
+          send_references++;
+          parent_handle = parent->handle;
+        }
+      }
+      if (parent_handle.exists())
+        parent->send_node(target, true/*up*/);
+      bool delete_parent = false;
+      if (!has_remote_instance(target))
+      {
+        AutoLock n_lock(node_lock); 
         {
           Serializer rez;
           {
             RezCheck z(rez);
             rez.serialize(handle);
             rez.serialize(did);
-            if (parent != NULL)
-              rez.serialize(parent->handle);
-            else
-              rez.serialize(IndexPartition::NO_PART);
+            rez.serialize(parent_handle);
             rez.serialize(color);
             rez.serialize(index_space_ready);
             rez.serialize(expr_id);
@@ -8427,7 +8441,24 @@ namespace Legion {
           context->runtime->send_index_space_node(target, rez); 
           update_remote_instances(target);
         }
+        if (parent_handle.exists() && (--send_references == 0))
+          delete_parent = parent->remove_nested_resource_ref(did);
       }
+      if (delete_parent)
+        delete parent;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexSpaceNode::remove_send_reference(void)
+    //--------------------------------------------------------------------------
+    {
+      bool remove_reference;
+      {
+        AutoLock n_lock(node_lock);
+        remove_reference = (--send_references == 0);
+      }
+      if (remove_reference && parent->remove_nested_resource_ref(did))
+        delete parent;
     }
 
     //--------------------------------------------------------------------------
@@ -9114,8 +9145,11 @@ namespace Legion {
       // worry about the child nodes being deleted
       for (std::map<LegionColor,IndexSpaceNode*>::const_iterator it = 
             color_map.begin(); it != color_map.end(); it++)
+      {
+        it->second->remove_send_reference();
         if (it->second->is_owner())
           it->second->remove_nested_valid_ref(did, mutator);
+      }
       if (!partition_trackers.empty())
       {
         for (std::vector<PartitionTracker*>::const_iterator it = 

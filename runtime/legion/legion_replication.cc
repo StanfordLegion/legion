@@ -3540,7 +3540,7 @@ namespace Legion {
         task->set_must_epoch(this, idx, true/*register*/);
         // If we have a trace, set it for this operation as well
         if (trace != NULL)
-          task->set_trace(trace, !trace->is_fixed(), NULL);
+          task->set_trace(trace, NULL);
         task->must_epoch_task = true;
         task->initialize_replication(repl_ctx);
         task->index_domain = this->launch_domain;
@@ -3565,7 +3565,7 @@ namespace Legion {
         task->set_must_epoch(this, indiv_tasks.size()+idx, 
                                          true/*register*/);
         if (trace != NULL)
-          task->set_trace(trace, !trace->is_fixed(), NULL);
+          task->set_trace(trace, NULL);
         task->must_epoch_task = true;
         task->initialize_replication(repl_ctx);
         task->sharding_space = launcher.sharding_space;
@@ -5597,21 +5597,20 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplTraceCaptureOp::initialize_capture(ReplicateContext *ctx, 
-                                                bool has_block)
+                                          bool has_block, bool remove_trace_ref)
     //--------------------------------------------------------------------------
     {
       initialize_repl_fence(ctx, EXECUTION_FENCE, false/*need future*/);
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
-      assert(trace->is_dynamic_trace());
 #endif
-      dynamic_trace = trace->as_dynamic_trace();
-      local_trace = dynamic_trace;
+      local_trace = trace;
       // Now mark our trace as NULL to avoid registering this operation
       trace = NULL;
       tracing = false;
       current_template = NULL;
       has_blocking_call = has_block;
+      remove_trace_reference = remove_trace_ref;
       // Get a collective ID to use for check all replayable
       replayable_collective_id = 
         ctx->get_next_collective_index(COLLECTIVE_LOC_85); 
@@ -5628,10 +5627,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_operation();
-      dynamic_trace = NULL;
       current_template = NULL;
       replayable_collective_id = 0;
       has_blocking_call = false;
+      remove_trace_reference = false;
     }
 
     //--------------------------------------------------------------------------
@@ -5663,10 +5662,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(trace == NULL);
       assert(local_trace != NULL);
-      assert(local_trace == dynamic_trace);
 #endif
       // Indicate that we are done capturing this trace
-      dynamic_trace->end_trace_capture();
+      local_trace->end_trace_capture();
       // Register this fence with all previous users in the parent's context
       ReplFenceOp::trigger_dependence_analysis();
       parent_ctx->record_previous_trace(local_trace);
@@ -5712,6 +5710,8 @@ namespace Legion {
         // Reset the local trace
         local_trace->initialize_tracing_state();
       }
+      if (remove_trace_reference && local_trace->remove_reference())
+        delete local_trace;
       ReplFenceOp::trigger_mapping();
     }
 

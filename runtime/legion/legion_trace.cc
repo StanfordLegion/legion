@@ -66,8 +66,8 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    LegionTrace::LegionTrace(InnerContext *c, bool logical_only)
-      : ctx(c), state(LOGICAL_ONLY), last_memoized(0),
+    LegionTrace::LegionTrace(InnerContext *c, TraceID t, bool logical_only)
+      : ctx(c), tid(t), state(LOGICAL_ONLY), last_memoized(0),
         blocking_call_observed(false)
     //--------------------------------------------------------------------------
     {
@@ -82,6 +82,16 @@ namespace Legion {
     {
       if (physical_trace != NULL)
         delete physical_trace;
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionTrace::fix_trace(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!fixed);
+#endif
+      fixed = true;
     }
 
     //--------------------------------------------------------------------------
@@ -203,9 +213,9 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    StaticTrace::StaticTrace(InnerContext *c,
+    StaticTrace::StaticTrace(TraceID t, InnerContext *c, bool logical_only,
                              const std::set<RegionTreeID> *trees)
-      : LegionTrace(c, true)
+      : LegionTrace(c, t, logical_only)
     //--------------------------------------------------------------------------
     {
       if (trees != NULL)
@@ -214,7 +224,7 @@ namespace Legion {
     
     //--------------------------------------------------------------------------
     StaticTrace::StaticTrace(const StaticTrace &rhs)
-      : LegionTrace(NULL, true)
+      : LegionTrace(NULL, 0, true)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -242,14 +252,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool StaticTrace::is_fixed(void) const
-    //--------------------------------------------------------------------------
-    {
-      // Static traces are always fixed
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
     bool StaticTrace::handles_region_tree(RegionTreeID tid) const
     //--------------------------------------------------------------------------
     {
@@ -259,18 +261,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void StaticTrace::record_static_dependences(Operation *op,
-                               const std::vector<StaticDependence> *dependences)
+    bool StaticTrace::initialize_op_tracing(Operation *op,
+                               const std::vector<StaticDependence> *dependences,
+                               const LogicalTraceInfo *trace_info)
     //--------------------------------------------------------------------------
     {
+      // If we've already recorded all these, there's no need to do it again
+      if (fixed)
+        return false;
       // Internal operations get to skip this
       if (op->is_internal_op())
-        return;
+        return false;
       // All other operations have to add something to the list
       if (dependences == NULL)
         static_dependences.resize(static_dependences.size() + 1);
       else // Add it to the list of static dependences
         static_dependences.push_back(*dependences);
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -444,6 +451,23 @@ namespace Legion {
       assert(false);
     }
 
+    //--------------------------------------------------------------------------
+    void StaticTrace::end_trace_capture(void)
+    //--------------------------------------------------------------------------
+    {
+      // Remove mapping fences on the frontiers which haven't been removed yet
+      for (std::set<std::pair<Operation*,GenerationID> >::const_iterator it =
+            frontiers.begin(); it != frontiers.end(); it++)
+        it->first->remove_mapping_reference(it->second);
+      operations.clear();
+      frontiers.clear();
+      last_memoized = 0;
+#ifdef LEGION_SPY
+      current_uids.clear();
+      num_regions.clear();
+#endif
+    }
+
 #ifdef LEGION_SPY
     //--------------------------------------------------------------------------
     void StaticTrace::perform_logging(
@@ -499,14 +523,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     DynamicTrace::DynamicTrace(TraceID t, InnerContext *c, bool logical_only)
-      : LegionTrace(c, logical_only), tid(t), fixed(false), tracing(true)
+      : LegionTrace(c, t, logical_only), tracing(true)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     DynamicTrace::DynamicTrace(const DynamicTrace &rhs)
-      : LegionTrace(NULL, true), tid(0)
+      : LegionTrace(NULL, 0, true)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -526,17 +550,7 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void DynamicTrace::fix_trace(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!fixed);
-#endif
-      fixed = true;
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void DynamicTrace::end_trace_capture(void)
@@ -545,6 +559,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(tracing);
 #endif
+      // We don't record mapping dependences when tracing so we don't need
+      // to remove them when we are here
       operations.clear();
       last_memoized = 0;
       op_map.clear();
@@ -565,11 +581,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DynamicTrace::record_static_dependences(Operation *op,
-                               const std::vector<StaticDependence> *dependences)
+    bool DynamicTrace::initialize_op_tracing(Operation *op,
+                               const std::vector<StaticDependence> *dependences,
+                               const LogicalTraceInfo *trace_info)
     //--------------------------------------------------------------------------
     {
-      // Nothing to do
+      if (trace_info != NULL) // happens for internal operations
+        return !trace_info->already_traced;
+      else
+        return !is_fixed();
     }
 
     //--------------------------------------------------------------------------
@@ -1124,21 +1144,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceCaptureOp::initialize_capture(InnerContext *ctx, bool has_block)
+    void TraceCaptureOp::initialize_capture(InnerContext *ctx, bool has_block,
+                                            bool remove_trace_ref)
     //--------------------------------------------------------------------------
     {
       initialize(ctx, EXECUTION_FENCE, false/*need future*/);
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
-      assert(trace->is_dynamic_trace());
 #endif
-      dynamic_trace = trace->as_dynamic_trace();
-      local_trace = dynamic_trace;
+      local_trace = trace;
       // Now mark our trace as NULL to avoid registering this operation
       trace = NULL;
       tracing = false;
       current_template = NULL;
       has_blocking_call = has_block;
+      remove_trace_reference = remove_trace_ref;
     }
 
     //--------------------------------------------------------------------------
@@ -1177,10 +1197,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(trace == NULL);
       assert(local_trace != NULL);
-      assert(local_trace == dynamic_trace);
 #endif
       // Indicate that we are done capturing this trace
-      dynamic_trace->end_trace_capture();
+      local_trace->end_trace_capture();
       // Register this fence with all previous users in the parent's context
       FenceOp::trigger_dependence_analysis();
       parent_ctx->record_previous_trace(local_trace);
@@ -1225,6 +1244,8 @@ namespace Legion {
         // Reset the local trace
         local_trace->initialize_tracing_state();
       }
+      if (remove_trace_reference && local_trace->remove_reference())
+        delete local_trace;
       FenceOp::trigger_mapping();
     }
 
@@ -1353,14 +1374,6 @@ namespace Legion {
             get_completion_event());
         current_template = physical_trace->get_current_template();
         physical_trace->clear_cached_template();
-      }
-
-      // If this is a static trace, then we remove our reference when we're done
-      if (local_trace->is_static_trace())
-      {
-        StaticTrace *static_trace = static_cast<StaticTrace*>(local_trace);
-        if (static_trace->remove_reference())
-          delete static_trace;
       }
       FenceOp::trigger_dependence_analysis();
     }

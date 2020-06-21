@@ -2313,11 +2313,6 @@ namespace Legion {
       void issue_release(Context ctx, const ReleaseLauncher &launcher);
       Future issue_mapping_fence(Context ctx);
       Future issue_execution_fence(Context ctx);
-      void begin_trace(Context ctx, TraceID tid, bool logical_only);
-      void end_trace(Context ctx, TraceID tid);
-      void begin_static_trace(Context ctx, 
-                              const std::set<RegionTreeID> *managed);
-      void end_static_trace(Context ctx);
       TraceID generate_dynamic_trace_id(bool check_context = true);
       TraceID generate_library_trace_ids(const char *name, size_t count);
       static TraceID& get_current_static_trace_id(void);

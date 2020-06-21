@@ -2711,12 +2711,10 @@ namespace Legion {
         free_remote_contexts();
       if (post_task_comp_queue.exists())
         post_task_comp_queue.destroy();
-      for (std::map<TraceID,DynamicTrace*>::const_iterator it = traces.begin();
-            it != traces.end(); it++)
-      {
+      for (std::map<TraceID,LegionTrace*>::const_iterator it = 
+            traces.begin(); it != traces.end(); it++)
         if (it->second->remove_reference())
           delete (it->second);
-      }
       traces.clear();
       // Clean up any locks and barriers that the user
       // asked us to destroy
@@ -6773,7 +6771,7 @@ namespace Legion {
     {
       // If we are performing a trace mark that the child has a trace
       if (current_trace != NULL)
-        op->set_trace(current_trace, !current_trace->is_fixed(), dependences);
+        op->set_trace(current_trace, dependences);
       size_t result = total_children_count++;
       const size_t outstanding_count = 
         __sync_add_and_fetch(&outstanding_children_count,1);
@@ -7795,7 +7793,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::begin_trace(TraceID tid, bool logical_only)
+    void InnerContext::begin_trace(TraceID tid, bool logical_only,
+        bool static_trace, const std::set<RegionTreeID> *trees, bool deprecated)
     //--------------------------------------------------------------------------
     {
       if (runtime->no_tracing) return;
@@ -7810,45 +7809,48 @@ namespace Legion {
       // by the one thread that is running the task.
       if (current_trace != NULL)
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_NESTED_TRACE,
-          "Illegal nested trace with ID %d attempted in "
-                       "task %s (ID %lld)", tid, get_task_name(),
-                       get_unique_id())
-      std::map<TraceID,DynamicTrace*>::const_iterator finder = traces.find(tid);
-      DynamicTrace* dynamic_trace = NULL;
+          "Illegal nested trace with ID %d attempted in task %s (ID %lld)", 
+          tid, get_task_name(), get_unique_id())
+      std::map<TraceID,LegionTrace*>::const_iterator finder = traces.find(tid);
+      LegionTrace *trace = NULL;
       if (finder == traces.end())
       {
         // Trace does not exist yet, so make one and record it
-        dynamic_trace = new DynamicTrace(tid, this, logical_only);
-        dynamic_trace->add_reference();
-        traces[tid] = dynamic_trace;
+        if (static_trace)
+          trace = new StaticTrace(tid, this, logical_only, trees);
+        else
+          trace = new DynamicTrace(tid, this, logical_only);
+        if (!deprecated)
+          traces[tid] = trace;
+        trace->add_reference();
       }
       else
-        dynamic_trace = finder->second;
+        trace = finder->second;
 
 #ifdef DEBUG_LEGION
-      assert(dynamic_trace != NULL);
+      assert(trace != NULL);
 #endif
-      dynamic_trace->clear_blocking_call();
+      trace->clear_blocking_call();
 
       // Issue a begin op
       TraceBeginOp *begin = runtime->get_available_begin_op();
-      begin->initialize_begin(this, dynamic_trace);
+      begin->initialize_begin(this, trace);
       add_to_dependence_queue(begin);
 
       if (!logical_only)
       {
         // Issue a replay op
         TraceReplayOp *replay = runtime->get_available_replay_op();
-        replay->initialize_replay(this, dynamic_trace);
+        replay->initialize_replay(this, trace);
         add_to_dependence_queue(replay);
       }
 
       // Now mark that we are starting a trace
-      current_trace = dynamic_trace;
+      current_trace = trace;
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::end_trace(TraceID tid)
+    void InnerContext::end_trace(TraceID tid, bool deprecated)
     //--------------------------------------------------------------------------
     {
       if (runtime->no_tracing) return;
@@ -7863,12 +7865,11 @@ namespace Legion {
           "Unmatched end trace for ID %d in task %s "
                        "(ID %lld)", tid, get_task_name(),
                        get_unique_id())
-      else if (!current_trace->is_dynamic_trace())
-      {
+      else if (!deprecated && (current_trace->tid != tid))
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_END_TRACE_CALL,
-          "Illegal end trace call on a static trace in "
-                       "task %s (UID %lld)", get_task_name(), get_unique_id());
-      }
+          "Illegal end trace call on trace ID %d that does not match "
+          "the current trace ID %d in task %s (UID %lld)", tid,
+          current_trace->tid, get_task_name(), get_unique_id())
       bool has_blocking_call = current_trace->has_blocking_call();
       if (current_trace->is_fixed())
       {
@@ -7881,63 +7882,11 @@ namespace Legion {
       {
         // Not fixed yet, dump a capture trace op into the stream
         TraceCaptureOp *capture_op = runtime->get_available_capture_op(); 
-        capture_op->initialize_capture(this, has_blocking_call);
-        add_to_dependence_queue(capture_op);
+        capture_op->initialize_capture(this, has_blocking_call, deprecated);
         // Mark that the current trace is now fixed
-        current_trace->as_dynamic_trace()->fix_trace();
+        current_trace->fix_trace();
+        add_to_dependence_queue(capture_op);
       }
-      // We no longer have a trace that we're executing 
-      current_trace = NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    void InnerContext::begin_static_trace(const std::set<RegionTreeID> *trees)
-    //--------------------------------------------------------------------------
-    {
-      if (runtime->no_tracing) return;
-
-      AutoRuntimeCall call(this);
-#ifdef DEBUG_LEGION
-      log_run.debug("Beginning a static trace in task %s (ID %lld)",
-                    get_task_name(), get_unique_id());
-#endif
-      // No need to hold the lock here, this is only ever called
-      // by the one thread that is running the task.
-      if (current_trace != NULL)
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_NESTED_STATIC_TRACE,
-          "Illegal nested static trace attempted in "
-                       "task %s (ID %lld)", get_task_name(), get_unique_id())
-      // Issue the mapping fence into the analysis
-      runtime->issue_mapping_fence(this);
-      // Then we make a static trace
-      current_trace = new StaticTrace(this, trees); 
-      current_trace->add_reference();
-    }
-
-    //--------------------------------------------------------------------------
-    void InnerContext::end_static_trace(void)
-    //--------------------------------------------------------------------------
-    {
-      if (runtime->no_tracing) return;
-
-      AutoRuntimeCall call(this);
-#ifdef DEBUG_LEGION
-      log_run.debug("Ending a static trace in task %s (ID %lld)",
-                    get_task_name(), get_unique_id());
-#endif
-      if (current_trace == NULL)
-        REPORT_LEGION_ERROR(ERROR_UNMATCHED_END_STATIC_TRACE,
-          "Unmatched end static trace in task %s "
-                       "(ID %lld)", get_task_name(), get_unique_id())
-      else if (current_trace->is_dynamic_trace())
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_END_STATIC_TRACE,
-          "Illegal end static trace call on a dynamic trace in "
-                       "task %s (UID %lld)", get_task_name(), get_unique_id())
-      // We're done with this trace, need a trace complete op to clean up
-      // This operation takes ownership of the static trace reference
-      TraceCompleteOp *complete_op = runtime->get_available_trace_op();
-      complete_op->initialize_complete(this,current_trace->has_blocking_call());
-      add_to_dependence_queue(complete_op);
       // We no longer have a trace that we're executing 
       current_trace = NULL;
     }
@@ -14645,7 +14594,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::begin_trace(TraceID tid, bool logical_only)
+    void ReplicateContext::begin_trace(TraceID tid, bool logical_only,
+        bool static_trace, const std::set<RegionTreeID> *trees, bool deprecated)
     //--------------------------------------------------------------------------
     {
       if (runtime->no_tracing) return;
@@ -14662,42 +14612,46 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_NESTED_TRACE,
           "Illegal nested trace with ID %d attempted in "
            "task %s (ID %lld)", tid, get_task_name(), get_unique_id())
-      std::map<TraceID,DynamicTrace*>::const_iterator finder = traces.find(tid);
-      DynamicTrace* dynamic_trace = NULL;
+      std::map<TraceID,LegionTrace*>::const_iterator finder = traces.find(tid);
+      LegionTrace *trace = NULL;
       if (finder == traces.end())
       {
         // Trace does not exist yet, so make one and record it
-        dynamic_trace = new DynamicTrace(tid, this, logical_only);
-        dynamic_trace->add_reference();
-        traces[tid] = dynamic_trace;
+        if (static_trace)
+          trace = new StaticTrace(tid, this, logical_only, trees);
+        else
+          trace = new DynamicTrace(tid, this, logical_only);
+        if (!deprecated)
+          traces[tid] = trace;
+        trace->add_reference();
       }
       else
-        dynamic_trace = finder->second;
+        trace = finder->second;
 
 #ifdef DEBUG_LEGION
-      assert(dynamic_trace != NULL);
+      assert(trace != NULL);
 #endif
-      dynamic_trace->clear_blocking_call();
+      trace->clear_blocking_call();
 
       // Issue a begin op
       ReplTraceBeginOp *begin = runtime->get_available_repl_begin_op();
-      begin->initialize_begin(this, dynamic_trace);
+      begin->initialize_begin(this, trace);
       add_to_dependence_queue(begin);
 
       if (!logical_only)
       {
         // Issue a replay op
         ReplTraceReplayOp *replay = runtime->get_available_repl_replay_op();
-        replay->initialize_replay(this, dynamic_trace);
+        replay->initialize_replay(this, trace);
         add_to_dependence_queue(replay);
       }
 
       // Now mark that we are starting a trace
-      current_trace = dynamic_trace;
+      current_trace = trace;
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::end_trace(TraceID tid)
+    void ReplicateContext::end_trace(TraceID tid, bool deprecated)
     //--------------------------------------------------------------------------
     {
       if (runtime->no_tracing) return;
@@ -14711,12 +14665,11 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_UMATCHED_END_TRACE,
           "Unmatched end trace for ID %d in task %s (ID %lld)", 
           tid, get_task_name(), get_unique_id())
-      else if (!current_trace->is_dynamic_trace())
-      {
+      else if (!deprecated && (current_trace->tid != tid))
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_END_TRACE_CALL,
-          "Illegal end trace call on a static trace in task %s (UID %lld)", 
-          get_task_name(), get_unique_id());
-      }
+          "Illegal end trace call on trace ID %d that does not match "
+          "the current trace ID %d in task %s (UID %lld)", tid,
+          current_trace->tid, get_task_name(), get_unique_id())
       const bool has_blocking_call = current_trace->has_blocking_call();
       if (current_trace->is_fixed())
       {
@@ -14736,16 +14689,16 @@ namespace Legion {
         // Not fixed yet, dump a capture trace op into the stream
         ReplTraceCaptureOp *capture_op = 
           runtime->get_available_repl_capture_op();
-        capture_op->initialize_capture(this, has_blocking_call);
+        capture_op->initialize_capture(this, has_blocking_call, deprecated);
         // Make a trace collective ID here if we don't have one in case
         // we need to regenerate the trace barrier during the dependence
         // analysis stage of the pipeline
         if (trace_recording_collective_id == 0)
           trace_recording_collective_id = 
             get_next_collective_index(COLLECTIVE_LOC_99);
-        add_to_dependence_queue(capture_op);
         // Mark that the current trace is now fixed
-        current_trace->as_dynamic_trace()->fix_trace();
+        current_trace->fix_trace();
+        add_to_dependence_queue(capture_op);
       }
       // We no longer have a trace that we're executing 
       current_trace = NULL;
@@ -18578,7 +18531,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::begin_trace(TraceID tid, bool logical_only)
+    void LeafContext::begin_trace(TraceID tid, bool logical_only,
+        bool static_trace, const std::set<RegionTreeID> *trees, bool deprecated)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_LEGION_BEGIN_TRACE,
@@ -18587,30 +18541,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::end_trace(TraceID tid)
+    void LeafContext::end_trace(TraceID tid, bool deprecated)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_LEGION_END_TRACE,
         "Illegal Legion end trace call in leaf task %s (ID %lld)",
                      get_task_name(), get_unique_id())
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::begin_static_trace(const std::set<RegionTreeID> *managed)
-    //--------------------------------------------------------------------------
-    {
-      REPORT_LEGION_ERROR(ERROR_ILLEGAL_LEGION_BEGIN_STATIC_TRACE,
-        "Illegal Legion begin static trace call in leaf task %s "
-                     "(ID %lld)", get_task_name(), get_unique_id())
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::end_static_trace(void)
-    //--------------------------------------------------------------------------
-    {
-      REPORT_LEGION_ERROR(ERROR_ILLEGAL_LEGION_BEGIN_STATIC_TRACE,
-        "Illegal Legion end static trace call in leaf task %s "
-                     "(ID %lld)", get_task_name(), get_unique_id())
     }
 
     //--------------------------------------------------------------------------
@@ -20007,31 +19943,18 @@ namespace Legion {
 
 
     //--------------------------------------------------------------------------
-    void InlineContext::begin_trace(TraceID tid, bool logical_only)
+    void InlineContext::begin_trace(TraceID tid, bool logical_only,
+        bool static_trace, const std::set<RegionTreeID> *trees, bool deprecated)
     //--------------------------------------------------------------------------
     {
-      enclosing->begin_trace(tid, logical_only);
+      enclosing->begin_trace(tid, logical_only, static_trace, trees,deprecated);
     }
 
     //--------------------------------------------------------------------------
-    void InlineContext::end_trace(TraceID tid)
+    void InlineContext::end_trace(TraceID tid, bool deprecated)
     //--------------------------------------------------------------------------
     {
-      enclosing->end_trace(tid);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::begin_static_trace(const std::set<RegionTreeID> *trees)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->begin_static_trace(trees);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::end_static_trace(void)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->end_static_trace();
+      enclosing->end_trace(tid, deprecated);
     }
 
     //--------------------------------------------------------------------------
