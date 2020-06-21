@@ -218,8 +218,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::set_trace(LegionTrace *t, bool is_tracing,
-                              const std::vector<StaticDependence> *dependences)
+    void Operation::set_trace(LegionTrace *t,
+                              const std::vector<StaticDependence> *dependences,
+                              const LogicalTraceInfo *trace_info)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -227,8 +228,7 @@ namespace Legion {
       assert(t != NULL);
 #endif
       trace = t; 
-      tracing = is_tracing;
-      trace->record_static_dependences(this, dependences);
+      tracing = trace->initialize_op_tracing(this, dependences, trace_info);
     }
 
     //--------------------------------------------------------------------------
@@ -6416,39 +6416,72 @@ namespace Legion {
         }
       } 
       if (runtime->legion_spy_enabled)
-      { 
-        for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-        {
-          const RegionRequirement &req = src_requirements[idx];
-          const bool reg = (req.handle_type == LEGION_SINGULAR_PROJECTION) ||
-                           (req.handle_type == LEGION_REGION_PROJECTION);
-          const bool proj = (req.handle_type == LEGION_REGION_PROJECTION) ||
-                            (req.handle_type == LEGION_PARTITION_PROJECTION); 
+        log_index_copy_requirements();
+    }
 
-          LegionSpy::log_logical_requirement(unique_op_id, idx, reg,
-              reg ? req.region.index_space.id :
-                    req.partition.index_partition.id,
-              reg ? req.region.field_space.id :
-                    req.partition.field_space.id,
-              reg ? req.region.tree_id : 
-                    req.partition.tree_id,
-              req.privilege, req.prop, req.redop, req.parent.index_space.id);
-          LegionSpy::log_requirement_fields(unique_op_id, idx, 
-                                            req.instance_fields);
-          if (proj)
-            LegionSpy::log_requirement_projection(unique_op_id, idx, 
-                                                  req.projection);
-        }
-        for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+    //--------------------------------------------------------------------------
+    void IndexCopyOp::log_index_copy_requirements(void)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+      {
+        const RegionRequirement &req = src_requirements[idx];
+        const bool reg = (req.handle_type == LEGION_SINGULAR_PROJECTION) ||
+                         (req.handle_type == LEGION_REGION_PROJECTION);
+        const bool proj = (req.handle_type == LEGION_REGION_PROJECTION) ||
+                          (req.handle_type == LEGION_PARTITION_PROJECTION); 
+
+        LegionSpy::log_logical_requirement(unique_op_id, idx, reg,
+            reg ? req.region.index_space.id :
+                  req.partition.index_partition.id,
+            reg ? req.region.field_space.id :
+                  req.partition.field_space.id,
+            reg ? req.region.tree_id : 
+                  req.partition.tree_id,
+            req.privilege, req.prop, req.redop, req.parent.index_space.id);
+        LegionSpy::log_requirement_fields(unique_op_id, idx, 
+                                          req.instance_fields);
+        if (proj)
+          LegionSpy::log_requirement_projection(unique_op_id, idx, 
+                                                req.projection);
+      }
+      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+      {
+        const RegionRequirement &req = dst_requirements[idx];
+        const bool reg = (req.handle_type == LEGION_SINGULAR_PROJECTION) ||
+                         (req.handle_type == LEGION_REGION_PROJECTION);
+        const bool proj = (req.handle_type == LEGION_REGION_PROJECTION) ||
+                          (req.handle_type == LEGION_PARTITION_PROJECTION);
+
+        LegionSpy::log_logical_requirement(unique_op_id, 
+            src_requirements.size() + idx, reg,
+            reg ? req.region.index_space.id :
+                  req.partition.index_partition.id,
+            reg ? req.region.field_space.id :
+                  req.partition.field_space.id,
+            reg ? req.region.tree_id : 
+                  req.partition.tree_id,
+            req.privilege, req.prop, req.redop, req.parent.index_space.id);
+        LegionSpy::log_requirement_fields(unique_op_id, 
+                                          src_requirements.size()+idx, 
+                                          req.instance_fields);
+        if (proj)
+          LegionSpy::log_requirement_projection(unique_op_id,
+              src_requirements.size() + idx, req.projection);
+      }
+      if (!src_indirect_requirements.empty())
+      {
+        const size_t offset = 
+          src_requirements.size() + dst_requirements.size();
+        for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
         {
-          const RegionRequirement &req = dst_requirements[idx];
+          const RegionRequirement &req = src_indirect_requirements[idx];
           const bool reg = (req.handle_type == LEGION_SINGULAR_PROJECTION) ||
                            (req.handle_type == LEGION_REGION_PROJECTION);
           const bool proj = (req.handle_type == LEGION_REGION_PROJECTION) ||
                             (req.handle_type == LEGION_PARTITION_PROJECTION);
 
-          LegionSpy::log_logical_requirement(unique_op_id, 
-              src_requirements.size() + idx, reg,
+          LegionSpy::log_logical_requirement(unique_op_id, offset + idx, reg,
               reg ? req.region.index_space.id :
                     req.partition.index_partition.id,
               reg ? req.region.field_space.id :
@@ -6456,66 +6489,38 @@ namespace Legion {
               reg ? req.region.tree_id : 
                     req.partition.tree_id,
               req.privilege, req.prop, req.redop, req.parent.index_space.id);
-          LegionSpy::log_requirement_fields(unique_op_id, 
-                                            src_requirements.size()+idx, 
+          LegionSpy::log_requirement_fields(unique_op_id, offset + idx, 
                                             req.instance_fields);
           if (proj)
-            LegionSpy::log_requirement_projection(unique_op_id,
-                src_requirements.size() + idx, req.projection);
+            LegionSpy::log_requirement_projection(unique_op_id, offset + idx,
+                                                  req.projection);
         }
-        if (!src_indirect_requirements.empty())
+      }
+      if (!dst_indirect_requirements.empty())
+      {
+        const size_t offset = src_requirements.size() + 
+          dst_requirements.size() + src_indirect_requirements.size();
+        for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
         {
-          const size_t offset = 
-            src_requirements.size() + dst_requirements.size();
-          for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
-          {
-            const RegionRequirement &req = src_indirect_requirements[idx];
-            const bool reg = (req.handle_type == LEGION_SINGULAR_PROJECTION) ||
-                             (req.handle_type == LEGION_REGION_PROJECTION);
-            const bool proj = (req.handle_type == LEGION_REGION_PROJECTION) ||
-                              (req.handle_type == LEGION_PARTITION_PROJECTION);
+          const RegionRequirement &req = dst_indirect_requirements[idx];
+          const bool reg = (req.handle_type == LEGION_SINGULAR_PROJECTION) ||
+                           (req.handle_type == LEGION_REGION_PROJECTION);
+          const bool proj = (req.handle_type == LEGION_REGION_PROJECTION) ||
+                            (req.handle_type == LEGION_PARTITION_PROJECTION);
 
-            LegionSpy::log_logical_requirement(unique_op_id, offset + idx, reg,
-                reg ? req.region.index_space.id :
-                      req.partition.index_partition.id,
-                reg ? req.region.field_space.id :
-                      req.partition.field_space.id,
-                reg ? req.region.tree_id : 
-                      req.partition.tree_id,
-                req.privilege, req.prop, req.redop, req.parent.index_space.id);
-            LegionSpy::log_requirement_fields(unique_op_id, offset + idx, 
-                                              req.instance_fields);
-            if (proj)
-              LegionSpy::log_requirement_projection(unique_op_id, offset + idx,
-                                                    req.projection);
-          }
-        }
-        if (!dst_indirect_requirements.empty())
-        {
-          const size_t offset = src_requirements.size() + 
-            dst_requirements.size() + src_indirect_requirements.size();
-          for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
-          {
-            const RegionRequirement &req = dst_indirect_requirements[idx];
-            const bool reg = (req.handle_type == LEGION_SINGULAR_PROJECTION) ||
-                             (req.handle_type == LEGION_REGION_PROJECTION);
-            const bool proj = (req.handle_type == LEGION_REGION_PROJECTION) ||
-                              (req.handle_type == LEGION_PARTITION_PROJECTION);
-
-            LegionSpy::log_logical_requirement(unique_op_id, offset + idx, reg,
-                reg ? req.region.index_space.id :
-                      req.partition.index_partition.id,
-                reg ? req.region.field_space.id :
-                      req.partition.field_space.id,
-                reg ? req.region.tree_id : 
-                      req.partition.tree_id,
-                req.privilege, req.prop, req.redop, req.parent.index_space.id);
-            LegionSpy::log_requirement_fields(unique_op_id, offset + idx, 
-                                              req.instance_fields);
-            if (proj)
-              LegionSpy::log_requirement_projection(unique_op_id, offset + idx,
-                                                    req.projection);
-          }
+          LegionSpy::log_logical_requirement(unique_op_id, offset + idx, reg,
+              reg ? req.region.index_space.id :
+                    req.partition.index_partition.id,
+              reg ? req.region.field_space.id :
+                    req.partition.field_space.id,
+              reg ? req.region.tree_id : 
+                    req.partition.tree_id,
+              req.privilege, req.prop, req.redop, req.parent.index_space.id);
+          LegionSpy::log_requirement_fields(unique_op_id, offset + idx, 
+                                            req.instance_fields);
+          if (proj)
+            LegionSpy::log_requirement_projection(unique_op_id, offset + idx,
+                                                  req.projection);
         }
       }
     }
@@ -6659,6 +6664,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_replaying());
 #endif
+      if (runtime->legion_spy_enabled && !need_prepipeline_stage)
+        log_index_copy_requirements();
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
@@ -8325,7 +8332,7 @@ namespace Legion {
       create_gen = creator->get_generation();
       creator_req_idx = intern_idx;
       if (trace_info.trace != NULL)
-        set_trace(trace_info.trace, !trace_info.already_traced, NULL); 
+        set_trace(trace_info.trace, NULL, &trace_info); 
     }
 
     //--------------------------------------------------------------------------
@@ -9477,19 +9484,24 @@ namespace Legion {
       compute_parent_index();
       initialize_privilege_path(privilege_path, requirement);
       if (runtime->legion_spy_enabled)
-      { 
-        LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
-                                           true/*region*/,
-                                           requirement.region.index_space.id,
-                                           requirement.region.field_space.id,
-                                           requirement.region.tree_id,
-                                           requirement.privilege,
-                                           requirement.prop,
-                                           requirement.redop,
-                                           requirement.parent.index_space.id);
-        LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
-                                          requirement.privilege_fields);
-      }
+        log_acquire_requirement();
+    }
+
+    //--------------------------------------------------------------------------
+    void AcquireOp::log_acquire_requirement(void)
+    //--------------------------------------------------------------------------
+    {
+      LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
+                                         true/*region*/,
+                                         requirement.region.index_space.id,
+                                         requirement.region.field_space.id,
+                                         requirement.region.tree_id,
+                                         requirement.privilege,
+                                         requirement.prop,
+                                         requirement.redop,
+                                         requirement.parent.index_space.id);
+      LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
+                                        requirement.privilege_fields);
     }
 
     //--------------------------------------------------------------------------
@@ -9758,6 +9770,8 @@ namespace Legion {
     void AcquireOp::replay_analysis(void)
     //--------------------------------------------------------------------------
     {
+      if (runtime->legion_spy_enabled && !need_prepipeline_stage)
+        log_acquire_requirement();
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
@@ -10340,19 +10354,24 @@ namespace Legion {
       compute_parent_index();
       initialize_privilege_path(privilege_path, requirement);
       if (runtime->legion_spy_enabled)
-      { 
-        LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
-                                           true/*region*/,
-                                           requirement.region.index_space.id,
-                                           requirement.region.field_space.id,
-                                           requirement.region.tree_id,
-                                           requirement.privilege,
-                                           requirement.prop,
-                                           requirement.redop,
-                                           requirement.parent.index_space.id);
-        LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
-                                          requirement.privilege_fields);
-      }
+        log_release_requirement();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReleaseOp::log_release_requirement(void)
+    //--------------------------------------------------------------------------
+    {
+      LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
+                                         true/*region*/,
+                                         requirement.region.index_space.id,
+                                         requirement.region.field_space.id,
+                                         requirement.region.tree_id,
+                                         requirement.privilege,
+                                         requirement.prop,
+                                         requirement.redop,
+                                         requirement.parent.index_space.id);
+      LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
+                                        requirement.privilege_fields);
     }
 
     //--------------------------------------------------------------------------
@@ -10645,6 +10664,8 @@ namespace Legion {
     void ReleaseOp::replay_analysis(void)
     //--------------------------------------------------------------------------
     {
+      if (runtime->legion_spy_enabled && !need_prepipeline_stage)
+        log_release_requirement();
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
@@ -11871,7 +11892,7 @@ namespace Legion {
         indiv_tasks[idx]->initialize_must_epoch(this, idx, true/*register*/);
         // If we have a trace, set it for this operation as well
         if (trace != NULL)
-          indiv_tasks[idx]->set_trace(trace, !trace->is_fixed(), NULL);
+          indiv_tasks[idx]->set_trace(trace, NULL);
       }
       indiv_triggered.resize(indiv_tasks.size(), false);
       index_tasks.resize(launcher.index_tasks.size());
@@ -11887,7 +11908,7 @@ namespace Legion {
         index_tasks[idx]->initialize_must_epoch(this, 
             indiv_tasks.size() + idx, true/*register*/);
         if (trace != NULL)
-          index_tasks[idx]->set_trace(trace, !trace->is_fixed(), NULL);
+          index_tasks[idx]->set_trace(trace, NULL);
       }
       index_triggered.resize(index_tasks.size(), false);
       mapper_id = launcher.map_id;
@@ -15770,27 +15791,32 @@ namespace Legion {
       compute_parent_index();
       initialize_privilege_path(privilege_path, requirement);
       if (runtime->legion_spy_enabled)
-      { 
-        const bool reg = (requirement.handle_type == LEGION_SINGULAR_PROJECTION)
-                       || (requirement.handle_type == LEGION_REGION_PROJECTION);
-        const bool proj = (requirement.handle_type == LEGION_REGION_PROJECTION) 
-                    || (requirement.handle_type == LEGION_PARTITION_PROJECTION);
+        log_index_fill_requirement();
+    }
 
-        LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/, reg,
-            reg ? requirement.region.index_space.id :
-                  requirement.partition.index_partition.id,
-            reg ? requirement.region.field_space.id :
-                  requirement.partition.field_space.id,
-            reg ? requirement.region.tree_id : 
-                  requirement.partition.tree_id,
-            requirement.privilege, requirement.prop, 
-            requirement.redop, requirement.parent.index_space.id);
-        LegionSpy::log_requirement_fields(unique_op_id, 0/*idx*/, 
-                                          requirement.privilege_fields);
-        if (proj)
-          LegionSpy::log_requirement_projection(unique_op_id, 0/*idx*/, 
-                                                requirement.projection);
-      }
+    //--------------------------------------------------------------------------
+    void IndexFillOp::log_index_fill_requirement(void)
+    //--------------------------------------------------------------------------
+    {
+      const bool reg = (requirement.handle_type == LEGION_SINGULAR_PROJECTION)
+                     || (requirement.handle_type == LEGION_REGION_PROJECTION);
+      const bool proj = (requirement.handle_type == LEGION_REGION_PROJECTION) 
+                  || (requirement.handle_type == LEGION_PARTITION_PROJECTION);
+
+      LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/, reg,
+          reg ? requirement.region.index_space.id :
+                requirement.partition.index_partition.id,
+          reg ? requirement.region.field_space.id :
+                requirement.partition.field_space.id,
+          reg ? requirement.region.tree_id : 
+                requirement.partition.tree_id,
+          requirement.privilege, requirement.prop, 
+          requirement.redop, requirement.parent.index_space.id);
+      LegionSpy::log_requirement_fields(unique_op_id, 0/*idx*/, 
+                                        requirement.privilege_fields);
+      if (proj)
+        LegionSpy::log_requirement_projection(unique_op_id, 0/*idx*/, 
+                                              requirement.projection);
     }
 
     //--------------------------------------------------------------------------
@@ -15876,6 +15902,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_replaying());
 #endif
+      if (runtime->legion_spy_enabled)
+        log_index_fill_requirement();
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);
 #endif

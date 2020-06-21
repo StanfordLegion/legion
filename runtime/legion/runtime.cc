@@ -13646,43 +13646,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::begin_trace(Context ctx, TraceID tid, bool logical_only)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context begin trace!");
-      ctx->begin_trace(tid, logical_only);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::end_trace(Context ctx, TraceID tid)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context end trace!");
-      ctx->end_trace(tid); 
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::begin_static_trace(Context ctx, 
-                                     const std::set<RegionTreeID> *managed)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context begin static trace!");
-      ctx->begin_static_trace(managed);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::end_static_trace(Context ctx)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context end static trace!");
-      ctx->end_static_trace(); 
-    }
-
-    //--------------------------------------------------------------------------
     TraceID Runtime::generate_dynamic_trace_id(bool check_context/*= true*/)
     //--------------------------------------------------------------------------
     {

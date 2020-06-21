@@ -5756,17 +5756,18 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::begin_trace(
-                        Context ctx, TraceID tid, bool logical_only /*= false*/)
+                        Context ctx, TraceID tid, bool logical_only /*= false*/,
+                        bool static_trace, const std::set<RegionTreeID> *trees)
     //--------------------------------------------------------------------------
     {
-      runtime->begin_trace(ctx, tid, logical_only);
+      ctx->begin_trace(tid, logical_only, static_trace, trees, false/*dep*/);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::end_trace(Context ctx, TraceID tid)
     //--------------------------------------------------------------------------
     {
-      runtime->end_trace(ctx, tid);
+      ctx->end_trace(tid, false/*deprecated*/);
     }
 
     //--------------------------------------------------------------------------
@@ -5774,14 +5775,14 @@ namespace Legion {
                                      const std::set<RegionTreeID> *managed)
     //--------------------------------------------------------------------------
     {
-      runtime->begin_static_trace(ctx, managed);
+      ctx->begin_trace(0, true/*logical only*/, true/*static*/, managed, true);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::end_static_trace(Context ctx)
     //--------------------------------------------------------------------------
     {
-      runtime->end_static_trace(ctx);
+      ctx->end_trace(0, true/*deprecated*/);
     }
 
     //--------------------------------------------------------------------------
