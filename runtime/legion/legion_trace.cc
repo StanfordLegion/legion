@@ -68,7 +68,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LegionTrace::LegionTrace(InnerContext *c, TraceID t, bool logical_only)
       : ctx(c), tid(t), state(LOGICAL_ONLY), last_memoized(0),
-        blocking_call_observed(false)
+        blocking_call_observed(false), fixed(false)
     //--------------------------------------------------------------------------
     {
       physical_trace = logical_only ? NULL
@@ -1295,6 +1295,7 @@ namespace Legion {
       local_trace = trace;
       // Now mark our trace as NULL to avoid registering this operation
       trace = NULL;
+      tracing = false;
       current_template = NULL;
       template_completion = ApEvent::NO_AP_EVENT;
       replayed = false;
@@ -1626,6 +1627,7 @@ namespace Legion {
 #endif
       local_trace = trace;
       trace = NULL;
+      tracing = false;
     }
 
     //--------------------------------------------------------------------------

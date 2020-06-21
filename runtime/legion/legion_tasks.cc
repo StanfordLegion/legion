@@ -5437,9 +5437,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
       {
         for (unsigned idx = 0; idx < regions.size(); idx++)
-        {
           log_requirement(unique_op_id, idx, regions[idx]);
-        }
       }
     }
 
@@ -9434,6 +9432,7 @@ namespace Legion {
       {
         for (unsigned idx = 0; idx < regions.size(); idx++)
           TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
+        runtime->forest->log_launch_space(launch_space->handle, unique_op_id);
       }
       // Mark that this is origin mapped effectively in case we
       // have any remote tasks, do this before we clone it

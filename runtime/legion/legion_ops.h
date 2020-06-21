@@ -1332,6 +1332,8 @@ namespace Legion {
       void enumerate_points(void);
       void handle_point_commit(RtEvent point_committed);
       void check_point_requirements(void);
+    protected:
+      void log_index_copy_requirements(void);
     public:
       IndexSpaceNode*                                    launch_space;
     protected:
@@ -1927,6 +1929,7 @@ namespace Legion {
       void check_acquire_privilege(void);
       void compute_parent_index(void);
       void invoke_mapper(void);
+      void log_acquire_requirement(void);
       virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests, bool fill);
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
@@ -2039,6 +2042,7 @@ namespace Legion {
       void check_release_privilege(void);
       void compute_parent_index(void);
       void invoke_mapper(void);
+      void log_release_requirement(void);
       virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests, bool fill);
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
@@ -3246,6 +3250,8 @@ namespace Legion {
       void enumerate_points(void);
       void handle_point_commit(void);
       void check_point_requirements(void);
+    protected:
+      void log_index_fill_requirement(void);
     public:
       IndexSpaceNode*               launch_space;
     protected:
