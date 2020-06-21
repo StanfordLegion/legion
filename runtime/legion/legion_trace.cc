@@ -65,7 +65,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LegionTrace::LegionTrace(InnerContext *c, TraceID t, bool logical_only)
       : ctx(c), tid(t), state(LOGICAL_ONLY), last_memoized(0),
-        blocking_call_observed(false)
+        blocking_call_observed(false), fixed(false)
     //--------------------------------------------------------------------------
     {
       physical_trace = logical_only ? NULL
