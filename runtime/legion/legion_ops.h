@@ -311,8 +311,9 @@ namespace Legion {
                                    const RegionRequirement &req,
                                    LogicalPartition start_node);
       void set_tracking_parent(size_t index);
-      void set_trace(LegionTrace *trace, bool is_tracing,
-                     const std::vector<StaticDependence> *dependences);
+      void set_trace(LegionTrace *trace,
+                     const std::vector<StaticDependence> *dependences,
+                     const LogicalTraceInfo *trace_info = NULL);
       void set_trace_local_id(unsigned id);
       void set_must_epoch(MustEpochOp *epoch, bool do_registration);
     public:

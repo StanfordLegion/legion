@@ -6558,9 +6558,29 @@ namespace Legion {
        * dependence analysis, reducing overheads and improving
        * the parallelism available in the physical analysis.
        * The trace ID need only be local to the enclosing context.
-       * Traces are currently not permitted to be nested.
+       * Traces are currently not permitted to be nested. In general,
+       * the runtime will capture all dependence information for the
+       * trace. However, in some cases, compilers may want to pass 
+       * information along for the logical dependence analysis as a
+       * static trace. Inside of a static trace it is the application's 
+       * responsibility to specify any dependences that would normally 
+       * have existed between each operation being launched and any prior 
+       * operations in the trace (there is no need to specify dependences 
+       * on anything outside of the trace). The application can optionally 
+       * specify a set of region trees for which it will be supplying 
+       * dependences, with all other region trees being left to the runtime 
+       * to handle. If no such set is specified then the runtime will operate 
+       * under the assumption that the application is specifying dependences 
+       * for all region trees.
+       * @param ctx the enclosing task context
+       * @param tid the trace ID of the trace to be captured
+       * @param logical_only whether physical tracing is permitted
+       * @param static_trace whether this is a static trace
+       * @param managed specific region trees the application will handle
+       *                in the case of a static trace
        */
-      void begin_trace(Context ctx, TraceID tid, bool logical_only = false);
+      void begin_trace(Context ctx, TraceID tid, bool logical_only = false,
+       bool static_trace = false, const std::set<RegionTreeID> *managed = NULL);
       /**
        * Mark the end of trace that was being performed.
        */
@@ -6579,17 +6599,19 @@ namespace Legion {
        * @param ctx the enclosing task context
        * @param managed optional list of region trees managed by the application
        */
+      LEGION_DEPRECATED("Use begin_trace with static_trace=true")
       void begin_static_trace(Context ctx, 
                               const std::set<RegionTreeID> *managed = NULL);
       /**
        * Finish a static trace of operations
        * @param ctx the enclosing task context
        */
+      LEGION_DEPRECATED("Use end_trace")
       void end_static_trace(Context ctx);
 
       /**
        * Dynamically generate a unique TraceID for use across the machine
-       * @reutrn a TraceID that is globally unique across the machine
+       * @return a TraceID that is globally unique across the machine
        */
       TraceID generate_dynamic_trace_id(void);
 

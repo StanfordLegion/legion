@@ -218,8 +218,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::set_trace(LegionTrace *t, bool is_tracing,
-                              const std::vector<StaticDependence> *dependences)
+    void Operation::set_trace(LegionTrace *t,
+                              const std::vector<StaticDependence> *dependences,
+                              const LogicalTraceInfo *trace_info)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -227,8 +228,7 @@ namespace Legion {
       assert(t != NULL);
 #endif
       trace = t; 
-      tracing = is_tracing;
-      trace->record_static_dependences(this, dependences);
+      tracing = trace->initialize_op_tracing(this, dependences, trace_info);
     }
 
     //--------------------------------------------------------------------------
@@ -8317,7 +8317,7 @@ namespace Legion {
       create_gen = creator->get_generation();
       creator_req_idx = intern_idx;
       if (trace_info.trace != NULL)
-        set_trace(trace_info.trace, !trace_info.already_traced, NULL); 
+        set_trace(trace_info.trace, NULL, &trace_info); 
     }
 
     //--------------------------------------------------------------------------
@@ -11863,7 +11863,7 @@ namespace Legion {
         indiv_tasks[idx]->initialize_must_epoch(this, idx, true/*register*/);
         // If we have a trace, set it for this operation as well
         if (trace != NULL)
-          indiv_tasks[idx]->set_trace(trace, !trace->is_fixed(), NULL);
+          indiv_tasks[idx]->set_trace(trace, NULL);
       }
       indiv_triggered.resize(indiv_tasks.size(), false);
       index_tasks.resize(launcher.index_tasks.size());
@@ -11879,7 +11879,7 @@ namespace Legion {
         index_tasks[idx]->initialize_must_epoch(this, 
             indiv_tasks.size() + idx, true/*register*/);
         if (trace != NULL)
-          index_tasks[idx]->set_trace(trace, !trace->is_fixed(), NULL);
+          index_tasks[idx]->set_trace(trace, NULL);
       }
       index_triggered.resize(index_tasks.size(), false);
       mapper_id = launcher.map_id;
