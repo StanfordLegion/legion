@@ -253,6 +253,12 @@ namespace Realm {
       if(measurements.wants_measurement<ProfilingMeasurements::OperationEventWaits>())
 	measurements.add_measurement(waits);
 
+      ProfilingMeasurements::OperationFinishEvent fevent;
+      if(measurements.wants_measurement<ProfilingMeasurements::OperationFinishEvent>()) {
+        fevent.finish_event = get_finish_event();
+        measurements.add_measurement(fevent);
+      }
+
       if (measurements.wants_measurement<ProfilingMeasurements::OperationTimelineGPU>())
 	measurements.add_measurement(timeline_gpu);
 
