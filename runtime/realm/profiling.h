@@ -55,6 +55,7 @@ namespace Realm {
     PMID_PCTRS_BP,   // branch predictor performance counters
     PMID_OP_TIMELINE_GPU, // when a task was started and completed on the GPU
     PMID_OP_SUBGRAPH_INFO,  // identifying info for containing subgraph(s)
+    PMID_OP_FINISH_EVENT, // finish event for an operation
 
     // as the name suggests, this should always be last, allowing apps/runtimes
     // sitting on top of Realm to use some of the ID space
@@ -178,6 +179,11 @@ namespace Realm {
       Memory source;
       Memory target;
       size_t size;
+    };
+
+    struct OperationFinishEvent {
+      static const ProfilingMeasurementID ID = PMID_OP_FINISH_EVENT;
+      Event finish_event;
     };
 
     struct OperationSubgraphInfo {

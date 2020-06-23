@@ -403,23 +403,33 @@ namespace Realm {
 					(CUdeviceptr)ptr) );
 
 	if(managed) {
+#if CUDART_VERSION < 11000
 	  attr->memoryType = cudaMemoryTypeDevice;
+#endif
 #if CUDART_VERSION >= 10000
 	  attr->type = cudaMemoryTypeManaged;
 #endif
+#if CUDART_VERSION < 11000
 	  attr->isManaged = 1;
+#endif
 	} else {
+#if CUDART_VERSION < 11000
 	  attr->isManaged = 0;
+#endif
 	  switch(mtype) {
 	  case CU_MEMORYTYPE_HOST: {
+#if CUDART_VERSION < 11000
 	    attr->memoryType = cudaMemoryTypeHost;
+#endif
 #if CUDART_VERSION >= 10000
 	    attr->type = cudaMemoryTypeHost;
 #endif
 	    break;
 	  }
 	  case CU_MEMORYTYPE_DEVICE: {
+#if CUDART_VERSION < 11000
 	    attr->memoryType = cudaMemoryTypeDevice;
+#endif
 #if CUDART_VERSION >= 10000
 	    attr->type = cudaMemoryTypeDevice;
 #endif
