@@ -13722,10 +13722,8 @@ namespace Legion {
         is_local, is_index_space, expr_handle, expr_id, wait_for);
       IndexSpace handle;
       derez.deserialize(handle);
-      // We only actually need the index space node on the owner and the
-      // logical owner otherwise we can skip it
       IndexSpaceNode *node = NULL; RtEvent wait_on;
-      if (handle.exists() && (logical_owner == runtime->address_space))
+      if (handle.exists())
         node = runtime->forest->get_node(handle, &wait_on);
 
       // Defer this if the index space expression isn't ready yet
@@ -13753,8 +13751,7 @@ namespace Legion {
         if (expr == NULL)
           expr = is_index_space ? runtime->forest->get_node(expr_handle) :
             runtime->forest->find_remote_expression(expr_id);
-        if ((node == NULL) && handle.exists() &&
-            (logical_owner == runtime->address_space))
+        if (handle.exists() && (node == NULL))
           node = runtime->forest->get_node(handle);
       }
 
