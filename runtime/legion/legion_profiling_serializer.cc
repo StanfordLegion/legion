@@ -262,6 +262,11 @@ namespace Legion {
          << "ready:timestamp_t:"   << sizeof(timestamp_t) << delim
          << "start:timestamp_t:"   << sizeof(timestamp_t) << delim
          << "stop:timestamp_t:"    << sizeof(timestamp_t)
+#ifdef LEGION_PROF_PROVENANCE
+         << delim
+         << "provenance:"          << sizeof(LgEvent) << delim
+         << "finish_event:"        << sizeof(LgEvent)
+#endif
          << "}" << std::endl;
 
       ss << "GPUTaskInfo {"
@@ -276,6 +281,11 @@ namespace Legion {
          << "stop:timestamp_t:"      << sizeof(timestamp_t) << delim
          << "gpu_start:timestamp_t:" << sizeof(timestamp_t) << delim
          << "gpu_stop:timestamp_t:"  << sizeof(timestamp_t)
+#ifdef LEGION_PROF_PROVENANCE
+         << delim
+         << "provenance:"            << sizeof(LgEvent) << delim
+         << "finish_event:"          << sizeof(LgEvent)
+#endif
          << "}" << std::endl;
 
       ss << "MetaInfo {"
@@ -287,6 +297,11 @@ namespace Legion {
          << "ready:timestamp_t:"  << sizeof(timestamp_t)  << delim
          << "start:timestamp_t:"  << sizeof(timestamp_t)  << delim
          << "stop:timestamp_t:"   << sizeof(timestamp_t)
+#ifdef LEGION_PROF_PROVENANCE
+         << delim
+         << "provenance:"         << sizeof(LgEvent) << delim
+         << "finish_event:"       << sizeof(LgEvent)
+#endif
          << "}" << std::endl;
 
       ss << "CopyInfo {"
@@ -299,6 +314,10 @@ namespace Legion {
          << "ready:timestamp_t:"       << sizeof(timestamp_t)        << delim
          << "start:timestamp_t:"       << sizeof(timestamp_t)        << delim
          << "stop:timestamp_t:"        << sizeof(timestamp_t)
+#ifdef LEGION_PROF_PROVENANCE
+         << delim
+         << "provenance:"              << sizeof(LgEvent)
+#endif
          << "}" << std::endl;
 
       ss << "FillInfo {"
@@ -309,6 +328,10 @@ namespace Legion {
          << "ready:timestamp_t:"  << sizeof(timestamp_t) << delim
          << "start:timestamp_t:"  << sizeof(timestamp_t) << delim
          << "stop:timestamp_t:"   << sizeof(timestamp_t)
+#ifdef LEGION_PROF_PROVENANCE
+         << delim
+         << "provenance:"         << sizeof(LgEvent)
+#endif
          << "}" << std::endl;
 
       ss << "InstCreateInfo {"
@@ -316,6 +339,10 @@ namespace Legion {
          << "op_id:UniqueID:"     << sizeof(UniqueID)    << delim
          << "inst_id:InstID:"     << sizeof(InstID)      << delim
          << "create:timestamp_t:" << sizeof(timestamp_t)
+#ifdef LEGION_PROF_PROVENANCE
+         << delim
+         << "provenance:"         << sizeof(LgEvent)
+#endif
          << "}" << std::endl;
 
       ss << "InstUsageInfo {"
@@ -342,6 +369,10 @@ namespace Legion {
          << "ready:timestamp_t:"      << sizeof(timestamp_t)    << delim
          << "start:timestamp_t:"      << sizeof(timestamp_t)    << delim
          << "stop:timestamp_t:"       << sizeof(timestamp_t)
+#ifdef LEGION_PROF_PROVENANCE
+         << delim
+         << "provenance:"             << sizeof(LgEvent)
+#endif
          << "}" << std::endl;
 
       ss << "MapperCallInfo {"
@@ -799,6 +830,11 @@ namespace Legion {
       lp_fwrite(f, (char*)&(task_info.ready),     sizeof(task_info.ready));
       lp_fwrite(f, (char*)&(task_info.start),     sizeof(task_info.start));
       lp_fwrite(f, (char*)&(task_info.stop),      sizeof(task_info.stop));
+#ifdef LEGION_PROF_PROVENANCE
+      lp_fwrite(f, (char*)&(task_info.provenance),sizeof(task_info.provenance));
+      lp_fwrite(f, (char*)&(task_info.finish_event),
+                                                sizeof(task_info.finish_event));
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -818,6 +854,11 @@ namespace Legion {
       lp_fwrite(f, (char*)&(task_info.stop),      sizeof(task_info.stop));
       lp_fwrite(f, (char*)&(task_info.gpu_start), sizeof(task_info.gpu_start));
       lp_fwrite(f, (char*)&(task_info.gpu_stop),  sizeof(task_info.gpu_stop));
+#ifdef LEGION_PROF_PROVENANCE
+      lp_fwrite(f, (char*)&(task_info.provenance),sizeof(task_info.provenance));
+      lp_fwrite(f, (char*)&(task_info.finish_event),
+                                                sizeof(task_info.finish_event));
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -834,6 +875,11 @@ namespace Legion {
       lp_fwrite(f, (char*)&(meta_info.ready),   sizeof(meta_info.ready));
       lp_fwrite(f, (char*)&(meta_info.start),   sizeof(meta_info.start));
       lp_fwrite(f, (char*)&(meta_info.stop),    sizeof(meta_info.stop));
+#ifdef LEGION_PROF_PROVENANCE
+      lp_fwrite(f, (char*)&(meta_info.provenance),sizeof(meta_info.provenance));
+      lp_fwrite(f, (char*)&(meta_info.finish_event),
+                                                sizeof(meta_info.finish_event));
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -852,6 +898,9 @@ namespace Legion {
       lp_fwrite(f, (char*)&(copy_info.ready),  sizeof(copy_info.ready));
       lp_fwrite(f, (char*)&(copy_info.start),  sizeof(copy_info.start));
       lp_fwrite(f, (char*)&(copy_info.stop),   sizeof(copy_info.stop));
+#ifdef LEGION_PROF_PROVENANCE
+      lp_fwrite(f, (char*)&(copy_info.provenance),sizeof(copy_info.provenance));
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -868,6 +917,9 @@ namespace Legion {
       lp_fwrite(f, (char*)&(fill_info.ready),  sizeof(fill_info.ready));
       lp_fwrite(f, (char*)&(fill_info.start),  sizeof(fill_info.start));
       lp_fwrite(f, (char*)&(fill_info.stop),   sizeof(fill_info.stop));
+#ifdef LEGION_PROF_PROVENANCE
+      lp_fwrite(f, (char*)&(fill_info.provenance),sizeof(fill_info.provenance));
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -883,6 +935,10 @@ namespace Legion {
                 sizeof(inst_create_info.inst_id));
       lp_fwrite(f, (char*)&(inst_create_info.create),  
                 sizeof(inst_create_info.create));
+#ifdef LEGION_PROF_PROVENANCE
+      lp_fwrite(f, (char*)&(inst_create_info.provenance),
+                sizeof(inst_create_info.provenance));
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -938,6 +994,10 @@ namespace Legion {
                 sizeof(partition_info.start));
       lp_fwrite(f, (char*)&(partition_info.stop),
                 sizeof(partition_info.stop));
+#ifdef LEGION_PROF_PROVENANCE
+      lp_fwrite(f, (char*)&(partition_info.provenance),
+                sizeof(partition_info.provenance));
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -1549,10 +1609,19 @@ namespace Legion {
                                   const LegionProfInstance::TaskInfo& task_info)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_PROF_PROVENANCE
+      log_prof.print("Prof Task Info %llu %u %u " IDFMT " %llu %llu %llu %llu "
+                     IDFMT " " IDFMT "",
+                     task_info.op_id, task_info.task_id, task_info.variant_id, 
+                     task_info.proc_id, task_info.create, task_info.ready, 
+                     task_info.start, task_info.stop, task_info.provenance.id,
+                     task_info.finish_event.id);
+#else
       log_prof.print("Prof Task Info %llu %u %u " IDFMT " %llu %llu %llu %llu",
                      task_info.op_id, task_info.task_id, task_info.variant_id, 
                      task_info.proc_id, task_info.create, task_info.ready, 
                      task_info.start, task_info.stop);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -1560,12 +1629,22 @@ namespace Legion {
                               const LegionProfInstance::GPUTaskInfo& task_info)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_PROF_PROVENANCE
+      log_prof.print("Prof GPU Task Info %llu %u %u " IDFMT
+		     " %llu %llu %llu %llu %llu %llu " IDFMT " " IDFMT "",
+                     task_info.op_id, task_info.task_id, task_info.variant_id,
+                     task_info.proc_id, task_info.create, task_info.ready,
+                     task_info.start, task_info.stop, task_info.gpu_start,
+		     task_info.gpu_stop, task_info.provenance.id, 
+                     task_info.finish_event.id);
+#else
       log_prof.print("Prof GPU Task Info %llu %u %u " IDFMT
 		     " %llu %llu %llu %llu %llu %llu",
                      task_info.op_id, task_info.task_id, task_info.variant_id,
                      task_info.proc_id, task_info.create, task_info.ready,
                      task_info.start, task_info.stop, task_info.gpu_start,
 		     task_info.gpu_stop);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -1573,9 +1652,17 @@ namespace Legion {
                                   const LegionProfInstance::MetaInfo& meta_info)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_PROF_PROVENANCE
+      log_prof.print("Prof Meta Info %llu %u " IDFMT " %llu %llu %llu %llu "
+          IDFMT " " IDFMT "",
+         meta_info.op_id, meta_info.lg_id, meta_info.proc_id,
+         meta_info.create, meta_info.ready, meta_info.start, meta_info.stop,
+         meta_info.provenance.id, meta_info.finish_event.id);
+#else
       log_prof.print("Prof Meta Info %llu %u " IDFMT " %llu %llu %llu %llu",
          meta_info.op_id, meta_info.lg_id, meta_info.proc_id,
          meta_info.create, meta_info.ready, meta_info.start, meta_info.stop);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -1583,10 +1670,17 @@ namespace Legion {
                                   const LegionProfInstance::CopyInfo& copy_info)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_PROF_PROVENANCE
+      log_prof.print("Prof Copy Info %llu " IDFMT " " IDFMT " %llu %llu %llu "
+          "%llu %llu " IDFMT "", copy_info.op_id, copy_info.src, 
+          copy_info.dst, copy_info.size, copy_info.create, copy_info.ready, 
+          copy_info.start, copy_info.stop, copy_info.provenance.id);
+#else
       log_prof.print("Prof Copy Info %llu " IDFMT " " IDFMT " %llu"
          " %llu %llu %llu %llu", copy_info.op_id, copy_info.src,
          copy_info.dst, copy_info.size, copy_info.create,
          copy_info.ready, copy_info.start, copy_info.stop);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -1594,9 +1688,15 @@ namespace Legion {
                                   const LegionProfInstance::FillInfo& fill_info)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_PROF_PROVENANCE
+      log_prof.print("Prof Fill Info %llu " IDFMT " %llu %llu %llu %llu " IDFMT,
+        fill_info.op_id, fill_info.dst, fill_info.create, fill_info.ready, 
+        fill_info.start, fill_info.stop, fill_info.provenance.id);
+#else
       log_prof.print("Prof Fill Info %llu " IDFMT 
          " %llu %llu %llu %llu", fill_info.op_id, fill_info.dst, 
          fill_info.create, fill_info.ready, fill_info.start, fill_info.stop);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -1604,9 +1704,15 @@ namespace Legion {
                      const LegionProfInstance::InstCreateInfo& inst_create_info)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_PROF_PROVENANCE
+      log_prof.print("Prof Inst Create %llu " IDFMT " %llu " IDFMT "", 
+                     inst_create_info.op_id, inst_create_info.inst_id, 
+                     inst_create_info.create, inst_create_info.provenance.id);
+#else
       log_prof.print("Prof Inst Create %llu " IDFMT " %llu", 
                      inst_create_info.op_id, inst_create_info.inst_id, 
                      inst_create_info.create);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -1634,10 +1740,18 @@ namespace Legion {
                         const LegionProfInstance::PartitionInfo& partition_info)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_PROF_PROVENANCE
+      log_prof.print("Prof Partition Timeline %llu %d %llu %llu %llu %llu "
+                     IDFMT "", partition_info.op_id, partition_info.part_op, 
+                     partition_info.create, partition_info.create,
+                     partition_info.start, partition_info.stop,
+                     partition_info.provenance.id);
+#else
       log_prof.print("Prof Partition Timeline %llu %d %llu %llu %llu %llu",
                      partition_info.op_id, partition_info.part_op, 
                      partition_info.create, partition_info.create,
                      partition_info.start, partition_info.stop);
+#endif
     }
 
     //--------------------------------------------------------------------------
