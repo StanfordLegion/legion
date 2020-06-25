@@ -716,7 +716,7 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
-      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+      virtual std::map<PhysicalManager*,unsigned>*
                                        get_acquired_instances_ref(void);
     public:
       virtual void resolve_false(bool speculated, bool launched);
@@ -792,8 +792,7 @@ namespace Legion {
     protected:
       std::map<AddressSpaceID,RemoteTask*> remote_instances;
     protected:
-      std::map<PhysicalManager*,
-        std::pair<unsigned/*ref count*/,bool/*created*/> > acquired_instances;
+      std::map<PhysicalManager*,unsigned/*ref count*/> acquired_instances;
     };
 
     /**
@@ -843,7 +842,7 @@ namespace Legion {
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events);
       virtual void perform_inlining(TaskContext *enclosing);
-      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+      virtual std::map<PhysicalManager*,unsigned>*
                                        get_acquired_instances_ref(void);
     public:
       virtual void handle_future(const void *res, 
@@ -948,7 +947,7 @@ namespace Legion {
       virtual void end_inline_task(const void *result, 
                                    size_t result_size, bool owned);
       virtual VersionInfo& get_version_info(unsigned idx);
-      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+      virtual std::map<PhysicalManager*,unsigned>*
                                        get_acquired_instances_ref(void);
     public:
       virtual SliceTask* clone_as_slice_task(IndexSpace is,
@@ -1014,7 +1013,7 @@ namespace Legion {
       std::set<RtEvent> map_applied_conditions;
       std::set<RtEvent> complete_preconditions;
       std::set<RtEvent> commit_preconditions;
-      std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
+      std::map<PhysicalManager*,unsigned> acquired_instances;
     protected:
       std::map<DomainPoint,RtUserEvent> pending_intra_space_dependences;
     protected:
@@ -1095,7 +1094,7 @@ namespace Legion {
       void enumerate_points(void);
       const void* get_predicate_false_result(size_t &result_size);
     public:
-      std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
+      virtual std::map<PhysicalManager*,unsigned>* 
                                      get_acquired_instances_ref(void);
       void check_target_processors(void) const;
       void update_target_processor(void);
@@ -1164,7 +1163,7 @@ namespace Legion {
       TraceInfo *remote_trace_info;
       ApUserEvent effects_postcondition;
     protected: 
-      std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
+      std::map<PhysicalManager*,unsigned> acquired_instances;
       std::set<RtEvent> map_applied_conditions;
       std::set<RtEvent> complete_preconditions;
       std::set<RtEvent> commit_preconditions;

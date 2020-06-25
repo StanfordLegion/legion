@@ -3103,8 +3103,7 @@ namespace Legion {
                                   const std::vector<MappingInstance> &chosen,
                                   InstanceSet &result, RegionTreeID &bad_tree,
                                   std::vector<FieldID> &missing_fields,
-                                  std::map<PhysicalManager*,
-                                       std::pair<unsigned,bool> > *acquired,
+                                  std::map<PhysicalManager*,unsigned> *acquired,
                                   std::vector<PhysicalManager*> &unacquired,
                                   const bool do_acquire_checks,
                                   const bool allow_partial_virtual)
@@ -3195,13 +3194,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool RegionTreeForest::physical_convert_postmapping(Operation *op,
-                                     const RegionRequirement &req,
-                                     const std::vector<MappingInstance> &chosen,
-                                     InstanceSet &result,RegionTreeID &bad_tree,
-                                     std::map<PhysicalManager*,
-                                          std::pair<unsigned,bool> > *acquired,
-                                     std::vector<PhysicalManager*> &unacquired,
-                                     const bool do_acquire_checks)
+                                  const RegionRequirement &req,
+                                  const std::vector<MappingInstance> &chosen,
+                                  InstanceSet &result,RegionTreeID &bad_tree,
+                                  std::map<PhysicalManager*,unsigned> *acquired,
+                                  std::vector<PhysicalManager*> &unacquired,
+                                  const bool do_acquire_checks)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3288,7 +3286,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::perform_missing_acquires(Operation *op,
-                std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired,
+                                std::map<PhysicalManager*,unsigned> &acquired,
                                 const std::vector<PhysicalManager*> &unacquired)
     //--------------------------------------------------------------------------
     {
@@ -3300,8 +3298,7 @@ namespace Legion {
       {
         if ((*it)->acquire_instance(MAPPING_ACQUIRE_REF, op))
         {
-          acquired.insert(std::pair<PhysicalManager*,
-             std::pair<unsigned,bool> >(*it,std::pair<unsigned,bool>(1,false)));
+          acquired.insert(std::pair<PhysicalManager*,unsigned>(*it, 1));
           continue;
         }
         // If we failed on the owner node, it will never work
@@ -3340,8 +3337,7 @@ namespace Legion {
                 req_it->second.instances.end(); it++, idx++)
           {
             if (req_it->second.results[idx])
-              acquired.insert(std::pair<PhysicalManager*,std::pair<unsigned,
-                  bool> >(*it,std::pair<unsigned,bool>(1,false)));
+              acquired.insert(std::pair<PhysicalManager*,unsigned>(*it, 1));
           }
         }
       }

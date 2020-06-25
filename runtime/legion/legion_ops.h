@@ -331,9 +331,9 @@ namespace Legion {
       // acquired instances until the very end of the operation as they
       // will not hurt anything.
       RtEvent release_nonempty_acquired_instances(RtEvent precondition,
-          std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired_insts);
+          std::map<PhysicalManager*,unsigned> &acquired_insts);
       static void release_acquired_instances(
-          std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired_insts);
+          std::map<PhysicalManager*,unsigned> &acquired_insts);
       static void handle_deferred_release(const void *args);
     public:
       // Initialize this operation in a new parent context
@@ -414,7 +414,7 @@ namespace Legion {
                                               const char *field_string,
                                               RtUserEvent reported);
       // Get a reference to our data structure for tracking acquired instances
-      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+      virtual std::map<PhysicalManager*,unsigned>*
                                        get_acquired_instances_ref(void);
       // Update the set of atomic locks for this operation
       virtual void update_atomic_locks(const unsigned index, 
@@ -1030,7 +1030,7 @@ namespace Legion {
                                   const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
-      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+      virtual std::map<PhysicalManager*,unsigned>*
                    get_acquired_instances_ref(void);
       virtual void update_atomic_locks(const unsigned index,
                                        Reservation lock, bool exclusive);
@@ -1060,7 +1060,7 @@ namespace Legion {
       RegionTreePath privilege_path;
       unsigned parent_req_index;
       VersionInfo version_info;
-      std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
+      std::map<PhysicalManager*,unsigned> acquired_instances;
       std::map<Reservation,bool> atomic_locks;
       std::set<RtEvent> map_applied_conditions;
     protected:
@@ -1191,7 +1191,7 @@ namespace Legion {
                                   const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
-      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+      virtual std::map<PhysicalManager*,unsigned>*
                    get_acquired_instances_ref(void);
       virtual void update_atomic_locks(const unsigned index,
                                        Reservation lock, bool exclusive);
@@ -1263,7 +1263,7 @@ namespace Legion {
     protected: // for support with mapping
       MapperManager*              mapper;
     protected:
-      std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
+      std::map<PhysicalManager*,unsigned> acquired_instances;
       std::vector<std::map<Reservation,bool> > atomic_locks;
       std::set<RtEvent> map_applied_conditions;
     public:
@@ -1767,7 +1767,7 @@ namespace Legion {
                                   const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
-      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+      virtual std::map<PhysicalManager*,unsigned>*
                    get_acquired_instances_ref(void);
       virtual void record_reference_mutation_effect(RtEvent event);
     protected:
@@ -1782,7 +1782,7 @@ namespace Legion {
     protected:
       unsigned parent_idx;
       InstanceSet target_instances;
-      std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
+      std::map<PhysicalManager*,unsigned> acquired_instances;
       std::set<RtEvent> map_applied_conditions;
     protected:
       MapperManager *mapper;
@@ -1888,7 +1888,7 @@ namespace Legion {
     public:
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
-      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+      virtual std::map<PhysicalManager*,unsigned>*
                    get_acquired_instances_ref(void);
       virtual void record_reference_mutation_effect(RtEvent event);
     public: 
@@ -1925,7 +1925,7 @@ namespace Legion {
       RegionTreePath    privilege_path;
       VersionInfo       version_info;
       unsigned          parent_req_index;
-      std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
+      std::map<PhysicalManager*,unsigned> acquired_instances;
       std::set<RtEvent> map_applied_conditions;
     protected:
       MapperManager*    mapper;
@@ -2001,7 +2001,7 @@ namespace Legion {
                                   const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
-      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+      virtual std::map<PhysicalManager*,unsigned>*
                    get_acquired_instances_ref(void);
       virtual void record_reference_mutation_effect(RtEvent event);
     public:
@@ -2038,7 +2038,7 @@ namespace Legion {
       RegionTreePath    privilege_path;
       VersionInfo       version_info;
       unsigned          parent_req_index;
-      std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
+      std::map<PhysicalManager*,unsigned> acquired_instances;
       std::set<RtEvent> map_applied_conditions;
     protected:
       MapperManager*    mapper;
@@ -2306,7 +2306,7 @@ namespace Legion {
                                         Mapper::MapTaskInput &input,
                                         Mapper::MapTaskOutput &output);
       // Get a reference to our data structure for tracking acquired instances
-      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+      virtual std::map<PhysicalManager*,unsigned>*
                                        get_acquired_instances_ref(void);
     public:
       void add_mapping_dependence(RtEvent precondition);
@@ -2350,7 +2350,7 @@ namespace Legion {
       // Used for computing the constraints
       std::vector<std::set<SingleTask*> > task_sets;
       // Track the physical instances that we've acquired
-      std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
+      std::map<PhysicalManager*,unsigned> acquired_instances;
     protected:
       std::map<std::pair<unsigned/*task index*/,unsigned/*req index*/>,
                unsigned/*dependence index*/> dependence_map;
@@ -2956,7 +2956,7 @@ namespace Legion {
                                   const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
-      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+      virtual std::map<PhysicalManager*,unsigned>*
                    get_acquired_instances_ref(void);
       virtual void record_reference_mutation_effect(RtEvent event);
       virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
@@ -2982,7 +2982,7 @@ namespace Legion {
       VersionInfo version_info;
       RegionTreePath privilege_path;
       unsigned parent_req_index;
-      std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
+      std::map<PhysicalManager*,unsigned> acquired_instances;
       std::set<RtEvent> map_applied_conditions;
       DepPartThunk *thunk;
     protected:
@@ -3097,7 +3097,7 @@ namespace Legion {
       virtual size_t get_context_index(void) const;
       virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
-      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+      virtual std::map<PhysicalManager*,unsigned>*
                                        get_acquired_instances_ref(void);
       virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests, bool fill);
@@ -3430,7 +3430,7 @@ namespace Legion {
       virtual void deactivate(void);
       virtual const char* get_logging_name(void) const = 0;
       virtual OpKind get_operation_kind(void) const = 0;
-      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+      virtual std::map<PhysicalManager*,unsigned>*
                                        get_acquired_instances_ref(void);
       // This should be the only mapper call that we need to handle
       virtual void select_sources(const unsigned index,

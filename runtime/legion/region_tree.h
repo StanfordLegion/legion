@@ -601,8 +601,7 @@ namespace Legion {
                                const std::vector<MappingInstance> &chosen,
                                InstanceSet &result, RegionTreeID &bad_tree,
                                std::vector<FieldID> &missing_fields,
-                               std::map<PhysicalManager*,
-                                    std::pair<unsigned,bool> > *acquired,
+                               std::map<PhysicalManager*,unsigned> *acquired,
                                std::vector<PhysicalManager*> &unacquired,
                                const bool do_acquire_checks,
                                const bool allow_partial_virtual = false);
@@ -610,8 +609,7 @@ namespace Legion {
                                const RegionRequirement &req,
                                const std::vector<MappingInstance> &chosen,
                                InstanceSet &result, RegionTreeID &bad_tree,
-                               std::map<PhysicalManager*,
-                                    std::pair<unsigned,bool> > *acquired,
+                               std::map<PhysicalManager*,unsigned> *acquired,
                                std::vector<PhysicalManager*> &unacquired,
                                const bool do_acquire_checks);
       void log_mapping_decision(const UniqueID unique_id, TaskContext *context,
@@ -621,7 +619,7 @@ namespace Legion {
                                 bool postmapping = false);
     public: // helper method for the above two methods
       void perform_missing_acquires(Operation *op,
-                 std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired,
+                               std::map<PhysicalManager*,unsigned> &acquired,
                                const std::vector<PhysicalManager*> &unacquired);
     public:
       // Debugging method for checking context state

@@ -2165,7 +2165,7 @@ namespace Legion {
       bool remote_acquired = perform_remote_acquires(ctx, acquire_requests);
       if (!remote_acquired)
       {
-        std::map<PhysicalManager*,std::pair<unsigned,bool> > &already_acquired =
+        std::map<PhysicalManager*,unsigned> &already_acquired =
           *(ctx->acquired_instances);
         // Figure out which instances weren't deleted yet
         for (unsigned idx = 0; idx < instances.size(); idx++)
@@ -2261,7 +2261,7 @@ namespace Legion {
       bool remote_acquired = perform_remote_acquires(ctx, acquire_requests);
       if (!remote_acquired)
       {
-        std::map<PhysicalManager*,std::pair<unsigned,bool> > &already_acquired =
+        std::map<PhysicalManager*,unsigned> &already_acquired =
           *(ctx->acquired_instances); 
         std::vector<unsigned> to_erase;
         for (std::vector<std::vector<MappingInstance> >::iterator it = 
@@ -2298,7 +2298,7 @@ namespace Legion {
                       std::vector<unsigned> *to_erase)
     //--------------------------------------------------------------------------
     {
-      std::map<PhysicalManager*,std::pair<unsigned,bool> > &already_acquired = 
+      std::map<PhysicalManager*,unsigned> &already_acquired = 
         *(info->acquired_instances);
       bool local_acquired = true;
       for (unsigned idx = 0; idx < instances.size(); idx++)
@@ -2315,7 +2315,7 @@ namespace Legion {
         if (manager->acquire_instance(MAPPING_ACQUIRE_REF, info->operation))
         {
           // We already know it wasn't there before
-          already_acquired[manager] = std::pair<unsigned,bool>(1, false);
+          already_acquired[manager] = 1;
           continue;
         }
         // if we failed on the owner node, it will never work
@@ -2444,14 +2444,14 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(ctx->acquired_instances != NULL);
 #endif
-      std::map<PhysicalManager*,
-        std::pair<unsigned,bool> > &acquired =*(ctx->acquired_instances);
-      std::map<PhysicalManager*,std::pair<unsigned,bool> >::iterator finder = 
-        acquired.find(manager); 
+      std::map<PhysicalManager*,unsigned> &acquired =
+        *(ctx->acquired_instances);
+      std::map<PhysicalManager*,unsigned>::iterator finder = 
+        acquired.find(manager);
       if (finder == acquired.end())
-        acquired[manager] = std::pair<unsigned,bool>(1/*first ref*/, created);
+        acquired[manager] = 1;
       else
-        finder->second.first++;
+        finder->second++;
     }
 
     //--------------------------------------------------------------------------
@@ -2465,16 +2465,16 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(ctx->acquired_instances != NULL);
 #endif
-      std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired =
+      std::map<PhysicalManager*,unsigned> &acquired = 
         *(ctx->acquired_instances);
-      std::map<PhysicalManager*,std::pair<unsigned,bool> >::iterator finder = 
+      std::map<PhysicalManager*,unsigned>::iterator finder = 
         acquired.find(manager);
       if (finder == acquired.end())
         return;
       // Release the refrences and then keep going, we know there is 
       // a resource reference so no need to check for deletion
       manager->remove_base_valid_ref(MAPPING_ACQUIRE_REF, ctx->operation,
-                                     finder->second.first);
+                                     finder->second);
       acquired.erase(finder);
     }
 

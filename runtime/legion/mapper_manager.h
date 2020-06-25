@@ -31,8 +31,7 @@ namespace Legion {
       RtUserEvent                       resume;
       MappingCallKind                   kind;
       Operation*                        operation;
-      std::map<PhysicalManager*,
-        std::pair<unsigned/*count*/,bool/*created*/> >* acquired_instances;
+      std::map<PhysicalManager*,unsigned/*count*/>* acquired_instances;
       unsigned long long                start_time;
       unsigned long long                stop_time;
     };
