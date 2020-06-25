@@ -23127,7 +23127,7 @@ namespace Legion {
       FillView *fill_view = new FillView(forest, get_available_distributed_id(),
                                  address_space, fill_value, true/*register now*/
 #ifdef LEGION_SPY
-                                 , implicit_provenance
+                                 , 0/*no creator*/
 #endif
                                  );
       fill_view->add_base_valid_ref(RUNTIME_REF);

@@ -163,16 +163,12 @@ namespace Legion {
       }
 #endif
 #ifdef LEGION_SPY
-      // We can skip this if fill_uid is 0
-      if (fill_uid != 0)
-      {
-        assert(trace_info.op != NULL);
-        LegionSpy::log_fill_events(trace_info.op->get_unique_op_id(), 
-            expr_id, handle, tree_id, precondition, result, fill_uid);
-        for (unsigned idx = 0; idx < dst_fields.size(); idx++)
-          LegionSpy::log_fill_field(result, dst_fields[idx].field_id,
-                                    dst_fields[idx].inst_event);
-      }
+      assert(trace_info.op != NULL);
+      LegionSpy::log_fill_events(trace_info.op->get_unique_op_id(), 
+          expr_id, handle, tree_id, precondition, result, fill_uid);
+      for (unsigned idx = 0; idx < dst_fields.size(); idx++)
+        LegionSpy::log_fill_field(result, dst_fields[idx].field_id,
+                                  dst_fields[idx].inst_event);
 #endif
       if (trace_info.recording)
         trace_info.record_issue_fill(result, this, dst_fields,

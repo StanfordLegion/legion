@@ -4853,7 +4853,7 @@ class EquivalenceSet(object):
                 assert False
             return False
         else:
-            fill = op.find_or_create_fill(req, self.field, inst, op)
+            fill = op.find_or_create_fill(req, self.field, inst, None)
             # Record this point for the copy operation so it renders properly
             fill.record_version_number(self)
             preconditions = inst.find_verification_copy_dependences(self.depth, 
@@ -5774,7 +5774,8 @@ class Operation(object):
         fill.set_tree_properties(None, req.field_space, req.tid)
         fill.add_field(field.fid, dst)
         self.realm_fills.append(fill)
-        fill.set_fill_op(fill_op)
+        if fill_op is not None:
+            fill.set_fill_op(fill_op)
         return fill
 
     def find_verification_copy_across(self, src_field, dst_field, point,
@@ -9319,9 +9320,8 @@ class RealmFill(RealmBase):
     def is_across(self):
         if self.across is not None:
             return self.across
-        assert self.fill_op is not None
         # This happens when we do a fill for initializing a reduction instance
-        if self.fill_op.kind != FILL_OP_KIND:
+        if self.fill_op is None:
             self.across = False
             return self.across
         req = self.fill_op.reqs[0]
@@ -10229,8 +10229,10 @@ def parse_legion_spy_line(line, state):
         field_space = state.get_field_space(int(m.group('fspace')))
         tree_id = int(m.group('tid'))
         fill.set_tree_properties(index_expr, field_space, tree_id)
-        fill_op = state.get_operation(int(m.group('fill_uid')))
-        fill.set_fill_op(fill_op)
+        fill_uid = int(m.group('fill_uid'))
+        if fill_uid > 0:
+            fill_op = state.get_operation(fill_uid)
+            fill.set_fill_op(fill_op)
         return True
     m = realm_fill_field_pat.match(line)
     if m is not None:
@@ -11935,6 +11937,9 @@ class State(object):
     def get_operation(self, uid):
         if uid in self.ops:
             return self.ops[uid]
+        if uid == 23:
+            import pdb
+            pdb.set_trace()
         result = Operation(self, uid)
         self.ops[uid] = result
         return result
