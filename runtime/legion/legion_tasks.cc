@@ -2825,10 +2825,7 @@ namespace Legion {
           // managers are reduction instances
           if (IS_REDUCE(regions[idx]))
           {
-            std::map<PhysicalManager*,std::pair<unsigned,bool> > 
-              *acquired = get_acquired_instances_ref();
             for (unsigned idx2 = 0; idx2 < result.size(); idx2++)
-            {
               if (!result[idx2].get_manager()->is_reduction_manager())
                 REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                               "Invalid mapper output from invocation of '%s' "
@@ -2838,28 +2835,10 @@ namespace Legion {
                               "reduction privileges.", "map_task", 
                               mapper->get_mapper_name(), idx,
                               get_task_name(), get_unique_id())
-              std::map<PhysicalManager*,std::pair<unsigned,bool> >::
-                const_iterator finder = acquired->find(
-                    result[idx2].get_instance_manager());
-#ifdef DEBUG_LEGION
-              assert(finder != acquired->end());
-#endif
-              // Permit this if we are doing replay mapping
-              if (!finder->second.second && (runtime->replay_file.empty()))
-                REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                              "Invalid mapper output from invocation of '%s' "
-                              "on mapper %s. Mapper made an illegal decision "
-                              "to re-use a reduction instance for region "
-                              "requirement %d of task %s (ID %lld). Reduction "
-                              "instances are not currently permitted to be "
-                              "recycled.", "map_task",mapper->get_mapper_name(),
-                              idx, get_task_name(), get_unique_id())
-            }
           }
           else
           {
             for (unsigned idx2 = 0; idx2 < result.size(); idx2++)
-            {
               if (!result[idx2].get_manager()->is_instance_manager())
                 REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                               "Invalid mapper output from invocation of '%s' "
@@ -2869,7 +2848,6 @@ namespace Legion {
                               "does not have reduction privileges.", "map_task",
                               mapper->get_mapper_name(), idx, 
                               get_task_name(), get_unique_id())
-            }
           }
         }
       }

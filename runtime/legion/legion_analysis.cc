@@ -3935,15 +3935,13 @@ namespace Legion {
                                          CopyAcrossHelper *helper /*=NULL*/)
     //--------------------------------------------------------------------------
     {
-      // No need to record the destination as we already did that the first
-      // time through on our way to finding this fill view
 #ifdef DEBUG_LEGION
-      assert(all_views.find(dst_view) != all_views.end());
       assert(!!fill_mask);
       assert(!expr->is_empty());
 #endif
       update_fields |= fill_mask;
       record_view(src_view);
+      record_view(dst_view);
       FillUpdate *update = new FillUpdate(src_view, fill_mask, expr, helper); 
       if (helper == NULL)
         sources[dst_view].insert(update, fill_mask);
@@ -4083,9 +4081,9 @@ namespace Legion {
         if (!sources.empty())
         {
           const RtEvent deferral_event = 
-            perform_updates(sources, trace_info, precondition,
-                has_src_preconditions, has_dst_preconditions, 
-                need_pass_preconditions);
+            perform_updates(sources, trace_info, precondition, 
+                -1/*redop index*/, has_src_preconditions, 
+                has_dst_preconditions, need_pass_preconditions);
           if (deferral_event.exists())
           {
             CopyFillAggregation args(this, trace_info, precondition, 
@@ -4111,8 +4109,8 @@ namespace Legion {
         {
           const RtEvent deferral_event = 
             perform_updates(reductions[idx], trace_info, precondition,
-                            has_src_preconditions, has_dst_preconditions, 
-                            need_pass_preconditions);
+                            idx/*redop index*/, has_src_preconditions, 
+                            has_dst_preconditions, need_pass_preconditions);
           if (deferral_event.exists())
           {
             CopyFillAggregation args(this, trace_info, precondition, 
@@ -4162,11 +4160,73 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void CopyFillAggregator::find_reduction_preconditions(InstanceView *view,
+        const PhysicalTraceInfo &trace_info, IndexSpaceExpression *copy_expr,
+        const FieldMask &copy_mask, UniqueID op_id, unsigned redop_index,
+        std::set<RtEvent> &preconditions_ready)
+    //--------------------------------------------------------------------------
+    {
+      // Break up the fields in the copy mask based on their
+      // different reduction operators, we'll handle the special
+      // case where they all have the same reduction ID since
+      // it is going to be very common
+      FieldMask first_mask;
+      ReductionOpID first_redop = 0;
+      LegionMap<ReductionOpID,FieldMask>::aligned *other_masks = NULL;
+      int fidx = copy_mask.find_first_set();
+      while (fidx >= 0)
+      {
+        const std::pair<InstanceView*,unsigned> key(view, fidx);
+#ifdef DEBUG_LEGION
+        assert(reduction_epochs.find(key) != reduction_epochs.end());
+        assert(redop_index < reduction_epochs[key].size());
+#endif
+        const ReductionOpID op = reduction_epochs[key][redop_index];
+        if (op != first_redop)
+        {
+          if (first_redop != 0)
+          {
+            if (other_masks == NULL)
+              other_masks = new LegionMap<ReductionOpID,FieldMask>::aligned();
+            (*other_masks)[op].set_bit(fidx);
+          }
+          else
+          {
+            first_redop = op;
+            first_mask.set_bit(fidx);
+          }
+        }
+        else
+          first_mask.set_bit(fidx);
+        fidx = copy_mask.find_next_set(fidx+1);
+      }
+      RtEvent first_ready = view->find_copy_preconditions(
+          false/*reading*/, first_redop, first_mask, copy_expr, op_id,
+          dst_index, *this, trace_info.recording, local_space);
+      if (first_ready.exists())
+        preconditions_ready.insert(first_ready);
+      if (other_masks != NULL)
+      {
+        for (LegionMap<ReductionOpID,FieldMask>::aligned::
+              const_iterator it = other_masks->begin(); 
+              it != other_masks->end(); it++)
+        {
+          RtEvent pre_ready = view->find_copy_preconditions(
+              false/*reading*/, it->first, it->second, copy_expr, op_id, 
+              dst_index, *this, trace_info.recording, local_space);
+          if (pre_ready.exists())
+            preconditions_ready.insert(pre_ready);
+        }
+        delete other_masks;
+      }
+    }
+
+    //--------------------------------------------------------------------------
     RtEvent CopyFillAggregator::perform_updates(
          const LegionMap<InstanceView*,FieldMaskSet<Update> >::aligned &updates,
          const PhysicalTraceInfo &trace_info, const ApEvent all_precondition,
-         const bool has_src_preconditions, const bool has_dst_preconditions,
-         const bool needs_preconditions)
+         int redop_index, const bool has_src_preconditions, 
+         const bool has_dst_preconditions, const bool needs_preconditions)
     //--------------------------------------------------------------------------
     {
       if (needs_preconditions && 
@@ -4214,11 +4274,19 @@ namespace Legion {
               // No need to do any kind of sorts here
               IndexSpaceExpression *copy_expr = dit->second.begin()->first;
               const FieldMask &copy_mask = dit->second.get_valid_mask();
-              RtEvent pre_ready = dit->first->find_copy_preconditions(
-                              false/*reading*/, copy_mask, copy_expr, op_id, 
-                              dst_index,*this,trace_info.recording,local_space);
-              if (pre_ready.exists())
-                preconditions_ready.insert(pre_ready);
+              // See if we're doing reductions or not
+              if (redop_index < 0)
+              {
+                // No reductions so do the normal precondition test
+                RtEvent pre_ready = dit->first->find_copy_preconditions(
+                    false/*reading*/, 0/*redop*/, copy_mask, copy_expr, op_id, 
+                    dst_index, *this, trace_info.recording, local_space);
+                if (pre_ready.exists())
+                  preconditions_ready.insert(pre_ready);
+              }
+              else
+                find_reduction_preconditions(dit->first, trace_info, copy_expr,
+                    copy_mask, op_id, redop_index, preconditions_ready);
             }
             else
             {
@@ -4234,11 +4302,17 @@ namespace Legion {
                 IndexSpaceExpression *copy_expr = (it->elements.size() == 1) ?
                   *(it->elements.begin()) : 
                   forest->union_index_spaces(it->elements);
-                RtEvent pre_ready = dit->first->find_copy_preconditions(
-                          false/*reading*/, copy_mask, copy_expr, op_id,
-                          dst_index, *this, trace_info.recording, local_space);
-                if (pre_ready.exists())
-                  preconditions_ready.insert(pre_ready);
+                if (redop_index < 0)
+                {
+                  RtEvent pre_ready = dit->first->find_copy_preconditions(
+                      false/*reading*/, 0/*redop*/, copy_mask, copy_expr, op_id,
+                      dst_index, *this, trace_info.recording, local_space);
+                  if (pre_ready.exists())
+                    preconditions_ready.insert(pre_ready);
+                }
+                else
+                  find_reduction_preconditions(dit->first, trace_info,copy_expr,
+                      copy_mask, op_id, redop_index, preconditions_ready);
               }
             }
           }
@@ -4255,8 +4329,8 @@ namespace Legion {
               IndexSpaceExpression *copy_expr = sit->second.begin()->first;
               const FieldMask &copy_mask = sit->second.get_valid_mask();
               RtEvent pre_ready = sit->first->find_copy_preconditions(
-                            true/*reading*/, copy_mask, copy_expr, op_id, 
-                            src_index, *this, trace_info.recording,local_space);
+                  true/*reading*/, 0/*redop*/, copy_mask, copy_expr, op_id, 
+                  src_index, *this, trace_info.recording, local_space);
               if (pre_ready.exists())
                 preconditions_ready.insert(pre_ready);
             }
@@ -4275,8 +4349,8 @@ namespace Legion {
                   *(it->elements.begin()) : 
                   forest->union_index_spaces(it->elements);
                 RtEvent pre_ready = sit->first->find_copy_preconditions(
-                          true/*reading*/, copy_mask, copy_expr, op_id,
-                          src_index, *this, trace_info.recording, local_space);
+                    true/*reading*/, 0/*redop*/, copy_mask, copy_expr, op_id,
+                    src_index, *this, trace_info.recording, local_space);
                 if (pre_ready.exists())
                   preconditions_ready.insert(pre_ready);
               }
@@ -4682,7 +4756,7 @@ namespace Legion {
           {
             const FieldMask dst_mask = 
                 update->across_helper->convert_src_to_dst(fill_mask);
-            target->add_copy_user(false/*reading*/, result, collect_event,
+            target->add_copy_user(false/*reading*/, 0, result, collect_event,
                                   dst_mask, fill_expr, op_id, dst_index,
                                   effects, trace_info.recording, local_space);
             // Record this for the next iteration if necessary
@@ -4692,7 +4766,7 @@ namespace Legion {
           }
           else
           {
-            target->add_copy_user(false/*reading*/, result, collect_event,
+            target->add_copy_user(false/*reading*/, 0, result, collect_event,
                                   fill_mask, fill_expr, op_id,dst_index,
                                   effects, trace_info.recording, local_space);
             // Record this for the next iteration if necessary
@@ -4762,7 +4836,7 @@ namespace Legion {
           const RtEvent collect_event = trace_info.get_collect_event();
           if (result.exists())
           {
-            target->add_copy_user(false/*reading*/, result, collect_event,
+            target->add_copy_user(false/*reading*/, 0, result, collect_event,
                                   dst_mask, fill_expr, op_id, dst_index,
                                   effects, trace_info.recording, local_space);
             if (track_events)
@@ -4838,16 +4912,16 @@ namespace Legion {
           if (result.exists())
           {
             const RtEvent collect_event = trace_info.get_collect_event();
-            source->add_copy_user(true/*reading*/, result, collect_event,
+            source->add_copy_user(true/*reading*/, 0, result, collect_event,
                                   copy_mask, copy_expr, op_id,src_index,
                                   effects, trace_info.recording, local_space);
             if (update->across_helper != NULL)
             {
               const FieldMask dst_mask = 
                 update->across_helper->convert_src_to_dst(copy_mask);
-              target->add_copy_user(false/*reading*/, result, collect_event,
-                                  dst_mask, copy_expr, op_id, dst_index,
-                                  effects, trace_info.recording, local_space);
+              target->add_copy_user(false/*reading*/, update->redop, result, 
+                        collect_event, dst_mask, copy_expr, op_id, dst_index,
+                        effects, trace_info.recording, local_space);
               // Record this for the next iteration if necessary
               if (has_dst_preconditions)
                 record_precondition(target, false/*reading*/, result,
@@ -4855,9 +4929,9 @@ namespace Legion {
             }
             else
             {
-              target->add_copy_user(false/*reading*/, result, collect_event,
-                                  copy_mask, copy_expr, op_id,dst_index,
-                                  effects, trace_info.recording, local_space);
+              target->add_copy_user(false/*reading*/, update->redop, result, 
+                  collect_event, copy_mask, copy_expr, op_id,dst_index,
+                  effects, trace_info.recording, local_space);
               // Record this for the next iteration if necessary
               if (has_dst_preconditions)
                 record_precondition(target, false/*reading*/, result,
@@ -4922,10 +4996,10 @@ namespace Legion {
             const RtEvent collect_event = trace_info.get_collect_event();
             if (result.exists())
             {
-              it->first->add_copy_user(true/*reading*/, result, collect_event,
+              it->first->add_copy_user(true/*reading*/, 0, result,collect_event,
                                   copy_mask, copy_expr, op_id,src_index,
                                   effects, trace_info.recording, local_space);
-              target->add_copy_user(false/*reading*/, result, collect_event,
+              target->add_copy_user(false/*reading*/,redop,result,collect_event,
                                   dst_mask, copy_expr, op_id, dst_index,
                                   effects, trace_info.recording, local_space);
               if (track_events)
@@ -10518,24 +10592,121 @@ namespace Legion {
         // empty equivalence sets which can lead to leaked instances
         if (!set_expr->is_empty())
         {
+          CopyFillAggregator *fill_aggregator = NULL;
+          // See if we have an input aggregator that we can use now
+          // for any fills that need to be done to initialize instances
+          std::map<RtEvent,CopyFillAggregator*>::const_iterator finder = 
+            analysis.input_aggregators.find(RtEvent::NO_RT_EVENT);
+          if (finder != analysis.input_aggregators.end())
+            fill_aggregator = finder->second;
+          FieldMask guard_fill_mask;
           // Record the reduction instances
           for (unsigned idx = 0; idx < analysis.target_views.size(); idx++)
           {
             ReductionView *red_view = 
               analysis.target_views[idx]->as_reduction_view();
+            const ReductionOpID view_redop = red_view->get_redop(); 
 #ifdef DEBUG_LEGION
-            assert(red_view->get_redop() == analysis.usage.redop);
+            assert(view_redop == analysis.usage.redop);
 #endif
             const FieldMask &update_fields = 
               analysis.target_instances[idx].get_valid_fields(); 
             int fidx = update_fields.find_first_set();
+            // Figure out which fields require a fill operation
+            // in order initialize the reduction instances
+            FieldMask fill_mask;
             while (fidx >= 0)
             {
               std::vector<ReductionView*> &field_views = 
                 reduction_instances[fidx];
-              red_view->add_nested_valid_ref(did, &mutator); 
-              field_views.push_back(red_view);
+              // Scan through the reduction instances to see if we're
+              // already in the list of valid reductions, if not then
+              // we're going to need a fill to initialize the instance
+              // Also check for the ABA problem on reduction instances
+              // described in Legion issue #545 where we start out
+              // with reductions of kind A, switch to reductions of
+              // kind B, and then switch back to reductions of kind A
+              // which will make it unsafe to re-use the instance
+              bool found = false;
+              for (std::vector<ReductionView*>::const_iterator it =
+                    field_views.begin(); it != field_views.end(); it++)
+              {
+                if ((*it) != red_view)
+                {
+                  if (found && ((*it)->get_redop() != view_redop))
+                    REPORT_LEGION_FATAL(LEGION_FATAL_REDUCTION_ABA_PROBLEM,
+                        "Unsafe re-use of reduction instance detected due "
+                        "to alternating un-flushed reduction operations "
+                        "%d and %d. Please report this use case to the "
+                        "Legion developer's mailing list so that we can "
+                        "help you address it.", view_redop, (*it)->get_redop())
+                }
+                else 
+                  // we've seen it now so we don't need a fill
+                  // keep going to check for ABA problem
+                  found = true;
+              }
+              if (!found)
+              {
+                red_view->add_nested_valid_ref(did, &mutator); 
+                field_views.push_back(red_view);
+                // We need a fill for this field to initialize it
+                fill_mask.set_bit(fidx); 
+              }
+              else
+                guard_fill_mask.set_bit(fidx);
               fidx = update_fields.find_next_set(fidx+1);
+            }
+            if (!!fill_mask)
+            {
+              if (fill_aggregator == NULL)
+              {
+                fill_aggregator = new CopyFillAggregator(runtime->forest,
+                    analysis.op, analysis.index, analysis.index,
+                    RtEvent::NO_RT_EVENT, false/*track events*/);
+                analysis.input_aggregators[RtEvent::NO_RT_EVENT] = 
+                  fill_aggregator;
+              }
+              // Record the fill operation on the aggregator
+              fill_aggregator->record_fill(red_view, red_view->fill_view,
+                                           fill_mask, set_expr);
+              // Record this as a guard for later operations
+              update_guards.insert(fill_aggregator, fill_mask);
+#ifdef DEBUG_LEGION
+              if (!fill_aggregator->record_guard_set(this))
+                assert(false);
+#else
+              fill_aggregator->record_guard_set(this);
+#endif
+            }
+          }
+          // If we have any fills that were issued by a prior operation
+          // that we need to reuse then check for them here. This is a
+          // slight over-approximation for the mapping dependences because
+          // we really only need to wait for fills to instances that we
+          // care about it, but it should be minimal overhead and the
+          // resulting event graph will still be precise
+          if (!update_guards.empty() && !!guard_fill_mask &&
+              !(update_guards.get_valid_mask() * guard_fill_mask))
+          {
+            for (FieldMaskSet<CopyFillGuard>::iterator it = 
+                  update_guards.begin(); it != update_guards.end(); it++)
+            {
+              if (it->first == fill_aggregator)
+                continue;
+              const FieldMask guard_mask = guard_fill_mask & it->second;
+              if (!guard_mask)
+                continue;
+              // No matter what record our dependences on the prior guards
+#ifdef NON_AGGRESSIVE_AGGREGATORS
+              const RtEvent guard_event = it->first->effects_applied;
+#else
+              const RtEvent guard_event = 
+                (analysis.original_source == local_space) ?
+                it->first->guard_postcondition :
+                it->first->effects_applied;
+#endif
+              analysis.guard_events.insert(guard_event);
             }
           }
           // Flush any restricted fields

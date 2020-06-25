@@ -3196,16 +3196,8 @@ namespace Legion {
             break;
           }
         case LEGION_AFFINE_REDUCTION_SPECIALIZE:
+        case LEGION_COMPACT_REDUCTION_SPECIALIZE:
           {
-            // TODO: this can go away once realm understands reduction
-            // instances that contain multiple fields, Legion is ready
-            // though so all you should have to do is delete this check
-            if (field_sizes.size() > 1)
-              REPORT_LEGION_ERROR(ERROR_ILLEGAL_REDUCTION_REQUEST,
-                            "Illegal request for a reduction instance "
-                            "containing multiple fields. Only a single field "
-                            "is currently permitted for reduction instances.")
-            ApUserEvent filled_and_ready = Runtime::create_ap_user_event(NULL);
             result = new IndividualManager(forest, did, local_space,
                                            memory_manager, instance, 
                                            instance_domain, piece_list,
@@ -3213,41 +3205,9 @@ namespace Legion {
                                            tree_id, layout, redop_id,
                                            pointer_constraint,
                                            true/*register now*/,
-                                           instance_footprint, filled_and_ready,
+                                           instance_footprint, ready,
                                            false/*external instance*/,
                                            reduction_op);
-            // Before we can actually use this instance, we have to 
-            // initialize it with a fill operation of the proper value
-            // Don't record this fill operation because it is just part
-            // of the semantics of reduction instances and not something
-            // that we want Legion Spy to see
-            const PhysicalTraceInfo fake_info(NULL, -1U, false);
-            if (!instance_domain->is_empty())
-            {
-              void *fill_buffer = malloc(reduction_op->sizeof_rhs);
-              reduction_op->init(fill_buffer, 1);
-              std::vector<CopySrcDstField> dsts;
-              result->compute_copy_offsets(instance_mask, dsts);
-              const PhysicalTraceInfo fake_info(NULL, -1U, false);
-              const ApEvent filled = instance_domain->issue_fill(fake_info, 
-                    dsts, fill_buffer, reduction_op->sizeof_rhs, 
-#ifdef LEGION_SPY
-                    0/*uid*/, field_space_node->handle, tree_id,
-#endif
-                    ready, PredEvent::NO_PRED_EVENT);
-              // We can free the buffer after we've issued the fill
-              free(fill_buffer);
-              // Trigger our filled_and_ready event
-              Runtime::trigger_event(&fake_info, filled_and_ready, filled);
-            }
-            else
-              Runtime::trigger_event(&fake_info, filled_and_ready);
-            break;
-          }
-        case LEGION_COMPACT_REDUCTION_SPECIALIZE:
-          {
-            // TODO: implement this
-            assert(false);
             break;
           }
         default:

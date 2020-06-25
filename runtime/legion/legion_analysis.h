@@ -1238,7 +1238,7 @@ namespace Legion {
     public:
       CopyFillAggregator& operator=(const CopyFillAggregator &rhs);
     public:
-      virtual void record_updates(InstanceView *dst_view, 
+      void record_updates(InstanceView *dst_view, 
                           const FieldMaskSet<LogicalView> &src_views,
                           const FieldMask &src_mask,
                           IndexSpaceExpression *expr,
@@ -1246,17 +1246,20 @@ namespace Legion {
                           CopyAcrossHelper *across_helper = NULL);
       // Neither fills nor reductions should have a redop across as they
       // should have been applied an instance directly for across copies
-      virtual void record_fill(InstanceView *dst_view,
+      void record_fill(InstanceView *dst_view,
                        FillView *src_view,
                        const FieldMask &fill_mask,
                        IndexSpaceExpression *expr,
                        CopyAcrossHelper *across_helper = NULL);
-      virtual void record_reductions(InstanceView *dst_view,
+      void record_reductions(InstanceView *dst_view,
                              const std::vector<ReductionView*> &src_views,
                              const unsigned src_fidx,
                              const unsigned dst_fidx,
                              IndexSpaceExpression *expr,
                              CopyAcrossHelper *across_helper = NULL);
+      void record_reduction_fill(ReductionView *init_view,
+                                 const FieldMask &fill_mask,
+                                 IndexSpaceExpression *expr);
       // Record preconditions coming back from analysis on views
       void record_preconditions(InstanceView *view, bool reading,
                                 EventFieldExprs &preconditions);
@@ -1277,10 +1280,16 @@ namespace Legion {
       RtEvent perform_updates(const LegionMap<InstanceView*,
                             FieldMaskSet<Update> >::aligned &updates,
                            const PhysicalTraceInfo &trace_info,
-                           const ApEvent all_precondition,
+                           const ApEvent all_precondition, int redop_index,
                            const bool has_src_preconditions,
                            const bool has_dst_preconditions,
                            const bool needs_preconditions);
+      void find_reduction_preconditions(InstanceView *dst_view, 
+                           const PhysicalTraceInfo &trace_info,
+                           IndexSpaceExpression *copy_expr,
+                           const FieldMask &copy_mask, 
+                           UniqueID op_id, unsigned redop_index, 
+                           std::set<RtEvent> &preconditions_ready);
       void issue_fills(InstanceView *target,
                        const std::vector<FillUpdate*> &fills,
                        ApEvent precondition, const FieldMask &fill_mask,

@@ -747,12 +747,6 @@ namespace Legion {
                              RegionTreeID tree_id,
 #endif
                              ApEvent precondition, PredEvent pred_guard);
-    private:
-      void record_issue_fill_for_reduction(Memoizable *memo,
-                                           unsigned idx,
-                                           InstanceView *view,
-                                           const FieldMask &user_mask,
-                                           IndexSpaceExpression *expr);
     public:
       virtual void get_reduction_ready_events(Memoizable *memo,
                                               std::set<ApEvent> &ready_events);

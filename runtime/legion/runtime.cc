@@ -4135,7 +4135,6 @@ namespace Legion {
     void MemoryManager::deactivate_instance(PhysicalManager *manager)
     //--------------------------------------------------------------------------
     {
-      bool perform_deletion = false;
       bool remove_reference = false;
 #ifdef LEGION_MALLOC_INSTANCES
       std::pair<RtEvent,uintptr_t> to_free(RtEvent::NO_RT_EVENT, 0);
@@ -4187,21 +4186,9 @@ namespace Legion {
           assert(finder->second.pending_acquires > 0);
 #endif
         }
-        else if (is_owner && manager->is_reduction_manager())
-        {
-          // Always eagerly delete reduction instances since we don't
-          // currently allow the mappers to reuse them
-          perform_deletion = true;
-          remove_reference = true;
-          tree_finder->second.erase(finder);
-          if (tree_finder->second.empty())
-            current_instances.erase(tree_finder);
-        }
         else // didn't collect it yet
           info.current_state = COLLECTABLE_STATE;
       }
-      if (perform_deletion)
-        manager->perform_deletion(RtEvent::NO_RT_EVENT);
       if (remove_reference)
       {
         if (manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
@@ -20098,6 +20085,15 @@ namespace Legion {
               delete (*it);
         }
       }
+      if (!redop_fill_views.empty())
+      {
+        WrapperReferenceMutator mutator(applied);
+        for (std::map<ReductionOpID,FillView*>::const_iterator it = 
+              redop_fill_views.begin(); it != redop_fill_views.end(); it++)
+          if (it->second->remove_base_valid_ref(RUNTIME_REF, &mutator))
+            delete it->second;
+        redop_fill_views.clear();
+      }
       if (!applied.empty())
       {
         const RtEvent wait_on = Runtime::merge_events(applied);
@@ -23103,6 +23099,40 @@ namespace Legion {
     {
       AutoLock r_lock(redop_lock);
       return get_reduction_op(redop_id, true/*has lock*/); 
+    }
+
+    //--------------------------------------------------------------------------
+    FillView* Runtime::find_or_create_reduction_fill_view(ReductionOpID redop)
+    //--------------------------------------------------------------------------
+    {
+      {
+        AutoLock r_lock(redop_lock,1,false/*exclusive*/);
+        std::map<ReductionOpID,FillView*>::const_iterator finder = 
+          redop_fill_views.find(redop);
+        if (finder != redop_fill_views.end())
+          return finder->second;
+      }
+      AutoLock r_lock(redop_lock);
+      // Check to see if we lost the race
+      std::map<ReductionOpID,FillView*>::const_iterator finder = 
+        redop_fill_views.find(redop);
+      if (finder != redop_fill_views.end())
+        return finder->second;
+      const ReductionOp *reduction_op = 
+        get_reduction_op(redop, true/*has lock*/);
+      void *fill_buffer = malloc(reduction_op->sizeof_rhs);
+      reduction_op->init(fill_buffer, 1);
+      FillView::FillViewValue *fill_value = 
+        new FillView::FillViewValue(fill_buffer, reduction_op->sizeof_rhs);
+      FillView *fill_view = new FillView(forest, get_available_distributed_id(),
+                                 address_space, fill_value, true/*register now*/
+#ifdef LEGION_SPY
+                                 , implicit_provenance
+#endif
+                                 );
+      fill_view->add_base_valid_ref(RUNTIME_REF);
+      redop_fill_views[redop] = fill_view;
+      return fill_view;
     }
 
     //--------------------------------------------------------------------------

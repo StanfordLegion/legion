@@ -3889,55 +3889,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_issue_fill_for_reduction(Memoizable *memo,
-                                                           unsigned idx,
-                                                           InstanceView *view,
-                                                     const FieldMask &user_mask,
-                                                     IndexSpaceExpression *expr)
-    //--------------------------------------------------------------------------
-    {
-      if (expr->is_empty()) return;
-
-      TraceLocalID op_key = find_trace_local_id(memo);
-      ReductionView *reduction_view = view->as_reduction_view();
-      PhysicalManager *manager = reduction_view->manager;
-      
-      std::vector<CopySrcDstField> fields;
-      manager->compute_copy_offsets(user_mask, fields);
-
-      const ReductionOp *reduction_op = manager->reduction_op;
-#ifdef DEBUG_LEGION
-      assert(reduction_op != NULL);
-#endif
-      size_t fill_size = reduction_op->sizeof_rhs;
-      void *fill_value = malloc(fill_size);
-      reduction_op->init(fill_value, 1);
-
-      ApEvent lhs;
-      {
-        Realm::UserEvent e(Realm::UserEvent::create_user_event());
-        e.trigger();
-        lhs = ApEvent(e);
-      }
-      unsigned lhs_ = convert_event(lhs);
-      insert_instruction(new IssueFill(*this, lhs_, expr, op_key,
-                                       fields, fill_value, fill_size,
-#ifdef LEGION_SPY
-                                       manager->field_space_node->handle,
-                                       manager->tree_id,
-#endif
-                                       fence_completion_id));
-      reduction_ready_events[op_key].insert(lhs);
-
-      FieldMaskSet<InstanceView> views;
-      views.insert(view, user_mask);
-      record_copy_views(lhs_, expr, views);
-
-      const RegionUsage usage(LEGION_WRITE_ONLY, LEGION_EXCLUSIVE, 0);
-      add_view_user(view, usage, lhs_, expr, user_mask);
-    }
-
-    //--------------------------------------------------------------------------
     void PhysicalTemplate::get_reduction_ready_events(
                               Memoizable *memo, std::set<ApEvent> &ready_events)
     //--------------------------------------------------------------------------
@@ -3986,8 +3937,6 @@ namespace Legion {
           views.insert(expr, mask);
           if (update_validity)
           {
-            if (view->is_reduction_view() && IS_REDUCE(usage))
-              record_issue_fill_for_reduction(memo, idx, view, mask, expr);
             update_valid_views(view, *eit, usage, mask, true);
             add_view_user(view, usage, entry, expr, mask);
           }
