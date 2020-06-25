@@ -139,7 +139,7 @@ namespace Legion {
         const RtUserEvent done_event;
       };
     public:
-      InstanceView(RegionTreeForest *ctx, DistributedID did,
+      InstanceView(RegionTreeForest *ctx,DistributedID did,PhysicalManager *man,
                    AddressSpaceID owner_proc, AddressSpaceID logical_owner, 
                    UniqueID owner_context, bool register_now); 
       virtual ~InstanceView(void);
@@ -223,6 +223,18 @@ namespace Legion {
       virtual void copy_from(const FieldMask &copy_mask, 
                    std::vector<CopySrcDstField> &src_fields) = 0;
     public:
+      void find_atomic_reservations(const FieldMask &mask, Operation *op, 
+                                    const unsigned index, bool exclusive);
+      void find_field_reservations(const std::vector<FieldID> &needed_fields,
+                                   std::vector<Reservation> &results);
+      static void handle_send_atomic_reservation_request(Runtime *runtime,
+                                  Deserializer &derez, AddressSpaceID source);
+      void update_field_reservations(
+                            const std::vector<FieldID> &fields,
+                            const std::vector<Reservation> &reservations);
+      static void handle_send_atomic_reservation_response(Runtime *runtime,
+                                                          Deserializer &derez);
+    public:
       static void handle_view_register_user(Deserializer &derez,
                         Runtime *runtime, AddressSpaceID source);
       static void handle_view_find_copy_pre_request(Deserializer &derez,
@@ -242,11 +254,17 @@ namespace Legion {
                         Runtime *runtime, AddressSpaceID source);
 #endif
     public:
+      PhysicalManager *const manager;
       // The ID of the context that made this view
       // instance made for a virtual mapping
       const UniqueID owner_context;
       // This is the owner space for the purpose of logical analysis
       const AddressSpaceID logical_owner;
+    private:
+      // Keep track of the locks used for managing atomic coherence
+      // on individual fields of this materialized view. Only the
+      // top-level view for an instance needs to track this.
+      std::map<FieldID,Reservation> atomic_reservations;
     };
 
     /**
@@ -645,20 +663,7 @@ namespace Legion {
 #ifdef ENABLE_VIEW_REPLICATION
       // Must be called while holding the replication lock
       void update_remote_replication_state(std::set<RtEvent> &applied_events);
-#endif
-    public:
-      void find_atomic_reservations(const FieldMask &mask, Operation *op, 
-                                    const unsigned index, bool exclusive);
-    public:
-      void find_field_reservations(const std::vector<FieldID> &needed_fields,
-                                   std::vector<Reservation> &results);
-      static void handle_send_atomic_reservation_request(Runtime *runtime,
-                                  Deserializer &derez, AddressSpaceID source);
-      void update_field_reservations(
-                            const std::vector<FieldID> &fields,
-                            const std::vector<Reservation> &reservations);
-      static void handle_send_atomic_reservation_response(Runtime *runtime,
-                                                          Deserializer &derez);
+#endif 
     public:
       static void handle_send_materialized_view(Runtime *runtime,
                               Deserializer &derez, AddressSpaceID source);
@@ -668,13 +673,7 @@ namespace Legion {
                                      AddressSpaceID owner_space, 
                                      AddressSpaceID logical_owner, 
                                      UniqueID context_uid);
-    public:
-      PhysicalManager *const manager;
-    protected:
-      // Keep track of the locks used for managing atomic coherence
-      // on individual fields of this materialized view. Only the
-      // top-level view for an instance needs to track this.
-      std::map<FieldID,Reservation> atomic_reservations;
+    protected: 
       // Use a ExprView DAG to track the current users of this instance
       ExprView *current_users; 
       // Lock for serializing creation of ExprView objects
@@ -802,14 +801,11 @@ namespace Legion {
                                  const bool trace_recording,
                                  const AddressSpaceID source);
     protected: 
-      void find_reducing_preconditions(const FieldMask &user_mask,
+      void find_reducing_preconditions(const RegionUsage &usage,
+                                       const FieldMask &user_mask,
                                        IndexSpaceExpression *user_expr,
                                        UniqueID op_id,
                                        std::set<ApEvent> &wait_on);
-      void find_reading_preconditions(const FieldMask &user_mask,
-                                      IndexSpaceExpression *user_expr,
-                                      UniqueID op_id,
-                                      std::set<ApEvent> &wait_on);
       void find_initializing_preconditions(const FieldMask &user_mask,
                                            IndexSpaceExpression *user_expr,
                                            UniqueID op_id,
@@ -861,7 +857,6 @@ namespace Legion {
     public:
       ReductionOpID get_redop(void) const;
     public:
-      PhysicalManager *const manager;
       FillView *const fill_view; // fill view for this reduction value
     protected:
       EventFieldUsers initialization_users;

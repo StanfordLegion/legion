@@ -1954,16 +1954,14 @@ namespace Legion {
       else if (analysis->user_registered.exists())
         Runtime::trigger_event(analysis->user_registered);
       // Find any atomic locks we need to take for these instances
-      if (IS_ATOMIC(analysis->usage) && !IS_REDUCE(analysis->usage))
+      if (IS_ATOMIC(analysis->usage))
       {
-        const bool exclusive = IS_WRITE(analysis->usage);
+        const bool exclusive = HAS_WRITE(analysis->usage);
         for (unsigned idx = 0; idx < targets.size(); idx++)
         {
           const FieldMask &inst_mask = targets[idx].get_valid_fields();
-          MaterializedView *mat_view = 
-            analysis->target_views[idx]->as_materialized_view();
-          mat_view->find_atomic_reservations(inst_mask, analysis->op,
-                                             analysis->index, exclusive);
+          analysis->target_views[idx]->find_atomic_reservations(inst_mask, 
+                                analysis->op, analysis->index, exclusive);
         }
       }
       // Perform any output copies (e.g. for restriction) that need to be done

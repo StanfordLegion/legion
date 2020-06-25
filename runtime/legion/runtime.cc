@@ -17976,15 +17976,14 @@ namespace Legion {
                                                          AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      MaterializedView::handle_send_atomic_reservation_request(this, derez, 
-                                                               source);
+      InstanceView::handle_send_atomic_reservation_request(this, derez, source);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::handle_send_atomic_reservation_response(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      MaterializedView::handle_send_atomic_reservation_response(this, derez);
+      InstanceView::handle_send_atomic_reservation_response(this, derez);
     }
 
     //--------------------------------------------------------------------------
