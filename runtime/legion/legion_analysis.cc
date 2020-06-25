@@ -10611,6 +10611,14 @@ namespace Legion {
 #endif
             const FieldMask &update_fields = 
               analysis.target_instances[idx].get_valid_fields(); 
+            // Track the case where this reduction view is also
+            // stored in the valid instances in which case we 
+            // do not need to do any fills. This will only happen
+            // if these fields are restricted.
+            bool already_valid = false;
+            if (!!restricted_fields && !(update_fields * restricted_fields) &&
+                (valid_instances.find(red_view) != valid_instances.end()))
+              already_valid = true;
             int fidx = update_fields.find_first_set();
             // Figure out which fields require a fill operation
             // in order initialize the reduction instances
@@ -10627,7 +10635,7 @@ namespace Legion {
               // with reductions of kind A, switch to reductions of
               // kind B, and then switch back to reductions of kind A
               // which will make it unsafe to re-use the instance
-              bool found = false;
+              bool found = already_valid && restricted_fields.is_set(fidx);
               for (std::vector<ReductionView*>::const_iterator it =
                     field_views.begin(); it != field_views.end(); it++)
               {
@@ -12311,25 +12319,28 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(finder != reduction_instances.end());
 #endif
-        // Find the target targets and record them
-        for (FieldMaskSet<LogicalView>::const_iterator it = 
-              valid_instances.begin(); it != valid_instances.end(); it++)
+        if (!finder->second.empty())
         {
-          if (!it->second.is_set(fidx))
-            continue;
-          // Shouldn't have any deferred views here
-          InstanceView *dst_view = it->first->as_instance_view();
-          if (aggregator == NULL)
-            aggregator = new CopyFillAggregator(runtime->forest, op, index,
-                                                guard_event, trace_events);
-          aggregator->record_reductions(dst_view, finder->second, fidx, 
-                                        fidx, set_expr);
+          // Find the target targets and record them
+          for (FieldMaskSet<LogicalView>::const_iterator it = 
+                valid_instances.begin(); it != valid_instances.end(); it++)
+          {
+            if (!it->second.is_set(fidx))
+              continue;
+            // Shouldn't have any deferred views here
+            InstanceView *dst_view = it->first->as_instance_view();
+            if (aggregator == NULL)
+              aggregator = new CopyFillAggregator(runtime->forest, op, index,
+                                                  guard_event, trace_events);
+            aggregator->record_reductions(dst_view, finder->second, fidx, 
+                                          fidx, set_expr);
+          }
+          // Remove the reduction views from those available
+          for (std::vector<ReductionView*>::const_iterator it = 
+                finder->second.begin(); it != finder->second.end(); it++)
+            if ((*it)->remove_nested_valid_ref(did))
+              delete (*it);
         }
-        // Remove the reduction views from those available
-        for (std::vector<ReductionView*>::const_iterator it = 
-              finder->second.begin(); it != finder->second.end(); it++)
-          if ((*it)->remove_nested_valid_ref(did))
-            delete (*it);
         reduction_instances.erase(finder);
         fidx = reduce_mask.find_next_set(fidx+1);
       }

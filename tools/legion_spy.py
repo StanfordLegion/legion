@@ -4697,7 +4697,8 @@ class EquivalenceSet(object):
                 self.pending_reductions = list()
             # Check to see if this instance is already in the list
             # of reduction instances, also check for the ABA problem
-            found = False
+            # The instance could also be the restricted instance
+            found = inst is self.restricted_inst
             for prev in self.pending_reductions:
                 if prev is not inst:
                     if found and prev.redop != inst.redop:
