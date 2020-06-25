@@ -51,7 +51,8 @@ namespace Legion {
         DEFAULT_TUNABLE_GLOBAL_IOS = 8,
         DEFAULT_TUNABLE_GLOBAL_OMPS = 9,
         DEFAULT_TUNABLE_GLOBAL_PYS = 10,
-        DEFAULT_TUNABLE_LAST = 11, // this one must always be last and unused
+        DEFAULT_TUNABLE_LOCAL_ACCELS = 11,
+        DEFAULT_TUNABLE_LAST = 12 // this one must always be last and unused
       };
       enum MappingKind {
         TASK_MAPPING,
@@ -375,6 +376,8 @@ namespace Legion {
       Processor default_get_next_global_cpu(void);
       Processor default_get_next_local_gpu(void);
       Processor default_get_next_global_gpu(void);
+      Processor default_get_next_local_accel(void);
+      Processor default_get_next_global_accel(void);
       Processor default_get_next_local_io(void);
       Processor default_get_next_global_io(void);
       Processor default_get_next_local_py(void);
@@ -464,12 +467,14 @@ namespace Legion {
       // There are a couple of parameters from the machine description that 
       // the default mapper uses to determine how to perform mapping.
       std::vector<Processor> local_gpus;
+      std::vector<Processor> local_accels;
       std::vector<Processor> local_cpus;
       std::vector<Processor> local_ios;
       std::vector<Processor> local_procsets;
       std::vector<Processor> local_omps;
       std::vector<Processor> local_pys;
       std::vector<Processor> remote_gpus;
+      std::vector<Processor> remote_accels;
       std::vector<Processor> remote_cpus;
       std::vector<Processor> remote_ios;
       std::vector<Processor> remote_procsets;
@@ -477,11 +482,11 @@ namespace Legion {
       std::vector<Processor> remote_pys;
     protected:
       // For doing round-robining of tasks onto processors
-      unsigned next_local_gpu, next_local_cpu, next_local_io,
+      unsigned next_local_gpu, next_local_cpu, next_local_io, next_local_accel,
                next_local_procset, next_local_omp, next_local_py;
-      Processor next_global_gpu, next_global_cpu, next_global_io,
+      Processor next_global_gpu, next_global_cpu, next_global_io, next_global_accel,
                 next_global_procset, next_global_omp, next_global_py;
-      Machine::ProcessorQuery *global_gpu_query, *global_cpu_query,
+      Machine::ProcessorQuery *global_gpu_query, *global_cpu_query, *global_accel_query,
                               *global_io_query, *global_procset_query,
                               *global_omp_query, *global_py_query;
     protected: 

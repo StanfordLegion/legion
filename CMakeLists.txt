@@ -234,6 +234,15 @@ if(Legion_USE_CUDA)
 endif()
 
 #------------------------------------------------------------------------------#
+# Accelerator configuration
+#------------------------------------------------------------------------------#
+option(Legion_USE_ACCELERATOR "Enable support for accelerator" OFF)
+if (Legion_USE_ACCELERATOR)
+  message("Including Accelerator in Realm...")
+  set(REALM_USE_ACCELERATOR ON)
+endif()
+
+#------------------------------------------------------------------------------#
 # Kokkos configuration
 #------------------------------------------------------------------------------#
 option(Legion_USE_Kokkos "Enable support for the Kokkos runtime" OFF)

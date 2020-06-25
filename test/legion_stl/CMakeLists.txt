@@ -22,6 +22,12 @@ if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
+if (Legion_USE_ACCELERATOR)
+  set(XRT_LIB_DIR $ENV{XILINX_XRT}/lib)
+  link_directories(${XRT_LIB_DIR})
+endif()
+
+
 add_executable(test_stl test_stl.cc)
 set_property(TARGET test_stl PROPERTY CXX_STANDARD 11)
 set_property(TARGET test_stl PROPERTY CXX_STANDARD_REQUIRED ON)

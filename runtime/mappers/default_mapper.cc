@@ -55,14 +55,14 @@ namespace Legion {
         node_id(local.address_space()), machine(m),
         mapper_name((name == NULL) ? create_default_name(local) : 
                       own ? name : strdup(name)),
-        next_local_gpu(0), next_local_cpu(0), next_local_io(0),
+        next_local_gpu(0), next_local_cpu(0), next_local_io(0), next_local_accel(0),
         next_local_procset(0), next_local_omp(0), next_local_py(0),
-        next_global_gpu(Processor::NO_PROC),
+        next_global_gpu(Processor::NO_PROC), next_global_accel(Processor::NO_PROC),
         next_global_cpu(Processor::NO_PROC), next_global_io(Processor::NO_PROC),
         next_global_procset(Processor::NO_PROC),
         next_global_omp(Processor::NO_PROC), next_global_py(Processor::NO_PROC),
         global_gpu_query(NULL), global_cpu_query(NULL), global_io_query(NULL),
-        global_procset_query(NULL), global_omp_query(NULL),
+        global_procset_query(NULL), global_omp_query(NULL), global_accel_query(NULL),
         global_py_query(NULL),
         max_steals_per_theft(STATIC_MAX_PERMITTED_STEALS),
         max_steal_count(STATIC_MAX_STEAL_COUNT),
@@ -151,6 +151,11 @@ namespace Legion {
                 local_omps.push_back(*it);
                 break;
               }
+	    case Processor::ACCEL_PROC:
+	      {
+		local_accels.push_back(*it);
+		break;
+	      }
             default: // ignore anything else
               break;
           }
@@ -211,6 +216,14 @@ namespace Legion {
                 remote_omps[node] = *it;
               break;
             }
+	  case Processor::ACCEL_PROC:
+	    {
+              if (node >= remote_accels.size())
+		remote_accels.resize(node+1, Processor::NO_PROC);
+	      if (!remote_accels[node].exists())
+		remote_accels[node] = *it;
+	      break;
+	    }
           default: // ignore anything else
             break;
         }
@@ -392,6 +405,8 @@ namespace Legion {
             return default_get_next_local_omp();
           case Processor::PY_PROC:
             return default_get_next_local_py();
+	  case Processor::ACCEL_PROC:
+	    return default_get_next_local_accel();
           default: // make warnings go away
             break;
         }
@@ -421,6 +436,8 @@ namespace Legion {
                 return default_get_next_local_omp();
               case Processor::PY_PROC:
                 return default_get_next_local_py();
+	      case Processor::ACCEL_PROC:
+                return default_get_next_local_accel();
               default: // make warnings go away
                 break;
             }
@@ -446,6 +463,8 @@ namespace Legion {
                   return default_get_next_global_omp();
                 case Processor::PY_PROC:
                   return default_get_next_global_py();
+		case Processor::ACCEL_PROC:
+                  return default_get_next_global_accel();
                 default: // make warnings go away
                   break;
               }
@@ -468,6 +487,8 @@ namespace Legion {
                 return default_get_next_local_omp();
               case Processor::PY_PROC:
                 return default_get_next_local_py();
+	      case Processor::ACCEL_PROC:
+                return default_get_next_local_accel();
               default: // make warnings go away
                 break;
             }
@@ -552,6 +573,37 @@ namespace Legion {
       return result;
     }
 
+    //--------------------------------------------------------------------------
+    Processor DefaultMapper::default_get_next_local_accel(void)
+    //--------------------------------------------------------------------------
+    {
+      Processor result = local_accels[next_local_accel++];
+      if (next_local_accel == local_accels.size())
+        next_local_accel = 0;
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    Processor DefaultMapper::default_get_next_global_accel(void)
+    //-------------------------------------------------------------------------
+    {
+      if (total_nodes == 1)
+	return default_get_next_local_accel();
+      if (!next_global_accel.exists())
+      {
+         global_accel_query = new Machine::ProcessorQuery(machine);
+	 global_accel_query->only_kind(Processor::ACCEL_PROC);
+	 next_global_accel = global_accel_query->first();
+      }
+      Processor result = next_global_accel;
+      next_global_accel = global_accel_query->next(result);
+      if (!next_global_accel.exists())
+      {
+        delete global_accel_query;
+	global_accel_query = NULL;
+      }
+      return result;
+    }
     //--------------------------------------------------------------------------
     Processor DefaultMapper::default_get_next_local_io(void)
     //--------------------------------------------------------------------------
@@ -753,6 +805,13 @@ namespace Legion {
                     continue;
                   break;
                 }
+	      case Processor::ACCEL_PROC:
+		{
+		  kindString += "ACCEL_PROC ";
+		  if (local_accels.empty())
+		    continue;
+		  break;
+		}
               case Processor::LOC_PROC:
                 {
                   kindString += "LOC_PROC ";
@@ -914,10 +973,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Default mapper is ignorant about task IDs so just do whatever:
-      // 1) GPU > OMP > procset > cpu > IO > Python  (default)
-      // 2) OMP > procset > cpu > IO > Python > GPU  (with PREFER_CPU_VARIANT)
+      // 1) GPU > OMP > procset > cpu > IO > Python > Accel  (default)
+      // 2) OMP > procset > cpu > IO > Python > GPU > Accel  (with PREFER_CPU_VARIANT)
       // It is up to the caller to filter out processor kinds that aren't
       // suitable for a given task
+
       bool prefer_cpu = ((task.tag & PREFER_CPU_VARIANT) != 0);
       if ((local_gpus.size() > 0) && !prefer_cpu)
        ranking.push_back(Processor::TOC_PROC);
@@ -928,6 +988,10 @@ namespace Legion {
       if (local_pys.size() > 0) ranking.push_back(Processor::PY_PROC);
       if ((local_gpus.size() > 0) && prefer_cpu)
        ranking.push_back(Processor::TOC_PROC);
+
+      if (local_accels.size() > 0) {
+       ranking.push_back(Processor::ACCEL_PROC);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1016,6 +1080,23 @@ namespace Legion {
                     log_mapper.error("Default mapper failure. No memory found "
                         "for Python task %s (ID %lld) which is visible "
                         "for all points in the index space.",
+                        task.get_task_name(), task.get_unique_id());
+                    assert(false);
+                  }
+                  else
+                    target_memory = global_memory;
+                }
+                break;
+              }
+	    case Processor::ACCEL_PROC:
+	      {
+                if (task.index_domain.get_volume() > local_accels.size())
+                {
+                  if (!global_memory.exists())
+                  {
+                    log_mapper.error("Default mapper failure. No memory found "
+                        "for CPU task %s (ID %lld) which is visible "
+                        "for all point in the index space.",
                         task.get_task_name(), task.get_unique_id());
                     assert(false);
                   }
@@ -1125,6 +1206,7 @@ namespace Legion {
         switch (task.target_proc.kind())
         {
           case Processor::LOC_PROC:
+          case Processor::ACCEL_PROC: // use cpu memory
           case Processor::IO_PROC:
           case Processor::PROC_SET:
           case Processor::OMP_PROC:
@@ -1252,6 +1334,11 @@ namespace Legion {
                                input, output, gpu_slices_cache);
             break;
           }
+	case Processor::ACCEL_PROC:
+	  {
+            default_slice_task(task, local_accels, remote_accels,
+                               input, output, cpu_slices_cache);
+	  }
         case Processor::IO_PROC:
           {
             default_slice_task(task, local_ios, remote_ios, 
@@ -1701,6 +1788,15 @@ namespace Legion {
               target_procs.push_back(task.target_proc);
               break;
             }
+	  case Processor::ACCEL_PROC:
+	    {
+	      if (!task.must_epoch_task)
+                target_procs.insert(target_procs.end(),
+                    local_accels.begin(), local_accels.end());
+              else
+                target_procs.push_back(task.target_proc);
+              break;
+	    }
           case Processor::LOC_PROC:
             {
               // Put any of our local cpus on here
@@ -3124,6 +3220,11 @@ namespace Legion {
             *result = local_gpus.size();
             break;
           }
+	case DEFAULT_TUNABLE_LOCAL_ACCELS:
+	  {
+	    *result = local_accels.size();
+	    break;
+          }
         case DEFAULT_TUNABLE_LOCAL_CPUS:
           {
             *result = local_cpus.size();
@@ -3418,6 +3519,15 @@ namespace Legion {
                 }
                 break;
               }
+	    case  Processor::ACCEL_PROC:
+	      {
+                if (local_accels.empty())
+		{
+		  ++it;
+		  continue;
+		}
+		break;
+	      }
             case Processor::OMP_PROC:
               {
                 if (local_omps.empty())

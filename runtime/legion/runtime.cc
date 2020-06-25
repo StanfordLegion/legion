@@ -11769,6 +11769,11 @@ namespace Legion {
                 LegionSpy::log_processor_kind(kind, "Python");
                 break;
               }
+            case Processor::ACCEL_PROC:
+              {
+                LegionSpy::log_processor_kind(kind, "Accelerator");
+                break;
+              }
             default:
               assert(false); // unknown processor kind
           }
@@ -22843,6 +22848,7 @@ namespace Legion {
             ((local_util_procs.empty() || config.replay_on_cpus) &&
               ((it->first.kind() == Processor::LOC_PROC) ||
                (it->first.kind() == Processor::TOC_PROC) ||
+               (it->first.kind() == Processor::ACCEL_PROC) ||
                (it->first.kind() == Processor::IO_PROC))))
         {
           registered_events.insert(RtEvent(

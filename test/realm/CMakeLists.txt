@@ -44,9 +44,20 @@ list(APPEND REALM_TESTS
   coverings
   )
 
+# TODO: build memspeed properly with cuda enabled...
 if(Legion_USE_CUDA)
   # some tests have CUDA source files too
   set(CUDASRC_memspeed memspeed_gpu.cu)
+endif()
+
+if (Legion_USE_ACCELERATOR)
+  list(APPEND REALM_TESTS
+    accelerator_task
+  )
+  # environment variable XILINX_XRT
+  # looking for libxilinxopencl
+  set(XRT_LIB_DIR $ENV{XILINX_XRT}/lib)
+  link_directories(${XRT_LIB_DIR})
 endif()
 
 foreach(test IN LISTS REALM_TESTS)

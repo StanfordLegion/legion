@@ -1059,6 +1059,7 @@ namespace Legion {
           case Processor::PROC_SET: return "PROC_SET";
           case Processor::OMP_PROC: return "OMP_PROC";
           case Processor::PY_PROC: return "PY_PROC";
+	  case Processor::ACCEL_PROC: return "ACCEL_PROC";
           default: assert(false); return "";
         }
       }
