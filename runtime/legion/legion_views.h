@@ -805,7 +805,7 @@ namespace Legion {
                                        const FieldMask &user_mask,
                                        IndexSpaceExpression *user_expr,
                                        UniqueID op_id,
-                                       std::set<ApEvent> &wait_on);
+                                       std::set<ApEvent> &wait_on) const;
       void find_initializing_preconditions(const FieldMask &user_mask,
                                            IndexSpaceExpression *user_expr,
                                            UniqueID op_id,
@@ -813,11 +813,11 @@ namespace Legion {
       void find_reducing_preconditions(const FieldMask &user_mask,
                                        IndexSpaceExpression *user_expr,
                                        UniqueID op_id,
-                                       EventFieldExprs &preconditions);
+                                       EventFieldExprs &preconditions) const;
       void find_reading_preconditions(const FieldMask &user_mask,
                                       IndexSpaceExpression *user_expr,
                                       UniqueID op_id,
-                                      EventFieldExprs &preconditions);
+                                      EventFieldExprs &preconditions) const;
       bool add_user(const RegionUsage &usage,
                     IndexSpaceExpression *user_expr,
                     const FieldMask &user_mask,

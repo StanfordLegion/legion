@@ -4662,7 +4662,7 @@ namespace Legion {
                                                const FieldMask &user_mask,
                                                IndexSpaceExpression *user_expr,
                                                UniqueID op_id,
-                                               std::set<ApEvent> &wait_on)
+                                               std::set<ApEvent> &wait_on) const
     //--------------------------------------------------------------------------
     {
       // lock must be held by caller
@@ -4867,9 +4867,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReductionView::find_reducing_preconditions(const FieldMask &user_mask,
-                                               IndexSpaceExpression *user_expr,
-                                               UniqueID op_id,
-                                               EventFieldExprs &preconditions)
+                                           IndexSpaceExpression *user_expr,
+                                           UniqueID op_id,
+                                           EventFieldExprs &preconditions) const
     //--------------------------------------------------------------------------
     {
       // lock must be held by caller
@@ -4953,9 +4953,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReductionView::find_reading_preconditions(const FieldMask &user_mask,
-                                               IndexSpaceExpression *user_expr,
-                                               UniqueID op_id,
-                                               EventFieldExprs &preconditions)
+                                           IndexSpaceExpression *user_expr,
+                                           UniqueID op_id,
+                                           EventFieldExprs &preconditions) const
     //--------------------------------------------------------------------------
     {
       // lock must be held by caller
