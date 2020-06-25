@@ -4490,8 +4490,6 @@ class DataflowTraverser(object):
         # If we didn't have a dataflow path then we're done
         if not self.found_dataflow_path:
             if last:
-                import pdb
-                pdb.set_trace()
                 print("ERROR: No dataflow path found to update field "+
                         str(self.dst_field)+" of instance "+str(self.target)+
                         " of region requirement "+str(self.dst_req.index)+
@@ -8825,8 +8823,6 @@ class RealmBase(object):
             for field in fields:
                 eq_key = (point, field, tree)
                 if versions is None or eq_key not in versions:
-                    import pdb
-                    pdb.set_trace()
                     print('ERROR: '+str(self.creator)+' generated spurious '+
                             str(self)+' for point '+str(point)+' of '+str(field)+
                             ' in tree '+str(tree))
@@ -11937,9 +11933,6 @@ class State(object):
     def get_operation(self, uid):
         if uid in self.ops:
             return self.ops[uid]
-        if uid == 23:
-            import pdb
-            pdb.set_trace()
         result = Operation(self, uid)
         self.ops[uid] = result
         return result
