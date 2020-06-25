@@ -45,7 +45,9 @@ public:
 protected:
   void map_circuit_region(const MapperContext ctx,
                           LogicalRegion region, Memory target,
-                          std::vector<PhysicalInstance> &instanes);
+                          std::vector<PhysicalInstance> &instanes,
+                          const std::set<FieldID> &privilege_fields,
+                          ReductionOpID redop);
 protected:
   std::vector<Processor>& procs_list;
   std::vector<Memory>& sysmems_list;
@@ -56,6 +58,7 @@ protected:
 protected:
   // For memoizing mapping instances
   std::map<std::pair<LogicalRegion,Memory>,PhysicalInstance> local_instances;
+  std::map<std::pair<LogicalRegion,Memory>,PhysicalInstance> reduction_instances;
 };
 
 void update_mappers(Machine machine, Runtime *rt,
