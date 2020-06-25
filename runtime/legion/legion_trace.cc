@@ -4141,7 +4141,7 @@ namespace Legion {
           continue;
 
         DependenceType dep =
-          check_dependence_type(it->first->usage, user->usage);
+          check_dependence_type<false>(it->first->usage, user->usage);
         if (dep == LEGION_NO_DEPENDENCE)
           continue;
 

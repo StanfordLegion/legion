@@ -15748,7 +15748,8 @@ namespace Legion {
         {
           if (TRACK_DOM)
             observed_mask |= overlap;
-          DependenceType dtype = check_dependence_type(it->usage, user.usage);
+          const DependenceType dtype = 
+            check_dependence_type<true>(it->usage, user.usage);
           bool validate = validates_regions;
           switch (dtype)
           {

@@ -1256,7 +1256,8 @@ namespace Legion {
           (!COPY_USER || !user->copy_user))
         return false;
       // Now do a dependence test for privilege non-interference
-      DependenceType dt = check_dependence_type(user->usage, next_user);
+      // Only reductions here are copy reductions which we know do not interfere
+      DependenceType dt = check_dependence_type<false>(user->usage, next_user);
       switch (dt)
       {
         case LEGION_NO_DEPENDENCE:
@@ -1308,7 +1309,8 @@ namespace Legion {
           (!COPY_USER || !user->copy_user))
         return false;
       // Now do a dependence test for privilege non-interference
-      DependenceType dt = check_dependence_type(user->usage, next_user);
+      // Only reductions here are copy reductions which we know do not interfere
+      DependenceType dt = check_dependence_type<false>(user->usage, next_user);
       switch (dt)
       {
         case LEGION_NO_DEPENDENCE:

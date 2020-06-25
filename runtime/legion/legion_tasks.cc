@@ -1797,7 +1797,7 @@ namespace Legion {
 #endif
             // Get the interference kind and report it if it is bad
             RegionUsage usage2(regions[indexes[j]]);
-            DependenceType dtype = check_dependence_type(usage1, usage2);
+            DependenceType dtype = check_dependence_type<false>(usage1, usage2);
             // We can only reporting interfering requirements precisely
             // if at least one of these is not a projection requireemnts
             if (((dtype == LEGION_TRUE_DEPENDENCE) || 
