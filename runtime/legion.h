@@ -2750,6 +2750,8 @@ namespace Legion {
       inline T* ptr(const Rect<DIM,COORD_T> &r) const; // must be dense
       __CUDA_HD__
       inline T* ptr(const Rect<DIM,COORD_T> &r, size_t strides[DIM]) const;
+      __CUDA_HD__
+      inline T& operator[](const Point<DIM,COORD_T> &p) const;
     protected:
       Realm::RegionInstance instance;
       Realm::AffineAccessor<T,DIM,COORD_T> accessor;

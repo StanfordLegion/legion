@@ -9840,6 +9840,8 @@ namespace Legion {
       inline FT* ptr(const Rect<N,T> &r) const; // must be dense
       __CUDA_HD__
       inline FT* ptr(const Rect<N,T> &r, size_t strides[N]) const;
+      __CUDA_HD__
+      inline FT& operator[](const Point<N,T> &p) const;
     protected:
       Realm::RegionInstance instance;
       Realm::AffineAccessor<FT,N,T> accessor;
@@ -9903,6 +9905,8 @@ namespace Legion {
       inline FT* ptr(const Rect<N,T> &r) const; // must be dense
       __CUDA_HD__
       inline FT* ptr(const Rect<N,T> &r, size_t strides[N]) const;
+      __CUDA_HD__
+      inline FT& operator[](const Point<N,T> &p) const;
     protected:
       Realm::RegionInstance instance;
       Realm::AffineAccessor<FT,N,T> accessor;
@@ -10647,7 +10651,7 @@ namespace Legion {
         exit(ERROR_NON_DENSE_RECTANGLE);
 #endif
       }
-      return accessor.ptr(r);
+      return accessor.ptr(r.lo);
     }
 
     //--------------------------------------------------------------------------
@@ -10668,6 +10672,24 @@ namespace Legion {
       for (int i = 0; i < N; i++)
         strides[i] = accessor.strides[i] / sizeof(FT);
       return accessor.ptr(r.lo);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifndef BOUNDS_CHECKS
+              , bool CB 
+#endif
+              > __CUDA_HD__
+    inline FT& DeferredBuffer<FT,N,T,
+#ifdef BOUNDS_CHECKS
+              false 
+#else
+              CB
+#endif
+              >::operator[](const Point<N,T> &p) const
+    //--------------------------------------------------------------------------
+    {
+      return accessor[p];
     }
 
     //--------------------------------------------------------------------------
@@ -11356,8 +11378,7 @@ namespace Legion {
 #else
               true
 #endif
-              >::write(const Point<N,T> &p,
-                                                    FT value) const
+              >::write(const Point<N,T> &p, FT value) const
     //--------------------------------------------------------------------------
     {
       assert(instance.exists());
@@ -11429,7 +11450,7 @@ namespace Legion {
         exit(ERROR_NON_DENSE_RECTANGLE);
 #endif
       }
-      return accessor.ptr(r);
+      return accessor.ptr(r.lo);
     }
 
     //--------------------------------------------------------------------------
@@ -11456,6 +11477,30 @@ namespace Legion {
       for (int i = 0; i < N; i++)
         strides[i] = accessor.strides[i] / sizeof(FT);
       return accessor.ptr(r.lo);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifdef BOUNDS_CHECKS
+              , bool CB 
+#endif
+              > __CUDA_HD__
+    inline FT& DeferredBuffer<FT,N,T,
+#ifdef BOUNDS_CHECKS
+              CB 
+#else
+              true
+#endif
+              >::operator[](const Point<N,T> &p) const
+    //--------------------------------------------------------------------------
+    {
+      assert(instance.exists());
+#ifdef __CUDA_ARCH__
+      assert(bounds.bounds.contains(p));
+#else
+      assert(bounds.contains(p));
+#endif
+      return accessor[p];
     }
 
     //--------------------------------------------------------------------------
