@@ -1034,6 +1034,15 @@ namespace Legion {
                            unsigned unique_indirections_identifier,
 #endif
                            ApEvent precondition, PredEvent pred_guard) = 0;
+#ifdef LEGION_GPU_REDUCTIONS
+      virtual ApEvent gpu_reduction(const PhysicalTraceInfo &trace_info,
+                           const std::vector<CopySrcDstField> &dst_fields,
+                           const std::vector<CopySrcDstField> &src_fields,
+                           Processor gpu, 
+                           PhysicalManager *dst, PhysicalManager *src,
+                           ApEvent precondition, PredEvent pred_guard, 
+                           ReductionOpID redop, bool reduction_fold) = 0;
+#endif
       virtual Realm::InstanceLayoutGeneric* create_layout(
                            const LayoutConstraintSet &constraints,
                            const std::vector<FieldID> &field_ids,
@@ -1115,6 +1124,18 @@ namespace Legion {
                                unsigned unique_indirections_identifier,
 #endif
                                ApEvent precondition, PredEvent pred_guard);
+#ifdef LEGION_GPU_REDUCTIONS
+      template<int DIM, typename T>
+      inline ApEvent gpu_reduction_internal(RegionTreeForest *forest,
+                               const Realm::IndexSpace<DIM,T> &space,
+                               const PhysicalTraceInfo &trace_info,
+                               const std::vector<CopySrcDstField> &dst_fields,
+                               const std::vector<CopySrcDstField> &src_fields,
+                               Processor gpu, 
+                               PhysicalManager *dst, PhysicalManager *src,
+                               ApEvent precondition, PredEvent pred_guard, 
+                               ReductionOpID redop, bool reduction_fold);
+#endif
       template<int DIM, typename T>
       inline Realm::InstanceLayoutGeneric* create_layout_internal(
                                const Realm::IndexSpace<DIM,T> &space,
@@ -1302,6 +1323,15 @@ namespace Legion {
                            unsigned unique_indirections_identifier,
 #endif
                            ApEvent precondition, PredEvent pred_guard);
+#ifdef LEGION_GPU_REDUCTIONS
+      virtual ApEvent gpu_reduction(const PhysicalTraceInfo &trace_info,
+                           const std::vector<CopySrcDstField> &dst_fields,
+                           const std::vector<CopySrcDstField> &src_fields,
+                           Processor gpu, 
+                           PhysicalManager *dst, PhysicalManager *src,
+                           ApEvent precondition, PredEvent pred_guard, 
+                           ReductionOpID redop, bool reduction_fold);
+#endif
       virtual Realm::InstanceLayoutGeneric* create_layout(
                            const LayoutConstraintSet &constraints,
                            const std::vector<FieldID> &field_ids,
@@ -2196,6 +2226,15 @@ namespace Legion {
                            unsigned unique_indirections_identifier,
 #endif
                            ApEvent precondition, PredEvent pred_guard);
+#ifdef LEGION_GPU_REDUCTIONS
+      virtual ApEvent gpu_reduction(const PhysicalTraceInfo &trace_info,
+                           const std::vector<CopySrcDstField> &dst_fields,
+                           const std::vector<CopySrcDstField> &src_fields,
+                           Processor gpu, 
+                           PhysicalManager *dst, PhysicalManager *src,
+                           ApEvent precondition, PredEvent pred_guard, 
+                           ReductionOpID redop, bool reduction_fold);
+#endif
       virtual Realm::InstanceLayoutGeneric* create_layout(
                            const LayoutConstraintSet &constraints,
                            const std::vector<FieldID> &field_ids,

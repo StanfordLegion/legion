@@ -4711,7 +4711,6 @@ namespace Legion {
             context->intersect_index_spaces(user_expr, it->first->expr);
           if (expr_overlap->is_empty())
             continue;
-          // Once we have one event precondition we are done
           wait_on.insert(uit->first);
         }
       }

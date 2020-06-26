@@ -3899,7 +3899,7 @@ namespace Legion {
         capacity(m.capacity()), remaining_capacity(capacity), runtime(rt)
     //--------------------------------------------------------------------------
     {
-#if defined(LEGION_USE_CUDA) && defined(LEGION_MALLOC_INSTANCES)
+#ifdef LEGION_USE_CUDA
       if (memory.kind() == Memory::GPU_FB_MEM)
       {
         Machine::ProcessorQuery finder(runtime->machine);
@@ -6808,6 +6808,28 @@ namespace Legion {
         delete manager;
       // No conditions on being done with this now
       return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    bool MemoryManager::is_visible_memory(Memory other)
+    //--------------------------------------------------------------------------
+    {
+      if (other == memory)
+        return true;
+      {
+        AutoLock m_lock(manager_lock,1,false);
+        if (!visible_memories.empty())
+          return (visible_memories.find(other) != visible_memories.end());
+      }
+      // Do the query while not holding the lock
+      Machine::MemoryQuery vis_mems(runtime->machine);
+      vis_mems.has_affinity_to(memory);
+      AutoLock m_lock(manager_lock);
+      if (visible_memories.empty())
+        for (Machine::MemoryQuery::iterator it = vis_mems.begin();
+              it != vis_mems.end(); it++)
+          visible_memories.insert(*it);
+      return (visible_memories.find(other) != visible_memories.end());
     }
 
 #ifdef LEGION_MALLOC_INSTANCES

@@ -799,6 +799,10 @@ namespace Legion {
     public:
       MemoryManager& operator=(const MemoryManager &rhs);
     public:
+#ifdef LEGION_USE_CUDA
+      inline Processor get_local_gpu(void) const { return local_gpu; }
+#endif
+    public:
       void find_shutdown_preconditions(std::set<ApEvent> &preconditions);
       void prepare_for_shutdown(void);
       void finalize(void);
@@ -926,6 +930,8 @@ namespace Legion {
                                     InstanceState state, bool larger_only); 
       RtEvent attach_external_instance(PhysicalManager *manager);
       RtEvent detach_external_instance(PhysicalManager *manager);
+    public:
+      bool is_visible_memory(Memory other);
 #ifdef LEGION_MALLOC_INSTANCES
     public:
       uintptr_t allocate_legion_instance(size_t footprint, 
@@ -962,13 +968,16 @@ namespace Legion {
       // Keep track of outstanding requuests for allocations which 
       // will be tried in the order that they arrive
       std::deque<RtUserEvent> pending_allocation_attempts;
+    protected:
+      std::set<Memory> visible_memories;
+    protected:
 #ifdef LEGION_MALLOC_INSTANCES
       std::map<InstanceManager*,uintptr_t> legion_instances;
       std::map<uintptr_t,size_t> allocations;
       std::map<RtEvent,uintptr_t> pending_collectables;
+#endif
 #ifdef LEGION_USE_CUDA
       Processor local_gpu;
-#endif
 #endif
     };
 

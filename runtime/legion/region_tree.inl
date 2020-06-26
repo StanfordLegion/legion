@@ -513,6 +513,130 @@ namespace Legion {
       return(a * b / gcd(a, b));
     }
 
+#ifdef LEGION_GPU_REDUCTIONS
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    ApEvent IndexSpaceExpression::gpu_reduction_internal(
+                                 RegionTreeForest *forest,
+                                 const Realm::IndexSpace<DIM,T> &space,
+                                 const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 const std::vector<CopySrcDstField> &src_fields,
+                                 Processor gpu,
+                                 PhysicalManager *dst, PhysicalManager *src,
+                                 ApEvent precondition, PredEvent pred_guard, 
+                                 ReductionOpID redop, bool reduction_fold)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!space.empty());
+      assert(dst_fields.size() == src_fields.size());
+#endif
+      // Now that we know we're going to do this copy add any profling requests
+      const TaskID tid = LG_REDOP_TASK_ID + (redop - LEGION_REDOP_BASE); 
+      // We need to compute the rectangles for which we can get dense accessors
+      // for each of these reduction operations
+      const Rect<DIM,T> *src_piece_list = 
+        static_cast<const Rect<DIM,T>*>(src->piece_list);
+      const Rect<DIM,T> *dst_piece_list =
+        static_cast<const Rect<DIM,T>*>(dst->piece_list);
+      std::vector<Rect<DIM,T> > piece_rects;
+      if (dst_piece_list != NULL)
+      {
+        if (src_piece_list != NULL)
+        {
+          for (unsigned idx1 = 0; idx1 < src->piece_list_size; idx1++)
+            for (unsigned idx2 = 0; idx2 < dst->piece_list_size; idx2++)
+            {
+              const Rect<DIM,T> intersect = 
+                src_piece_list[idx1].intersection(dst_piece_list[idx2]);
+              if (intersect.empty())
+                continue;
+              const Rect<DIM,T> intersect2 = 
+                intersect.intersection(space.bounds);
+              if (!intersect2.empty())
+                piece_rects.push_back(intersect2);
+            }
+        }
+        else
+        {
+          for (unsigned idx = 0; idx < piece_rects.size(); idx++)
+          {
+            const Rect<DIM,T> intersect = 
+              dst_piece_list[idx].intersection(space.bounds);
+            if (!intersect.empty())
+              piece_rects.push_back(intersect);
+          }
+        }
+      }
+      else
+      {
+        if (src_piece_list != NULL)
+        {
+          for (unsigned idx = 0; idx < piece_rects.size(); idx++)
+          {
+            const Rect<DIM,T> intersect = 
+              src_piece_list[idx].intersection(space.bounds);
+            if (!intersect.empty())
+              piece_rects.push_back(intersect);
+          }
+        }
+        else
+          piece_rects.push_back(space.bounds);
+      }
+      Realm::ProfilingRequestSet requests;
+      if (forest->runtime->profiler != NULL)
+        forest->runtime->profiler->add_task_request(requests, tid, 0/*vid*/,
+            forest->runtime->get_unique_operation_id(), gpu);
+      // Pack the arguments for this task
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(type_tag);
+        rez.serialize(space);
+        rez.serialize<bool>(reduction_fold);
+        rez.serialize<bool>(false); // exclusive
+        rez.serialize<size_t>(dst_fields.size());
+        for (unsigned idx = 0; idx < dst_fields.size(); idx++)
+        {
+          rez.serialize(dst_fields[idx].inst);
+          rez.serialize(src_fields[idx].inst);
+          rez.serialize(dst_fields[idx].field_id);
+          rez.serialize(src_fields[idx].field_id);
+        }
+        rez.serialize<size_t>(piece_rects.size());
+        for (unsigned idx = 0; idx < piece_rects.size(); idx++)
+          rez.serialize(piece_rects[idx]);
+      }
+      ApEvent result;
+      if (pred_guard.exists())
+      {
+        ApEvent pred_pre = 
+          Runtime::merge_events(&trace_info, precondition, ApEvent(pred_guard));
+        if (trace_info.recording)
+          trace_info.record_merge_events(pred_pre, precondition,
+                                          ApEvent(pred_guard));
+        result = Runtime::ignorefaults(gpu.spawn(tid,
+              rez.get_buffer(), rez.get_used_bytes(), requests, pred_pre));
+      }
+      else
+        result = ApEvent(gpu.spawn(tid,
+              rez.get_buffer(), rez.get_used_bytes(), requests, precondition));
+      // TODO update this for tracing
+      if (trace_info.recording)
+        assert(false);
+#ifdef LEGION_DISABLE_EVENT_PRUNING
+      if (!result.exists())
+      {
+        ApUserEvent new_result = Runtime::create_ap_user_event(NULL);
+        Runtime::trigger_event(NULL, new_result);
+        result = new_result;
+      }
+#endif
+      return result;
+    }
+#endif
+
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     Realm::InstanceLayoutGeneric* IndexSpaceExpression::create_layout_internal(
@@ -1330,6 +1454,37 @@ namespace Legion {
 #endif
                                        precondition, pred_guard);
     }
+
+#ifdef LEGION_GPU_REDUCTIONS
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    ApEvent IndexSpaceOperationT<DIM,T>::gpu_reduction(
+                                 const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 const std::vector<CopySrcDstField> &src_fields,
+                                 Processor gpu,
+                                 PhysicalManager *dst, PhysicalManager *src,
+                                 ApEvent precondition, PredEvent pred_guard, 
+                                 ReductionOpID redop, bool reduction_fold)
+    //--------------------------------------------------------------------------
+    {
+      Realm::IndexSpace<DIM,T> local_space;
+      ApEvent space_ready = get_realm_index_space(local_space, true/*tight*/);
+      if (space_ready.exists() && precondition.exists())
+        return gpu_reduction_internal(context, local_space, trace_info, 
+            dst_fields, src_fields, gpu, dst, src,
+            Runtime::merge_events(&trace_info, precondition, space_ready),
+            pred_guard, redop, reduction_fold);
+      else if (space_ready.exists())
+        return gpu_reduction_internal(context, local_space, trace_info, 
+                dst_fields, src_fields, gpu, dst, src,
+                space_ready, pred_guard, redop, reduction_fold);
+      else
+        return gpu_reduction_internal(context, local_space, trace_info, 
+                dst_fields, src_fields, gpu, dst, src,
+                precondition, pred_guard, redop, reduction_fold);
+    }
+#endif
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
@@ -4806,6 +4961,37 @@ namespace Legion {
 #endif
                                        precondition, pred_guard);
     }
+
+#ifdef LEGION_GPU_REDUCTIONS
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    ApEvent IndexSpaceNodeT<DIM,T>::gpu_reduction(
+                                 const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 const std::vector<CopySrcDstField> &src_fields,
+                                 Processor gpu,
+                                 PhysicalManager *dst, PhysicalManager *src,
+                                 ApEvent precondition, PredEvent pred_guard, 
+                                 ReductionOpID redop, bool reduction_fold)
+    //--------------------------------------------------------------------------
+    {
+      Realm::IndexSpace<DIM,T> local_space;
+      ApEvent space_ready = get_realm_index_space(local_space, true/*tight*/);
+      if (precondition.exists() && space_ready.exists())
+        return gpu_reduction_internal(context, local_space, trace_info, 
+            dst_fields, src_fields, gpu, dst, src,
+            Runtime::merge_events(&trace_info, space_ready, precondition),
+            pred_guard, redop, reduction_fold);
+      else if (space_ready.exists())
+        return gpu_reduction_internal(context, local_space, trace_info, 
+                dst_fields, src_fields, gpu, dst, src,
+                space_ready, pred_guard, redop, reduction_fold);
+      else
+        return gpu_reduction_internal(context, local_space, trace_info, 
+                dst_fields, src_fields, gpu, dst, src,
+                precondition, pred_guard, redop, reduction_fold);
+    }
+#endif
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>

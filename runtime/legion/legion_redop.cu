@@ -15,8 +15,10 @@
 
 #include <map>
 #include "realm.h"
+#include "cuda_runtime.h"
 #include "legion/legion_types.h"
 #include "legion/legion_redop.h"
+#include "legion/legion_utilities.h"
 
 #define THREADS_PER_BLOCK 256
 #define MIN_BLOCKS_PER_SM 4
@@ -35,20 +37,36 @@ namespace Legion {
     __launch_bounds__(THREADS_PER_BLOCK,MIN_BLOCKS_PER_SM)
     fold_kernel(const Realm::AffineAccessor<typename REDOP::RHS,N,T> dst,
                 const Realm::AffineAccessor<typename REDOP::RHS,N,T> src,
+                const DeferredBuffer<Rect<N,T>,1> piece_rects,
+                const DeferredBuffer<size_t,1> scan_volumes,
                 const DimOrder<N> order,
-                const Realm::Point<N,T> lo,
-                const Realm::Point<N,T> extents,
-                const size_t max_offset)
+                const size_t max_offset, const size_t max_rects)
     {
       size_t offset = blockIdx.x * blockDim.x + threadIdx.x;
       if (offset >= max_offset)
         return;
-      Point<N,T> point = lo;
+      // Perform a binary search for the rectangle that we are in
+      coord_t first = 0;
+      coord_t last = max_rects - 1;
+      coord_t mid = 0;
+      while (first <= last) {
+        mid = (first + last) / 2;
+        if (scan_volumes[mid+1] <= offset)
+          first = mid + 1;
+        else if (offset < scan_volumes[mid])
+          last = mid - 1;
+        else
+          break;
+      }
+      const Rect<N,T> rect = piece_rects[mid];
+      Point<N,T> point = rect.lo;
+      size_t pitch = 1;
       for (int i = 0; i < N; i++)
       {
         const int index = order.index[i];
-        point[index] += (offset / extents[index]);
-        offset = offset % extents[index];
+        point[index] += (offset / pitch);
+        offset = offset % pitch;
+        pitch *= ((rect.hi[index] - rect.lo[index]) + 1);
       }
       REDOP::template fold<EXCLUSIVE>(dst[point], src[point]);
     }
@@ -58,20 +76,36 @@ namespace Legion {
     __launch_bounds__(THREADS_PER_BLOCK,MIN_BLOCKS_PER_SM)
     apply_kernel(const Realm::AffineAccessor<typename REDOP::LHS,N,T> dst,
                  const Realm::AffineAccessor<typename REDOP::RHS,N,T> src,
+                 const DeferredBuffer<Rect<N,T>,1> piece_rects,
+                 const DeferredBuffer<size_t,1> scan_volumes,
                  const DimOrder<N> order,
-                 const Realm::Point<N,T> lo,
-                 const Realm::Point<N,T> extents,
-                 const size_t max_offset)
+                 const size_t max_offset, const size_t max_rects)
     {
       size_t offset = blockIdx.x * blockDim.x + threadIdx.x;
       if (offset >= max_offset)
         return;
-      Point<N,T> point = lo;
+      // Perform a binary search for the rectangle that we are in
+      int first = 0;
+      int last = max_rects - 1;
+      int mid = 0;
+      while (first <= last) {
+        mid = (first + last) / 2;
+        if (scan_volumes[mid+1] <= offset)
+          first = mid + 1;
+        else if (offset < scan_volumes[mid])
+          last = mid - 1;
+        else
+          break;
+      }
+      const Rect<N,T> rect = piece_rects[mid];
+      Point<N,T> point = rect.lo;
+      size_t pitch = 1;
       for (int i = 0; i < N; i++)
       {
         const int index = order.index[i];
-        point[index] += (offset / extents[index]);
-        offset = offset % extents[index];
+        point[index] += (offset / pitch);
+        offset = offset % pitch;
+        pitch *= ((rect.hi[index] - rect.lo[index]) + 1);
       }
       REDOP::template apply<EXCLUSIVE>(dst[point], src[point]);
     } 
@@ -80,163 +114,122 @@ namespace Legion {
     struct ReductionRunner {
     public:
       __host__
-      ReductionRunner(const char *b) : buffer(b) { }
+      ReductionRunner(Deserializer &d) : derez(d) { }
     public: 
       template<int N, typename T>
       __host__
       inline void run(void)
       {
-        const Realm::IndexSpace<N,T> space = 
-          *((const Realm::IndexSpace<N,T>*)buffer);
-        buffer += sizeof(space);
-        const FieldID field_id = *((const FieldID*)buffer);
-        buffer += sizeof(field_id);
-        const Realm::RegionInstance dst = 
-          *((const Realm::RegionInstance*)buffer);
-        buffer += sizeof(dst);
-        const Realm::RegionInstance src = 
-          *((const Realm::RegionInstance*)buffer);
-        buffer += sizeof(src);
-        const bool exclusive = *((const bool*)buffer);
-        buffer += sizeof(exclusive);
-        const bool fold = *((const bool*)buffer);
-
-        const Realm::AffineAccessor<typename REDOP::RHS,N,T> 
-            src_accessor(src, field_id, space.bounds);
-        // Compute the order of dimensions to walk based on sorting the 
-        // strides for the source accessor, we'll optimistically assume 
-        // the two instances are laid out the same way, if we're wrong
-        // it will still be correct, just slow
-        std::map<ptrdiff_t,int> strides;
-        for (int i = 0; i < N; i++)
+        Realm::IndexSpace<N,T> space;
+        derez.deserialize(space);
+        Realm::Event ready = space.make_valid();
+        bool fold, exclusive;;
+        derez.deserialize<bool>(fold);
+        derez.deserialize<bool>(exclusive);
+        size_t num_fields;
+        derez.deserialize(num_fields);
+        std::vector<FieldID> src_fields(num_fields);
+        std::vector<FieldID> dst_fields(num_fields);;
+        std::vector<Realm::RegionInstance> src_insts(num_fields);
+        std::vector<Realm::RegionInstance> dst_insts(num_fields);
+        for (unsigned idx = 0; idx < num_fields; idx++)
         {
-          std::pair<std::map<ptrdiff_t,int>::iterator,bool> result = 
-            strides.insert(std::pair<ptrdiff_t,int>(src_accessor.strides[i],i));
-          // Strides should be unique across dimensions unless the extent is 1
-          assert(result.second || (space.bounds.hi[i] == space.bounds.lo[i]));
+          derez.deserialize(dst_insts[idx]);
+          derez.deserialize(src_insts[idx]);
+          derez.deserialize(dst_fields[idx]);
+          derez.deserialize(src_fields[idx]);
         }
-        // Put the dimensions in order from largest to smallest
-        DimOrder<N> order;
-        std::map<ptrdiff_t,int>::const_reverse_iterator rit = strides.rbegin();
-        for (int i = 0; i < N; i++, rit++)
-          order.index[i] = rit->second;
-        
-        if (fold)
+        size_t num_pieces;
+        derez.deserialize(num_pieces);
+        if (ready.exists() && !ready.has_triggered())
+          ready.wait();
+        // Iterate over all the pieces
+        for (unsigned pidx = 0; pidx < num_pieces; pidx++)
         {
-          const Realm::AffineAccessor<typename REDOP::RHS,N,T> 
-            dst_accessor(dst, field_id, space.bounds);
-          if (!space.dense()) 
+          Rect<N,T> piece_rect;
+          derez.deserialize(piece_rect);
+          std::vector<Rect<N,T> > piece_rects;
+          std::vector<size_t> scan_volumes;
+          size_t sum_volume = 0;
+          for (Realm::IndexSpaceIterator<N,T> itr(space); itr.valid; itr.step())
           {
-            // The index space is not dense so launch a kernel for each rect
-            Realm::IndexSpaceIterator<N,T> iterator(space);
-            while (true)
+            const Rect<N,T> intersection = piece_rect.intersection(itr.rect);
+            if (intersection.empty())
+              continue;
+            piece_rects.push_back(intersection);
+            scan_volumes.push_back(sum_volume);
+            sum_volume += intersection.volume();
+          }
+          if (piece_rects.empty())
+            continue;
+          scan_volumes.push_back(sum_volume);
+          assert(scan_volumes.size() == (piece_rects.size() + 1));
+          const Rect<1,coord_t> bounds(0, piece_rects.size()-1);
+          const Rect<1,coord_t> scan_bounds(0, piece_rects.size());
+          DeferredBuffer<Rect<N,T>,1> 
+            device_piece_rects(Memory::GPU_FB_MEM, bounds);
+          DeferredBuffer<size_t,1>
+            device_scan_volumes(Memory::GPU_FB_MEM, scan_bounds);
+          cudaMemcpyAsync(device_piece_rects.ptr(bounds), &piece_rects.front(),
+              piece_rects.size() * sizeof(Rect<N,T>), cudaMemcpyHostToDevice);
+          cudaMemcpyAsync(device_scan_volumes.ptr(scan_bounds), &scan_volumes.front(),
+              scan_volumes.size() * sizeof(size_t), cudaMemcpyHostToDevice);
+          const size_t blocks = 
+                  (sum_volume + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
+          // Iterate over all the fields we should handle
+          for (unsigned fidx = 0; fidx < num_fields; fidx++)
+          {
+            // Make accessors for the source and destination for this piece
+            const Realm::AffineAccessor<typename REDOP::RHS,N,T>
+              src_accessor(src_insts[fidx], src_fields[fidx], piece_rect);
+            // Compute the order of dimensions to walk based on sorting the 
+            // strides for the source accessor, we'll optimistically assume 
+            // the two instances are laid out the same way, if we're wrong
+            // it will still be correct, just slow
+            std::map<size_t,int> strides;
+            for (int i = 0; i < N; i++)
             {
-              const size_t volume = iterator.rect.volume();
-              const size_t blocks = 
-                (volume + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
-              Point<N,T> extents;
-              size_t pitch = 1;
-              for (std::map<ptrdiff_t,int>::const_iterator it = 
-                    strides.begin(); it != strides.end(); it++)
-              {
-                extents[it->second] = pitch;
-                pitch *= ((iterator.rect.hi[it->second] - 
-                            iterator.rect.lo[it->second]) + 1);
-              }
+              std::pair<std::map<size_t,int>::iterator,bool> result = 
+                strides.insert(std::pair<size_t,int>(
+                      src_accessor.strides[i],i));
+              // Strides should be unique across dimensions unless extent is 1
+              assert(result.second || (piece_rect.hi[i] == piece_rect.lo[i]));
+            }
+            // Put the dimensions in order from largest to smallest
+            DimOrder<N> order;
+            std::map<size_t,int>::const_reverse_iterator rit = 
+              strides.rbegin();
+            for (int i = 0; i < N; i++, rit++)
+              order.index[i] = rit->second;
+            // See if we are folding or applying
+            if (fold)
+            {
+              const Realm::AffineAccessor<typename REDOP::RHS,N,T> 
+                dst_accessor(dst_insts[fidx], dst_fields[fidx], piece_rect);
+              // Now launch the kernel
               if (exclusive)
                 fold_kernel<REDOP,N,T,true><<<blocks,THREADS_PER_BLOCK>>>(
-                    dst_accessor, src_accessor, order, 
-                    iterator.rect.lo, extents, volume); 
+                    dst_accessor, src_accessor, device_piece_rects,
+                    device_scan_volumes, order, sum_volume, piece_rects.size());
               else
                 fold_kernel<REDOP,N,T,false><<<blocks,THREADS_PER_BLOCK>>>(
-                    dst_accessor, src_accessor, order, 
-                    iterator.rect.lo, extents, volume);
-              if (!iterator.step())
-                break;
+                    dst_accessor, src_accessor, device_piece_rects,
+                    device_scan_volumes, order, sum_volume, piece_rects.size());
             }
-          }
-          else
-          {
-            // Space is dense so we just need a single kernel launch here
-            const size_t volume = space.bounds.volume();
-            const size_t blocks = 
-              (volume + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
-            Point<N,T> extents;
-            size_t pitch = 1;
-            for (std::map<ptrdiff_t,int>::const_iterator it = 
-                  strides.begin(); it != strides.end(); it++)
-            {
-              extents[it->second] = pitch;
-              pitch *= ((space.bounds.hi[it->second] - 
-                          space.bounds.lo[it->second]) + 1);
-            }
-            if (exclusive)
-              fold_kernel<REDOP,N,T,true><<<blocks,THREADS_PER_BLOCK>>>(
-                  dst_accessor, src_accessor, order, 
-                  space.bounds.lo, extents, volume);
             else
-              fold_kernel<REDOP,N,T,false><<<blocks,THREADS_PER_BLOCK>>>(
-                  dst_accessor, src_accessor, order, 
-                  space.bounds.lo, extents, volume);
-          }
-        }
-        else
-        {
-          const Realm::AffineAccessor<typename REDOP::LHS,N,T> 
-            dst_accessor(dst, field_id, space.bounds);
-          if (!space.dense()) 
-          {
-            // The index space is not dense so launch a kernel for each rect
-            Realm::IndexSpaceIterator<N,T> iterator(space);
-            while (true)
             {
-              const size_t volume = iterator.rect.volume();
-              const size_t blocks = 
-                (volume + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
-              Point<N,T> extents;
-              size_t pitch = 1;
-              for (std::map<ptrdiff_t,int>::const_iterator it = 
-                    strides.begin(); it != strides.end(); it++)
-              {
-                extents[it->second] = pitch;
-                pitch *= ((iterator.rect.hi[it->second] - 
-                            iterator.rect.lo[it->second]) + 1);
-              }
+              const Realm::AffineAccessor<typename REDOP::LHS,N,T> 
+                dst_accessor(dst_insts[fidx], dst_fields[fidx], piece_rect);
+              // Now launch the kernel
               if (exclusive)
                 apply_kernel<REDOP,N,T,true><<<blocks,THREADS_PER_BLOCK>>>(
-                    dst_accessor, src_accessor, order, 
-                    iterator.rect.lo, extents, volume); 
+                    dst_accessor, src_accessor, device_piece_rects,
+                    device_scan_volumes, order, sum_volume, piece_rects.size()); 
               else
                 apply_kernel<REDOP,N,T,false><<<blocks,THREADS_PER_BLOCK>>>(
-                    dst_accessor, src_accessor, order, 
-                    iterator.rect.lo, extents, volume);
-              if (!iterator.step())
-                break;
+                    dst_accessor, src_accessor, device_piece_rects,
+                    device_scan_volumes, order, sum_volume, piece_rects.size());
             }
-          }
-          else
-          {
-            // Space is dense so we just need a single kernel launch here
-            const size_t volume = space.bounds.volume();
-            const size_t blocks = 
-              (volume + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
-            Point<N,T> extents;
-            size_t pitch = 1;
-            for (std::map<ptrdiff_t,int>::const_iterator it = 
-                  strides.begin(); it != strides.end(); it++)
-            {
-              extents[it->second] = pitch;
-              pitch *= ((space.bounds.hi[it->second] - 
-                          space.bounds.lo[it->second]) + 1);
-            }
-            if (exclusive)
-              apply_kernel<REDOP,N,T,true><<<blocks,THREADS_PER_BLOCK>>>(
-                  dst_accessor, src_accessor, order, 
-                  space.bounds.lo, extents, volume);
-            else
-              apply_kernel<REDOP,N,T,false><<<blocks,THREADS_PER_BLOCK>>>(
-                  dst_accessor, src_accessor, order, 
-                  space.bounds.lo, extents, volume);
           }
         }
       }
@@ -248,7 +241,7 @@ namespace Legion {
         runner->run<N::N,T>();
       }
     public:
-      const char *buffer;
+      Deserializer &derez;
     };
 
     // This is a Realm task function signature that we use for launching
@@ -259,11 +252,14 @@ namespace Legion {
     void reduction_helper(const void *args, size_t arglen,
         const void *user_data,size_t user_data_size, Processor proc)
     {
-      const char *buffer = (const char*)args;
-      const TypeTag type_tag = *((const TypeTag*)buffer);
-      buffer += sizeof(type_tag);
-      ReductionRunner<REDOP> runner(buffer);
-      NT_TemplateHelper::demux<ReductionRunner<REDOP> >(type_tag, &runner);
+      Deserializer derez(args, arglen);
+      {
+        DerezCheck z(derez);
+        TypeTag type_tag;
+        derez.deserialize(type_tag);
+        ReductionRunner<REDOP> runner(derez);
+        NT_TemplateHelper::demux<ReductionRunner<REDOP> >(type_tag, &runner);
+      }
     }
 
 #define REGISTER_GPU_REDUCTION_TASK(id, type)                               \

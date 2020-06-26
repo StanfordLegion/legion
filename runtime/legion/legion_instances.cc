@@ -1264,6 +1264,36 @@ namespace Legion {
       else
         across_helper->compute_across_offsets(copy_mask, dst_fields);
       source_manager->compute_copy_offsets(copy_mask, src_fields);
+#ifdef LEGION_GPU_REDUCTIONS
+#ifndef LEGION_SPY
+      // Realm is really bad at applying reductions to GPU instances right
+      // now so let's help it out by running tasks to apply reductions for it
+      // See github issues #372 and #821
+      if ((LEGION_REDOP_BASE <= reduction_op_id) &&
+          (reduction_op_id < LEGION_REDOP_LAST) &&
+          (memory_manager->memory.kind() == Memory::GPU_FB_MEM))
+      {
+#ifdef DEBUG_LEGION
+        assert(!source_manager->is_collective_manager());
+#endif
+        IndividualManager *src_man = source_manager->as_individual_manager();
+        // Next check to see if the two instances are visible from 
+        // the GPU associated with the destination instance
+        if (memory_manager->is_visible_memory(src_man->memory_manager->memory))
+        {
+          // If we can directly perform memory accesses between the
+          // two memories then we can launch a kernel that just runs
+          // normal CUDA kernels without having any problems
+          const ApEvent result = copy_expression->gpu_reduction(trace_info,
+              dst_fields, src_fields, memory_manager->get_local_gpu(), 
+              this, source_manager, precondition, predicate_guard,
+              reduction_op_id, false/*fold*/);
+          return result;
+        }
+        // TODO: else make a shadow copy and perform the reduction there
+      }
+#endif
+#endif 
       const ApEvent result = copy_expression->issue_copy(trace_info, 
                                          dst_fields, src_fields,
 #ifdef LEGION_SPY
