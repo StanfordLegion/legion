@@ -18,36 +18,6 @@
 
 #include "cuda_runtime.h"
 
-class GPUAccumulateCharge {
-public:
-  typedef float LHS;
-  typedef float RHS;
-
-  template<bool EXCLUSIVE>
-  __host__ __device__ __forceinline__
-  static void apply(LHS &lhs, RHS &rhs)
-  {
-#ifdef __CUDA_ARCH__
-    float *target = &lhs; 
-    atomicAdd(target,rhs);
-#else
-    assert(false);
-#endif
-  }
-
-  template<bool EXCLUSIVE>
-  __host__ __device__ __forceinline__
-  static void fold(RHS &rhs1, RHS rhs2)
-  {
-#ifdef __CUDA_ARCH__
-    float *target = &rhs1;
-    atomicAdd(target,rhs2);
-#else
-    assert(false);
-#endif
-  }
-};
-
 template<typename AT, int SEGMENTS>
 struct SegmentAccessors {
 public:
@@ -211,7 +181,7 @@ void CalcNewCurrentsTask::gpu_base_impl(const CircuitPiece &piece,
 #endif
 }
 
-typedef ReductionAccessor<GPUAccumulateCharge,false/*exclusive*/,1,coord_t,
+typedef ReductionAccessor<SumReduction<float>,false/*exclusive*/,1,coord_t,
                           Realm::AffineAccessor<float,1,coord_t> > AccessorRDfloat;
 
 __device__ __forceinline__
@@ -223,7 +193,7 @@ void reduce_local(const AccessorRWfloat &pvt,
   switch (loc)
   {
     case PRIVATE_PTR:
-      GPUAccumulateCharge::apply<true/*exclusive*/>(pvt[ptr], value);
+      SumReduction<float>::apply<true/*exclusive*/>(pvt[ptr], value);
       break;
     case SHARED_PTR:
       shr[ptr] <<= value;

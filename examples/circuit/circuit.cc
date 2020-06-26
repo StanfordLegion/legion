@@ -236,7 +236,6 @@ int main(int argc, char **argv)
   InitWiresTask::register_task();
   InitLocationTask::register_task();
 #endif
-  Runtime::register_reduction_op<AccumulateCharge>(REDUCE_ID);
   Runtime::add_registration_callback(update_mappers);
 
   return Runtime::start(argc, argv);

@@ -54,7 +54,6 @@ void CircuitMapper::map_task(const MapperContext      ctx,
     bool map_to_gpu = task.target_proc.kind() == Processor::TOC_PROC;
     Memory sysmem = proc_sysmems[task.target_proc];
     Memory fbmem = proc_fbmems[task.target_proc];
-    Memory zcmem = proc_zcmems[task.target_proc];
 
     for (unsigned idx = 0; idx < task.regions.size(); idx++)
     {
@@ -62,44 +61,10 @@ void CircuitMapper::map_task(const MapperContext      ctx,
           (task.regions[idx].privilege_fields.empty())) continue;
 
       Memory target_memory;
-      if (!map_to_gpu) target_memory = sysmem;
-      else {
-        switch (task.task_id)
-        {
-          case CALC_NEW_CURRENTS_TASK_ID:
-            {
-              if (idx < 3)
-                target_memory = fbmem;
-              else
-                target_memory = zcmem;
-              break;
-            }
-
-          case DISTRIBUTE_CHARGE_TASK_ID:
-            {
-              if (idx < 2)
-                target_memory = fbmem;
-              else
-                target_memory = zcmem;
-              break;
-            }
-
-          case UPDATE_VOLTAGES_TASK_ID:
-            {
-              if (idx != 1)
-                target_memory = fbmem;
-              else
-                target_memory = zcmem;
-              break;
-            }
-
-          default:
-            {
-              assert(false);
-              break;
-            }
-        }
-      }
+      if (!map_to_gpu) 
+        target_memory = sysmem;
+      else
+        target_memory = fbmem;
       const RegionRequirement &req = task.regions[idx];
       map_circuit_region(ctx, req.region, target_memory,
                          output.chosen_instances[idx], 
