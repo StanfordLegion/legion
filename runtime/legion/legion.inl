@@ -2175,54 +2175,57 @@ namespace Legion {
       };
     };
 
+    // Some helper methods for accessors and deferred buffers
+    namespace Internal {
+      template<int N, typename T> __CUDA_HD__
+      static inline bool is_dense_layout(const Rect<N,T> &bounds,
+                                const size_t strides[N], size_t field_size)
+      {
+        ptrdiff_t exp_offset = field_size;
+        int used_mask = 0; // keep track of the dimensions we've already matched
+        for (int i = 0; i < N; i++) {
+          bool found = false;
+          for (int j = 0; j < N; j++) {
+            if ((used_mask >> j) & 1) continue;
+            if (strides[j] != exp_offset) continue;
+            found = true;
+            used_mask |= (1 << j);
+            exp_offset *= (bounds.hi[j] - bounds.lo[j] + 1);
+            break;
+          }
+          if (!found)
+            return false;
+        }
+        return true;
+      }
+
+      // Same method as above but for realm points from affine accessors
+      template<int N, typename T> __CUDA_HD__
+      static inline bool is_dense_layout(const Rect<N,T> &bounds,
+                  const Realm::Point<N,size_t> &strides, size_t field_size)
+      {
+        ptrdiff_t exp_offset = field_size;
+        int used_mask = 0; // keep track of the dimensions we've already matched
+        for (int i = 0; i < N; i++) {
+          bool found = false;
+          for (int j = 0; j < N; j++) {
+            if ((used_mask >> j) & 1) continue;
+            if (strides[j] != exp_offset) continue;
+            found = true;
+            used_mask |= (1 << j);
+            exp_offset *= (bounds.hi[j] - bounds.lo[j] + 1);
+            break;
+          }
+          if (!found)
+            return false;
+        }
+        return true;
+      }
+    }
+
     ////////////////////////////////////////////////////////////
     // Specializations for Affine Accessors
     ////////////////////////////////////////////////////////////
-
-    template<int N, typename T> __CUDA_HD__
-    static inline bool __legion_is_dense_layout(const Rect<N,T> &bounds,
-                              const size_t strides[N], size_t field_size)
-    {
-      ptrdiff_t exp_offset = field_size;
-      int used_mask = 0; // keep track of which dimensions we've already matched
-      for (int i = 0; i < N; i++) {
-        bool found = false;
-        for (int j = 0; j < N; j++) {
-          if ((used_mask >> j) & 1) continue;
-          if (strides[j] != exp_offset) continue;
-          found = true;
-          used_mask |= (1 << j);
-          exp_offset *= (bounds.hi[j] - bounds.lo[j] + 1);
-          break;
-        }
-        if (!found)
-          return false;
-      }
-      return true;
-    }
-
-    // Same method as above but for realm points from affine accessors
-    template<int N, typename T> __CUDA_HD__
-    static inline bool __legion_is_dense_layout(const Rect<N,T> &bounds,
-                const Realm::Point<N,size_t> &strides, size_t field_size)
-    {
-      ptrdiff_t exp_offset = field_size;
-      int used_mask = 0; // keep track of which dimensions we've already matched
-      for (int i = 0; i < N; i++) {
-        bool found = false;
-        for (int j = 0; j < N; j++) {
-          if ((used_mask >> j) & 1) continue;
-          if (strides[j] != exp_offset) continue;
-          found = true;
-          used_mask |= (1 << j);
-          exp_offset *= (bounds.hi[j] - bounds.lo[j] + 1);
-          break;
-        }
-        if (!found)
-          return false;
-      }
-      return true;
-    }
 
     // Read-only FieldAccessor specialization
     template<typename FT, int N, typename T, bool CB>
@@ -2338,9 +2341,9 @@ namespace Legion {
                            size_t field_size = sizeof(FT)) const
         {
 #ifdef __CUDA_ARCH__
-          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
+          assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
-          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
+          if (!Internal::is_dense_layout(r, accessor.strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -2524,12 +2527,12 @@ namespace Legion {
         {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
-          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
+          assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
                                               LEGION_READ_ONLY);
-          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
+          if (!Internal::is_dense_layout(r, accessor.strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -2706,9 +2709,9 @@ namespace Legion {
                            size_t field_size = sizeof(FT)) const
         {
 #ifdef __CUDA_ARCH__
-          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
+          assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
-          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
+          if (!Internal::is_dense_layout(r, accessor.strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -2880,12 +2883,12 @@ namespace Legion {
         {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
-          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
+          assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
                                               LEGION_READ_ONLY);
-          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
+          if (!Internal::is_dense_layout(r, accessor.strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -3053,9 +3056,9 @@ namespace Legion {
       inline FT* ptr(const Rect<N,T>& r, size_t field_size = sizeof(FT)) const
         {
 #ifdef __CUDA_ARCH__
-          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
+          assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
-          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
+          if (!Internal::is_dense_layout(r, accessor.strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -3256,12 +3259,12 @@ namespace Legion {
         {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
-          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
+          assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
                                               LEGION_READ_WRITE);
-          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
+          if (!Internal::is_dense_layout(r, accessor.strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -3455,9 +3458,9 @@ namespace Legion {
       inline FT* ptr(const Rect<1,T>& r, size_t field_size = sizeof(FT)) const
         {
 #ifdef __CUDA_ARCH__
-          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
+          assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
-          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
+          if (!Internal::is_dense_layout(r, accessor.strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -3646,12 +3649,12 @@ namespace Legion {
         {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
-          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
+          assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
                                               LEGION_READ_WRITE);
-          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
+          if (!Internal::is_dense_layout(r, accessor.strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -3832,9 +3835,9 @@ namespace Legion {
       inline FT* ptr(const Rect<N,T>& r, size_t field_size = sizeof(FT)) const
         {
 #ifdef __CUDA_ARCH__
-          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
+          assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
-          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
+          if (!Internal::is_dense_layout(r, accessor.strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -4029,12 +4032,12 @@ namespace Legion {
         {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
-          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
+          assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
                                               LEGION_READ_WRITE);
-          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
+          if (!Internal::is_dense_layout(r, accessor.strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -4215,9 +4218,9 @@ namespace Legion {
       inline FT* ptr(const Rect<1,T>& r, size_t field_size = sizeof(FT)) const
         {
 #ifdef __CUDA_ARCH__
-          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
+          assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
-          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
+          if (!Internal::is_dense_layout(r, accessor.strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -4400,12 +4403,12 @@ namespace Legion {
         {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
-          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
+          assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
                                               LEGION_READ_WRITE);
-          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
+          if (!Internal::is_dense_layout(r, accessor.strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -4568,9 +4571,9 @@ namespace Legion {
       inline FT* ptr(const Rect<N,T>& r, size_t field_size = sizeof(FT)) const
         {
 #ifdef __CUDA_ARCH__
-          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
+          assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
-          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
+          if (!Internal::is_dense_layout(r, accessor.strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -4750,12 +4753,12 @@ namespace Legion {
         {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
-          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
+          assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
                                               LEGION_READ_WRITE);
-          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
+          if (!Internal::is_dense_layout(r, accessor.strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -4931,9 +4934,9 @@ namespace Legion {
       inline FT* ptr(const Rect<1,T>& r, size_t field_size = sizeof(FT)) const
         {
 #ifdef __CUDA_ARCH__
-          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
+          assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
-          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
+          if (!Internal::is_dense_layout(r, accessor.strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -5104,12 +5107,12 @@ namespace Legion {
         {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
-          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
+          assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
                                               LEGION_READ_WRITE);
-          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
+          if (!Internal::is_dense_layout(r, accessor.strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -5259,9 +5262,9 @@ namespace Legion {
               size_t field_size = sizeof(REDOP::RHS)) const
         {
 #ifdef __CUDA_ARCH__
-          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
+          assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
-          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
+          if (!Internal::is_dense_layout(r, accessor.strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -5436,12 +5439,12 @@ namespace Legion {
         {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
-          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
+          assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
                                               LEGION_REDUCE);
-          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
+          if (!Internal::is_dense_layout(r, accessor.strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -5602,9 +5605,9 @@ namespace Legion {
               size_t field_size = sizeof(REDOP::RHS)) const
         {
 #ifdef __CUDA_ARCH__
-          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
+          assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
-          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
+          if (!Internal::is_dense_layout(r, accessor.strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -5767,11 +5770,11 @@ namespace Legion {
         {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
-          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
+          assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, LEGION_REDUCE);
-          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
+          if (!Internal::is_dense_layout(r, accessor.strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -5893,7 +5896,7 @@ namespace Legion {
           FT *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
           assert(result != NULL);
-          assert(__legion_is_dense_layout(r, strides, field_size));
+          assert(Internal::is_dense_layout(r, strides, field_size));
 #else
           if (result == NULL)
           {
@@ -5905,7 +5908,7 @@ namespace Legion {
             exit(ERROR_NON_PIECE_RECTANGLE);
 #endif
           }
-          if (!__legion_is_dense_layout(r, strides, field_size))
+          if (!Internal::is_dense_layout(r, strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -6057,7 +6060,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
           assert(result != NULL);
-          assert(__legion_is_dense_layout(r, strides, field_size));
+          assert(Internal::is_dense_layout(r, strides, field_size));
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
@@ -6072,7 +6075,7 @@ namespace Legion {
             exit(ERROR_NON_PIECE_RECTANGLE);
 #endif
           }
-          if (!__legion_is_dense_layout(r, strides, field_size))
+          if (!Internal::is_dense_layout(r, strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -6219,7 +6222,7 @@ namespace Legion {
           FT *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
           assert(result != NULL);
-          assert(__legion_is_dense_layout(r, strides, field_size));
+          assert(Internal::is_dense_layout(r, strides, field_size));
 #else
           if (result == NULL)
           {
@@ -6231,7 +6234,7 @@ namespace Legion {
             exit(ERROR_NON_PIECE_RECTANGLE);
 #endif
           }
-          if (!__legion_is_dense_layout(r, strides, field_size))
+          if (!Internal::is_dense_layout(r, strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -6371,7 +6374,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
           assert(result != NULL);
-          assert(__legion_is_dense_layout(r, strides, field_size));
+          assert(Internal::is_dense_layout(r, strides, field_size));
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
@@ -6386,7 +6389,7 @@ namespace Legion {
             exit(ERROR_NON_PIECE_RECTANGLE);
 #endif
           }
-          if (!__legion_is_dense_layout(r, strides, field_size))
+          if (!Internal::is_dense_layout(r, strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -6523,7 +6526,7 @@ namespace Legion {
           FT *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
           assert(result != NULL);
-          assert(__legion_is_dense_layout(r, strides, field_size));
+          assert(Internal::is_dense_layout(r, strides, field_size));
 #else
           if (result == NULL)
           {
@@ -6535,7 +6538,7 @@ namespace Legion {
             exit(ERROR_NON_PIECE_RECTANGLE);
 #endif
           }
-          if (!__legion_is_dense_layout(r, strides, field_size))
+          if (!Internal::is_dense_layout(r, strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -6704,7 +6707,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
           assert(result != NULL);
-          assert(__legion_is_dense_layout(r, strides, field_size));
+          assert(Internal::is_dense_layout(r, strides, field_size));
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
@@ -6719,7 +6722,7 @@ namespace Legion {
             exit(ERROR_NON_PIECE_RECTANGLE);
 #endif
           }
-          if (!__legion_is_dense_layout(r, strides, field_size))
+          if (!Internal::is_dense_layout(r, strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -6883,7 +6886,7 @@ namespace Legion {
           FT *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
           assert(result != NULL);
-          assert(__legion_is_dense_layout(r, strides, field_size));
+          assert(Internal::is_dense_layout(r, strides, field_size));
 #else
           if (result == NULL)
           {
@@ -6895,7 +6898,7 @@ namespace Legion {
             exit(ERROR_NON_PIECE_RECTANGLE);
 #endif
           }
-          if (!__legion_is_dense_layout(r, strides, field_size))
+          if (!Internal::is_dense_layout(r, strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -7053,7 +7056,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
           assert(result != NULL);
-          assert(__legion_is_dense_layout(r, strides, field_size));
+          assert(Internal::is_dense_layout(r, strides, field_size));
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
@@ -7068,7 +7071,7 @@ namespace Legion {
             exit(ERROR_NON_PIECE_RECTANGLE);
 #endif
           }
-          if (!__legion_is_dense_layout(r, strides, field_size))
+          if (!Internal::is_dense_layout(r, strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -7218,7 +7221,7 @@ namespace Legion {
           FT *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
           assert(result != NULL);
-          assert(__legion_is_dense_layout(r, strides, field_size));
+          assert(Internal::is_dense_layout(r, strides, field_size));
 #else
           if (result == NULL)
           {
@@ -7230,7 +7233,7 @@ namespace Legion {
             exit(ERROR_NON_PIECE_RECTANGLE);
 #endif
           }
-          if (!__legion_is_dense_layout(r, strides, field_size))
+          if (!Internal::is_dense_layout(r, strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -7393,7 +7396,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
           assert(result != NULL);
-          assert(__legion_is_dense_layout(r, strides, field_size));
+          assert(Internal::is_dense_layout(r, strides, field_size));
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
@@ -7408,7 +7411,7 @@ namespace Legion {
             exit(ERROR_NON_PIECE_RECTANGLE);
 #endif
           }
-          if (!__legion_is_dense_layout(r, strides, field_size))
+          if (!Internal::is_dense_layout(r, strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -7558,7 +7561,7 @@ namespace Legion {
           FT *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
           assert(result != NULL);
-          assert(__legion_is_dense_layout(r, strides, field_size));
+          assert(Internal::is_dense_layout(r, strides, field_size));
 #else
           if (result == NULL)
           {
@@ -7570,7 +7573,7 @@ namespace Legion {
             exit(ERROR_NON_PIECE_RECTANGLE);
 #endif
           }
-          if (!__legion_is_dense_layout(r, strides, field_size))
+          if (!Internal::is_dense_layout(r, strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -7721,7 +7724,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
           assert(result != NULL);
-          assert(__legion_is_dense_layout(r, strides, field_size));
+          assert(Internal::is_dense_layout(r, strides, field_size));
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
@@ -7736,7 +7739,7 @@ namespace Legion {
             exit(ERROR_NON_PIECE_RECTANGLE);
 #endif
           }
-          if (!__legion_is_dense_layout(r, strides, field_size))
+          if (!Internal::is_dense_layout(r, strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -7868,7 +7871,7 @@ namespace Legion {
           FT *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
           assert(result != NULL);
-          assert(__legion_is_dense_layout(r, strides, field_size));
+          assert(Internal::is_dense_layout(r, strides, field_size));
 #else
           if (result == NULL)
           {
@@ -7880,7 +7883,7 @@ namespace Legion {
             exit(ERROR_NON_PIECE_RECTANGLE);
 #endif
           }
-          if (!__legion_is_dense_layout(r, strides, field_size))
+          if (!Internal::is_dense_layout(r, strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -8032,7 +8035,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
           assert(result != NULL);
-          assert(__legion_is_dense_layout(r, strides, field_size));
+          assert(Internal::is_dense_layout(r, strides, field_size));
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
@@ -8047,7 +8050,7 @@ namespace Legion {
             exit(ERROR_NON_PIECE_RECTANGLE);
 #endif
           }
-          if (!__legion_is_dense_layout(r, strides, field_size))
+          if (!Internal::is_dense_layout(r, strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -8192,7 +8195,7 @@ namespace Legion {
           FT *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
           assert(result != NULL);
-          assert(__legion_is_dense_layout(r, strides, field_size));
+          assert(Internal::is_dense_layout(r, strides, field_size));
 #else
           if (result == NULL)
           {
@@ -8204,7 +8207,7 @@ namespace Legion {
             exit(ERROR_NON_PIECE_RECTANGLE);
 #endif
           }
-          if (!__legion_is_dense_layout(r, strides, field_size))
+          if (!Internal::is_dense_layout(r, strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -8343,7 +8346,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
           assert(result != NULL);
-          assert(__legion_is_dense_layout(r, strides, field_size));
+          assert(Internal::is_dense_layout(r, strides, field_size));
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
@@ -8358,7 +8361,7 @@ namespace Legion {
             exit(ERROR_NON_PIECE_RECTANGLE);
 #endif
           }
-          if (!__legion_is_dense_layout(r, strides, field_size))
+          if (!Internal::is_dense_layout(r, strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -8484,7 +8487,7 @@ namespace Legion {
           typename REDOP::RHS *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
           assert(result != NULL);
-          assert(__legion_is_dense_layout(r, strides, field_size));
+          assert(Internal::is_dense_layout(r, strides, field_size));
 #else
           if (result == NULL)
           {
@@ -8496,7 +8499,7 @@ namespace Legion {
             exit(ERROR_NON_PIECE_RECTANGLE);
 #endif
           }
-          if (!__legion_is_dense_layout(r, strides, field_size))
+          if (!Internal::is_dense_layout(r, strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -8645,7 +8648,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
           assert(result != NULL);
-          assert(__legion_is_dense_layout(r, strides, field_size));
+          assert(Internal::is_dense_layout(r, strides, field_size));
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, 
@@ -8660,7 +8663,7 @@ namespace Legion {
             exit(ERROR_NON_PIECE_RECTANGLE);
 #endif
           }
-          if (!__legion_is_dense_layout(r, strides, field_size))
+          if (!Internal::is_dense_layout(r, strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -8797,7 +8800,7 @@ namespace Legion {
           typename REDOP::RHS *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
           assert(result != NULL);
-          assert(__legion_is_dense_layout(r, strides, field_size));
+          assert(Internal::is_dense_layout(r, strides, field_size));
 #else
           if (result == NULL)
           {
@@ -8809,7 +8812,7 @@ namespace Legion {
             exit(ERROR_NON_PIECE_RECTANGLE);
 #endif
           }
-          if (!__legion_is_dense_layout(r, strides, field_size))
+          if (!Internal::is_dense_layout(r, strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -8947,7 +8950,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
           assert(result != NULL);
-          assert(__legion_is_dense_layout(r, strides, field_size));
+          assert(Internal::is_dense_layout(r, strides, field_size));
 #else
           if (!bounds.contains_all(r)) 
             PhysicalRegion::fail_bounds_check(Domain(r), field, LEGION_REDUCE);
@@ -8961,7 +8964,7 @@ namespace Legion {
             exit(ERROR_NON_PIECE_RECTANGLE);
 #endif
           }
-          if (!__legion_is_dense_layout(r, strides, field_size))
+          if (!Internal::is_dense_layout(r, strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -14307,9 +14310,9 @@ namespace Legion {
       inline FT* ptr(const Rect<N,T>& r, size_t field_size = sizeof(FT)) const
         {
 #ifdef __CUDA_ARCH__
-          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
+          assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
-          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
+          if (!Internal::is_dense_layout(r, accessor.strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -14448,9 +14451,9 @@ namespace Legion {
       inline FT* ptr(const Rect<1,T> &r, size_t field_size = sizeof(FT)) const
         {
 #ifdef __CUDA_ARCH__
-          assert(__legion_is_dense_layout(r, accessor.strides, field_size));
+          assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
-          if (!__legion_is_dense_layout(r, accessor.strides, field_size))
+          if (!Internal::is_dense_layout(r, accessor.strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -14546,7 +14549,7 @@ namespace Legion {
           FT *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
           assert(result != NULL);
-          assert(__legion_is_dense_layout(r, strides, field_size));
+          assert(Internal::is_dense_layout(r, strides, field_size));
 #else
           if (result == NULL)
           {
@@ -14558,7 +14561,7 @@ namespace Legion {
             exit(ERROR_NON_PIECE_RECTANGLE);
 #endif
           }
-          if (!__legion_is_dense_layout(r, strides, field_size))
+          if (!Internal::is_dense_layout(r, strides, field_size))
           {
             fprintf(stderr, 
                 "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -14769,7 +14772,7 @@ namespace Legion {
             for (int dim = 0; dim < DIM; dim++)
               if (strides[dim] < min_stride)
                 min_stride = strides[dim];
-            if (__legion_is_dense_layout(*piece_iterator, strides, min_stride))
+            if (Internal::is_dense_layout(*piece_iterator, strides, min_stride))
             {
               const size_t volume = piece_iterator->volume();
               if (!current.empty())
@@ -15892,9 +15895,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef __CUDA_ARCH__
-      assert(__legion_is_dense_layout(r, accessor.strides, sizeof(FT)));
+      assert(Internal::is_dense_layout(r, accessor.strides, sizeof(FT)));
 #else
-      if (!__legion_is_dense_layout(r, accessor.strides, sizeof(FT)))
+      if (!Internal::is_dense_layout(r, accessor.strides, sizeof(FT)))
       {
         fprintf(stderr, 
             "ERROR: Illegal request for pointer of non-dense rectangle\n");
@@ -16686,24 +16689,20 @@ namespace Legion {
       assert(instance.exists());
 #ifdef __CUDA_ARCH__
       assert(bounds.bounds.contains(r));
+      assert(Internal::is_dense_layout(r, accessor.strides, sizeof(FT)));
 #else
       assert(bounds.contains_all(r));
-#endif
-      if (!is_dense_layout(r, accessor.strides, sizeof(FT)))
+      if (!Internal::is_dense_layout(r, accessor.strides, sizeof(FT)))
       {
-#ifdef __CUDA_ARCH__
-        printf(
-            "ERROR: Illegal request for pointer of non-dense rectangle\n");
-        assert(false);
-#else
         fprintf(stderr, 
             "ERROR: Illegal request for pointer of non-dense rectangle\n");
 #ifdef DEBUG_LEGION
         assert(false);
-#endif
+#else
         exit(ERROR_NON_DENSE_RECTANGLE);
 #endif
       }
+#endif
       return accessor.ptr(r.lo);
     }
 
@@ -18674,7 +18673,7 @@ namespace Legion {
         for (int dim = 0; dim < DIM; dim++)
           if (strides[dim] < min_stride)
             min_stride = strides[dim];
-        if (__legion_is_dense_layout(*piece_iterator, strides, min_stride))
+        if (Internal::is_dense_layout(*piece_iterator, strides, min_stride))
         {
           const size_t volume = piece_iterator->volume();
           if (!current.empty())
