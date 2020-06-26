@@ -1527,6 +1527,9 @@ namespace Legion {
     class SetOpSyncEvent;
     class SetEffects;
     class CompleteReplay;
+#ifdef LEGION_GPU_REDUCTIONS
+    class GPUReduction;
+#endif
 
     // region_tree.h
     class RegionTreeForest;

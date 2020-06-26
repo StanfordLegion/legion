@@ -747,6 +747,16 @@ namespace Legion {
                              RegionTreeID tree_id,
 #endif
                              ApEvent precondition, PredEvent pred_guard);
+#ifdef LEGION_GPU_REDUCTIONS
+      virtual void record_gpu_reduction(Memoizable *memo, ApEvent &lhs,
+                           IndexSpaceExpression *expr,
+                           const std::vector<CopySrcDstField> &src_fields,
+                           const std::vector<CopySrcDstField> &dst_fields,
+                           Processor gpu,
+                           PhysicalManager *src, PhysicalManager *dst,
+                           ApEvent precondition, PredEvent pred_guard,
+                           ReductionOpID redop, bool reduction_fold);
+#endif
     public:
       virtual void get_reduction_ready_events(Memoizable *memo,
                                               std::set<ApEvent> &ready_events);
@@ -904,6 +914,9 @@ namespace Legion {
       SET_EFFECTS,
       ASSIGN_FENCE_COMPLETION,
       COMPLETE_REPLAY,
+#ifdef LEGION_GPU_REDUCTIONS
+      GPU_REDUCTION,
+#endif
     };
 
     /**
@@ -929,6 +942,9 @@ namespace Legion {
       virtual SetOpSyncEvent* as_set_op_sync_event(void) { return NULL; }
       virtual SetEffects* as_set_effects(void) { return NULL; }
       virtual CompleteReplay* as_complete_replay(void) { return NULL; }
+#ifdef LEGION_GPU_REDUCTIONS
+      virtual GPUReduction* as_gpu_reduction(void) { return NULL; }
+#endif
     protected:
       std::map<TraceLocalID, Memoizable*> &operations;
       std::vector<ApEvent> &events;
@@ -1127,6 +1143,47 @@ namespace Legion {
       ReductionOpID redop;
       bool reduction_fold;
     };
+
+#ifdef LEGION_GPU_REDUCTIONS
+    /**
+     * \class GPUReduction
+     * This instruction has the following semantics:
+     * events[lhs] = expr->gpu_reduction(dst_fields, src_fields,
+     *                                   gpu, dst, src,
+     *                                   events[precondition_idx],
+     *                                   predicate_guard,
+     *                                   redop, reduction_fold)
+     */
+    class GPUReduction : public Instruction {
+    public:
+      GPUReduction(PhysicalTemplate &tpl,
+                   unsigned lhs, IndexSpaceExpression *expr,
+                   const TraceLocalID &op_key,
+                   const std::vector<CopySrcDstField>& src_fields,
+                   const std::vector<CopySrcDstField>& dst_fields,
+                   Processor gpu, PhysicalManager *src, PhysicalManager *dst,
+                   unsigned precondition_idx,
+                   ReductionOpID redop, bool reduction_fold);
+      virtual ~GPUReduction(void);
+      virtual void execute(void);
+      virtual std::string to_string(void);
+
+      virtual InstructionKind get_kind(void)
+        { return GPU_REDUCTION; }
+      virtual GPUReduction* as_gpu_reduction(void)
+        { return this; }
+    private:
+      friend class PhysicalTemplate;
+      unsigned lhs;
+      IndexSpaceExpression *expr;
+      std::vector<CopySrcDstField> src_fields, dst_fields;
+      Processor gpu;
+      PhysicalManager *src, *dst;
+      unsigned precondition_idx;
+      ReductionOpID redop;
+      bool reduction_fold;
+    };
+#endif
 
     /**
      * \class SetOpSyncEvent

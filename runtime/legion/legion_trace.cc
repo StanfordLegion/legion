@@ -2616,6 +2616,17 @@ namespace Legion {
               num_merges += generator_kind != MERGE_EVENT;
               break;
             }
+#ifdef LEGION_GPU_REDUCTIONS
+        case GPU_REDUCTION:
+            {
+              unsigned precondition_idx =
+                (*it)->as_gpu_reduction()->precondition_idx;
+              InstructionKind generator_kind =
+                instructions[precondition_idx]->get_kind();
+              num_merges += generator_kind != MERGE_EVENT;
+              break;
+            }
+#endif
           default:
             {
               break;
@@ -2674,6 +2685,20 @@ namespace Legion {
               precondition_idx = &fill->precondition_idx;
               break;
             }
+#ifdef LEGION_GPU_REDUCTIONS
+          case GPU_REDUCTION:
+            {
+              GPUReduction *reduction = inst->as_gpu_reduction();
+              std::map<unsigned, ViewExprs>::iterator finder =
+                copy_views.find(reduction->lhs);
+#ifdef DEBUG_LEGION
+              assert(finder != copy_views.end());
+#endif
+              find_all_last_users(finder->second, users);
+              precondition_idx = &reduction->precondition_idx;
+              break;
+            }
+#endif
           default:
             {
               break;
@@ -2766,6 +2791,14 @@ namespace Legion {
               used[gen[fill->precondition_idx]] = true;
               break;
             }
+#ifdef LEGION_GPU_REDUCTIONS
+          case GPU_REDUCTION:
+            {
+              GPUReduction *reduction = inst->as_gpu_reduction();
+              used[gen[reduction->precondition_idx]] = true;
+              break;
+            }
+#endif
           case SET_EFFECTS:
             {
               SetEffects *effects = inst->as_set_effects();
@@ -2975,6 +3008,13 @@ namespace Legion {
                 event_to_check = &inst->as_issue_fill()->precondition_idx;
                 break;
               }
+#ifdef LEGION_GPU_REDUCTIONS
+            case GPU_REDUCTION:
+              {
+                event_to_check = &inst->as_gpu_reduction()->precondition_idx;
+                break;
+              }
+#endif
             case SET_EFFECTS :
               {
                 event_to_check = &inst->as_set_effects()->rhs;
@@ -3095,6 +3135,15 @@ namespace Legion {
               outgoing[fill->precondition_idx].push_back(fill->lhs);
               break;
             }
+#ifdef LEGION_GPU_REDUCTIONS
+          case GPU_REDUCTION:
+            {
+              GPUReduction *reduction = inst->as_gpu_reduction();
+              incoming[reduction->lhs].push_back(reduction->precondition_idx);
+              outgoing[reduction->precondition_idx].push_back(reduction->lhs);
+              break;
+            }
+#endif
           case SET_OP_SYNC_EVENT :
             {
               SetOpSyncEvent *sync = inst->as_set_op_sync_event();
@@ -3348,6 +3397,16 @@ namespace Legion {
               lhs = fill->lhs;
               break;
             }
+#ifdef LEGION_GPU_REDUCTIONS
+          case GPU_REDUCTION:
+            {
+              GPUReduction *reduction = inst->as_gpu_reduction();
+              int subst = substs[reduction->precondition_idx];
+              if (subst >= 0) reduction->precondition_idx = (unsigned)subst;
+              lhs = reduction->lhs;
+              break;
+            }
+#endif
           case SET_EFFECTS :
             {
               SetEffects *effects = inst->as_set_effects();
@@ -3438,6 +3497,17 @@ namespace Legion {
               used[gen[fill->precondition_idx]] = true;
               break;
             }
+#ifdef LEGION_GPU_REDUCTIONS
+          case GPU_REDUCTION:
+            {
+              GPUReduction *reduction = inst->as_gpu_reduction();
+#ifdef DEBUG_LEGION
+              assert(gen[reduction->precondition_idx] != -1U);
+#endif
+              used[gen[reduction->precondition_idx]] = true;
+              break;
+            }
+#endif
           case SET_EFFECTS:
             {
               SetEffects *effects = inst->as_set_effects();
@@ -3887,6 +3957,41 @@ namespace Legion {
 #endif
                                        find_event(precondition))); 
     }
+
+#ifdef LEGION_GPU_REDUCTIONS
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_gpu_reduction(Memoizable *memo, ApEvent &lhs,
+                                 IndexSpaceExpression *expr,
+                                 const std::vector<CopySrcDstField> &src_fields,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 Processor gpu,
+                                 PhysicalManager *src, PhysicalManager *dst,
+                                 ApEvent precondition, PredEvent pred_guard,
+                                 ReductionOpID redop, bool reduction_fold)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(memo != NULL);
+#endif
+      if (!lhs.exists())
+      {
+        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+        rename.trigger();
+        lhs = ApEvent(rename);
+      } 
+
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
+
+      unsigned lhs_ = convert_event(lhs);
+      insert_instruction(new GPUReduction(
+            *this, lhs_, expr, find_trace_local_id(memo),
+            src_fields, dst_fields, gpu, src, dst,
+            find_event(precondition), redop, reduction_fold));
+    }
+#endif
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::get_reduction_ready_events(
@@ -4754,6 +4859,102 @@ namespace Legion {
 
       return ss.str();
     }
+
+#ifdef LEGION_GPU_REDUCTIONS
+    /////////////////////////////////////////////////////////////
+    // GPUReduction
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    GPUReduction::GPUReduction(PhysicalTemplate& tpl,
+                               unsigned l, IndexSpaceExpression *e,
+                               const TraceLocalID& key,
+                               const std::vector<CopySrcDstField>& s,
+                               const std::vector<CopySrcDstField>& d,
+                               Processor g, 
+                               PhysicalManager *sm, PhysicalManager *dm,
+                               unsigned pi, ReductionOpID ro, bool rf)
+      : Instruction(tpl, key), lhs(l), expr(e), src_fields(s), dst_fields(d), 
+        gpu(g), src(sm), dst(dm),
+        precondition_idx(pi), redop(ro), reduction_fold(rf)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(lhs < events.size());
+      assert(operations.find(owner) != operations.end());
+      assert(src_fields.size() > 0);
+      assert(dst_fields.size() > 0);
+      assert(precondition_idx < events.size());
+      assert(expr != NULL);
+#endif
+      expr->add_expression_reference();
+      src->add_base_resource_ref(TRACE_REF);
+      dst->add_base_resource_ref(TRACE_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    GPUReduction::~GPUReduction(void)
+    //--------------------------------------------------------------------------
+    {
+      if (expr->remove_expression_reference())
+        delete expr;
+      if (src->remove_base_resource_ref(TRACE_REF))
+        delete src;
+      if (dst->remove_base_resource_ref(TRACE_REF))
+        delete dst;
+    }
+
+    //--------------------------------------------------------------------------
+    void GPUReduction::execute(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(operations.find(owner) != operations.end());
+      assert(operations.find(owner)->second != NULL);
+#endif
+      Memoizable *memo = operations[owner];
+      ApEvent precondition = events[precondition_idx];
+      const PhysicalTraceInfo trace_info(memo->get_operation(), -1U, false);
+      events[lhs] = expr->gpu_reduction(trace_info, dst_fields, src_fields,
+                                     gpu, dst, src,
+                                     precondition, PredEvent::NO_PRED_EVENT,
+                                     redop, reduction_fold);
+    }
+
+    //--------------------------------------------------------------------------
+    std::string GPUReduction::to_string(void)
+    //--------------------------------------------------------------------------
+    {
+      std::stringstream ss;
+      ss << "events[" << lhs << "] = gpu_reduction(operations[" << owner << "],"
+         << " Index expr: " << expr->expr_id << ", {";
+      for (unsigned idx = 0; idx < src_fields.size(); ++idx)
+      {
+        ss << "(" << std::hex << src_fields[idx].inst.id
+           << "," << std::dec << src_fields[idx].subfield_offset
+           << "," << src_fields[idx].size
+           << "," << src_fields[idx].field_id
+           << "," << src_fields[idx].serdez_id << ")";
+        if (idx != src_fields.size() - 1) ss << ",";
+      }
+      ss << "}, {";
+      for (unsigned idx = 0; idx < dst_fields.size(); ++idx)
+      {
+        ss << "(" << std::hex << dst_fields[idx].inst.id
+           << "," << std::dec << dst_fields[idx].subfield_offset
+           << "," << dst_fields[idx].size
+           << "," << dst_fields[idx].field_id
+           << "," << dst_fields[idx].serdez_id << ")";
+        if (idx != dst_fields.size() - 1) ss << ",";
+      }
+      ss << "}, events[" << precondition_idx << "]";
+
+      if (redop != 0) ss << ", " << redop;
+      ss << ")";
+
+      return ss.str();
+    }
+#endif // LEGION_GPU_REDUCTIONS
 
     /////////////////////////////////////////////////////////////
     // IssueFill

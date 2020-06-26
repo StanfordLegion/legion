@@ -1288,6 +1288,9 @@ namespace Legion {
               dst_fields, src_fields, memory_manager->get_local_gpu(), 
               this, source_manager, precondition, predicate_guard,
               reduction_op_id, false/*fold*/);
+          if (trace_info.recording)
+            trace_info.record_copy_views(result, copy_expression,
+                  *tracing_srcs, *tracing_dsts, effects_applied);
           return result;
         }
         // TODO: else make a shadow copy and perform the reduction there

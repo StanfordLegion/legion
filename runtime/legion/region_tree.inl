@@ -622,9 +622,9 @@ namespace Legion {
       else
         result = ApEvent(gpu.spawn(tid,
               rez.get_buffer(), rez.get_used_bytes(), requests, precondition));
-      // TODO update this for tracing
       if (trace_info.recording)
-        assert(false);
+        trace_info.record_gpu_reduction(result, this, src_fields, dst_fields,
+              gpu, src, dst, precondition, pred_guard, redop, reduction_fold);
 #ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!result.exists())
       {

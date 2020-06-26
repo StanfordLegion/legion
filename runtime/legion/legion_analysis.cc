@@ -740,6 +740,58 @@ namespace Legion {
       assert(false);
     }
 
+#ifdef LEGION_GPU_REDUCTIONS
+    //--------------------------------------------------------------------------
+    void RemoteTraceRecorder::record_gpu_reduction(Memoizable *memo, 
+                                 ApEvent &lhs, IndexSpaceExpression *expr,
+                                 const std::vector<CopySrcDstField>& src_fields,
+                                 const std::vector<CopySrcDstField>& dst_fields,
+                                 Processor gpu, 
+                                 PhysicalManager *src, PhysicalManager *dst,
+                                 ApEvent precondition, PredEvent pred_guard,
+                                 ReductionOpID redop, bool reduction_fold)
+    //--------------------------------------------------------------------------
+    {
+      if (local_space != origin_space)
+      {
+        RtUserEvent done = Runtime::create_rt_user_event(); 
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(remote_tpl);
+          rez.serialize(REMOTE_TRACE_GPU_REDUCTION);
+          rez.serialize(done);
+          memo->pack_remote_memoizable(rez, origin_space);
+          rez.serialize(&lhs);
+          rez.serialize(lhs);
+          expr->pack_expression(rez, origin_space);
+#ifdef DEBUG_LEGION
+          assert(src_fields.size() == dst_fields.size());
+#endif
+          rez.serialize<size_t>(src_fields.size());
+          for (unsigned idx = 0; idx < src_fields.size(); idx++)
+          {
+            pack_src_dst_field(rez, src_fields[idx]);
+            pack_src_dst_field(rez, dst_fields[idx]);
+          }
+          rez.serialize(gpu);
+          rez.serialize(src->did);
+          rez.serialize(dst->did);
+          rez.serialize(precondition);
+          rez.serialize(pred_guard);
+          rez.serialize(redop);
+          rez.serialize<bool>(reduction_fold); 
+        }
+        runtime->send_remote_trace_update(origin_space, rez);
+        // Wait to see if lhs changes
+        done.wait();
+      }
+      else
+        remote_tpl->record_gpu_reduction(memo, lhs, expr, src_fields,dst_fields,
+                gpu, src, dst, precondition, pred_guard, redop, reduction_fold);
+    }
+#endif
+
     //--------------------------------------------------------------------------
     void RemoteTraceRecorder::record_op_view(Memoizable *memo,
                                              unsigned idx,
@@ -1292,6 +1344,75 @@ namespace Legion {
               delete memo;
             break;
           }
+#ifdef LEGION_GPU_REDUCTIONS
+        case REMOTE_TRACE_GPU_REDUCTION:
+          {
+            RtUserEvent done;
+            derez.deserialize(done);
+            Memoizable *memo = RemoteMemoizable::unpack_remote_memoizable(derez,
+                                                           NULL/*op*/, runtime);
+            ApUserEvent *lhs_ptr;
+            derez.deserialize(lhs_ptr);
+            ApUserEvent lhs;
+            derez.deserialize(lhs);
+            RegionTreeForest *forest = runtime->forest;
+            IndexSpaceExpression *expr = 
+              IndexSpaceExpression::unpack_expression(derez, forest, source);
+            size_t num_fields;
+            derez.deserialize(num_fields);
+            std::vector<CopySrcDstField> src_fields(num_fields);
+            std::vector<CopySrcDstField> dst_fields(num_fields);
+            for (unsigned idx = 0; idx < num_fields; idx++)
+            {
+              unpack_src_dst_field(derez, src_fields[idx]);
+              unpack_src_dst_field(derez, dst_fields[idx]);
+            }
+            Processor gpu;
+            derez.deserialize(gpu);
+            DistributedID src_did, dst_did;
+            derez.deserialize(src_did);
+            derez.deserialize(dst_did);
+            RtEvent src_ready, dst_ready;
+            PhysicalManager *src = 
+              runtime->find_or_request_instance_manager(src_did, src_ready);
+            PhysicalManager *dst = 
+              runtime->find_or_request_instance_manager(dst_did, dst_ready);
+            ApEvent precondition;
+            derez.deserialize(precondition);
+            PredEvent pred_guard;
+            derez.deserialize(pred_guard);
+            ReductionOpID redop;
+            derez.deserialize(redop);
+            bool reduction_fold;
+            derez.deserialize<bool>(reduction_fold);
+            // Use this to track if lhs changes
+            const ApUserEvent lhs_copy = lhs;
+            if (src_ready.exists() && !src_ready.has_triggered())
+              src_ready.wait();
+            if (dst_ready.exists() && !dst_ready.has_triggered())
+              dst_ready.wait();
+            // Do the base call
+            tpl->record_gpu_reduction(memo, lhs, expr, src_fields, dst_fields,
+                gpu, src, dst, precondition, pred_guard, redop, reduction_fold);
+            if (lhs != lhs_copy)
+            {
+              Serializer rez;
+              {
+                RezCheck z2(rez);
+                rez.serialize(REMOTE_TRACE_GPU_REDUCTION);
+                rez.serialize(lhs_ptr);
+                rez.serialize(lhs);
+                rez.serialize(done);
+              }
+              runtime->send_remote_trace_response(source, rez);
+            }
+            else // lhs was unchanged
+              Runtime::trigger_event(done);
+            if (memo->get_origin_space() != runtime->address_space)
+              delete memo;
+            break;
+          }
+#endif
         case REMOTE_TRACE_RECORD_OP_VIEW:
           {
             RtUserEvent applied;
@@ -1469,6 +1590,9 @@ namespace Legion {
         case REMOTE_TRACE_ISSUE_COPY:
         case REMOTE_TRACE_ISSUE_FILL:
         case REMOTE_TRACE_SET_OP_SYNC:
+#ifdef LEGION_GPU_REDUCTIONS
+        case REMOTE_TRACE_GPU_REDUCTION:
+#endif
           {
             ApUserEvent *event_ptr;
             derez.deserialize(event_ptr);
