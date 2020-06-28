@@ -482,7 +482,7 @@ namespace Realm {
 	// no ready or resumable tasks?  thumb twiddling time
 
 	// are we shutting down?
-	if(shutdown_flag) {
+	if(shutdown_flag.load()) {
 	  // yes, we can terminate - wake up an idler (if any) first though
 	  if(!idle_workers.empty()) {
 	    Thread *to_wake = idle_workers.back();
@@ -646,7 +646,7 @@ namespace Realm {
 #endif
 
     // TODO: tear down interpreter if last thread
-    if(shutdown_flag && pythreads.empty())
+    if(shutdown_flag.load() && pythreads.empty())
       pyproc->destroy_interpreter();
 
     KernelThreadTaskScheduler::worker_terminate(switch_to);

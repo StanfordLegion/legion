@@ -135,8 +135,16 @@ namespace Realm {
   template <typename T, IntrusiveListLink<T> T::*LINK, typename LT>
   inline bool IntrusiveList<T, LINK, LT>::empty(void) const
   {
+#ifndef TSAN_ENABLED
     // no lock taken here because it's not thread-safe even with a lock
     return(head.next == 0);
+#else
+    // with thread-sanitizer, we have to take the lock to suppress the warning
+    lock.lock();
+    bool retval = (head.next == 0);
+    lock.unlock();
+    return retval;
+#endif
   }
 
   template <typename T, IntrusiveListLink<T> T::*LINK, typename LT>
@@ -438,8 +446,16 @@ namespace Realm {
   template <typename T, typename PT, IntrusivePriorityListLink<T> T::*LINK, PT T::*PRI, typename LT>
   inline bool IntrusivePriorityList<T, PT, LINK, PRI, LT>::empty(void) const
   {
+#ifndef TSAN_ENABLED
     // no lock taken here because it's not thread-safe even with a lock
     return(head == 0);
+#else
+    // with thread-sanitizer, we have to take the lock to suppress the warning
+    lock.lock();
+    bool retval = (head == 0);
+    lock.unlock();
+    return retval;
+#endif
   }
 
   template <typename T, typename PT, IntrusivePriorityListLink<T> T::*LINK, PT T::*PRI, typename LT>
