@@ -223,7 +223,7 @@ namespace Realm {
       typedef PriorityQueue<Thread *, DummyLock> ResumableQueue;
       ResumableQueue resumable_workers;
       std::map<Thread *, int> worker_priorities;
-      bool shutdown_flag;
+      atomic<bool> shutdown_flag;
       int active_worker_count;  // workers that are awake (i.e. using a core)
       int unassigned_worker_count;  // awake but unassigned workers
 

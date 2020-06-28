@@ -101,7 +101,7 @@ namespace Realm {
       failed_work_items.fetch_add(1);
 
     // do an atomic decrement of the work counter to see if we're also complete
-    int remaining = pending_work_items.fetch_sub(1) - 1;
+    int remaining = pending_work_items.fetch_sub_acqrel(1) - 1;
 
     if(remaining == 0)
       mark_completed();    
@@ -143,7 +143,7 @@ namespace Realm {
     }
 
     // can't trigger the finish event immediately if async work items are pending
-    int remaining = pending_work_items.fetch_sub(1) - 1;
+    int remaining = pending_work_items.fetch_sub_acqrel(1) - 1;
 
     if(remaining == 0)
       mark_completed();    
