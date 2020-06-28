@@ -1716,7 +1716,8 @@ namespace Legion {
               const std::set<Processor> &local_procs,
               const std::set<Processor> &local_util_procs,
               const std::set<AddressSpaceID> &address_spaces,
-              const std::map<Processor,AddressSpaceID> &proc_spaces);
+              const std::map<Processor,AddressSpaceID> &proc_spaces,
+              bool supply_default_mapper);
       Runtime(const Runtime &rhs);
       ~Runtime(void);
     public:
@@ -1766,6 +1767,7 @@ namespace Legion {
       const bool unsafe_mapper;
       const bool disable_independence_tests;
       const bool legion_spy_enabled;
+      const bool supply_default_mapper;
       const bool enable_test_mapper;
       const bool legion_ldb_enabled;
       const std::string replay_file;
@@ -3286,7 +3288,7 @@ namespace Legion {
                                                  RtEvent *wait_for = NULL);
     public:
       // Static methods for start-up and callback phases
-      static int start(int argc, char **argv, bool background);
+      static int start(int argc, char **argv, bool background, bool def_mapper);
       static void register_builtin_reduction_operators(void);
       static const LegionConfiguration& initialize(int *argc, char ***argv, 
                                                    bool filter);
@@ -3295,7 +3297,7 @@ namespace Legion {
       static void configure_interoperability(bool separate_runtimes);
       static RtEvent configure_runtime(int argc, char **argv,
           const LegionConfiguration &config, RealmRuntime &realm,
-          Processor::Kind &startup_kind, bool background);
+          Processor::Kind &startup_kind, bool background, bool default_mapper);
       static int wait_for_shutdown(void);
       static void set_return_code(int return_code);
       Future launch_top_level_task(const TaskLauncher &launcher);
