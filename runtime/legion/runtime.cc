@@ -12462,8 +12462,27 @@ namespace Legion {
                                    const Realm::Point<DIM,coord_t> &point) const
     //--------------------------------------------------------------------------
     {
-      Realm::AffineLinearizedIndexSpace<DIM,coord_t> linearizer(is);
-      return linearizer.linearize(point);
+      if (is.dense())
+      {
+        Realm::AffineLinearizedIndexSpace<DIM,coord_t> linearizer(is);
+        return linearizer.linearize(point);
+      }
+      else
+      {
+        size_t offset = 0;
+        for (Realm::IndexSpaceIterator<DIM,coord_t> it(is); it.valid; it.step())
+        {
+          if (it.rect.contains(point))
+          {
+            Realm::AffineLinearizedIndexSpace<DIM,coord_t> 
+              linearizer(Realm::IndexSpace<DIM,coord_t>(it.rect));
+            return offset + linearizer.linearize(point);
+          }
+          else
+            offset += it.rect.volume();
+        }
+        return offset;
+      }
     }
 
     //--------------------------------------------------------------------------

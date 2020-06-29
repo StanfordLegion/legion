@@ -5308,24 +5308,35 @@ namespace Legion {
       else
         shard_domain = local_space;
       std::vector<Realm::Point<DIM,T> > shard_points; 
-      size_t total_points = 0;
-      for (Realm::IndexSpaceIterator<DIM,T> rect_itr(realm_index_space); 
-            rect_itr.valid; rect_itr.step())
+      if (func->functor->is_invertible())
       {
-        for (Realm::PointInRectIterator<DIM,T> itr(rect_itr.rect);
-              itr.valid; itr.step(), total_points++)
+        for (Realm::IndexSpaceIterator<DIM,T> rect_itr(local_space); 
+              rect_itr.valid; rect_itr.step())
         {
-          const ShardID point_shard = 
-            func->find_owner(DomainPoint(Point<DIM,T>(itr.p)), shard_domain);
-          if (point_shard == shard)
-            shard_points.push_back(itr.p);
+          for (Realm::PointInRectIterator<DIM,T> itr(rect_itr.rect);
+                itr.valid; itr.step())
+          {
+            const ShardID point_shard = 
+              func->find_owner(DomainPoint(Point<DIM,T>(itr.p)), shard_domain);
+            if (point_shard == shard)
+              shard_points.push_back(itr.p);
+          }
         }
+      }
+      else
+      {
+        std::vector<DomainPoint> domain_points;
+        func->functor->invert(shard, Domain(local_space), shard_domain,
+                              func->total_shards, domain_points);  
+        shard_points.resize(domain_points.size());
+        for (unsigned idx = 0; idx < domain_points.size(); idx++)
+          shard_points[idx] = Point<DIM,coord_t>(domain_points[idx]);
       }
       if (shard_points.empty())
         return IndexSpace::NO_SPACE;
       // Another useful case is if all the points are in the shard then
       // we can return ourselves as the result
-      if (shard_points.size() == total_points)
+      if (shard_points.size() == get_volume())
         return handle;
       Realm::IndexSpace<DIM,T> realm_is(shard_points);
       const Domain domain((DomainT<DIM,T>(realm_is)));
