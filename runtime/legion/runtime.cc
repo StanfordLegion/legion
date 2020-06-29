@@ -4190,7 +4190,11 @@ namespace Legion {
         finder->second = std::pair<MapperManager*,bool>(m, own);
       }
       else
+      {
         mappers[0] = std::pair<MapperManager*,bool>(m, own);
+        AutoLock q_lock(queue_lock);
+        mapper_states[0] = MapperState();
+      }
     }
 
     //--------------------------------------------------------------------------
