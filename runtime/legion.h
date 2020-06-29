@@ -2757,6 +2757,8 @@ namespace Legion {
       inline T* ptr(const Rect<DIM,COORD_T> &r) const; // must be dense
       __CUDA_HD__
       inline T* ptr(const Rect<DIM,COORD_T> &r, size_t strides[DIM]) const;
+      __CUDA_HD__
+      inline T& operator[](const Point<DIM,COORD_T> &p) const;
     protected:
       Realm::RegionInstance instance;
       Realm::AffineAccessor<T,DIM,COORD_T> accessor;
@@ -7727,9 +7729,12 @@ namespace Legion {
        * @param argc the number of input arguments
        * @param argv pointer to an array of string arguments of size argc
        * @param background whether to execute the runtime in the background
+       * @param supply_default_mapper whether the runtime should initialize
+       *              the default mapper for use by the application
        * @return only if running in background, otherwise never
        */
-      static int start(int argc, char **argv, bool background = false);
+      static int start(int argc, char **argv, bool background = false,
+                       bool supply_default_mapper = true);
 
       /**
        * This 'initialize' method is an optional method that provides

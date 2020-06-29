@@ -1308,15 +1308,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::create_field_space_allocator(FieldSpace handle,
+    RtEvent RegionTreeForest::create_field_space_allocator(FieldSpace handle,
                                    bool sharded_owner_context, bool owner_shard)
     //--------------------------------------------------------------------------
     {
       FieldSpaceNode *node = get_node(handle);
-      const RtEvent ready = node->create_allocator(runtime->address_space,
+      return node->create_allocator(runtime->address_space,
              RtUserEvent::NO_RT_USER_EVENT, sharded_owner_context, owner_shard);
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
     }
 
     //--------------------------------------------------------------------------
@@ -11991,9 +11989,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(finder != field_infos.end());
 #endif
-      // Only need to free the index if it wasn't destroyed previously
-      if (!finder->second.destroyed)
-        free_index(finder->second.idx, RtEvent::NO_RT_EVENT);
+      free_index(finder->second.idx, RtEvent::NO_RT_EVENT);
       // Remove it from the field map
       field_infos.erase(finder);
     }
@@ -12047,9 +12043,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(finder != field_infos.end());
 #endif
-        // Only need to free the index if we weren't destroyed previously
-        if (!finder->second.destroyed)
-          free_index(finder->second.idx, RtEvent::NO_RT_EVENT);
+        free_index(finder->second.idx, RtEvent::NO_RT_EVENT);
         // Remove it from the fields map
         field_infos.erase(finder);
       }
@@ -12242,8 +12236,8 @@ namespace Legion {
             field_infos.find(fid);
           if (finder == field_infos.end())
             return false;
-          // Make sure we haven't destroyed this field
-          return (!finder->second.destroyed);
+          else
+            return true;
         }
       }
       std::map<FieldID,FieldInfo> local_infos;
@@ -12254,8 +12248,8 @@ namespace Legion {
         local_infos.find(fid);
       if (finder == local_infos.end())
         return false;
-      // Make sure we haven't destroyed this field
-      return (!finder->second.destroyed);
+      else
+        return true;
     }
 
     //--------------------------------------------------------------------------
@@ -12334,10 +12328,7 @@ namespace Legion {
           to_set.reserve(field_infos.size());
           for (std::map<FieldID,FieldInfo>::const_iterator it = 
                 field_infos.begin(); it != field_infos.end(); it++)
-          {
-            if (!it->second.destroyed)
-              to_set.push_back(it->first);
-          }
+            to_set.push_back(it->first);
           return;
         }
       }
@@ -12348,10 +12339,7 @@ namespace Legion {
       to_set.reserve(local_infos.size());
       for (std::map<FieldID,FieldInfo>::const_iterator it = 
             local_infos.begin(); it != local_infos.end(); it++)
-      {
-        if (!it->second.destroyed)
-          to_set.push_back(it->first);
-      }
+        to_set.push_back(it->first);
     }
 
     //--------------------------------------------------------------------------
@@ -12378,8 +12366,6 @@ namespace Legion {
           for (std::map<FieldID,FieldInfo>::const_iterator it = 
                 field_infos.begin(); it != field_infos.end(); it++)
           {
-            if (it->second.destroyed)
-              continue;
             if (mask.is_set(it->second.idx))
             {
               if (it->second.local)
@@ -12402,8 +12388,6 @@ namespace Legion {
         for (std::map<FieldID,FieldInfo>::const_iterator it = 
               local_infos.begin(); it != local_infos.end(); it++)
         {
-          if (it->second.destroyed)
-            continue;
           if (mask.is_set(it->second.idx))
           {
             if (it->second.local)
@@ -12441,8 +12425,6 @@ namespace Legion {
           for (std::map<FieldID,FieldInfo>::const_iterator it = 
                 field_infos.begin(); it != field_infos.end(); it++)
           {
-            if (it->second.destroyed)
-              continue;
             if (mask.is_set(it->second.idx))
             {
               if (it->second.local)
@@ -12465,8 +12447,6 @@ namespace Legion {
         for (std::map<FieldID,FieldInfo>::const_iterator it = 
               local_infos.begin(); it != local_infos.end(); it++)
         {
-          if (it->second.destroyed)
-            continue;
           if (mask.is_set(it->second.idx))
           {
             if (it->second.local)
@@ -12510,8 +12490,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
             assert(finder != field_infos.end());
 #endif
-            if (finder->second.destroyed)
-              continue;
             if (mask.is_set(finder->second.idx))
               to_set.insert(finder->first);
           }
@@ -12531,8 +12509,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(finder != local_infos.end());
 #endif
-        if (finder->second.destroyed)
-          continue;
         if (mask.is_set(finder->second.idx))
           to_set.insert(finder->first);
       }

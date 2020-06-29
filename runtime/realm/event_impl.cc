@@ -750,7 +750,7 @@ namespace Realm {
       MergeEventPrecondition *p = &preconditions[num_preconditions++];
 
       // increment count first, then add the waiter
-      count_needed.fetch_add(1);
+      count_needed.fetch_add_acqrel(1);
       EventImpl::add_waiter(wait_for, p);
     }
 
@@ -771,7 +771,7 @@ namespace Realm {
 	}
       }
 
-      int count_left = count_needed.fetch_add(-1);
+      int count_left = count_needed.fetch_sub_acqrel(1);
 
       // Put the logging first to avoid segfaults
       log_event.debug() << "received trigger merged event=" << event_impl->make_event(finish_gen)
@@ -3224,7 +3224,7 @@ static void *bytedup(const void *data, size_t datalen)
 	// try to pop a waiter from the free list - this needs to use
 	//  CAS to accomodate unsynchronized pushes to the list, but the
 	//  mutex we hold prevents any other poppers (so no ABA problem)
-	waiter = first_free_waiter.load();
+	waiter = first_free_waiter.load_acquire();
 	while(waiter) {
 	  if(first_free_waiter.compare_exchange(waiter, waiter->next_free))
 	    break;
@@ -3409,7 +3409,7 @@ static void *bytedup(const void *data, size_t datalen)
       //  entries - this has to happen in the same order as the rd_ptr
       //  bumps though
       while(consume_ptr.load() != old_rd_ptr) { /*pause?*/ }
-      size_t check = consume_ptr.fetch_add(count);
+      size_t check = consume_ptr.fetch_add_acqrel(count);
       assert(check == old_rd_ptr);
 
       return count;
@@ -3483,7 +3483,7 @@ static void *bytedup(const void *data, size_t datalen)
 
       // bump commit pointer, but respecting order
       while(commit_ptr.load() != old_wr_ptr) { /*pause?*/ }
-      size_t check = commit_ptr.fetch_add(1);
+      size_t check = commit_ptr.fetch_add_acqrel(1);
       assert(check == old_wr_ptr);
 
       // lock-free insertion of waiter into free list

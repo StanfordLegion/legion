@@ -3,22 +3,38 @@ attempt is made to keep this list accurate for the master branch.
 
 Version 20.06.0 (June ??, 2020)
   * Regent
-     - Support for `std/format` module for type-safe formatted printing.
-     - Support for documentation with LDoc.
-     - Support for `__future` operator to import a C API future.
+    - Support for `std/format` module for type-safe formatted printing
+    - Support for documentation with LDoc
+    - Support for `__future` operator to import a C API future
+  * Legion
+    - Support for inlining tasks into leaf contexts
+    - Support for global registration callbacks inside of tasks
+    - Added semantic tags for source file and line location
+    - Support for multi-region accessors for region requirements with
+        co-location constraints
+    - Changes to semantics of deletion for index spaces, field spaces, and
+        logical regions.  For details, see:
+	https://github.com/StanfordLegion/legion/issues/812
+    - Support for creating fields spaces with initial fields
   * Realm
-     - Subgraphs can be used to capture a template of Realm operations
+    - Subgraphs can be used to capture a template of Realm operations
         that will be executed repeatedly.  Subgraph definitions include
         support for "interpolating" values into individual operations'
         arguments on each instantiation of the subgraph template
-     - `create_weighted_subspaces` supports `size_t` weights for precise
+    - `create_weighted_subspaces` supports `size_t` weights for precise
         control over the size of each subspace
-     - Added support for `omp critical` constructs and dynamic loop
+    - Added support for `omp critical` constructs and dynamic loop
         schedules in OpenMP tasks
-     - Added support for `cudaStreamLegacy` and `cudaStreamPerThread` in
+    - Added support for `cudaStreamLegacy` and `cudaStreamPerThread` in
         CUDA tasks
-     - Realm logs now include a timestamp (relative to runtime init)
+    - Realm logs now include a timestamp (relative to runtime init)
         by default.  This behavior can be disabled with `-logtime 0`
+    - Performance improvements for copies/fills of 3D instances spaces in
+        GPU device memory
+    - Added ability to compute a set of "covering rectangles" for sparse
+        index spaces, allowing more compact representation in memory
+    - Added `MultiAffineAccessor` for accessing compact instances
+    - Added ability to delete a `ProcessorGroup`
 
 Version 20.03.0 (March 31, 2020)
   * Regent

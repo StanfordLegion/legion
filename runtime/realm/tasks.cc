@@ -837,9 +837,9 @@ namespace Realm {
       return;
 
     // this had better not be after shutdown was initiated
-    if(shutdown_flag) {
+    if(shutdown_flag.load()) {
       log_sched.fatal() << "scheduler worker awakened during shutdown: sched=" << this << " worker=" << thread;
-      assert(!shutdown_flag);
+      abort();
     }
 
     // look up the priority of this thread and then add it to the resumable workers
@@ -1002,7 +1002,7 @@ namespace Realm {
 	  // no ready or resumable tasks?  thumb twiddling time
 
 	  // are we shutting down?
-	  if(shutdown_flag) {
+	  if(shutdown_flag.load()) {
 	    // yes, we can terminate - wake up an idler (if any) first though
 	    if(!idle_workers.empty()) {
 	      Thread *to_wake = idle_workers.back();
@@ -1132,7 +1132,7 @@ namespace Realm {
   void KernelThreadTaskScheduler::shutdown(void)
   {
     log_sched.info() << "scheduler shutdown requested: sched=" << this;
-    shutdown_flag = true;
+    shutdown_flag.store(true);
     // setting the shutdown flag adds "work" to the system
     work_counter.increment_counter();
 
@@ -1181,7 +1181,7 @@ namespace Realm {
       // if this was our last worker, and we're not shutting down,
       //  something bad probably happened - fire up a new worker and
       //  hope things work themselves out
-      if((all_workers.size() == 1) && !shutdown_flag) {
+      if((all_workers.size() == 1) && !shutdown_flag.load()) {
 	printf("HELP!  Lost last worker for proc " IDFMT "!", proc.id);
 	worker_terminate(worker_create(false));
       } else {
@@ -1198,7 +1198,7 @@ namespace Realm {
 
     // if this was the last thread, we'd better be in shutdown...
     if(all_workers.empty() && terminating_workers.empty()) {
-      assert(shutdown_flag);
+      assert(shutdown_flag.load());
       shutdown_condvar.signal();
     }
   }
@@ -1391,7 +1391,7 @@ namespace Realm {
       host_startup_condvar.wait();
     }
 
-    shutdown_flag = true;
+    shutdown_flag.store(true);
     // setting the shutdown flag adds "work" to the system
     work_counter.increment_counter();
 
@@ -1446,7 +1446,7 @@ namespace Realm {
       Thread::user_switch(worker);
       do_user_thread_cleanup();
 
-      if(shutdown_flag)
+      if(shutdown_flag.load())
 	break;
 
       // getting here is unexpected
@@ -1534,7 +1534,7 @@ namespace Realm {
 
     // terminating is like sleeping, except you are allowed to terminate to "nobody" when
     //  shutting down
-    assert((switch_to != 0) || shutdown_flag);
+    assert((switch_to != 0) || shutdown_flag.load());
 
 #ifdef DEBUG_THREAD_SCHEDULER
     printf("terminate: %p -> %p\n", Thread::self(), switch_to);

@@ -397,9 +397,6 @@ namespace Legion {
       void process_task(const ProfilingInfo *info,
             const Realm::ProfilingResponse &response,
             const Realm::ProfilingMeasurements::OperationProcessorUsage &usage);
-      void process_gpu_task(const ProfilingInfo *info,
-            const Realm::ProfilingResponse &response,
-            const Realm::ProfilingMeasurements::OperationProcessorUsage &usage);
       void process_meta(const ProfilingInfo *info,
             const Realm::ProfilingResponse &response,
             const Realm::ProfilingMeasurements::OperationProcessorUsage &usage);
@@ -486,7 +483,6 @@ namespace Legion {
         LEGION_PROF_FILL,
         LEGION_PROF_INST,
         LEGION_PROF_PARTITION,
-        LEGION_PROF_GPU_TASK,
         LEGION_PROF_LAST,
       };
       struct ProfilingInfo : public LegionProfInstance::ProfilingInfo {
@@ -528,10 +524,8 @@ namespace Legion {
       void register_multi_task(Operation *op, TaskID task_id);
       void register_slice_owner(UniqueID pid, UniqueID id);
     public:
-      void add_task_request(Realm::ProfilingRequestSet &requests, 
-                            TaskID tid, VariantID vid, SingleTask *task);
-      void add_gpu_task_request(Realm::ProfilingRequestSet &requests,
-                            TaskID tid, VariantID vid, SingleTask *task);
+      void add_task_request(Realm::ProfilingRequestSet &requests, TaskID tid, 
+                            VariantID vid, UniqueID task_uid, Processor p);
       void add_meta_request(Realm::ProfilingRequestSet &requests,
                             LgTaskID tid, Operation *op);
       void add_copy_request(Realm::ProfilingRequestSet &requests, 

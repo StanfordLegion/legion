@@ -5238,7 +5238,8 @@ namespace Legion {
     FieldAllocator Runtime::create_field_allocator(Context ctx,FieldSpace space)
     //--------------------------------------------------------------------------
     {
-      return FieldAllocator(ctx->create_field_allocator(space));
+      return FieldAllocator(
+          ctx->create_field_allocator(space, false/*unordered*/));
     }
 
     //--------------------------------------------------------------------------
@@ -6426,10 +6427,11 @@ namespace Legion {
 #endif
 
     //--------------------------------------------------------------------------
-    /*static*/ int Runtime::start(int argc, char **argv, bool background)
+    /*static*/ int Runtime::start(int argc, char **argv, bool background,
+                                  bool default_mapper)
     //--------------------------------------------------------------------------
     {
-      return Internal::Runtime::start(argc, argv, background);
+      return Internal::Runtime::start(argc, argv, background, default_mapper);
     }
 
     //--------------------------------------------------------------------------

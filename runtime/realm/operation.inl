@@ -47,12 +47,12 @@ namespace Realm {
 
   inline void Operation::add_reference(void)
   {
-    refcount.fetch_add(1);
+    refcount.fetch_add_acqrel(1);
   }
 
   inline void Operation::remove_reference(void)
   {
-    int left = refcount.fetch_sub(1) - 1;
+    int left = refcount.fetch_sub_acqrel(1) - 1;
     if(left == 0)
       delete this;
   }
@@ -63,7 +63,7 @@ namespace Realm {
   inline void Operation::add_async_work_item(AsyncWorkItem *item)
   {
     // NO lock taken
-    pending_work_items.fetch_add(1);
+    pending_work_items.fetch_add_acqrel(1);
     all_work_items.insert(item);
   }
 
@@ -76,7 +76,7 @@ namespace Realm {
 
     // no per-work-item data to record, so just decrement the count, and if it goes
     //  to zero, we're complete
-    int remaining = pending_work_items.fetch_sub(1) - 1;
+    int remaining = pending_work_items.fetch_sub_acqrel(1) - 1;
 
     if(remaining == 0) {
       mark_completed();

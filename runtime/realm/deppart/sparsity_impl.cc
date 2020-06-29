@@ -354,7 +354,7 @@ namespace Realm {
 	if(a.lo[dim_order[i]] < b.lo[dim_order[i]]) return true;
 	if(a.lo[dim_order[i]] > b.lo[dim_order[i]]) return false;
       }
-      return true;
+      return false;
     }
   protected:
     const int *dim_order;

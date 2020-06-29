@@ -1288,7 +1288,7 @@ namespace Realm {
 			STATE_BASE_RSRV | STATE_BASE_RSRV_WAITING)) == 0) &&
 	 !sleeping_writer) {
 	if((cur_state & (STATE_WRITER | STATE_WRITER_WAITING)) == 0) {
-	  State prev_state = state.fetch_add(1);
+	  State prev_state = state.fetch_add_acqrel(1);
 	  if((prev_state & ~(STATE_SLEEPER | STATE_READER_COUNT_MASK)) == 0) {
 	    // no conflicts - we have the lock
 	    return Event::NO_EVENT;
@@ -1432,7 +1432,7 @@ namespace Realm {
       // if the only thing present is (potentially sleeping) readers, attempt to
       //  increment the count (this prevents cache-fighting with writers)
       if((cur_state & ~(STATE_SLEEPER | STATE_READER_COUNT_MASK)) == 0) {
-	State prev_state = state.fetch_add(1);
+	State prev_state = state.fetch_add_acqrel(1);
 	if((prev_state & ~(STATE_SLEEPER | STATE_READER_COUNT_MASK)) == 0) {
 	  // no conflicts - we have the lock
 	  return true;
@@ -1504,7 +1504,7 @@ namespace Realm {
       }
 
       // now we can clear the WRITER bit and finish
-      state.fetch_sub(STATE_WRITER);
+      state.fetch_sub_acqrel(STATE_WRITER);
     } else {
       // we'd better be a reader then
       unsigned reader_count = (cur_state & STATE_READER_COUNT_MASK);
@@ -1523,7 +1523,7 @@ namespace Realm {
       }
 
       // finally, decrement the read count
-      state.fetch_sub(1);
+      state.fetch_sub_acqrel(1);
     }
 
     frs.mutex.unlock();

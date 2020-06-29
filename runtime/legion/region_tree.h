@@ -357,7 +357,7 @@ namespace Legion {
                                    ShardMapping *shard_mapping = NULL);
       void destroy_field_space(FieldSpace handle, std::set<RtEvent> &applied,
                                const bool total_sharding_collective = false);
-      void create_field_space_allocator(FieldSpace handle, 
+      RtEvent create_field_space_allocator(FieldSpace handle, 
                                         bool sharded_owner_context = false,
                                         bool owner_shard = false);
       void destroy_field_space_allocator(FieldSpace handle,
@@ -3024,21 +3024,20 @@ namespace Legion {
       struct FieldInfo {
       public:
         FieldInfo(void) : field_size(0), idx(0), serdez_id(0),
-                          destroyed(false), local(false) { }
+                          collective(false), local(false) { }
         FieldInfo(size_t size, unsigned id, CustomSerdezID sid, 
                   bool loc = false, bool collect = false)
           : field_size(size), idx(id), serdez_id(sid), 
-            destroyed(false), collective(collect), local(loc) { }
+            collective(collect), local(loc) { }
         FieldInfo(ApEvent ready, unsigned id, CustomSerdezID sid,
                   bool loc = false, bool collect = false)
           : field_size(0), size_ready(ready), idx(id), serdez_id(sid), 
-            destroyed(false), collective(collect), local(loc) { }
+            collective(collect), local(loc) { }
       public:
         size_t field_size;
         ApEvent size_ready;
         unsigned idx;
         CustomSerdezID serdez_id;
-        bool destroyed;
         bool collective;
         bool local;
       };

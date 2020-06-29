@@ -8001,13 +8001,22 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DeletionOp::initialize_field_deletion(InnerContext *ctx, 
-                           FieldSpace handle, FieldID fid, const bool unordered)
+                                  FieldSpace handle, FieldID fid, 
+                                  const bool unordered,FieldAllocatorImpl *impl)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+      assert(allocator == NULL);
+#endif
       initialize_operation(ctx, !unordered/*track*/);
       kind = FIELD_DELETION;
       field_space = handle;
       free_fields.insert(fid);
+      // Hold a reference to the allocator to keep it alive until
+      // we are done performing the field deletion
+      allocator = impl;
+      allocator->add_reference();
       if (runtime->legion_spy_enabled)
         LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
                                           unique_op_id);
@@ -8015,13 +8024,22 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DeletionOp::initialize_field_deletions(InnerContext *ctx,
-      FieldSpace handle, const std::set<FieldID> &to_free, const bool unordered)
+                            FieldSpace handle, const std::set<FieldID> &to_free,
+                            const bool unordered, FieldAllocatorImpl *impl)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+      assert(allocator == NULL);
+#endif
       initialize_operation(ctx, !unordered/*track*/);
       kind = FIELD_DELETION;
       field_space = handle;
       free_fields = to_free; 
+      // Hold a reference to the allocator to keep it alive until
+      // we are done performing the field deletion
+      allocator = impl;
+      allocator->add_reference();
       if (runtime->legion_spy_enabled)
         LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
                                           unique_op_id);
@@ -8052,6 +8070,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_operation();
+      allocator = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -8067,6 +8086,10 @@ namespace Legion {
     void DeletionOp::deactivate_deletion(void)
     //--------------------------------------------------------------------------
     {
+      // We can remove the reference to the allocator once we are
+      // done with all of our free operations
+      if ((allocator != NULL) && allocator->remove_reference())
+        delete allocator;
       deactivate_operation();
       sub_partitions.clear();
       free_fields.clear();
@@ -8147,7 +8170,7 @@ namespace Legion {
       // who came before, although we will never actually record ourselves
       // as a mapping fence since we want operations that come after us to
       // be re-ordered up above us. We need this upward facing fence though
-      // to ensure that all tasks are done above use before we do delete
+      // to ensure that all tasks are done above us before we do delete
       // any internal data structures associated with these resources
       execution_precondition = parent_ctx->perform_fence_analysis(this, 
                                     true/*mapping*/, true/*execution*/);
@@ -8242,6 +8265,10 @@ namespace Legion {
         for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
           runtime->forest->invalidate_fields(this, idx, version_infos[idx],
               PhysicalTraceInfo(trace_info, idx), map_applied_conditions);
+        // make sure that we don't try to do the deletion calls until
+        // after the allocator is ready
+        if (allocator->ready_event.exists())
+          map_applied_conditions.insert(allocator->ready_event);
       }
       // Mark that we're done mapping and defer the execution as appropriate
       if (!map_applied_conditions.empty())
@@ -8313,7 +8340,7 @@ namespace Legion {
               parent_ctx->remove_deleted_local_fields(field_space,local_fields);
             if (!deletion_req_indexes.empty())
               parent_ctx->remove_deleted_requirements(deletion_req_indexes,
-                                                      regions_to_destroy);
+                                                      regions_to_destroy); 
             break;
           }
         case LOGICAL_REGION_DELETION:

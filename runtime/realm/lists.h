@@ -18,6 +18,8 @@
 #ifndef REALM_LISTS_H
 #define REALM_LISTS_H
 
+#include "realm/atomics.h"
+
 namespace Realm {
 
 #ifdef DEBUG_REALM

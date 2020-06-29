@@ -508,8 +508,9 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    FieldAllocatorImpl::FieldAllocatorImpl(FieldSpace space, TaskContext *ctx)
-      : field_space(space), context(ctx)
+    FieldAllocatorImpl::FieldAllocatorImpl(FieldSpace space, TaskContext *ctx,
+                                           RtEvent ready)
+      : field_space(space), context(ctx), ready_event(ready)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -521,7 +522,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FieldAllocatorImpl::FieldAllocatorImpl(const FieldAllocatorImpl &rhs)
-      : field_space(rhs.field_space), context(rhs.context)
+      : field_space(rhs.field_space), context(rhs.context), 
+        ready_event(rhs.ready_event)
     //--------------------------------------------------------------------------
     {
       // Should never be called
@@ -554,6 +556,9 @@ namespace Legion {
                                                bool local)
     //--------------------------------------------------------------------------
     {
+      // Need to wait for this allocator to be ready
+      if (ready_event.exists() && !ready_event.has_triggered())
+        ready_event.wait();
       return context->allocate_field(field_space, field_size, desired_fieldid,
                                      local, serdez_id);
     }
@@ -565,7 +570,10 @@ namespace Legion {
                                                bool local)
     //--------------------------------------------------------------------------
     {
-      return context->allocate_field(field_space, field_size, desired_fieldid,
+      // Need to wait for this allocator to be ready
+      if (ready_event.exists() && !ready_event.has_triggered())
+        ready_event.wait();
+      return context->allocate_field(field_space, field_size, desired_fieldid, 
                                      local, serdez_id);
     }
 
@@ -573,7 +581,9 @@ namespace Legion {
     void FieldAllocatorImpl::free_field(FieldID fid, const bool unordered)
     //--------------------------------------------------------------------------
     {
-      context->free_field(field_space, fid, unordered);
+      // Don't need to wait here since deletion operations catch
+      // dependences on the allocator themselves
+      context->free_field(this, field_space, fid, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -583,6 +593,9 @@ namespace Legion {
                                         CustomSerdezID serdez_id, bool local)
     //--------------------------------------------------------------------------
     {
+      // Need to wait for this allocator to be ready
+      if (ready_event.exists() && !ready_event.has_triggered())
+        ready_event.wait();
       context->allocate_fields(field_space, field_sizes, resulting_fields,
                                local, serdez_id);
     }
@@ -594,7 +607,10 @@ namespace Legion {
                                         CustomSerdezID serdez_id, bool local)
     //--------------------------------------------------------------------------
     {
-      context->allocate_fields(field_space, field_sizes, resulting_fields,
+      // Need to wait for this allocator to be ready
+      if (ready_event.exists() && !ready_event.has_triggered())
+        ready_event.wait();
+      context->allocate_fields(field_space, field_sizes, resulting_fields, 
                                local, serdez_id);
     }
 
@@ -603,7 +619,9 @@ namespace Legion {
                                          const bool unordered)
     //--------------------------------------------------------------------------
     {
-      context->free_fields(field_space, to_free, unordered);
+      // Don't need to wait here since deletion operations catch
+      // dependences on the allocator themselves
+      context->free_fields(this, field_space, to_free, unordered);
     }
 
     /////////////////////////////////////////////////////////////
@@ -4165,12 +4183,14 @@ namespace Legion {
       AutoLock m_lock(mapper_lock);
       std::map<MapperID,std::pair<MapperManager*,bool> >::iterator finder = 
         mappers.find(0);
-#ifdef DEBUG_LEGION
-      assert(finder != mappers.end());
-#endif
-      if (finder->second.second)
-        delete finder->second.first;
-      finder->second = std::pair<MapperManager*,bool>(m, own);
+      if (finder != mappers.end())
+      {
+        if (finder->second.second)
+          delete finder->second.first;
+        finder->second = std::pair<MapperManager*,bool>(m, own);
+      }
+      else
+        mappers[0] = std::pair<MapperManager*,bool>(m, own);
     }
 
     //--------------------------------------------------------------------------
@@ -10840,13 +10860,8 @@ namespace Legion {
 #endif
       // Add any profiling requests
       if (runtime->profiler != NULL)
-      {
-        if (target.kind() == Processor::TOC_PROC)
-          runtime->profiler->add_gpu_task_request(requests, owner->task_id, 
-                                                  vid, task);
-        else
-          runtime->profiler->add_task_request(requests,owner->task_id,vid,task);
-      }
+        runtime->profiler->add_task_request(requests, owner->task_id, vid,
+                                            task->get_unique_op_id(), target);
       // Increment the number of outstanding tasks
 #ifdef DEBUG_LEGION
       runtime->increment_total_outstanding_tasks(task->task_id, false/*meta*/);
@@ -12559,7 +12574,8 @@ namespace Legion {
                      const std::set<Processor> &locals,
                      const std::set<Processor> &local_utilities,
                      const std::set<AddressSpaceID> &address_spaces,
-                     const std::map<Processor,AddressSpaceID> &processor_spaces)
+                     const std::map<Processor,AddressSpaceID> &processor_spaces,
+                     bool default_mapper)
       : external(new Legion::Runtime(this)),
         mapper_runtime(new Legion::Mapping::MapperRuntime()),
         machine(m), address_space(unique), 
@@ -12605,6 +12621,7 @@ namespace Legion {
 #else
         legion_spy_enabled(config.legion_spy_enabled),
 #endif
+        supply_default_mapper(default_mapper),
         enable_test_mapper(config.enable_test_mapper),
         legion_ldb_enabled(!config.ldb_file.empty()),
         replay_file(legion_ldb_enabled ? config.ldb_file : config.replay_file),
@@ -12800,6 +12817,7 @@ namespace Legion {
         unsafe_mapper(rhs.unsafe_mapper),
         disable_independence_tests(rhs.disable_independence_tests),
         legion_spy_enabled(rhs.legion_spy_enabled),
+        supply_default_mapper(rhs.supply_default_mapper),
         enable_test_mapper(rhs.enable_test_mapper),
         legion_ldb_enabled(rhs.legion_ldb_enabled),
         replay_file(rhs.replay_file),
@@ -13683,7 +13701,7 @@ namespace Legion {
             it->second->add_mapper(0, wrapper, false/*check*/, true/*owns*/);
           }
         }
-        else
+        else if (supply_default_mapper)
         {
           // Make default mappers for everyone
           for (std::map<Processor,ProcessorManager*>::const_iterator it = 
@@ -24980,7 +24998,8 @@ namespace Legion {
     /*static*/ int Runtime::mpi_rank = -1;
 
     //--------------------------------------------------------------------------
-    /*static*/ int Runtime::start(int argc, char **argv, bool background)
+    /*static*/ int Runtime::start(int argc, char **argv, bool background,
+                                  bool supply_default_mapper)
     //--------------------------------------------------------------------------
     {
       // Some static asserts that need to hold true for the runtime to work
@@ -25029,7 +25048,7 @@ namespace Legion {
       // Construct our runtime objects 
       Processor::Kind startup_kind = Processor::NO_KIND;
       const RtEvent tasks_registered = configure_runtime(argc, argv,
-                            config, realm, startup_kind, background);
+          config, realm, startup_kind, background, supply_default_mapper);
 #ifdef DEBUG_LEGION
       // Startup kind should be a CPU or a Utility processor
       assert((startup_kind == Processor::LOC_PROC) ||
@@ -25635,7 +25654,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     /*static*/ RtEvent Runtime::configure_runtime(int argc, char **argv,
                          const LegionConfiguration &config, RealmRuntime &realm,
-                         Processor::Kind &startup_kind, bool background)
+                         Processor::Kind &startup_kind, bool background,
+                         bool supply_default_mapper)
     //--------------------------------------------------------------------------
     {
       // Do some error checking in case we are running with separate instances
@@ -25721,7 +25741,8 @@ namespace Legion {
           Runtime *runtime = new Runtime(machine, config, background,
                                          input_args, local_space,
                                          fake_local_procs, local_util_procs,
-                                         address_spaces, proc_spaces);
+                                         address_spaces, proc_spaces,
+                                         supply_default_mapper);
           processor_mapping[*it] = runtime;
           // Save the the_runtime as the first one we make
           // just so that things will work in the multi-processor case
@@ -25750,7 +25771,8 @@ namespace Legion {
         Runtime *runtime = new Runtime(machine, config, background,
                                        input_args, local_space,
                                        local_procs, local_util_procs,
-                                       address_spaces, proc_spaces);
+                                       address_spaces, proc_spaces,
+                                       supply_default_mapper);
         // Save THE runtime 
         the_runtime = runtime;
         for (std::set<Processor>::const_iterator it = 

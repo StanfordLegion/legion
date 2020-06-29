@@ -2339,6 +2339,10 @@ namespace Legion {
                 PhysicalTraceInfo(trace_info, idx), map_applied_conditions, 
                 is_total_sharding/*collective*/);
         }
+        // make sure that we don't try to do the deletion calls until
+        // after the allocator is ready
+        if (allocator->ready_event.exists())
+          map_applied_conditions.insert(allocator->ready_event);
         if (!map_applied_conditions.empty())
           Runtime::phase_barrier_arrive(mapping_barrier, 1/*count*/,
               Runtime::merge_events(map_applied_conditions));
