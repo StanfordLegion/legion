@@ -139,7 +139,7 @@ namespace Legion {
      */
     class FieldAllocatorImpl : public Collectable {
     public:
-      FieldAllocatorImpl(FieldSpace space, TaskContext *context);
+      FieldAllocatorImpl(FieldSpace space, TaskContext *context, RtEvent ready);
       FieldAllocatorImpl(const FieldAllocatorImpl &rhs);
       ~FieldAllocatorImpl(void);
     public:
@@ -165,6 +165,7 @@ namespace Legion {
     public:
       const FieldSpace field_space;
       TaskContext *const context;
+      const RtEvent ready_event;
     };
 
     /**

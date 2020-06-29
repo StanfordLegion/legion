@@ -320,8 +320,9 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    FieldAllocatorImpl::FieldAllocatorImpl(FieldSpace space, TaskContext *ctx)
-      : field_space(space), context(ctx)
+    FieldAllocatorImpl::FieldAllocatorImpl(FieldSpace space, TaskContext *ctx,
+                                           RtEvent ready)
+      : field_space(space), context(ctx), ready_event(ready)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -333,7 +334,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FieldAllocatorImpl::FieldAllocatorImpl(const FieldAllocatorImpl &rhs)
-      : field_space(rhs.field_space), context(rhs.context)
+      : field_space(rhs.field_space), context(rhs.context), 
+        ready_event(rhs.ready_event)
     //--------------------------------------------------------------------------
     {
       // Should never be called
@@ -366,6 +368,9 @@ namespace Legion {
                                                bool local)
     //--------------------------------------------------------------------------
     {
+      // Need to wait for this allocator to be ready
+      if (ready_event.exists() && !ready_event.has_triggered())
+        ready_event.wait();
       return context->allocate_field(field_space, field_size, desired_fieldid,
                                      local, serdez_id);
     }
@@ -377,7 +382,10 @@ namespace Legion {
                                                bool local)
     //--------------------------------------------------------------------------
     {
-      return context->allocate_field(field_space, field_size, desired_fieldid,
+      // Need to wait for this allocator to be ready
+      if (ready_event.exists() && !ready_event.has_triggered())
+        ready_event.wait();
+      return context->allocate_field(field_space, field_size, desired_fieldid, 
                                      local, serdez_id);
     }
 
@@ -385,7 +393,9 @@ namespace Legion {
     void FieldAllocatorImpl::free_field(FieldID fid, const bool unordered)
     //--------------------------------------------------------------------------
     {
-      context->free_field(field_space, fid, unordered);
+      // Don't need to wait here since deletion operations catch
+      // dependences on the allocator themselves
+      context->free_field(this, field_space, fid, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -395,6 +405,9 @@ namespace Legion {
                                         CustomSerdezID serdez_id, bool local)
     //--------------------------------------------------------------------------
     {
+      // Need to wait for this allocator to be ready
+      if (ready_event.exists() && !ready_event.has_triggered())
+        ready_event.wait();
       context->allocate_fields(field_space, field_sizes, resulting_fields,
                                local, serdez_id);
     }
@@ -406,7 +419,10 @@ namespace Legion {
                                         CustomSerdezID serdez_id, bool local)
     //--------------------------------------------------------------------------
     {
-      context->allocate_fields(field_space, field_sizes, resulting_fields,
+      // Need to wait for this allocator to be ready
+      if (ready_event.exists() && !ready_event.has_triggered())
+        ready_event.wait();
+      context->allocate_fields(field_space, field_sizes, resulting_fields, 
                                local, serdez_id);
     }
 
@@ -415,7 +431,9 @@ namespace Legion {
                                          const bool unordered)
     //--------------------------------------------------------------------------
     {
-      context->free_fields(field_space, to_free, unordered);
+      // Don't need to wait here since deletion operations catch
+      // dependences on the allocator themselves
+      context->free_fields(this, field_space, to_free, unordered);
     }
 
     /////////////////////////////////////////////////////////////

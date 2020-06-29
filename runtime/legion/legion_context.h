@@ -283,8 +283,8 @@ namespace Legion {
                                      FieldSpace space, size_t field_size,
                                      FieldID fid, CustomSerdezID serdez_id,
                                      std::set<RtEvent> &done_events) = 0;
-      virtual void free_field(FieldSpace space, FieldID fid,
-                              const bool unordered) = 0;
+      virtual void free_field(FieldAllocatorImpl *allocator, FieldSpace space, 
+                              FieldID fid, const bool unordered) = 0;
       virtual void allocate_fields(FieldSpace space,
                                    const std::vector<size_t> &sizes,
                                    std::vector<FieldID> &resuling_fields,
@@ -298,7 +298,7 @@ namespace Legion {
                                    const std::vector<FieldID> &resuling_fields,
                                    CustomSerdezID serdez_id,
                                    std::set<RtEvent> &done_events) = 0;
-      virtual void free_fields(FieldSpace space, 
+      virtual void free_fields(FieldAllocatorImpl *allocator, FieldSpace space, 
                                const std::set<FieldID> &to_free,
                                const bool unordered) = 0; 
       virtual LogicalRegion create_logical_region(RegionTreeForest *forest,
@@ -1019,9 +1019,9 @@ namespace Legion {
                                    const std::vector<FieldID> &resuling_fields,
                                    CustomSerdezID serdez_id,
                                    std::set<RtEvent> &done_events);
-      virtual void free_field(FieldSpace space, FieldID fid,
-                              const bool unordered);
-      virtual void free_fields(FieldSpace space, 
+      virtual void free_field(FieldAllocatorImpl *allocator, FieldSpace space, 
+                              FieldID fid, const bool unordered);
+      virtual void free_fields(FieldAllocatorImpl *allocator, FieldSpace space,
                                const std::set<FieldID> &to_free,
                                const bool unordered);
       virtual void destroy_logical_region(LogicalRegion handle,
@@ -1678,9 +1678,9 @@ namespace Legion {
                                    const std::vector<FieldID> &resuling_fields,
                                    CustomSerdezID serdez_id,
                                    std::set<RtEvent> &done_events);
-      virtual void free_field(FieldSpace space, FieldID fid, 
-                              const bool unordered);
-      virtual void free_fields(FieldSpace space, 
+      virtual void free_field(FieldAllocatorImpl *allocator, FieldSpace space, 
+                              FieldID fid, const bool unordered);
+      virtual void free_fields(FieldAllocatorImpl *allocator, FieldSpace space,
                                const std::set<FieldID> &to_free,
                                const bool unordered);
       virtual void destroy_logical_region(LogicalRegion handle,
@@ -2024,13 +2024,13 @@ namespace Legion {
       virtual FieldID allocate_field(FieldSpace space, const Future &field_size,
                                      FieldID fid, bool local,
                                      CustomSerdezID serdez_id);
-      virtual void free_field(FieldSpace space, FieldID fid,
-                              const bool unordered);
+      virtual void free_field(FieldAllocatorImpl *allocator, FieldSpace space, 
+                              FieldID fid, const bool unordered);
       virtual void allocate_fields(FieldSpace space,
                                    const std::vector<size_t> &sizes,
                                    std::vector<FieldID> &resuling_fields,
                                    bool local, CustomSerdezID serdez_id);
-      virtual void free_fields(FieldSpace space, 
+      virtual void free_fields(FieldAllocatorImpl *allocator, FieldSpace space,
                                const std::set<FieldID> &to_free,
                                const bool unordered);
       virtual void allocate_local_field(FieldSpace space, size_t field_size,

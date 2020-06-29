@@ -450,20 +450,28 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      // Check to see if we still have one
+      {
+        AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
+        std::map<FieldSpace,FieldAllocatorImpl*>::const_iterator finder = 
+          field_allocators.find(handle);
+        if (finder != field_allocators.end())
+          return finder->second;
+      }
+      // Didn't find it, so have to make, retake the lock in exclusive mode
+      AutoLock priv_lock(privilege_lock);
+      // Check to see if we lost the race
       std::map<FieldSpace,FieldAllocatorImpl*>::const_iterator finder = 
         field_allocators.find(handle);
-      if (finder == field_allocators.end())
-      {
-        runtime->forest->create_field_space_allocator(handle);
-        // Don't have one so make a new one
-        FieldAllocatorImpl *result = new FieldAllocatorImpl(handle, this); 
-        // Save it for later
-        field_allocators[handle] = result;
-        return result;
-      }
-      else
+      if (finder != field_allocators.end())
         return finder->second;
+      // Otherwise we can make it
+      const RtEvent ready = 
+        runtime->forest->create_field_space_allocator(handle);
+      // Don't have one so make a new one
+      FieldAllocatorImpl *result = new FieldAllocatorImpl(handle,this,ready); 
+      // Save it for later
+      field_allocators[handle] = result;
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -471,14 +479,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      // Check to see if we still have one
+      runtime->forest->destroy_field_space_allocator(handle);
+      AutoLock priv_lock(privilege_lock);
       std::map<FieldSpace,FieldAllocatorImpl*>::iterator finder = 
         field_allocators.find(handle);
 #ifdef DEBUG_LEGION
       assert(finder != field_allocators.end());
 #endif
       field_allocators.erase(finder);
-      runtime->forest->destroy_field_space_allocator(handle);
     }
 
     //--------------------------------------------------------------------------
@@ -2981,8 +2989,9 @@ namespace Legion {
               delete_now.begin(); it != delete_now.end(); it++)
         {
           DeletionOp *op = runtime->get_available_deletion_op();
+          FieldAllocatorImpl *allocator = create_field_allocator(it->first);
           op->initialize_field_deletions(this, it->first, it->second, 
-                                         true/*unordered*/);
+                                         true/*unordered*/, allocator);
           op->set_execution_precondition(precondition);
           preconditions.insert(
               Runtime::protect_event(op->get_completion_event()));
@@ -5503,8 +5512,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::free_field(FieldSpace space, FieldID fid,
-                                  const bool unordered)
+    void InnerContext::free_field(FieldAllocatorImpl *allocator, 
+                            FieldSpace space, FieldID fid, const bool unordered)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -5533,12 +5542,13 @@ namespace Legion {
       }
       // Launch off the deletion operation
       DeletionOp *op = runtime->get_available_deletion_op();
-      op->initialize_field_deletion(this, space, fid, unordered);
+      op->initialize_field_deletion(this, space, fid, unordered, allocator);
       add_to_dependence_queue(op, unordered);
     } 
 
     //--------------------------------------------------------------------------
-    void InnerContext::free_fields(FieldSpace space, 
+    void InnerContext::free_fields(FieldAllocatorImpl *allocator, 
+                                   FieldSpace space,
                                    const std::set<FieldID> &to_free,
                                    const bool unordered)
     //--------------------------------------------------------------------------
@@ -5578,7 +5588,7 @@ namespace Legion {
       if (free_now.empty())
         return;
       DeletionOp *op = runtime->get_available_deletion_op();
-      op->initialize_field_deletions(this, space, free_now, unordered);
+      op->initialize_field_deletions(this, space, free_now,unordered,allocator);
       add_to_dependence_queue(op, unordered);
     }
 
@@ -8576,7 +8586,10 @@ namespace Legion {
         for (std::map<FieldSpace,std::set<FieldID> >::const_iterator it = 
               local_fields_to_delete.begin(); it !=
               local_fields_to_delete.end(); it++)
-          free_fields(it->first, it->second, false/*unordered*/);
+        {
+          FieldAllocatorImpl *allocator = create_field_allocator(it->first);
+          free_fields(allocator, it->first, it->second, false/*unordered*/);
+        }
       }
       if (!index_launch_spaces.empty())
       {
@@ -10573,8 +10586,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::free_field(FieldSpace space, FieldID fid,
-                                 const bool unordered)
+    void LeafContext::free_field(FieldAllocatorImpl *allocator,FieldSpace space, 
+                                 FieldID fid, const bool unordered)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -10596,6 +10609,10 @@ namespace Legion {
             "or one of its ancestor tasks. Field deallocations must be " 
             "lexicographically scoped by the task tree.", fid, space.id,
             get_task_name(), get_unique_id())
+      // If the allocator is not ready we need to wait for it here
+      if (allocator->ready_event.exists() && 
+          !allocator->ready_event.has_triggered())
+        allocator->ready_event.wait();
       // We can free this field immediately
       std::set<RtEvent> preconditions;
       runtime->forest->free_field(space, fid, preconditions);
@@ -10607,7 +10624,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::free_fields(FieldSpace space, 
+    void LeafContext::free_fields(FieldAllocatorImpl *allocator, 
+                                  FieldSpace space, 
                                   const std::set<FieldID> &to_free,
                                   const bool unordered)
     //--------------------------------------------------------------------------
@@ -10640,6 +10658,10 @@ namespace Legion {
             "or one of its ancestor tasks. Field deallocations must be " 
             "lexicographically scoped by the task tree.", bad_fid, space.id,
             get_task_name(), get_unique_id())
+      // If the allocator is not ready we need to wait for it here
+      if (allocator->ready_event.exists() && 
+          !allocator->ready_event.has_triggered())
+        allocator->ready_event.wait();
       // We can free these fields immediately
       std::set<RtEvent> preconditions;
       const std::vector<FieldID> field_vec(to_free.begin(), to_free.end());
@@ -12153,11 +12175,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InlineContext::free_field(FieldSpace space, FieldID fid,
-                                   const bool unordered)
+    void InlineContext::free_field(FieldAllocatorImpl *allocator, 
+                            FieldSpace space, FieldID fid, const bool unordered)
     //--------------------------------------------------------------------------
     {
-      enclosing->free_field(space, fid, unordered);
+      enclosing->free_field(allocator, space, fid, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -12171,12 +12193,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InlineContext::free_fields(FieldSpace space, 
+    void InlineContext::free_fields(FieldAllocatorImpl *allocator, 
+                                    FieldSpace space, 
                                     const std::set<FieldID> &to_free,
                                     const bool unordered)
     //--------------------------------------------------------------------------
     {
-      enclosing->free_fields(space, to_free, unordered);
+      enclosing->free_fields(allocator, space, to_free, unordered);
     }
 
     //--------------------------------------------------------------------------
