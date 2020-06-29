@@ -3701,6 +3701,13 @@ namespace Legion {
       virtual ShardID shard(const DomainPoint &point,
                             const Domain &full_space,
                             const size_t total_shards) = 0;
+    public:
+      virtual bool is_invertible(void) const { return false; }
+      virtual void invert(ShardID shard,
+                          const Domain &shard_domain,
+                          const Domain &full_domain,
+                          const size_t total_shards,
+                          std::vector<DomainPoint> &points) { }
     };
 
     /**
