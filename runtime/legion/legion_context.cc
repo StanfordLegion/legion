@@ -13804,7 +13804,6 @@ namespace Legion {
           result = owner_finder->second;
           
           field_allocator_owner_shards.erase(owner_finder);
-          field_allocators.erase(finder);
         }
       }
       if (found)
