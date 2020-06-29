@@ -5308,7 +5308,7 @@ namespace Legion {
       else
         shard_domain = local_space;
       std::vector<Realm::Point<DIM,T> > shard_points; 
-      if (func->functor->is_invertible())
+      if (!func->functor->is_invertible())
       {
         for (Realm::IndexSpaceIterator<DIM,T> rect_itr(local_space); 
               rect_itr.valid; rect_itr.step())
