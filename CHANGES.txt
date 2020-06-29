@@ -1,7 +1,7 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
-Version 20.06.0 (June ??, 2020)
+Version 20.06.0 (June 29, 2020)
   * Regent
     - Support for `std/format` module for type-safe formatted printing
     - Support for documentation with LDoc
