@@ -6439,10 +6439,11 @@ namespace Legion {
 #endif
 
     //--------------------------------------------------------------------------
-    /*static*/ int Runtime::start(int argc, char **argv, bool background)
+    /*static*/ int Runtime::start(int argc, char **argv, bool background,
+                                  bool default_mapper)
     //--------------------------------------------------------------------------
     {
-      return Internal::Runtime::start(argc, argv, background);
+      return Internal::Runtime::start(argc, argv, background, default_mapper);
     }
 
     //--------------------------------------------------------------------------

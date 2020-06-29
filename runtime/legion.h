@@ -3828,6 +3828,13 @@ namespace Legion {
       virtual ShardID shard(const DomainPoint &point,
                             const Domain &full_space,
                             const size_t total_shards) = 0;
+    public:
+      virtual bool is_invertible(void) const { return false; }
+      virtual void invert(ShardID shard,
+                          const Domain &shard_domain,
+                          const Domain &full_domain,
+                          const size_t total_shards,
+                          std::vector<DomainPoint> &points) { }
     };
 
     /**
@@ -7848,9 +7855,12 @@ namespace Legion {
        * @param argc the number of input arguments
        * @param argv pointer to an array of string arguments of size argc
        * @param background whether to execute the runtime in the background
+       * @param supply_default_mapper whether the runtime should initialize
+       *              the default mapper for use by the application
        * @return only if running in background, otherwise never
        */
-      static int start(int argc, char **argv, bool background = false);
+      static int start(int argc, char **argv, bool background = false,
+                       bool supply_default_mapper = true);
 
       /**
        * This 'initialize' method is an optional method that provides

@@ -99,9 +99,9 @@ namespace Realm {
     //  still observe lack of writer/rsrv contention (we check first so that
     //  a pending writer doesn't get interference from new attempted readers)
     // note that a sleeper is ok, as long as it's a reader
-    State cur_state = (volatile const State&)state;
+    State cur_state = state.load();
     if(REALM_LIKELY((cur_state & ~(STATE_SLEEPER | STATE_READER_COUNT_MASK)) == 0)) {
-      State orig_state = state.fetch_add(1);
+      State orig_state = state.fetch_add_acqrel(1);
       if(REALM_LIKELY((orig_state & ~(STATE_SLEEPER | STATE_READER_COUNT_MASK)) == 0)) {
 	return Event::NO_EVENT;
       } else {
@@ -153,7 +153,7 @@ namespace Realm {
     // in both cases we compute the desired new state and do a compare/swap to
     //  avoid races with state changes that would take us off the fast path
 
-    State cur_state = (volatile const State&)state;
+    State cur_state = state.load();
 
     if((cur_state & STATE_WRITER) != 0) {
       if(REALM_LIKELY((cur_state & (STATE_READER_COUNT_MASK |
@@ -235,9 +235,9 @@ namespace Realm {
     //  still observe lack of writer/rsrv contention (we check first so that
     //  a pending writer doesn't get interference from new attempted readers)
     // note that a sleeper is ok, as long as it's a reader
-    State cur_state = (volatile const State&)state;
+    State cur_state = state.load();
     if(REALM_LIKELY((cur_state & ~(STATE_SLEEPER | STATE_READER_COUNT_MASK)) == 0)) {
-      State orig_state = state.fetch_add(1);
+      State orig_state = state.fetch_add_acqrel(1);
       if(REALM_LIKELY((orig_state & ~(STATE_SLEEPER | STATE_READER_COUNT_MASK)) == 0)) {
 	return true;
       } else {

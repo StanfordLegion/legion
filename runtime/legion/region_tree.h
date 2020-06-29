@@ -307,7 +307,7 @@ namespace Legion {
                               std::set<RtEvent> *applied = NULL);
       void destroy_field_space(FieldSpace handle,
                                std::set<RtEvent> &preconditions);
-      void create_field_space_allocator(FieldSpace handle);
+      RtEvent create_field_space_allocator(FieldSpace handle);
       void destroy_field_space_allocator(FieldSpace handle);
       // Return true if local is set to true and we actually performed the 
       // allocation.  It is an error if the field already existed and the
@@ -2848,20 +2848,17 @@ namespace Legion {
     public:
       struct FieldInfo {
       public:
-        FieldInfo(void) : field_size(0), idx(0), serdez_id(0),
-                          destroyed(false), local(false) { }
+        FieldInfo(void) : field_size(0), idx(0), serdez_id(0), local(false) { }
         FieldInfo(size_t size, unsigned id, CustomSerdezID sid, bool loc=false)
-          : field_size(size), idx(id), serdez_id(sid), 
-            destroyed(false), local(loc) { }
+          : field_size(size), idx(id), serdez_id(sid), local(loc) { }
         FieldInfo(ApEvent ready, unsigned id, CustomSerdezID sid,bool loc=false)
           : field_size(0), size_ready(ready), idx(id), serdez_id(sid), 
-            destroyed(false), local(loc) { }
+            local(loc) { }
       public:
         size_t field_size;
         ApEvent size_ready;
         unsigned idx;
         CustomSerdezID serdez_id;
-        bool destroyed;
         bool local;
       };
       struct FindTargetsFunctor {

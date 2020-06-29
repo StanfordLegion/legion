@@ -1557,10 +1557,12 @@ namespace Legion {
                                            FieldSpace handle,
                                            const bool unordered);
       void initialize_field_deletion(InnerContext *ctx, FieldSpace handle,
-                                     FieldID fid, const bool unordered);
+                                     FieldID fid, const bool unordered,
+                                     FieldAllocatorImpl *allocator);
       void initialize_field_deletions(InnerContext *ctx, FieldSpace handle,
                                       const std::set<FieldID> &to_free,
-                                      const bool unordered);
+                                      const bool unordered,
+                                      FieldAllocatorImpl *allocator);
       void initialize_logical_region_deletion(InnerContext *ctx, 
                                               LogicalRegion handle,
                                               const bool unordered);
@@ -1584,6 +1586,7 @@ namespace Legion {
       IndexPartition index_part;
       std::vector<IndexPartition> sub_partitions;
       FieldSpace field_space;
+      FieldAllocatorImpl *allocator;
       LogicalRegion logical_region;
       std::set<FieldID> free_fields;
       std::vector<FieldID> local_fields;

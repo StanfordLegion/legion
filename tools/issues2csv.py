@@ -79,6 +79,9 @@ for num in sorted(data['issues']):
     if args.label and not list_match(args.label, labels(i)):
         continue
 
+    if args.milestone and not list_match(args.milestone, milestones(i)):
+        continue
+
     cw.writerow(col_values[c](i) for c in args.columns)
 
 if args.output:
