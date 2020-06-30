@@ -6473,6 +6473,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    PhysicalManager* MemoryManager::create_shadow_instance(
+                                                       InstanceBuilder &builder)
+    //--------------------------------------------------------------------------
+    {
+      // Acquire allocation privilege before doing anything
+      const RtEvent wait_on = acquire_allocation_privilege();
+      if (wait_on.exists())
+        wait_on.wait();
+      // Try to make the result
+      PhysicalManager *manager = allocate_physical_instance(builder, 
+          NULL/*footprint*/, NULL/*unsat kind*/, NULL/*unsat index*/);
+      // Release our allocation privilege after doing the record
+      release_allocation_privilege();
+      return manager;
+    }
+
+    //--------------------------------------------------------------------------
     RtEvent MemoryManager::acquire_allocation_privilege(void)
     //--------------------------------------------------------------------------
     {
@@ -8051,6 +8068,19 @@ namespace Legion {
               runtime->handle_collective_instance_message(derez);
               break;
             }
+#ifdef LEGION_GPU_REDUCTIONS
+          case SEND_CREATE_SHADOW_REQUEST:
+            {
+              runtime->handle_create_shadow_reduction_request(derez, 
+                                              remote_address_space);
+              break;
+            }
+          case SEND_CREATE_SHADOW_RESPONSE:
+            {
+              runtime->handle_create_shadow_reduction_response(derez);
+              break;
+            }
+#endif
           case SEND_CREATE_TOP_VIEW_REQUEST:
             {
               runtime->handle_create_top_view_request(derez,
@@ -16449,6 +16479,26 @@ namespace Legion {
                                    REFERENCE_VIRTUAL_CHANNEL, true/*flush*/); 
     }
 
+#ifdef LEGION_GPU_REDUCTIONS
+    //--------------------------------------------------------------------------
+    void Runtime::send_create_shadow_reduction_request(AddressSpaceID target,
+                                                       Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_CREATE_SHADOW_REQUEST,
+                                    DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_create_shadow_reduction_response(AddressSpaceID target,
+                                                        Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_CREATE_SHADOW_RESPONSE,
+                  DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+#endif // LEGION_GPU_REDUCTIONS
+
     //--------------------------------------------------------------------------
     void Runtime::send_create_top_view_request(AddressSpaceID target,
                                                Serializer &rez)
@@ -18084,6 +18134,23 @@ namespace Legion {
     {
       CollectiveManager::handle_collective_message(derez, this);
     }
+
+#ifdef LEGION_GPU_REDUCTIONS
+    //--------------------------------------------------------------------------
+    void Runtime::handle_create_shadow_reduction_request(Deserializer &derez,
+                                                         AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      IndividualManager::handle_create_shadow_request(this, source, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_create_shadow_reduction_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      IndividualManager::handle_create_shadow_response(this, derez);
+    }
+#endif // LEGION_GPU_REDUCTIONS
 
     //--------------------------------------------------------------------------
     void Runtime::handle_create_top_view_request(Deserializer &derez,

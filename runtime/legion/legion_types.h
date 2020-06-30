@@ -757,6 +757,8 @@ namespace Legion {
       SEND_INSTANCE_MANAGER,
       SEND_COLLECTIVE_MANAGER,
       SEND_COLLECTIVE_MESSAGE,
+      SEND_CREATE_SHADOW_REQUEST,
+      SEND_CREATE_SHADOW_RESPONSE,
       SEND_CREATE_TOP_VIEW_REQUEST,
       SEND_CREATE_TOP_VIEW_RESPONSE,
       SEND_VIEW_REQUEST,
@@ -935,6 +937,8 @@ namespace Legion {
         "Send Instance Manager",                                      \
         "Send Collective Instance Manager",                           \
         "Send Collective Instance Message",                           \
+        "Send Create Shadow Reduction Instance Request",              \
+        "Send Create Shadow Reduction Instance Response",             \
         "Send Create Top View Request",                               \
         "Send Create Top View Response",                              \
         "Send View Request",                                          \

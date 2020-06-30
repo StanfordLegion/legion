@@ -273,6 +273,18 @@ namespace Legion {
       virtual bool has_visible_from(const std::set<Memory> &memories) const = 0;
       virtual Memory get_memory(void) const = 0; 
       inline size_t get_instance_size(void) const { return instance_footprint; }
+#ifdef LEGION_GPU_REDUCTIONS
+    public:
+      virtual bool is_gpu_visible(PhysicalManager *other) const = 0;
+      virtual ReductionView* find_or_create_shadow_reduction(unsigned fidx,
+          ReductionOpID redop, AddressSpaceID request_space, UniqueID opid) = 0;
+      virtual void record_remote_shadow_reduction(unsigned fidx,
+          ReductionOpID redop, ReductionView *view) = 0;
+      static void handle_create_shadow_request(Runtime *runtime,
+                                AddressSpaceID source, Deserializer &derez);
+      static void handle_create_shadow_response(Runtime *runtime,
+                                                Deserializer &derez);
+#endif
     public:
       // Methods for creating/finding/destroying logical top views
       virtual InstanceView* create_instance_top_view(InnerContext *context,
@@ -300,6 +312,13 @@ namespace Legion {
     protected:
       mutable LocalLock inst_lock;
       std::set<InnerContext*> active_contexts;
+#ifdef LEGION_GPU_REDUCTIONS
+    protected:
+      std::map<std::pair<unsigned/*fidx*/,ReductionOpID>,ReductionView*>
+                                              shadow_reduction_instances;
+      std::map<std::pair<unsigned/*fidx*/,ReductionOpID>,RtEvent>
+                                              pending_reduction_shadows;
+#endif
     private:
       // Events that have to trigger before we can remove our GC reference
       std::map<CollectableView*,CollectableInfo> gc_events;
@@ -353,7 +372,8 @@ namespace Legion {
             IndexSpaceExpression *lx, bool is, IndexSpace dh, 
             IndexSpaceExprID dx, FieldSpace h, RegionTreeID tid, 
             LayoutConstraintID l, PointerConstraint &p, ApEvent use, 
-            ReductionOpID redop, const void *piece_list,size_t piece_list_size);
+            ReductionOpID redop, const void *piece_list,
+            size_t piece_list_size, bool shadow_instance);
       public:
         const DistributedID did;
         const AddressSpaceID owner;
@@ -373,6 +393,7 @@ namespace Legion {
         const ReductionOpID redop;
         const void *const piece_list;
         const size_t piece_list_size;
+        const bool shadow_instance;
       };
     public:
       IndividualManager(RegionTreeForest *ctx, DistributedID did,
@@ -385,7 +406,8 @@ namespace Legion {
                         const PointerConstraint &constraint,
                         bool register_now, size_t footprint,
                         ApEvent use_event, bool external_instance,
-                        const ReductionOp *op = NULL);
+                        const ReductionOp *op = NULL,
+                        bool shadow_instance = false);
       IndividualManager(const IndividualManager &rhs);
       virtual ~IndividualManager(void);
     public:
@@ -446,7 +468,8 @@ namespace Legion {
           const void *piece_list, size_t piece_list_size,
           FieldSpaceNode *space_node, RegionTreeID tree_id,
           LayoutConstraints *constraints, ApEvent use_event,
-          PointerConstraint &pointer_constraint, ReductionOpID redop);
+          PointerConstraint &pointer_constraint, ReductionOpID redop, 
+          bool shadow_instance);
     public:
       virtual bool acquire_instance(ReferenceSource source, 
                                     ReferenceMutator *mutator);
@@ -458,6 +481,14 @@ namespace Legion {
       virtual RtEvent detach_external_instance(void);
       virtual bool has_visible_from(const std::set<Memory> &memories) const;
       virtual Memory get_memory(void) const;
+#ifdef LEGION_GPU_REDUCTIONS
+    public:
+      virtual bool is_gpu_visible(PhysicalManager *other) const;
+      virtual ReductionView* find_or_create_shadow_reduction(unsigned fidx,
+          ReductionOpID redop, AddressSpaceID request_space, UniqueID opid); 
+      virtual void record_remote_shadow_reduction(unsigned fidx,
+          ReductionOpID redop, ReductionView *view);
+#endif
     public:
       MemoryManager *const memory_manager;
       const PhysicalInstance instance;
@@ -465,6 +496,7 @@ namespace Legion {
       // Event that needs to trigger before we can start using
       // this physical instance.
       const ApEvent use_event; 
+      const bool shadow_instance;
     };
 
     /**
@@ -610,6 +642,14 @@ namespace Legion {
                                 CopyAcrossHelper *across_helper = NULL);
       virtual void compute_copy_offsets(const FieldMask &copy_mask,
                                 std::vector<CopySrcDstField> &fields);
+#ifdef LEGION_GPU_REDUCTIONS
+    public:
+      virtual bool is_gpu_visible(PhysicalManager *other) const;
+      virtual ReductionView* find_or_create_shadow_reduction(unsigned fidx,
+          ReductionOpID redop, AddressSpaceID request_space, UniqueID opid);
+      virtual void record_remote_shadow_reduction(unsigned fidx,
+          ReductionOpID redop, ReductionView *view);
+#endif
     public:
       virtual void send_manager(AddressSpaceID target);
     public:
@@ -690,7 +730,13 @@ namespace Legion {
           creator_id(cid), instance(PhysicalInstance::NO_INST), 
           field_space_node(NULL), instance_domain(NULL), tree_id(0),
           redop_id(0), reduction_op(NULL), realm_layout(NULL), piece_list(NULL),
-          piece_list_size(0), valid(false) { }
+          piece_list_size(0), shadow_instance(false), valid(false) { }
+      InstanceBuilder(const std::vector<LogicalRegion> &regs,
+                      IndexSpaceExpression *expr, FieldSpaceNode *node,
+                      RegionTreeID tree_id, const LayoutConstraintSet &cons, 
+                      Runtime *rt, MemoryManager *memory, UniqueID cid,
+                      const void *piece_list, size_t piece_list_size, 
+                      bool shadow_instance);
       virtual ~InstanceBuilder(void);
     public:
       void initialize(RegionTreeForest *forest);
@@ -728,6 +774,7 @@ namespace Legion {
       Realm::InstanceLayoutGeneric *realm_layout;
       void *piece_list;
       size_t piece_list_size;
+      bool shadow_instance;
     public:
       bool valid;
     };

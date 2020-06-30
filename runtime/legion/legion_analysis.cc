@@ -4091,6 +4091,17 @@ namespace Legion {
       for (std::vector<ReductionView*>::const_iterator it = 
             src_views.begin(); it != src_views.end(); it++)
         record_view(*it);
+#ifdef LEGION_GPU_REDUCTIONS
+#ifndef LEGION_SPY
+      // Realm is really bad at applying reductions to GPU instances right
+      // now so let's help it out by moving data into a shadow instance in
+      // the same memory which will allow us to run our own GPU reduction
+      // application kernels, see github issues #372 and #821
+      PhysicalManager *dst_manager = dst_view->get_manager();
+      const bool gpu_dst = (Memory::GPU_FB_MEM == 
+        dst_manager->layout->constraints->memory_constraint.get_kind());
+#endif
+#endif
       const std::pair<InstanceView*,unsigned> dst_key(dst_view, dst_fidx);
       std::vector<ReductionOpID> &redop_epochs = reduction_epochs[dst_key];
       FieldMask src_mask, dst_mask;
@@ -4102,8 +4113,38 @@ namespace Legion {
             src_views.begin(); it != src_views.end(); it++)
       {
         const ReductionOpID redop = (*it)->get_redop();
-        CopyUpdate *update = 
-          new CopyUpdate(*it, src_mask, expr, redop, across_helper);
+        CopyUpdate *update;
+#ifdef LEGION_GPU_REDUCTIONS
+#ifndef LEGION_SPY
+        // See if we're reducing into a remote GPU memory 
+        // for a built-in reduction operator
+        if (gpu_dst && (LEGION_REDOP_BASE <= redop) && 
+            (redop < LEGION_REDOP_LAST) && 
+            !dst_manager->is_gpu_visible((*it)->get_manager()))
+        {
+          // Get the shadow reduction instance for this manager
+          ReductionView *shadow_reduction = 
+            dst_manager->find_or_create_shadow_reduction(dst_fidx, redop,
+                                    local_space, op->get_unique_op_id());
+          // If we fail to make the shadow instance then we'll fall back
+          // to the slow path of asking Realm to do it for us
+          if (shadow_reduction != NULL)
+          {
+            // Record a copy update to the shadow instance
+            FieldMaskSet<LogicalView> src_views;
+            src_views.insert(*it, src_mask);
+            record_updates(shadow_reduction, src_views, src_mask,
+                           expr, 0/*no reduction here*/, across_helper);
+            // The update is then performed solely by the shadow reduction
+            update = new CopyUpdate(shadow_reduction, dst_mask, expr, redop);
+          }
+          else 
+            update = new CopyUpdate(*it, src_mask, expr, redop, across_helper);
+        }
+        else
+#endif
+#endif
+          update = new CopyUpdate(*it, src_mask, expr, redop, across_helper);
         // Scan along looking for a reduction op epoch that matches
         while ((redop_index < redop_epochs.size()) &&
                 (redop_epochs[redop_index] != redop))

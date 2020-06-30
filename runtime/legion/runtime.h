@@ -917,6 +917,8 @@ namespace Legion {
                                     bool tight_region_bounds, bool remote);
       void release_candidate_references(const std::deque<PhysicalManager*>
                                                         &candidates) const;
+    public:
+      PhysicalManager* create_shadow_instance(InstanceBuilder &builder);
     protected:
       // We serialize all allocation attempts in a memory in order to 
       // ensure find_and_create calls will remain atomic
@@ -2284,6 +2286,12 @@ namespace Legion {
                                             Serializer &rez);
       void send_collective_instance_message(AddressSpaceID target, 
                                             Serializer &rez);
+#ifdef LEGION_GPU_REDUCTIONS
+      void send_create_shadow_reduction_request(AddressSpaceID target, 
+                                                Serializer &rez);
+      void send_create_shadow_reduction_response(AddressSpaceID target,
+                                                 Serializer &rez);
+#endif
       void send_create_top_view_request(AddressSpaceID target, Serializer &rez);
       void send_create_top_view_response(AddressSpaceID target,Serializer &rez);
       void send_view_register_user(AddressSpaceID target, Serializer &rez);
@@ -2525,6 +2533,11 @@ namespace Legion {
       void handle_collective_instance_manager(Deserializer &derez,
                                               AddressSpaceID source);
       void handle_collective_instance_message(Deserializer &derez);
+#ifdef LEGION_GPU_REDUCTIONS
+      void handle_create_shadow_reduction_request(Deserializer &derez,
+                                                  AddressSpaceID source);
+      void handle_create_shadow_reduction_response(Deserializer &derez);
+#endif
       void handle_create_top_view_request(Deserializer &derez,
                                           AddressSpaceID source);
       void handle_create_top_view_response(Deserializer &derez);
