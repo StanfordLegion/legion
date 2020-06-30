@@ -1974,7 +1974,7 @@ namespace Legion {
               shadow_reduction_instances.end());
 #endif
       shadow_reduction_instances[key] = result;
-      std::map<std::pair<unsigned,ReductionOpID>,RtEvent>::const_iterator
+      std::map<std::pair<unsigned,ReductionOpID>,RtEvent>::iterator
         pending_finder = pending_reduction_shadows.find(key); 
 #ifdef DEBUG_LEGION
       assert(pending_finder != pending_reduction_shadows.end());
@@ -1998,7 +1998,7 @@ namespace Legion {
               shadow_reduction_instances.end());
 #endif
       shadow_reduction_instances[key] = view;
-      std::map<std::pair<unsigned,ReductionOpID>,RtEvent>::const_iterator
+      std::map<std::pair<unsigned,ReductionOpID>,RtEvent>::iterator
         pending_finder = pending_reduction_shadows.find(key); 
 #ifdef DEBUG_LEGION
       assert(pending_finder != pending_reduction_shadows.end());
