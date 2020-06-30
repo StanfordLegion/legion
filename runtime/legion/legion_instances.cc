@@ -1502,6 +1502,7 @@ namespace Legion {
         layout->pack_layout_description(rez, target);
         pointer_constraint.serialize(rez);
         rez.serialize(redop);
+        rez.serialize<bool>(shadow_instance);
       }
       context->runtime->send_instance_manager(target, rez);
       update_remote_instances(target);
