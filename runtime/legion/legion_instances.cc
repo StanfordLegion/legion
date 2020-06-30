@@ -1918,7 +1918,6 @@ namespace Legion {
       LayoutConstraintSet shadow_constraints = *(layout->constraints);
       SpecializedConstraint &specialized = 
         shadow_constraints.specialized_constraint;
-      bool compact = true;
       switch (specialized.get_kind())
       {
         case LEGION_NO_SPECIALIZE:
@@ -1932,7 +1931,6 @@ namespace Legion {
           {
             specialized = 
               SpecializedConstraint(LEGION_COMPACT_REDUCTION_SPECIALIZE, red);
-            compact = false;
             break;
           }
         default:
