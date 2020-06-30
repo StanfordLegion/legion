@@ -4596,7 +4596,7 @@ namespace Legion {
       }
       else
       {
-        AutoLock v_lock(view_lock,1,false/*exclusive*/);
+        AutoLock v_lock(view_lock);
         find_initializing_preconditions(copy_mask, copy_expr, 
                                         op_id, preconditions);
       }
