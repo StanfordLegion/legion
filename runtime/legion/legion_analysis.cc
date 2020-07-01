@@ -1163,11 +1163,11 @@ namespace Legion {
             derez.deserialize(done);
             Memoizable *memo = RemoteMemoizable::unpack_remote_memoizable(derez,
                                                            NULL/*op*/, runtime);
+            ApUserEvent lhs;
+            derez.deserialize(lhs);
             unsigned src_idx, dst_idx;
             derez.deserialize(src_idx);
             derez.deserialize(dst_idx);
-            ApUserEvent lhs;
-            derez.deserialize(lhs);
             RegionTreeForest *forest = runtime->forest;
             IndexSpaceExpression *expr = 
               IndexSpaceExpression::unpack_expression(derez, forest, source);
@@ -1287,8 +1287,6 @@ namespace Legion {
                                                            NULL/*op*/, runtime);
             unsigned index;
             derez.deserialize(index);
-            ApUserEvent *lhs_ptr;
-            derez.deserialize(lhs_ptr);
             ApUserEvent lhs;
             derez.deserialize(lhs);
             RegionTreeForest *forest = runtime->forest;
