@@ -590,24 +590,21 @@ namespace Legion {
             forest->runtime->get_unique_operation_id(), gpu);
       // Pack the arguments for this task
       Serializer rez;
+      rez.serialize(type_tag);
+      rez.serialize(space);
+      rez.serialize<bool>(reduction_fold);
+      rez.serialize<bool>(false); // exclusive
+      rez.serialize<size_t>(dst_fields.size());
+      for (unsigned idx = 0; idx < dst_fields.size(); idx++)
       {
-        RezCheck z(rez);
-        rez.serialize(type_tag);
-        rez.serialize(space);
-        rez.serialize<bool>(reduction_fold);
-        rez.serialize<bool>(false); // exclusive
-        rez.serialize<size_t>(dst_fields.size());
-        for (unsigned idx = 0; idx < dst_fields.size(); idx++)
-        {
-          rez.serialize(dst_fields[idx].inst);
-          rez.serialize(src_fields[idx].inst);
-          rez.serialize(dst_fields[idx].field_id);
-          rez.serialize(src_fields[idx].field_id);
-        }
-        rez.serialize<size_t>(piece_rects.size());
-        for (unsigned idx = 0; idx < piece_rects.size(); idx++)
-          rez.serialize(piece_rects[idx]);
+        rez.serialize(dst_fields[idx].inst);
+        rez.serialize(src_fields[idx].inst);
+        rez.serialize(dst_fields[idx].field_id);
+        rez.serialize(src_fields[idx].field_id);
       }
+      rez.serialize<size_t>(piece_rects.size());
+      for (unsigned idx = 0; idx < piece_rects.size(); idx++)
+        rez.serialize(piece_rects[idx]);
       ApEvent result;
       if (pred_guard.exists())
       {

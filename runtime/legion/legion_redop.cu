@@ -15,10 +15,8 @@
 
 #include <map>
 #include "realm.h"
+#include "legion.h"
 #include "cuda_runtime.h"
-#include "legion/legion_types.h"
-#include "legion/legion_redop.h"
-#include "legion/legion_utilities.h"
 
 #define THREADS_PER_BLOCK 256
 #define MIN_BLOCKS_PER_SM 4
@@ -114,40 +112,52 @@ namespace Legion {
     struct ReductionRunner {
     public:
       __host__
-      ReductionRunner(Deserializer &d) : derez(d) { }
-    public: 
-      template<int N, typename T>
+      ReductionRunner(const void *b, size_t s) 
+        : buffer(((const char*)b)), index(0), size(s) { }
       __host__
+      ~ReductionRunner(void)
+      {
+        assert(index == size);
+      }
+    public: 
+      template<typename T> __host__
+      inline void deserialize(T &element)
+      {
+        assert((index + sizeof(T)) <= size);
+        element = *((const T*)(buffer+index));
+        index += sizeof(T);
+      }
+      template<int N, typename T> __host__
       inline void run(void)
       {
         Realm::IndexSpace<N,T> space;
-        derez.deserialize(space);
+        deserialize(space);
         Realm::Event ready = space.make_valid();
         bool fold, exclusive;;
-        derez.deserialize<bool>(fold);
-        derez.deserialize<bool>(exclusive);
+        deserialize<bool>(fold);
+        deserialize<bool>(exclusive);
         size_t num_fields;
-        derez.deserialize(num_fields);
+        deserialize(num_fields);
         std::vector<FieldID> src_fields(num_fields);
         std::vector<FieldID> dst_fields(num_fields);;
         std::vector<Realm::RegionInstance> src_insts(num_fields);
         std::vector<Realm::RegionInstance> dst_insts(num_fields);
         for (unsigned idx = 0; idx < num_fields; idx++)
         {
-          derez.deserialize(dst_insts[idx]);
-          derez.deserialize(src_insts[idx]);
-          derez.deserialize(dst_fields[idx]);
-          derez.deserialize(src_fields[idx]);
+          deserialize(dst_insts[idx]);
+          deserialize(src_insts[idx]);
+          deserialize(dst_fields[idx]);
+          deserialize(src_fields[idx]);
         }
         size_t num_pieces;
-        derez.deserialize(num_pieces);
+        deserialize(num_pieces);
         if (ready.exists() && !ready.has_triggered())
           ready.wait();
         // Iterate over all the pieces
         for (unsigned pidx = 0; pidx < num_pieces; pidx++)
         {
           Rect<N,T> piece_rect;
-          derez.deserialize(piece_rect);
+          deserialize(piece_rect);
           std::vector<Rect<N,T> > piece_rects;
           std::vector<size_t> scan_volumes;
           size_t sum_volume = 0;
@@ -241,7 +251,9 @@ namespace Legion {
         runner->run<N::N,T>();
       }
     public:
-      Deserializer &derez;
+      const char *buffer;
+      size_t index;
+      size_t size;
     };
 
     // This is a Realm task function signature that we use for launching
@@ -252,14 +264,10 @@ namespace Legion {
     void reduction_helper(const void *args, size_t arglen,
         const void *user_data,size_t user_data_size, Processor proc)
     {
-      Deserializer derez(args, arglen);
-      {
-        DerezCheck z(derez);
-        TypeTag type_tag;
-        derez.deserialize(type_tag);
-        ReductionRunner<REDOP> runner(derez);
-        NT_TemplateHelper::demux<ReductionRunner<REDOP> >(type_tag, &runner);
-      }
+      ReductionRunner<REDOP> runner(args, arglen);
+      TypeTag type_tag;
+      runner.deserialize(type_tag);
+      NT_TemplateHelper::demux<ReductionRunner<REDOP> >(type_tag, &runner);
     }
 
 #define REGISTER_GPU_REDUCTION_TASK(id, type)                               \
