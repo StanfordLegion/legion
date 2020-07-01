@@ -184,7 +184,7 @@ namespace Legion {
                            IndexSpaceExpression *expr,
                            const std::vector<CopySrcDstField> &src_fields,
                            const std::vector<CopySrcDstField> &dst_fields,
-                           Processor gpu,
+                           Processor gpu, TaskID gpu_task_id,
                            PhysicalManager *src, PhysicalManager *dst,
                            ApEvent precondition, PredEvent pred_guard,
                            ReductionOpID redop, bool reduction_fold) = 0;
@@ -308,7 +308,7 @@ namespace Legion {
                            IndexSpaceExpression *expr,
                            const std::vector<CopySrcDstField> &src_fields,
                            const std::vector<CopySrcDstField> &dst_fields,
-                           Processor gpu,
+                           Processor gpu, TaskID gpu_task_id,
                            PhysicalManager *src, PhysicalManager *dst,
                            ApEvent precondition, PredEvent pred_guard,
                            ReductionOpID redop, bool reduction_fold);
@@ -519,15 +519,15 @@ namespace Legion {
                                 IndexSpaceExpression *expr,
                                 const std::vector<CopySrcDstField> &src_fields,
                                 const std::vector<CopySrcDstField> &dst_fields,
-                                Processor gpu,
+                                Processor gpu, TaskID gpu_task_id,
                                 PhysicalManager *src, PhysicalManager *dst,
                                 ApEvent precondition, PredEvent pred_guard,
                                 ReductionOpID redop, bool reduction_fold) const
         {
           sanity_check();
           rec->record_gpu_reduction(memo, result, expr, src_fields, dst_fields,
-                                    gpu, src, dst, precondition, pred_guard,
-                                    redop, reduction_fold);
+                                    gpu, gpu_task_id, src, dst, precondition, 
+                                    pred_guard, redop, reduction_fold);
         }
 #endif
       inline void record_post_fill_view(FillView *view, 

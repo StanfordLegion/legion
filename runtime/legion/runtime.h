@@ -3353,6 +3353,13 @@ namespace Legion {
       static void perform_dynamic_registration_callback(
                                RegistrationCallbackFnptr callback, bool global);
       static ReductionOpTable& get_reduction_table(bool safe);
+#ifdef LEGION_GPU_REDUCTIONS
+      static GPUReductionTable& get_gpu_reduction_table(void);
+      static std::map<ReductionOpID,CodeDescriptor>& 
+                                get_pending_gpu_reduction_table(void);
+      static void preregister_gpu_reduction(ReductionOpID redop_id,
+                                            const CodeDescriptor &desc);
+#endif
       static SerdezOpTable& get_serdez_table(bool safe);
       static SerdezRedopTable& get_serdez_redop_table(bool safe);
       static void register_reduction_op(ReductionOpID redop_id,

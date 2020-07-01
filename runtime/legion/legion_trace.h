@@ -752,7 +752,7 @@ namespace Legion {
                            IndexSpaceExpression *expr,
                            const std::vector<CopySrcDstField> &src_fields,
                            const std::vector<CopySrcDstField> &dst_fields,
-                           Processor gpu,
+                           Processor gpu, TaskID gpu_task_id,
                            PhysicalManager *src, PhysicalManager *dst,
                            ApEvent precondition, PredEvent pred_guard,
                            ReductionOpID redop, bool reduction_fold);
@@ -1161,7 +1161,8 @@ namespace Legion {
                    const TraceLocalID &op_key,
                    const std::vector<CopySrcDstField>& src_fields,
                    const std::vector<CopySrcDstField>& dst_fields,
-                   Processor gpu, PhysicalManager *src, PhysicalManager *dst,
+                   Processor gpu, TaskID gpu_task_id,
+                   PhysicalManager *src, PhysicalManager *dst,
                    unsigned precondition_idx,
                    ReductionOpID redop, bool reduction_fold);
       virtual ~GPUReduction(void);
@@ -1178,6 +1179,7 @@ namespace Legion {
       IndexSpaceExpression *expr;
       std::vector<CopySrcDstField> src_fields, dst_fields;
       Processor gpu;
+      TaskID gpu_task_id;
       PhysicalManager *src, *dst;
       unsigned precondition_idx;
       ReductionOpID redop;

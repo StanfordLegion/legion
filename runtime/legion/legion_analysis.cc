@@ -746,7 +746,7 @@ namespace Legion {
                                  ApEvent &lhs, IndexSpaceExpression *expr,
                                  const std::vector<CopySrcDstField>& src_fields,
                                  const std::vector<CopySrcDstField>& dst_fields,
-                                 Processor gpu, 
+                                 Processor gpu, TaskID gpu_task_id,
                                  PhysicalManager *src, PhysicalManager *dst,
                                  ApEvent precondition, PredEvent pred_guard,
                                  ReductionOpID redop, bool reduction_fold)
@@ -775,6 +775,7 @@ namespace Legion {
             pack_src_dst_field(rez, dst_fields[idx]);
           }
           rez.serialize(gpu);
+          rez.serialize(gpu_task_id);
           rez.serialize(src->did);
           rez.serialize(dst->did);
           rez.serialize(precondition);
@@ -788,7 +789,7 @@ namespace Legion {
       }
       else
         remote_tpl->record_gpu_reduction(memo, lhs, expr, src_fields,dst_fields,
-                gpu, src, dst, precondition, pred_guard, redop, reduction_fold);
+          gpu,gpu_task_id,src,dst,precondition,pred_guard,redop,reduction_fold);
     }
 #endif
 
@@ -1367,6 +1368,8 @@ namespace Legion {
             }
             Processor gpu;
             derez.deserialize(gpu);
+            TaskID gpu_task_id;
+            derez.deserialize(gpu_task_id);
             DistributedID src_did, dst_did;
             derez.deserialize(src_did);
             derez.deserialize(dst_did);
@@ -1391,7 +1394,8 @@ namespace Legion {
               dst_ready.wait();
             // Do the base call
             tpl->record_gpu_reduction(memo, lhs, expr, src_fields, dst_fields,
-                gpu, src, dst, precondition, pred_guard, redop, reduction_fold);
+                                      gpu, gpu_task_id, src, dst, precondition,
+                                      pred_guard, redop, reduction_fold);
             if (lhs != lhs_copy)
             {
               Serializer rez;
@@ -4098,6 +4102,8 @@ namespace Legion {
       PhysicalManager *dst_manager = dst_view->get_manager();
       const bool gpu_dst = (Memory::GPU_FB_MEM == 
         dst_manager->layout->constraints->memory_constraint.get_kind());
+      const GPUReductionTable &gpu_reduction_tasks = 
+        Runtime::get_gpu_reduction_table();
 #endif
 #endif
       const std::pair<InstanceView*,unsigned> dst_key(dst_view, dst_fidx);
@@ -4115,9 +4121,9 @@ namespace Legion {
 #ifdef LEGION_GPU_REDUCTIONS
 #ifndef LEGION_SPY
         // See if we're reducing into a remote GPU memory 
-        // for a built-in reduction operator
-        if (gpu_dst && (LEGION_REDOP_BASE <= redop) && 
-            (redop < LEGION_REDOP_LAST) && 
+        // for a reduction operator that we have a reduction task for
+        if (gpu_dst && 
+            (gpu_reduction_tasks.find(redop) != gpu_reduction_tasks.end()) &&
             !dst_manager->is_gpu_visible((*it)->get_manager()))
         {
           // Get the shadow reduction instance for this manager

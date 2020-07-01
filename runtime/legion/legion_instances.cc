@@ -1382,22 +1382,28 @@ namespace Legion {
       // Realm is really bad at applying reductions to GPU instances right
       // now so let's help it out by running tasks to apply reductions for it
       // See github issues #372 and #821
-      if ((LEGION_REDOP_BASE <= reduction_op_id) &&
-          (reduction_op_id < LEGION_REDOP_LAST) &&
+      if ((reduction_op_id > 0) &&
           (memory_manager->memory.kind() == Memory::GPU_FB_MEM) &&
           is_gpu_visible(source_manager))
       {
-        // If we can directly perform memory accesses between the
-        // two memories then we can launch a kernel that just runs
-        // normal CUDA kernels without having any problems
-        const ApEvent result = copy_expression->gpu_reduction(trace_info,
-            dst_fields, src_fields, memory_manager->get_local_gpu(), 
-            this, source_manager, precondition, predicate_guard,
-            reduction_op_id, false/*fold*/);
-        if (trace_info.recording)
-          trace_info.record_copy_views(result, copy_expression,
-                *tracing_srcs, *tracing_dsts, effects_applied);
-        return result;
+        const GPUReductionTable &gpu_reductions = 
+          Runtime::get_gpu_reduction_table();
+        std::map<ReductionOpID,TaskID>::const_iterator finder = 
+          gpu_reductions.find(reduction_op_id);
+        if (finder != gpu_reductions.end())
+        {
+          // If we can directly perform memory accesses between the
+          // two memories then we can launch a kernel that just runs
+          // normal CUDA kernels without having any problems
+          const ApEvent result = copy_expression->gpu_reduction(trace_info,
+              dst_fields, src_fields, memory_manager->get_local_gpu(), 
+              finder->second, this, source_manager, precondition, 
+              predicate_guard, reduction_op_id, false/*fold*/);
+          if (trace_info.recording)
+            trace_info.record_copy_views(result, copy_expression,
+                  *tracing_srcs, *tracing_dsts, effects_applied);
+          return result;
+        }
       }
 #endif
 #endif 

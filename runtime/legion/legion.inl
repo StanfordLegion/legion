@@ -19777,6 +19777,285 @@ namespace Legion {
                                                      permit_duplicates);
     }
 
+#ifdef LEGION_GPU_REDUCTIONS
+#ifdef __CUDACC__
+#define LEGION_THREADS_PER_BLOCK 256
+#define LEGION_MIN_BLOCKS_PER_SM 4
+    namespace Internal {
+
+      template<int N>
+      struct DimOrder {
+        int index[N];
+      };
+
+      template<typename REDOP, int N, typename T, bool EXCLUSIVE>
+      __global__ void
+      __launch_bounds__(LEGION_THREADS_PER_BLOCK,LEGION_MIN_BLOCKS_PER_SM)
+      fold_kernel(const Realm::AffineAccessor<typename REDOP::RHS,N,T> dst,
+                  const Realm::AffineAccessor<typename REDOP::RHS,N,T> src,
+                  const DeferredBuffer<Rect<N,T>,1> piece_rects,
+                  const DeferredBuffer<size_t,1> scan_volumes,
+                  const DimOrder<N> order,
+                  const size_t max_offset, const size_t max_rects)
+      {
+        size_t offset = blockIdx.x * blockDim.x + threadIdx.x;
+        if (offset >= max_offset)
+          return;
+        // Perform a binary search for the rectangle that we are in
+        coord_t first = 0;
+        coord_t last = max_rects - 1;
+        coord_t mid = 0;
+        while (first <= last) {
+          mid = (first + last) / 2;
+          if (scan_volumes[mid+1] <= offset)
+            first = mid + 1;
+          else if (offset < scan_volumes[mid])
+            last = mid - 1;
+          else
+            break;
+        }
+        const Rect<N,T> rect = piece_rects[mid];
+        Point<N,T> point = rect.lo;
+        size_t pitch = 1;
+        for (int i = 0; i < N; i++)
+        {
+          const int index = order.index[i];
+          point[index] += (offset / pitch);
+          offset = offset % pitch;
+          pitch *= ((rect.hi[index] - rect.lo[index]) + 1);
+        }
+        REDOP::template fold<EXCLUSIVE>(dst[point], src[point]);
+      }
+
+      template<typename REDOP, int N, typename T, bool EXCLUSIVE>
+      __global__ void
+      __launch_bounds__(LEGION_THREADS_PER_BLOCK,LEGION_MIN_BLOCKS_PER_SM)
+      apply_kernel(const Realm::AffineAccessor<typename REDOP::LHS,N,T> dst,
+                   const Realm::AffineAccessor<typename REDOP::RHS,N,T> src,
+                   const DeferredBuffer<Rect<N,T>,1> piece_rects,
+                   const DeferredBuffer<size_t,1> scan_volumes,
+                   const DimOrder<N> order,
+                   const size_t max_offset, const size_t max_rects)
+      {
+        size_t offset = blockIdx.x * blockDim.x + threadIdx.x;
+        if (offset >= max_offset)
+          return;
+        // Perform a binary search for the rectangle that we are in
+        int first = 0;
+        int last = max_rects - 1;
+        int mid = 0;
+        while (first <= last) {
+          mid = (first + last) / 2;
+          if (scan_volumes[mid+1] <= offset)
+            first = mid + 1;
+          else if (offset < scan_volumes[mid])
+            last = mid - 1;
+          else
+            break;
+        }
+        const Rect<N,T> rect = piece_rects[mid];
+        Point<N,T> point = rect.lo;
+        size_t pitch = 1;
+        for (int i = 0; i < N; i++)
+        {
+          const int index = order.index[i];
+          point[index] += (offset / pitch);
+          offset = offset % pitch;
+          pitch *= ((rect.hi[index] - rect.lo[index]) + 1);
+        }
+        REDOP::template apply<EXCLUSIVE>(dst[point], src[point]);
+      } 
+
+      template<typename REDOP>
+      struct ReductionRunner {
+      public:
+        __host__
+        ReductionRunner(const void *b, size_t s) 
+          : buffer(((const char*)b)), index(0), size(s) { }
+        __host__
+        ~ReductionRunner(void)
+        {
+          assert(index == size);
+        }
+      public: 
+        template<typename T> __host__
+        inline void deserialize(T &element)
+        {
+          assert((index + sizeof(T)) <= size);
+          element = *((const T*)(buffer+index));
+          index += sizeof(T);
+        }
+        __host__
+        inline void deserialize_bool(bool &element)
+        {
+          // bools are stored with 4 bytes in the serializer
+          assert((index + 4) <= size);
+          element = *((const bool*)(buffer+index));
+          index += 4;
+        }
+        template<int N, typename T> __host__
+        inline void run(void)
+        {
+          Realm::IndexSpace<N,T> space;
+          deserialize(space);
+          Realm::Event ready = space.make_valid();
+          bool fold, exclusive;;
+          deserialize_bool(fold);
+          deserialize_bool(exclusive);
+          size_t num_fields;
+          deserialize(num_fields);
+          std::vector<FieldID> src_fields(num_fields);
+          std::vector<FieldID> dst_fields(num_fields);;
+          std::vector<Realm::RegionInstance> src_insts(num_fields);
+          std::vector<Realm::RegionInstance> dst_insts(num_fields);
+          for (unsigned idx = 0; idx < num_fields; idx++)
+          {
+            deserialize(dst_insts[idx]);
+            deserialize(src_insts[idx]);
+            deserialize(dst_fields[idx]);
+            deserialize(src_fields[idx]);
+          }
+          size_t num_pieces;
+          deserialize(num_pieces);
+          if (ready.exists() && !ready.has_triggered())
+            ready.wait();
+          // Iterate over all the pieces
+          for (unsigned pidx = 0; pidx < num_pieces; pidx++)
+          {
+            Rect<N,T> piece_rect;
+            deserialize(piece_rect);
+            std::vector<Rect<N,T> > piece_rects;
+            std::vector<size_t> scan_volumes;
+            size_t sum_volume = 0;
+            for (Realm::IndexSpaceIterator<N,T> itr(space);itr.valid;itr.step())
+            {
+              const Rect<N,T> intersection = piece_rect.intersection(itr.rect);
+              if (intersection.empty())
+                continue;
+              piece_rects.push_back(intersection);
+              scan_volumes.push_back(sum_volume);
+              sum_volume += intersection.volume();
+            }
+            if (piece_rects.empty())
+              continue;
+            scan_volumes.push_back(sum_volume);
+            assert(scan_volumes.size() == (piece_rects.size() + 1));
+            const Rect<1,coord_t> bounds(0, piece_rects.size()-1);
+            const Rect<1,coord_t> scan_bounds(0, piece_rects.size());
+            DeferredBuffer<Rect<N,T>,1> 
+              device_piece_rects(Memory::GPU_FB_MEM, bounds);
+            DeferredBuffer<size_t,1>
+              device_scan_volumes(Memory::GPU_FB_MEM, scan_bounds);
+            cudaMemcpyAsync(device_piece_rects.ptr(bounds),&piece_rects.front(),
+                piece_rects.size() * sizeof(Rect<N,T>), cudaMemcpyHostToDevice);
+            cudaMemcpyAsync(device_scan_volumes.ptr(scan_bounds), 
+                &scan_volumes.front(), scan_volumes.size() * sizeof(size_t), 
+                cudaMemcpyHostToDevice);
+            const size_t blocks = (sum_volume + LEGION_THREADS_PER_BLOCK - 1) / 
+              LEGION_THREADS_PER_BLOCK;
+            // Iterate over all the fields we should handle
+            for (unsigned fidx = 0; fidx < num_fields; fidx++)
+            {
+              // Make accessors for the source and destination for this piece
+              const Realm::AffineAccessor<typename REDOP::RHS,N,T>
+                src_accessor(src_insts[fidx], src_fields[fidx], piece_rect);
+              // Compute the order of dimensions to walk based on sorting the 
+              // strides for the source accessor, we'll optimistically assume 
+              // the two instances are laid out the same way, if we're wrong
+              // it will still be correct, just slow
+              std::map<size_t,int> strides;
+              for (int i = 0; i < N; i++)
+              {
+                std::pair<std::map<size_t,int>::iterator,bool> result = 
+                  strides.insert(std::pair<size_t,int>(
+                        src_accessor.strides[i],i));
+                // Strides should be unique across dimensions unless extent is 1
+                assert(result.second || (piece_rect.hi[i] == piece_rect.lo[i]));
+              }
+              // Put the dimensions in order from largest to smallest
+              DimOrder<N> order;
+              std::map<size_t,int>::const_reverse_iterator rit = 
+                strides.rbegin();
+              for (int i = 0; i < N; i++, rit++)
+                order.index[i] = rit->second;
+              // See if we are folding or applying
+              if (fold)
+              {
+                const Realm::AffineAccessor<typename REDOP::RHS,N,T> 
+                  dst_accessor(dst_insts[fidx], dst_fields[fidx], piece_rect);
+                // Now launch the kernel
+                if (exclusive)
+                  fold_kernel<REDOP,N,T,true>
+                    <<<blocks,LEGION_THREADS_PER_BLOCK>>>(
+                    dst_accessor, src_accessor, device_piece_rects,
+                    device_scan_volumes, order, sum_volume, piece_rects.size());
+                else
+                  fold_kernel<REDOP,N,T,false>
+                    <<<blocks,LEGION_THREADS_PER_BLOCK>>>(
+                    dst_accessor, src_accessor, device_piece_rects,
+                    device_scan_volumes, order, sum_volume, piece_rects.size());
+              }
+              else
+              {
+                const Realm::AffineAccessor<typename REDOP::LHS,N,T> 
+                  dst_accessor(dst_insts[fidx], dst_fields[fidx], piece_rect);
+                // Now launch the kernel
+                if (exclusive)
+                  apply_kernel<REDOP,N,T,true>
+                    <<<blocks,LEGION_THREADS_PER_BLOCK>>>(
+                    dst_accessor, src_accessor, device_piece_rects,
+                    device_scan_volumes, order, sum_volume, piece_rects.size());
+                else
+                  apply_kernel<REDOP,N,T,false>
+                    <<<blocks,LEGION_THREADS_PER_BLOCK>>>(
+                    dst_accessor, src_accessor, device_piece_rects,
+                    device_scan_volumes, order, sum_volume, piece_rects.size());
+              }
+            }
+          }
+        }
+
+        template<typename N, typename T>
+        __host__
+        static inline void demux(ReductionRunner<REDOP> *runner)
+        {
+          runner->run<N::N,T>();
+        }
+      public:
+        const char *buffer;
+        size_t index;
+        size_t size;
+      };
+
+      // This is a Realm task function signature that we use for launching
+      // off kernels that perform reductions between a reduction instance
+      // and a normal instance on a GPU since Realm does not support this yet.
+      template<typename REDOP>
+      __host__ 
+      void gpu_reduction_helper(const void *args, size_t arglen,
+          const void *user_data,size_t user_data_size, Processor proc)
+      {
+        ReductionRunner<REDOP> runner(args, arglen);
+        TypeTag type_tag;
+        runner.deserialize(type_tag);
+        NT_TemplateHelper::demux<ReductionRunner<REDOP> >(type_tag, &runner);
+      }
+
+    }; // namespace Internal
+
+    //--------------------------------------------------------------------------
+    template<typename REDOP>
+    /*static*/ void Runtime::preregister_gpu_reduction(ReductionOpID redop_id)
+    //--------------------------------------------------------------------------
+    {
+      CodeDescriptor desc(Internal::gpu_reduction_helper<REDOP>);
+      preregister_gpu_reduction(redop_id, desc);
+    }
+#undef LEGION_THREADS_PER_BLOCK
+#undef LEGION_MIN_BLOCKS_PER_SM
+#endif // __CUDACC__
+#endif // LEGION_GPU_REDUCTIONS
+
     //--------------------------------------------------------------------------
     template<typename SERDEZ>
     /*static*/ void Runtime::register_custom_serdez_op(CustomSerdezID serdez_id,

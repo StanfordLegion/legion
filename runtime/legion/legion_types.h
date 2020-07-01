@@ -402,12 +402,7 @@ namespace Legion {
     enum {
       LG_INITIALIZE_TASK_ID   = Realm::Processor::TASK_ID_PROCESSOR_INIT,
       LG_SHUTDOWN_TASK_ID     = Realm::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
-#ifdef LEGION_GPU_REDUCTIONS
-      LG_REDOP_TASK_ID        = Realm::Processor::TASK_ID_FIRST_AVAILABLE,
-      LG_TASK_ID              = LG_REDOP_TASK_ID + LEGION_REDOP_LAST - LEGION_REDOP_BASE,
-#else
       LG_TASK_ID              = Realm::Processor::TASK_ID_FIRST_AVAILABLE,
-#endif
 #ifdef LEGION_SEPARATE_META_TASKS
       LG_LEGION_PROFILING_ID  = LG_TASK_ID+LG_LAST_TASK_ID+1,
       LG_STARTUP_TASK_ID      = LG_TASK_ID+LG_LAST_TASK_ID+2,
@@ -1796,6 +1791,9 @@ namespace Legion {
       const std::vector<Future> futures);
   typedef void (*RealmFnptr)(const void*,size_t,
                              const void*,size_t,Processor);
+#ifdef LEGION_GPU_REDUCTIONS
+  typedef std::map<ReductionOpID,TaskID> GPUReductionTable;
+#endif
   // Magical typedefs 
   // (don't forget to update ones in old HighLevel namespace in legion.inl)
   typedef Internal::TaskContext* Context;

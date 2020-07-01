@@ -7622,6 +7622,15 @@ namespace Legion {
        * @return a pointer to the reduction operation object if it exists
        */
       static const ReductionOp* get_reduction_op(ReductionOpID redop_id);
+
+#ifdef LEGION_GPU_REDUCTIONS
+#ifdef __CUDACC__
+      template<typename REDOP>
+      static void preregister_gpu_reduction(ReductionOpID redop_id);
+#endif
+      static void preregister_gpu_reduction(ReductionOpID redop_id,
+                                            const CodeDescriptor &desc);
+#endif
     public:
       /**
        * Dynamically generate a unique serdez ID for use across the machine

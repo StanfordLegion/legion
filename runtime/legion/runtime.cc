@@ -11133,6 +11133,9 @@ namespace Legion {
         unique_field_id(LEGION_MAX_APPLICATION_FIELD_ID + 
                         ((unique == 0) ? runtime_stride : unique)),
         unique_code_descriptor_id(LG_TASK_ID_AVAILABLE +
+#ifdef LEGION_GPU_REDUCTIONS
+                        get_gpu_reduction_table().size() + 
+#endif
                         ((unique == 0) ? runtime_stride : unique)),
         unique_constraint_id((unique == 0) ? runtime_stride : unique),
         unique_is_expr_id((unique == 0) ? runtime_stride : unique),
@@ -22834,7 +22837,7 @@ namespace Legion {
 
 #ifdef LEGION_GPU_REDUCTIONS
     extern void register_builtin_gpu_reduction_tasks(
-        const std::set<Processor> &gpus, std::set<RtEvent> &registered_events);
+      GPUReductionTable &gpu_reductions, std::set<RtEvent> &registered_events);
 #endif
 
     //--------------------------------------------------------------------------
@@ -22887,6 +22890,29 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_NO_PROCESSORS, "Machine model contains "
             "no CPU processors and no utility processors! At least one "
             "CPU or one utility processor is required for Legion.")
+      Realm::ProfilingRequestSet no_requests;
+      // Keep track of all the registration events
+      std::set<RtEvent> registered_events;
+#ifdef LEGION_GPU_REDUCTIONS
+      // Do this here to make sure we get the gpu reduction table
+      // setup before we make the runtime object
+      register_builtin_gpu_reduction_tasks(get_gpu_reduction_table(),
+                                           registered_events);
+      GPUReductionTable &gpu_reduction_table = get_gpu_reduction_table();
+      const std::map<ReductionOpID,CodeDescriptor> &pending_gpu_reductions =
+        get_pending_gpu_reduction_table();
+      for (std::map<ReductionOpID,CodeDescriptor>::const_iterator it = 
+            pending_gpu_reductions.begin(); it != 
+            pending_gpu_reductions.end(); it++)
+      {
+        const TaskID task_id = 
+          LG_TASK_ID_AVAILABLE + gpu_reduction_table.size();
+        registered_events.insert(RtEvent(Processor::register_task_by_kind(
+                Processor::TOC_PROC, false/*global*/, task_id, it->second,
+                no_requests, NULL, 0)));
+        gpu_reduction_table[it->first] = task_id;
+      }
+#endif
       // Now build the data structures for all processors 
       std::map<Processor,Runtime*> processor_mapping;
       if (config.separate_runtime_instances)
@@ -22978,10 +23004,7 @@ namespace Legion {
       CodeDescriptor lg_task(Runtime::legion_runtime_task);
       CodeDescriptor rt_profiling_task(Runtime::profiling_runtime_task);
       CodeDescriptor startup_task(Runtime::startup_runtime_task);
-      CodeDescriptor endpoint_task(Runtime::endpoint_runtime_task);
-      Realm::ProfilingRequestSet no_requests;
-      // Keep track of all the registration events
-      std::set<RtEvent> registered_events;
+      CodeDescriptor endpoint_task(Runtime::endpoint_runtime_task); 
       for (std::map<Processor,Runtime*>::const_iterator it = 
             processor_mapping.begin(); it != processor_mapping.end(); it++)
       {
@@ -23030,16 +23053,12 @@ namespace Legion {
               it->first.register_task(LG_LEGION_PROFILING_ID, rt_profiling_task,
                 no_requests, &it->second, sizeof(it->second))));
       }
-#if defined(LEGION_GPU_REDUCTIONS) || \
-      (defined(LEGION_MALLOC_INSTANCES) && defined(LEGION_USE_CUDA))
+#if defined(LEGION_MALLOC_INSTANCES) && defined(LEGION_USE_CUDA)
       std::set<Processor> gpu_procs;
       for (std::set<Processor>::const_iterator it = 
             local_procs.begin(); it != local_procs.end(); it++)
         if (it->kind() == Processor::TOC_PROC)
           gpu_procs.insert(*it);
-#endif
-#ifdef LEGION_GPU_REDUCTIONS
-      register_builtin_gpu_reduction_tasks(gpu_procs, registered_events); 
 #endif
 #if defined(LEGION_MALLOC_INSTANCES) && defined(LEGION_USE_CUDA)
 #ifdef LEGION_SEPARATE_META_TASKS
@@ -23367,6 +23386,35 @@ namespace Legion {
         assert(false);
       return table;
     }
+
+#ifdef LEGION_GPU_REDUCTIONS
+    //--------------------------------------------------------------------------
+    /*static*/ GPUReductionTable& Runtime::get_gpu_reduction_table(void)
+    //--------------------------------------------------------------------------
+    {
+      static GPUReductionTable table;
+      return table;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ std::map<ReductionOpID,CodeDescriptor>&
+                                  Runtime::get_pending_gpu_reduction_table(void)
+    //--------------------------------------------------------------------------
+    {
+      static std::map<ReductionOpID,CodeDescriptor> pending_table;
+      return pending_table;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::preregister_gpu_reduction(ReductionOpID redop_id,
+                                                     const CodeDescriptor &desc)
+    //--------------------------------------------------------------------------
+    {
+      std::map<ReductionOpID,CodeDescriptor> &pending_table = 
+        get_pending_gpu_reduction_table();
+      pending_table[redop_id] = desc;
+    }
+#endif
 
     //--------------------------------------------------------------------------
     /*static*/ SerdezOpTable& Runtime::get_serdez_table(bool safe)

@@ -1038,7 +1038,7 @@ namespace Legion {
       virtual ApEvent gpu_reduction(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
-                           Processor gpu, 
+                           Processor gpu, TaskID gpu_task_id, 
                            PhysicalManager *dst, PhysicalManager *src,
                            ApEvent precondition, PredEvent pred_guard, 
                            ReductionOpID redop, bool reduction_fold) = 0;
@@ -1131,7 +1131,7 @@ namespace Legion {
                                const PhysicalTraceInfo &trace_info,
                                const std::vector<CopySrcDstField> &dst_fields,
                                const std::vector<CopySrcDstField> &src_fields,
-                               Processor gpu, 
+                               Processor gpu, TaskID gpu_task_id,
                                PhysicalManager *dst, PhysicalManager *src,
                                ApEvent precondition, PredEvent pred_guard, 
                                ReductionOpID redop, bool reduction_fold);
@@ -1327,7 +1327,7 @@ namespace Legion {
       virtual ApEvent gpu_reduction(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
-                           Processor gpu, 
+                           Processor gpu, TaskID gpu_task_id,
                            PhysicalManager *dst, PhysicalManager *src,
                            ApEvent precondition, PredEvent pred_guard, 
                            ReductionOpID redop, bool reduction_fold);
@@ -2230,7 +2230,7 @@ namespace Legion {
       virtual ApEvent gpu_reduction(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
-                           Processor gpu, 
+                           Processor gpu, TaskID gpu_task_id,
                            PhysicalManager *dst, PhysicalManager *src,
                            ApEvent precondition, PredEvent pred_guard, 
                            ReductionOpID redop, bool reduction_fold);

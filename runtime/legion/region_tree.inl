@@ -522,7 +522,7 @@ namespace Legion {
                                  const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
-                                 Processor gpu,
+                                 Processor gpu, TaskID gpu_task_id,
                                  PhysicalManager *dst, PhysicalManager *src,
                                  ApEvent precondition, PredEvent pred_guard, 
                                  ReductionOpID redop, bool reduction_fold)
@@ -532,8 +532,6 @@ namespace Legion {
       assert(!space.empty());
       assert(dst_fields.size() == src_fields.size());
 #endif
-      // Now that we know we're going to do this copy add any profling requests
-      const TaskID tid = LG_REDOP_TASK_ID + (redop - LEGION_REDOP_BASE); 
       // We need to compute the rectangles for which we can get dense accessors
       // for each of these reduction operations
       const Rect<DIM,T> *src_piece_list = 
@@ -586,8 +584,8 @@ namespace Legion {
       }
       Realm::ProfilingRequestSet requests;
       if (forest->runtime->profiler != NULL)
-        forest->runtime->profiler->add_task_request(requests, tid, 0/*vid*/,
-            forest->runtime->get_unique_operation_id(), gpu);
+        forest->runtime->profiler->add_task_request(requests, gpu_task_id,
+            0/*vid*/, forest->runtime->get_unique_operation_id(), gpu);
       // Pack the arguments for this task
       Serializer rez;
       rez.serialize(type_tag);
@@ -613,15 +611,16 @@ namespace Legion {
         if (trace_info.recording)
           trace_info.record_merge_events(pred_pre, precondition,
                                           ApEvent(pred_guard));
-        result = Runtime::ignorefaults(gpu.spawn(tid,
+        result = Runtime::ignorefaults(gpu.spawn(gpu_task_id,
               rez.get_buffer(), rez.get_used_bytes(), requests, pred_pre));
       }
       else
-        result = ApEvent(gpu.spawn(tid,
+        result = ApEvent(gpu.spawn(gpu_task_id,
               rez.get_buffer(), rez.get_used_bytes(), requests, precondition));
       if (trace_info.recording)
         trace_info.record_gpu_reduction(result, this, src_fields, dst_fields,
-              gpu, src, dst, precondition, pred_guard, redop, reduction_fold);
+                                    gpu, gpu_task_id, src, dst, precondition, 
+                                    pred_guard, redop, reduction_fold);
 #ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!result.exists())
       {
@@ -1459,7 +1458,7 @@ namespace Legion {
                                  const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
-                                 Processor gpu,
+                                 Processor gpu, TaskID gpu_task_id,
                                  PhysicalManager *dst, PhysicalManager *src,
                                  ApEvent precondition, PredEvent pred_guard, 
                                  ReductionOpID redop, bool reduction_fold)
@@ -1469,16 +1468,16 @@ namespace Legion {
       ApEvent space_ready = get_realm_index_space(local_space, true/*tight*/);
       if (space_ready.exists() && precondition.exists())
         return gpu_reduction_internal(context, local_space, trace_info, 
-            dst_fields, src_fields, gpu, dst, src,
+            dst_fields, src_fields, gpu, gpu_task_id, dst, src,
             Runtime::merge_events(&trace_info, precondition, space_ready),
             pred_guard, redop, reduction_fold);
       else if (space_ready.exists())
         return gpu_reduction_internal(context, local_space, trace_info, 
-                dst_fields, src_fields, gpu, dst, src,
+                dst_fields, src_fields, gpu, gpu_task_id, dst, src,
                 space_ready, pred_guard, redop, reduction_fold);
       else
         return gpu_reduction_internal(context, local_space, trace_info, 
-                dst_fields, src_fields, gpu, dst, src,
+                dst_fields, src_fields, gpu, gpu_task_id, dst, src,
                 precondition, pred_guard, redop, reduction_fold);
     }
 #endif
@@ -4966,7 +4965,7 @@ namespace Legion {
                                  const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
-                                 Processor gpu,
+                                 Processor gpu, TaskID gpu_task_id,
                                  PhysicalManager *dst, PhysicalManager *src,
                                  ApEvent precondition, PredEvent pred_guard, 
                                  ReductionOpID redop, bool reduction_fold)
@@ -4976,16 +4975,16 @@ namespace Legion {
       ApEvent space_ready = get_realm_index_space(local_space, true/*tight*/);
       if (precondition.exists() && space_ready.exists())
         return gpu_reduction_internal(context, local_space, trace_info, 
-            dst_fields, src_fields, gpu, dst, src,
+            dst_fields, src_fields, gpu, gpu_task_id, dst, src,
             Runtime::merge_events(&trace_info, space_ready, precondition),
             pred_guard, redop, reduction_fold);
       else if (space_ready.exists())
         return gpu_reduction_internal(context, local_space, trace_info, 
-                dst_fields, src_fields, gpu, dst, src,
+                dst_fields, src_fields, gpu, gpu_task_id, dst, src,
                 space_ready, pred_guard, redop, reduction_fold);
       else
         return gpu_reduction_internal(context, local_space, trace_info, 
-                dst_fields, src_fields, gpu, dst, src,
+                dst_fields, src_fields, gpu, gpu_task_id, dst, src,
                 precondition, pred_guard, redop, reduction_fold);
     }
 #endif

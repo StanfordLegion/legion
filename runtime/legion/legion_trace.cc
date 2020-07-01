@@ -3964,7 +3964,7 @@ namespace Legion {
                                  IndexSpaceExpression *expr,
                                  const std::vector<CopySrcDstField> &src_fields,
                                  const std::vector<CopySrcDstField> &dst_fields,
-                                 Processor gpu,
+                                 Processor gpu, TaskID gpu_task_id,
                                  PhysicalManager *src, PhysicalManager *dst,
                                  ApEvent precondition, PredEvent pred_guard,
                                  ReductionOpID redop, bool reduction_fold)
@@ -3988,7 +3988,7 @@ namespace Legion {
       unsigned lhs_ = convert_event(lhs);
       insert_instruction(new GPUReduction(
             *this, lhs_, expr, find_trace_local_id(memo),
-            src_fields, dst_fields, gpu, src, dst,
+            src_fields, dst_fields, gpu, gpu_task_id, src, dst,
             find_event(precondition), redop, reduction_fold));
     }
 #endif
@@ -4871,11 +4871,11 @@ namespace Legion {
                                const TraceLocalID& key,
                                const std::vector<CopySrcDstField>& s,
                                const std::vector<CopySrcDstField>& d,
-                               Processor g, 
+                               Processor g, TaskID tid, 
                                PhysicalManager *sm, PhysicalManager *dm,
                                unsigned pi, ReductionOpID ro, bool rf)
       : Instruction(tpl, key), lhs(l), expr(e), src_fields(s), dst_fields(d), 
-        gpu(g), src(sm), dst(dm),
+        gpu(g), gpu_task_id(tid), src(sm), dst(dm),
         precondition_idx(pi), redop(ro), reduction_fold(rf)
     //--------------------------------------------------------------------------
     {
@@ -4916,7 +4916,7 @@ namespace Legion {
       ApEvent precondition = events[precondition_idx];
       const PhysicalTraceInfo trace_info(memo->get_operation(), -1U, false);
       events[lhs] = expr->gpu_reduction(trace_info, dst_fields, src_fields,
-                                     gpu, dst, src,
+                                     gpu, gpu_task_id, dst, src,
                                      precondition, PredEvent::NO_PRED_EVENT,
                                      redop, reduction_fold);
     }
