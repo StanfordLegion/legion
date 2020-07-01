@@ -7626,10 +7626,10 @@ namespace Legion {
 #ifdef LEGION_GPU_REDUCTIONS
 #ifdef __CUDACC__
       template<typename REDOP>
-      static void preregister_gpu_reduction(ReductionOpID redop_id);
+      static void preregister_gpu_reduction_op(ReductionOpID redop_id);
 #endif
-      static void preregister_gpu_reduction(ReductionOpID redop_id,
-                                            const CodeDescriptor &desc);
+      static void preregister_gpu_reduction_op(ReductionOpID redop_id,
+                                               const CodeDescriptor &desc);
 #endif
     public:
       /**

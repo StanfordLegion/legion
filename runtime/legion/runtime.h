@@ -3357,7 +3357,7 @@ namespace Legion {
       static GPUReductionTable& get_gpu_reduction_table(void);
       static std::map<ReductionOpID,CodeDescriptor>& 
                                 get_pending_gpu_reduction_table(void);
-      static void preregister_gpu_reduction(ReductionOpID redop_id,
+      static void preregister_gpu_reduction_op(ReductionOpID redop_id,
                                             const CodeDescriptor &desc);
 #endif
       static SerdezOpTable& get_serdez_table(bool safe);

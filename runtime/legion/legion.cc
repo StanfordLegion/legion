@@ -6578,11 +6578,11 @@ namespace Legion {
 
 #ifdef LEGION_GPU_REDUCTIONS
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::preregister_gpu_reduction(ReductionOpID redop_id,
+    /*static*/ void Runtime::preregister_gpu_reduction_op(ReductionOpID redop,
                                                      const CodeDescriptor &desc)
     //--------------------------------------------------------------------------
     {
-      Internal::Runtime::preregister_gpu_reduction(redop_id, desc);
+      Internal::Runtime::preregister_gpu_reduction_op(redop, desc);
     }
 #endif
 

@@ -23406,13 +23406,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::preregister_gpu_reduction(ReductionOpID redop_id,
+    /*static*/ void Runtime::preregister_gpu_reduction_op(ReductionOpID redop,
                                                      const CodeDescriptor &desc)
     //--------------------------------------------------------------------------
     {
       std::map<ReductionOpID,CodeDescriptor> &pending_table = 
         get_pending_gpu_reduction_table();
-      pending_table[redop_id] = desc;
+      pending_table[redop] = desc;
     }
 #endif
 

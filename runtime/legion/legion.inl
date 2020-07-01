@@ -20045,11 +20045,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename REDOP>
-    /*static*/ void Runtime::preregister_gpu_reduction(ReductionOpID redop_id)
+    /*static*/ void Runtime::preregister_gpu_reduction_op(ReductionOpID redop)
     //--------------------------------------------------------------------------
     {
       CodeDescriptor desc(Internal::gpu_reduction_helper<REDOP>);
-      preregister_gpu_reduction(redop_id, desc);
+      preregister_gpu_reduction_op(redop, desc);
     }
 #undef LEGION_THREADS_PER_BLOCK
 #undef LEGION_MIN_BLOCKS_PER_SM
