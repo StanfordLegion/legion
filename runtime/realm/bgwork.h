@@ -75,7 +75,7 @@ namespace Realm {
     ~BackgroundWorkManager(void);
 
     struct Config {
-      WithDefault<unsigned, 1> generic_workers; // non-numa-specific workers
+      WithDefault<unsigned, 2> generic_workers; // non-numa-specific workers
       WithDefault<unsigned, 0> per_numa_workers;
       WithDefault<bool, false> pin_generic;
       WithDefault<bool, false> pin_numa;
