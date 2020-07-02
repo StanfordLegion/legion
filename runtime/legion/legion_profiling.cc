@@ -1722,12 +1722,6 @@ namespace Legion {
       info.id = tid;
       info.id2 = vid;
       info.op_id = task_uid;
-#ifdef LEGION_PROF_PROVENANCE
-      if (!external_implicit_task)
-        info.provenance = LgEvent(Processor::get_current_finish_event());
-      else
-        info.provenance = LgEvent::NO_LG_EVENT;
-#endif
       Realm::ProfilingRequest &req = requests.add_request(target_proc,
                 LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
       req.add_measurement<
@@ -1758,12 +1752,6 @@ namespace Legion {
       ProfilingInfo info(this, LEGION_PROF_META); 
       info.id = tid;
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
-#ifdef LEGION_PROF_PROVENANCE
-      if (!external_implicit_task)
-        info.provenance = LgEvent(Processor::get_current_finish_event());
-      else
-        info.provenance = LgEvent::NO_LG_EVENT;
-#endif
       Realm::ProfilingRequest &req = requests.add_request(target_proc,
                 LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
       req.add_measurement<
@@ -1788,12 +1776,6 @@ namespace Legion {
       ProfilingInfo info(NULL, LEGION_PROF_MESSAGE);
       info.id = LG_MESSAGE_ID + k;
       info.op_id = implicit_provenance;
-#ifdef LEGION_PROF_PROVENANCE
-      if (!external_implicit_task)
-        info.provenance = LgEvent(Processor::get_current_finish_event());
-      else
-        info.provenance = LgEvent::NO_LG_EVENT;
-#endif
       Realm::ProfilingRequest &req = requests.add_request(remote_target,
                 LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
       req.add_measurement<
@@ -1821,12 +1803,6 @@ namespace Legion {
       ProfilingInfo info(this, LEGION_PROF_COPY); 
       // No ID here
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
-#ifdef LEGION_PROF_PROVENANCE
-      if (!external_implicit_task)
-        info.provenance = LgEvent(Processor::get_current_finish_event());
-      else
-        info.provenance = LgEvent::NO_LG_EVENT;
-#endif
       Realm::ProfilingRequest &req = requests.add_request(target_proc,
                 LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
       req.add_measurement<
@@ -1848,12 +1824,6 @@ namespace Legion {
       ProfilingInfo info(this, LEGION_PROF_FILL);
       // No ID here
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
-#ifdef LEGION_PROF_PROVENANCE
-      if (!external_implicit_task)
-        info.provenance = LgEvent(Processor::get_current_finish_event());
-      else
-        info.provenance = LgEvent::NO_LG_EVENT;
-#endif
       Realm::ProfilingRequest &req = requests.add_request(target_proc,
                 LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
       req.add_measurement<
@@ -1876,12 +1846,6 @@ namespace Legion {
       ProfilingInfo info(this, LEGION_PROF_INST); 
       // No ID here
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
-#ifdef LEGION_PROF_PROVENANCE
-      if (!external_implicit_task)
-        info.provenance = LgEvent(Processor::get_current_finish_event());
-      else
-        info.provenance = LgEvent::NO_LG_EVENT;
-#endif
       // Instances use two profiling requests so that we can get MemoryUsage
       // right away - the Timeline doesn't come until we delete the instance
       Realm::ProfilingRequest &req1 = requests.add_request(target_proc,
@@ -1909,12 +1873,6 @@ namespace Legion {
       // Pass the part_op as the ID
       info.id = part_op;
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
-#ifdef LEGION_PROF_PROVENANCE
-      if (!external_implicit_task)
-        info.provenance = LgEvent(Processor::get_current_finish_event());
-      else
-        info.provenance = LgEvent::NO_LG_EVENT;
-#endif
       Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
                         ? target_proc : Processor::get_executing_processor(),
                         LG_LEGION_PROFILING_ID, &info, sizeof(info));
@@ -1936,12 +1894,6 @@ namespace Legion {
       info.id = tid;
       info.id2 = vid;
       info.op_id = uid;
-#ifdef LEGION_PROF_PROVENANCE
-      if (!external_implicit_task)
-        info.provenance = LgEvent(Processor::get_current_finish_event());
-      else
-        info.provenance = LgEvent::NO_LG_EVENT;
-#endif
       Realm::ProfilingRequest &req = requests.add_request(target_proc,
                 LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
       req.add_measurement<
@@ -1969,12 +1921,6 @@ namespace Legion {
       ProfilingInfo info(this, LEGION_PROF_META); 
       info.id = tid;
       info.op_id = uid;
-#ifdef LEGION_PROF_PROVENANCE
-      if (!external_implicit_task)
-        info.provenance = LgEvent(Processor::get_current_finish_event());
-      else
-        info.provenance = LgEvent::NO_LG_EVENT;
-#endif
       Realm::ProfilingRequest &req = requests.add_request(target_proc,
                 LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
       req.add_measurement<
@@ -2002,12 +1948,6 @@ namespace Legion {
       ProfilingInfo info(this, LEGION_PROF_COPY); 
       // No ID here
       info.op_id = uid;
-#ifdef LEGION_PROF_PROVENANCE
-      if (!external_implicit_task)
-        info.provenance = LgEvent(Processor::get_current_finish_event());
-      else
-        info.provenance = LgEvent::NO_LG_EVENT;
-#endif
       Realm::ProfilingRequest &req = requests.add_request(target_proc,
                 LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
       req.add_measurement<
@@ -2029,12 +1969,6 @@ namespace Legion {
       ProfilingInfo info(this, LEGION_PROF_FILL);
       // No ID here
       info.op_id = uid;
-#ifdef LEGION_PROF_PROVENANCE
-      if (!external_implicit_task)
-        info.provenance = LgEvent(Processor::get_current_finish_event());
-      else
-        info.provenance = LgEvent::NO_LG_EVENT;
-#endif
       Realm::ProfilingRequest &req = requests.add_request(target_proc,
                 LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
       req.add_measurement<
@@ -2057,12 +1991,6 @@ namespace Legion {
       ProfilingInfo info(this, LEGION_PROF_INST); 
       // No ID here
       info.op_id = uid;
-#ifdef LEGION_PROF_PROVENANCE
-      if (!external_implicit_task)
-        info.provenance = LgEvent(Processor::get_current_finish_event());
-      else
-        info.provenance = LgEvent::NO_LG_EVENT;
-#endif
       // Instances use two profiling requests so that we can get MemoryUsage
       // right away - the Timeline doesn't come until we delete the instance
       Realm::ProfilingRequest &req1 = requests.add_request(target_proc,
@@ -2090,12 +2018,6 @@ namespace Legion {
       // Pass the partition op kind as the ID
       info.id = part_op;
       info.op_id = uid;
-#ifdef LEGION_PROF_PROVENANCE
-      if (!external_implicit_task)
-        info.provenance = LgEvent(Processor::get_current_finish_event());
-      else
-        info.provenance = LgEvent::NO_LG_EVENT;
-#endif
       Realm::ProfilingRequest &req = requests.add_request(target_proc,
                   LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
       req.add_measurement<
