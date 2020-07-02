@@ -121,11 +121,19 @@ namespace Realm {
 	  assert(prev == (phead + 1));
 	}
 	Task *headptr = reinterpret_cast<Task *>(phead);
-#ifdef DEBUG_REALM
+//#ifdef DEBUG_REALM
 	// no need for load_acquire here, because the pushing and popping of
 	//  this task (and the head task) involved a mutex
-	assert(headptr->marked_ready.load());
-#endif
+	{
+	  bool head_ready = headptr->marked_ready.load();
+	  if(!head_ready) {
+	    log_task.fatal() << "HELP: headptr=" << std::hex << phead << std::dec
+			     << " ready=" << head_ready << " state=" << headptr->state.load();
+	    abort();
+	  }
+	}
+	//assert(headptr->marked_ready.load());
+//#endif
 	if(did_pending_update && wants_timeline)
 	  timeline.ready_time = headptr->timeline.ready_time;
 	headptr->remove_reference();
@@ -502,6 +510,11 @@ namespace Realm {
 
     // just jam it into the task queue
     if(task->mark_ready()) {
+//#ifdef DEBUG_REALM
+      // we should not be directly pushing a task that was part of a chain
+      assert(task->pending_head.load() == 0);
+//#endif
+
       {
 	AutoLock<> al(mutex);
 	if(ready_task_list.empty(task->priority))
@@ -536,6 +549,12 @@ namespace Realm {
     // we'll tentatively notify based on the highest priority task to be
     //  added
     priority_t notify_priority = tasks.front()->priority;
+
+//#ifdef DEBUG_REALM
+    // we should not be directly pushing a chain whose head is not marked
+    //  ready
+    assert(tasks.front()->pending_head.load() == 0);
+//#endif
 
     {
       AutoLock<> al(mutex);
@@ -686,11 +705,15 @@ namespace Realm {
 #endif
     }
 
-#ifdef DEBUG_REALM
+//#ifdef DEBUG_REALM
     // wait value should have moved on, or been set back to -1
     long long wv_check = wait_value.load();
+    if(!((wv_check == -1) || (wv_check > oc_w_lsb))) {
+      log_task.fatal() << "HELP: wv_check=" << wv_check << " oc_w_lsb=" << oc_w_lsb << " wv_read=" << wv_read << " counter=" << counter.load();
+      abort();
+    }
     assert((wv_check == -1) || (wv_check > oc_w_lsb));
-#endif
+//#endif
   }
 
 

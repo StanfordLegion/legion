@@ -117,6 +117,7 @@ namespace Realm {
       //  have a pointer to the head task (which uses a uintptr_t so we can
       //  borrow the bottom bit for avoiding races)
       atomic<bool> marked_ready;
+    public: // HACK for debug - should be protected
       atomic<uintptr_t> pending_head;
     };
 
