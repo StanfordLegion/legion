@@ -542,6 +542,40 @@ namespace Legion {
     }; 
 
     /////////////////////////////////////////////////////////////
+    // Murmur3Hasher
+    /////////////////////////////////////////////////////////////
+
+    /**
+     * \class Murmur3Hasher
+     * This class implements an object-oriented version of the
+     * MurmurHash3 hashing algorithm for computing a 128-bit 
+     * hash value. It is taken from the public domain here:
+     * https://github.com/aappleby/smhasher/blob/master/src/MurmurHash3.cpp
+     */
+    class Murmur3Hasher {
+    public:
+      Murmur3Hasher(uint64_t seed = 0xCC892563);
+    public:
+      template<typename T>
+      inline void hash(const T &value);
+      inline void finalize(uint64_t result[2]);
+    protected:
+      inline uint64_t rotl64(uint64_t x, uint8_t r);
+      inline uint64_t fmix64(uint64_t k);
+    protected:
+      union {
+        uint64_t k[2];
+        uint8_t b[16];
+      } blocks;
+      uint64_t h1, h2, len;
+      uint8_t bytes;
+      bool finalized;
+    public:
+      static const uint64_t c1 = 0x87c37b91114253d5ULL;
+      static const uint64_t c2 = 0x4cf5ad432745937fULL;
+    };
+
+    /////////////////////////////////////////////////////////////
     // Dynamic Table 
     /////////////////////////////////////////////////////////////
     template<typename IT>
@@ -1583,6 +1617,110 @@ namespace Legion {
       }
       identity = true;
     } 
+
+    //-------------------------------------------------------------------------
+    inline Murmur3Hasher::Murmur3Hasher(uint64_t seed)
+      : h1(seed), h2(seed), len(0), bytes(0), finalized(false)
+    //-------------------------------------------------------------------------
+    {
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename T>
+    inline void Murmur3Hasher::hash(const T &value)
+    //-------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!finalized);
+#endif
+      const uint8_t *data = reinterpret_cast<const uint8_t*>(&value); 
+      for (unsigned idx = 0; idx < sizeof(T); idx++)
+      {
+        blocks.b[bytes++] = data[idx];
+        if (bytes == 16)
+        {
+          // body
+          uint64_t k1 = blocks.k[0];
+          uint64_t k2 = blocks.k[1];
+          k1 *= c1; k1  = rotl64(k1,31); k1 *= c2; h1 ^= k1;
+          h1 = rotl64(h1,27); h1 += h2; h1 = h1*5+0x52dce729;
+          k2 *= c2; k2  = rotl64(k2,33); k2 *= c1; h2 ^= k2;
+          h2 = rotl64(h2,31); h2 += h1; h2 = h2*5+0x38495ab5;
+          len += 16;
+          bytes = 0;
+        }
+      }
+    }
+
+    //-------------------------------------------------------------------------
+    inline void Murmur3Hasher::finalize(uint64_t result[2])
+    //-------------------------------------------------------------------------
+    {
+      if (!finalized)
+      {
+        // tail
+        uint64_t k1 = 0;
+        uint64_t k2 = 0;
+        switch (bytes)
+        {
+          case 15: k2 ^= ((uint64_t)blocks.b[14]) << 48;
+          case 14: k2 ^= ((uint64_t)blocks.b[13]) << 40;
+          case 13: k2 ^= ((uint64_t)blocks.b[12]) << 32;
+          case 12: k2 ^= ((uint64_t)blocks.b[11]) << 24;
+          case 11: k2 ^= ((uint64_t)blocks.b[10]) << 16;
+          case 10: k2 ^= ((uint64_t)blocks.b[ 9]) << 8;
+          case  9: k2 ^= ((uint64_t)blocks.b[ 8]) << 0;
+                   k2 *= c2; k2  = rotl64(k2,33); k2 *= c1; h2 ^= k2;
+
+          case  8: k1 ^= ((uint64_t)blocks.b[ 7]) << 56;
+          case  7: k1 ^= ((uint64_t)blocks.b[ 6]) << 48;
+          case  6: k1 ^= ((uint64_t)blocks.b[ 5]) << 40;
+          case  5: k1 ^= ((uint64_t)blocks.b[ 4]) << 32;
+          case  4: k1 ^= ((uint64_t)blocks.b[ 3]) << 24;
+          case  3: k1 ^= ((uint64_t)blocks.b[ 2]) << 16;
+          case  2: k1 ^= ((uint64_t)blocks.b[ 1]) << 8;
+          case  1: k1 ^= ((uint64_t)blocks.b[ 0]) << 0;
+                   k1 *= c1; k1  = rotl64(k1,31); k1 *= c2; h1 ^= k1;
+        }
+        
+        // finalization
+        len += bytes;
+
+        h1 ^= len; h2 ^= len;
+
+        h1 += h2;
+        h2 += h1;
+
+        h1 = fmix64(h1);
+        h2 = fmix64(h2);
+
+        h1 += h2;
+        h2 += h1;
+
+        finalized = true;
+      }
+      result[0] = h1;
+      result[1] = h2;
+    }
+
+    //-------------------------------------------------------------------------
+    inline uint64_t Murmur3Hasher::rotl64(uint64_t x, uint8_t r)
+    //-------------------------------------------------------------------------
+    {
+      return (x << r) | (x >> (64 - r));
+    }
+
+    //-------------------------------------------------------------------------
+    inline uint64_t Murmur3Hasher::fmix64(uint64_t k)
+    //-------------------------------------------------------------------------
+    {
+      k ^= k >> 33;
+      k *= 0xff51afd7ed558ccdULL;
+      k ^= k >> 33;
+      k *= 0xc4ceb9fe1a85ec53ULL;
+      k ^= k >> 33;
+      return k;
+    }
 
     //-------------------------------------------------------------------------
     template<typename ALLOCATOR>
