@@ -19,6 +19,7 @@
 
 local affine_helper = require("regent/affine_helper")
 local ast = require("regent/ast")
+local util = require("regent/ast_util")
 local data = require("common/data")
 local report = require("common/report")
 local std = require("regent/std")
@@ -1145,9 +1146,10 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
           local passed = analyze_noninterference_self(
             loop_cx, task, arg, partition_type, mapping, loop_vars)
           if not passed then
-            report_fail(call, "loop optimization failed: argument " .. tostring(i) ..
+            -- Revert later!
+            ignore(call, "loop optimization failed: argument " .. tostring(i) ..
                 " interferes with itself")
-            return
+            --return
           end
         end
       end
@@ -1179,6 +1181,75 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
     free_variables = free_vars,
     loop_variables = loop_vars
   }
+end
+
+function mk_stat_for_num(block, values, sym)
+  return ast.typed.stat.ForNum {
+    block = block,
+    values = values,
+    symbol = sym,
+    metadata = false,
+    span = ast.trivial_span(),
+    annotations = ast.default_annotations()
+  }
+end
+
+function init_bitmask(bitmask)
+  local stats = terralib.newlist()
+
+  local idx = std.newsymbol(int32, "i")
+  local bitmask_i = util.mk_expr_index_access(util.mk_expr_id(bitmask, std.rawref(&bitmask:gettype())), util.mk_expr_id(idx), std.rawref(&bool))
+  local assign = util.mk_stat_assignment(bitmask_i, util.mk_expr_constant(false, bool))
+  stats:insert(assign)
+
+  local values = terralib.newlist()
+  values:insert(util.mk_expr_constant(0, int32))
+  values:insert(util.mk_expr_constant(1e2, int32))
+
+  return mk_stat_for_num(util.mk_block(stats), values, idx)
+end
+
+function amaze(node)
+  local p_symbol = node.call.args[1].value.value
+  local index_expr = node.call.args[1].index.arg
+
+  local stats = terralib.newlist()
+  -- Set colors = 1e2 for now
+  
+  local bitmask = std.newsymbol(bool[1e2], "bitmask")
+  stats:insert(util.mk_stat_var(bitmask, bool[1e2], false))
+  stats:insert(init_bitmask(bitmask))
+
+  local value = std.newsymbol(int64, "value")
+  stats:insert(util.mk_stat_var(value, int64, false))
+
+  local conflict = std.newsymbol(bool, "conflict")
+  stats:insert(util.mk_stat_var(conflict, bool, util.mk_expr_constant(false, bool)))
+
+  local bounds = terralib.newlist()
+  bounds:insert(util.mk_expr_constant(0, int32))
+  bounds:insert(util.mk_expr_constant(1e2, int32))
+
+  local i = index_expr.lhs.rhs.value -- FIX LATER
+
+  local loop = terralib.newlist()
+  loop:insert(util.mk_stat_assignment(util.mk_expr_id(value, std.rawref(&int64)), index_expr))
+
+  local cond = util.mk_expr_binary("<", util.mk_expr_id(value), util.mk_expr_constant(100, int32))
+  local then_block = terralib.newlist()
+
+  local bitmask_value = util.mk_expr_index_access(util.mk_expr_id(bitmask), util.mk_expr_id(value), std.rawref(&bool))
+  local assign = util.mk_stat_assignment(util.mk_expr_id(conflict),  bitmask_value)
+  then_block:insert(assign)
+
+  local bounds_check = util.mk_stat_if(cond, then_block)
+  loop:insert(bounds_check)
+
+  stats:insert(mk_stat_for_num(util.mk_block(loop), bounds, i))
+
+  local block = util.mk_block(stats)
+  local stat_block = util.mk_stat_block(block)
+  return stat_block
 end
 
 function optimize_index_launch.stat_for_num(cx, node)
@@ -1213,7 +1284,7 @@ function optimize_index_launch.stat_for_num(cx, node)
     }
   end
 
-  return ast.typed.stat.IndexLaunchNum {
+  local x = ast.typed.stat.IndexLaunchNum {
     symbol = node.symbol,
     values = node.values,
     preamble = body.preamble,
@@ -1225,9 +1296,10 @@ function optimize_index_launch.stat_for_num(cx, node)
     is_constant_time = body.is_constant_time,
     free_vars = body.free_variables,
     loop_vars = body.loop_variables,
-    annotations = node.annotations,
+    annotations = ast.default_annotations(), -- REVERT LATER!
     span = node.span,
   }
+  return amaze(x)
 end
 
 function optimize_index_launch.stat_for_list(cx, node)
@@ -1323,6 +1395,7 @@ function optimize_index_launches.top(cx, node)
 end
 
 function optimize_index_launches.entry(node)
+  --print(node.body.stats)
   local cx = context.new_global_scope({})
   return optimize_index_launches.top(cx, node)
 end
