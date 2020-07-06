@@ -34,6 +34,7 @@ namespace Legion {
       std::map<PhysicalManager*,unsigned/*count*/>* acquired_instances;
       unsigned long long                start_time;
       unsigned long long                stop_time;
+      unsigned                          collective_count;
     };
 
     /**

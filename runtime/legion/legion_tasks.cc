@@ -3375,7 +3375,8 @@ namespace Legion {
           {
             // If the mapper wants valid instances we first need to do our
             // versioning analysis and then call the mapper
-            if (defer_args == NULL/*first invocation*/)
+            if ((defer_args == NULL/*first invocation*/) || 
+                (defer_args->invocation_count == 0))
             {
               const RtEvent version_ready_event = 
                 perform_versioning_analysis(false/*post mapper*/);
@@ -3391,7 +3392,8 @@ namespace Legion {
           {
             // If the mapper doesn't need valid instances, we do the mapper
             // call first and then see if we need to do any versioning analysis
-            if (defer_args == NULL/*first invocation*/)
+            if ((defer_args == NULL/*first invocation*/) ||
+                (defer_args->invocation_count == 0))
             {
               invoke_mapper(must_epoch_op);
               const RtEvent version_ready_event = 
@@ -8939,13 +8941,14 @@ namespace Legion {
       for (std::vector<PointTask*>::const_iterator it = 
             points.begin(); it != points.end(); it++)
       {
-        const RtEvent map_event = (*it)->perform_mapping(epoch_owner);
-        if (map_event.exists())
-          mapped_events.insert(map_event);
+        // Now that we support collective instance creation, we need to 
+        // enable all the point tasks to be mapping in parallel with
+        // each other in case they need to synchronize to create 
+        // collective instances
+        mapped_events.insert((*it)->defer_perform_mapping(RtEvent::NO_RT_EVENT,
+                                    epoch_owner, args, 0/*invocation count*/));
       }
-      if (!mapped_events.empty())
-        return Runtime::merge_events(mapped_events);
-      return RtEvent::NO_RT_EVENT;
+      return Runtime::merge_events(mapped_events);
     }
 
     //--------------------------------------------------------------------------
@@ -8986,7 +8989,13 @@ namespace Legion {
       for (unsigned idx = 0; idx < num_points; idx++)
       {
         PointTask *point = points[idx];
-        const RtEvent map_event = point->perform_mapping();
+        // Now that we support collective instance creation, we need to 
+        // enable all the point tasks to be mapping in parallel with
+        // each other in case they need to synchronize to create 
+        // collective instances
+        const RtEvent map_event = point->defer_perform_mapping(
+            RtEvent::NO_RT_EVENT, NULL/*must epoch*/, 
+            NULL/*defer args*/, 0/*invocation count*/);
         if (map_event.exists() && !map_event.has_triggered())
           point->defer_launch_task(map_event);
         else

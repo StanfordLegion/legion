@@ -559,6 +559,40 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    CollectiveManager* Operation::find_or_create_collective_instance(
+                                  MappingCallKind call_kind, unsigned index,
+                                  const LayoutConstraintSet &constraints,
+                                  const std::vector<LogicalRegion> &regions,
+                                  DomainPoint &collective_point)
+    //--------------------------------------------------------------------------
+    {
+      // we do not do anything here in this case
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveManager* Operation::find_or_create_collective_instance(
+                                  MappingCallKind call_kind, unsigned index,
+                                  LayoutConstraints *constraints,
+                                  const std::vector<LogicalRegion> &regions,
+                                  DomainPoint &collective_point)
+    //--------------------------------------------------------------------------
+    {
+      // we do not do anything here in this case
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    bool Operation::finalize_collective_instance(CollectiveManager *manager,
+                                                 bool result)
+    //--------------------------------------------------------------------------
+    {
+      // should only be called for inherited types
+      assert(false);
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
     void Operation::report_uninitialized_usage(const unsigned index,
                                  LogicalRegion handle, const RegionUsage usage, 
                                  const char *field_string, RtUserEvent reported)

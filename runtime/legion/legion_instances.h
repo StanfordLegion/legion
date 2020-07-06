@@ -741,6 +741,7 @@ namespace Legion {
     public:
       void initialize(RegionTreeForest *forest);
       PhysicalManager* create_physical_instance(RegionTreeForest *forest,
+                        CollectiveManager *collective, DomainPoint *point,
                         LayoutConstraintKind *unsat_kind,
                         unsigned *unsat_index, size_t *footprint = NULL);
     public:

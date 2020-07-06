@@ -408,6 +408,18 @@ namespace Legion {
                                   const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
+      virtual CollectiveManager* find_or_create_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const LayoutConstraintSet &constraints,
+                                  const std::vector<LogicalRegion> &regions,
+                                  DomainPoint &collective_point);
+      virtual CollectiveManager* find_or_create_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  LayoutConstraints *constraints,
+                                  const std::vector<LogicalRegion> &regions,
+                                  DomainPoint &collective_point);
+      virtual bool finalize_collective_instance(CollectiveManager *manager, 
+                                                bool result);
       virtual void report_uninitialized_usage(const unsigned index,
                                               LogicalRegion handle,
                                               const RegionUsage usage,

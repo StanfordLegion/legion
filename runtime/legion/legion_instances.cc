@@ -3400,8 +3400,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalManager* InstanceBuilder::create_physical_instance(
-                    RegionTreeForest *forest, LayoutConstraintKind *unsat_kind,
-                    unsigned *unsat_index, size_t *footprint)
+                RegionTreeForest *forest, CollectiveManager *collective_inst,
+                DomainPoint *collective_point, LayoutConstraintKind *unsat_kind,
+                unsigned *unsat_index, size_t *footprint)
     //--------------------------------------------------------------------------
     {
       if (!valid)

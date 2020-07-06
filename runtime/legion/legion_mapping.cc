@@ -204,6 +204,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool PhysicalInstance::is_collective_instance(void) const
+    //--------------------------------------------------------------------------
+    {
+      if ((impl == NULL) || !impl->is_instance_manager())
+        return false;
+      return impl->is_collective_manager();
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ PhysicalInstance PhysicalInstance::get_virtual_instance(void)
     //--------------------------------------------------------------------------
     {

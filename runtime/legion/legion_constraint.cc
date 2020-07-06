@@ -629,9 +629,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     SpecializedConstraint::SpecializedConstraint(SpecializedKind k,
-                ReductionOpID r, bool no, bool ext, size_t pieces, int overhead)
+      ReductionOpID r, bool no, bool ext, bool col, size_t pieces, int overhead)
       : kind(k), redop(r), max_pieces(pieces), max_overhead(overhead), 
-        no_access(no), exact(ext)
+        collective(col), no_access(no), exact(ext)
     //--------------------------------------------------------------------------
     {
       if (redop != 0)
@@ -655,7 +655,8 @@ namespace Legion {
     {
       return ((kind == other.kind) && (redop == other.redop) &&
         (max_pieces == other.max_pieces) && (max_overhead == other.max_overhead)
-          && (no_access == other.no_access) && (exact == other.exact));
+          && (collective == other.collective) && (no_access == other.no_access) 
+          && (exact == other.exact));
     }
 
     //--------------------------------------------------------------------------
@@ -673,6 +674,8 @@ namespace Legion {
       if (max_pieces > other.max_pieces)
         return false;
       if (max_overhead > other.max_overhead)
+        return false;
+      if (collective && !other.collective)
         return false;
       if (no_access && !other.no_access)
         return false;
@@ -696,6 +699,8 @@ namespace Legion {
         return true;
       if (max_pieces != other.max_pieces)
         return true;
+      if (collective != other.collective)
+        return true;
       if (max_overhead != other.max_overhead)
         return true;
       // No access never causes a conflict
@@ -711,6 +716,7 @@ namespace Legion {
       SWAP_HELPER(ReductionOpID, redop)
       SWAP_HELPER(size_t, max_pieces)
       SWAP_HELPER(int, max_overhead)
+      SWAP_HELPER(bool, collective)
       SWAP_HELPER(bool, no_access)
       SWAP_HELPER(bool, exact)
     }
@@ -729,6 +735,7 @@ namespace Legion {
         rez.serialize(max_pieces);
         rez.serialize(max_overhead);
       }
+      rez.serialize<bool>(collective);
       rez.serialize<bool>(no_access);
       rez.serialize<bool>(exact);
     }
@@ -747,6 +754,7 @@ namespace Legion {
         derez.deserialize(max_pieces);
         derez.deserialize(max_overhead);
       }
+      derez.deserialize<bool>(collective);
       derez.deserialize<bool>(no_access);
       derez.deserialize<bool>(exact);
     }

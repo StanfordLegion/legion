@@ -4334,6 +4334,7 @@ namespace Legion {
                                 GCPriority priority, bool tight_bounds,
                                 LayoutConstraintKind *unsat_kind,
                                 unsigned *unsat_index, size_t *footprint, 
+                                CollectiveManager *target, DomainPoint *point,
                                 UniqueID creator_id, bool remote)
     //--------------------------------------------------------------------------
     {
@@ -4352,6 +4353,13 @@ namespace Legion {
           for (unsigned idx = 0; idx < regions.size(); idx++)
             rez.serialize(regions[idx]);
           rez.serialize<bool>(acquire);
+          if (target != NULL)
+          {
+            rez.serialize(target->did);
+            rez.serialize(*point);
+          }
+          else
+            rez.serialize<DistributedID>(0);
           constraints.serialize(rez);
           rez.serialize(mapper_id);
           rez.serialize(processor);
@@ -4380,7 +4388,7 @@ namespace Legion {
           wait_on.wait();
         // Try to make the result
         PhysicalManager *manager = allocate_physical_instance(builder, 
-            footprint, unsat_kind, unsat_index);
+            footprint, unsat_kind, unsat_index, target, point);
         if (manager != NULL)
         {
           if (runtime->legion_spy_enabled)
@@ -4404,6 +4412,7 @@ namespace Legion {
                                      GCPriority priority, bool tight_bounds,
                                      LayoutConstraintKind *unsat_kind,
                                      unsigned *unsat_index, size_t *footprint, 
+                                     CollectiveManager *target, DomainPoint *p,
                                      UniqueID creator_id, bool remote)
     //--------------------------------------------------------------------------
     {
@@ -4422,6 +4431,13 @@ namespace Legion {
           for (unsigned idx = 0; idx < regions.size(); idx++)
             rez.serialize(regions[idx]);
           rez.serialize<bool>(acquire);
+          if (target != NULL)
+          {
+            rez.serialize(target->did);
+            rez.serialize(*p);
+          }
+          else
+            rez.serialize<DistributedID>(0);
           rez.serialize(constraints->layout_id);
           rez.serialize(mapper_id);
           rez.serialize(processor);
@@ -4450,7 +4466,7 @@ namespace Legion {
           wait_on.wait();
         // Try to make the instance
         PhysicalManager *manager = allocate_physical_instance(builder, 
-            footprint, unsat_kind, unsat_index);
+            footprint, unsat_kind, unsat_index, target, p);
         if (manager != NULL)
         {
           if (runtime->legion_spy_enabled)
@@ -5153,6 +5169,18 @@ namespace Legion {
       {
         case CREATE_INSTANCE_CONSTRAINTS:
           {
+            DistributedID collective_did;
+            derez.deserialize(collective_did);
+            RtEvent collective_ready;
+            DomainPoint point;
+            CollectiveManager *collective = NULL;
+            if (collective_did > 0)
+            {
+              collective = static_cast<CollectiveManager*>(
+                  runtime->find_or_request_instance_manager(collective_did, 
+                                                            collective_ready));
+              derez.deserialize(point);
+            }
             LayoutConstraintSet constraints;
             constraints.deserialize(derez);
             MapperID mapper_id;
@@ -5179,11 +5207,13 @@ namespace Legion {
             size_t local_footprint;
             LayoutConstraintKind local_kind;
             unsigned local_index;
+            if (collective_ready.exists() && !collective_ready.has_triggered())
+              collective_ready.wait();
             bool success = create_physical_instance(constraints, regions, 
-                                   result, mapper_id, processor, acquire, 
-                                   priority, tight_region_bounds,
-                                   &local_kind, &local_index,
-                                   &local_footprint, creator_id,true/*remote*/);
+                                 result, mapper_id, processor, acquire, 
+                                 priority, tight_region_bounds,
+                                 &local_kind, &local_index, &local_footprint,
+                                 collective, &point, creator_id,true/*remote*/);
             if (success || (remote_footprint != NULL) || 
                 (remote_kind != NULL) || (remote_index != NULL))
             {
@@ -5227,6 +5257,18 @@ namespace Legion {
           }
         case CREATE_INSTANCE_LAYOUT:
           {
+            DistributedID collective_did;
+            derez.deserialize(collective_did);
+            RtEvent collective_ready;
+            CollectiveManager *collective = NULL;
+            DomainPoint point;
+            if (collective_did > 0)
+            {
+              collective = static_cast<CollectiveManager*>(
+                  runtime->find_or_request_instance_manager(collective_did, 
+                                                            collective_ready));
+              derez.deserialize(point);
+            }
             LayoutConstraintID layout_id;
             derez.deserialize(layout_id);
             MapperID mapper_id;
@@ -5255,11 +5297,13 @@ namespace Legion {
             size_t local_footprint;
             LayoutConstraintKind local_kind;
             unsigned local_index;
+            if (collective_ready.exists() && !collective_ready.has_triggered())
+              collective_ready.wait();
             bool success = create_physical_instance(constraints, regions, 
-                                   result, mapper_id, processor, acquire, 
-                                   priority, tight_region_bounds,
-                                   &local_kind, &local_index,
-                                   &local_footprint, creator_id,true/*remote*/);
+                                 result, mapper_id, processor, acquire, 
+                                 priority, tight_region_bounds,
+                                 &local_kind, &local_index, &local_footprint,
+                                 collective, &point, creator_id,true/*remote*/);
             if (success || (remote_footprint != NULL) ||
                 (remote_kind != NULL) || (remote_index != NULL))
             {
@@ -6527,7 +6571,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalManager* MemoryManager::allocate_physical_instance(
                         InstanceBuilder &builder, size_t *footprint,
-                        LayoutConstraintKind *unsat_kind, unsigned *unsat_index)
+                        LayoutConstraintKind *unsat_kind, unsigned *unsat_index,
+                        CollectiveManager *collective, DomainPoint *point)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -6536,7 +6581,7 @@ namespace Legion {
       // First, just try to make the instance as is, if it works we are done 
       size_t needed_size;
       PhysicalManager *manager = builder.create_physical_instance(
-          runtime->forest, unsat_kind, unsat_index, &needed_size);
+          runtime->forest,collective,point,unsat_kind,unsat_index,&needed_size);
       if (footprint != NULL)
         *footprint = needed_size;
       if ((manager != NULL) || (needed_size == 0))
@@ -6554,7 +6599,7 @@ namespace Legion {
       {
         // See if we can make the instance
         PhysicalManager *result = builder.create_physical_instance(
-            runtime->forest, unsat_kind, unsat_index);
+            runtime->forest, collective, point, unsat_kind, unsat_index);
         if (result != NULL)
           return result;
       }
@@ -6564,7 +6609,7 @@ namespace Legion {
       {
         // See if we can make the instance
         PhysicalManager *result = builder.create_physical_instance(
-            runtime->forest, unsat_kind, unsat_index);
+            runtime->forest, collective, point, unsat_kind, unsat_index);
         if (result != NULL)
           return result;
       }
@@ -6574,7 +6619,7 @@ namespace Legion {
       {
         // See if we can make the instance
         PhysicalManager *result = builder.create_physical_instance(
-            runtime->forest, unsat_kind, unsat_index);
+            runtime->forest, collective, point, unsat_kind, unsat_index);
         if (result != NULL)
           return result;
       }
@@ -6584,7 +6629,7 @@ namespace Legion {
       {
         // See if we can make the instance
         PhysicalManager *result = builder.create_physical_instance(
-            runtime->forest, unsat_kind, unsat_index);
+            runtime->forest, collective, point, unsat_kind, unsat_index);
         if (result != NULL)
           return result;
       }
@@ -19229,7 +19274,8 @@ namespace Legion {
                                      bool acquire, GCPriority priority,
                                      bool tight_bounds, 
                                      const LayoutConstraint **unsat,
-                                     size_t *footprint, UniqueID creator_id)
+                                     size_t *footprint, UniqueID creator_id,
+                                     CollectiveManager *target, DomainPoint *p)
     //--------------------------------------------------------------------------
     {
       MemoryManager *manager = find_memory_manager(target_memory);
@@ -19239,7 +19285,8 @@ namespace Legion {
         unsigned unsat_index;
         if (!manager->create_physical_instance(constraints, regions, result,
                          mapper_id, processor, acquire, priority, tight_bounds,
-                         &unsat_kind, &unsat_index, footprint, creator_id))
+                         &unsat_kind, &unsat_index, footprint, target, p,
+                         creator_id))
         {
           *unsat = constraints.convert_unsatisfied(unsat_kind, unsat_index);
           return false;
@@ -19250,22 +19297,22 @@ namespace Legion {
       else
         return manager->create_physical_instance(constraints, regions, result,
                          mapper_id, processor, acquire, priority, tight_bounds,
-                         NULL, NULL, footprint, creator_id);
+                         NULL, NULL, footprint, target, p, creator_id);
     }
 
     //--------------------------------------------------------------------------
     bool Runtime::create_physical_instance(Memory target_memory,
-                                     LayoutConstraintID layout_id,
+                                     LayoutConstraints *constraints,
                                      const std::vector<LogicalRegion> &regions,
                                      MappingInstance &result,
                                      MapperID mapper_id, Processor processor,
                                      bool acquire, GCPriority priority,
                                      bool tight_bounds, 
                                      const LayoutConstraint **unsat,
-                                     size_t *footprint, UniqueID creator_id)
+                                     size_t *footprint, UniqueID creator_id,
+                                     CollectiveManager *target, DomainPoint *p)
     //--------------------------------------------------------------------------
-    {
-      LayoutConstraints *constraints = find_layout_constraints(layout_id);
+    { 
       MemoryManager *manager = find_memory_manager(target_memory);
       if (unsat != NULL)
       {
@@ -19273,7 +19320,8 @@ namespace Legion {
         unsigned unsat_index;
         if (!manager->create_physical_instance(constraints, regions, result,
                          mapper_id, processor, acquire, priority, tight_bounds,
-                         &unsat_kind, &unsat_index, footprint, creator_id))
+                         &unsat_kind, &unsat_index, footprint, target, p,
+                         creator_id))
         {
           *unsat = constraints->convert_unsatisfied(unsat_kind, unsat_index);
           return false;
@@ -19284,7 +19332,7 @@ namespace Legion {
       else
         return manager->create_physical_instance(constraints, regions, result,
                          mapper_id, processor, acquire, priority, tight_bounds,
-                         NULL, NULL, footprint, creator_id);
+                         NULL, NULL, footprint, target, p, creator_id);
     }
 
     //--------------------------------------------------------------------------
@@ -19323,7 +19371,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool Runtime::find_or_create_physical_instance(Memory target_memory,
-                                    LayoutConstraintID layout_id,
+                                    LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool &created, 
                                     MapperID mapper_id, Processor processor,
@@ -19332,8 +19380,7 @@ namespace Legion {
                                     const LayoutConstraint **unsat,
                                     size_t *footprint, UniqueID creator_id)
     //--------------------------------------------------------------------------
-    {
-      LayoutConstraints *constraints = find_layout_constraints(layout_id);
+    { 
       MemoryManager *manager = find_memory_manager(target_memory);
       if (unsat != NULL)
       {
@@ -19371,13 +19418,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool Runtime::find_physical_instance(Memory target_memory,
-                                      LayoutConstraintID layout_id,
+                                      LayoutConstraints *constraints,
                                       const std::vector<LogicalRegion> &regions,
                                       MappingInstance &result, bool acquire,
                                       bool tight_region_bounds)
     //--------------------------------------------------------------------------
     {
-      LayoutConstraints *constraints = find_layout_constraints(layout_id);
       MemoryManager *manager = find_memory_manager(target_memory);
       return manager->find_physical_instance(constraints, regions, 
                                      result, acquire, tight_region_bounds);
@@ -19398,13 +19444,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::find_physical_instances(Memory target_memory,
-                                      LayoutConstraintID layout_id,
+                                      LayoutConstraints *constraints,
                                       const std::vector<LogicalRegion> &regions,
                                       std::vector<MappingInstance> &results, 
                                       bool acquire, bool tight_region_bounds)
     //--------------------------------------------------------------------------
     {
-      LayoutConstraints *constraints = find_layout_constraints(layout_id);
       MemoryManager *manager = find_memory_manager(target_memory);
       return manager->find_physical_instances(constraints, regions, 
                                      results, acquire, tight_region_bounds);
