@@ -50,7 +50,7 @@ namespace Realm {
       virtual ~ProcessorImpl(void);
 
       virtual void enqueue_task(Task *task) = 0;
-      virtual void enqueue_tasks(Task::TaskList& tasks) = 0;
+      virtual void enqueue_tasks(Task::TaskList& tasks, size_t num_tasks) = 0;
 
       virtual void spawn_task(Processor::TaskFuncID func_id,
 			      const void *args, size_t arglen,
@@ -124,7 +124,7 @@ namespace Realm {
       virtual ~LocalTaskProcessor(void);
 
       virtual void enqueue_task(Task *task);
-      virtual void enqueue_tasks(Task::TaskList& tasks);
+      virtual void enqueue_tasks(Task::TaskList& tasks, size_t num_tasks);
 
       virtual void spawn_task(Processor::TaskFuncID func_id,
 			      const void *args, size_t arglen,
@@ -184,7 +184,9 @@ namespace Realm {
     class LocalCPUProcessor : public LocalTaskProcessor {
     public:
       LocalCPUProcessor(Processor _me, CoreReservationSet& crs,
-			size_t _stack_size, bool _force_kthreads);
+			size_t _stack_size, bool _force_kthreads,
+			BackgroundWorkManager *bgwork,
+			long long bgwork_timeslice);
       virtual ~LocalCPUProcessor(void);
     protected:
       CoreReservation *core_rsrv;
@@ -194,7 +196,9 @@ namespace Realm {
     public:
       LocalUtilityProcessor(Processor _me, CoreReservationSet& crs,
 			    size_t _stack_size, bool _force_kthreads,
-                            bool _pin_util_proc);
+                            bool _pin_util_proc,
+			    BackgroundWorkManager *bgwork,
+			    long long bgwork_timeslice);
       virtual ~LocalUtilityProcessor(void);
     protected:
       CoreReservation *core_rsrv;
@@ -215,7 +219,7 @@ namespace Realm {
       virtual ~RemoteProcessor(void);
 
       virtual void enqueue_task(Task *task);
-      virtual void enqueue_tasks(Task::TaskList& tasks);
+      virtual void enqueue_tasks(Task::TaskList& tasks, size_t num_tasks);
 
       virtual void add_to_group(ProcessorGroupImpl *group);
 
@@ -247,7 +251,7 @@ namespace Realm {
       void get_group_members(std::vector<Processor>& member_list);
 
       virtual void enqueue_task(Task *task);
-      virtual void enqueue_tasks(Task::TaskList& tasks);
+      virtual void enqueue_tasks(Task::TaskList& tasks, size_t num_tasks);
 
       virtual void add_to_group(ProcessorGroupImpl *group);
 
@@ -277,7 +281,7 @@ namespace Realm {
       class DeferredDestroy : public EventWaiter {
       public:
 	void defer(ProcessorGroupImpl *_pg, Event wait_on);
-	virtual void event_triggered(bool poisoned);
+	virtual void event_triggered(bool poisoned, TimeLimit work_until);
 	virtual void print(std::ostream& os) const;
 	virtual Event get_finish_event(void) const;
 

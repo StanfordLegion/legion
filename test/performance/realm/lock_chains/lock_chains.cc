@@ -206,8 +206,8 @@ void top_level_task(const void *args, size_t arglen,
 
     double latency = stop - start;
     fprintf(stdout,"Total time: %7.3f us\n", latency);
-    double grants_per_sec = chains_per_processor * chain_depth * all_procs.size() / latency;
-    fprintf(stdout,"Reservation Grants/s (in Thousands): %7.3f\n", grants_per_sec);
+    double grants_per_sec = chains_per_processor * chain_depth * all_procs.size() / (1e-6 * latency);
+    fprintf(stdout,"Reservation Grants/s : %.4g\n", grants_per_sec);
   }
   
   fprintf(stdout,"Cleaning up...\n");

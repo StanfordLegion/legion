@@ -478,8 +478,8 @@ namespace Realm {
 
   GASNet1Module::GASNet1Module(void)
     : NetworkModule("gasnet1")
-    , active_msg_worker_threads(1)
-    , active_msg_handler_threads(1)
+    , active_msg_worker_bgwork(true)
+    , active_msg_worker_threads(0)
     , gasnet_mem_size(0)
     , amsg_stack_size(2 << 20)
   {}
@@ -578,11 +578,14 @@ namespace Realm {
     CommandLineParser cp;
     cp.add_option_int_units("-ll:gsize", gasnet_mem_size, 'm')
       .add_option_int("-ll:amsg", active_msg_worker_threads)
-      .add_option_int("-ll:ahandlers", active_msg_handler_threads)
+      .add_option_int("-ll:amsg_bgwork", active_msg_worker_bgwork)
       .add_option_int_units("-ll:astack", amsg_stack_size, 'm');
     
     bool ok = cp.parse_command_line(cmdline);
     assert(ok);
+
+    // make sure we have some way to get polling done
+    assert(active_msg_worker_bgwork || (active_msg_worker_threads > 0));
   }
 
   // "attaches" to the network, if that is meaningful - attempts to
@@ -606,7 +609,11 @@ namespace Realm {
     }
     
     init_endpoints(gasnet_mem_size, inseg_bytes, 0,
-		   *(runtime->core_reservations));
+		   *(runtime->core_reservations),
+		   active_msg_worker_threads,
+		   runtime->bgwork,
+		   active_msg_worker_bgwork,
+		   runtime->message_manager);
 
     // Put this here so that it complies with the GASNet specification and
     // doesn't make any calls between gasnet_init and gasnet_attach
@@ -638,11 +645,9 @@ namespace Realm {
       seg_base += (*it)->bytes;
     }
 
-    start_polling_threads(active_msg_worker_threads);
+    start_polling_threads();
 
-    start_handler_threads(active_msg_handler_threads,
-			  *(runtime->core_reservations),
-			  amsg_stack_size);
+    start_handler_threads(amsg_stack_size);
   }
 
   void GASNet1Module::create_memories(RuntimeImpl *runtime)
@@ -661,10 +666,6 @@ namespace Realm {
   void GASNet1Module::detach(RuntimeImpl *runtime,
 			     std::vector<NetworkSegment *>& segments)
   {
-    // flush out all inter-node communication channels to make sure
-    //  we handle any incoming work before we start tearing stuff down
-    flush_activemsg_channels();
-
     stop_activemsg_threads();
   }
 
@@ -689,6 +690,11 @@ namespace Realm {
     gasnet_coll_gather(GASNET_TEAM_ALL, root,
 		       vals_out, const_cast<void *>(val_in), bytes,
 		       GASNET_COLL_FLAGS);
+  }
+
+  bool GASNet1Module::check_for_quiescence(void)
+  {
+    return quiescence_checker.perform_check();
   }
 
   // used to create a remote proxy for a memory

@@ -30,6 +30,7 @@
 #include "realm/indexspace.h"
 #include "realm/proc_impl.h"
 #include "realm/mem_impl.h"
+#include "realm/bgwork.h"
 
 #define CHECK_CUDART(cmd) do { \
   cudaError_t ret = (cmd); \
@@ -109,7 +110,7 @@ namespace Realm {
       size_t cfg_zc_mem_size, cfg_zc_ib_size;
       size_t cfg_fb_mem_size;
       unsigned cfg_num_gpus, cfg_gpu_streams;
-      bool cfg_use_background_workers, cfg_use_shared_worker, cfg_pin_sysmem;
+      bool cfg_use_worker_threads, cfg_use_shared_worker, cfg_pin_sysmem;
       bool cfg_fences_use_callbacks;
       bool cfg_suppress_hijack_warning;
       unsigned cfg_skip_gpu_count;
@@ -387,10 +388,13 @@ namespace Realm {
 
       // to be called by a worker (that should already have the GPU context
       //   current) - returns true if any work remains
-      bool issue_copies(void);
-      bool reap_events(void);
+      bool issue_copies(TimeLimit work_until);
+      bool reap_events(TimeLimit work_until);
 
     protected:
+      // may only be tested with lock held
+      bool has_work(void) const;
+
       void add_event(CUevent event, GPUWorkFence *fence, 
 		     GPUCompletionNotification *notification=NULL, GPUWorkStart *start=NULL);
 
@@ -424,7 +428,7 @@ namespace Realm {
     // a GPUWorker is responsible for making progress on one or more GPUStreams -
     //  this may be done directly by a GPUProcessor or in a background thread
     //  spawned for the purpose
-    class GPUWorker {
+    class GPUWorker : public BackgroundWorkItem {
     public:
       GPUWorker(void);
       virtual ~GPUWorker(void);
@@ -432,26 +436,34 @@ namespace Realm {
       // adds a stream that has work to be done
       void add_stream(GPUStream *s);
 
-      // processes work on streams, optionally sleeping for work to show up
-      // returns true if work remains to be done
-      bool process_streams(bool sleep_on_empty);
-
+      // used to start a dedicate thread (mutually exclusive with being
+      //  registered with a background work manager)
       void start_background_thread(Realm::CoreReservationSet& crs,
 				   size_t stack_size);
       void shutdown_background_thread(void);
+
+      void do_work(TimeLimit work_until);
 
     public:
       void thread_main(void);
 
     protected:
+      // used by the background thread
+      // processes work on streams, optionally sleeping for work to show up
+      // returns true if work remains to be done
+      bool process_streams(bool sleep_on_empty);
+
       Mutex lock;
       CondVar condvar;
-      std::set<GPUStream *> active_streams;
+
+      typedef CircularQueue<GPUStream *, 16> ActiveStreamQueue;
+      ActiveStreamQueue active_streams;
 
       // used by the background thread (if any)
       Realm::CoreReservation *core_rsrv;
       Realm::Thread *worker_thread;
-      bool worker_shutdown_requested;
+      bool thread_sleeping;
+      atomic<bool> worker_shutdown_requested;
     };
 
     // a little helper class to manage a pool of CUevents that can be reused

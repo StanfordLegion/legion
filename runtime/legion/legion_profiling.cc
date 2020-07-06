@@ -1734,8 +1734,6 @@ namespace Legion {
         req.add_measurement<
           Realm::ProfilingMeasurements::OperationTimelineGPU>();
 #ifdef LEGION_PROF_PROVENANCE
-      if (!external_implicit_task)
-        info.provenance = LgEvent(Processor::get_current_finish_event());
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationFinishEvent>();
 #endif
@@ -1763,8 +1761,6 @@ namespace Legion {
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationEventWaits>();
 #ifdef LEGION_PROF_PROVENANCE
-      if (!external_implicit_task)
-        info.provenance = LgEvent(Processor::get_current_finish_event());
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationFinishEvent>();
 #endif
@@ -1789,8 +1785,6 @@ namespace Legion {
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationEventWaits>();
 #ifdef LEGION_PROF_PROVENANCE
-      if (!external_implicit_task)
-        info.provenance = LgEvent(Processor::get_current_finish_event());
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationFinishEvent>();
 #endif
@@ -1815,10 +1809,6 @@ namespace Legion {
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationMemoryUsage>();
-#ifdef LEGION_PROF_PROVENANCE
-      if (!external_implicit_task)
-        info.provenance = LgEvent(Processor::get_current_finish_event());
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -1840,10 +1830,6 @@ namespace Legion {
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationMemoryUsage>();
-#ifdef LEGION_PROF_PROVENANCE
-      if (!external_implicit_task)
-        info.provenance = LgEvent(Processor::get_current_finish_event());
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -1870,10 +1856,6 @@ namespace Legion {
                  LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
       req2.add_measurement<
                  Realm::ProfilingMeasurements::InstanceTimeline>();
-#ifdef LEGION_PROF_PROVENANCE
-      if (!external_implicit_task)
-        info.provenance = LgEvent(Processor::get_current_finish_event());
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -1896,10 +1878,6 @@ namespace Legion {
                         LG_LEGION_PROFILING_ID, &info, sizeof(info));
       req.add_measurement<
                   Realm::ProfilingMeasurements::OperationTimeline>();
-#ifdef LEGION_PROF_PROVENANCE
-      if (!external_implicit_task)
-        info.provenance = LgEvent(Processor::get_current_finish_event());
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -1925,8 +1903,6 @@ namespace Legion {
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationEventWaits>();
 #ifdef LEGION_PROF_PROVENANCE
-      if (!external_implicit_task)
-        info.provenance = LgEvent(Processor::get_current_finish_event());
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationFinishEvent>();
 #endif
@@ -1954,8 +1930,6 @@ namespace Legion {
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationEventWaits>();
 #ifdef LEGION_PROF_PROVENANCE
-      if (!external_implicit_task)
-        info.provenance = LgEvent(Processor::get_current_finish_event());
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationFinishEvent>();
 #endif
@@ -1980,10 +1954,6 @@ namespace Legion {
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationMemoryUsage>();
-#ifdef LEGION_PROF_PROVENANCE
-      if (!external_implicit_task)
-        info.provenance = LgEvent(Processor::get_current_finish_event());
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -2005,10 +1975,6 @@ namespace Legion {
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationMemoryUsage>();
-#ifdef LEGION_PROF_PROVENANCE
-      if (!external_implicit_task)
-        info.provenance = LgEvent(Processor::get_current_finish_event());
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -2035,10 +2001,6 @@ namespace Legion {
                  LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
       req2.add_measurement<
                  Realm::ProfilingMeasurements::InstanceTimeline>();
-#ifdef LEGION_PROF_PROVENANCE
-      if (!external_implicit_task)
-        info.provenance = LgEvent(Processor::get_current_finish_event());
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -2060,10 +2022,6 @@ namespace Legion {
                   LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
       req.add_measurement<
                   Realm::ProfilingMeasurements::OperationTimeline>();
-#ifdef LEGION_PROF_PROVENANCE
-      if (!external_implicit_task)
-        info.provenance = LgEvent(Processor::get_current_finish_event());
-#endif
     }
 
     //--------------------------------------------------------------------------

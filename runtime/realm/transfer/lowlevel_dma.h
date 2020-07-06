@@ -87,7 +87,9 @@ namespace Realm {
     extern void start_dma_worker_threads(int count, Realm::CoreReservationSet& crs);
     extern void stop_dma_worker_threads(void);
 
-    extern void start_dma_system(int count, bool pinned, int max_nr, Realm::CoreReservationSet& crs);
+    extern void start_dma_system(int count, bool pinned, int max_nr,
+				 CoreReservationSet& crs,
+				 BackgroundWorkManager *bgwork);
 
     extern void stop_dma_system(void);
 
@@ -102,7 +104,7 @@ namespace Realm {
     */
     
     class DmaRequestQueue;
-    // for now we use a single queue for all (local) dmas
+    // for now we use a single queue for all legacy fills/reduces
     extern DmaRequestQueue *dma_queue;
 
     // include files are all tangled up, so some XferDes stuff here...  :(
@@ -122,8 +124,8 @@ namespace Realm {
       XFER_GASNET_READ,
       XFER_GASNET_WRITE,
       XFER_REMOTE_WRITE,
-      XFER_HDF_READ,
-      XFER_HDF_WRITE,
+      XFER_HDF5_READ,
+      XFER_HDF5_WRITE,
       XFER_FILE_READ,
       XFER_FILE_WRITE,
       XFER_ADDR_SPLIT
@@ -155,7 +157,7 @@ namespace Realm {
     public:
       virtual void print(std::ostream& os) const;
 
-      virtual bool check_readiness(bool just_check, DmaRequestQueue *rq) = 0;
+      virtual bool check_readiness(void) = 0;
 
       virtual bool handler_safe(void) = 0;
 
@@ -189,14 +191,12 @@ namespace Realm {
         Waiter(void);
         virtual ~Waiter(void);
       public:
-	Reservation current_lock;
-	DmaRequestQueue *queue;
 	DmaRequest *req;
 	Event wait_on;
 
-	void sleep_on_event(Event e, Reservation l = Reservation::NO_RESERVATION);
+	void sleep_on_event(Event e);
 
-	virtual void event_triggered(bool poisoned);
+	virtual void event_triggered(bool poisoned, TimeLimit work_until);
 	virtual void print(std::ostream& os) const;
 	virtual Event get_finish_event(void) const;
       };
@@ -292,12 +292,12 @@ namespace Realm {
       // deletion performed when reference count goes to zero
       virtual ~CopyRequest(void);
 
+      void create_xfer_descriptors(void);
+
     public:
       void forward_request(NodeID target_node);
 
-      virtual bool check_readiness(bool just_check, DmaRequestQueue *rq);
-
-      void perform_new_dma(Memory src_mem, Memory dst_mem);
+      virtual bool check_readiness(void);
 
       virtual void perform_dma(void);
 
@@ -414,7 +414,9 @@ namespace Realm {
     public:
       void forward_request(NodeID target_node);
 
-      virtual bool check_readiness(bool just_check, DmaRequestQueue *rq);
+      void set_dma_queue(DmaRequestQueue *queue);
+
+      virtual bool check_readiness(void);
 
       virtual void perform_dma(void);
 
@@ -430,6 +432,7 @@ namespace Realm {
       bool red_fold;
       Event before_copy;
       Waiter waiter; // if we need to wait on events
+      DmaRequestQueue *dma_queue;
     };
 
     class FillRequest : public DmaRequest {
@@ -455,7 +458,9 @@ namespace Realm {
     public:
       void forward_request(NodeID target_node);
 
-      virtual bool check_readiness(bool just_check, DmaRequestQueue *rq);
+      void set_dma_queue(DmaRequestQueue *queue);
+
+      virtual bool check_readiness(void);
 
       virtual void perform_dma(void);
 
@@ -473,6 +478,7 @@ namespace Realm {
       size_t fill_size;
       Event before_fill;
       Waiter waiter;
+      DmaRequestQueue *dma_queue;
     };
 
     // each DMA "channel" implements one of these to describe (implicitly) which copies it
@@ -503,7 +509,7 @@ namespace Realm {
 
     class Request;
 
-    class AsyncFileIOContext {
+    class AsyncFileIOContext : public BackgroundWorkItem {
     public:
       AsyncFileIOContext(int _max_depth);
       ~AsyncFileIOContext(void);
@@ -514,9 +520,10 @@ namespace Realm {
 
       bool empty(void);
       long available(void);
-      void make_progress(void);
 
       static AsyncFileIOContext* get_singleton(void);
+
+      virtual void do_work(TimeLimit work_until);
 
       class AIOOperation {
       public:
@@ -526,6 +533,9 @@ namespace Realm {
 	bool completed;
         void* req;
       };
+
+    protected:
+      void make_progress(void);
 
       int max_depth;
       std::deque<AIOOperation *> launched_operations, pending_operations;

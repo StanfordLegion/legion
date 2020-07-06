@@ -129,7 +129,7 @@ namespace Realm {
     virtual ~LocalPythonProcessor(void);
 
     virtual void enqueue_task(Task *task);
-    virtual void enqueue_tasks(Task::TaskList& tasks);
+    virtual void enqueue_tasks(Task::TaskList& tasks, size_t num_tasks);
 
     virtual void spawn_task(Processor::TaskFuncID func_id,
 			    const void *args, size_t arglen,

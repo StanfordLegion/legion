@@ -38,6 +38,8 @@
 namespace Realm {
 namespace MPI {
 
+extern atomic<size_t> messages_sent;
+
 struct AM_msg {
     int type;
     int msgid;
@@ -48,7 +50,8 @@ struct AM_msg {
 
 void AM_Init(int *p_node_this, int *p_node_size);
 void AM_Finalize();
-void AM_init_long_messages(MPI_Win win, void *am_base);
+void AM_init_long_messages(MPI_Win win, void *am_base,
+			   Realm::IncomingMessageManager *message_manager);
 void AMPoll();
 void AMPoll_cancel();
 void AMSend(int tgt, int msgid, int header_size, int payload_size, const char *header, const char *payload, int has_dest, MPI_Aint dest);

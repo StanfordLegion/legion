@@ -112,6 +112,9 @@ namespace Realm {
     typedef ProfilingMeasurements::OperationStatus Status;
     atomic<Status::Result> state;
 
+    // allow operations to lazily update their state
+    virtual Status::Result get_state(void);
+
     ProfilingMeasurements::OperationStatus status;
     bool wants_timeline;
     ProfilingMeasurements::OperationTimeline timeline;
@@ -125,7 +128,7 @@ namespace Realm {
     atomic<int> pending_work_items;  // uses atomics so we don't have to take lock to check
     atomic<int> failed_work_items;
     
-    friend std::ostream& operator<<(std::ostream& os, const Operation *op);
+    friend std::ostream& operator<<(std::ostream& os, Operation *op);
   };
 
   class OperationTable {
@@ -166,7 +169,7 @@ namespace Realm {
 #endif
 
     struct TableEntry : public EventWaiter {
-      virtual void event_triggered(bool poisoned);
+      virtual void event_triggered(bool poisoned, TimeLimit work_until);
       virtual void print(std::ostream& os) const;
       virtual Event get_finish_event(void) const;
 

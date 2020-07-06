@@ -51,6 +51,10 @@ namespace Realm {
     // and a few "global" operations that abstract over any/all networks
     void barrier(void);
 
+    // a quiescence check across all nodes (i.e. has anybody sent anything
+    //  since the previous quiescence check)
+    bool check_for_quiescence(void);
+
     // collective communication across all nodes (TODO: subcommunicators?)
     template <typename T>
     T broadcast(NodeID root, T val);
@@ -119,6 +123,8 @@ namespace Realm {
 			   const void *val_in, void *val_out, size_t bytes) = 0;
     virtual void gather(NodeID root,
 			const void *val_in, void *vals_out, size_t bytes) = 0;
+
+    virtual bool check_for_quiescence(void) = 0;
 
     // used to create a remote proxy for a memory
     virtual MemoryImpl *create_remote_memory(Memory m, size_t size, Memory::Kind kind,

@@ -542,7 +542,8 @@ namespace Realm {
     CHECK_MPI( MPI_Win_allocate(attach_size, 1, MPI_INFO_NULL, MPI_COMM_WORLD, &baseptr, &g_am_win) );
     CHECK_MPI( MPI_Win_lock_all(0, g_am_win) );
 
-    Realm::MPI::AM_init_long_messages(g_am_win, baseptr);
+    Realm::MPI::AM_init_long_messages(g_am_win, baseptr,
+				      runtime->message_manager);
 
     int num_nodes = Network::max_node_id + 1;
     int size_p = sizeof(baseptr);
@@ -605,6 +606,17 @@ namespace Realm {
   void MPIModule::gather(NodeID root, const void *val_in, void *vals_out, size_t bytes)
   {
     CHECK_MPI( MPI_Gather(val_in, bytes, MPI_BYTE, vals_out, bytes, MPI_BYTE, root, MPI_COMM_WORLD) );
+  }
+
+  bool MPIModule::check_for_quiescence(void)
+  {
+    // add up the total messages sent by anybody since the last time we tried
+    unsigned long sent_snapshot = MPI::messages_sent.exchange(0);
+    unsigned long total = 0;
+    CHECK_MPI( MPI_Allreduce(&sent_snapshot, &total,
+			     1, MPI_UNSIGNED_LONG, MPI_SUM, MPI_COMM_WORLD) );
+    // if it's zero, we're quiescent
+    return (total == 0);
   }
 
   // used to create a remote proxy for a memory

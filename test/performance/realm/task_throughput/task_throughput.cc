@@ -196,6 +196,11 @@ void task_launcher(const void *args, size_t arglen,
   // round-robin tasks across target processors in case barrier trigger
   //  is slower than task execution rate
   std::map<Processor, Event> preconds;
+
+  // always have to have at least 2 tasks - one FIRST and one LAST
+  if(TestConfig::tasks_per_processor < 2)
+    TestConfig::tasks_per_processor = 2;
+
   for(int i = 0; i < TestConfig::tasks_per_processor; i++) {
     int which = ((i == 0) ? FIRST_TASK :
 		 (i == (TestConfig::tasks_per_processor - 1)) ? LAST_TASK :

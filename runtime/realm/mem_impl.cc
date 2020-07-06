@@ -410,7 +410,8 @@ namespace Realm {
 	  if(creator_node == Network::my_node_id) {
 	    // local notification of result
 	    inst->notify_allocation(ALLOC_CANCELLED,
-				    RegionInstanceImpl::INSTOFFSET_FAILED);
+				    RegionInstanceImpl::INSTOFFSET_FAILED,
+				    TimeLimit::responsive());
 	  } else {
 	    // we have to at least have the correct offset on our local
 	    //  instance impl (even if we don't have the rest of the metadata)
@@ -451,7 +452,8 @@ namespace Realm {
 	NodeID creator_node = ID(i).instance_creator_node();
 	if(creator_node == Network::my_node_id) {
 	  // local notification of result
-	  inst->notify_allocation(result, inst_offset);
+	  inst->notify_allocation(result, inst_offset,
+				  TimeLimit::responsive());
 	} else {
 	  // we have to at least have the correct offset on our local
 	  //  instance impl (even if we don't have the rest of the metadata)
@@ -641,7 +643,8 @@ namespace Realm {
     void MemoryImpl::deferred_creation_triggered(RegionInstanceImpl *inst,
 						 size_t bytes, size_t alignment,
 						 bool need_alloc_result,
-						 bool poisoned)
+						 bool poisoned,
+						 TimeLimit work_until)
     {
       AllocationResult result;
       size_t inst_offset = 0;
@@ -684,7 +687,7 @@ namespace Realm {
 	NodeID creator_node = ID(inst->me).instance_creator_node();
 	if(creator_node == Network::my_node_id) {
 	  // local notification of result
-	  inst->notify_allocation(result, inst_offset);
+	  inst->notify_allocation(result, inst_offset, work_until);
 	} else {
 	  // we have to at least have the correct offset on our local
 	  //  instance impl (even if we don't have the rest of the metadata)
@@ -728,7 +731,8 @@ namespace Realm {
   
     // should only be called by RegionInstance::DeferredDestroy
     void MemoryImpl::deferred_destruction_triggered(RegionInstanceImpl *inst,
-						    bool poisoned)
+						    bool poisoned,
+						    TimeLimit work_until)
     {
       std::vector<std::pair<RegionInstanceImpl *, size_t> > successful_allocs;
       std::vector<RegionInstanceImpl *> failed_allocs;
@@ -1005,7 +1009,8 @@ namespace Realm {
 	  NodeID creator_node = ID(it->first->me).instance_creator_node();
 	  if(creator_node == Network::my_node_id) {
 	    // local notification of result
-	    it->first->notify_allocation(ALLOC_EVENTUAL_SUCCESS, it->second);
+	    it->first->notify_allocation(ALLOC_EVENTUAL_SUCCESS, it->second,
+					 work_until);
 	  } else {
 	    // we have to at least have the correct offset on our local
 	    //  instance impl (even if we don't have the rest of the metadata)
@@ -1028,7 +1033,8 @@ namespace Realm {
 	  if(creator_node == Network::my_node_id) {
 	    // local notification of result
 	    (*it)->notify_allocation(ALLOC_EVENTUAL_FAILURE,
-				     RegionInstanceImpl::INSTOFFSET_FAILED);
+				     RegionInstanceImpl::INSTOFFSET_FAILED,
+				     work_until);
 	  } else {
 	    // we have to at least have the correct offset on our local
 	    //  instance impl (even if we don't have the rest of the metadata)
@@ -1228,11 +1234,12 @@ namespace Realm {
   //
 
   /*static*/ void MemStorageAllocResponse::handle_message(NodeID sender, const MemStorageAllocResponse &args,
-							  const void *data, size_t datalen)
+							  const void *data, size_t datalen,
+							  TimeLimit work_until)
   {
     RegionInstanceImpl *impl = get_runtime()->get_instance_impl(args.inst);
 
-    impl->notify_allocation(args.result, args.offset);
+    impl->notify_allocation(args.result, args.offset, work_until);
   }
 
 
@@ -1825,9 +1832,8 @@ namespace Realm {
 	    amsg->offset = offset;
 	    amsg->sequence_id = sequence_id;
 	    if (payload_size) {
-	      PayloadSource *payload_src = new TwoDPayload(pos, datalen, max_lines_per_xfer,
-							   stride, PAYLOAD_COPY);
-	      payload_src->copy_data(amsg.payload_ptr(payload_size));
+	      amsg.add_payload(pos, datalen, max_lines_per_xfer, stride,
+			       (make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP));
 	    }
 	    amsg.commit();
 	    offset += datalen * max_lines_per_xfer;
@@ -1843,9 +1849,8 @@ namespace Realm {
 	  amsg->offset = offset;
 	  amsg->sequence_id = sequence_id;
 	  if (payload_size) {
-	    PayloadSource *payload_src = new TwoDPayload(pos, datalen,lines,
-							 stride, PAYLOAD_COPY);
-	    payload_src->copy_data(amsg.payload_ptr(payload_size));
+	    amsg.add_payload(pos, datalen, lines, stride,
+			     (make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP));
 	  }
 	  amsg.commit();
 	  return count;
@@ -1861,15 +1866,15 @@ namespace Realm {
 	amsg->offset = offset;
 	amsg->sequence_id = sequence_id;
 	if (payload_size) {
-	  PayloadSource *payload_src = new TwoDPayload(data, datalen,lines,
-						       stride,PAYLOAD_COPY);
-	  payload_src->copy_data(amsg.payload_ptr(payload_size));
+	  amsg.add_payload(data, datalen, lines, stride,
+			   (make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP));
 	}
 	amsg.commit();
 	return 1;
       }
     }
 
+#if 0
     unsigned do_remote_write(Memory mem, off_t offset,
 			     const SpanList &spans, size_t datalen,
 			     unsigned sequence_id,
@@ -1976,6 +1981,7 @@ namespace Realm {
 	return 1;
       }
     }
+#endif
 
     unsigned do_remote_serdez(Memory mem, off_t offset,
                              CustomSerdezID serdez_id,
@@ -2082,9 +2088,8 @@ namespace Realm {
 	    size_t payload_size = rhs_size*max_elmts_per_xfer;
 	    ActiveMessage<RemoteReduceMessage> amsg(ID(mem).memory_owner_node(), payload_size);
 	    if (payload_size) {
-	      PayloadSource *payload_src = new TwoDPayload(pos, rhs_size,max_elmts_per_xfer,
-							   src_stride, PAYLOAD_COPY);
-	      payload_src->copy_data(amsg.payload_ptr(payload_size));
+	      amsg.add_payload(pos, rhs_size, max_elmts_per_xfer, src_stride,
+			       (make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP));
 	    }
 	    amsg->mem = mem;
 	    amsg->offset = offset;
@@ -2107,9 +2112,8 @@ namespace Realm {
 	  amsg1->redop_id = red_fold ? -redop_id : redop_id;
 	  amsg1->sequence_id = sequence_id;
 	  if (payload_size) {
-	    PayloadSource *payload_src = new TwoDPayload(pos, rhs_size,count,
-							 src_stride, PAYLOAD_COPY);
-	    payload_src->copy_data(amsg1.payload_ptr(payload_size));
+	    amsg1.add_payload(pos, rhs_size, count, src_stride,
+			      (make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP));
 	  }
 	  amsg1.commit();
 	  return xfers;
@@ -2126,9 +2130,8 @@ namespace Realm {
 	amsg1->redop_id = red_fold ? -redop_id : redop_id;
 	amsg1->sequence_id = sequence_id;
 	if (payload_size) {
-	  PayloadSource *payload_src = new TwoDPayload(data, rhs_size,count,
-						       src_stride, PAYLOAD_COPY);
-	  payload_src->copy_data(amsg1.payload_ptr(payload_size));
+	  amsg1.add_payload(data, rhs_size, count, src_stride,
+			    (make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP));
 	}
 	amsg1.commit();
 	return 1;
