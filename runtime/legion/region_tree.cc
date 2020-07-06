@@ -8378,6 +8378,13 @@ namespace Legion {
         return;
       if (target == runtime->address_space)
         return;
+      if (mapping != NULL)
+      {
+        const ShardMapping &shard_mapping = *mapping;
+        for (unsigned idx = 0; idx < shard_mapping.size(); idx++)
+          if (shard_mapping[idx] == target)
+            return;
+      }
       runtime->send_index_space_set(target, rez);
     } 
 

@@ -1786,14 +1786,16 @@ namespace Legion {
       };
       class IndexSpaceSetFunctor {
       public:
-        IndexSpaceSetFunctor(Runtime *rt, AddressSpaceID src, Serializer &r)
-          : runtime(rt), source(src), rez(r) { }
+        IndexSpaceSetFunctor(Runtime *rt, AddressSpaceID src, 
+                             Serializer &r, ShardMapping *m)
+          : runtime(rt), source(src), rez(r), mapping(m) { }
       public:
         void apply(AddressSpaceID target);
       public:
         Runtime *const runtime;
         const AddressSpaceID source;
         Serializer &rez;
+        ShardMapping *const mapping;
       };
       class InvalidFunctor {
       public:
@@ -1890,7 +1892,8 @@ namespace Legion {
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
                                            bool need_tight_result) = 0;
       virtual Domain get_domain(ApEvent &ready, bool need_tight) = 0;
-      virtual bool set_domain(const Domain &domain, AddressSpaceID space) = 0;
+      virtual bool set_domain(const Domain &domain, AddressSpaceID space,
+                              ShardMapping *shard_mapping = NULL) = 0;
       virtual void tighten_index_space(void) = 0;
       virtual bool check_empty(void) = 0;
       virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0;
@@ -2108,13 +2111,15 @@ namespace Legion {
       ApEvent get_realm_index_space(Realm::IndexSpace<DIM,T> &result,
 				    bool need_tight_result);
       bool set_realm_index_space(AddressSpaceID source,
-				 const Realm::IndexSpace<DIM,T> &value);
+				 const Realm::IndexSpace<DIM,T> &value,
+                                 ShardMapping *shard_mapping = NULL);
     public:
       // From IndexSpaceExpression
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
                                            bool need_tight_result);
       virtual Domain get_domain(ApEvent &ready, bool need_tight);
-      virtual bool set_domain(const Domain &domain, AddressSpaceID space);
+      virtual bool set_domain(const Domain &domain, AddressSpaceID space,
+                              ShardMapping *shard_mapping = NULL);
       virtual void tighten_index_space(void);
       virtual bool check_empty(void);
       virtual void pack_expression(Serializer &rez, AddressSpaceID target);

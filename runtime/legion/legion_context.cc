@@ -10624,7 +10624,9 @@ namespace Legion {
         else
           Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
-      creator_op->initialize_index_space(this, node, future);
+      creator_op->initialize_index_space(this, node, future,
+          shard_manager->is_first_local_shard(owner_shard), 
+          &(shard_manager->get_mapping()));
       add_to_dependence_queue(creator_op);
       delete collective.first;
       pending_index_spaces.pop_front();

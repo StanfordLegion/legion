@@ -1771,8 +1771,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    bool IndexSpaceNodeT<DIM,T>::set_realm_index_space(
-                  AddressSpaceID source, const Realm::IndexSpace<DIM,T> &value)
+    bool IndexSpaceNodeT<DIM,T>::set_realm_index_space(AddressSpaceID source, 
+                   const Realm::IndexSpace<DIM,T> &value, ShardMapping *mapping)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1792,7 +1792,7 @@ namespace Legion {
         Runtime::trigger_event(realm_index_space_set);
         // We're not the owner, if this is not from the owner then
         // send a message there telling the owner that it is set
-        if (source != owner_space)
+        if ((source != owner_space) && (mapping == NULL))
         {
           Serializer rez;
           {
@@ -1819,7 +1819,7 @@ namespace Legion {
             rez.serialize(handle);
             pack_index_space(rez, false/*include size*/);
           }
-          IndexSpaceSetFunctor functor(context->runtime, source, rez);
+          IndexSpaceSetFunctor functor(context->runtime, source, rez, mapping);
           map_over_remote_instances(functor);
         }
       }
@@ -1856,11 +1856,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     bool IndexSpaceNodeT<DIM,T>::set_domain(const Domain &domain, 
-                                            AddressSpaceID source)
+                             AddressSpaceID source, ShardMapping *shard_mapping)
     //--------------------------------------------------------------------------
     {
       const DomainT<DIM,T> realm_space = domain;
-      return set_realm_index_space(source, realm_space);
+      return set_realm_index_space(source, realm_space, shard_mapping);
     }
 
     //--------------------------------------------------------------------------
