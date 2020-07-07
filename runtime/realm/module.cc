@@ -56,6 +56,9 @@
 #if defined REALM_USE_MPI
 #include "realm/mpi/mpi_module.h"
 #endif
+#ifdef REALM_USE_ACCELERATOR
+#include "realm/accelerator/accelerator_module.h"
+#endif
 
 namespace Realm {
 

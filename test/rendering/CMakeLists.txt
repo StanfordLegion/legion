@@ -22,6 +22,12 @@ if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
+if (Legion_USE_ACCELERATOR)
+  set(XRT_LIB_DIR $ENV{XILINX_XRT}/lib)
+  link_directories(${XRT_LIB_DIR})
+endif()
+
+
 add_executable(rendering rendering.cc)
 target_link_libraries(rendering Legion::Legion)
 if(Legion_ENABLE_TESTING)

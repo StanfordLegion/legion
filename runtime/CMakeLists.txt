@@ -139,6 +139,13 @@ if(REALM_USE_MPI)
   )
 endif()
 
+if (REALM_USE_ACCELERATOR)
+  list(APPEND REALM_SRC
+    realm/accelerator/accelerator_module.h
+    realm/accelerator/accelerator_module.cc
+  )
+endif()
+
 list(APPEND REALM_SRC
   realm.h
   realm/activemsg.h realm/activemsg.cc
@@ -206,6 +213,14 @@ endforeach()
 
 find_package(Threads REQUIRED)
 add_library(RealmRuntime ${REALM_SRC})
+
+if(Legion_USE_ACCELERATOR)
+  if (REALM_USE_ACCELERATOR)
+    include(accelerator-deps)
+    add_definitions(-DREALM_USE_ACCELERATOR)
+  endif()
+endif()
+
 target_compile_options(RealmRuntime PRIVATE ${CXX_BUILD_WARNING_FLAGS})
 if(COMPILER_SUPPORTS_DEFCHECK)
   # use the cxx_defcheck wrapper to make sure realm_defines.h is included
