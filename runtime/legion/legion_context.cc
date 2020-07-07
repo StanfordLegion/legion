@@ -9362,11 +9362,31 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                       "Invalid mapper output from invoction of "
                       "'select_task_variant' on mapper %s. Mapper selected "
-                      "an invalidate variant ID %d for inlining of task %s "
+                      "an invalid variant ID %d for inlining of task %s "
                       "(UID %lld).", child_mapper->get_mapper_name(),
                       output.chosen_variant, child->get_task_name(), 
                       child->get_unique_id())
       return variant_impl;
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::handle_registration_callback_effects(RtEvent effects)
+    //--------------------------------------------------------------------------
+    {
+      if (current_trace != NULL)
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_PERFORM_REGISTRATION_CALLBACK,
+            "Illegal call to 'perform_registration_callback' performed "
+            "inside of a trace by task %s (UID %lld). Calls to "
+            "'perform_registration_callback' are only permitted outside "
+            "of traces.", get_task_name(), get_unique_id()) 
+      // Dump a mapping fence into the stream that will not be considered
+      // mapped until these effects are done so that we can ensure that 
+      // no downstream operations attempt to do anything on remote nodes
+      // which could need the results of the registration
+      FenceOp *fence_op = runtime->get_available_fence_op(); 
+      fence_op->initialize(this, FenceOp::MAPPING_FENCE, false/*need future*/);
+      fence_op->add_mapping_applied_condition(effects);
+      add_to_dependence_queue(fence_op);
     }
 
     //--------------------------------------------------------------------------
@@ -9858,6 +9878,26 @@ namespace Legion {
     {
       shard_manager->perform_global_registration_callbacks(dso, local_done, 
                                                 global_done, preconditions);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::handle_registration_callback_effects(RtEvent effects)
+    //--------------------------------------------------------------------------
+    {
+      if (current_trace != NULL)
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_PERFORM_REGISTRATION_CALLBACK,
+            "Illegal call to 'perform_registration_callback' performed "
+            "inside of a trace by task %s (UID %lld). Calls to "
+            "'perform_registration_callback' are only permitted outside "
+            "of traces.", get_task_name(), get_unique_id())
+      // Dump a mapping fence into the stream that will not be considered
+      // mapped until these effects are done so that we can ensure that 
+      // no downstream operations attempt to do anything on remote nodes
+      // which could need the results of the registration
+      ReplFenceOp *fence_op = runtime->get_available_repl_fence_op();
+      fence_op->initialize_repl_fence(this, FenceOp::MAPPING_FENCE, false);
+      fence_op->add_mapping_applied_condition(effects);
+      add_to_dependence_queue(fence_op);
     }
 
     //--------------------------------------------------------------------------
@@ -17261,6 +17301,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LeafContext::handle_registration_callback_effects(RtEvent effects)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock l_lock(leaf_lock);
+      execution_events.insert(effects);
+    }
+
+    //--------------------------------------------------------------------------
     bool LeafContext::is_leaf_context(void) const
     //--------------------------------------------------------------------------
     {
@@ -19070,6 +19118,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return enclosing->select_inline_variant(child);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::handle_registration_callback_effects(RtEvent effects)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->handle_registration_callback_effects(effects);
     }
 
     //--------------------------------------------------------------------------

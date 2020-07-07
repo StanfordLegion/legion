@@ -25480,6 +25480,8 @@ namespace Legion {
       increment_total_outstanding_tasks();
 #endif
       InnerContext *execution_context = local_task->create_implicit_context();
+      implicit_context = execution_context;
+      implicit_runtime = this;
       Legion::Runtime *dummy_rt;
       execution_context->begin_task(dummy_rt);
       execution_context->set_executing_processor(proxy);
@@ -25494,6 +25496,8 @@ namespace Legion {
       ctx->end_task(NULL, 0, false/*owned*/);
       // Record that this is no longer an implicit external task
       external_implicit_task = false; 
+      implicit_runtime = NULL;
+      implicit_context = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -26140,6 +26144,10 @@ namespace Legion {
     {
       if (runtime_started)
       {
+        if (implicit_runtime == NULL)
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_PERFORM_REGISTRATION_CALLBACK,
+              "Calls to 'perform_registration_callback' must be performed "
+              "inside of Legion tasks after the runtime has been started.")
         // Wait for the runtime to be started everywhere
         if (!runtime_started_event.has_triggered())
           // If we're here this has to be an external thread
@@ -26150,15 +26158,12 @@ namespace Legion {
                 "the runtime has been started with multiple runtime instances.") 
         const RtEvent done_event = 
           the_runtime->perform_registration_callback(callback, global);
-        // Only do this wait if we got this call from inside of a Legion 
-        // task, if not we actually need to return right away to avoid 
-        // blocking the dlopen call that loads this dynamic object
         if (done_event.exists() && !done_event.has_triggered())
         {
-          // Use the presence of an implicit runtime to distinguish between
-          // internal and external threads
-          if (implicit_runtime == NULL)
-            done_event.external_wait();
+          // If we have a context then record that no operations are 
+          // allowed to be executed until after this registration is done
+          if (implicit_context != NULL)
+            implicit_context->handle_registration_callback_effects(done_event);
           else
             done_event.wait();
         }

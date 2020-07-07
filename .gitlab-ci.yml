@@ -158,6 +158,8 @@ variables:
   USE_KOKKOS: "1"
   KOKKOS_REPO: "https://github.com/kokkos/kokkos.git"
   KOKKOS_BRANCH: "master"
+  KKERNELS_REPO: "https://github.com/kokkos/kokkos-kernels.git"
+  KKERNELS_BRANCH: "master"
 
 .prof: &prof
   USE_PROF: "1"
@@ -319,6 +321,25 @@ before_script:
       cd ../..
       # tell cmake where to find the Kokkos install
       export Kokkos_DIR=`pwd`/kokkos/install
+
+      # now build kokkos-kernels - unless we've got cuda and clang (since
+      #  kokkos-kernels fails to build for clang7 at least)
+      if [[ "$CXX" != *clang* || "$USE_CUDA" -ne 1 ]]; then
+        git clone -b $KKERNELS_BRANCH -- $KKERNELS_REPO kokkos-kernels
+        git -C kokkos-kernels log -n 1
+        mkdir kokkos-kernels/build
+        cd kokkos-kernels/build
+        KKERNELS_CMAKE_OPTS="-DCMAKE_INSTALL_PREFIX=../install"
+        KKERNELS_CMAKE_OPTS="$KKERNELS_CMAKE_OPTS -DCMAKE_CXX_COMPILER=${KOKKOS_CXX_COMPILER}"
+        cmake $KKERNELS_CMAKE_OPTS ..
+        make -j$THREADS install
+        cd ../..
+        # tell cmake where to find the Kokkos install
+        export KokkosKernels_DIR=`pwd`/kokkos-kernels/install
+
+        # enable WAR for: https://github.com/kokkos/kokkos-kernels/issues/757
+        export REALM_DEFAULT_ARGS="-cuda:nongpusync 0"
+      fi
     fi
 
 ###
@@ -1037,7 +1058,6 @@ clang8_cxx11_debug_kokkos_openmp_legion:
   <<: [*linux, *image_clang, *tests]
   variables:
     <<: [*clang8, *terra38, *debug, *cxx11_normal, *kokkos, *openmp, *cmake, *legion]
-    REALM_DEFAULT_ARGS: "-ll:ocpu 1 -ll:onuma 0"
 p100_clang7_cxx11_debug_kokkos_cuda_legion:
   <<: [*p100, *tests]
   variables:

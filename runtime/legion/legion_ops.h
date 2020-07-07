@@ -1424,6 +1424,8 @@ namespace Legion {
     public:
       Future initialize(InnerContext *ctx, FenceKind kind, 
                         bool need_future, bool track=true);
+      inline void add_mapping_applied_condition(RtEvent precondition)
+        { map_applied_conditions.insert(precondition); }
     public:
       virtual void activate(void);
       virtual void deactivate(void);

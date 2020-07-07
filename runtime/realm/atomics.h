@@ -19,6 +19,8 @@
 #ifndef REALM_ATOMICS_H
 #define REALM_ATOMICS_H
 
+#include "realm/realm_config.h"
+
 #if (REALM_CXX_STANDARD >= 11) && !defined(REALM_NO_USE_STD_ATOMIC)
 #define REALM_USE_STD_ATOMIC
 #endif

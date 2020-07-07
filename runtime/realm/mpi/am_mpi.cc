@@ -19,8 +19,8 @@
 static MPI_Win g_am_win = MPI_WIN_NULL;
 static void *g_am_base = NULL;
 static Realm::IncomingMessageManager *g_message_manager = NULL;
-static __thread int thread_id = 0;
-static __thread int am_seq = 0;
+static REALM_THREAD_LOCAL int thread_id = 0;
+static REALM_THREAD_LOCAL int am_seq = 0;
 static Realm::atomic<unsigned int> num_threads(0);
 static unsigned char buf_recv_list[AM_BUF_COUNT][1024];
 static unsigned char *buf_recv = buf_recv_list[0];

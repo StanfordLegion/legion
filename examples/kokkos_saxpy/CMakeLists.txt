@@ -22,10 +22,18 @@ if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
+# see if we have kokkos-kernels available
+find_package(KokkosKernels QUIET)
+
 add_executable(kokkos_saxpy kokkos_saxpy.cc)
 
 target_link_libraries(kokkos_saxpy Kokkos::kokkoscore)
 target_link_libraries(kokkos_saxpy Legion::Legion)
+
+if(KokkosKernels_FOUND)
+  target_link_libraries(kokkos_saxpy Kokkos::kokkoskernels)
+  target_compile_definitions(kokkos_saxpy PRIVATE USE_KOKKOS_KERNELS)
+endif()
 
 if(Kokkos_ENABLE_CUDA)
   # have to use Kokkos' choice of compiler for cuda-related options to work

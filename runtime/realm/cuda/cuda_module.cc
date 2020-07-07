@@ -1612,6 +1612,12 @@ namespace Realm {
     //  application's calls, and the cuda module needs to know that)
     /*extern*/ bool cudart_hijack_active = false;
 
+    // for most CUDART API entry points, calling them from a non-GPU task is
+    //  a fatal error - for others (e.g. cudaDeviceSynchronize), it's either
+    //  silently permitted (0), warned (1), or a fatal error (2) based on this
+    //  setting
+    /*extern*/ int cudart_hijack_nongpu_sync = 2;
+
     // used in GPUTaskScheduler<T>::execute_task below
     static bool already_issued_hijack_warning = false;
 #endif
@@ -3258,7 +3264,8 @@ namespace Realm {
 	  .add_option_bool("-cuda:nohijack", m->cfg_suppress_hijack_warning)
 	  .add_option_int("-cuda:skipgpus", m->cfg_skip_gpu_count)
 	  .add_option_bool("-cuda:skipbusy", m->cfg_skip_busy_gpus)
-	  .add_option_int_units("-cuda:minavailmem", m->cfg_min_avail_mem, 'm');
+	  .add_option_int_units("-cuda:minavailmem", m->cfg_min_avail_mem, 'm')
+	  .add_option_int("-cuda:nongpusync", cudart_hijack_nongpu_sync);
 	
 	bool ok = cp.parse_command_line(cmdline);
 	if(!ok) {
