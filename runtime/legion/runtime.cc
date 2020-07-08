@@ -26158,13 +26158,13 @@ namespace Legion {
                 "the runtime has been started with multiple runtime instances.") 
         const RtEvent done_event = 
           the_runtime->perform_registration_callback(callback, global);
-        if (done_event.exists() && !done_event.has_triggered())
+        if (done_event.exists())
         {
           // If we have a context then record that no operations are 
           // allowed to be executed until after this registration is done
           if (implicit_context != NULL)
             implicit_context->handle_registration_callback_effects(done_event);
-          else
+          else if (!done_event.has_triggered())
             done_event.wait();
         }
       }

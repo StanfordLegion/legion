@@ -9376,6 +9376,8 @@ namespace Legion {
             "inside of a trace by task %s (UID %lld). Calls to "
             "'perform_registration_callback' are only permitted outside "
             "of traces.", get_task_name(), get_unique_id()) 
+      if (effects.has_triggered())
+        return;
       // Dump a mapping fence into the stream that will not be considered
       // mapped until these effects are done so that we can ensure that 
       // no downstream operations attempt to do anything on remote nodes
@@ -17301,6 +17303,8 @@ namespace Legion {
     void LeafContext::handle_registration_callback_effects(RtEvent effects)
     //--------------------------------------------------------------------------
     {
+      if (effects.has_triggered())
+        return;
       AutoLock l_lock(leaf_lock);
       execution_events.insert(effects);
     }
