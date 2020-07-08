@@ -1146,9 +1146,17 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
           local passed = analyze_noninterference_self(
             loop_cx, task, arg, partition_type, mapping, loop_vars)
           if not passed then
-            ignore(call, "static loop optimization failed: argument " .. tostring(i) ..
-                " interferes with itself")
-            return
+            report_pass(call, "static loop optimization failed, emitting dynamic check")
+            return {
+              preamble = preamble,
+              call = call,
+              reduce_lhs = reduce_lhs,
+              reduce_op = reduce_op,
+              args_provably = args_provably,
+              free_variables = free_vars,
+              loop_variables = loop_vars,
+              needs_dynamic_check = true
+            }
           end
         end
       end
@@ -1178,7 +1186,8 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
     args_provably = args_provably,
     is_constant_time = is_constant_time,
     free_variables = free_vars,
-    loop_variables = loop_vars
+    loop_variables = loop_vars,
+    needs_dynamic_check = false
   }
 end
 
@@ -1283,34 +1292,38 @@ function optimize_index_launch.stat_for_num(cx, node)
     return node
   end
 
-  local needs_dynamic_check = false
   local body = optimize_loop_body(cx, node, report_pass, report_fail)
   if not body then
-    needs_dynamic_check = true
-  end
-
-  local index_launch_ast = ast.typed.stat.IndexLaunchNum {
-    symbol = node.symbol,
-    values = node.values,
-    preamble = body.preamble,
-    call = body.call,
-    reduce_lhs = body.reduce_lhs,
-    reduce_op = body.reduce_op,
-    reduce_task = false,
-    args_provably = body.args_provably,
-    is_constant_time = body.is_constant_time,
-    free_vars = body.free_variables,
-    loop_vars = body.loop_variables,
-    annotations = node.annotations,
-    span = node.span,
-  }
-
-  if needs_dynamic_check then
-    return insert_dynamic_check(index_launch_ast, node {
-      block = optimize_index_launches.block(cx, node.block)
-      })
+    return node {
+      block = optimize_index_launches.block(cx, node.block),
+    }
   else
-    return index_launch_ast
+    -- If we reach here then either the self interference test failed, 
+    -- or the optimization was successful. body.needs_dynamic_check
+    -- will tell us which it is.
+    local index_launch_ast = ast.typed.stat.IndexLaunchNum {
+        symbol = node.symbol,
+        values = node.values,
+        preamble = body.preamble,
+        call = body.call,
+        reduce_lhs = body.reduce_lhs,
+        reduce_op = body.reduce_op,
+        reduce_task = false,
+        args_provably = body.args_provably,
+        is_constant_time = body.is_constant_time,
+        free_vars = body.free_variables,
+        loop_vars = body.loop_variables,
+        annotations = node.annotations,
+        span = node.span,
+    }
+
+    if not body.needs_dynamic_check then
+      return index_launch_ast
+    else
+      return insert_dynamic_check(index_launch_ast, node {
+        block = optimize_index_launches.block(cx, node.block),
+      })
+    end
   end
 end
 
@@ -1343,31 +1356,36 @@ function optimize_index_launch.stat_for_list(cx, node)
   local needs_dynamic_check = false
   local body = optimize_loop_body(cx, node, report_pass, report_fail)
   if not body then
-    needs_dynamic_check = true
-  end
-
-  local index_launch_ast = ast.typed.stat.IndexLaunchList {
-    symbol = node.symbol,
-    value = node.value,
-    preamble = body.preamble,
-    call = body.call,
-    reduce_lhs = body.reduce_lhs,
-    reduce_op = body.reduce_op,
-    reduce_task = false,
-    args_provably = body.args_provably,
-    is_constant_time = body.is_constant_time,
-    free_vars = body.free_variables,
-    loop_vars = body.loop_variables,
-    annotations = node.annotations,
-    span = node.span,
-  }
-
-  if needs_dynamic_check then
-    return insert_dynamic_check(index_launch_ast, node {
-      block = optimize_index_launches.block(cx, node.block)
-      })
+    return node {
+      block = optimize_index_launches.block(cx, node.block),
+    }
   else
-    return index_launch_ast
+    -- If we reach here then either the self interference test failed, 
+    -- or the optimization was successful. body.needs_dynamic_check
+    -- will tell us which it is.
+    local index_launch_ast = ast.typed.stat.IndexLaunchList {
+      symbol = node.symbol,
+      value = node.value,
+      preamble = body.preamble,
+      call = body.call,
+      reduce_lhs = body.reduce_lhs,
+      reduce_op = body.reduce_op,
+      reduce_task = false,
+      args_provably = body.args_provably,
+      is_constant_time = body.is_constant_time,
+      free_vars = body.free_variables,
+      loop_vars = body.loop_variables,
+      annotations = node.annotations,
+      span = node.span,
+    }
+
+    if not body.needs_dynamic_check then
+      return index_launch_ast
+    else
+      return insert_dynamic_check(index_launch_ast, node {
+        block = optimize_index_launches.block(cx, node.block),
+      })
+    end
   end
 end
 
