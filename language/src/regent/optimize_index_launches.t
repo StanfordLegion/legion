@@ -1212,7 +1212,6 @@ function get_check_stats(bitmask, value, conflict, index_expr, volume)
   -- Compute value = index_expr(i)
   stats:insert(util.mk_stat_assignment(util.mk_expr_id_rawref(value), index_expr))
 
-  local cond = util.mk_expr_binary("<", util.mk_expr_id(value), util.mk_expr_id(volume))
   local then_block = terralib.newlist()
 
   local bitmask_value = util.mk_expr_index_access(util.mk_expr_id(bitmask), util.mk_expr_id(value), std.rawref(&bool))
@@ -1225,6 +1224,7 @@ function get_check_stats(bitmask, value, conflict, index_expr, volume)
   local check_conflict = util.mk_stat_if(util.mk_expr_id(conflict), util.mk_stat_break())
   then_block:insert(check_conflict)
 
+  local cond = util.mk_expr_binary("<", util.mk_expr_id(value), util.mk_expr_id(volume))
   local bounds_check = util.mk_stat_if(cond, then_block)
   stats:insert(bounds_check)
 
@@ -1240,7 +1240,7 @@ function insert_dynamic_check(index_launch_ast, unoptimized_loop_ast)
   local p_bounds = util.mk_expr_field_access(p_colors, "bounds", std.rect1d)
   local p_volume = util.mk_expr_method_call(p_bounds, int32, "volume", terralib.newlist())
   local volume = std.newsymbol(int32, "volume")
-  stats:insert(util.mk_stat_var(volume, nil, p_volume))
+  stats:insert(util.mk_stat_var(volume, int32, p_volume))
 
   -- Set colors = 1e2 for now
   local bitmask = std.newsymbol(bool[1e2], "bitmask")
@@ -1253,12 +1253,18 @@ function insert_dynamic_check(index_launch_ast, unoptimized_loop_ast)
   local conflict = std.newsymbol(bool, "conflict")
   stats:insert(util.mk_stat_var(conflict, bool, util.mk_expr_constant(false, bool)))
 
-  local index_expr = index_launch_ast.call.args[1].index.arg
+  local index_expr
+  -- Figure out what type of loop we've got and get its index expr
+  if unoptimized_loop_ast.node_type:is(ast.typed.stat.ForNum) then
+    index_expr = index_launch_ast.call.args[1].index.arg
+  else
+    index_expr = index_launch_ast.call.args[1].index
+  end
   local check_stats = get_check_stats(bitmask, value, conflict, index_expr, volume)
 
   local i = index_launch_ast.symbol
   local bounds
-  -- Figure out what type of loop we've got and generate its AST
+  -- Generating the AST based on loop type
   if unoptimized_loop_ast.node_type:is(ast.typed.stat.ForNum) then
     bounds = index_launch_ast.values
     stats:insert(util.mk_stat_for_num(i, bounds, util.mk_block(check_stats)))
