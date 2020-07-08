@@ -1176,8 +1176,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
   }
 end
 
--- Initialize bitmask to false
-function init_bitmask(bitmask)
+function init_bitmask_false(bitmask)
   local stats = terralib.newlist()
 
   local idx = std.newsymbol(int32, "i")
@@ -1192,62 +1191,72 @@ function init_bitmask(bitmask)
   return util.mk_stat_for_num(idx, values, util.mk_block(stats))
 end
 
-function get_checking_loop_ast(bitmask, value, conflict, index_expr)
-  local loop = terralib.newlist()
+function get_check_stats(bitmask, value, conflict, index_expr, volume)
+  local stats = terralib.newlist()
 
-  -- Computing value = index_expr(i)
-  loop:insert(util.mk_stat_assignment(util.mk_expr_id_rawref(value), index_expr))
+  -- Compute value = index_expr(i)
+  stats:insert(util.mk_stat_assignment(util.mk_expr_id_rawref(value), index_expr))
 
-  local cond = util.mk_expr_binary("<", util.mk_expr_id(value), util.mk_expr_constant(100, int32))
+  local cond = util.mk_expr_binary("<", util.mk_expr_id(value), util.mk_expr_id(volume))
   local then_block = terralib.newlist()
 
-  local bitmask_at_value = util.mk_expr_index_access(util.mk_expr_id(bitmask), util.mk_expr_id(value), std.rawref(&bool))
-  local conflict_assign = util.mk_stat_assignment(util.mk_expr_id_rawref(conflict), bitmask_at_value)
+  local bitmask_value = util.mk_expr_index_access(util.mk_expr_id(bitmask), util.mk_expr_id(value), std.rawref(&bool))
+  local conflict_assign = util.mk_stat_assignment(util.mk_expr_id_rawref(conflict), bitmask_value)
   then_block:insert(conflict_assign)
 
-  local bitmask_assign_true = util.mk_stat_assignment(bitmask_at_value, util.mk_expr_constant(true, bool)) 
+  local bitmask_assign_true = util.mk_stat_assignment(bitmask_value, util.mk_expr_constant(true, bool)) 
   then_block:insert(bitmask_assign_true)
 
   local check_conflict = util.mk_stat_if(util.mk_expr_id(conflict), util.mk_stat_break())
   then_block:insert(check_conflict)
 
   local bounds_check = util.mk_stat_if(cond, then_block)
-  loop:insert(bounds_check)
+  stats:insert(bounds_check)
 
-  return loop
+  return stats
 end
 
 function insert_dynamic_check(index_launch_ast, unoptimized_loop_ast)
-  local p_sym = index_launch_ast.call.args[1].value.value
-  local index_expr = index_launch_ast.call.args[1].index.arg
-  local i = index_launch_ast.symbol
+  local stats = terralib.newlist()
 
-  local main_stats = terralib.newlist()
+  -- Generating the AST for var volume = p.colors.bounds:volume()
+  local p_symbol = index_launch_ast.call.args[1].value.value
+  local p_colors = util.mk_expr_field_access(util.mk_expr_id(p_symbol), "colors", std.ispace(std.int1d))
+  local p_bounds = util.mk_expr_field_access(p_colors, "bounds", std.rect1d)
+  local p_volume = util.mk_expr_method_call(p_bounds, int32, "volume", terralib.newlist())
+  local volume = std.newsymbol(int32, "volume")
+  stats:insert(util.mk_stat_var(volume, nil, p_volume))
 
   -- Set colors = 1e2 for now
   local bitmask = std.newsymbol(bool[1e2], "bitmask")
-  main_stats:insert(util.mk_stat_var(bitmask, bool[1e2], false))
-  main_stats:insert(init_bitmask(bitmask))
+  stats:insert(util.mk_stat_var(bitmask, bool[1e2], false))
+  stats:insert(init_bitmask_false(bitmask))
 
   local value = std.newsymbol(int64, "value")
-  main_stats:insert(util.mk_stat_var(value, int64))
+  stats:insert(util.mk_stat_var(value, int64))
 
   local conflict = std.newsymbol(bool, "conflict")
-  main_stats:insert(util.mk_stat_var(conflict, bool, util.mk_expr_constant(false, bool)))
+  stats:insert(util.mk_stat_var(conflict, bool, util.mk_expr_constant(false, bool)))
 
-  local bounds = terralib.newlist()
-  bounds:insert(util.mk_expr_constant(0, int32))
-  bounds:insert(util.mk_expr_constant(1e2, int32))
+  local index_expr = index_launch_ast.call.args[1].index.arg
+  local check_stats = get_check_stats(bitmask, value, conflict, index_expr, volume)
 
-  local loop = get_checking_loop_ast(bitmask, value, conflict, index_expr)
-  main_stats:insert(util.mk_stat_for_num(i, bounds, util.mk_block(loop)))
+  local i = index_launch_ast.symbol
+  local bounds
+  -- Figure out what type of loop we've got and generate its AST
+  if unoptimized_loop_ast.node_type:is(ast.typed.stat.ForNum) then
+    bounds = index_launch_ast.values
+    stats:insert(util.mk_stat_for_num(i, bounds, util.mk_block(check_stats)))
+  else
+    bounds = index_launch_ast.value
+    stats:insert(util.mk_stat_for_list(i, bounds, util.mk_block(check_stats)))
+  end
 
-  -- Finally checking conflict outside the loop to decide whether
-  -- to optimize or not
+  -- Finally check conflict outside the loop to decide whether to optimize or not
   local final_check = util.mk_stat_if_else(util.mk_expr_id(conflict), unoptimized_loop_ast, index_launch_ast)
-  main_stats:insert(final_check)
+  stats:insert(final_check)
 
-  local block = util.mk_block(main_stats)
+  local block = util.mk_block(stats)
   local stat_block = util.mk_stat_block(block)
   return stat_block
 end
@@ -1327,7 +1336,6 @@ function optimize_index_launch.stat_for_list(cx, node)
     return node
   end
 
-  local needs_dynamic_check = false
   local body = optimize_loop_body(cx, node, report_pass, report_fail)
   if not body then
     return node {
