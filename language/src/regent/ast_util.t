@@ -113,6 +113,16 @@ function ast_util.mk_expr_binary(op, lhs, rhs)
   }
 end
 
+function ast_util.mk_expr_method_call(value, expr_type, method_name, args)
+  return ast.typed.expr.MethodCall {
+    value = value,
+    expr_type = expr_type,
+    method_name = method_name,
+    args = args,
+    span = ast.trivial_span(),
+    annotations = ast.default_annotations()
+  }
+end
 function ast_util.mk_expr_call(fn, args, replicable)
   args = args or terralib.newlist()
   if not terralib.islist(args) then
