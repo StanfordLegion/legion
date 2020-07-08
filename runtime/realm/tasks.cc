@@ -410,6 +410,7 @@ namespace Realm {
       } else {
 	ok = true;
 	pending_list.push_back(to_add);
+	list_length++;
 	// task we added will hold a reference this head task
 	task->add_reference();
 	to_add->pending_head.store(reinterpret_cast<uintptr_t>(task));
@@ -544,17 +545,23 @@ namespace Realm {
     // we lose the ability to filter out tasks that have been cancelled, but
     //  that'll happen in mark_started too, and it saves us from messing with
     //  the list structure here
-    tasks.front()->mark_ready();
+    // the catch is that the "first" task isn't necessarily the one at the
+    //  front of the list (since higher-priority tasks jump ahead in the list)
+    Task *first_task = tasks.front();
+    uintptr_t phead = first_task->pending_head.load();
+    if(phead != 0) {
+      // LSB needs to be masked off to make a valid pointer
+      first_task = reinterpret_cast<Task *>(phead & ~uintptr_t(1));
+//#ifdef DEBUG_REALM
+      // this task had better not also have a pending_head link
+      assert(first_task->pending_head.load() == 0);
+//#endif
+    }
+    first_task->mark_ready();
 
     // we'll tentatively notify based on the highest priority task to be
     //  added
     priority_t notify_priority = tasks.front()->priority;
-
-//#ifdef DEBUG_REALM
-    // we should not be directly pushing a chain whose head is not marked
-    //  ready
-    assert(tasks.front()->pending_head.load() == 0);
-//#endif
 
     {
       AutoLock<> al(mutex);
