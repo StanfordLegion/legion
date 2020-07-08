@@ -37,6 +37,16 @@ function ast_util.mk_expr_id(sym, ty)
   }
 end
 
+function ast_util.mk_expr_id_rawref(sym, ty)
+  ty = ty or std.rawref(&sym:gettype())
+  return ast.typed.expr.ID {
+    value = sym,
+    expr_type = ty,
+    span = ast.trivial_span(),
+    annotations = ast.default_annotations(),
+  }
+end
+
 function ast_util.mk_expr_index_access(value, index, ty)
   return ast.typed.expr.IndexAccess {
     value = value,
