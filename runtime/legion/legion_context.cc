@@ -6407,7 +6407,6 @@ namespace Legion {
     void InnerContext::progress_unordered_operations(void)
     //--------------------------------------------------------------------------
     {
-      bool issue_task = false;
       RtEvent precondition;
       Operation *op = NULL;
       {
@@ -6416,23 +6415,16 @@ namespace Legion {
         // a trace then add them into the queue
         if (!unordered_ops.empty() && (current_trace == NULL))
           insert_unordered_ops(d_lock, false/*end task*/, true/*progress*/);
-        if (dependence_queue.empty())
+        if (dependence_queue.empty() || outstanding_dependence)
           return;
-        if (!outstanding_dependence)
-        {
-          issue_task = true;
-          outstanding_dependence = true;
-          precondition = dependence_precondition;
-          dependence_precondition = RtEvent::NO_RT_EVENT;
-          op = dependence_queue.front();
-        }
+        outstanding_dependence = true;
+        precondition = dependence_precondition;
+        dependence_precondition = RtEvent::NO_RT_EVENT;
+        op = dependence_queue.front();
       }
-      if (issue_task)
-      {
-        DependenceArgs args(op, this);
-        const LgPriority priority = LG_THROUGHPUT_WORK_PRIORITY;
-        runtime->issue_runtime_meta_task(args, priority, precondition); 
-      }
+      DependenceArgs args(op, this);
+      const LgPriority priority = LG_THROUGHPUT_WORK_PRIORITY;
+      runtime->issue_runtime_meta_task(args, priority, precondition); 
     }
 
     //--------------------------------------------------------------------------
@@ -7013,19 +7005,16 @@ namespace Legion {
           unordered_ops.push_back(op);
           return term_event;
         }
+        // Insert any unordered operations into the stream
+        insert_unordered_ops(d_lock, false/*end task*/, false/*progress*/);
+        dependence_queue.push_back(op);
         if (!outstanding_dependence)
         {
-#ifdef DEBUG_LEGION
-          assert(dependence_queue.empty());
-#endif
           issue_task = true;
           outstanding_dependence = true;
           precondition = dependence_precondition;
           dependence_precondition = RtEvent::NO_RT_EVENT;
         }
-        dependence_queue.push_back(op);
-        // Insert any unordered operations into the stream
-        insert_unordered_ops(d_lock, false/*end task*/, false/*progress*/);
       }
       if (issue_task)
       {
@@ -8938,6 +8927,14 @@ namespace Legion {
       {
         AutoLock d_lock(dependence_lock);
         insert_unordered_ops(d_lock, true/*end task*/, false/*progress*/);
+        if (!dependence_queue.empty() && !outstanding_dependence)
+        {
+          outstanding_dependence = true;
+          DependenceArgs args(dependence_queue.front(), this);
+          runtime->issue_runtime_meta_task(args, 
+              LG_THROUGHPUT_WORK_PRIORITY, dependence_precondition);
+          dependence_precondition = RtEvent::NO_RT_EVENT;
+        }
       }
       // Mark that we are done executing this operation
       // We're not actually done until we have registered our pending
