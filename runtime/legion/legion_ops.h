@@ -1329,7 +1329,7 @@ namespace Legion {
       // From MemoizableOp
       virtual void replay_analysis(void);
     public:
-      void enumerate_points(void);
+      void enumerate_points(bool replaying);
       void handle_point_commit(RtEvent point_committed);
       void check_point_requirements(void);
     protected:
@@ -3254,7 +3254,7 @@ namespace Legion {
       virtual void replay_analysis(void);
     public:
       void perform_base_dependence_analysis(void);
-      void enumerate_points(void);
+      void enumerate_points(bool replaying);
       void handle_point_commit(void);
       void check_point_requirements(void);
     protected:
