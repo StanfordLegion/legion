@@ -1006,6 +1006,30 @@ namespace Legion {
     };
 
     /**
+     * \class VerifyReplicableExchange
+     * This class exchanges hash values of all the inputs for calls
+     * into control replication contexts in order to ensure that they 
+     * all are the same.
+     */
+    class VerifyReplicableExchange : public AllGatherCollective<false> {
+    public:
+      VerifyReplicableExchange(CollectiveIndexLocation loc, 
+                               ReplicateContext *ctx);
+      VerifyReplicableExchange(const VerifyReplicableExchange &rhs);
+      virtual ~VerifyReplicableExchange(void);
+    public:
+      VerifyReplicableExchange& operator=(const VerifyReplicableExchange &rhs);
+    public:
+      virtual void pack_collective_stage(Serializer &rez, int stage);
+      virtual void unpack_collective_stage(Deserializer &derez, int stage);
+    public:
+      typedef std::map<std::pair<uint64_t,uint64_t>,ShardID> ShardHashes;
+      const ShardHashes& exchange(uint64_t hash[2]);
+    public:
+      ShardHashes unique_hashes;
+    };
+
+    /**
      * \class SlowBarrier
      * This class creates a collective that behaves like a barrier, but is
      * probably slower than Realm phase barriers. It's useful for cases

@@ -558,6 +558,9 @@ namespace Legion {
     public:
       template<typename T>
       inline void hash(const T &value);
+      inline void hash(const void *values, size_t size);
+      inline void hash(const ExecutionConstraintSet &set);
+      inline void hash(const TaskLayoutConstraintSet &set);
       inline void finalize(uint64_t result[2]);
     protected:
       inline uint64_t rotl64(uint64_t x, uint8_t r);
@@ -1635,6 +1638,32 @@ namespace Legion {
 #endif
       const uint8_t *data = reinterpret_cast<const uint8_t*>(&value); 
       for (unsigned idx = 0; idx < sizeof(T); idx++)
+      {
+        blocks.b[bytes++] = data[idx];
+        if (bytes == 16)
+        {
+          // body
+          uint64_t k1 = blocks.k[0];
+          uint64_t k2 = blocks.k[1];
+          k1 *= c1; k1  = rotl64(k1,31); k1 *= c2; h1 ^= k1;
+          h1 = rotl64(h1,27); h1 += h2; h1 = h1*5+0x52dce729;
+          k2 *= c2; k2  = rotl64(k2,33); k2 *= c1; h2 ^= k2;
+          h2 = rotl64(h2,31); h2 += h1; h2 = h2*5+0x38495ab5;
+          len += 16;
+          bytes = 0;
+        }
+      }
+    }
+
+    //-------------------------------------------------------------------------
+    inline void Murmur3Hasher::hash(const void *value, size_t size)
+    //-------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!finalized);
+#endif
+      const uint8_t *data = reinterpret_cast<const uint8_t*>(value); 
+      for (unsigned idx = 0; idx < size; idx++)
       {
         blocks.b[bytes++] = data[idx];
         if (bytes == 16)

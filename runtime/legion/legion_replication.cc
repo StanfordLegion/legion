@@ -11809,6 +11809,95 @@ namespace Legion {
     template class ConsensusMatchExchange<uint64_t>;
 
     /////////////////////////////////////////////////////////////
+    // VerifyReplicableExchange
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    VerifyReplicableExchange::VerifyReplicableExchange(
+                             CollectiveIndexLocation loc, ReplicateContext *ctx)
+      : AllGatherCollective<false>(loc, ctx)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    VerifyReplicableExchange::VerifyReplicableExchange(
+                                            const VerifyReplicableExchange &rhs)
+      : AllGatherCollective<false>(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    VerifyReplicableExchange::~VerifyReplicableExchange(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    VerifyReplicableExchange& VerifyReplicableExchange::operator=(
+                                            const VerifyReplicableExchange &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void VerifyReplicableExchange::pack_collective_stage(Serializer &rez, 
+                                                         int stage)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(unique_hashes.size());
+      for (ShardHashes::const_iterator it = unique_hashes.begin();
+            it != unique_hashes.end(); it++)
+      {
+        rez.serialize(it->first.first);
+        rez.serialize(it->first.second);
+        rez.serialize(it->second);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void VerifyReplicableExchange::unpack_collective_stage(Deserializer &derez,
+                                                           int stage)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_hashes;
+      derez.deserialize(num_hashes);
+      for (unsigned idx = 0; idx < num_hashes; idx++)
+      {
+        std::pair<uint64_t,uint64_t> key;
+        derez.deserialize(key.first);
+        derez.deserialize(key.second);
+        ShardHashes::iterator finder = unique_hashes.find(key);
+        if (finder != unique_hashes.end())
+        {
+          ShardID sid;
+          derez.deserialize(sid);
+          if (sid < finder->second)
+            finder->second = sid;
+        }
+        else
+          derez.deserialize(unique_hashes[key]);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    const VerifyReplicableExchange::ShardHashes& 
+                            VerifyReplicableExchange::exchange(uint64_t hash[2])
+    //--------------------------------------------------------------------------
+    {
+      const std::pair<uint64_t,uint64_t> key(hash[0],hash[1]);
+      unique_hashes[key] = local_shard;
+      perform_collective_sync();
+      return unique_hashes;
+    }
+
+    /////////////////////////////////////////////////////////////
     // Slow Barrier
     /////////////////////////////////////////////////////////////
 

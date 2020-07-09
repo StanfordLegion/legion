@@ -7652,6 +7652,11 @@ namespace Legion {
        *              checks on mapper calls regardless of the 
        *              optimization level. (Default: true in debug mode,
        *              false in release mode.)
+       * -lg:safe_ctrlrepl Perform dynamic checks to verify the correctness
+       *              of control replication. This will compute a hash
+       *              all the arguments to each call into the runtime 
+       *              and perform a collective to compare it across 
+       *              the shards to see if they all align.
        * -lg:local <int> Specify the maximum number of local fields
        *              permitted in any field space within a context.
        * ---------------------

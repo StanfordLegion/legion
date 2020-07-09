@@ -1512,6 +1512,40 @@ namespace Legion {
         std::map<ShardID,RtEvent> ready_deps;
         std::map<ShardID,RtUserEvent> pending_deps;
       };
+      enum ReplicateAPICall {
+        REPLICATE_PERFORM_REGISTRATION_CALLBACK,
+        REPLICATE_CONSENSUS_MATCH,
+        REPLICATE_REGISTER_TASK_VARIANT,
+        REPLICATE_GENERATE_DYNAMIC_TRACE_ID,
+        REPLICATE_GENERATE_DYNAMIC_MAPPER_ID,
+        REPLICATE_GENERATE_DYNAMIC_PROJECTION_ID,
+        REPLICATE_GENERATE_DYNAMIC_SHARDING_ID,
+        REPLICATE_GENERATE_DYNAMIC_TASK_ID,
+        REPLICATE_GENERATE_DYNAMIC_REDUCTION_ID,
+        REPLICATE_GENERATE_DYNAMIC_SERDEZ_ID,
+        REPLICATE_CREATE_INDEX_SPACE,
+        REPLICATE_UNION_INDEX_SPACES,
+        REPLICATE_INTERSECT_INDEX_SPACES,
+        REPLICATE_SUBTRACT_INDEX_SPACES,
+        REPLICATE_CREATE_SHARED_OWNERSHIP,
+        REPLICATE_DESTROY_INDEX_SPACE,
+        REPLICATE_DESTROY_INDEX_PARTITION,
+        REPLICATE_CREATE_EQUAL_PARTITION,
+        REPLICATE_CREATE_PARTITION_BY_WEIGHTS,
+        REPLICATE_CREATE_PARTITION_BY_UNION,
+        REPLICATE_CREATE_PARTITION_BY_INTERSECTION,
+        REPLICATE_CREATE_PARTITION_BY_DIFFERENCE,
+        REPLICATE_CREATE_CROSS_PRODUCT_PARTITIONS,
+        REPLICATE_CREATE_ASSOCIATION,
+        REPLICATE_CREATE_RESTRICTED_PARTITION,
+        REPLICATE_CREATE_PARTITION_BY_DOMAIN,
+        REPLICATE_CREATE_PARTITION_BY_FIELD,
+        REPLICATE_CREATE_PARTITION_BY_IMAGE,
+        REPLICATE_CREATE_PARTITION_BY_IMAGE_RANGE,
+        REPLICATE_CREATE_PARTITION_BY_PREIMAGE,
+        REPLICATE_CREATE_PARTITION_BY_PREIMAGE_RANGE,
+        REPLICATE_CREATE_PENDING_PARTITION,
+      };
     public:
       ReplicateContext(Runtime *runtime, ShardTask *owner,int d,bool full_inner,
                        const std::vector<RegionRequirement> &reqs,
@@ -1988,6 +2022,8 @@ namespace Legion {
       // the same calls for the same operations in the same order
       void create_new_replicate_barrier(RtBarrier &bar, size_t arrivals);
       void create_new_replicate_barrier(ApBarrier &bar, size_t arrivals);
+    public:
+      void verify_replicable(Murmur3Hasher &hasher, const char *func_name);
     public:
       // A little help for ConsensusMatchExchange since it is templated
       static void help_complete_future(Future &f, const void *ptr,

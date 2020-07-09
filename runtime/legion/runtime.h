@@ -462,6 +462,8 @@ namespace Legion {
       // in case they have to make futures from remote shards
       const int op_depth; 
       const UniqueID op_uid;
+      // Use this for checking safety of control replication
+      const size_t op_ctx_index;
     protected:
       std::vector<PendingRequest> pending_future_map_requests;
       std::set<RtEvent> exchange_events;
@@ -1888,6 +1890,7 @@ namespace Legion {
             unsafe_launch(false),
             unsafe_mapper(false),
             safe_mapper(false),
+            safe_control_replication(false),
             disable_independence_tests(false),
             legion_spy_enabled(false),
             enable_test_mapper(false),
@@ -1936,6 +1939,7 @@ namespace Legion {
         bool unsafe_launch;
         bool unsafe_mapper;
         bool safe_mapper;
+        bool safe_control_replication;
         bool disable_independence_tests;
         bool legion_spy_enabled;
         bool enable_test_mapper;
@@ -2081,6 +2085,7 @@ namespace Legion {
       const bool resilient_mode;
       const bool unsafe_launch;
       const bool unsafe_mapper;
+      const bool safe_control_replication;
       const bool disable_independence_tests;
       const bool legion_spy_enabled;
       const bool supply_default_mapper;

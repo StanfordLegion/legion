@@ -1896,6 +1896,7 @@ namespace Legion {
         future_map_barrier(ctx->get_next_future_map_barrier()),
         collective_index(ctx->get_next_collective_index(COLLECTIVE_LOC_32)),
         op_depth(repl_ctx->get_depth()), op_uid(op->get_unique_op_id()),
+        op_ctx_index(op->get_ctx_index()),
         sharding_function_ready(Runtime::create_rt_user_event()), 
         sharding_function(NULL), collective_performed(false), 
         has_non_trivial_call(false)
@@ -1909,7 +1910,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ReplFutureMapImpl::ReplFutureMapImpl(const ReplFutureMapImpl &rhs)
       : FutureMapImpl(rhs), repl_ctx(NULL), shard_domain(Domain::NO_DOMAIN), 
-        future_map_barrier_index(0), collective_index(0), op_depth(0), op_uid(0)
+        future_map_barrier_index(0), collective_index(0), op_depth(0), 
+        op_uid(0), op_ctx_index(0)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -12638,6 +12640,7 @@ namespace Legion {
 #else
         unsafe_mapper(!config.safe_mapper),
 #endif
+        safe_control_replication(config.safe_control_replication),
         disable_independence_tests(config.disable_independence_tests),
 #ifdef LEGION_SPY
         legion_spy_enabled(true),
@@ -12838,6 +12841,7 @@ namespace Legion {
         resilient_mode(rhs.resilient_mode),
         unsafe_launch(rhs.unsafe_launch),
         unsafe_mapper(rhs.unsafe_mapper),
+        safe_control_replication(rhs.safe_control_replication),
         disable_independence_tests(rhs.disable_independence_tests),
         legion_spy_enabled(rhs.legion_spy_enabled),
         supply_default_mapper(rhs.supply_default_mapper),
@@ -25160,6 +25164,8 @@ namespace Legion {
         .add_option_bool("-lg:unsafe_launch",config.unsafe_launch,!filter)
         .add_option_bool("-lg:unsafe_mapper",config.unsafe_mapper,!filter)
         .add_option_bool("-lg:safe_mapper",config.safe_mapper,!filter)
+        .add_option_bool("-lg:safe_ctrlrepl",
+                         config.safe_control_replication, !filter)
         .add_option_bool("-lg:inorder",config.program_order_execution,!filter)
         .add_option_bool("-lg:dump_physical_traces",
                          config.dump_physical_traces, !filter)

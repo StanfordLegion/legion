@@ -9875,6 +9875,14 @@ namespace Legion {
                      RtEvent global_done, std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_PERFORM_REGISTRATION_CALLBACK);
+        hasher.hash(dso->dso_name.c_str(), dso->dso_name.size());
+        hasher.hash(dso->symbol_name.c_str(), dso->symbol_name.size());
+        verify_replicable(hasher, "perform_registration_callback");
+      }
       shard_manager->perform_global_registration_callbacks(dso, local_done, 
                                                 global_done, preconditions);
     }
@@ -9936,6 +9944,12 @@ namespace Legion {
                                        size_t num_elements, size_t element_size)
     //--------------------------------------------------------------------------
     {
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_CONSENSUS_MATCH);
+        verify_replicable(hasher, "consensus_match");
+      }
       ApUserEvent complete = Runtime::create_ap_user_event(NULL);
       Future result = runtime->help_create_future(complete);
       switch (element_size)
@@ -9995,6 +10009,32 @@ namespace Legion {
       if (inside_registration_callback)
         return TaskContext::register_variant(registrar, user_data, 
             user_data_size, desc, ret, vid, check_task_id);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_REGISTER_TASK_VARIANT);
+        hasher.hash(registrar.task_id);
+        hasher.hash(registrar.global_registration);
+        if (registrar.task_variant_name != NULL)
+          hasher.hash(registrar.task_variant_name, 
+                      strlen(registrar.task_variant_name));
+        Serializer rez;
+        registrar.execution_constraints.serialize(rez);
+        registrar.layout_constraints.serialize(rez);
+        hasher.hash(rez.get_buffer(), rez.get_used_bytes());
+        for (std::set<TaskID>::const_iterator it = 
+              registrar.generator_tasks.begin(); it !=
+              registrar.generator_tasks.end(); it++)
+          hasher.hash(*it);
+        hasher.hash(registrar.leaf_variant);
+        hasher.hash(registrar.inner_variant);
+        hasher.hash(registrar.idempotent_variant);
+        hasher.hash(registrar.replicable_variant);
+        if (user_data != NULL)
+          hasher.hash(user_data, user_data_size);
+        hasher.hash(vid);
+        verify_replicable(hasher, "register_task_variant");
+      }
       VariantID result;
       if (owner_shard->shard_id == dynamic_id_allocator_shard)
       {
@@ -10023,6 +10063,12 @@ namespace Legion {
       // If we're inside a registration callback we don't care
       if (inside_registration_callback)
         return TaskContext::generate_dynamic_trace_id();
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_GENERATE_DYNAMIC_TRACE_ID);
+        verify_replicable(hasher, "generate_dynamic_trace_id");
+      }
       // Otherwise have one shard make it and broadcast it to everyone else
       TraceID result;
       if (owner_shard->shard_id == dynamic_id_allocator_shard)
@@ -10049,6 +10095,12 @@ namespace Legion {
       // If we're inside a registration callback we don't care
       if (inside_registration_callback)
         return TaskContext::generate_dynamic_mapper_id();
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_GENERATE_DYNAMIC_MAPPER_ID);
+        verify_replicable(hasher, "generate_dynamic_mapper_id");
+      }
       // Otherwise have one shard make it and broadcast it to everyone else
       MapperID result;
       if (owner_shard->shard_id == dynamic_id_allocator_shard)
@@ -10075,6 +10127,12 @@ namespace Legion {
       // If we're inside a registration callback we don't care
       if (inside_registration_callback)
         return TaskContext::generate_dynamic_projection_id();
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_GENERATE_DYNAMIC_PROJECTION_ID);
+        verify_replicable(hasher, "generate_dynamic_projection_id");
+      }
       // Otherwise have one shard make it and broadcast it to everyone else
       ProjectionID result;
       if (owner_shard->shard_id == dynamic_id_allocator_shard)
@@ -10102,6 +10160,12 @@ namespace Legion {
       // If we're inside a registration callback we don't care
       if (inside_registration_callback)
         return TaskContext::generate_dynamic_sharding_id();
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_GENERATE_DYNAMIC_SHARDING_ID);
+        verify_replicable(hasher, "generate_dynamic_sharding_id");
+      }
       // Otherwise have one shard make it and broadcast it to everyone else
       ShardingID result;
       if (owner_shard->shard_id == dynamic_id_allocator_shard)
@@ -10128,6 +10192,12 @@ namespace Legion {
       // If we're inside a registration callback we don't care
       if (inside_registration_callback)
         return TaskContext::generate_dynamic_task_id();
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_GENERATE_DYNAMIC_TASK_ID);
+        verify_replicable(hasher, "generate_dynamic_task_id");
+      }
       // Otherwise have one shard make it and broadcast it to everyone else
       TaskID result;
       if (owner_shard->shard_id == dynamic_id_allocator_shard)
@@ -10154,6 +10224,12 @@ namespace Legion {
       // If we're inside a registration callback we don't care
       if (inside_registration_callback)
         return TaskContext::generate_dynamic_reduction_id();
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_GENERATE_DYNAMIC_REDUCTION_ID);
+        verify_replicable(hasher, "generate_dynamic_reduction_id");
+      }
       // Otherwise have one shard make it and broadcast it to everyone else
       ReductionOpID result;
       if (owner_shard->shard_id == dynamic_id_allocator_shard)
@@ -10180,6 +10256,12 @@ namespace Legion {
       // If we're inside a registration callback we don't care
       if (inside_registration_callback)
         return TaskContext::generate_dynamic_serdez_id();
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_GENERATE_DYNAMIC_SERDEZ_ID);
+        verify_replicable(hasher, "generate_dynamic_serdez_id");
+      }
       // Otherwise have one shard make it and broadcast it to everyone else
       CustomSerdezID result;
       if (owner_shard->shard_id == dynamic_id_allocator_shard)
@@ -10245,6 +10327,36 @@ namespace Legion {
       advance_replicate_barrier(semantic_attach_barrier, total_shards);
       if (wait_on.exists() && !wait_on.has_triggered())
         wait_on.wait();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::verify_replicable(Murmur3Hasher &hasher,
+                                             const char *func_name)
+    //--------------------------------------------------------------------------
+    {
+      uint64_t hash[2];
+      hasher.finalize(hash);
+      VerifyReplicableExchange exchange(COLLECTIVE_LOC_82, this);
+      const VerifyReplicableExchange::ShardHashes &hashes =
+        exchange.exchange(hash);
+      // If all shards had the same hashes then we are done
+      if (hashes.size() == 1)
+        return;
+      const std::pair<uint64_t,uint64_t> key(hash[0],hash[1]);
+      const VerifyReplicableExchange::ShardHashes::const_iterator
+        finder = hashes.find(key);
+#ifdef DEBUG_LEGION
+      assert(finder != hashes.end());
+#endif
+      // See if we are one of the lowest hashes and report the error
+      // We'll let the other shards continue to avoid printing out
+      // too many error messages, they'll be killed soon enough
+      if (finder->second == owner_shard->shard_id)
+        REPORT_LEGION_ERROR(ERROR_CONTROL_REPLICATION_VIOLATION,
+            "Detected control replication violation when invoking %s in "
+            "task %s (UID %lld) on shard %d. The hash summary for the function "
+            "does not align with the hash summaries from other call sites.",
+            func_name, get_task_name(), get_unique_id(), owner_shard->shard_id)
     }
 
     //--------------------------------------------------------------------------
@@ -10481,6 +10593,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_CREATE_INDEX_SPACE);
+        Serializer rez;
+        rez.serialize(domain);
+        hasher.hash(rez.get_buffer(), rez.get_used_bytes());
+        hasher.hash(type_tag);
+        verify_replicable(hasher, "create_index_space");
+      }
       // Seed this with the first index space broadcast
       if (pending_index_spaces.empty())
         increase_pending_index_spaces(1/*count*/, false/*double*/);
@@ -10600,6 +10722,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_CREATE_INDEX_SPACE);
+        const Domain *domain = static_cast<Domain*>(
+                future.impl->get_untyped_result(true,NULL,true/*internal*/));
+        Serializer rez;
+        rez.serialize(*domain);
+        hasher.hash(rez.get_buffer(), rez.get_used_bytes());
+        hasher.hash(type_tag);
+        verify_replicable(hasher, "create_index_space");
+      }
       // Seed this with the first index space broadcast
       if (pending_index_spaces.empty())
         increase_pending_index_spaces(1/*count*/, false/*double*/);
@@ -10687,6 +10821,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_UNION_INDEX_SPACES);
+        for (std::vector<IndexSpace>::const_iterator it = 
+              spaces.begin(); it != spaces.end(); it++)
+          hasher.hash(*it);
+        verify_replicable(hasher, "union_index_spaces");
+      }
       if (spaces.empty())
         return IndexSpace::NO_SPACE;
       bool none_exists = true;
@@ -10781,6 +10924,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_INTERSECT_INDEX_SPACES);
+        for (std::vector<IndexSpace>::const_iterator it = 
+              spaces.begin(); it != spaces.end(); it++)
+          hasher.hash(*it);
+        verify_replicable(hasher, "intersect_index_spaces");
+      }
       if (spaces.empty())
         return IndexSpace::NO_SPACE;
       bool none_exists = true;
@@ -10875,6 +11027,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_SUBTRACT_INDEX_SPACES);
+        hasher.hash(left);
+        hasher.hash(right);
+        verify_replicable(hasher, "subtract_index_spaces");
+      }
       if (!left.exists())
         return IndexSpace::NO_SPACE;
       if (right.exists() && left.get_type_tag() != right.get_type_tag())
@@ -10959,6 +11119,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_CREATE_SHARED_OWNERSHIP);
+        hasher.hash(handle);
+        verify_replicable(hasher, "create_shared_ownership");
+      }
       if (!handle.exists())
         return;
       // Check to see if this is a top-level index space, if not then
@@ -10989,6 +11156,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication && !unordered)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_DESTROY_INDEX_SPACE);
+        hasher.hash(handle);
+        hasher.hash(recurse);
+        verify_replicable(hasher, "destroy_index_space");
+      }
       if (!handle.exists())
         return;
 #ifdef DEBUG_LEGION
@@ -11067,6 +11242,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_CREATE_SHARED_OWNERSHIP);
+        hasher.hash(handle);
+        verify_replicable(hasher, "create_shared_ownership");
+      }
       if (!handle.exists())
         return;
       if (shard_manager->is_total_sharding() &&
@@ -11089,6 +11271,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication && !unordered)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_DESTROY_INDEX_PARTITION);
+        hasher.hash(handle);
+        hasher.hash(recurse);
+        verify_replicable(hasher, "destroy_index_partition");
+      }
       if (!handle.exists())
         return;
 #ifdef DEBUG_LEGION
@@ -11296,6 +11486,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);  
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_CREATE_EQUAL_PARTITION);
+        hasher.hash(parent);
+        hasher.hash(color_space);
+        hasher.hash(granularity);
+        hasher.hash(color);
+        verify_replicable(hasher, "create_equal_partition");
+      }
       IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
       LegionColor partition_color = INVALID_COLOR;
       bool color_generated = false; 
@@ -11330,6 +11530,26 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);  
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_CREATE_PARTITION_BY_WEIGHTS);
+        hasher.hash(parent);
+#ifdef DEBUG_LEGION
+        assert(weights.impl != NULL);
+        ReplFutureMapImpl *impl = 
+          dynamic_cast<ReplFutureMapImpl*>(weights.impl);
+        assert(impl != NULL);
+#else
+        ReplFutureMapImpl *impl = 
+          static_cast<ReplFutureMapImpl*>(weights.impl);
+#endif
+        hasher.hash(impl->op_ctx_index);
+        hasher.hash(color_space);
+        hasher.hash(granularity);
+        hasher.hash(color);
+        verify_replicable(hasher, "create_partition_by_weights");
+      }
       IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
       LegionColor partition_color = INVALID_COLOR;
       bool color_generated = false;
@@ -11365,6 +11585,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_CREATE_PARTITION_BY_UNION);
+        hasher.hash(parent);
+        hasher.hash(handle1);
+        hasher.hash(handle2);
+        hasher.hash(color_space);
+        hasher.hash(kind);
+        hasher.hash(color);
+        verify_replicable(hasher, "create_partition_by_union");
+      }
       PartitionKind verify_kind = LEGION_COMPUTE_KIND;
       if (runtime->verify_partitions)
         SWAP_PART_KINDS(verify_kind, kind)
@@ -11454,6 +11686,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_CREATE_PARTITION_BY_INTERSECTION);
+        hasher.hash(parent);
+        hasher.hash(handle1);
+        hasher.hash(handle2);
+        hasher.hash(color_space);
+        hasher.hash(kind);
+        hasher.hash(color);
+        verify_replicable(hasher, "create_partition_by_intersection");
+      }
       PartitionKind verify_kind = LEGION_COMPUTE_KIND;
       if (runtime->verify_partitions)
         SWAP_PART_KINDS(verify_kind, kind)
@@ -11541,6 +11785,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_CREATE_PARTITION_BY_INTERSECTION);
+        hasher.hash(parent);
+        hasher.hash(partition);
+        hasher.hash(kind);
+        hasher.hash(color);
+        hasher.hash(dominates);
+        verify_replicable(hasher, "create_partition_by_intersection");
+      }
       PartitionKind verify_kind = LEGION_COMPUTE_KIND;
       if (runtime->verify_partitions)
         SWAP_PART_KINDS(verify_kind, kind)
@@ -11612,6 +11867,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_CREATE_PARTITION_BY_DIFFERENCE);
+        hasher.hash(parent);
+        hasher.hash(handle1);
+        hasher.hash(handle2);
+        hasher.hash(color_space);
+        hasher.hash(kind);
+        hasher.hash(color);
+        verify_replicable(hasher, "create_partition_by_difference");
+      }
       PartitionKind verify_kind = LEGION_COMPUTE_KIND;
       if (runtime->verify_partitions)
         SWAP_PART_KINDS(verify_kind, kind)
@@ -11689,6 +11956,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_CREATE_CROSS_PRODUCT_PARTITIONS);
+        hasher.hash(handle1);
+        hasher.hash(handle2);
+        hasher.hash(kind);
+        hasher.hash(color);
+        verify_replicable(hasher, "create_cross_product_partitions");
+      }
       PartitionKind verify_kind = LEGION_COMPUTE_KIND;
       if (runtime->verify_partitions)
         SWAP_PART_KINDS(verify_kind, kind)
@@ -11824,6 +12101,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_CREATE_ASSOCIATION);
+        hasher.hash(domain);
+        hasher.hash(domain_parent);
+        hasher.hash(domain_fid);
+        hasher.hash(range);
+        hasher.hash(id);
+        hasher.hash(tag);
+        verify_replicable(hasher, "create_association");
+      }
       ReplDependentPartitionOp *part_op = 
         runtime->get_available_repl_dependent_partition_op();
 #ifdef DEBUG_LEGION
@@ -11868,6 +12157,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_CREATE_RESTRICTED_PARTITION);
+        hasher.hash(parent);
+        hasher.hash(color_space);
+        hasher.hash(transform, transform_size);
+        hasher.hash(extent, extent_size);
+        hasher.hash(part_kind);
+        hasher.hash(color);
+        verify_replicable(hasher, "create_restricted_partition");
+      }
       PartitionKind verify_kind = LEGION_COMPUTE_KIND;
       if (runtime->verify_partitions)
         SWAP_PART_KINDS(verify_kind, part_kind)
@@ -11915,6 +12216,26 @@ namespace Legion {
                                                 Color color)
     //--------------------------------------------------------------------------
     {
+      AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_CREATE_PARTITION_BY_DOMAIN);
+        hasher.hash(parent);
+        Serializer rez;
+        for (std::map<DomainPoint,Domain>::const_iterator it = 
+              domains.begin(); it != domains.end(); it++)
+        {
+          rez.serialize(it->first);
+          rez.serialize(it->second);
+        }
+        hasher.hash(rez.get_buffer(), rez.get_used_bytes());
+        hasher.hash(color_space);
+        hasher.hash(perform_intersections);
+        hasher.hash(part_kind);
+        hasher.hash(color);
+        verify_replicable(hasher, "create_partition_by_domain");
+      }
       Domain fm_domain;
       RtUserEvent deletion_precondition;
       // Have to include all the points in the domain computation
@@ -11979,6 +12300,27 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_CREATE_PARTITION_BY_DOMAIN);
+        hasher.hash(parent);
+#ifdef DEBUG_LEGION
+        assert(domains.impl != NULL);
+        ReplFutureMapImpl *impl = 
+          dynamic_cast<ReplFutureMapImpl*>(domains.impl);
+        assert(impl != NULL);
+#else
+        ReplFutureMapImpl *impl = 
+          static_cast<ReplFutureMapImpl*>(domains.impl);
+#endif
+        hasher.hash(impl->op_ctx_index);
+        hasher.hash(color_space);
+        hasher.hash(perform_intersections);
+        hasher.hash(part_kind);
+        hasher.hash(color);
+        verify_replicable(hasher, "create_partition_by_domain");
+      }
       PartitionKind verify_kind = LEGION_COMPUTE_KIND;
       if (runtime->verify_partitions)
         SWAP_PART_KINDS(verify_kind, part_kind)
@@ -12027,6 +12369,20 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_CREATE_PARTITION_BY_FIELD);
+        hasher.hash(handle);
+        hasher.hash(parent_priv);
+        hasher.hash(fid);
+        hasher.hash(color_space);
+        hasher.hash(color);
+        hasher.hash(id);
+        hasher.hash(tag);
+        hasher.hash(part_kind);
+        verify_replicable(hasher, "create_partition_by_field");
+      }
       // Partition by field is disjoint by construction
       PartitionKind verify_kind = LEGION_DISJOINT_KIND;
       if (runtime->verify_partitions)
@@ -12096,6 +12452,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);  
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_CREATE_PARTITION_BY_IMAGE);
+        hasher.hash(handle);
+        hasher.hash(projection);
+        hasher.hash(parent);
+        hasher.hash(fid);
+        hasher.hash(color_space);
+        hasher.hash(part_kind);
+        hasher.hash(color);
+        hasher.hash(id);
+        hasher.hash(tag);
+        verify_replicable(hasher, "create_partition_by_image");
+      }
       PartitionKind verify_kind = LEGION_COMPUTE_KIND;
       if (runtime->verify_partitions)
         SWAP_PART_KINDS(verify_kind, part_kind)
@@ -12174,6 +12545,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);  
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_CREATE_PARTITION_BY_IMAGE_RANGE);
+        hasher.hash(handle);
+        hasher.hash(projection);
+        hasher.hash(parent);
+        hasher.hash(fid);
+        hasher.hash(color_space);
+        hasher.hash(part_kind);
+        hasher.hash(color);
+        hasher.hash(id);
+        hasher.hash(tag);
+        verify_replicable(hasher, "create_partition_by_image_range");
+      }
       PartitionKind verify_kind = LEGION_COMPUTE_KIND;
       if (runtime->verify_partitions)
         SWAP_PART_KINDS(verify_kind, part_kind)
@@ -12251,6 +12637,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);  
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_CREATE_PARTITION_BY_PREIMAGE);
+        hasher.hash(projection);
+        hasher.hash(handle);
+        hasher.hash(parent);
+        hasher.hash(fid);
+        hasher.hash(color_space);
+        hasher.hash(part_kind);
+        hasher.hash(color);
+        hasher.hash(id);
+        hasher.hash(tag);
+        verify_replicable(hasher, "create_partition_by_preimage");
+      }
       PartitionKind verify_kind = LEGION_COMPUTE_KIND;
       if (runtime->verify_partitions)
         SWAP_PART_KINDS(verify_kind, part_kind)
@@ -12343,6 +12744,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);  
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_CREATE_PARTITION_BY_PREIMAGE_RANGE);
+        hasher.hash(projection);
+        hasher.hash(handle);
+        hasher.hash(parent);
+        hasher.hash(fid);
+        hasher.hash(color_space);
+        hasher.hash(part_kind);
+        hasher.hash(color);
+        hasher.hash(id);
+        hasher.hash(tag);
+        verify_replicable(hasher, "create_partition_by_preimage_range");
+      }
       PartitionKind verify_kind = LEGION_COMPUTE_KIND;
       if (runtime->verify_partitions)
         SWAP_PART_KINDS(verify_kind, part_kind)
@@ -12415,6 +12831,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_CREATE_PENDING_PARTITION);
+        hasher.hash(parent);
+        hasher.hash(color_space);
+        hasher.hash(part_kind);
+        hasher.hash(color);
+        verify_replicable(hasher, "create_pending_partition");
+      }
       PartitionKind verify_kind = LEGION_COMPUTE_KIND;
       if (runtime->verify_partitions)
         SWAP_PART_KINDS(verify_kind, part_kind)
