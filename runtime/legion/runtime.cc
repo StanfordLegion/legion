@@ -26150,10 +26150,6 @@ namespace Legion {
     {
       if (runtime_started)
       {
-        if (implicit_runtime == NULL)
-          REPORT_LEGION_ERROR(ERROR_ILLEGAL_PERFORM_REGISTRATION_CALLBACK,
-              "Calls to 'perform_registration_callback' must be performed "
-              "inside of Legion tasks after the runtime has been started.")
         // Wait for the runtime to be started everywhere
         if (!runtime_started_event.has_triggered())
           // If we're here this has to be an external thread
@@ -26171,7 +26167,12 @@ namespace Legion {
           if (implicit_context != NULL)
             implicit_context->handle_registration_callback_effects(done_event);
           else if (!done_event.has_triggered())
-            done_event.wait();
+          {
+            if (Processor::get_executing_processor().exists())
+              done_event.wait();
+            else
+              done_event.external_wait();
+          }
         }
       }
       else // can safely ignore global as this call must be done everywhere
