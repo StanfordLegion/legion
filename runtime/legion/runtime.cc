@@ -17387,7 +17387,10 @@ namespace Legion {
             precondition = finder->second;
           }
           else
+          {
             local_callbacks_done[callback] = done_event;
+            global_local_done[key] = done_event; 
+          }
         }
         else // We were already handled so nothing to do
           done_event = RtUserEvent::NO_RT_USER_EVENT;
