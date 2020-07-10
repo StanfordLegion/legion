@@ -735,7 +735,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -745,7 +746,8 @@ namespace Legion {
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                            is.bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds, offset);
       }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     const Rect<N,T> source_bounds,
@@ -756,7 +758,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -766,7 +769,8 @@ namespace Legion {
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                            source_bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, source_bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,N,T>(instance, fid, source_bounds, offset);
       }
     public:
       inline FT read(const Point<N,T>& p) const 
@@ -813,7 +817,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         const Realm::RegionInstance instance = 
@@ -824,7 +829,8 @@ namespace Legion {
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                            bounds.bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, bounds.bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,N,T>(instance, fid, bounds.bounds, offset);
       }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     const Rect<N,T> source_bounds,
@@ -835,7 +841,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid), bounds(source_bounds)
       {
         const Realm::RegionInstance instance = 
@@ -846,7 +853,8 @@ namespace Legion {
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                            source_bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, source_bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,N,T>(instance, fid, source_bounds, offset);
         bounds.bounds = source_bounds.intersection(bounds.bounds);
       }
     public:
@@ -902,7 +910,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -912,7 +921,8 @@ namespace Legion {
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                            is.bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds, offset);
       }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     const Rect<1,T> source_bounds,
@@ -923,7 +933,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -933,7 +944,8 @@ namespace Legion {
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                            source_bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, source_bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,1,T>(instance, fid, source_bounds, offset);
       }
     public:
       inline FT read(const Point<1,T>& p) const 
@@ -971,7 +983,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         const Realm::RegionInstance instance = 
@@ -982,7 +995,8 @@ namespace Legion {
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                            bounds.bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, bounds.bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,1,T>(instance, fid, bounds.bounds, offset);
       }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     const Rect<1,T> source_bounds,
@@ -993,7 +1007,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         const Realm::RegionInstance instance = 
@@ -1004,7 +1019,8 @@ namespace Legion {
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                            source_bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, source_bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,1,T>(instance, fid, source_bounds, offset);
         bounds.bounds = source_bounds.intersection(bounds.bounds);
       }
     public:
@@ -1049,7 +1065,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -1059,7 +1076,8 @@ namespace Legion {
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                            is.bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds, offset);
       }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     const Rect<N,T> source_bounds,
@@ -1070,7 +1088,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -1080,7 +1099,8 @@ namespace Legion {
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                            source_bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, source_bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,N,T>(instance, fid, source_bounds, offset);
       }
     public:
       inline FT read(const Point<N,T>& p) const
@@ -1132,7 +1152,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         const Realm::RegionInstance instance = 
@@ -1143,7 +1164,8 @@ namespace Legion {
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                            bounds.bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, bounds.bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,N,T>(instance, fid, bounds.bounds, offset);
       }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     const Rect<N,T> source_bounds,
@@ -1154,7 +1176,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         const Realm::RegionInstance instance = 
@@ -1165,7 +1188,8 @@ namespace Legion {
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                            source_bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, source_bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,N,T>(instance, fid, source_bounds, offset);
         bounds.bounds = source_bounds.intersection(bounds.bounds);
       }
     public:
@@ -1229,7 +1253,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -1239,7 +1264,8 @@ namespace Legion {
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                            is.bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds, offset);
       }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     const Rect<1,T> source_bounds,
@@ -1250,7 +1276,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -1260,7 +1287,8 @@ namespace Legion {
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                            source_bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, source_bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,1,T>(instance, fid, source_bounds, offset);
       }
     public:
       inline FT read(const Point<1,T>& p) const
@@ -1302,7 +1330,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         const Realm::RegionInstance instance = 
@@ -1313,7 +1342,8 @@ namespace Legion {
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                            bounds.bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, bounds.bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,1,T>(instance, fid, bounds.bounds, offset);
       }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     const Rect<1,T> source_bounds,
@@ -1324,7 +1354,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         const Realm::RegionInstance instance = 
@@ -1335,7 +1366,8 @@ namespace Legion {
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                            source_bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, source_bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,1,T>(instance, fid, source_bounds, offset);
         bounds.bounds = source_bounds.intersection(bounds.bounds);
       }
     public:
@@ -1388,7 +1420,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -1398,7 +1431,8 @@ namespace Legion {
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                            is.bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds, offset);
       }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     const Rect<N,T> source_bounds,
@@ -1409,7 +1443,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -1419,7 +1454,8 @@ namespace Legion {
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                            source_bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, source_bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,N,T>(instance, fid, source_bounds, offset);
       }
     public:
       inline FT read(const Point<N,T>& p) const
@@ -1471,7 +1507,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         const Realm::RegionInstance instance = 
@@ -1482,7 +1519,8 @@ namespace Legion {
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                            bounds.bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, bounds.bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,N,T>(instance, fid, bounds.bounds, offset);
       }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     const Rect<N,T> source_bounds,
@@ -1493,7 +1531,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         const Realm::RegionInstance instance = 
@@ -1504,7 +1543,8 @@ namespace Legion {
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                            source_bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, source_bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,N,T>(instance, fid, source_bounds, offset);
         bounds.bounds = source_bounds.intersection(bounds.bounds);
       }
     public:
@@ -1567,7 +1607,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -1577,7 +1618,8 @@ namespace Legion {
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                            is.bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds, offset);
       }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     const Rect<1,T> source_bounds,
@@ -1588,7 +1630,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -1598,7 +1641,8 @@ namespace Legion {
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                            source_bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, source_bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,1,T>(instance, fid, source_bounds, offset);
       }
     public:
       inline FT read(const Point<1,T>& p) const
@@ -1639,7 +1683,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         const Realm::RegionInstance instance = 
@@ -1650,7 +1695,8 @@ namespace Legion {
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                            bounds.bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, bounds.bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,1,T>(instance, fid, bounds.bounds, offset);
       }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     const Rect<1,T> source_bounds,
@@ -1661,7 +1707,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         const Realm::RegionInstance instance = 
@@ -1672,7 +1719,8 @@ namespace Legion {
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                            bounds.bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, bounds.bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,1,T>(instance, fid, bounds.bounds, offset);
         bounds.bounds = source_bounds.intersection(bounds.bounds);
       }
     public:
@@ -1724,7 +1772,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -1734,7 +1783,8 @@ namespace Legion {
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                            is.bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds, offset);
       }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     const Rect<N,T> source_bounds,
@@ -1745,7 +1795,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -1755,7 +1806,8 @@ namespace Legion {
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                            source_bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, source_bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,N,T>(instance, fid, source_bounds, offset);
       }
     public:
       inline void write(const Point<N,T>& p, FT val) const
@@ -1803,7 +1855,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         const Realm::RegionInstance instance = 
@@ -1814,7 +1867,8 @@ namespace Legion {
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                            bounds.bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, bounds.bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,N,T>(instance, fid, bounds.bounds, offset);
       }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     const Rect<N,T> source_bounds,
@@ -1825,7 +1879,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         const Realm::RegionInstance instance = 
@@ -1836,7 +1891,8 @@ namespace Legion {
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                            source_bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, source_bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,N,T>(instance, fid, source_bounds, offset);
         bounds.bounds = source_bounds.intersection(bounds.bound);
       }
     public:
@@ -1892,7 +1948,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -1902,7 +1959,8 @@ namespace Legion {
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                            is.bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds, offset);
       }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     const Rect<1,T> source_bounds,
@@ -1913,7 +1971,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -1923,7 +1982,8 @@ namespace Legion {
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                            source_bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, source_bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,1,T>(instance, fid, source_bounds, offset);
       }
     public:
       inline void write(const Point<1,T>& p, FT val) const
@@ -1960,7 +2020,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         const Realm::RegionInstance instance = 
@@ -1971,7 +2032,8 @@ namespace Legion {
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                            bounds.bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, bounds.bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,1,T>(instance, fid, bounds.bounds, offset);
       }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     const Rect<1,T> source_bounds,
@@ -1982,7 +2044,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         const Realm::RegionInstance instance = 
@@ -1993,7 +2056,8 @@ namespace Legion {
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                            source_bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, source_bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,1,T>(instance, fid, source_bounds, offset);
         bounds.bounds = source_bounds.intersection(bounds.bounds);
       }
     public:
@@ -2194,7 +2258,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -2204,7 +2269,8 @@ namespace Legion {
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                           is.bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
+        accessor = 
+          Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds, offset);
       }
       // With explicit bounds
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
@@ -2216,7 +2282,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -2226,7 +2293,8 @@ namespace Legion {
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                           source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds);
+        accessor = 
+          Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds, offset);
       }
       // With explicit transform
       template<int M>
@@ -2239,7 +2307,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -2250,7 +2319,7 @@ namespace Legion {
               transform.transform, transform.offset, fid))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid);
+            transform.offset, fid, offset);
       }
       // With explicit transform and bounds
       template<int M>
@@ -2264,7 +2333,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -2275,7 +2345,7 @@ namespace Legion {
               transform.transform, transform.offset, fid, source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid, source_bounds);
+            transform.offset, fid, source_bounds, offset);
       }
     public:
       __CUDA_HD__
@@ -2356,7 +2426,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         DomainT<N,T> is;
@@ -2367,7 +2438,8 @@ namespace Legion {
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                           is.bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
+        accessor = 
+          Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds, offset);
         bounds = AffineBounds::Tester<N,T>(is);
       }
       // With explicit bounds
@@ -2380,7 +2452,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         DomainT<N,T> is;
@@ -2391,7 +2464,8 @@ namespace Legion {
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                           source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds);
+        accessor = 
+          Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds, offset);
         bounds = AffineBounds::Tester<N,T>(is, source_bounds);
       }
       // With explicit transform
@@ -2405,7 +2479,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         DomainT<M,T> is;
@@ -2417,7 +2492,7 @@ namespace Legion {
               transform.transform, transform.offset, fid))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid);
+            transform.offset, fid, offset);
         bounds = AffineBounds::Tester<N,T>(is, transform);
       }
       // With explicit transform and bounds
@@ -2432,7 +2507,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         DomainT<M,T> is;
@@ -2444,7 +2520,7 @@ namespace Legion {
               transform.transform, transform.offset, fid, source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid, source_bounds);
+            transform.offset, fid, source_bounds, offset);
         bounds = AffineBounds::Tester<N,T>(is, source_bounds, transform);
       }
     public:
@@ -2563,7 +2639,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -2573,7 +2650,8 @@ namespace Legion {
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                           is.bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
+        accessor = 
+          Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds, offset);
       }
       // With explicit bounds
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
@@ -2585,7 +2663,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -2595,7 +2674,8 @@ namespace Legion {
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                           source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds);
+        accessor = 
+          Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds, offset);
       }
       // With explicit transform
       template<int M>
@@ -2608,7 +2688,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -2619,7 +2700,7 @@ namespace Legion {
               transform.transform, transform.offset, fid))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid);
+            transform.offset, fid, offset);
       }
       // With explicit transform and bounds
       template<int M>
@@ -2633,7 +2714,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -2644,7 +2726,7 @@ namespace Legion {
               transform.transform, transform.offset, fid, source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid, source_bounds);
+            transform.offset, fid, source_bounds, offset);
       }
     public:
       __CUDA_HD__
@@ -2713,7 +2795,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid) 
       {
         DomainT<1,T> is;
@@ -2724,7 +2807,8 @@ namespace Legion {
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                           is.bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
+        accessor = 
+          Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds, offset);
         bounds = AffineBounds::Tester<1,T>(is);
       }
       // With explicit bounds
@@ -2737,7 +2821,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid) 
       {
         DomainT<1,T> is;
@@ -2748,7 +2833,8 @@ namespace Legion {
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                           source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds);
+        accessor = 
+          Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds, offset);
         bounds = AffineBounds::Tester<1,T>(is, source_bounds);
       }
       // With explicit transform
@@ -2762,7 +2848,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid) 
       {
         DomainT<M,T> is;
@@ -2774,7 +2861,7 @@ namespace Legion {
               transform.transform, transform.offset, fid))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid);
+            transform.offset, fid, offset);
         bounds = AffineBounds::Tester<1,T>(is, transform);
       }
       // With explicit transform and bounds
@@ -2789,7 +2876,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid) 
       {
         DomainT<M,T> is;
@@ -2801,7 +2889,7 @@ namespace Legion {
               transform.transform, transform.offset, fid, source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid, source_bounds);
+            transform.offset, fid, source_bounds, offset);
         bounds = AffineBounds::Tester<1,T>(is, source_bounds, transform);
       }
     public:
@@ -2907,7 +2995,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -2917,7 +3006,8 @@ namespace Legion {
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                           is.bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
+        accessor = 
+          Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds, offset);
       }
       // With explicit bounds
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
@@ -2929,7 +3019,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -2939,7 +3030,8 @@ namespace Legion {
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                           source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds);
+        accessor = 
+          Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds, offset);
       }
       // With explicit transform
       template<int M>
@@ -2952,7 +3044,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -2963,7 +3056,7 @@ namespace Legion {
               transform.transform, transform.offset, fid))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid);
+            transform.offset, fid, offset);
       }
       // With explicit transform and bounds
       template<int M>
@@ -2977,7 +3070,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -2988,7 +3082,7 @@ namespace Legion {
               transform.transform, transform.offset, fid, source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid, source_bounds);
+            transform.offset, fid, source_bounds, offset);
       }
     public:
       __CUDA_HD__
@@ -3080,7 +3174,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         DomainT<N,T> is;
@@ -3091,7 +3186,8 @@ namespace Legion {
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                           is.bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
+        accessor = 
+          Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds, offset);
         bounds = AffineBounds::Tester<N,T>(is);
       }
       // With explicit bounds
@@ -3104,7 +3200,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         DomainT<N,T> is;
@@ -3115,7 +3212,8 @@ namespace Legion {
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                           source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds);
+        accessor = 
+          Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds, offset);
         bounds = AffineBounds::Tester<N,T>(is, source_bounds);
       }
       // With explicit transform
@@ -3129,7 +3227,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         DomainT<M,T> is;
@@ -3141,7 +3240,7 @@ namespace Legion {
               transform.transform, transform.offset, fid))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid);
+            transform.offset, fid, offset);
         bounds = AffineBounds::Tester<N,T>(is, transform);
       }
       // With explicit transform and bounds
@@ -3156,7 +3255,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         DomainT<M,T> is;
@@ -3168,7 +3268,7 @@ namespace Legion {
               transform.transform, transform.offset, fid, source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid, source_bounds);
+            transform.offset, fid, source_bounds, offset);
         bounds = AffineBounds::Tester<N,T>(is, source_bounds, transform);
       }
     public:
@@ -3312,7 +3412,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -3322,7 +3423,8 @@ namespace Legion {
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                           is.bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
+        accessor = 
+          Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds, offset);
       }
       // With explicit bounds
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
@@ -3334,7 +3436,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -3344,7 +3447,8 @@ namespace Legion {
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                           source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds);
+        accessor = 
+          Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds, offset);
       }
       // With explicit transform
       template<int M>
@@ -3357,7 +3461,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -3368,7 +3473,7 @@ namespace Legion {
               transform.transform, transform.offset, fid))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid);
+            transform.offset, fid, offset);
       }
       // With explicit transform and bounds
       template<int M>
@@ -3382,7 +3487,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -3393,7 +3499,7 @@ namespace Legion {
               transform.transform, transform.offset, fid, source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid, source_bounds);
+            transform.offset, fid, source_bounds, offset);
       }
     public:
       __CUDA_HD__
@@ -3473,7 +3579,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         DomainT<1,T> is;
@@ -3484,7 +3591,8 @@ namespace Legion {
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                           is.bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
+        accessor = 
+          Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds, offset);
         bounds = AffineBounds::Tester<1,T>(is);
       }
       // With explicit bounds
@@ -3497,7 +3605,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         DomainT<1,T> is;
@@ -3508,7 +3617,8 @@ namespace Legion {
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                           source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds);
+        accessor = 
+          Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds, offset);
         bounds = AffineBounds::Tester<1,T>(is, source_bounds);
       }
       // With explicit transform
@@ -3522,7 +3632,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         DomainT<M,T> is;
@@ -3534,7 +3645,7 @@ namespace Legion {
               transform.transform, transform.offset, fid))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid);
+            transform.offset, fid, offset);
         bounds = AffineBounds::Tester<1,T>(is, transform);
       }
       // With explicit transform and bounds
@@ -3549,7 +3660,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         DomainT<M,T> is;
@@ -3561,7 +3673,7 @@ namespace Legion {
               transform.transform, transform.offset, fid, source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid, source_bounds);
+            transform.offset, fid, source_bounds, offset);
         bounds = AffineBounds::Tester<1,T>(is, source_bounds, transform);
       }
     public:
@@ -3692,7 +3804,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -3702,7 +3815,8 @@ namespace Legion {
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                           is.bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
+        accessor = 
+          Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds, offset);
       }
       // With explicit bounds
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
@@ -3714,7 +3828,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -3724,7 +3839,8 @@ namespace Legion {
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                           source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds);
+        accessor = 
+          Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds, offset);
       }
       // With explicit transform
       template<int M>
@@ -3737,7 +3853,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -3748,7 +3865,7 @@ namespace Legion {
               transform.transform, transform.offset, fid))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid);
+            transform.offset, fid, offset);
       }
       // With explicit transform and bounds
       template<int M>
@@ -3762,7 +3879,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -3773,7 +3891,7 @@ namespace Legion {
               transform.transform, transform.offset, fid, source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid, source_bounds);
+            transform.offset, fid, source_bounds, offset);
       }
     public:
       __CUDA_HD__
@@ -3859,7 +3977,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         DomainT<N,T> is;
@@ -3870,7 +3989,8 @@ namespace Legion {
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                           is.bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
+        accessor = 
+          Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds, offset);
         bounds = AffineBounds::Tester<N,T>(is);
       }
       // With explicit bounds
@@ -3883,7 +4003,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         DomainT<N,T> is;
@@ -3894,7 +4015,8 @@ namespace Legion {
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                           source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds);
+        accessor = 
+          Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds, offset);
         bounds = AffineBounds::Tester<N,T>(is, source_bounds);
       }
       // With explicit transform
@@ -3908,7 +4030,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         DomainT<M,T> is;
@@ -3920,7 +4043,7 @@ namespace Legion {
               transform.transform, transform.offset, fid))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid);
+            transform.offset, fid, offset);
         bounds = AffineBounds::Tester<N,T>(is, transform);
       }
       // With explicit transform and bounds
@@ -3935,7 +4058,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         DomainT<M,T> is;
@@ -3947,7 +4071,7 @@ namespace Legion {
               transform.transform, transform.offset, fid, source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid, source_bounds);
+            transform.offset, fid, source_bounds, offset);
         bounds = AffineBounds::Tester<N,T>(is, source_bounds, transform);
       }
     public:
@@ -4078,7 +4202,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -4088,7 +4213,8 @@ namespace Legion {
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                           is.bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
+        accessor = 
+          Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds, offset);
       }
       // With explicit bounds
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
@@ -4100,7 +4226,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -4110,7 +4237,8 @@ namespace Legion {
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                           source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds);
+        accessor = 
+          Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds, offset);
       }
       // With explicit transform
       template<int M>
@@ -4123,7 +4251,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -4134,7 +4263,7 @@ namespace Legion {
               transform.transform, transform.offset, fid))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid);
+            transform.offset, fid, offset);
       }
       // With explicit transform and bounds
       template<int M>
@@ -4148,7 +4277,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -4159,7 +4289,7 @@ namespace Legion {
               transform.transform, transform.offset, fid, source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid, source_bounds);
+            transform.offset, fid, source_bounds, offset);
       }
     public:
       __CUDA_HD__
@@ -4233,7 +4363,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         DomainT<1,T> is;
@@ -4244,7 +4375,8 @@ namespace Legion {
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                           is.bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
+        accessor = 
+          Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds, offset);
         bounds = AffineBounds::Tester<1,T>(is);
       }
       // With explicit bounds
@@ -4257,7 +4389,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         DomainT<1,T> is;
@@ -4268,7 +4401,8 @@ namespace Legion {
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                           source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds);
+        accessor = 
+          Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds, offset);
         bounds = AffineBounds::Tester<1,T>(is, source_bounds);
       }
       // With explicit transform
@@ -4282,7 +4416,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         DomainT<M,T> is;
@@ -4294,7 +4429,7 @@ namespace Legion {
               transform.transform, transform.offset, fid))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid);
+            transform.offset, fid, offset);
         bounds = AffineBounds::Tester<1,T>(is, transform);
       }
       // With explicit transform and bounds
@@ -4309,7 +4444,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         DomainT<M,T> is;
@@ -4321,7 +4457,7 @@ namespace Legion {
               transform.transform, transform.offset, fid, source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid, source_bounds);
+            transform.offset, fid, source_bounds, offset);
         bounds = AffineBounds::Tester<1,T>(is, source_bounds, transform);
       }
     public:
@@ -4439,7 +4575,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -4449,7 +4586,8 @@ namespace Legion {
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                           is.bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
+        accessor = 
+          Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds, offset);
       }
       // With explicit bounds
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
@@ -4461,7 +4599,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -4471,7 +4610,8 @@ namespace Legion {
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                           source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds);
+        accessor = 
+          Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds, offset);
       }
       // With explicit transform
       template<int M>
@@ -4484,7 +4624,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -4495,7 +4636,7 @@ namespace Legion {
               transform.transform, transform.offset, fid))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid);
+            transform.offset, fid, offset);
       }
       // With explicit transform and bounds
       template<int M>
@@ -4509,7 +4650,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -4520,7 +4662,7 @@ namespace Legion {
               transform.transform, transform.offset, fid, source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid, source_bounds);
+            transform.offset, fid, source_bounds, offset);
       }
     public:
       __CUDA_HD__
@@ -4601,7 +4743,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         DomainT<N,T> is;
@@ -4612,7 +4755,8 @@ namespace Legion {
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                           is.bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
+        accessor = 
+          Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds, offset);
         bounds = AffineBounds::Tester<N,T>(is);
       }
       // With explicit bounds
@@ -4625,7 +4769,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         DomainT<N,T> is;
@@ -4636,7 +4781,8 @@ namespace Legion {
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                           source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds);
+        accessor = 
+          Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds, offset);
         bounds = AffineBounds::Tester<N,T>(is, source_bounds);
       }
       // With explicit transform
@@ -4650,7 +4796,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         DomainT<M,T> is;
@@ -4659,7 +4806,7 @@ namespace Legion {
               &is,Internal::NT_TemplateHelper::encode_tag<M,T>(),warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid);
+            transform.offset, fid, offset);
         bounds = AffineBounds::Tester<N,T>(is, transform);
       }
       // With explicit transform and bounds
@@ -4674,7 +4821,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         DomainT<M,T> is;
@@ -4686,7 +4834,7 @@ namespace Legion {
               transform.transform, transform.offset, fid))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid, source_bounds);
+            transform.offset, fid, source_bounds, offset);
         bounds = AffineBounds::Tester<N,T>(is, source_bounds, transform);
       }
     public:
@@ -4805,7 +4953,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -4815,7 +4964,8 @@ namespace Legion {
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                           is.bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
+        accessor = 
+          Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds, offset);
       }
       // With explicit bounds
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
@@ -4827,7 +4977,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -4837,7 +4988,8 @@ namespace Legion {
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                           source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds);
+        accessor = 
+          Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds, offset);
       }
       // With explicit transform
       template<int M>
@@ -4850,7 +5002,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -4861,7 +5014,7 @@ namespace Legion {
               transform.transform, transform.offset, fid))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid);
+            transform.offset, fid, offset);
       }
       // With explicit transform and bounds
       template<int M>
@@ -4875,7 +5028,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -4886,7 +5040,7 @@ namespace Legion {
               transform.transform, transform.offset, fid, source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid, source_bounds);
+            transform.offset, fid, source_bounds, offset);
       }
     public:
       __CUDA_HD__
@@ -4955,7 +5109,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         DomainT<1,T> is;
@@ -4966,7 +5121,8 @@ namespace Legion {
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                           is.bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
+        accessor = 
+          Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds, offset);
         bounds = AffineBounds::Tester<1,T>(is);
       }
       // With explicit bounds
@@ -4979,7 +5135,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         DomainT<1,T> is;
@@ -4990,7 +5147,8 @@ namespace Legion {
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                           source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds);
+        accessor = 
+          Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds, offset);
         bounds = AffineBounds::Tester<1,T>(is, source_bounds);
       }
       // With explicit transform
@@ -5004,7 +5162,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         DomainT<M,T> is;
@@ -5016,7 +5175,7 @@ namespace Legion {
               transform.transform, transform.offset, fid))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid);
+            transform.offset, fid, offset);
         bounds = AffineBounds::Tester<1,T>(is, transform);
       }
       // With explicit transform and bounds
@@ -5031,7 +5190,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL)
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
         : field(fid)
       {
         DomainT<M,T> is;
@@ -5043,7 +5203,7 @@ namespace Legion {
               transform.transform, transform.offset, fid, source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid, source_bounds);
+            transform.offset, fid, source_bounds, offset);
         bounds = AffineBounds::Tester<1,T>(is, source_bounds, transform);
       }
     public:
@@ -5143,7 +5303,8 @@ namespace Legion {
       ReductionAccessor(void) { }
       ReductionAccessor(const PhysicalRegion &region, FieldID fid,
                         ReductionOpID redop, bool silence_warnings = false,
-                        const char *warning_string = NULL)
+                        const char *warning_string = NULL,
+                        size_t offset = 0)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -5155,14 +5316,15 @@ namespace Legion {
               instance, fid, is.bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,N,T>(
-            instance, fid, is.bounds);
+            instance, fid, is.bounds, offset);
       }
       // With explicit bounds
       ReductionAccessor(const PhysicalRegion &region, FieldID fid,
                         ReductionOpID redop, 
                         const Rect<N,T> source_bounds,
                         bool silence_warnings = false,
-                        const char *warning_string = NULL)
+                        const char *warning_string = NULL,
+                        size_t offset = 0)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -5174,7 +5336,7 @@ namespace Legion {
               instance, fid, source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,N,T>(
-            instance, fid, source_bounds);
+            instance, fid, source_bounds, offset);
       }
       // With explicit transform
       template<int M>
@@ -5182,7 +5344,8 @@ namespace Legion {
                         ReductionOpID redop, 
                         const AffineTransform<M,N,T> transform,
                         bool silence_warnings = false,
-                        const char *warning_string = NULL)
+                        const char *warning_string = NULL,
+                        size_t offset = 0)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -5194,7 +5357,7 @@ namespace Legion {
               instance, transform.transform, transform.offset, fid))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,N,T>(instance, 
-            transform.transform, transform.offset, fid);
+            transform.transform, transform.offset, fid, offset);
       }
       // With explicit transform and bounds
       template<int M>
@@ -5203,7 +5366,8 @@ namespace Legion {
                         const AffineTransform<M,N,T> transform,
                         const Rect<N,T> source_bounds,
                         bool silence_warnings = false,
-                        const char *warning_string = NULL)
+                        const char *warning_string = NULL,
+                        size_t offset = 0)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -5215,7 +5379,7 @@ namespace Legion {
               instance,transform.transform,transform.offset,fid,source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,N,T>(instance, 
-            transform.transform, transform.offset, fid, source_bounds);
+            transform.transform, transform.offset, fid, source_bounds, offset);
       }
     public:
       __CUDA_HD__
@@ -5296,7 +5460,8 @@ namespace Legion {
       ReductionAccessor(void) { }
       ReductionAccessor(const PhysicalRegion &region, FieldID fid,
                         ReductionOpID redop, bool silence_warnings = false,
-                        const char *warning_string = NULL)
+                        const char *warning_string = NULL,
+                        size_t offset = 0)
         : field(fid)
       {
         DomainT<N,T> is;
@@ -5309,7 +5474,7 @@ namespace Legion {
               instance, fid, is.bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,N,T>(
-            instance, fid, is.bounds);
+            instance, fid, is.bounds, offset);
         bounds = AffineBounds::Tester<N,T>(is);
       }
       // With explicit bounds
@@ -5317,7 +5482,8 @@ namespace Legion {
                         ReductionOpID redop, 
                         const Rect<N,T> source_bounds,
                         bool silence_warnings = false,
-                        const char *warning_string = NULL)
+                        const char *warning_string = NULL,
+                        size_t offset = 0)
         : field(fid)
       {
         DomainT<N,T> is;
@@ -5330,7 +5496,7 @@ namespace Legion {
               instance, fid, source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,N,T>(
-            instance, fid, source_bounds);
+            instance, fid, source_bounds, offset);
         bounds = AffineBounds::Tester<N,T>(is, source_bounds);
       }
       // With explicit transform
@@ -5339,7 +5505,8 @@ namespace Legion {
                         ReductionOpID redop, 
                         const AffineTransform<M,N,T> transform,
                         bool silence_warnings = false,
-                        const char *warning_string = NULL)
+                        const char *warning_string = NULL,
+                        size_t offset = 0)
         : field(fid)
       {
         DomainT<M,T> is;
@@ -5352,8 +5519,7 @@ namespace Legion {
               instance, transform.transform, transform.offset, fid))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,N,T>(
-            instance, transform.transform,
-                                                transform.offset, fid);
+            instance, transform.transform, transform.offset, fid, offset);
         bounds = AffineBounds::Tester<N,T>(is, transform);
       }
       // With explicit transform and bounds
@@ -5363,7 +5529,8 @@ namespace Legion {
                         const AffineTransform<M,N,T> transform,
                         const Rect<N,T> source_bounds,
                         bool silence_warnings = false,
-                        const char *warning_string = NULL)
+                        const char *warning_string = NULL,
+                        size_t offset = 0)
         : field(fid)
       {
         DomainT<M,T> is;
@@ -5376,7 +5543,7 @@ namespace Legion {
               instance,transform.transform,transform.offset,fid,source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,N,T>(instance,
-              transform.transform, transform.offset, fid, source_bounds);
+            transform.transform, transform.offset, fid, source_bounds, offset);
         bounds = AffineBounds::Tester<N,T>(is, source_bounds, transform);
       }
     public:
@@ -5489,7 +5656,8 @@ namespace Legion {
       ReductionAccessor(void) { }
       ReductionAccessor(const PhysicalRegion &region, FieldID fid,
                         ReductionOpID redop, bool silence_warnings = false,
-                        const char *warning_string = NULL)
+                        const char *warning_string = NULL,
+                        size_t offset = 0)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -5501,14 +5669,15 @@ namespace Legion {
               instance, fid, is.bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,1,T>(
-            instance, fid, is.bounds);
+            instance, fid, is.bounds, offset);
       }
       // With explicit bounds
       ReductionAccessor(const PhysicalRegion &region, FieldID fid,
                         ReductionOpID redop, 
                         const Rect<1,T> source_bounds,
                         bool silence_warnings = false,
-                        const char *warning_string = NULL)
+                        const char *warning_string = NULL,
+                        size_t offset = 0)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -5520,7 +5689,7 @@ namespace Legion {
               instance, fid, source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,1,T>(
-            instance, fid, source_bounds);
+            instance, fid, source_bounds, offset);
       }
       // With explicit transform
       template<int M>
@@ -5528,7 +5697,8 @@ namespace Legion {
                         ReductionOpID redop, 
                         const AffineTransform<M,1,T> transform,
                         bool silence_warnings = false,
-                        const char *warning_string = NULL)
+                        const char *warning_string = NULL,
+                        size_t offset = 0)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -5540,7 +5710,7 @@ namespace Legion {
               instance, transform.transform, transform.offset, fid))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,1,T>(
-            instance, transform.transform, transform.offset, fid);
+            instance, transform.transform, transform.offset, fid, offset);
       }
       // With explicit transform and bounds
       template<int M>
@@ -5549,7 +5719,8 @@ namespace Legion {
                         const AffineTransform<M,1,T> transform,
                         const Rect<1,T> source_bounds,
                         bool silence_warnings = false,
-                        const char *warning_string = NULL)
+                        const char *warning_string = NULL,
+                        size_t offset = 0)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -5561,7 +5732,7 @@ namespace Legion {
               instance,transform.transform,transform.offset,fid,source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,1,T>(instance, 
-            transform.transform, transform.offset, fid, source_bounds);
+            transform.transform, transform.offset, fid, source_bounds, offset);
       }
     public:
       __CUDA_HD__
@@ -5631,7 +5802,8 @@ namespace Legion {
       ReductionAccessor(void) { }
       ReductionAccessor(const PhysicalRegion &region, FieldID fid,
                         ReductionOpID redop, bool silence_warnings = false,
-                        const char *warning_string = NULL)
+                        const char *warning_string = NULL,
+                        size_t offset = 0)
         : field(fid)
       {
         DomainT<1,T> is;
@@ -5644,7 +5816,7 @@ namespace Legion {
               instance, fid, is.bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,1,T>(
-            instance, fid, is.bounds);
+            instance, fid, is.bounds, offset);
         bounds = AffineBounds::Tester<1,T>(is);
       }
       // With explicit bounds
@@ -5652,7 +5824,8 @@ namespace Legion {
                         ReductionOpID redop, 
                         const Rect<1,T> source_bounds,
                         bool silence_warnings = false,
-                        const char *warning_string = NULL)
+                        const char *warning_string = NULL,
+                        size_t offset = 0)
         : field(fid)
       {
         DomainT<1,T> is;
@@ -5665,7 +5838,7 @@ namespace Legion {
               instance, fid, source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,1,T>(
-              instance, fid, source_bounds);
+              instance, fid, source_bounds, offset);
         bounds = AffineBounds::Tester<1,T>(is, source_bounds);
       }
       // With explicit transform
@@ -5674,7 +5847,8 @@ namespace Legion {
                         ReductionOpID redop, 
                         const AffineTransform<M,1,T> transform,
                         bool silence_warnings = false,
-                        const char *warning_string = NULL)
+                        const char *warning_string = NULL,
+                        size_t offset = 0)
         : field(fid)
       {
         DomainT<M,T> is;
@@ -5687,7 +5861,7 @@ namespace Legion {
               instance, transform.transform, transform.offset, fid))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,1,T>(instance,
-            transform.transform, transform.offset, fid);
+            transform.transform, transform.offset, fid, offset);
         bounds = AffineBounds::Tester<1,T>(is, transform);
       }
       // With explicit transform and bounds
@@ -5697,7 +5871,8 @@ namespace Legion {
                         const AffineTransform<M,1,T> transform,
                         const Rect<1,T> source_bounds,
                         bool silence_warnings = false,
-                        const char *warning_string = NULL)
+                        const char *warning_string = NULL,
+                        size_t offset = 0)
         : field(fid)
       {
         DomainT<M,T> is;
@@ -5710,7 +5885,7 @@ namespace Legion {
               instance,transform.transform,transform.offset,fid,source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,1,T>(instance, 
-            transform.transform, transform.offset, fid, source_bounds);
+            transform.transform, transform.offset, fid, source_bounds, offset);
         bounds = AffineBounds::Tester<1,T>(is, source_bounds, transform);
       }
     public:
@@ -5818,7 +5993,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
         : field(fid)
       {
         if (start == stop)
@@ -5846,7 +6022,8 @@ namespace Legion {
         }
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance,fid,bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,N,T>(instance, fid, bounds, offset);
         total_regions = idx;
       }
       template<typename InputIterator>
@@ -5859,7 +6036,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
         : field(fid)
       {
         if (start == stop)
@@ -5889,7 +6067,8 @@ namespace Legion {
         }
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance,fid,bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,N,T>(instance, fid, bounds, offset);
         total_regions = idx;
       }
     public:
@@ -5901,7 +6080,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
         : field(fid), total_regions(regions.size())
       {
         if (regions.empty())
@@ -5928,7 +6108,8 @@ namespace Legion {
         }
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance,fid,bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,N,T>(instance, fid, bounds, offset);
       }
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
                           const Rect<N,T> source_bounds, FieldID fid,
@@ -5939,7 +6120,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
         : field(fid), total_regions(regions.size())
       {
         if (regions.empty())
@@ -5970,7 +6152,8 @@ namespace Legion {
         }
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance,fid,bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,N,T>(instance, fid, bounds, offset);
       }
     public:
       inline FT read(const Point<N,T>& p) const
@@ -6062,7 +6245,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
         : field(fid)
       {
         if (start == stop)
@@ -6090,7 +6274,8 @@ namespace Legion {
         }
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance,fid,bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,1,T>(instance, fid, bounds, offset);
         total_regions = idx;
       }
       template<typename InputIterator>
@@ -6103,7 +6288,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
         : field(fid)
       {
         if (start == stop)
@@ -6133,7 +6319,8 @@ namespace Legion {
         }
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance,fid,bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,1,T>(instance, fid, bounds, offset);
         total_regions = idx;
       }
     public:
@@ -6145,7 +6332,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
         : field(fid), total_regions(regions.size())
       {
         if (regions.empty())
@@ -6172,7 +6360,8 @@ namespace Legion {
         }
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance,fid,bounds)) 
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,1,T>(instance, fid, bounds, offset);
       }
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
                           const Rect<1,T> source_bounds, FieldID fid,
@@ -6183,7 +6372,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
         : field(fid), total_regions(regions.size())
       {
         if (regions.empty())
@@ -6214,7 +6404,8 @@ namespace Legion {
         }
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance,fid,bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,1,T>(instance, fid, bounds, offset);
       }
     public:
       inline FT read(const Point<1,T>& p) const
@@ -6299,7 +6490,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
       {
         if (start == stop)
           return;
@@ -6326,7 +6518,8 @@ namespace Legion {
         }
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance,fid,bounds)) 
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,N,T>(instance, fid, bounds, offset);
       }
       template<typename InputIterator>
       MultiRegionAccessor(InputIterator start, InputIterator stop,
@@ -6338,7 +6531,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
       {
         if (start == stop)
           return;
@@ -6365,7 +6559,8 @@ namespace Legion {
         }
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance,fid,bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,N,T>(instance, fid, bounds, offset);
       }
     public:
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
@@ -6376,7 +6571,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
       {
         if (regions.empty())
           return;
@@ -6400,7 +6596,8 @@ namespace Legion {
         }
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance,fid,bounds)) 
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,N,T>(instance, fid, bounds, offset);
       }
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
                           const Rect<N,T> source_bounds, FieldID fid,
@@ -6411,7 +6608,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
       {
         if (regions.empty())
           return;
@@ -6435,7 +6633,8 @@ namespace Legion {
         }
         if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance,fid,bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,N,T>(instance, fid, bounds, offset);
       }
     public:
       inline FT read(const Point<N,T>& p) const
@@ -6487,7 +6686,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
       {
         if (start == stop)
           return;
@@ -6514,7 +6714,8 @@ namespace Legion {
         }
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance,fid,bounds)) 
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,1,T>(instance, fid, bounds, offset);
       }
       template<typename InputIterator>
       MultiRegionAccessor(InputIterator start, InputIterator stop,
@@ -6526,7 +6727,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
       {
         if (start == stop)
           return;
@@ -6553,7 +6755,8 @@ namespace Legion {
         }
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance,fid,bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,1,T>(instance, fid, bounds, offset);
       }
     public:
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
@@ -6564,7 +6767,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
       {
         if (regions.empty())
           return;
@@ -6588,7 +6792,8 @@ namespace Legion {
         }
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance,fid,bounds)) 
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,1,T>(instance, fid, bounds, offset);
       }
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
                           const Rect<1,T> source_bounds, FieldID fid,
@@ -6599,7 +6804,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
       {
         if (regions.empty())
           return;
@@ -6623,7 +6829,8 @@ namespace Legion {
         }
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance,fid,bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,1,T>(instance, fid, bounds, offset);
       }
     public:
       inline FT read(const Point<1,T>& p) const
@@ -6668,7 +6875,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
         : field(fid)
       {
         if (start == stop)
@@ -6700,7 +6908,7 @@ namespace Legion {
         }
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,fid,bounds)) 
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, bounds);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, bounds, offset);
         total_regions = idx;
       }
       template<typename InputIterator>
@@ -6713,7 +6921,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
         : field(fid)
       {
         if (start == stop)
@@ -6745,7 +6954,7 @@ namespace Legion {
         }
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,fid,bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, bounds);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, bounds, offset);
         total_regions = idx;
       }
       template<int M, typename InputIterator>
@@ -6758,7 +6967,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
         : field(fid)
       {
         if (start == stop)
@@ -6792,7 +7002,7 @@ namespace Legion {
               transform.transform, transform.offset, fid, bounds)) 
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid, bounds);
+            transform.offset, fid, bounds, offset);
         total_regions = idx;
       }
       template<int M, typename InputIterator>
@@ -6808,7 +7018,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
         : field(fid)
       {
         if (start == stop)
@@ -6843,7 +7054,7 @@ namespace Legion {
               transform.transform, transform.offset, fid, bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid, bounds);
+            transform.offset, fid, bounds, offset);
         total_regions = idx;
       }
     public:
@@ -6855,7 +7066,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
         : field(fid), total_regions(regions.size())
       {
         if (regions.empty())
@@ -6884,7 +7096,7 @@ namespace Legion {
         }
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,fid,bounds)) 
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, bounds);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, bounds, offset);
       }
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
                           const Rect<N,T> source_bounds, FieldID fid,
@@ -6895,7 +7107,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
         : field(fid), total_regions(regions.size())
       {
         if (regions.empty())
@@ -6924,7 +7137,7 @@ namespace Legion {
         }
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,fid,bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, bounds);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, bounds, offset);
       }
       template<int M>
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
@@ -6936,7 +7149,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
         : field(fid), total_regions(regions.size())
       {
         if (regions.empty())
@@ -6967,7 +7181,7 @@ namespace Legion {
               transform.transform, transform.offset, fid, bounds)) 
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid, bounds);
+            transform.offset, fid, bounds, offset);
       }
       template<int M>
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
@@ -6982,7 +7196,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
         : field(fid), total_regions(regions.size())
       {
         if (regions.empty())
@@ -7014,7 +7229,7 @@ namespace Legion {
               transform.transform, transform.offset, fid, bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid, bounds);
+            transform.offset, fid, bounds, offset);
       }
     public:
       __CUDA_HD__
@@ -7170,7 +7385,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
         : field(fid)
       {
         if (start == stop)
@@ -7202,7 +7418,7 @@ namespace Legion {
         }
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,fid,bounds)) 
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, bounds);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, bounds, offset);
         total_regions = idx;
       }
       template<typename InputIterator>
@@ -7215,7 +7431,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
         : field(fid)
       {
         if (start == stop)
@@ -7247,7 +7464,7 @@ namespace Legion {
         }
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,fid,bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, bounds);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, bounds, offset);
         total_regions = idx;
       }
       template<int M, typename InputIterator>
@@ -7260,7 +7477,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
         : field(fid)
       {
         if (start == stop)
@@ -7294,7 +7512,7 @@ namespace Legion {
               transform.transform, transform.offset, fid, bounds)) 
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid, bounds);
+            transform.offset, fid, bounds, offset);
         total_regions = idx;
       }
       template<int M, typename InputIterator>
@@ -7310,7 +7528,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
         : field(fid)
       {
         if (start == stop)
@@ -7345,7 +7564,7 @@ namespace Legion {
               transform.transform, transform.offset, fid, bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid, bounds);
+            transform.offset, fid, bounds, offset);
         total_regions = idx;
       }
     public:
@@ -7357,7 +7576,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
         : field(fid), total_regions(regions.size())
       {
         if (regions.empty())
@@ -7386,7 +7606,7 @@ namespace Legion {
         }
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,fid,bounds)) 
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, bounds);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, bounds, offset);
       }
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
                           const Rect<1,T> source_bounds, FieldID fid,
@@ -7397,7 +7617,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
         : field(fid), total_regions(regions.size())
       {
         if (regions.empty())
@@ -7426,7 +7647,7 @@ namespace Legion {
         }
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,fid,bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, bounds);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, bounds, offset);
       }
       template<int M>
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
@@ -7438,7 +7659,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
         : field(fid), total_regions(regions.size())
       {
         if (regions.empty())
@@ -7469,7 +7691,7 @@ namespace Legion {
               transform.transform, transform.offset, fid, bounds)) 
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid, bounds);
+            transform.offset, fid, bounds, offset);
       }
       template<int M>
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
@@ -7484,7 +7706,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
         : field(fid), total_regions(regions.size())
       {
         if (regions.empty())
@@ -7516,7 +7739,7 @@ namespace Legion {
               transform.transform, transform.offset, fid, bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid, bounds);
+            transform.offset, fid, bounds, offset);
       }
     public:
       __CUDA_HD__
@@ -7664,7 +7887,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
         : field(fid)
       {
         if (start == stop)
@@ -7696,7 +7920,7 @@ namespace Legion {
         }
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,fid,bounds)) 
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, bounds);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, bounds, offset);
         total_regions = idx;
       }
       template<typename InputIterator>
@@ -7709,7 +7933,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
         : field(fid)
       {
         if (start == stop)
@@ -7741,7 +7966,7 @@ namespace Legion {
         }
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,fid,bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, bounds);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, bounds, offset);
         total_regions = idx;
       }
       template<int M, typename InputIterator>
@@ -7754,7 +7979,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
         : field(fid)
       {
         if (start == stop)
@@ -7788,7 +8014,7 @@ namespace Legion {
               transform.transform, transform.offset, fid, bounds)) 
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid, bounds);
+            transform.offset, fid, bounds, offset);
         total_regions = idx;
       }
       template<int M, typename InputIterator>
@@ -7804,7 +8030,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
         : field(fid)
       {
         if (start == stop)
@@ -7839,7 +8066,7 @@ namespace Legion {
               transform.transform, transform.offset, fid, bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid, bounds);
+            transform.offset, fid, bounds, offset);
         total_regions = idx;
       }
     public:
@@ -7851,7 +8078,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
         : field(fid), total_regions(regions.size())
       {
         if (regions.empty())
@@ -7880,7 +8108,7 @@ namespace Legion {
         }
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,fid,bounds)) 
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, bounds);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, bounds, offset);
       }
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
                           const Rect<N,T> source_bounds, FieldID fid,
@@ -7891,7 +8119,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
         : field(fid), total_regions(regions.size())
       {
         if (regions.empty())
@@ -7920,7 +8149,7 @@ namespace Legion {
         }
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,fid,bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, bounds);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, bounds, offset);
       }
       template<int M>
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
@@ -7932,7 +8161,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
         : field(fid), total_regions(regions.size())
       {
         if (regions.empty())
@@ -7963,7 +8193,7 @@ namespace Legion {
               transform.transform, transform.offset, fid, bounds)) 
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid, bounds);
+            transform.offset, fid, bounds, offset);
       }
       template<int M>
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
@@ -7978,7 +8208,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
         : field(fid), total_regions(regions.size())
       {
         if (regions.empty())
@@ -8010,7 +8241,7 @@ namespace Legion {
               transform.transform, transform.offset, fid, bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid, bounds);
+            transform.offset, fid, bounds, offset);
       }
     public:
       __CUDA_HD__
@@ -8133,7 +8364,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
         : field(fid)
       {
         if (start == stop)
@@ -8165,7 +8397,7 @@ namespace Legion {
         }
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,fid,bounds)) 
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, bounds);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, bounds, offset);
         total_regions = idx;
       }
       template<typename InputIterator>
@@ -8178,7 +8410,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
         : field(fid)
       {
         if (start == stop)
@@ -8210,7 +8443,7 @@ namespace Legion {
         }
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,fid,bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, bounds);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, bounds, offset);
         total_regions = idx;
       }
       template<int M, typename InputIterator>
@@ -8223,7 +8456,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
         : field(fid)
       {
         if (start == stop)
@@ -8257,7 +8491,7 @@ namespace Legion {
               transform.transform, transform.offset, fid, bounds)) 
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid, bounds);
+            transform.offset, fid, bounds, offset);
         total_regions = idx;
       }
       template<int M, typename InputIterator>
@@ -8273,7 +8507,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
         : field(fid)
       {
         if (start == stop)
@@ -8308,7 +8543,7 @@ namespace Legion {
               transform.transform, transform.offset, fid, bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid, bounds);
+            transform.offset, fid, bounds, offset);
         total_regions = idx;
       }
     public:
@@ -8320,7 +8555,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
         : field(fid), total_regions(regions.size())
       {
         if (regions.empty())
@@ -8349,7 +8585,7 @@ namespace Legion {
         }
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,fid,bounds)) 
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, bounds);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, bounds, offset);
       }
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
                           const Rect<1,T> source_bounds, FieldID fid,
@@ -8360,7 +8596,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
         : field(fid), total_regions(regions.size())
       {
         if (regions.empty())
@@ -8389,7 +8626,7 @@ namespace Legion {
         }
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,fid,bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, bounds);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, bounds, offset);
       }
       template<int M>
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
@@ -8401,7 +8638,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
         : field(fid), total_regions(regions.size())
       {
         if (regions.empty())
@@ -8432,7 +8670,7 @@ namespace Legion {
               transform.transform, transform.offset, fid, bounds)) 
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid, bounds);
+            transform.offset, fid, bounds, offset);
       }
       template<int M>
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
@@ -8447,7 +8685,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
         : field(fid), total_regions(regions.size())
       {
         if (regions.empty())
@@ -8479,7 +8718,7 @@ namespace Legion {
               transform.transform, transform.offset, fid, bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid, bounds);
+            transform.offset, fid, bounds, offset);
       }
     public:
       __CUDA_HD__
@@ -8592,7 +8831,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
       {
         if (start == stop)
           return;
@@ -8619,7 +8859,7 @@ namespace Legion {
         }
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,fid,bounds)) 
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, bounds);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, bounds, offset);
       }
       template<typename InputIterator>
       MultiRegionAccessor(InputIterator start, InputIterator stop,
@@ -8631,7 +8871,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
       {
         if (start == stop)
           return;
@@ -8658,7 +8899,7 @@ namespace Legion {
         }
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,fid,bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, bounds);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, bounds, offset);
       }
       template<int M, typename InputIterator>
       MultiRegionAccessor(InputIterator start, InputIterator stop,
@@ -8670,7 +8911,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
       {
         if (start == stop)
           return;
@@ -8699,7 +8941,7 @@ namespace Legion {
               transform.transform, transform.offset, fid, bounds)) 
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid, bounds);
+            transform.offset, fid, bounds, offset);
       }
       template<int M, typename InputIterator>
       MultiRegionAccessor(InputIterator start, InputIterator stop,
@@ -8714,7 +8956,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
       {
         if (start == stop)
           return;
@@ -8743,7 +8986,7 @@ namespace Legion {
               transform.transform, transform.offset, fid, bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid, bounds);
+            transform.offset, fid, bounds, offset);
       }
     public:
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
@@ -8754,7 +8997,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
       {
         if (regions.empty())
           return;
@@ -8778,7 +9022,7 @@ namespace Legion {
         }
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,fid,bounds)) 
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, bounds);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, bounds, offset);
       }
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
                           const Rect<N,T> source_bounds, FieldID fid,
@@ -8789,7 +9033,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
       {
         if (regions.empty())
           return;
@@ -8813,7 +9058,7 @@ namespace Legion {
         }
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,fid,bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, bounds);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, bounds, offset);
       }
       template<int M>
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
@@ -8825,7 +9070,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
       {
         if (regions.empty())
           return;
@@ -8851,7 +9097,7 @@ namespace Legion {
               transform.transform, transform.offset, fid, bounds)) 
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid, bounds);
+            transform.offset, fid, bounds, offset);
       }
       template<int M>
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
@@ -8866,7 +9112,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
       {
         if (regions.empty())
           return;
@@ -8892,7 +9139,7 @@ namespace Legion {
               transform.transform, transform.offset, fid, bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid, bounds);
+            transform.offset, fid, bounds, offset);
       }
     public:
       __CUDA_HD__
@@ -8950,7 +9197,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
       {
         if (start == stop)
           return;
@@ -8977,7 +9225,7 @@ namespace Legion {
         }
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,fid,bounds)) 
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, bounds);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, bounds, offset);
       }
       template<typename InputIterator>
       MultiRegionAccessor(InputIterator start, InputIterator stop,
@@ -8989,7 +9237,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
       {
         if (start == stop)
           return;
@@ -9016,7 +9265,7 @@ namespace Legion {
         }
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,fid,bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, bounds);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, bounds, offset);
       }
       template<int M, typename InputIterator>
       MultiRegionAccessor(InputIterator start, InputIterator stop,
@@ -9028,7 +9277,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
       {
         if (start == stop)
           return;
@@ -9057,7 +9307,7 @@ namespace Legion {
               transform.transform, transform.offset, fid, bounds)) 
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid, bounds);
+            transform.offset, fid, bounds, offset);
       }
       template<int M, typename InputIterator>
       MultiRegionAccessor(InputIterator start, InputIterator stop,
@@ -9072,7 +9322,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
       {
         if (start == stop)
           return;
@@ -9101,7 +9352,7 @@ namespace Legion {
               transform.transform, transform.offset, fid, bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid, bounds);
+            transform.offset, fid, bounds, offset);
       }
     public:
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
@@ -9112,7 +9363,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
       {
         if (regions.empty())
           return;
@@ -9136,7 +9388,7 @@ namespace Legion {
         }
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,fid,bounds)) 
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, bounds);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, bounds, offset);
       }
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
                           const Rect<1,T> source_bounds, FieldID fid,
@@ -9147,7 +9399,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
       {
         if (regions.empty())
           return;
@@ -9171,7 +9424,7 @@ namespace Legion {
         }
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,fid,bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, bounds);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, bounds, offset);
       }
       template<int M>
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
@@ -9183,7 +9436,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
       {
         if (regions.empty())
           return;
@@ -9209,7 +9463,7 @@ namespace Legion {
               transform.transform, transform.offset, fid, bounds)) 
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid, bounds);
+            transform.offset, fid, bounds, offset);
       }
       template<int M>
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
@@ -9224,7 +9478,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
       {
         if (regions.empty())
           return;
@@ -9250,7 +9505,7 @@ namespace Legion {
               transform.transform, transform.offset, fid, bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid, bounds);
+            transform.offset, fid, bounds, offset);
       }
     public:
       __CUDA_HD__
@@ -9299,7 +9554,8 @@ namespace Legion {
       UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
 
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -9309,7 +9565,7 @@ namespace Legion {
               false/*check field size*/);
         if (!A::is_compatible(instance, fid, is.bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = A(instance, fid, is.bounds);
+        accessor = A(instance, fid, is.bounds, offset);
       }
     public:
       inline FT read(const Point<N,T> &p) const
@@ -9348,7 +9604,8 @@ namespace Legion {
       UnsafeFieldAccessor(void) { }
       UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -9359,7 +9616,8 @@ namespace Legion {
         if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                            is.bounds))
           region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
+        accessor = 
+          Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds, offset);
       }
     public:
       inline FT read(const Point<1,T> &p) const
@@ -9391,7 +9649,8 @@ namespace Legion {
       UnsafeFieldAccessor(void) { }
       UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -9402,13 +9661,15 @@ namespace Legion {
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                           is.bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
+        accessor = 
+          Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds, offset);
       }
       // With explicit bounds
       UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
                           const Rect<N,T> source_bounds,
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
@@ -9419,14 +9680,16 @@ namespace Legion {
         if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
                                                           source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds);
+        accessor = 
+          Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds, offset);
       }
       // With explicit transform
       template<int M>
       UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
                           const AffineTransform<M,N,T> transform,
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -9438,7 +9701,7 @@ namespace Legion {
               transform.transform, transform.offset, fid))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid);
+            transform.offset, fid, offset);
       }
       // With explicit transform and bounds
       template<int M>
@@ -9446,7 +9709,8 @@ namespace Legion {
                           const AffineTransform<M,N,T> transform,
                           const Rect<N,T> source_bounds,
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -9458,7 +9722,7 @@ namespace Legion {
               transform.transform, transform.offset, fid, source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid, source_bounds);
+            transform.offset, fid, source_bounds, offset);
       }
     public:
       __CUDA_HD__
@@ -9532,7 +9796,8 @@ namespace Legion {
       UnsafeFieldAccessor(void) { }
       UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -9543,13 +9808,15 @@ namespace Legion {
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                           is.bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
+        accessor = 
+          Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds, offset);
       }
       // With explicit bounds
       UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
                           const Rect<1,T> source_bounds,
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
@@ -9560,14 +9827,16 @@ namespace Legion {
         if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
                                                           source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds);
+        accessor = 
+          Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds, offset);
       }
       // With explicit transform
       template<int M>
       UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
                           const AffineTransform<M,1,T> transform,
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -9579,7 +9848,7 @@ namespace Legion {
               transform.transform, transform.offset, fid))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid);
+            transform.offset, fid, offset);
       }
       // With explicit transform and bounds
       template<int M>
@@ -9587,7 +9856,8 @@ namespace Legion {
                           const AffineTransform<M,1,T> transform,
                           const Rect<1,T> source_bounds,
                           bool silence_warnings = false,
-                          const char *warning_string = NULL)
+                          const char *warning_string = NULL,
+                          size_t offset = 0)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -9599,7 +9869,7 @@ namespace Legion {
               transform.transform, transform.offset, fid, source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid, source_bounds);
+            transform.offset, fid, source_bounds, offset);
       }
     public:
       __CUDA_HD__
