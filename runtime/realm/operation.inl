@@ -33,6 +33,7 @@ namespace Realm {
     , refcount(1)
     , state(ProfilingMeasurements::OperationStatus::WAITING)
     , requests(_requests)
+    , all_work_items(0)
     , pending_work_items(1 /* i.e. the main work item */)
     , failed_work_items(0 /* hopefully it stays that way*/)
   {
@@ -64,7 +65,14 @@ namespace Realm {
   {
     // NO lock taken
     pending_work_items.fetch_add_acqrel(1);
-    all_work_items.insert(item);
+    // use compare-and-swap loop to atomically append this item to the front
+    //  of the list
+    while(true) {
+      AsyncWorkItem *prev_head = all_work_items.load();
+      item->next_item = prev_head;
+      if(all_work_items.compare_exchange(prev_head, item))
+	break;
+    }
   }
 
   // called by AsyncWorkItem::mark_finished
@@ -114,6 +122,7 @@ namespace Realm {
   
   inline Operation::AsyncWorkItem::AsyncWorkItem(Operation *_op)
     : op(_op)
+    , next_item(0)
   {
   }
 

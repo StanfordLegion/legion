@@ -31,11 +31,12 @@ namespace Realm {
   Operation::~Operation(void)
   {
     // delete all of the async work items we were given to track
-    for(std::set<AsyncWorkItem *>::iterator it = all_work_items.begin();
-	it != all_work_items.end();
-	it++)
-      delete *it;
-    all_work_items.clear();
+    AsyncWorkItem *awi_head = all_work_items.load();
+    while(awi_head != 0) {
+      AsyncWorkItem *next = awi_head->next_item;
+      delete awi_head;
+      awi_head = next;
+    }
   }
 
   bool Operation::mark_ready(void)
@@ -135,11 +136,11 @@ namespace Realm {
     failed_work_items.fetch_add(1);
 
     // if this operation has async work items, try to cancel them
-    if(!all_work_items.empty()) {
-      for(std::set<AsyncWorkItem *>::iterator it = all_work_items.begin();
-	  it != all_work_items.end();
-	  it++)
-	(*it)->request_cancellation();
+    AsyncWorkItem *awi_head = all_work_items.load();
+    while(awi_head != 0) {
+      AsyncWorkItem *next = awi_head->next_item;
+      awi_head->request_cancellation();
+      awi_head = next;
     }
 
     // can't trigger the finish event immediately if async work items are pending
@@ -304,14 +305,15 @@ namespace Realm {
        << "(" << op->timeline.ready_time
        << "," << op->timeline.start_time
        << ") work=" << op->pending_work_items.load();
-    if(!op->all_work_items.empty()) {
+    Operation::AsyncWorkItem *awi_head = op->all_work_items.load();
+    if(awi_head != 0) {
       os << " { ";
-      std::set<Operation::AsyncWorkItem *>::const_iterator it = op->all_work_items.begin();
-      (*it)->print(os);
-      while(++it != op->all_work_items.end()) {
-	os << ", ";
-	(*it)->print(os);
-      }
+      do {
+	awi_head->print(os);
+	awi_head = awi_head->next_item;
+	if(awi_head != 0)
+	  os << ", ";
+      } while(awi_head != 0);
       os << " }\n";
     }
     return os;
