@@ -868,6 +868,20 @@ namespace Legion {
       // From Memoizable
       virtual TraceLocalID get_trace_local_id(void) const;
     public:
+      // For collective instance creation
+      virtual CollectiveManager* find_or_create_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const LayoutConstraintSet &constraints,
+                                  const std::vector<LogicalRegion> &regions,
+                                  Memory::Kind kind, size_t *footprint,
+                                  LayoutConstraintKind *unsat_kind,
+                                  unsigned *unsat_index,
+                                  DomainPoint &collective_point);
+      virtual bool finalize_collective_instance(MappingCallKind mapper_call,
+                                                unsigned index, bool success);
+      virtual void report_total_collective_instance_calls(MappingCallKind call,
+                                                          unsigned total_calls);
+    public:
       void record_intra_space_dependences(unsigned index, 
              const std::vector<DomainPoint> &dependences);
     protected:
@@ -889,7 +903,7 @@ namespace Legion {
      * slice tasks for the index space will be distributed around
      * the machine and eventually returned to this index space task.
      */
-    class IndexTask : public MultiTask,
+    class IndexTask : public CollectiveInstanceCreator<MultiTask>,
                       public LegionHeapify<IndexTask> {
     public:
       static const AllocationType alloc_type = INDEX_TASK_ALLOC;
@@ -991,6 +1005,10 @@ namespace Legion {
       // From MemoizableOp
       virtual void replay_analysis(void);
     public:
+      // From CollectiveInstanceCreator
+      virtual IndexSpaceNode *get_collective_space(void) const
+        { return launch_space; }
+    public:
       static void process_slice_mapped(Deserializer &derez, 
                                        AddressSpaceID source);
       static void process_slice_complete(Deserializer &derez);
@@ -1055,6 +1073,12 @@ namespace Legion {
                       public LegionHeapify<SliceTask> {
     public:
       static const AllocationType alloc_type = SLICE_TASK_ALLOC;
+    public:
+      enum CollectiveInstMessage {
+        SLICE_COLLECTIVE_FIND_OR_CREATE,
+        SLICE_COLLECTIVE_FINALIZE,
+        SLICE_COLLECTIVE_REPORT,
+      };
     public:
       SliceTask(Runtime *rt);
       SliceTask(const SliceTask &rhs);
@@ -1146,6 +1170,24 @@ namespace Legion {
       virtual RtEvent find_intra_space_dependence(const DomainPoint &point);
       virtual void record_intra_space_dependence(const DomainPoint &point,
                                                  RtEvent point_mapped);
+    public:
+      // For collective instance creation
+      virtual CollectiveManager* find_or_create_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const LayoutConstraintSet &constraints,
+                                  const std::vector<LogicalRegion> &regions,
+                                  Memory::Kind kind, size_t *footprint,
+                                  LayoutConstraintKind *unsat_kind,
+                                  unsigned *unsat_index,
+                                  DomainPoint &collective_point);
+      virtual bool finalize_collective_instance(MappingCallKind mapper_call,
+                                                unsigned index, bool success);
+      virtual void report_total_collective_instance_calls(MappingCallKind call,
+                                                          unsigned total_calls);
+      static void handle_collective_instance_request(Deserializer &derez,
+                                       AddressSpaceID source, Runtime *rutime);
+      static void handle_collective_instance_response(Deserializer &derez,
+                                                      Runtime *runtime);
     protected:
       friend class IndexTask;
       friend class PointTask;

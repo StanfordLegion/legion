@@ -2267,6 +2267,10 @@ namespace Legion {
                                                   Serializer &rez);
       void send_slice_record_intra_space_dependence(Processor target,
                                                     Serializer &rez);
+      void send_slice_collective_instance_request(Processor target, 
+                                                  Serializer &rez);
+      void send_slice_collective_instance_response(AddressSpaceID target,
+                                                   Serializer &rez);
       void send_did_remote_registration(AddressSpaceID target, Serializer &rez);
       void send_did_remote_valid_update(AddressSpaceID target, Serializer &rez);
       void send_did_remote_gc_update(AddressSpaceID target, Serializer &rez);
@@ -2514,6 +2518,9 @@ namespace Legion {
       void handle_slice_remote_commit(Deserializer &derez);
       void handle_slice_find_intra_dependence(Deserializer &derez);
       void handle_slice_record_intra_dependence(Deserializer &derez);
+      void handle_slice_collective_request(Deserializer &derez, 
+                                           AddressSpaceID source);
+      void handle_slice_collective_response(Deserializer &derez);
       void handle_did_remote_registration(Deserializer &derez, 
                                           AddressSpaceID source);
       void handle_did_remote_valid_update(Deserializer &derez);

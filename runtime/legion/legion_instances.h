@@ -529,20 +529,14 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_DEFER_COLLECTIVE_MANAGER_TASK_ID;
       public:
         DeferCollectiveManagerArgs(DistributedID d, AddressSpaceID own, 
-            std::vector<MemoryManager*> &memories, 
-            std::vector<PhysicalInstance> &instances,
-            std::vector<AddressSpaceID> &right_spaces, AddressSpaceID left,
-            size_t f, bool local, IndexSpaceExpression *lx, bool is, 
-            IndexSpace dh, IndexSpaceExprID dx, FieldSpace h, RegionTreeID tid,
-            LayoutConstraintID l, ApEvent use, ReductionOpID redop,
-            const void *piece_list, size_t piece_list_size);
+            IndexSpace p, size_t f, bool local, IndexSpaceExpression *lx, 
+            bool is, IndexSpace dh, IndexSpaceExprID dx, FieldSpace h, 
+            RegionTreeID tid, LayoutConstraintID l, ApEvent use, 
+            ReductionOpID redop, const void *piece_list,size_t piece_list_size);
       public:
         const DistributedID did;
         const AddressSpaceID owner;
-        std::vector<MemoryManager*> *const memories;
-        std::vector<PhysicalInstance> *const instances;
-        std::vector<AddressSpaceID> *const right_spaces;
-        const AddressSpaceID left_space;
+        IndexSpace point_space;
         const size_t footprint;
         const bool local_is;
         const bool domain_is;
@@ -559,11 +553,7 @@ namespace Legion {
       };
     public:
       CollectiveManager(RegionTreeForest *ctx, DistributedID did,
-                        AddressSpaceID owner_space,
-                        const std::vector<MemoryManager*> memories,
-                        const std::vector<PhysicalInstance> &insts,
-                        const std::vector<AddressSpaceID> &right,
-                        const AddressSpaceID left,
+                        AddressSpaceID owner_space, IndexSpaceNode *point_space,
                         IndexSpaceExpression *instance_domain,
                         const void *piece_list, size_t piece_list_size,
                         FieldSpaceNode *node, RegionTreeID tree_id,
@@ -574,6 +564,8 @@ namespace Legion {
       virtual ~CollectiveManager(void);
     public:
       CollectiveManager& operator=(const CollectiveManager &rh);
+    public:
+      void finalize_collective_instance(ApUserEvent instance_event);
     public:
       virtual ApEvent get_use_event(void) const;
       virtual PhysicalInstance get_instance(const DomainPoint &key) const;
@@ -660,20 +652,18 @@ namespace Legion {
       static void handle_collective_message(Deserializer &derez,
                                             Runtime *runtime);
       static void create_collective_manager(Runtime *runtime, DistributedID did,
-          AddressSpaceID owner_space, 
-          const std::vector<MemoryManager*> &memories,
-          const std::vector<PhysicalInstance> &instances,
-          const std::vector<AddressSpaceID> &right_spaces, 
-          AddressSpaceID left_space, size_t inst_footprint, 
-          IndexSpaceExpression *inst_domain, const void *piece_list,
-          size_t piece_list_size, FieldSpaceNode *space_node, 
-          RegionTreeID tree_id, LayoutConstraints *constraints, 
-          ApEvent use_event, ReductionOpID redop);
+          AddressSpaceID owner_space, IndexSpaceNode *point_space,
+          size_t inst_footprint, IndexSpaceExpression *inst_domain, 
+          const void *piece_list, size_t piece_list_size, 
+          FieldSpaceNode *space_node, RegionTreeID tree_id, 
+          LayoutConstraints *constraints,ApEvent use_event,ReductionOpID redop);
+    public:
+      IndexSpaceNode *const point_space;
     protected:
-      const std::vector<MemoryManager*> memories; // local memories
-      const std::vector<PhysicalInstance> instances; // local instances
-      const std::vector<AddressSpaceID> right_spaces;
-      const AddressSpaceID left_space;
+      std::vector<MemoryManager*> memories; // local memories
+      std::vector<PhysicalInstance> instances; // local instances
+      std::vector<AddressSpaceID> right_spaces;
+      AddressSpaceID left_space;
     protected:
       RtEvent detached;
       unsigned finalize_messages;
@@ -725,7 +715,7 @@ namespace Legion {
     public:
       InstanceBuilder(const std::vector<LogicalRegion> &regs,
                       const LayoutConstraintSet &cons, Runtime *rt,
-                      MemoryManager *memory, UniqueID cid)
+                      MemoryManager *memory = NULL, UniqueID cid = 0)
         : regions(regs), constraints(cons), runtime(rt), memory_manager(memory),
           creator_id(cid), instance(PhysicalInstance::NO_INST), 
           field_space_node(NULL), instance_domain(NULL), tree_id(0),
@@ -744,6 +734,10 @@ namespace Legion {
                         CollectiveManager *collective, DomainPoint *point,
                         LayoutConstraintKind *unsat_kind,
                         unsigned *unsat_index, size_t *footprint = NULL);
+      CollectiveManager* create_collective_instance(RegionTreeForest *forest,
+                        Memory::Kind mem_kind, IndexSpaceNode *point_space,
+                        LayoutConstraintKind *unsat_kind, unsigned *unsat_index,
+                        ApEvent ready_event, size_t *footprint = NULL);
     public:
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
                                       const Realm::ProfilingResponse &response,

@@ -6674,6 +6674,43 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    CollectiveManager* PointTask::find_or_create_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const LayoutConstraintSet &constraints,
+                                  const std::vector<LogicalRegion> &regions,
+                                  Memory::Kind kind, size_t *footprint,
+                                  LayoutConstraintKind *unsat_kind,
+                                  unsigned *unsat_index,
+                                  DomainPoint &collective_point)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(index_point.get_dim() > 0);
+#endif
+      collective_point = index_point;
+      return slice_owner->find_or_create_collective_instance(mapper_call, index,
+          constraints, regions, kind, footprint, unsat_kind, unsat_index, 
+          collective_point);
+    }
+
+    //--------------------------------------------------------------------------
+    bool PointTask::finalize_collective_instance(MappingCallKind call_kind,
+                                                 unsigned index, bool success)
+    //--------------------------------------------------------------------------
+    {
+      return slice_owner->finalize_collective_instance(call_kind,index,success);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointTask::report_total_collective_instance_calls(
+                              MappingCallKind mapper_call, unsigned total_calls)
+    //--------------------------------------------------------------------------
+    {
+      slice_owner->report_total_collective_instance_calls(mapper_call, 
+                                                          total_calls);
+    }
+
+    //--------------------------------------------------------------------------
     void PointTask::record_intra_space_dependences(unsigned index,
                                     const std::vector<DomainPoint> &dependences)
     //--------------------------------------------------------------------------
@@ -6710,14 +6747,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexTask::IndexTask(Runtime *rt)
-      : MultiTask(rt)
+      : CollectiveInstanceCreator<MultiTask>(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     IndexTask::IndexTask(const IndexTask &rhs)
-      : MultiTask(NULL)
+      : CollectiveInstanceCreator<MultiTask>(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -10125,6 +10162,280 @@ namespace Legion {
       }
       else
         index_owner->record_intra_space_dependence(point, point_mapped);
+    }
+    
+    //--------------------------------------------------------------------------
+    CollectiveManager* SliceTask::find_or_create_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const LayoutConstraintSet &constraints,
+                                  const std::vector<LogicalRegion> &regions,
+                                  Memory::Kind kind, size_t *footprint,
+                                  LayoutConstraintKind *unsat_kind,
+                                  unsigned *unsat_index,
+                                  DomainPoint &collective_point)
+    //--------------------------------------------------------------------------
+    {
+      if (is_remote())
+      {
+        CollectiveManager *volatile result = NULL;
+        RtUserEvent ready_event = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(index_owner);
+          rez.serialize(mapper_call);
+          rez.serialize(SLICE_COLLECTIVE_FIND_OR_CREATE);
+          rez.serialize(index);
+          constraints.serialize(rez);
+          rez.serialize<size_t>(regions.size());
+          for (std::vector<LogicalRegion>::const_iterator it = 
+                regions.begin(); it != regions.end(); it++)
+            rez.serialize(*it);
+          rez.serialize(kind);
+          rez.serialize(footprint);
+          rez.serialize(unsat_kind);
+          rez.serialize(unsat_index);
+          rez.serialize(collective_point);
+          rez.serialize(&result);
+          rez.serialize(ready_event);
+        }
+        runtime->send_slice_collective_instance_request(orig_proc, rez);
+        ready_event.wait();
+        return result;
+      }
+      else
+        return index_owner->find_or_create_collective_instance(mapper_call, 
+            index, constraints, regions, kind, footprint, unsat_kind, 
+            unsat_index, collective_point);
+    }
+
+    //--------------------------------------------------------------------------
+    bool SliceTask::finalize_collective_instance(MappingCallKind call_kind,
+                                                 unsigned index, bool success)
+    //--------------------------------------------------------------------------
+    {
+      if (is_remote())
+      {
+        volatile bool result = success;
+        RtUserEvent ready_event = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(index_owner);
+          rez.serialize(call_kind);
+          rez.serialize(SLICE_COLLECTIVE_FINALIZE);
+          rez.serialize(index);
+          rez.serialize<bool>(success);
+          rez.serialize(&result);
+          rez.serialize(ready_event);
+        }
+        runtime->send_slice_collective_instance_request(orig_proc, rez);
+        ready_event.wait();
+        return result;
+      }
+      else
+        return index_owner->finalize_collective_instance(call_kind, index, 
+                                                         success);
+    }
+
+    //--------------------------------------------------------------------------
+    void SliceTask::report_total_collective_instance_calls(
+                              MappingCallKind mapper_call, unsigned total_calls)
+    //--------------------------------------------------------------------------
+    {
+      if (is_remote())
+      {
+        RtUserEvent applied_event = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(index_owner);
+          rez.serialize(mapper_call);
+          rez.serialize(SLICE_COLLECTIVE_REPORT);
+          rez.serialize(total_calls);
+          rez.serialize(applied_event);
+        }
+        runtime->send_slice_collective_instance_request(orig_proc, rez);
+        map_applied_conditions.insert(applied_event);
+      }
+      else
+        index_owner->report_total_collective_instance_calls(mapper_call,
+                                                            total_calls);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void SliceTask::handle_collective_instance_request(
+                   Deserializer &derez, AddressSpaceID source, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      IndexTask *index_owner;
+      derez.deserialize(index_owner);
+      MappingCallKind mapper_call;
+      derez.deserialize(mapper_call);
+      CollectiveInstMessage message;
+      derez.deserialize(message);
+      switch (message)
+      {
+        case SLICE_COLLECTIVE_FIND_OR_CREATE:
+          {
+            unsigned index;
+            derez.deserialize(index);
+            LayoutConstraintSet constraints;
+            constraints.deserialize(derez);
+            size_t num_regions;
+            derez.deserialize(num_regions);
+            std::vector<LogicalRegion> regions(num_regions);
+            for (unsigned idx = 0; idx < num_regions; idx++)
+              derez.deserialize(regions[idx]);
+            Memory::Kind mem_kind;
+            derez.deserialize(mem_kind);
+            size_t *remote_footprint;
+            derez.deserialize(remote_footprint);
+            LayoutConstraintKind *remote_unsat_kind;
+            derez.deserialize(remote_unsat_kind);
+            unsigned *remote_unsat_index;
+            derez.deserialize(remote_unsat_index);
+            DomainPoint point;
+            derez.deserialize(point);
+            CollectiveManager **target;
+            derez.deserialize(target);
+            RtUserEvent done_event;
+            derez.deserialize(done_event);
+
+            size_t footprint = 0;
+            LayoutConstraintKind unsat_kind = LEGION_SPECIALIZED_CONSTRAINT;
+            unsigned unsat_index = 0;
+            CollectiveManager *result = 
+              index_owner->find_or_create_collective_instance(mapper_call,
+                  index, constraints, regions, mem_kind, &footprint,
+                  &unsat_kind, &unsat_index, point);
+            if ((result != NULL) || (remote_footprint != NULL) || 
+                (remote_unsat_kind != NULL) || (remote_unsat_index != NULL))
+            {
+              Serializer rez;
+              {
+                RezCheck z2(rez);
+                rez.serialize(message);
+                if (result != NULL)
+                {
+                  rez.serialize(result->did);
+                  rez.serialize(target);
+                }
+                else
+                  rez.serialize<DistributedID>(0);
+                rez.serialize(remote_footprint);
+                if (remote_footprint != NULL)
+                  rez.serialize(footprint);
+                rez.serialize(remote_unsat_kind);
+                if (remote_unsat_kind != NULL)
+                  rez.serialize(unsat_kind);
+                rez.serialize(remote_unsat_index);
+                if (remote_unsat_index != NULL)
+                  rez.serialize(unsat_index);
+                rez.serialize(done_event);
+              }
+              runtime->send_slice_collective_instance_response(source, rez);
+            }
+            else // Nothing to send back so just trigger the event
+              Runtime::trigger_event(done_event);
+            break;
+          }
+        case SLICE_COLLECTIVE_FINALIZE:
+          {
+            unsigned index;
+            derez.deserialize(index);
+            bool success;
+            derez.deserialize(success);
+            bool *target;
+            derez.deserialize(target);
+            RtUserEvent done_event;
+            derez.deserialize(done_event);
+            const bool result = index_owner->finalize_collective_instance(
+                                              mapper_call, index, success);
+            if (result != success)
+            {
+              Serializer rez;
+              {
+                RezCheck z2(rez);
+                rez.serialize(message);
+                rez.serialize(target);
+                rez.serialize<bool>(result);
+                rez.serialize(done_event);
+              }
+              runtime->send_slice_collective_instance_response(source, rez);
+            }
+            else // Nothing to send back so just trigger the event
+              Runtime::trigger_event(done_event);
+            break;
+          }
+        case SLICE_COLLECTIVE_REPORT:
+          {
+            size_t total_calls;
+            derez.deserialize(total_calls);
+            RtUserEvent done_event;
+            derez.deserialize(done_event);
+            index_owner->report_total_collective_instance_calls(mapper_call, 
+                                                                total_calls);            
+            Runtime::trigger_event(done_event);
+            break;
+          }
+        default:
+          assert(false);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void SliceTask::handle_collective_instance_response(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      CollectiveInstMessage message;
+      derez.deserialize(message);
+      switch (message)
+      {
+        case SLICE_COLLECTIVE_FIND_OR_CREATE:
+          {
+            DistributedID did;
+            derez.deserialize(did);
+            RtEvent ready_event;
+            if (did > 0)
+            {
+              CollectiveManager **target;
+              derez.deserialize(target);
+              *target = static_cast<CollectiveManager*>(
+                  runtime->find_or_request_instance_manager(did, ready_event)); 
+            }
+            size_t *footprint;
+            derez.deserialize(footprint);
+            if (footprint != NULL)
+              derez.deserialize(*footprint);
+            LayoutConstraintKind *unsat_kind;
+            derez.deserialize(unsat_kind);
+            if (unsat_kind != NULL)
+              derez.deserialize(*unsat_kind);
+            unsigned *unsat_index;
+            derez.deserialize(unsat_index);
+            if (unsat_index != NULL)
+              derez.deserialize(*unsat_index);
+            RtUserEvent done_event;
+            derez.deserialize(done_event);
+            Runtime::trigger_event(done_event, ready_event);
+            break;
+          }
+        case SLICE_COLLECTIVE_FINALIZE:
+          {
+            bool *target;
+            derez.deserialize(target);
+            derez.deserialize<bool>(*target);
+            RtUserEvent done_event;
+            derez.deserialize(done_event);
+            Runtime::trigger_event(done_event);
+          }
+        default:
+          assert(false);
+      }
     }
 
   }; // namespace Internal 

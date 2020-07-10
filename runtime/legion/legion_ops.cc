@@ -563,6 +563,9 @@ namespace Legion {
                                   MappingCallKind call_kind, unsigned index,
                                   const LayoutConstraintSet &constraints,
                                   const std::vector<LogicalRegion> &regions,
+                                  Memory::Kind kind, size_t *footprint,
+                                  LayoutConstraintKind *unsat_kind,
+                                  unsigned *unsat_index, 
                                   DomainPoint &collective_point)
     //--------------------------------------------------------------------------
     {
@@ -571,25 +574,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    CollectiveManager* Operation::find_or_create_collective_instance(
-                                  MappingCallKind call_kind, unsigned index,
-                                  LayoutConstraints *constraints,
-                                  const std::vector<LogicalRegion> &regions,
-                                  DomainPoint &collective_point)
-    //--------------------------------------------------------------------------
-    {
-      // we do not do anything here in this case
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    bool Operation::finalize_collective_instance(CollectiveManager *manager,
-                                                 bool result)
+    bool Operation::finalize_collective_instance(MappingCallKind call,
+                                              unsigned total_calls, bool succes)
     //--------------------------------------------------------------------------
     {
       // should only be called for inherited types
       assert(false);
       return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::report_total_collective_instance_calls(
+                              MappingCallKind mapper_call, unsigned total_calls)
+    //--------------------------------------------------------------------------
+    {
+      // Nothing to do here for this case
     }
 
     //--------------------------------------------------------------------------
@@ -6136,7 +6135,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexCopyOp::IndexCopyOp(Runtime *rt)
-      : CopyOp(rt)
+      : CollectiveInstanceCreator<CopyOp>(rt)
     //--------------------------------------------------------------------------
     {
       this->is_index_space = true;
@@ -6144,7 +6143,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexCopyOp::IndexCopyOp(const IndexCopyOp &rhs)
-      : CopyOp(rhs)
+      : CollectiveInstanceCreator<CopyOp>(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -7244,6 +7243,42 @@ namespace Legion {
       // Exchange via the owner
       return owner->exchange_indirect_records(index, local_done, trace_info, 
                                 insts, space, index_point, records, sources);
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveManager* PointCopyOp::find_or_create_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const LayoutConstraintSet &constraints,
+                                  const std::vector<LogicalRegion> &regions,
+                                  Memory::Kind kind, size_t *footprint,
+                                  LayoutConstraintKind *unsat_kind,
+                                  unsigned *unsat_index,
+                                  DomainPoint &collective_point)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(index_point.get_dim() > 0);
+#endif
+      collective_point = index_point;
+      return owner->find_or_create_collective_instance(mapper_call, index,
+          constraints, regions, kind, footprint, unsat_kind, unsat_index, 
+          collective_point);
+    }
+
+    //--------------------------------------------------------------------------
+    bool PointCopyOp::finalize_collective_instance(MappingCallKind call_kind,
+                                                   unsigned index, bool success)
+    //--------------------------------------------------------------------------
+    {
+      return owner->finalize_collective_instance(call_kind, index, success);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointCopyOp::report_total_collective_instance_calls(
+                              MappingCallKind mapper_call, unsigned total_calls)
+    //--------------------------------------------------------------------------
+    {
+      owner->report_total_collective_instance_calls(mapper_call, total_calls);
     }
 
     //--------------------------------------------------------------------------
@@ -13411,14 +13446,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     DependentPartitionOp::DependentPartitionOp(Runtime *rt)
-      : ExternalPartition(), Operation(rt), thunk(NULL)
+      : ExternalPartition(), CollectiveInstanceCreator<Operation>(rt), 
+        thunk(NULL)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     DependentPartitionOp::DependentPartitionOp(const DependentPartitionOp &rhs)
-      : ExternalPartition(), Operation(NULL)
+      : ExternalPartition(), CollectiveInstanceCreator<Operation>(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -14591,6 +14627,55 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    CollectiveManager* DependentPartitionOp::find_or_create_collective_instance(
+                                  MappingCallKind call_kind, unsigned index,
+                                  const LayoutConstraintSet &constraints,
+                                  const std::vector<LogicalRegion> &regions,
+                                  Memory::Kind kind, size_t *footprint,
+                                  LayoutConstraintKind *unsat_kind,
+                                  unsigned *unsat_index, 
+                                  DomainPoint &collective_point)
+    //--------------------------------------------------------------------------
+    {
+      if (points.empty())
+        return Operation::find_or_create_collective_instance(call_kind, index,
+                            constraints, regions, kind, footprint, unsat_kind, 
+                            unsat_index, collective_point);
+      else
+        return 
+          CollectiveInstanceCreator<Operation>::
+                find_or_create_collective_instance(
+                          call_kind, index, constraints, regions, kind,
+                          footprint, unsat_kind, unsat_index, collective_point);
+    }
+
+    //--------------------------------------------------------------------------
+    bool DependentPartitionOp::finalize_collective_instance(
+                        MappingCallKind call_kind, unsigned index, bool success)
+    //--------------------------------------------------------------------------
+    {
+      if (points.empty())
+        return Operation::finalize_collective_instance(call_kind,index,success);
+      else
+        return 
+          CollectiveInstanceCreator<Operation>::finalize_collective_instance(
+                                                    call_kind, index, success);
+    }
+
+    //--------------------------------------------------------------------------
+    void DependentPartitionOp::report_total_collective_instance_calls(
+                              MappingCallKind mapper_call, unsigned total_calls)
+    //--------------------------------------------------------------------------
+    {
+      if (points.empty())
+        Operation::report_total_collective_instance_calls(mapper_call, 
+                                                          total_calls);
+      else
+        CollectiveInstanceCreator<Operation>::
+          report_total_collective_instance_calls(mapper_call, total_calls);
+    }
+
+    //--------------------------------------------------------------------------
     void DependentPartitionOp::check_privilege(void)
     //--------------------------------------------------------------------------
     {
@@ -14892,6 +14977,42 @@ namespace Legion {
       commit_operation(false/*deactivate*/, profiling_reported);
       // Tell our owner that we are done, they will do the deactivate
       owner->handle_point_commit(profiling_reported);
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveManager* PointDepPartOp::find_or_create_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const LayoutConstraintSet &constraints,
+                                  const std::vector<LogicalRegion> &regions,
+                                  Memory::Kind kind, size_t *footprint,
+                                  LayoutConstraintKind *unsat_kind,
+                                  unsigned *unsat_index,
+                                  DomainPoint &collective_point)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(index_point.get_dim() > 0);
+#endif
+      collective_point = index_point;
+      return owner->find_or_create_collective_instance(mapper_call, index,
+          constraints, regions, kind, footprint, unsat_kind, unsat_index,
+          collective_point);
+    }
+
+    //--------------------------------------------------------------------------
+    bool PointDepPartOp::finalize_collective_instance(MappingCallKind call_kind,
+                                                   unsigned index, bool success)
+    //--------------------------------------------------------------------------
+    {
+      return owner->finalize_collective_instance(call_kind, index, success);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointDepPartOp::report_total_collective_instance_calls(
+                              MappingCallKind mapper_call, unsigned total_calls)
+    //--------------------------------------------------------------------------
+    {
+      owner->report_total_collective_instance_calls(mapper_call, total_calls);
     }
 
     //--------------------------------------------------------------------------
@@ -15703,7 +15824,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexFillOp::IndexFillOp(Runtime *rt)
-      : FillOp(rt)
+      : CollectiveInstanceCreator<FillOp>(rt)
     //--------------------------------------------------------------------------
     {
       this->is_index_space = true;
@@ -15711,7 +15832,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexFillOp::IndexFillOp(const IndexFillOp &rhs)
-      : FillOp(rhs)
+      : CollectiveInstanceCreator<FillOp>(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -16203,6 +16324,42 @@ namespace Legion {
       commit_operation(false/*deactivate*/);
       // Tell our owner that we are done, they will do the deactivate
       owner->handle_point_commit();
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveManager* PointFillOp::find_or_create_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const LayoutConstraintSet &constraints,
+                                  const std::vector<LogicalRegion> &regions,
+                                  Memory::Kind kind, size_t *footprint,
+                                  LayoutConstraintKind *unsat_kind,
+                                  unsigned *unsat_index,
+                                  DomainPoint &collective_point)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(index_point.get_dim() > 0);
+#endif
+      collective_point = index_point;
+      return owner->find_or_create_collective_instance(mapper_call, index,
+          constraints, regions, kind, footprint, unsat_kind, unsat_index,
+          collective_point);
+    }
+
+    //--------------------------------------------------------------------------
+    bool PointFillOp::finalize_collective_instance(MappingCallKind call_kind,
+                                                   unsigned index, bool success)
+    //--------------------------------------------------------------------------
+    {
+      return owner->finalize_collective_instance(call_kind, index, success);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointFillOp::report_total_collective_instance_calls(
+                              MappingCallKind mapper_call, unsigned total_calls)
+    //--------------------------------------------------------------------------
+    {
+      owner->report_total_collective_instance_calls(mapper_call, total_calls);
     }
 
     //--------------------------------------------------------------------------

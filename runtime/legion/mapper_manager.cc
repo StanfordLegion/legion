@@ -1775,8 +1775,28 @@ namespace Legion {
       DomainPoint point;
       if (constraints.specialized_constraint.is_collective())
       {
-        collective = ctx->operation->find_or_create_collective_instance(
-            ctx->kind, ctx->collective_count++, constraints, regions, point);
+        if (ctx->operation == NULL)
+          REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
+                "Ignoring call to create a collective instance for the %d-"
+                "st/nd/rd/th call to create instance in mapper call %s in "
+                "mapper %s because the mapper call does not have an assoicated "
+                "mappable. Legion will still attempt to make an instance.",
+                ctx->collective_count++, get_mapper_call_name(ctx->kind),
+                get_mapper_name())
+        else if (unsat != NULL)
+        {
+          LayoutConstraintKind unsat_kind = LEGION_SPECIALIZED_CONSTRAINT;
+          unsigned unsat_index = 0;
+          collective = ctx->operation->find_or_create_collective_instance(
+              ctx->kind, ctx->collective_count++, constraints, regions, 
+              target_memory.kind(), footprint, &unsat_kind, &unsat_index,point);
+          if (collective == NULL)
+            *unsat = constraints.convert_unsatisfied(unsat_kind, unsat_index);
+        }
+        else
+          collective = ctx->operation->find_or_create_collective_instance(
+              ctx->kind, ctx->collective_count++, constraints, regions, 
+              target_memory.kind(), footprint, NULL, NULL, point);
         if (collective == NULL)
         {
           if (point.get_dim() > 0)
@@ -1810,8 +1830,8 @@ namespace Legion {
           (collective == NULL) ? NULL : &point);
       if (collective != NULL)
       {
-        success = 
-         ctx->operation->finalize_collective_instance(collective, success);
+        success = ctx->operation->finalize_collective_instance(ctx->kind, 
+                                      ctx->collective_count - 1, success);
         if (!success)
           result = MappingInstance();
       }
@@ -1852,8 +1872,28 @@ namespace Legion {
       LayoutConstraints *cons = runtime->find_layout_constraints(layout_id);
       if (cons->specialized_constraint.is_collective())
       {
-        collective = ctx->operation->find_or_create_collective_instance(
-            ctx->kind, ctx->collective_count++, cons, regions, point);
+        if (ctx->operation == NULL)
+          REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
+                "Ignoring call to create a collective instance for the %d-"
+                "st/nd/rd/th call to create instance in mapper call %s in "
+                "mapper %s because the mapper call does not have an assoicated "
+                "mappable. Legion will still attempt to make an instance.",
+                ctx->collective_count++, get_mapper_call_name(ctx->kind),
+                get_mapper_name())
+        else if (unsat != NULL)
+        {
+          LayoutConstraintKind unsat_kind = LEGION_SPECIALIZED_CONSTRAINT;
+          unsigned unsat_index = 0;
+          collective = ctx->operation->find_or_create_collective_instance(
+              ctx->kind, ctx->collective_count++, *cons, regions, 
+              target_memory.kind(), footprint, &unsat_kind, &unsat_index,point);
+          if (collective == NULL)
+            *unsat = cons->convert_unsatisfied(unsat_kind, unsat_index);
+        }
+        else
+          collective = ctx->operation->find_or_create_collective_instance(
+              ctx->kind, ctx->collective_count++, *cons, regions, 
+              target_memory.kind(), footprint, NULL, NULL, point);
         if (collective == NULL)
         {
           if (point.get_dim() > 0)
@@ -1888,8 +1928,8 @@ namespace Legion {
                         (collective == NULL) ? NULL : &point);
       if (collective != NULL)
       {
-        success = 
-         ctx->operation->finalize_collective_instance(collective, success);
+        success = ctx->operation->finalize_collective_instance(ctx->kind, 
+                                      ctx->collective_count - 1, success);
         if (!success)
           result = MappingInstance();
       }
@@ -1927,7 +1967,8 @@ namespace Legion {
       }
       pause_mapper_call(ctx);
       bool success;
-      if (constraints.specialized_constraint.is_collective())
+      if (constraints.specialized_constraint.is_collective() &&
+          (ctx->operation != NULL))
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
               "Ignoring request to find a collective instance for the %d-"
@@ -1939,9 +1980,21 @@ namespace Legion {
               ctx->operation->get_logging_name(),
               ctx->operation->get_unique_op_id(), get_mapper_name())
         DomainPoint point;
-        CollectiveManager *collective = 
-          ctx->operation->find_or_create_collective_instance(ctx->kind, 
-              ctx->collective_count++, constraints, regions, point);
+        CollectiveManager *collective = NULL;
+        if (unsat != NULL)
+        {
+          LayoutConstraintKind unsat_kind = LEGION_SPECIALIZED_CONSTRAINT;
+          unsigned unsat_index = 0;
+          collective = ctx->operation->find_or_create_collective_instance(
+              ctx->kind, ctx->collective_count++, constraints, regions, 
+              target_memory.kind(), footprint, &unsat_kind, &unsat_index,point);
+          if (collective == NULL)
+            *unsat = constraints.convert_unsatisfied(unsat_kind, unsat_index);
+        }
+        else
+          collective = ctx->operation->find_or_create_collective_instance(
+              ctx->kind, ctx->collective_count++, constraints, regions, 
+              target_memory.kind(), footprint, NULL, NULL, point);
         if (collective == NULL)
         {
           if (point.get_dim() > 0)
@@ -1974,17 +2027,27 @@ namespace Legion {
             0 : ctx->operation->get_unique_op_id(), collective,
             (collective == NULL) ? NULL : &point);
         if (collective != NULL)
-          success = 
-            ctx->operation->finalize_collective_instance(collective, success);
+          success = ctx->operation->finalize_collective_instance(ctx->kind,
+                                        ctx->collective_count - 1, success);
         if (!success)
           result = MappingInstance();
       }
       else
+      {
+        if (constraints.specialized_constraint.is_collective())
+          REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
+                "Ignoring call to create a collective instance for the %d-"
+                "st/nd/rd/th call to create instance in mapper call %s in "
+                "mapper %s because the mapper call does not have an assoicated "
+                "mappable. Legion will still attempt to make an instance.",
+                ctx->collective_count++, get_mapper_call_name(ctx->kind),
+                get_mapper_name())
         success = runtime->find_or_create_physical_instance(target_memory,
                   constraints, regions, result, created, mapper_id, processor, 
                   acquire, priority, tight_region_bounds, unsat, footprint,
                   (ctx->operation == NULL) ? 0 :
                    ctx->operation->get_unique_op_id());
+      }
       if (success && acquire)
         record_acquired_instance(ctx, result.impl, created);
       resume_mapper_call(ctx);
@@ -2020,9 +2083,9 @@ namespace Legion {
       pause_mapper_call(ctx);
       bool success;
       DomainPoint point;
-      CollectiveManager *collective = NULL;
       LayoutConstraints *cons = runtime->find_layout_constraints(layout_id);
-      if (cons->specialized_constraint.is_collective())
+      if (cons->specialized_constraint.is_collective() && 
+          (ctx->operation != NULL))
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
               "Ignoring request to find a collective instance for the %d-"
@@ -2033,8 +2096,21 @@ namespace Legion {
               get_mapper_call_name(ctx->kind), 
               ctx->operation->get_logging_name(),
               ctx->operation->get_unique_op_id(), get_mapper_name())
-        collective = ctx->operation->find_or_create_collective_instance(
-            ctx->kind, ctx->collective_count++, cons, regions, point);
+        CollectiveManager *collective = NULL;
+        if (unsat != NULL)
+        {
+          LayoutConstraintKind unsat_kind = LEGION_SPECIALIZED_CONSTRAINT;
+          unsigned unsat_index = 0;
+          collective = ctx->operation->find_or_create_collective_instance(
+              ctx->kind, ctx->collective_count++, *cons, regions, 
+              target_memory.kind(), footprint, &unsat_kind, &unsat_index,point);
+          if (collective == NULL)
+            *unsat = cons->convert_unsatisfied(unsat_kind, unsat_index);
+        }
+        else
+          collective = ctx->operation->find_or_create_collective_instance(
+              ctx->kind, ctx->collective_count++, *cons, regions, 
+              target_memory.kind(), footprint, NULL, NULL, point);
         if (collective == NULL)
         {
           if (point.get_dim() > 0)
@@ -2068,17 +2144,27 @@ namespace Legion {
                         ctx->operation->get_unique_op_id(), collective,
                         (collective == NULL) ? NULL : &point);
         if (collective != NULL)
-          success = 
-            ctx->operation->finalize_collective_instance(collective, success); 
+          success = ctx->operation->finalize_collective_instance(ctx->kind,
+                                        ctx->collective_count - 1, success); 
         if (!success)
           result = MappingInstance();
       }
       else
+      {
+        if (cons->specialized_constraint.is_collective())
+          REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
+                "Ignoring call to create a collective instance for the %d-"
+                "st/nd/rd/th call to create instance in mapper call %s in "
+                "mapper %s because the mapper call does not have an assoicated "
+                "mappable. Legion will still attempt to make an instance.",
+                ctx->collective_count++, get_mapper_call_name(ctx->kind),
+                get_mapper_name())
         success = runtime->find_or_create_physical_instance(target_memory,
                    cons, regions, result, created, mapper_id, processor,
                    acquire, priority, tight_region_bounds, unsat, footprint,
                    (ctx->operation == NULL) ? 0 : 
                     ctx->operation->get_unique_op_id());
+      }
       if (success && acquire)
         record_acquired_instance(ctx, result.impl, created);
       resume_mapper_call(ctx);
@@ -3527,11 +3613,15 @@ namespace Legion {
         runtime->profiler->record_mapper_call(info->kind, 
             (info->operation == NULL) ? 0 : info->operation->get_unique_op_id(),
             info->start_time, info->stop_time); 
+      if ((info->operation != NULL) && !runtime->unsafe_mapper)
+        info->operation->report_total_collective_instance_calls(
+                              info->kind, info->collective_count);
       info->resume = RtUserEvent::NO_RT_USER_EVENT;
       info->operation = NULL;
       info->acquired_instances = NULL;
       info->start_time = 0;
       info->stop_time = 0;
+      info->collective_count = 0;
       available_infos.push_back(info);
     }
 

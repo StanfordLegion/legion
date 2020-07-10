@@ -736,6 +736,8 @@ namespace Legion {
       SLICE_REMOTE_COMMIT,
       SLICE_FIND_INTRA_DEP,
       SLICE_RECORD_INTRA_DEP,
+      SLICE_COLLECTIVE_REQUEST,
+      SLICE_COLLECTIVE_RESPONSE,
       DISTRIBUTED_REMOTE_REGISTRATION,
       DISTRIBUTED_VALID_UPDATE,
       DISTRIBUTED_GC_UPDATE,
@@ -916,6 +918,8 @@ namespace Legion {
         "Slice Remote Commit",                                        \
         "Slice Find Intra-Space Dependence",                          \
         "Slice Record Intra-Space Dependence",                        \
+        "Slice Collective Instance Request",                          \
+        "Slice Collective Instance Response",                         \
         "Distributed Remote Registration",                            \
         "Distributed Valid Update",                                   \
         "Distributed GC Update",                                      \

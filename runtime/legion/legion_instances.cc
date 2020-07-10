@@ -2020,10 +2020,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     CollectiveManager::CollectiveManager(RegionTreeForest *ctx, 
                                 DistributedID did, AddressSpaceID owner_space,
-                                const std::vector<MemoryManager*> mems,
-                                const std::vector<PhysicalInstance> &insts,
-                                const std::vector<AddressSpaceID> &right,
-                                const AddressSpaceID left,
+                                IndexSpaceNode *points,
                                 IndexSpaceExpression *instance_domain,
                                 const void *pl, size_t pl_size,
                                 FieldSpaceNode *node, RegionTreeID tree_id,
@@ -2035,10 +2032,11 @@ namespace Legion {
           owner_space, footprint, redop_id, (redop_id == 0) ? NULL : 
             ctx->runtime->get_reduction(redop_id),
           node, instance_domain, pl, pl_size, tree_id, u_event, register_now), 
-        memories(mems), instances(insts), right_spaces(right), left_space(left),
-        finalize_messages(0), deleted_or_detached(false)
+        point_space(points), finalize_messages(0), deleted_or_detached(false)
     //--------------------------------------------------------------------------
     {
+      point_space->add_nested_valid_ref(did);
+#if 0
 #ifdef DEBUG_LEGION
       if (is_owner())
         assert(left == local_space);
@@ -2047,12 +2045,12 @@ namespace Legion {
 #endif
       if (!right_spaces.empty())
         add_nested_resource_ref(did);
+#endif
     }
 
     //--------------------------------------------------------------------------
     CollectiveManager::CollectiveManager(const CollectiveManager &rhs)
-      : PhysicalManager(rhs), memories(rhs.memories), instances(rhs.instances),
-        right_spaces(rhs.right_spaces), left_space(rhs.left_space)
+      : PhysicalManager(rhs), point_space(rhs.point_space)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -2063,6 +2061,8 @@ namespace Legion {
     CollectiveManager::~CollectiveManager(void)
     //--------------------------------------------------------------------------
     {
+      if (point_space->remove_nested_valid_ref(did))
+        delete point_space;
     }
 
     //--------------------------------------------------------------------------
@@ -2073,6 +2073,14 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveManager::finalize_collective_instance(ApUserEvent inst_event)
+    //--------------------------------------------------------------------------
+    {
+      // TODO: implement this
+      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -2916,10 +2924,7 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(did);
         rez.serialize(owner_space);
-        rez.serialize<size_t>(0); // no memories;
-        rez.serialize<size_t>(0); // no instances
-        rez.serialize<size_t>(0); // no right 
-        rez.serialize(owner_space);
+        rez.serialize(point_space->handle);
         rez.serialize(instance_footprint);
         instance_domain->pack_expression(rez, target);
         rez.serialize(field_space_node->handle);
@@ -2942,27 +2947,11 @@ namespace Legion {
       derez.deserialize(did);
       AddressSpaceID owner_space;
       derez.deserialize(owner_space);
-      size_t num_memories;
-      derez.deserialize(num_memories);
-      std::vector<MemoryManager*> memories(num_memories);
-      for (unsigned idx = 0; idx < num_memories; idx++)
-      {
-        Memory mem;
-        derez.deserialize(mem);
-        memories[idx] = runtime->find_memory_manager(mem); 
-      }
-      size_t num_instances;
-      derez.deserialize(num_instances);
-      std::vector<PhysicalInstance> instances(num_instances);
-      for (unsigned idx = 0; idx < num_instances; idx++)
-        derez.deserialize(instances[idx]);
-      size_t num_right_spaces;
-      derez.deserialize(num_right_spaces);
-      std::vector<AddressSpaceID> right_spaces(num_right_spaces);
-      for (unsigned idx = 0; idx < num_right_spaces; idx++)
-        derez.deserialize(right_spaces[idx]);
-      AddressSpaceID left_space;
-      derez.deserialize(left_space);
+      IndexSpace points_handle;
+      derez.deserialize(points_handle);
+      RtEvent points_ready;
+      IndexSpaceNode *point_space = 
+        runtime->forest->get_node(points_handle, &points_ready); 
       size_t inst_footprint;
       derez.deserialize(inst_footprint);
       bool local_is, domain_is;
@@ -2996,22 +2985,33 @@ namespace Legion {
       LayoutConstraints *constraints = 
         runtime->find_layout_constraints(layout_id, 
                     false/*can fail*/, &layout_ready);
-      if (domain_ready.exists() || fs_ready.exists() || layout_ready.exists())
+      if (points_ready.exists() || domain_ready.exists() || 
+          fs_ready.exists() || layout_ready.exists())
       {
-        const RtEvent precondition = 
-          Runtime::merge_events(domain_ready, fs_ready, layout_ready);
+        std::set<RtEvent> preconditions;
+        if (points_ready.exists())
+          preconditions.insert(points_ready);
+        if (domain_ready.exists())
+          preconditions.insert(domain_ready);
+        if (fs_ready.exists())
+          preconditions.insert(fs_ready);
+        if (layout_ready.exists())
+          preconditions.insert(layout_ready);
+        const RtEvent precondition = Runtime::merge_events(preconditions);
         if (precondition.exists() && !precondition.has_triggered())
         {
           // We need to defer this instance creation
-          DeferCollectiveManagerArgs args(did, owner_space, memories, 
-              instances, right_spaces, left_space, inst_footprint, local_is, 
-              inst_domain, domain_is, domain_handle, domain_expr_id, handle, 
-              tree_id, layout_id,unique_event,redop,piece_list,piece_list_size);
+          DeferCollectiveManagerArgs args(did, owner_space, points_handle, 
+              inst_footprint, local_is, inst_domain, domain_is, domain_handle, 
+              domain_expr_id, handle, tree_id, layout_id, unique_event, redop,
+              piece_list, piece_list_size);
           runtime->issue_runtime_meta_task(args,
               LG_LATENCY_RESPONSE_PRIORITY, precondition);
           return;
         }
         // If we fall through we need to refetch things that we didn't get
+        if (points_ready.exists())
+          point_space = runtime->forest->get_node(points_handle);
         if (domain_ready.exists())
           inst_domain = domain_is ? 
             runtime->forest->get_node(domain_handle) :
@@ -3023,29 +3023,23 @@ namespace Legion {
             runtime->find_layout_constraints(layout_id, false/*can fail*/);
       }
       // If we fall through here we can create the manager now
-      create_collective_manager(runtime, did, owner_space, memories, instances,
-          right_spaces, left_space, inst_footprint, inst_domain, piece_list,
-          piece_list_size, space_node, tree_id, constraints,unique_event,redop);
+      create_collective_manager(runtime, did, owner_space, point_space,
+          inst_footprint, inst_domain, piece_list, piece_list_size, space_node,
+          tree_id, constraints, unique_event, redop);
     }
 
     //--------------------------------------------------------------------------
     CollectiveManager::DeferCollectiveManagerArgs::DeferCollectiveManagerArgs(
-            DistributedID d, AddressSpaceID own, 
-            std::vector<MemoryManager*> &mems, 
-            std::vector<PhysicalInstance> &insts,
-            std::vector<AddressSpaceID> &rights, AddressSpaceID left,
+            DistributedID d, AddressSpaceID own, IndexSpace points, 
             size_t f, bool local, IndexSpaceExpression *lx, bool is, 
             IndexSpace dh, IndexSpaceExprID dx, FieldSpace h, RegionTreeID tid,
             LayoutConstraintID l, ApEvent use, ReductionOpID r,
             const void *pl, size_t pl_size)
       : LgTaskArgs<DeferCollectiveManagerArgs>(implicit_provenance),
-        did(d), owner(own), memories(new std::vector<MemoryManager*>(mems)), 
-        instances(new std::vector<PhysicalInstance>(insts)),
-        right_spaces(new std::vector<AddressSpaceID>(rights)), left_space(left),
-        footprint(f), local_is(local), domain_is(is), local_expr(lx), 
-        domain_handle(dh), domain_expr(dx), handle(h), tree_id(tid), 
-        layout_id(l), use_event(use), redop(r), piece_list(pl), 
-        piece_list_size(pl_size)
+        did(d), owner(own), point_space(points), footprint(f), local_is(local),
+        domain_is(is), local_expr(lx), domain_handle(dh), domain_expr(dx), 
+        handle(h), tree_id(tid), layout_id(l), use_event(use), redop(r), 
+        piece_list(pl), piece_list_size(pl_size)
     //--------------------------------------------------------------------------
     {
       if (local_is)
@@ -3059,20 +3053,18 @@ namespace Legion {
     {
       const DeferCollectiveManagerArgs *dargs = 
         (const DeferCollectiveManagerArgs*)args; 
+      IndexSpaceNode *point_space = 
+        runtime->forest->get_node(dargs->point_space);
       IndexSpaceExpression *inst_domain = dargs->local_is ? dargs->local_expr :
         dargs->domain_is ? runtime->forest->get_node(dargs->domain_handle) :
         runtime->forest->find_remote_expression(dargs->domain_expr);
       FieldSpaceNode *space_node = runtime->forest->get_node(dargs->handle);
       LayoutConstraints *constraints = 
         runtime->find_layout_constraints(dargs->layout_id);
-      create_collective_manager(runtime, dargs->did, dargs->owner, 
-          *(dargs->memories), *(dargs->instances), *(dargs->right_spaces), 
-          dargs->left_space, dargs->footprint, inst_domain, dargs->piece_list,
+      create_collective_manager(runtime, dargs->did, dargs->owner, point_space,
+          dargs->footprint, inst_domain, dargs->piece_list,
           dargs->piece_list_size, space_node, dargs->tree_id, constraints, 
           dargs->use_event, dargs->redop);
-      delete dargs->memories;
-      delete dargs->instances;
-      delete dargs->right_spaces;
       // Remove the local expression reference if necessary
       if (dargs->local_is && dargs->local_expr->remove_expression_reference())
         delete dargs->local_expr;
@@ -3081,10 +3073,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     /*static*/ void CollectiveManager::create_collective_manager(
           Runtime *runtime, DistributedID did, AddressSpaceID owner_space, 
-          const std::vector<MemoryManager*> &memories,
-          const std::vector<PhysicalInstance> &instances,
-          const std::vector<AddressSpaceID> &right_spaces, 
-          AddressSpaceID left_space, size_t inst_footprint, 
+          IndexSpaceNode *point_space, size_t inst_footprint, 
           IndexSpaceExpression *inst_domain, const void *piece_list,
           size_t piece_list_size, FieldSpaceNode *space_node, 
           RegionTreeID tree_id,LayoutConstraints *constraints,
@@ -3099,20 +3088,18 @@ namespace Legion {
       const bool external_instance = PhysicalManager::is_external_did(did);
       if (runtime->find_pending_collectable_location(did, location))
         man = new(location) CollectiveManager(runtime->forest, did,
-                                            owner_space, memories, instances, 
-                                            right_spaces, left_space,
+                                            owner_space, point_space, 
                                             inst_domain, piece_list, 
                                             piece_list_size, space_node,tree_id,
                                             layout, redop, false/*reg now*/, 
                                             inst_footprint, use_event, 
                                             external_instance); 
       else
-        man = new CollectiveManager(runtime->forest, did, owner_space, memories,
-                                  instances, right_spaces, left_space,
-                                  inst_domain, piece_list, piece_list_size, 
-                                  space_node, tree_id, layout, redop, 
-                                  false/*reg now*/, inst_footprint, use_event, 
-                                  external_instance);
+        man = new CollectiveManager(runtime->forest, did, owner_space, 
+                                  point_space, inst_domain, piece_list, 
+                                  piece_list_size, space_node, tree_id, layout,
+                                  redop, false/*reg now*/, inst_footprint, 
+                                  use_event, external_instance);
       // Hold-off doing the registration until construction is complete
       man->register_with_runtime(NULL/*no remote registration needed*/);
     }
@@ -3551,6 +3538,7 @@ namespace Legion {
       constraints.ordering_constraint.contiguous = true;
       constraints.memory_constraint = MemoryConstraint(
                                         memory_manager->memory.kind());
+      constraints.specialized_constraint.collective = false;
       const unsigned num_dims = instance_domain->get_num_dims();
       // Now let's find the layout constraints to use for this instance
       LayoutDescription *layout = field_space_node->find_layout_description(
@@ -3627,6 +3615,111 @@ namespace Legion {
                                                      instance.id,
                                                      layout->owner->handle,
                                                      layout->constraints);
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveManager* InstanceBuilder::create_collective_instance(
+        RegionTreeForest *forest, Memory::Kind mem_kind, 
+        IndexSpaceNode *point_space, LayoutConstraintKind *unsat_kind, 
+        unsigned *unsat_index, ApEvent ready_event, size_t *footprint)
+    //--------------------------------------------------------------------------
+    {
+      if (!valid)
+        initialize(forest);
+      // If there are no fields then we are done
+      if (field_sizes.empty())
+      {
+        REPORT_LEGION_WARNING(LEGION_WARNING_IGNORE_MEMORY_REQUEST,
+                        "Ignoring request to create instance in "
+                        "memory " IDFMT " with no fields.",
+                        memory_manager->memory.id);
+        if (footprint != NULL)
+          *footprint = 0;
+        if (unsat_kind != NULL)
+          *unsat_kind = LEGION_FIELD_CONSTRAINT;
+        if (unsat_index != NULL)
+          *unsat_index = 0;
+        return NULL;
+      }
+      if (realm_layout == NULL)
+      {
+        const std::vector<FieldID> &field_set = 
+          constraints.field_constraint.get_field_set();
+        bool compact = false;
+        switch (constraints.specialized_constraint.get_kind())
+        {
+          case LEGION_COMPACT_SPECIALIZE:
+          case LEGION_COMPACT_REDUCTION_SPECIALIZE:
+            {
+              compact = true;
+              break;
+            }
+          default:
+            break;
+        }
+        realm_layout =
+          instance_domain->create_layout(constraints, field_set, 
+             field_sizes, compact, unsat_kind, unsat_index, 
+             &piece_list, &piece_list_size);
+        // If constraints were unsatisfied then return now
+        if (realm_layout == NULL)
+          return NULL;
+      }
+      const size_t instance_footprint = realm_layout->bytes_used;
+      // Save the footprint size if we need to
+      if (footprint != NULL)
+        *footprint = instance_footprint;
+      // If we successfully made the layout then tighten the constraints
+      constraints.field_constraint.contiguous = true;
+      constraints.field_constraint.inorder = true;
+      constraints.ordering_constraint.contiguous = true;
+      constraints.memory_constraint = MemoryConstraint(mem_kind);
+      constraints.specialized_constraint.collective = false;
+      const unsigned num_dims = instance_domain->get_num_dims();
+      // Now let's find the layout constraints to use for this instance
+      LayoutDescription *layout = field_space_node->find_layout_description(
+                                        instance_mask, num_dims, constraints);
+      // If we couldn't find one then we make one
+      if (layout == NULL)
+      {
+        // First make a new layout constraint
+        LayoutConstraints *layout_constraints = 
+          forest->runtime->register_layout(field_space_node->handle,
+                                           constraints, true/*internal*/);
+        // Then make our description
+        layout = field_space_node->create_layout_description(instance_mask, 
+                                  num_dims, layout_constraints, mask_index_map,
+                                  constraints.field_constraint.get_field_set(),
+                                  field_sizes, serdez);
+      }
+      CollectiveManager *result = NULL;
+      DistributedID did = forest->runtime->get_available_distributed_id();
+      AddressSpaceID local_space = forest->runtime->address_space;
+      switch (constraints.specialized_constraint.get_kind())
+      {
+        case LEGION_NO_SPECIALIZE:
+        case LEGION_AFFINE_SPECIALIZE:
+        case LEGION_COMPACT_SPECIALIZE:
+          {
+            result = new CollectiveManager(forest, did, local_space,
+                point_space, instance_domain, piece_list, piece_list_size,
+                field_space_node, tree_id, layout, 0/*redop*/, true/*register*/,
+                instance_footprint, ready_event, false/*external*/); 
+            break;
+          }
+        case LEGION_AFFINE_REDUCTION_SPECIALIZE:
+        case LEGION_COMPACT_REDUCTION_SPECIALIZE:
+          {
+            result = new CollectiveManager(forest, did, local_space,
+                point_space, instance_domain, piece_list, piece_list_size,
+                field_space_node, tree_id, layout, redop_id, true/*register*/,
+                instance_footprint, ready_event, false/*external*/); 
+            break;
+          }
+        default:
+          assert(false);
       }
       return result;
     }

@@ -8027,6 +8027,17 @@ namespace Legion {
               runtime->handle_slice_record_intra_dependence(derez);
               break;
             }
+          case SLICE_COLLECTIVE_REQUEST:
+            {
+              runtime->handle_slice_collective_request(derez,
+                                                       remote_address_space);
+              break;
+            }
+          case SLICE_COLLECTIVE_RESPONSE:
+            {
+              runtime->handle_slice_collective_response(derez);
+              break;
+            }
           case DISTRIBUTED_REMOTE_REGISTRATION:
             {
               runtime->handle_did_remote_registration(derez, 
@@ -16386,6 +16397,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_slice_collective_instance_request(Processor target,
+                                                         Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SLICE_COLLECTIVE_REQUEST,
+                                  DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_slice_collective_instance_response(AddressSpaceID target,
+                                                          Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SLICE_COLLECTIVE_RESPONSE,
+                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_did_remote_registration(AddressSpaceID target, 
                                                Serializer &rez)
     //--------------------------------------------------------------------------
@@ -18063,6 +18092,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_slice_collective_request(Deserializer &derez,
+                                                  AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      SliceTask::handle_collective_instance_request(derez, source, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_slice_collective_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      SliceTask::handle_collective_instance_response(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_did_remote_registration(Deserializer &derez,
                                                  AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -19281,8 +19325,8 @@ namespace Legion {
       MemoryManager *manager = find_memory_manager(target_memory);
       if (unsat != NULL)
       {
-        LayoutConstraintKind unsat_kind;
-        unsigned unsat_index;
+        LayoutConstraintKind unsat_kind = LEGION_SPECIALIZED_CONSTRAINT;
+        unsigned unsat_index = 0;
         if (!manager->create_physical_instance(constraints, regions, result,
                          mapper_id, processor, acquire, priority, tight_bounds,
                          &unsat_kind, &unsat_index, footprint, target, p,
@@ -19316,8 +19360,8 @@ namespace Legion {
       MemoryManager *manager = find_memory_manager(target_memory);
       if (unsat != NULL)
       {
-        LayoutConstraintKind unsat_kind;
-        unsigned unsat_index;
+        LayoutConstraintKind unsat_kind = LEGION_SPECIALIZED_CONSTRAINT;
+        unsigned unsat_index = 0;
         if (!manager->create_physical_instance(constraints, regions, result,
                          mapper_id, processor, acquire, priority, tight_bounds,
                          &unsat_kind, &unsat_index, footprint, target, p,
@@ -19350,8 +19394,8 @@ namespace Legion {
       MemoryManager *manager = find_memory_manager(target_memory);
       if (unsat != NULL)
       {
-        LayoutConstraintKind unsat_kind;
-        unsigned unsat_index;
+        LayoutConstraintKind unsat_kind = LEGION_SPECIALIZED_CONSTRAINT;
+        unsigned unsat_index = 0;
         if (!manager->find_or_create_physical_instance(constraints, regions, 
                          result, created, mapper_id, processor, acquire, 
                          priority, tight_bounds, &unsat_kind, &unsat_index,
@@ -19384,8 +19428,8 @@ namespace Legion {
       MemoryManager *manager = find_memory_manager(target_memory);
       if (unsat != NULL)
       {
-        LayoutConstraintKind unsat_kind;
-        unsigned unsat_index;
+        LayoutConstraintKind unsat_kind = LEGION_SPECIALIZED_CONSTRAINT;
+        unsigned unsat_index = 0;
         if (!manager->find_or_create_physical_instance(constraints, regions,
                            result, created, mapper_id, processor, acquire, 
                            priority, tight_bounds, &unsat_kind, &unsat_index,
