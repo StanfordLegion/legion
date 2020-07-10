@@ -10371,7 +10371,7 @@ namespace Legion {
           }
         case SLICE_COLLECTIVE_REPORT:
           {
-            size_t total_calls;
+            unsigned total_calls;
             derez.deserialize(total_calls);
             RtUserEvent done_event;
             derez.deserialize(done_event);
