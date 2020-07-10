@@ -57,7 +57,7 @@ def detect_python_interpreter():
 def run(filename, debug, verbose, flags, env):
     args = ((['-mg'] if debug else []) +
             [os.path.basename(filename)] + flags +
-            ([] if verbose else ['-level', '5']))
+            ([] if verbose else ['-level', 'runtime=5,threads=5']))
     if verbose: print('Running', ' '.join(args))
     proc = regent.regent(
         args,
