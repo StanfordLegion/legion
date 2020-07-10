@@ -2787,6 +2787,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    bool IndexSpaceNodeT<DIM,T>::contains_point(const DomainPoint &point)
+    //--------------------------------------------------------------------------
+    {
+      const Point<DIM,T> p = point;
+      return contains_point(p); 
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     bool IndexSpaceNodeT<DIM,T>::contains_point(const Realm::Point<DIM,T> &p)
     //--------------------------------------------------------------------------
     {

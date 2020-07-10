@@ -2777,7 +2777,7 @@ namespace Legion {
                           "coherence.", "map_task", mapper->get_mapper_name(),
                           idx, get_task_name(), get_unique_id())
           virtual_mapped[idx] = true;
-        } 
+        }
         if (runtime->legion_spy_enabled)
           runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
                                                 idx, regions[idx],
@@ -2792,7 +2792,9 @@ namespace Legion {
           std::vector<LogicalRegion> regions_to_check(1, regions[idx].region);
           for (unsigned idx2 = 0; idx2 < result.size(); idx2++)
           {
-            if (!result[idx2].get_manager()->meets_regions(regions_to_check))
+            PhysicalManager *manager = 
+              result[idx2].get_manager()->as_instance_manager();
+            if (!manager->meets_regions(regions_to_check))
               // Doesn't satisfy the region requirement
               REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                             "Invalid mapper output from invocation of '%s' on "
@@ -2802,6 +2804,19 @@ namespace Legion {
                             "insufficient space for the requested logical "
                             "region.", "map_task", mapper->get_mapper_name(),
                             idx, get_task_name(), get_unique_id())
+            if (manager->is_collective_manager())
+            {
+              CollectiveManager *collective_manager = 
+                manager->as_collective_manager();
+              if (!collective_manager->point_space->contains_point(index_point))
+                REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                            "Invalid mapper output from invocation of '%s' on "
+                            "mapper %s. Mapper selected a collective instance "
+                            "for region requirement %d that does not contain "
+                            "the point for task %s (ID %lld).", "map_task",
+                            mapper->get_mapper_name(), idx, get_task_name(),
+                            get_unique_id())
+            }
           }
           if (!regions[idx].is_no_access() &&
               !variant_impl->is_no_access_region(idx))
@@ -7556,8 +7571,9 @@ namespace Legion {
           for (unsigned check_idx = 0; 
                 check_idx < chosen_instances.size(); check_idx++)
           {
-            if (!chosen_instances[check_idx].get_manager()->meets_regions(
-                                                          regions_to_check))
+            PhysicalManager *manager = 
+              chosen_instances[check_idx].get_manager()->as_instance_manager();
+            if (!manager->meets_regions(regions_to_check))
               REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                             "Invalid mapper output from invocation of "
                             "'premap_task' on mapper %s. Mapper specified an "
@@ -7568,6 +7584,23 @@ namespace Legion {
                             get_task_name(), get_unique_id(), 
                             parent_ctx->get_task_name(), 
                             parent_ctx->get_unique_id())
+            if (manager->is_collective_manager())
+            {
+              CollectiveManager *collective_manager = 
+                manager->as_collective_manager();
+              if (collective_manager->point_space->handle != 
+                  launch_space->handle)
+                REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT, 
+                                "Invalid mapper output from invocation of "
+                                "'premap_task' on mapper %s. Mapper selected "
+                                "a collective instance with domain of index "
+                                "space %d for region requirement %d that does "
+                                "not match the launch index space %d for index "
+                                "task %s (UID %lld).",mapper->get_mapper_name(),
+                                collective_manager->point_space->handle.id,
+                                *it, launch_space->handle.id, get_task_name(),
+                                get_unique_id())
+            }
           }
         }
         // TODO: Implement physical tracing for premapped regions

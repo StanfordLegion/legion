@@ -6010,6 +6010,22 @@ namespace Legion {
                         get_req_type_name<REQ_TYPE>(), idx, 
                         parent_ctx->get_task_name(),
                         parent_ctx->get_unique_id())
+        if (manager->is_collective_manager())
+        {
+          CollectiveManager *collective_manager = 
+            manager->as_collective_manager();
+          if (!collective_manager->point_space->contains_point(index_point))
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of 'map_copy' "
+                        "on mapper %s. Mapper selected a collective instance "
+                        "for %s region requirement at index %d but point copy "
+                        "(ID %lld) launched in task %s (ID %lld) is not "
+                        "contained within the point space for the collective "
+                        "instace.", mapper->get_mapper_name(), 
+                        get_req_type_name<REQ_TYPE>(), idx,
+                        get_unique_op_id(), parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id())
+        }
       }
       // Make sure all the destinations are real instances, this has
       // to be true for all kinds of explicit copies including reductions
@@ -14145,7 +14161,7 @@ namespace Legion {
                         mapper->get_mapper_name(),
                         parent_ctx->get_task_name(),
                         parent_ctx->get_unique_id())
-        if (!manager->is_instance_manager())
+        if (manager->is_reduction_manager())
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of "
                         "'map_partition' on mapper %s. Mapper selected an "
@@ -14153,6 +14169,22 @@ namespace Legion {
                         "partition operation in task %s (ID %lld).",
                         mapper->get_mapper_name(),parent_ctx->get_task_name(),
                         parent_ctx->get_unique_id())
+        if (manager->is_collective_manager())
+        {
+          CollectiveManager *collective_manager = 
+            manager->as_collective_manager();
+          if (!collective_manager->point_space->contains_point(index_point))
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of "
+                        "'map_partition' on mapper %s. Mapper selected a "
+                        "collective instance for region requirement %d but "
+                        "point partition (ID %lld) launched in task %s "
+                        "(ID %lld) is not contained within the point space "
+                        "for the collective instace.",
+                        mapper->get_mapper_name(), idx, 
+                        get_unique_op_id(), parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id())
+        }
         // This is a temporary check to guarantee that instances for 
         // dependent partitioning operations are in memories that 
         // Realm supports for now. In the future this should be fixed
