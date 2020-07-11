@@ -91,8 +91,11 @@ void top_level_task(const void *args, size_t arglen,
   {
     Machine::ProcessorQuery pq(machine);
     pq.only_kind(Processor::LOC_PROC);
-    for(Machine::ProcessorQuery::iterator it = pq.begin(); it != pq.end(); ++it)
-      lastp = *it;
+    // workaround for issue 892 - use the current processor (guaranteed local)
+    //  rather than trying to get a remote one
+    lastp = p;
+    //for(Machine::ProcessorQuery::iterator it = pq.begin(); it != pq.end(); ++it)
+    //  lastp = *it;
   }
   assert(lastp.exists());
 
