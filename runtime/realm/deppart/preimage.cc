@@ -306,7 +306,10 @@ namespace Realm {
 
   template <int N, typename T, int N2, typename T2>
   PreimageOperation<N,T,N2,T2>::~PreimageOperation(void)
-  {}
+  {
+    if(overlap_tester)
+      delete overlap_tester;
+  }
 
   template <int N, typename T, int N2, typename T2>
   IndexSpace<N,T> PreimageOperation<N,T,N2,T2>::add_target(const IndexSpace<N2,T2>& target)

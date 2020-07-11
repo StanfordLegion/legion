@@ -49,8 +49,6 @@ namespace Realm {
     ok = microop->serialize_params(msg);
     assert(ok);
     msg.commit();
-
-    delete microop;
   }
 
 

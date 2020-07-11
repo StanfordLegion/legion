@@ -2274,6 +2274,8 @@ int main(int argc, char **argv)
 
   // now sleep this thread until that shutdown actually happens
   rt.wait_for_shutdown();
+
+  delete testcfg;
   
   return 0;
 }

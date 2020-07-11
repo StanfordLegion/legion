@@ -587,6 +587,7 @@ namespace Realm {
     g_am_manager.stop_threads();
     g_am_manager.release_corereservation();
     Realm::MPI::AM_Finalize();
+    free(g_am_bases);
   }
 
   // collective communication within this network

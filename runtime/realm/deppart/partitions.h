@@ -83,6 +83,7 @@ namespace Realm {
   class AsyncMicroOp : public Operation::AsyncWorkItem {
   public:
     AsyncMicroOp(Operation *_op, PartitioningMicroOp *_uop);
+    ~AsyncMicroOp();
     
     virtual void request_cancellation(void);
       

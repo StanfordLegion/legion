@@ -548,6 +548,12 @@ namespace Realm {
     : Operation::AsyncWorkItem(_op)
     , uop(_uop)
   {}
+
+  AsyncMicroOp::~AsyncMicroOp()
+  {
+    if(uop)
+      delete uop;
+  }
     
   void AsyncMicroOp::request_cancellation(void)
   {
@@ -584,11 +590,15 @@ namespace Realm {
     if(async_microop) {
       if(requestor == Network::my_node_id) {
 	async_microop->mark_finished(true /*successful*/);
+	// async micro op will delete us when it's ready
       } else {
 	ActiveMessage<RemoteMicroOpCompleteMessage> amsg(requestor);
 	amsg->async_microop = async_microop;
 	amsg.commit();
+	delete this;
       }
+    } else {
+      delete this;
     }
   }
 
@@ -765,6 +775,8 @@ namespace Realm {
 
   void PartitioningOperation::launch(Event wait_for)
   {
+    get_runtime()->optable.add_local_operation(get_finish_event(), this);
+
     if(wait_for.has_triggered())
       op_queue->enqueue_partitioning_operation(this);
     else
