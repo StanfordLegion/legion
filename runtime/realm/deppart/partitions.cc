@@ -34,12 +34,7 @@ namespace Realm {
   Logger log_uop_timing("uop_timing");
   Logger log_dpops("dpops");
 
-  namespace {
-    // module-level globals
-
-    PartitioningOpQueue *op_queue = 0;
-
-  };
+  PartitioningOpQueue *deppart_op_queue = 0;
 
   namespace DeppartConfig {
 
@@ -607,7 +602,7 @@ namespace Realm {
   {
     int left = wait_count.fetch_sub(1) - 1;
     if(left == 0)
-      op_queue->enqueue_partitioning_microop(this);
+      deppart_op_queue->enqueue_partitioning_microop(this);
   }
 
   void PartitioningMicroOp::finish_dispatch(PartitioningOperation *op, bool inline_ok)
@@ -644,7 +639,7 @@ namespace Realm {
 	execute();
 	mark_finished();
       } else
-	op_queue->enqueue_partitioning_microop(this);
+	deppart_op_queue->enqueue_partitioning_microop(this);
     }
   }
 
@@ -749,7 +744,7 @@ namespace Realm {
 							      TimeLimit work_until)
   {
     assert(!poisoned); // TODO: POISON_FIXME
-    op_queue->enqueue_partitioning_operation(op);
+    deppart_op_queue->enqueue_partitioning_operation(op);
   }
 
   void PartitioningOperation::DeferredLaunch::print(std::ostream& os) const
@@ -778,7 +773,7 @@ namespace Realm {
     get_runtime()->optable.add_local_operation(get_finish_event(), this);
 
     if(wait_for.has_triggered())
-      op_queue->enqueue_partitioning_operation(this);
+      deppart_op_queue->enqueue_partitioning_operation(this);
     else
       deferred_launch.defer(this, wait_for);
   };
@@ -822,6 +817,7 @@ namespace Realm {
 					    BackgroundWorkManager *_bgwork)
     : BackgroundWorkItem("deppart op queue")
     , shutdown_flag(false), rsrv(_rsrv), condvar(mutex)
+    , work_advertised(false)
   {
     if(_bgwork)
       add_to_manager(_bgwork);
@@ -848,78 +844,80 @@ namespace Realm {
   /*static*/ void PartitioningOpQueue::start_worker_threads(CoreReservationSet& crs,
 				     BackgroundWorkManager *_bgwork)
   {
-    assert(op_queue == 0);
+    assert(deppart_op_queue == 0);
     CoreReservation *rsrv = 0;
     if(DeppartConfig::cfg_num_partitioning_workers > 0)
       rsrv = new CoreReservation("partitioning", crs,
 				 CoreReservationParameters());
-    op_queue = new PartitioningOpQueue(rsrv, _bgwork);
+    deppart_op_queue = new PartitioningOpQueue(rsrv, _bgwork);
     ThreadLaunchParameters tlp;
     for(int i = 0; i < DeppartConfig::cfg_num_partitioning_workers; i++) {
       Thread *t = Thread::create_kernel_thread<PartitioningOpQueue,
-					       &PartitioningOpQueue::worker_thread_loop>(op_queue,
+					       &PartitioningOpQueue::worker_thread_loop>(deppart_op_queue,
 											 tlp,
 											 *rsrv);
-      op_queue->workers.push_back(t);
+      deppart_op_queue->workers.push_back(t);
     }
   }
 
   /*static*/ void PartitioningOpQueue::stop_worker_threads(void)
   {
-    assert(op_queue != 0);
+    assert(deppart_op_queue != 0);
 
 #ifdef DEBUG_REALM
-    op_queue->shutdown_work_item();
+    deppart_op_queue->shutdown_work_item();
 #endif
 
-    op_queue->shutdown_flag.store(true);
+    deppart_op_queue->shutdown_flag.store(true);
     {
-      AutoLock<> al(op_queue->mutex);
-      op_queue->condvar.broadcast();
+      AutoLock<> al(deppart_op_queue->mutex);
+      deppart_op_queue->condvar.broadcast();
     }
-    for(size_t i = 0; i < op_queue->workers.size(); i++) {
-      op_queue->workers[i]->join();
-      delete op_queue->workers[i];
+    for(size_t i = 0; i < deppart_op_queue->workers.size(); i++) {
+      deppart_op_queue->workers[i]->join();
+      delete deppart_op_queue->workers[i];
     }
-    op_queue->workers.clear();
+    deppart_op_queue->workers.clear();
 
-    delete op_queue;
-    op_queue = 0;
+    delete deppart_op_queue;
+    deppart_op_queue = 0;
   }
       
   void PartitioningOpQueue::enqueue_partitioning_operation(PartitioningOperation *op)
   {
     op->mark_ready();
 
-    bool was_empty;
+    bool need_advertise;
     {
       AutoLock<> al(mutex);
 
-      was_empty = queued_ops.empty();
+      need_advertise = !work_advertised;
+      work_advertised = true;
       queued_ops.put(op, OPERATION_PRIORITY);
 
       if(!workers.empty())
-	op_queue->condvar.broadcast();
+	deppart_op_queue->condvar.broadcast();
     }
 
-    if(was_empty)
+    if(need_advertise)
       make_active();
   }
 
   void PartitioningOpQueue::enqueue_partitioning_microop(PartitioningMicroOp *uop)
   {
-    bool was_empty;
+    bool need_advertise;
     {
       AutoLock<> al(mutex);
 
-      was_empty = queued_ops.empty();
+      need_advertise = !work_advertised;
+      work_advertised = true;
       queued_ops.put(uop, MICROOP_PRIORITY);
 
       if(!workers.empty())
-	op_queue->condvar.broadcast();
+	deppart_op_queue->condvar.broadcast();
     }
 
-    if(was_empty)
+    if(need_advertise)
       make_active();
   }
 
@@ -929,15 +927,22 @@ namespace Realm {
     //  more remains
     void *op = 0;
     int priority;
-    bool work_left = false;
+    bool readvertise;
     {
       AutoLock<> al(mutex);
       op = queued_ops.get(&priority);
-      work_left = !queued_ops.empty();
+#ifdef DEBUG_REALM
+      assert(work_advertised);
+#endif
+      work_advertised = !queued_ops.empty();
+      readvertise = work_advertised;
     }
-    if(!op) return;
-    if(op && work_left && manager)
+    if(readvertise) {
+      assert((op != 0) && (manager != 0));
       make_active();
+    }
+    // might not have gotten any work if there's dedicated workers too
+    if(!op) return;
 
     // now we can work on the op we got in parallel with everybody else
     switch(priority) {

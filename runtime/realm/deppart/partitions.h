@@ -211,6 +211,7 @@ namespace Realm {
     Mutex mutex;
     CondVar condvar;
     std::vector<Thread *> workers;
+    bool work_advertised;
   };
 
 
