@@ -106,6 +106,9 @@ namespace Realm {
     template <int N, typename T>
     void sparsity_map_ready(SparsityMapImpl<N,T> *sparsity, bool precise);
 
+    IntrusiveListLink<PartitioningMicroOp> uop_link;
+    typedef IntrusiveList<PartitioningMicroOp, &PartitioningMicroOp::uop_link, DummyLock> MicroOpList;
+
   protected:
     PartitioningMicroOp(NodeID _requestor, AsyncMicroOp *_async_microop);
 
@@ -162,6 +165,9 @@ namespace Realm {
     static void do_inline_profiling(const ProfilingRequestSet &reqs,
 				    long long inline_start_time);
 
+    IntrusiveListLink<PartitioningOperation> op_link;
+    typedef IntrusiveList<PartitioningOperation, &PartitioningOperation::op_link, DummyLock> OpList;
+
     class DeferredLaunch : public EventWaiter {
     public:
       void defer(PartitioningOperation *_op, Event wait_on);
@@ -191,11 +197,6 @@ namespace Realm {
 				     BackgroundWorkManager *_bgwork);
     static void stop_worker_threads(void);
 
-    enum {
-      OPERATION_PRIORITY = 1,
-      MICROOP_PRIORITY = 0
-    };
-
     void enqueue_partitioning_operation(PartitioningOperation *op);
     void enqueue_partitioning_microop(PartitioningMicroOp *uop);
 
@@ -207,7 +208,8 @@ namespace Realm {
   protected:
     atomic<bool> shutdown_flag;
     CoreReservation *rsrv;
-    PriorityQueue<void *, DummyLock> queued_ops;
+    PartitioningOperation::OpList op_list;
+    PartitioningMicroOp::MicroOpList uop_list;
     Mutex mutex;
     CondVar condvar;
     std::vector<Thread *> workers;

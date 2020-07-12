@@ -893,7 +893,7 @@ namespace Realm {
 
       need_advertise = !work_advertised;
       work_advertised = true;
-      queued_ops.put(op, OPERATION_PRIORITY);
+      op_list.push_back(op);
 
       if(!workers.empty())
 	deppart_op_queue->condvar.broadcast();
@@ -911,7 +911,7 @@ namespace Realm {
 
       need_advertise = !work_advertised;
       work_advertised = true;
-      queued_ops.put(uop, MICROOP_PRIORITY);
+      uop_list.push_back(uop);
 
       if(!workers.empty())
 	deppart_op_queue->condvar.broadcast();
@@ -925,48 +925,51 @@ namespace Realm {
   {
     // attempt to take one item off the work queue - readvertise work if
     //  more remains
-    void *op = 0;
-    int priority;
+    PartitioningOperation *op = 0;
+    PartitioningMicroOp *uop = 0;
     bool readvertise;
     {
       AutoLock<> al(mutex);
-      op = queued_ops.get(&priority);
+
+      // prefer micro ops over operations
+      if(!uop_list.empty())
+	uop = uop_list.pop_front();
+      else if(!op_list.empty())
+	op = op_list.pop_front();
+
 #ifdef DEBUG_REALM
       assert(work_advertised);
 #endif
-      work_advertised = !queued_ops.empty();
+      work_advertised = !op_list.empty() || !uop_list.empty();
       readvertise = work_advertised;
     }
     if(readvertise) {
-      assert((op != 0) && (manager != 0));
+      assert(((op != 0) || (uop != 0)) && (manager != 0));
       make_active();
     }
-    // might not have gotten any work if there's dedicated workers too
-    if(!op) return;
 
     // now we can work on the op we got in parallel with everybody else
-    switch(priority) {
-    case OPERATION_PRIORITY:
-      {
-	PartitioningOperation *p_op = static_cast<PartitioningOperation *>(op);
-	log_part.info() << "worker " << this << " starting op " << p_op;
-	p_op->mark_started();
-	p_op->execute();
-	log_part.info() << "worker " << this << " finished op " << p_op;
-	p_op->mark_finished(true /*successful*/);
-	break;
+    //  (neither branch will be taken if there are dedicated workers and they
+    //  already got to the queued operations)
+    if(op != 0) {
+      bool ok_to_run = op->mark_started();
+      if(ok_to_run) {
+	log_part.info() << "worker " << this << " starting op " << op;
+	op->execute();
+	log_part.info() << "worker " << this << " finished op " << op;
+	op->mark_finished(true /*successful*/);
+      } else {
+	log_part.info() << "worker " << this << " cancelled op " << op;
+	op->mark_finished(false /*!successful*/);
       }
-    case MICROOP_PRIORITY:
-      {
-	PartitioningMicroOp *p_uop = static_cast<PartitioningMicroOp *>(op);
-	log_part.info() << "worker " << this << " starting uop " << p_uop;
-	p_uop->mark_started();
-	p_uop->execute();
-	log_part.info() << "worker " << this << " finished uop " << p_uop;
-	p_uop->mark_finished();
-	break;
-      }
-    default: assert(0);
+    }
+
+    if(uop != 0) {
+      log_part.info() << "worker " << this << " starting uop " << uop;
+      uop->mark_started();
+      uop->execute();
+      log_part.info() << "worker " << this << " finished uop " << uop;
+      uop->mark_finished();
     }
   }
 
@@ -975,12 +978,18 @@ namespace Realm {
     log_part.info() << "worker " << Thread::self() << " started for op queue " << this;
 
     while(!shutdown_flag.load()) {
-      void *op = 0;
-      int priority = -1; /*invalid value*/
-      while(!op && !shutdown_flag.load()) {
+      PartitioningOperation *op = 0;
+      PartitioningMicroOp *uop = 0;
+      while(!op && !uop && !shutdown_flag.load()) {
 	AutoLock<> al(mutex);
-	op = queued_ops.get(&priority);
-	if(!op && !shutdown_flag.load()) {
+
+	// prefer micro ops over operations
+	if(!uop_list.empty())
+	  uop = uop_list.pop_front();
+	else if(!op_list.empty())
+	  op = op_list.pop_front();
+
+	if(!op && !uop && !shutdown_flag.load()) {
           if(DeppartConfig::cfg_worker_threads_sleep) {
 	    condvar.wait();
           } else {
@@ -990,30 +999,26 @@ namespace Realm {
           }
         }
       }
+
       if(op) {
-	switch(priority) {
-	case OPERATION_PRIORITY:
-	  {
-	    PartitioningOperation *p_op = static_cast<PartitioningOperation *>(op);
-	    log_part.info() << "worker " << this << " starting op " << p_op;
-	    p_op->mark_started();
-	    p_op->execute();
-	    log_part.info() << "worker " << this << " finished op " << p_op;
-	    p_op->mark_finished(true /*successful*/);
-	    break;
-	  }
-	case MICROOP_PRIORITY:
-	  {
-	    PartitioningMicroOp *p_uop = static_cast<PartitioningMicroOp *>(op);
-	    log_part.info() << "worker " << this << " starting uop " << p_uop;
-	    p_uop->mark_started();
-	    p_uop->execute();
-	    log_part.info() << "worker " << this << " finished uop " << p_uop;
-	    p_uop->mark_finished();
-	    break;
-	  }
-	default: assert(0);
+	bool ok_to_run = op->mark_started();
+	if(ok_to_run) {
+	  log_part.info() << "worker " << this << " starting op " << op;
+	  op->execute();
+	  log_part.info() << "worker " << this << " finished op " << op;
+	  op->mark_finished(true /*successful*/);
+	} else {
+	  log_part.info() << "worker " << this << " cancelled op " << op;
+	  op->mark_finished(false /*!successful*/);
 	}
+      }
+
+      if(uop) {
+	log_part.info() << "worker " << this << " starting uop " << uop;
+	uop->mark_started();
+	uop->execute();
+	log_part.info() << "worker " << this << " finished uop " << uop;
+	uop->mark_finished();
       }
     }
 
