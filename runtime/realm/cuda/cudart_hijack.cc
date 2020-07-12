@@ -533,7 +533,39 @@ namespace Realm {
 
       cudaError_t cudaDeviceSynchronize(void)
       {
-	GPUProcessor *p = get_gpu_or_die("cudaDeviceSynchronize");
+	cudart_hijack_active = true;
+
+	// instead of get_gpu_or_die, we can allow poorly written code to
+	//  call cudaDeviceSynchronize from non-GPU tasks based on the
+	//  '-cuda:nongpusync' command-line parameter
+	//GPUProcessor *p = get_gpu_or_die("cudaDeviceSynchronize");
+	GPUProcessor *p = GPUProcessor::get_current_gpu_proc();
+	if(!p) {
+	  switch(cudart_hijack_nongpu_sync) {
+	  case 0: // ignore
+	    {
+	      // don't complain, but there's nothing to synchronize against
+	      //  either
+	      return cudaSuccess;
+	    }
+
+	  case 1: // warn
+	    {
+	      Backtrace bt;
+	      bt.capture_backtrace();
+	      bt.lookup_symbols();
+	      log_cudart.warning() << "cudaDeviceSynchronize() called outside CUDA task at " << bt;
+	      return cudaSuccess;
+	    }
+
+	  case 2: // fatal error
+	  default:
+	    {
+	      log_cudart.fatal() << "cudaDeviceSynchronize() called outside CUDA task";
+	      abort();
+	    }
+	  }
+	}
 	p->device_synchronize();
 	return cudaSuccess;
       }

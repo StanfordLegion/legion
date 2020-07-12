@@ -51,6 +51,9 @@ namespace Realm {
       void notify_request_read_done(Request* req);
       void notify_request_write_done(Request* req);
       void flush();
+
+      bool progress_xd(FileChannel *channel, TimeLimit work_until);
+
     private:
       FileRequest* file_reqs;
       std::string filename;
@@ -76,28 +79,34 @@ namespace Realm {
       void notify_request_write_done(Request* req);
       void flush();
 
+      bool progress_xd(DiskChannel *channel, TimeLimit work_until);
+
     private:
       int fd;
       DiskRequest* disk_reqs;
       //const char *buf_base;
     };
 
-    class FileChannel : public Channel {
+    class FileChannel : public SingleXDQChannel<FileChannel, FileXferDes> {
     public:
-      FileChannel(long max_nr, XferDesKind _kind);
+      FileChannel(BackgroundWorkManager *bgwork);
       ~FileChannel();
+
+      // TODO: farm I/O work off to dedicated threads if needed
+      static const bool is_ordered = true;
+
       long submit(Request** requests, long nr);
-      void pull();
-      long available();
     };
 
-    class DiskChannel : public Channel {
+    class DiskChannel : public SingleXDQChannel<DiskChannel, DiskXferDes> {
     public:
-      DiskChannel(long max_nr, XferDesKind _kind);
+      DiskChannel(BackgroundWorkManager *bgwork);
       ~DiskChannel();
+
+      // TODO: farm I/O work off to dedicated threads if needed
+      static const bool is_ordered = true;
+
       long submit(Request** requests, long nr);
-      void pull();
-      long available();
     };
 
 }; // namespace Realm

@@ -34,6 +34,7 @@
 #include "realm/runtime_impl.h"
 #include "realm/mem_impl.h"
 #include "realm/inst_impl.h"
+#include "realm/bgwork.h"
 
 #ifdef REALM_USE_CUDA
 #include "realm/cuda/cuda_module.h"
@@ -233,14 +234,13 @@ namespace Realm {
     };
 
 #ifdef REALM_USE_CUDA
+    class GPURequest;
+
     class GPUCompletionEvent : public Cuda::GPUCompletionNotification {
     public:
-      GPUCompletionEvent(void) {triggered = false;}
-      void request_completed(void) {triggered = true;}
-      void reset(void) {triggered = false;}
-      bool has_triggered(void) {return triggered;}
-    private:
-      bool triggered;
+      void request_completed(void);
+
+      GPURequest *req;
     };
 
     class GPURequest : public Request {
@@ -254,7 +254,7 @@ namespace Realm {
 #endif
 
 #ifdef REALM_USE_HDF5
-    class HDFRequest : public Request {
+    class HDF5Request : public Request {
     public:
       void *mem_base; // could be source or dest
       hid_t dataset_id, datatype_id;
@@ -298,6 +298,7 @@ namespace Realm {
       NodeID launch_node;
       //uint64_t /*bytes_submit, */bytes_read, bytes_write/*, bytes_total*/;
       bool iteration_completed;
+      bool transfer_completed;
       // current input and output port mask
       uint64_t current_in_port_mask, current_out_port_mask;
       uint64_t current_in_port_remain, current_out_port_remain;
@@ -335,8 +336,6 @@ namespace Realm {
       XferDesID guid;//, pre_xd_guid, next_xd_guid;
       // XferDesKind of the Xfer Descriptor
       XferDesKind kind;
-      // queue that contains all available free requests
-      std::queue<Request*> available_reqs;
       enum {
         XFERDES_NO_GUID = 0
       };
@@ -352,6 +351,17 @@ namespace Realm {
       //Layouts::GenericLayoutIterator<DIM>* li;
       // SJT:what is this for?
       //unsigned offset_idx;
+      // used to track by upstream/downstream xds so that we can safely
+      //  sleep xds that are stalled
+      atomic<unsigned> progress_counter;
+
+      // intrusive list for queued XDs in a channel
+      IntrusivePriorityListLink<XferDes> xd_link;
+      typedef IntrusivePriorityList<XferDes, int, &XferDes::xd_link, &XferDes::priority, DummyLock> XferDesList;
+    protected:
+      // this will be removed soon
+      // queue that contains all available free requests
+      std::queue<Request*> available_reqs;
     public:
       XferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
 	      const std::vector<XferDesPortInfo>& inputs_info,
@@ -385,6 +395,15 @@ namespace Realm {
 
       void mark_completed();
 
+      unsigned current_progress(void);
+
+      // checks to see if progress has been made since the last read of the
+      //  progress counter - atomically marks the xd for wakeup if not
+      bool check_for_progress(unsigned last_counter);
+
+      // updates the progress counter, waking up the xd if needed
+      void update_progress(void);
+
 #if 0
       void update_pre_bytes_write(size_t new_val) {
 	update_write_lock.lock();
@@ -409,7 +428,12 @@ namespace Realm {
       }
 #endif
 
-      Request* dequeue_request() {
+      virtual bool request_available() const
+      {
+	return !available_reqs.empty();
+      }
+
+      virtual Request* dequeue_request() {
         Request* req = available_reqs.front();
 	available_reqs.pop();
 	req->is_read_done = false;
@@ -417,7 +441,7 @@ namespace Realm {
         return req;
       }
 
-      void enqueue_request(Request* req) {
+      virtual void enqueue_request(Request* req) {
         available_reqs.push(req);
       }
 
@@ -426,7 +450,7 @@ namespace Realm {
 	void defer(XferDesQueue *_xferDes_queue,
 		   XferDes *_xd, Event wait_on);
 
-	virtual void event_triggered(bool poisoned);
+	virtual void event_triggered(bool poisoned, TimeLimit work_until);
 	virtual void print(std::ostream& os) const;
 	virtual Event get_finish_event(void) const;
 
@@ -437,6 +461,8 @@ namespace Realm {
       DeferredXDEnqueue deferred_enqueue;
     };
 
+    class MemcpyChannel;
+
     class MemcpyXferDes : public XferDes {
     public:
       MemcpyXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
@@ -446,20 +472,24 @@ namespace Realm {
 		    uint64_t _max_req_size, long max_nr, int _priority,
 		    XferDesFence* _complete_fence);
 
-      ~MemcpyXferDes()
-      {
-        free(memcpy_reqs);
-      }
-
       long get_requests(Request** requests, long nr);
       void notify_request_read_done(Request* req);
       void notify_request_write_done(Request* req);
       void flush();
 
+      virtual bool request_available() const;
+      virtual Request* dequeue_request();
+      virtual void enqueue_request(Request* req);
+
+      bool progress_xd(MemcpyChannel *channel, TimeLimit work_until);
+
     private:
-      MemcpyRequest* memcpy_reqs;
+      bool memcpy_req_in_use;
+      MemcpyRequest memcpy_req;
       //const char *src_buf_base, *dst_buf_base;
     };
+
+    class GASNetChannel;
 
     class GASNetXferDes : public XferDes {
     public:
@@ -480,9 +510,13 @@ namespace Realm {
       void notify_request_write_done(Request* req);
       void flush();
 
+      bool progress_xd(GASNetChannel *channel, TimeLimit work_until);
+
     private:
       GASNetRequest* gasnet_reqs;
     };
+
+    class RemoteWriteChannel;
 
     class RemoteWriteXferDes : public XferDes {
     public:
@@ -507,12 +541,16 @@ namespace Realm {
       //  takes care of it with lower latency
       virtual void update_bytes_write(int port_idx, size_t offset, size_t size);
 
+      bool progress_xd(RemoteWriteChannel *channel, TimeLimit work_until);
+
     private:
       RemoteWriteRequest* requests;
       //char *dst_buf_base;
     };
 
 #ifdef REALM_USE_CUDA
+    class GPUChannel;
+
     class GPUXferDes : public XferDes {
     public:
       GPUXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
@@ -536,6 +574,8 @@ namespace Realm {
       void notify_request_write_done(Request* req);
       void flush();
 
+      bool progress_xd(GPUChannel *channel, TimeLimit work_until);
+
     private:
       //GPURequest* gpu_reqs;
       //char *src_buf_base;
@@ -545,18 +585,20 @@ namespace Realm {
 #endif
 
 #ifdef REALM_USE_HDF5
-    class HDFXferDes : public XferDes {
-    public:
-      HDFXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
-		 const std::vector<XferDesPortInfo>& inputs_info,
-		 const std::vector<XferDesPortInfo>& outputs_info,
-		 bool _mark_start,
-		 uint64_t _max_req_size, long max_nr, int _priority,
-		 XferDesFence* _complete_fence);
+    class HDF5Channel;
 
-      ~HDFXferDes()
+    class HDF5XferDes : public XferDes {
+    public:
+      HDF5XferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
+		  const std::vector<XferDesPortInfo>& inputs_info,
+		  const std::vector<XferDesPortInfo>& outputs_info,
+		  bool _mark_start,
+		  uint64_t _max_req_size, long max_nr, int _priority,
+		  XferDesFence* _complete_fence);
+
+      ~HDF5XferDes()
       {
-        free(hdf_reqs);
+        //free(hdf_reqs);
         //delete lsi;
       }
 
@@ -565,8 +607,15 @@ namespace Realm {
       void notify_request_write_done(Request* req);
       void flush();
 
+      virtual bool request_available() const;
+      virtual Request* dequeue_request();
+      virtual void enqueue_request(Request* req);
+
+      bool progress_xd(HDF5Channel *channel, TimeLimit work_until);
+
     private:
-      HDFRequest* hdf_reqs;
+      bool req_in_use;
+      HDF5Request hdf5_req;
       std::map<FieldID, HDF5::HDF5Dataset *> datasets;
       //char *buf_base;
       //const HDF5Memory::HDFMetadata *hdf_metadata;
@@ -582,6 +631,10 @@ namespace Realm {
       Channel(XferDesKind _kind)
 	: node(Network::my_node_id), kind(_kind) {}
       virtual ~Channel() {};
+
+      // TODO: make pure virtual
+      virtual void shutdown() {}
+
     public:
       // which node manages this channel
       NodeID node;
@@ -625,6 +678,7 @@ namespace Realm {
 	  Memory dst_mem;
 	  Memory::Kind dst_kind;
 	};
+	XferDesKind xd_kind;
 	unsigned bandwidth; // units = MB/s = B/us
 	unsigned latency;   // units = ns
 	bool redops_allowed; // TODO: list of redops?
@@ -637,6 +691,7 @@ namespace Realm {
 				 CustomSerdezID src_serdez_id,
 				 CustomSerdezID dst_serdez_id,
 				 ReductionOpID redop_id,
+				 XferDesKind *kind_ret = 0,
 				 unsigned *bw_ret = 0,
 				 unsigned *lat_ret = 0);
 
@@ -645,17 +700,23 @@ namespace Realm {
 
       void print(std::ostream& os) const;
 
+      virtual void enqueue_ready_xd(XferDes *xd) = 0;
+      virtual void wakeup_xd(XferDes *xd) = 0;
+
     protected:
       void add_path(Memory src_mem, Memory dst_mem,
 		    unsigned bandwidth, unsigned latency,
-		    bool redops_allowed, bool serdez_allowed);
+		    bool redops_allowed, bool serdez_allowed,
+		    XferDesKind xd_kind);
       void add_path(Memory src_mem, Memory::Kind dst_kind, bool dst_global,
 		    unsigned bandwidth, unsigned latency,
-		    bool redops_allowed, bool serdez_allowed);
+		    bool redops_allowed, bool serdez_allowed,
+		    XferDesKind xd_kind);
       void add_path(Memory::Kind src_kind, bool src_global,
 		    Memory::Kind dst_kind, bool dst_global,
 		    unsigned bandwidth, unsigned latency,
-		    bool redops_allowed, bool serdez_allowed);
+		    bool redops_allowed, bool serdez_allowed,
+		    XferDesKind xd_kind);
 
       std::vector<SupportedPath> paths;
       // std::deque<Copy_1D> copies_1D;
@@ -682,6 +743,8 @@ namespace Realm {
     class RemoteChannel : public Channel {
     protected:
       RemoteChannel(void);
+
+      virtual void shutdown();
 
     public:
       template <typename S>
@@ -710,8 +773,12 @@ namespace Realm {
 				 CustomSerdezID src_serdez_id,
 				 CustomSerdezID dst_serdez_id,
 				 ReductionOpID redop_id,
+				 XferDesKind *kind_ret = 0,
 				 unsigned *bw_ret = 0,
 				 unsigned *lat_ret = 0);
+
+      virtual void enqueue_ready_xd(XferDes *xd) { assert(0); }
+      virtual void wakeup_xd(XferDes *xd) { assert(0); }
     };
 
     template <typename S>
@@ -729,115 +796,133 @@ namespace Realm {
       }
     }
 
-    class MemcpyChannel;
-
-    class MemcpyThread {
+    template <typename CHANNEL, typename XD>
+    class XDQueue : public BackgroundWorkItem {
     public:
-      MemcpyThread(MemcpyChannel* _channel) : channel(_channel) {}
-      void thread_loop();
-      static void* start(void* arg);
-      void stop();
-    private:
-      MemcpyChannel* channel;
-      std::deque<MemcpyRequest*> thread_queue;
+      XDQueue(CHANNEL *_channel, const std::string& _name,
+	      bool _ordered);
+
+      void enqueue_xd(XD *xd, bool at_front = false);
+
+      virtual void do_work(TimeLimit work_until);
+
+    protected:
+      CHANNEL *channel;
+      bool ordered_mode, in_ordered_worker;
+      Mutex mutex;
+      XferDes::XferDesList ready_xds;
     };
 
-    class MemcpyChannel : public Channel {
+    template <typename CHANNEL, typename XD>
+    class SingleXDQChannel : public Channel {
     public:
-      MemcpyChannel(long max_nr);
+      SingleXDQChannel(BackgroundWorkManager *bgwork,
+		       XferDesKind _kind,
+		       const std::string& _name);
+
+      virtual void shutdown();
+
+      virtual void enqueue_ready_xd(XferDes *xd);
+      virtual void wakeup_xd(XferDes *xd);
+
+      // TODO: remove!
+      void pull() { assert(0); }
+      long available() { assert(0); return 0; }
+      virtual long progress_xd(XferDes *xd, long max_nr) { assert(0); return 0; }
+    protected:
+      XDQueue<CHANNEL, XD> xdq;
+    };
+
+    class MemcpyChannel : public SingleXDQChannel<MemcpyChannel, MemcpyXferDes> {
+    public:
+      MemcpyChannel(BackgroundWorkManager *bgwork);
+
+      // multiple concurrent memcpys ok
+      static const bool is_ordered = false;
+
       ~MemcpyChannel();
-      void stop();
-      void get_request(std::deque<MemcpyRequest*>& thread_queue);
-      void return_request(std::deque<MemcpyRequest*>& thread_queue);
-      long submit(Request** requests, long nr);
-      void pull();
-      long available();
 
       virtual bool supports_path(Memory src_mem, Memory dst_mem,
 				 CustomSerdezID src_serdez_id,
 				 CustomSerdezID dst_serdez_id,
 				 ReductionOpID redop_id,
+				 XferDesKind *kind_ret = 0,
 				 unsigned *bw_ret = 0,
 				 unsigned *lat_ret = 0);
 
+      virtual long submit(Request** requests, long nr);
+
       bool is_stopped;
-    private:
-      std::deque<MemcpyRequest*> pending_queue, finished_queue;
-      Mutex pending_lock, finished_lock;
-      CondVar pending_cond;
-      atomic<long> capacity;
-      bool sleep_threads;
-      //std::vector<MemcpyRequest*> available_cb;
-      //MemcpyRequest** cbs;
     };
 
-    class GASNetChannel : public Channel {
+    class GASNetChannel : public SingleXDQChannel<GASNetChannel, GASNetXferDes> {
     public:
-      GASNetChannel(long max_nr, XferDesKind _kind);
+      GASNetChannel(BackgroundWorkManager *bgwork, XferDesKind _kind);
       ~GASNetChannel();
+
+      // no more than one GASNet xfer of each type at a time
+      static const bool is_ordered = true;
+      
       long submit(Request** requests, long nr);
-      void pull();
-      long available();
-    private:
-      atomic<long> capacity;
     };
 
-    class RemoteWriteChannel : public Channel {
+    class RemoteWriteChannel : public SingleXDQChannel<RemoteWriteChannel, RemoteWriteXferDes> {
     public:
-      RemoteWriteChannel(long max_nr);
+      RemoteWriteChannel(BackgroundWorkManager *bgwork);
       ~RemoteWriteChannel();
-      long submit(Request** requests, long nr);
-      void pull();
-      long available();
-      void notify_completion();
 
-    private:
-      // RemoteWriteChannel is maintained by dma threads
-      // and active message threads, so we need atomic ops
-      // for preventing data race
-      atomic<long> capacity;
+      // multiple concurrent RDMAs ok
+      static const bool is_ordered = false;
+
+      long submit(Request** requests, long nr);
     };
    
 #ifdef REALM_USE_CUDA
-    class GPUChannel : public Channel {
+    class GPUChannel : public SingleXDQChannel<GPUChannel, GPUXferDes> {
     public:
-      GPUChannel(Cuda::GPU* _src_gpu, long max_nr, XferDesKind _kind);
+      GPUChannel(Cuda::GPU* _src_gpu, XferDesKind _kind,
+		 BackgroundWorkManager *bgwork);
       ~GPUChannel();
+
+      // multiple concurrent cuda copies ok
+      static const bool is_ordered = false;
+
       long submit(Request** requests, long nr);
-      void pull();
-      long available();
+
     private:
       Cuda::GPU* src_gpu;
-      atomic<long> capacity;
-      std::deque<Request*> pending_copies;
+      //std::deque<Request*> pending_copies;
     };
 #endif
 
 #ifdef REALM_USE_HDF5
-    class HDFChannel : public Channel {
+    // single channel handles both HDF5 reads and writes
+    class HDF5Channel : public SingleXDQChannel<HDF5Channel, HDF5XferDes> {
     public:
-      HDFChannel(long max_nr, XferDesKind _kind);
-      ~HDFChannel();
+      HDF5Channel(BackgroundWorkManager *bgwork);
+      ~HDF5Channel();
+
+      // handle HDF5 requests in order - no concurrency
+      static const bool is_ordered = true;
+
       long submit(Request** requests, long nr);
-      void pull();
-      long available();
-    private:
-      atomic<long> capacity;
     };
 #endif
 
     class FileChannel;
     class DiskChannel;
 
-    class AddressSplitChannel : public Channel {
+    class AddressSplitXferDesBase;
+
+    class AddressSplitChannel : public SingleXDQChannel<AddressSplitChannel, AddressSplitXferDesBase> {
     public:
-      AddressSplitChannel();
+      AddressSplitChannel(BackgroundWorkManager *bgwork);
       virtual ~AddressSplitChannel();
+
+      // do as many of these concurrently as we like
+      static const bool is_ordered = false;
       
-      virtual long progress_xd(XferDes *xd, long max_nr);
-      virtual long submit(Request** requests, long nr);
-      virtual void pull();
-      virtual long available();
+      virtual long submit(Request** requests, long nr) { assert(0); return 0; }
     };
   
     class ChannelManager {
@@ -846,35 +931,33 @@ namespace Realm {
         memcpy_channel = NULL;
         gasnet_read_channel = gasnet_write_channel = NULL;
         remote_write_channel = NULL;
-        disk_read_channel = NULL;
-        disk_write_channel = NULL;
-        file_read_channel = NULL;
-        file_write_channel = NULL;
+        disk_channel = NULL;
+        file_channel = NULL;
 #ifdef REALM_USE_HDF5
-        hdf_read_channel = NULL;
-        hdf_write_channel = NULL;
+        hdf5_channel = NULL;
 #endif
 	addr_split_channel = 0;
       }
       ~ChannelManager(void);
-      MemcpyChannel* create_memcpy_channel(long max_nr);
-      GASNetChannel* create_gasnet_read_channel(long max_nr);
-      GASNetChannel* create_gasnet_write_channel(long max_nr);
-      RemoteWriteChannel* create_remote_write_channel(long max_nr);
-      DiskChannel* create_disk_read_channel(long max_nr);
-      DiskChannel* create_disk_write_channel(long max_nr);
-      FileChannel* create_file_read_channel(long max_nr);
-      FileChannel* create_file_write_channel(long max_nr);
-      AddressSplitChannel *create_addr_split_channel();
+      MemcpyChannel* create_memcpy_channel(BackgroundWorkManager *bgwork);
+      GASNetChannel* create_gasnet_read_channel(BackgroundWorkManager *bgwork);
+      GASNetChannel* create_gasnet_write_channel(BackgroundWorkManager *bgwork);
+      RemoteWriteChannel* create_remote_write_channel(BackgroundWorkManager *bgwork);
+      DiskChannel* create_disk_channel(BackgroundWorkManager *bgwork);
+      FileChannel* create_file_channel(BackgroundWorkManager *bgwork);
+      AddressSplitChannel *create_addr_split_channel(BackgroundWorkManager *bgwork);
 #ifdef REALM_USE_CUDA
-      GPUChannel* create_gpu_to_fb_channel(long max_nr, Cuda::GPU* src_gpu);
-      GPUChannel* create_gpu_from_fb_channel(long max_nr, Cuda::GPU* src_gpu);
-      GPUChannel* create_gpu_in_fb_channel(long max_nr, Cuda::GPU* src_gpu);
-      GPUChannel* create_gpu_peer_fb_channel(long max_nr, Cuda::GPU* src_gpu);
+      GPUChannel* create_gpu_to_fb_channel(Cuda::GPU* src_gpu,
+					   BackgroundWorkManager *bgwork);
+      GPUChannel* create_gpu_from_fb_channel(Cuda::GPU* src_gpu,
+					     BackgroundWorkManager *bgwork);
+      GPUChannel* create_gpu_in_fb_channel(Cuda::GPU* src_gpu,
+					   BackgroundWorkManager *bgwork);
+      GPUChannel* create_gpu_peer_fb_channel(Cuda::GPU* src_gpu,
+					     BackgroundWorkManager *bgwork);
 #endif
 #ifdef REALM_USE_HDF5
-      HDFChannel* create_hdf_read_channel(long max_nr);
-      HDFChannel* create_hdf_write_channel(long max_nr);
+      HDF5Channel* create_hdf5_channel(BackgroundWorkManager *bgwork);
 #endif
 
       MemcpyChannel* get_memcpy_channel() {
@@ -889,17 +972,11 @@ namespace Realm {
       RemoteWriteChannel* get_remote_write_channel() {
         return remote_write_channel;
       }
-      DiskChannel* get_disk_read_channel() {
-        return disk_read_channel;
+      DiskChannel* get_disk_channel() {
+        return disk_channel;
       }
-      DiskChannel* get_disk_write_channel() {
-        return disk_write_channel;
-      }
-      FileChannel* get_file_read_channel() {
-        return file_read_channel;
-      }
-      FileChannel* get_file_write_channel() {
-        return file_write_channel;
+      FileChannel* get_file_channel() {
+        return file_channel;
       }
       AddressSplitChannel *get_address_split_channel() {
 	return addr_split_channel;
@@ -931,24 +1008,21 @@ namespace Realm {
       }
 #endif
 #ifdef REALM_USE_HDF5
-      HDFChannel* get_hdf_read_channel() {
-        return hdf_read_channel;
-      }
-      HDFChannel* get_hdf_write_channel() {
-        return hdf_write_channel;
+      HDF5Channel* get_hdf5_channel() {
+        return hdf5_channel;
       }
 #endif
     public:
       MemcpyChannel* memcpy_channel;
       GASNetChannel *gasnet_read_channel, *gasnet_write_channel;
       RemoteWriteChannel* remote_write_channel;
-      DiskChannel *disk_read_channel, *disk_write_channel;
-      FileChannel *file_read_channel, *file_write_channel;
+      DiskChannel *disk_channel;
+      FileChannel *file_channel;
 #ifdef REALM_USE_CUDA
       std::map<Cuda::GPU*, GPUChannel*> gpu_to_fb_channels, gpu_in_fb_channels, gpu_from_fb_channels, gpu_peer_fb_channels;
 #endif
 #ifdef REALM_USE_HDF5
-      HDFChannel *hdf_read_channel, *hdf_write_channel;
+      HDF5Channel *hdf5_channel;
 #endif
       AddressSplitChannel *addr_split_channel;
     };
@@ -964,66 +1038,6 @@ namespace Realm {
     };
     //typedef std::priority_queue<XferDes*, std::vector<XferDes*>, CompareXferDes> PriorityXferDesQueue;
     typedef std::set<XferDes*, CompareXferDes> PriorityXferDesQueue;
-
-    class DMAThread {
-    public:
-      DMAThread(long _max_nr, XferDesQueue* _xd_queue, std::vector<Channel*>& _channels)
-	: enqueue_cond(enqueue_lock)
-      {
-        for (std::vector<Channel*>::iterator it = _channels.begin(); it != _channels.end(); it ++) {
-          channel_to_xd_pool[*it] = new PriorityXferDesQueue;
-        }
-        xd_queue = _xd_queue;
-        max_nr = _max_nr;
-        is_stopped = false;
-        requests = (Request**) calloc(max_nr, sizeof(Request*));
-        sleep = false;
-      }
-      DMAThread(long _max_nr, XferDesQueue* _xd_queue, Channel* _channel) 
-	: enqueue_cond(enqueue_lock)
-      {
-        channel_to_xd_pool[_channel] = new PriorityXferDesQueue;
-        xd_queue = _xd_queue;
-        max_nr = _max_nr;
-        is_stopped = false;
-        requests = (Request**) calloc(max_nr, sizeof(Request*));
-        sleep = false;
-      }
-      ~DMAThread() {
-        std::map<Channel*, PriorityXferDesQueue*>::iterator it;
-        for (it = channel_to_xd_pool.begin(); it != channel_to_xd_pool.end(); it++) {
-          delete it->second;
-        }
-        free(requests);
-      }
-      void dma_thread_loop();
-      // Thread start function that takes an input of DMAThread
-      // instance, and start to execute the requests from XferDes
-      // by using its channels.
-      static void* start(void* arg) {
-        DMAThread* dma_thread = (DMAThread*) arg;
-        dma_thread->dma_thread_loop();
-        return NULL;
-      }
-
-      void stop() {
-	enqueue_lock.lock();
-        is_stopped = true;
-	enqueue_cond.signal();
-	enqueue_lock.unlock();
-      }
-    public:
-      Mutex enqueue_lock;
-      CondVar enqueue_cond;
-      std::map<Channel*, PriorityXferDesQueue*> channel_to_xd_pool;
-      bool sleep;
-      bool is_stopped;
-    private:
-      // maximum allowed num of requests for a single
-      long max_nr;
-      Request** requests;
-      XferDesQueue* xd_queue;
-    };
 
     struct NotifyXferDesCompleteMessage {
       XferDesFence* fence;
@@ -1094,9 +1108,7 @@ namespace Realm {
 	amsg->span_start = span_start;
 	amsg->span_size = span_size;
 	amsg->pre_bytes_total = pre_bytes_total;
-        //TODO: need to ask Sean what payload mode we should use
-	PayloadSource *payload_src = new TwoDPayload(src_buf, nbytes, nlines, src_str, PAYLOAD_KEEP);
-	payload_src->copy_data(amsg.payload_ptr(payload_size));
+	amsg.add_payload(src_buf, nbytes, nlines, src_str, PAYLOAD_KEEP);
 	amsg.commit();
       }
     };
@@ -1249,35 +1261,14 @@ namespace Realm {
         NODE_BITS = 16,
         INDEX_BITS = 32
       };
-      XferDesQueue(int num_dma_threads, bool pinned, CoreReservationSet& crs)
+      XferDesQueue()
       //: core_rsrv("DMA request queue", crs, CoreReservationParameters())
       {
-        if (pinned) {
-          CoreReservationParameters params;
-          params.set_num_cores(num_dma_threads);
-          params.set_alu_usage(params.CORE_USAGE_EXCLUSIVE);
-          params.set_fpu_usage(params.CORE_USAGE_EXCLUSIVE);
-          params.set_ldst_usage(params.CORE_USAGE_SHARED);
-          core_rsrv = new CoreReservation("DMA threads", crs, params);
-        } else {
-          core_rsrv = new CoreReservation("DMA threads", crs, CoreReservationParameters());
-        }
         // reserve the first several guid
         next_to_assign_idx.store(10);
-        num_threads = 0;
-        num_memcpy_threads = 0;
-        dma_threads = NULL;
       }
 
       ~XferDesQueue() {
-        delete core_rsrv;
-        // clean up the priority queues
-	queues_lock.lock();  // probably don't need lock here
-        std::map<Channel*, PriorityXferDesQueue*>::iterator it2;
-        for (it2 = queues.begin(); it2 != queues.end(); it2++) {
-          delete it2->second;
-        }
-	queues_lock.unlock();
       }
 
       XferDesID get_guid(NodeID execution_node)
@@ -1354,17 +1345,6 @@ namespace Realm {
         }
       }
 
-      void register_dma_thread(DMAThread* dma_thread)
-      {
-        std::map<Channel*, PriorityXferDesQueue*>::iterator it;
-        queues_lock.lock();
-        for(it = dma_thread->channel_to_xd_pool.begin(); it != dma_thread->channel_to_xd_pool.end(); it++) {
-          channel_to_dma_thread[it->first] = dma_thread;
-          queues[it->first] = new PriorityXferDesQueue;
-        }
-	queues_lock.unlock();
-      }
-
       void destroy_xferDes(XferDesID guid) {
 	XferDes *xd;
 	{
@@ -1378,26 +1358,19 @@ namespace Realm {
         delete xd;
       }
 
-      void enqueue_xferDes_local(XferDes* xd);
+      // returns true if xd is ready, false if enqueue has been deferred
+      bool enqueue_xferDes_local(XferDes* xd, bool add_to_queue = true);
 
-      bool dequeue_xferDes(DMAThread* dma_thread, bool wait_on_empty);
-
-      void start_worker(int count, int max_nr, ChannelManager* channel_manager);
+      void start_worker(ChannelManager* channel_manager,
+			BackgroundWorkManager *bgwork);
 
       void stop_worker();
 
     protected:
-      std::map<Channel*, DMAThread*> channel_to_dma_thread;
-      std::map<Channel*, PriorityXferDesQueue*> queues;
       std::map<XferDesID, XferDesWithUpdates> guid_to_xd;
       Mutex queues_lock;
       RWLock guid_lock;
       atomic<XferDesID> next_to_assign_idx;
-      CoreReservation* core_rsrv;
-      int num_threads, num_memcpy_threads;
-      DMAThread** dma_threads;
-      MemcpyThread** memcpy_threads;
-      std::vector<Thread*> worker_threads;
     };
 
     XferDesQueue* get_xdq_singleton();
@@ -1405,7 +1378,7 @@ namespace Realm {
 #ifdef REALM_USE_CUDA
     void register_gpu_in_dma_systems(Cuda::GPU* gpu);
 #endif
-    void start_channel_manager(int count, bool pinned, int max_nr, CoreReservationSet& crs);
+    void start_channel_manager(BackgroundWorkManager *bgwork);
     void stop_channel_manager();
 
     void destroy_xfer_des(XferDesID _guid);

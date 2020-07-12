@@ -54,7 +54,6 @@ typedef FieldAccessor<READ_ONLY, float, 1, coord_t,
 typedef FieldAccessor<READ_WRITE, float, 1, coord_t,
 		      Realm::AffineAccessor<float, 1, coord_t> > AccessorRW;
 
-#ifndef USE_KOKKOS_KERNELS
 // we'll do saxpy with a functor and sdot below with a lambda
 template <class execution_space>
 class SaxpyFunctor {
@@ -73,7 +72,6 @@ public:
     y(i) += alpha * x(i);
   }
 };
-#endif
 
 // we have to wrap our tasks in classes so that we can use them as template
 //  template parameters below (function templates cannot be template template
@@ -101,18 +99,23 @@ public:
     Kokkos::View<float *,
 		 typename execution_space::memory_space> y = acc_y.accessor;
 #ifdef USE_KOKKOS_KERNELS
-    KokkosBlas::axpy(args.alpha,
-		     Kokkos::subview(x, std::make_pair(subspace.lo.x,
-						       subspace.hi.x + 1)),
-		     Kokkos::subview(y, std::make_pair(subspace.lo.x,
-						       subspace.hi.x + 1)));
-#else
-    Kokkos::RangePolicy<execution_space> range(runtime->get_executing_processor(ctx).kokkos_work_space(),
-					       subspace.lo.x,
-					       subspace.hi.x + 1);
-    Kokkos::parallel_for(range,
-			 SaxpyFunctor<execution_space>(args.alpha, x, y));
+    // only do half the child tasks with kokkos-kernels because we want to
+    //  test application-supplied kernels too
+    if((task->index_point[0] % 2) == 0) {
+      KokkosBlas::axpy(args.alpha,
+		       Kokkos::subview(x, std::make_pair(subspace.lo.x,
+							 subspace.hi.x + 1)),
+		       Kokkos::subview(y, std::make_pair(subspace.lo.x,
+							 subspace.hi.x + 1)));
+    } else
 #endif
+    {
+      Kokkos::RangePolicy<execution_space> range(runtime->get_executing_processor(ctx).kokkos_work_space(),
+						 subspace.lo.x,
+						 subspace.hi.x + 1);
+      Kokkos::parallel_for(range,
+			   SaxpyFunctor<execution_space>(args.alpha, x, y));
+    }
   }
 };
 
@@ -138,12 +141,16 @@ public:
     Kokkos::View<const float *,
 		 typename execution_space::memory_space> y = acc_y.accessor;
 #ifdef USE_KOKKOS_KERNELS
-    return KokkosBlas::dot(Kokkos::subview(x, std::make_pair(subspace.lo.x,
-							     subspace.hi.x + 1)),
-			   Kokkos::subview(y, std::make_pair(subspace.lo.x,
-							     subspace.hi.x + 1))
-			   );
-#else
+    // only do half the child tasks with kokkos-kernels because we want to
+    //  test application-supplied kernels too
+    if((task->index_point[0] % 2) == 0) {
+      return KokkosBlas::dot(Kokkos::subview(x, std::make_pair(subspace.lo.x,
+							       subspace.hi.x + 1)),
+			     Kokkos::subview(y, std::make_pair(subspace.lo.x,
+							       subspace.hi.x + 1))
+			     );
+    }
+#endif
     Kokkos::RangePolicy<execution_space> range(runtime->get_executing_processor(ctx).kokkos_work_space(),
 					       subspace.lo.x,
 					       subspace.hi.x + 1);
@@ -158,7 +165,6 @@ public:
 			      update += x(j) * y(j);
 			    }, sum);
     return sum;
-#endif
   }
 };
 
@@ -167,7 +173,7 @@ void top_level_task(const Task *task,
                     Context ctx, Runtime *runtime)
 {
   size_t num_elements = 32768;
-  size_t num_pieces = 1;
+  size_t num_pieces = 4;
 
   const InputArgs &command_args = Runtime::get_input_args();
 

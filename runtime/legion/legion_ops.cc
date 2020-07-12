@@ -6625,7 +6625,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Enumerate the points
-      enumerate_points(); 
+      enumerate_points(false/*replaying*/); 
       if (runtime->check_privileges)
       {
         // Check for interfering point requirements in debug mode
@@ -6698,7 +6698,7 @@ namespace Legion {
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
       // Enumerate the points
-      enumerate_points();
+      enumerate_points(true/*replaying*/);
       // Then call replay analysis on all of them
       for (std::vector<PointCopyOp*>::const_iterator it = 
             points.begin(); it != points.end(); it++)
@@ -6711,7 +6711,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexCopyOp::enumerate_points(void)
+    void IndexCopyOp::enumerate_points(bool replaying)
     //--------------------------------------------------------------------------
     {
       size_t num_points = index_domain.get_volume();
@@ -6782,7 +6782,7 @@ namespace Legion {
                                    projection_points);
         }
       }
-      if (runtime->legion_spy_enabled)
+      if (runtime->legion_spy_enabled && !replaying)
       {
         for (std::vector<PointCopyOp*>::const_iterator it = points.begin();
               it != points.end(); it++) 
@@ -16036,7 +16036,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Enumerate the points
-      enumerate_points(); 
+      enumerate_points(false/*replaying*/); 
       // Check for interfering point requirements in debug mode
       if (runtime->check_privileges)
         check_point_requirements(); 
@@ -16101,7 +16101,7 @@ namespace Legion {
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
       // Enumerate the points
-      enumerate_points();
+      enumerate_points(true/*replaying*/);
       // Then call replay analysis on all of them
       for (std::vector<PointFillOp*>::const_iterator it = 
             points.begin(); it != points.end(); it++)
@@ -16114,7 +16114,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexFillOp::enumerate_points(void)
+    void IndexFillOp::enumerate_points(bool replaying)
     //--------------------------------------------------------------------------
     {
       // Enumerate the points
@@ -16138,7 +16138,7 @@ namespace Legion {
                                                       points.end());
       function->project_points(this, 0/*idx*/, requirement,
                                runtime, projection_points);
-      if (runtime->legion_spy_enabled)
+      if (runtime->legion_spy_enabled && !replaying)
       {
         for (std::vector<PointFillOp*>::const_iterator it = points.begin();
               it != points.end(); it++)

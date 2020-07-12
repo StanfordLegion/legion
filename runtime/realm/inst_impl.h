@@ -57,7 +57,7 @@ namespace Realm {
 	void defer(RegionInstanceImpl *_inst, MemoryImpl *_mem,
 		   size_t _bytes, size_t _align, bool _need_alloc_result,
 		   Event wait_on);
-	virtual void event_triggered(bool poisoned);
+	virtual void event_triggered(bool poisoned, TimeLimit work_until);
 	virtual void print(std::ostream& os) const;
 	virtual Event get_finish_event(void) const;
 
@@ -72,7 +72,7 @@ namespace Realm {
       class DeferredDestroy : public EventWaiter {
       public:
 	void defer(RegionInstanceImpl *_inst, MemoryImpl *_mem, Event wait_on);
-	virtual void event_triggered(bool poisoned);
+	virtual void event_triggered(bool poisoned, TimeLimit work_until);
 	virtual void print(std::ostream& os) const;
 	virtual Event get_finish_event(void) const;
 
@@ -86,7 +86,8 @@ namespace Realm {
       // the life cycle of an instance is defined in part by when the
       //  allocation and deallocation of storage occurs, but that is managed
       //  by the memory, which uses these callbacks to notify us
-      void notify_allocation(MemoryImpl::AllocationResult result, size_t offset);
+      void notify_allocation(MemoryImpl::AllocationResult result, size_t offset,
+			     TimeLimit work_until);
       void notify_deallocation(void);
 
       bool get_strided_parameters(void *&base, size_t &stride,
@@ -165,7 +166,8 @@ namespace Realm {
 
       static void handle_message(NodeID sender,
 				 const InstanceMetadataPrefetchRequest& msg,
-				 const void *data, size_t datalen);
+				 const void *data, size_t datalen,
+				 TimeLimit work_until);
     };
       
 }; // namespace Realm

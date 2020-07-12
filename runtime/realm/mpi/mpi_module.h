@@ -60,6 +60,8 @@ namespace Realm {
     virtual void gather(NodeID root,
 			const void *val_in, void *vals_out, size_t bytes);
 
+    virtual bool check_for_quiescence(void);
+
     // used to create a remote proxy for a memory
     virtual MemoryImpl *create_remote_memory(Memory m, size_t size, Memory::Kind kind,
 					     const ByteArray& rdma_info);

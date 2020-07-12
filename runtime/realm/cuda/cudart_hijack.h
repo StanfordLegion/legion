@@ -34,6 +34,12 @@ namespace Realm {
     //  application's calls, and the cuda module needs to know that)
     extern bool cudart_hijack_active;
 
+    // for most CUDART API entry points, calling them from a non-GPU task is
+    //  a fatal error - for others (e.g. cudaDeviceSynchronize), it's either
+    //  silently permitted (0), warned (1), or a fatal error (2) based on this
+    //  setting
+    extern int cudart_hijack_nongpu_sync;
+
     // files compiled with nvcc will use global registrations of modules, variables, etc.
     //  that get broadcast to all contexts
 

@@ -2341,7 +2341,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL) { }
+                    const char *warning_string = NULL,
+                    size_t subfield_offset = 0) { }
       // For Realm::AffineAccessor specializations there are additional
       // methods for creating accessors with limited bounding boxes and
       // affine transformations for using alternative coordinates spaces
@@ -2357,7 +2358,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL) { }
+                    const char *warning_string = NULL,
+                    size_t subfield_offset = 0) { }
       // Specify a specific Affine transform to use for interpreting points
       // Not avalable for Realm::MultiAffineAccessor specializations
       template<int M>
@@ -2372,7 +2374,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL) { }
+                    const char *warning_string = NULL,
+                    size_t subfield_offset = 0) { }
       // Specify both a transform and a bounds to use
       // Not avalable for Realm::MultiAffineAccessor specializations
       template<int M>
@@ -2388,7 +2391,8 @@ namespace Legion {
                     bool check_field_size = false,
 #endif
                     bool silence_warnings = false,
-                    const char *warning_string = NULL) { }
+                    const char *warning_string = NULL,
+                    size_t subfield_offset = 0) { }
     public:
       typedef FT value_type;
       typedef FT& reference;
@@ -2420,7 +2424,8 @@ namespace Legion {
       ReductionAccessor(void) { }
       ReductionAccessor(const PhysicalRegion &region, FieldID fid,
                         ReductionOpID redop, bool silence_warnings = false,
-                        const char *warning_string = NULL) { }
+                        const char *warning_string = NULL,
+                        size_t subfield_offset = 0) { }
       // For Realm::AffineAccessor specializations there are additional
       // methods for creating accessors with limited bounding boxes and
       // affine transformations for using alternative coordinates spaces
@@ -2429,7 +2434,8 @@ namespace Legion {
                         ReductionOpID redop, 
                         const Rect<N,COORD_T> bounds,
                         bool silence_warnings = false,
-                        const char *warning_string = NULL) { }
+                        const char *warning_string = NULL,
+                        size_t subfield_offset = 0) { }
       // Specify a specific Affine transform to use for interpreting points
       // Not available for Realm::MultiAffineAccessor specializations
       template<int M>
@@ -2437,7 +2443,8 @@ namespace Legion {
                         ReductionOpID redop,
                         const AffineTransform<M,N,COORD_T> transform,
                         bool silence_warnings = false,
-                        const char *warning_string = NULL) { }
+                        const char *warning_string = NULL,
+                        size_t subfield_offset = 0) { }
       // Specify both a transform and a bounds to use
       // Not available for Realm::MultiAffineAccessor specializations
       template<int M>
@@ -2446,7 +2453,8 @@ namespace Legion {
                         const AffineTransform<M,N,COORD_T> transform,
                         const Rect<N,COORD_T> bounds,
                         bool silence_warnings = false,
-                        const char *warning_string = NULL) { }
+                        const char *warning_string = NULL,
+                        size_t subfield_offset = 0) { }
     public:
       typedef typename REDOP::RHS value_type;
       typedef typename REDOP::RHS& reference;
@@ -2514,7 +2522,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL) { }
+                          const char *warning_string = NULL,
+                          size_t subfield_offset = 0) { }
       // Specify a specific bounds rectangle to use for the accessor
       template<typename InputIterator>
       MultiRegionAccessor(InputIterator start, InputIterator stop,
@@ -2528,7 +2537,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL) { }
+                          const char *warning_string = NULL,
+                          size_t subfield_offset = 0) { }
       // Specify a specific Affine transform to use for interpreting points
       template<int M, typename InputIterator>
       MultiRegionAccessor(InputIterator start, InputIterator stop,
@@ -2542,7 +2552,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL) { }
+                          const char *warning_string = NULL,
+                          size_t subfield_offset = 0) { }
       // Specify both a transform and a bounds to use
       template<int M, typename InputIterator>
       MultiRegionAccessor(InputIterator start, InputIterator stop,
@@ -2557,7 +2568,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL) { }
+                          const char *warning_string = NULL,
+                          size_t subfield_offset = 0) { }
     public: // explicit data structure versions of the implicit iterators above
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
                           // The actual field size in case it is different from 
@@ -2569,7 +2581,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL) { }
+                          const char *warning_string = NULL,
+                          size_t subfield_offset = 0) { }
       // Specify a specific bounds rectangle to use for the accessor
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
                           const Rect<N,COORD_T> bounds, FieldID fid,
@@ -2582,7 +2595,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL) { }
+                          const char *warning_string = NULL,
+                          size_t subfield_offset = 0) { }
       // Specify a specific Affine transform to use for interpreting points
       template<int M>
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
@@ -2596,7 +2610,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL) { }
+                          const char *warning_string = NULL,
+                          size_t subfield_offset = 0) { }
       // Specify both a transform and a bounds to use
       template<int M>
       MultiRegionAccessor(const std::vector<PhysicalRegion> &regions,
@@ -2611,7 +2626,8 @@ namespace Legion {
                           bool check_field_size = false,
 #endif
                           bool silence_warnings = false,
-                          const char *warning_string = NULL) { }
+                          const char *warning_string = NULL,
+                          size_t subfield_offset = 0) { }
     public:
       typedef FT value_type;
       typedef FT& reference;

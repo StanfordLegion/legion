@@ -463,7 +463,8 @@ namespace Realm {
       EventImpl::add_waiter(wait_on, this);
     }
 
-    void RuntimeImpl::DeferredShutdown::event_triggered(bool poisoned)
+    void RuntimeImpl::DeferredShutdown::event_triggered(bool poisoned,
+							TimeLimit work_until)
     {
       // no real good way to deal with a poisoned shutdown precondition
       if(poisoned) {
@@ -699,6 +700,8 @@ namespace Realm {
     , concurrent_io_threads(1)  // Legion does not support values > 1 right now
     , sysmem_size(512 << 20), stack_size(2 << 20)
     , pin_util_procs(false)
+    , cpu_bgwork_timeslice(0)
+    , util_bgwork_timeslice(100 /*microseconds*/)
   {}
 
   CoreModule::~CoreModule(void)
@@ -718,6 +721,8 @@ namespace Realm {
       .add_option_int_units("-ll:csize", m->sysmem_size, 'm')
       .add_option_int_units("-ll:stacksize", m->stack_size, 'm', true /*binary*/, true /*keep*/)
       .add_option_bool("-ll:pin_util", m->pin_util_procs)
+      .add_option_int("-ll:cpu_bgwork", m->cpu_bgwork_timeslice)
+      .add_option_int("-ll:util_bgwork", m->util_bgwork_timeslice)
       .parse_command_line(cmdline);
 
     return m;
@@ -749,7 +754,9 @@ namespace Realm {
       ProcessorImpl *pi = new LocalUtilityProcessor(p, runtime->core_reservation_set(),
 						    stack_size,
 						    Config::force_kernel_threads,
-                                                    pin_util_procs);
+                                                    pin_util_procs,
+						    &runtime->bgwork,
+						    util_bgwork_timeslice);
       runtime->add_processor(pi);
     }
 
@@ -765,7 +772,9 @@ namespace Realm {
       Processor p = runtime->next_local_processor_id();
       ProcessorImpl *pi = new LocalCPUProcessor(p, runtime->core_reservation_set(),
 						stack_size,
-						Config::force_kernel_threads);
+						Config::force_kernel_threads,
+						&runtime->bgwork,
+						cpu_bgwork_timeslice);
       runtime->add_processor(pi);
     }
   }
@@ -825,6 +834,7 @@ namespace Realm {
 	shutdown_initiated(false),
 	shutdown_in_progress(false),
 	core_map(0), core_reservations(0),
+	message_manager(0),
 	sampling_profiler(true /*system default*/),
 	num_local_memories(0), num_local_ib_memories(0),
 	num_local_processors(0),
@@ -1101,6 +1111,8 @@ namespace Realm {
       //  a reasonable cutoff for switching to twolevel nodeset bitmasks
       //  (measured on an E5-2698 v4)
       int bitset_twolevel = -1024; // i.e. yes if > 1024 nodes
+      int active_msg_handler_threads = 0; // default is none (use bgwork)
+      bool active_msg_handler_bgwork = true;
 
       CommandLineParser cp;
       cp.add_option_int_units("-ll:rsize", reg_mem_size, 'm')
@@ -1133,6 +1145,9 @@ namespace Realm {
       cp.add_option_int("-ll:machine_query_cache", Config::use_machine_query_cache);
       cp.add_option_int("-ll:defalloc", Config::deferred_instance_allocation);
       cp.add_option_int("-ll:amprofile", Config::profile_activemsg_handlers);
+      cp.add_option_int("-ll:aminline", Config::max_inline_message_time);
+      cp.add_option_int("-ll:ahandlers", active_msg_handler_threads);
+      cp.add_option_int("-ll:handler_bgwork", active_msg_handler_bgwork);
 
       bool cmdline_ok = cp.parse_command_line(cmdline);
 
@@ -1184,6 +1199,9 @@ namespace Realm {
       core_reservations = new CoreReservationSet(core_map);
 
       sampling_profiler.configure_from_cmdline(cmdline, *core_reservations);
+
+      bgwork.configure_from_cmdline(cmdline);
+      event_triggerer.add_to_manager(&bgwork);
 
       // initialize barrier timestamp
       BarrierImpl::barrier_adjustment_timestamp.store((((Barrier::timestamp_t)(Network::my_node_id)) << BarrierImpl::BARRIER_TIMESTAMP_NODEID_SHIFT) + 1);
@@ -1259,6 +1277,15 @@ namespace Realm {
       // construct active message handler table once before any network(s) init
       activemsg_handler_table.construct_handler_table();
 
+      // and also our incoming active message manager
+      message_manager = new IncomingMessageManager(Network::max_node_id + 1,
+						   active_msg_handler_threads,
+						   *core_reservations);
+      if(active_msg_handler_bgwork)
+	message_manager->add_to_manager(&bgwork);
+      else
+	assert(active_msg_handler_threads > 0);
+
       // attach to the network
       for(std::vector<NetworkModule *>::const_iterator it = network_modules.begin();
 	  it != network_modules.end();
@@ -1322,10 +1349,12 @@ namespace Realm {
 	}
       }
       
+      bgwork.start_dedicated_workers(*core_reservations);
+
       start_dma_worker_threads(dma_worker_threads,
 			       *core_reservations);
 
-      PartitioningOpQueue::start_worker_threads(*core_reservations);
+      PartitioningOpQueue::start_worker_threads(*core_reservations, &bgwork);
 
 #ifdef EVENT_TRACING
       // Always initialize even if we won't dump to file, otherwise segfaults happen
@@ -1426,7 +1455,7 @@ namespace Realm {
       // since we need list of local gpus to create channels
       start_dma_system(dma_worker_threads,
 		       pin_dma_threads, 100
-		       ,*core_reservations);
+		       ,*core_reservations, &bgwork);
 
       // now that we've created all the processors/etc., we can try to come up with core
       //  allocations that satisfy everybody's requirements - this will also start up any
@@ -2111,7 +2140,29 @@ namespace Realm {
 
       // the operation tables on every rank should be clear of work
       optable.shutdown_check();
-      Network::barrier();
+
+      // make sure the network is completely quiescent
+      if(Network::max_node_id > 0) {
+	int tries = 0;
+	while(true) {
+	  // first make sure the incoming message queue is quiescent
+	  message_manager->drain_incoming_messages();
+
+	  // then check the network for quiescence
+	  tries++;
+	  bool done = Network::check_for_quiescence();
+	  if(done) {
+	    if(Network::my_node_id == 0)
+	      log_runtime.info() << "quiescent after " << tries << " attempts";
+	    break;
+	  }
+
+	  if(tries >= 10) {
+	    log_runtime.fatal() << "network still not quiescent after " << tries << " attempts";
+	    abort();
+	  }
+	}
+      }
       
       // mark that a shutdown is in progress so that we can hopefully catch
       //  things that try to run during teardown
@@ -2124,9 +2175,23 @@ namespace Realm {
 
       // Shutdown all the threads
 
+      // stop processors before most other things, as they may be helping with
+      //  background work
+      {
+	std::vector<ProcessorImpl *>& local_procs = nodes[Network::my_node_id].processors;
+	for(std::vector<ProcessorImpl *>::const_iterator it = local_procs.begin();
+	    it != local_procs.end();
+	    it++)
+	  (*it)->shutdown();
+      }
+
       // threads that cause inter-node communication have to stop first
       PartitioningOpQueue::stop_worker_threads();
       stop_dma_worker_threads();
+      for(std::vector<Channel *>::iterator it = nodes[Network::my_node_id].dma_channels.begin();
+	  it != nodes[Network::my_node_id].dma_channels.end();
+	  ++it)
+	(*it)->shutdown();
       stop_dma_system();
 
       // detach from the network
@@ -2135,18 +2200,19 @@ namespace Realm {
 	  it++)
 	(*it)->detach(this, network_segments);
 
+#ifdef DEBUG_REALM
+      event_triggerer.shutdown_work_item();
+#endif
+      bgwork.stop_dedicated_workers();
+
+      // tear down the active message manager
+      message_manager->shutdown();
+      delete message_manager;
+
       sampling_profiler.shutdown();
 
       if(Config::profile_activemsg_handlers)
 	activemsg_handler_table.report_message_handler_stats();
-
-      {
-	std::vector<ProcessorImpl *>& local_procs = nodes[Network::my_node_id].processors;
-	for(std::vector<ProcessorImpl *>::const_iterator it = local_procs.begin();
-	    it != local_procs.end();
-	    it++)
-	  (*it)->shutdown();
-      }
 
 #ifdef EVENT_TRACING
       if(event_trace_file) {

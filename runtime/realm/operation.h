@@ -81,9 +81,14 @@ namespace Realm {
 
     protected:
       Operation *op;
+
+      // the next_item field is effectively owned by the Operation class
+      friend class Operation;
+      friend std::ostream& operator<<(std::ostream& os, Operation *op);
+
+      AsyncWorkItem *next_item;
     };
 
-    // must only be called by thread performing operation (i.e. not thread safe)
     // once added, the item belongs to the operation (i.e. will be deleted with
     //  the operation)
     void add_async_work_item(AsyncWorkItem *item);
@@ -112,6 +117,9 @@ namespace Realm {
     typedef ProfilingMeasurements::OperationStatus Status;
     atomic<Status::Result> state;
 
+    // allow operations to lazily update their state
+    virtual Status::Result get_state(void);
+
     ProfilingMeasurements::OperationStatus status;
     bool wants_timeline;
     ProfilingMeasurements::OperationTimeline timeline;
@@ -121,11 +129,12 @@ namespace Realm {
     ProfilingRequestSet requests; 
     ProfilingMeasurementCollection measurements;
 
-    std::set<AsyncWorkItem *> all_work_items;
+    // append-only list (until Operation destruction)
+    atomic<AsyncWorkItem *> all_work_items;
     atomic<int> pending_work_items;  // uses atomics so we don't have to take lock to check
     atomic<int> failed_work_items;
     
-    friend std::ostream& operator<<(std::ostream& os, const Operation *op);
+    friend std::ostream& operator<<(std::ostream& os, Operation *op);
   };
 
   class OperationTable {
@@ -166,7 +175,7 @@ namespace Realm {
 #endif
 
     struct TableEntry : public EventWaiter {
-      virtual void event_triggered(bool poisoned);
+      virtual void event_triggered(bool poisoned, TimeLimit work_until);
       virtual void print(std::ostream& os) const;
       virtual Event get_finish_event(void) const;
 

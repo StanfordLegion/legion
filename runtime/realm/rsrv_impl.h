@@ -24,11 +24,8 @@
 #include "realm/network.h"
 #include "realm/nodeset.h"
 #include "realm/mutex.h"
-
-#define REALM_RSRV_USE_CIRCQUEUE
-#ifdef REALM_RSRV_USE_CIRCQUEUE
-#include "realm/circ_queue.h"
-#endif
+#include "realm/bgwork.h"
+#include "realm/event_impl.h"
 
 namespace Realm {
 
@@ -84,15 +81,21 @@ namespace Realm {
       NodeSet remote_waiter_mask, remote_sharer_mask;
       //std::list<LockWaiter *> local_waiters; // set of local threads that are waiting on lock
 
-#ifdef REALM_RSRV_USE_CIRCQUEUE
-      typedef CircularQueue<Event> WaiterList;
-#else
-      typedef std::deque<Event> WaiterList;
-#endif
+      typedef EventWaiter::EventWaiterList WaiterList;
 
-      std::map<unsigned, WaiterList> local_waiters;
-      std::map<unsigned, unsigned> retry_count;
-      std::map<unsigned, Event> retry_events;
+      WaiterList local_excl_waiters;
+
+      struct LocalSharedInfo {
+	unsigned count;
+	WaiterList waiters;
+      };
+      std::map<unsigned, LocalSharedInfo> local_shared;
+
+      struct RetryInfo {
+	unsigned count;
+	Event event;
+      };
+      std::map<unsigned, RetryInfo> retries;
       bool requested; // do we have a request for the lock in flight?
 
       // local data protected by lock
@@ -123,9 +126,9 @@ namespace Realm {
 		    AcquireType acquire_type,
 		    Event after_lock = Event::NO_EVENT);
 
-      bool select_local_waiters(WaiterList& to_wake);
+      bool select_local_waiters(WaiterList& to_wake, Event& retry);
 
-      void release(void);
+      void release(TimeLimit work_until);
 
       bool is_locked(unsigned check_mode, bool excl_ok);
 
@@ -155,7 +158,8 @@ namespace Realm {
     unsigned mode;
 
     static void handle_message(NodeID sender,const LockGrantMessage &msg,
-			       const void *data, size_t datalen);
+			       const void *data, size_t datalen,
+			       TimeLimit work_until);
   };
 
   struct DestroyLockMessage {

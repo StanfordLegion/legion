@@ -44,6 +44,7 @@ list(APPEND REALM_SRC
   realm/deppart/sparsity_impl.h            realm/deppart/sparsity_impl.cc
   realm/deppart/sparsity_impl.inl
   realm/atomics.h           realm/atomics.inl
+  realm/bgwork.h            realm/bgwork.cc
   realm/event_impl.h        realm/event_impl.cc
   realm/event_impl.inl
   realm/faults.h            realm/faults.cc

@@ -8343,10 +8343,7 @@ namespace Legion {
       }
       // Lastly we can unregister ourselves with the context
       if (registered_with_runtime)
-      {
-        parent->remove_child(color);
         context->remove_node(handle);
-      }
       if (parent->remove_nested_resource_ref(did))
         delete parent;
       if (color_space->remove_nested_resource_ref(did))
@@ -8443,6 +8440,7 @@ namespace Legion {
       // be modifying these data structures at this point
       // We still hold resource references to the node so we don't need to
       // worry about the child nodes being deleted
+      parent->remove_child(color);
       for (std::map<LegionColor,IndexSpaceNode*>::const_iterator it = 
             color_map.begin(); it != color_map.end(); it++)
       {
@@ -17306,7 +17304,6 @@ namespace Legion {
           delete it->second;
       if (registered)
       {
-        parent->remove_child(row_source->color);
         if (parent->remove_nested_resource_ref(did))
           delete parent;
         // Unregister ourselves with our row source
@@ -17351,6 +17348,7 @@ namespace Legion {
       assert(currently_active);
       currently_active = false;
 #endif
+      parent->remove_child(row_source->color);
       invalidate_version_managers();
       // Remove gc references on all of our child nodes
       // We should not need a lock at this point since nobody else should

@@ -49,7 +49,7 @@ namespace Realm {
     /*static*/ const Processor Processor::NO_PROC = { 0 }; 
 
   namespace ThreadLocal {
-    REALM_THREAD_LOCAL Processor current_processor;
+    REALM_THREAD_LOCAL Processor current_processor = { 0 };
     
     // if nonzero, prevents application thread from yielding execution
     //  resources on an Event wait
@@ -707,9 +707,10 @@ namespace Realm {
       task_queue.enqueue_task(task);
     }
 
-    void ProcessorGroupImpl::enqueue_tasks(Task::TaskList& tasks)
+    void ProcessorGroupImpl::enqueue_tasks(Task::TaskList& tasks,
+					   size_t num_tasks)
     {
-      task_queue.enqueue_tasks(tasks);
+      task_queue.enqueue_tasks(tasks, num_tasks);
     }
 
     void ProcessorGroupImpl::add_to_group(ProcessorGroupImpl *group)
@@ -792,7 +793,8 @@ namespace Realm {
     EventImpl::add_waiter(wait_on, this);
   }
 
-  void ProcessorGroupImpl::DeferredDestroy::event_triggered(bool poisoned)
+  void ProcessorGroupImpl::DeferredDestroy::event_triggered(bool poisoned,
+							    TimeLimit work_until)
   {
     assert(!poisoned);
     pg->destroy();
@@ -888,7 +890,7 @@ namespace Realm {
       assert(0);
     }
 
-    void RemoteProcessor::enqueue_tasks(Task::TaskList& tasks)
+    void RemoteProcessor::enqueue_tasks(Task::TaskList& tasks, size_t num_tasks)
     {
       // should never be called
       assert(0);
@@ -1009,9 +1011,9 @@ namespace Realm {
     task_queue.enqueue_task(task);
   }
 
-  void LocalTaskProcessor::enqueue_tasks(Task::TaskList& tasks)
+  void LocalTaskProcessor::enqueue_tasks(Task::TaskList& tasks, size_t num_tasks)
   {
-    task_queue.enqueue_tasks(tasks);
+    task_queue.enqueue_tasks(tasks, num_tasks);
   }
 
   void LocalTaskProcessor::spawn_task(Processor::TaskFuncID func_id,
@@ -1141,7 +1143,9 @@ namespace Realm {
   //
 
   LocalCPUProcessor::LocalCPUProcessor(Processor _me, CoreReservationSet& crs,
-				       size_t _stack_size, bool _force_kthreads)
+				       size_t _stack_size, bool _force_kthreads,
+				       BackgroundWorkManager *bgwork,
+				       long long bgwork_timeslice)
     : LocalTaskProcessor(_me, Processor::LOC_PROC)
   {
     CoreReservationParameters params;
@@ -1158,13 +1162,18 @@ namespace Realm {
 #ifdef REALM_USE_USER_THREADS
     if(!_force_kthreads) {
       UserThreadTaskScheduler *sched = new UserThreadTaskScheduler(me, *core_rsrv);
-      // no config settings we want to tweak yet
+      if(bgwork_timeslice > 0)
+	sched->configure_bgworker(bgwork, bgwork_timeslice, -1 /*numa domain*/);
+
       set_scheduler(sched);
     } else
 #endif
     {
       KernelThreadTaskScheduler *sched = new KernelThreadTaskScheduler(me, *core_rsrv);
       sched->cfg_max_idle_workers = 3; // keep a few idle threads around
+      if(bgwork_timeslice > 0)
+	sched->configure_bgworker(bgwork, bgwork_timeslice, -1 /*numa domain*/);
+
       set_scheduler(sched);
     }
   }
@@ -1181,7 +1190,9 @@ namespace Realm {
   //
 
   LocalUtilityProcessor::LocalUtilityProcessor(Processor _me, CoreReservationSet& crs,
-					       size_t _stack_size, bool _force_kthreads, bool _pin_util_proc)
+					       size_t _stack_size, bool _force_kthreads, bool _pin_util_proc,
+					       BackgroundWorkManager *bgwork,
+					       long long bgwork_timeslice)
     : LocalTaskProcessor(_me, Processor::UTIL_PROC)
   {
     CoreReservationParameters params;
@@ -1206,13 +1217,17 @@ namespace Realm {
 #ifdef REALM_USE_USER_THREADS
     if(!_force_kthreads) {
       UserThreadTaskScheduler *sched = new UserThreadTaskScheduler(me, *core_rsrv);
-      // no config settings we want to tweak yet
+      if(bgwork_timeslice > 0)
+	sched->configure_bgworker(bgwork, bgwork_timeslice, -1 /*numa domain*/);
+
       set_scheduler(sched);
     } else
 #endif
     {
       KernelThreadTaskScheduler *sched = new KernelThreadTaskScheduler(me, *core_rsrv);
-      // no config settings we want to tweak yet
+      if(bgwork_timeslice > 0)
+	sched->configure_bgworker(bgwork, bgwork_timeslice, -1 /*numa domain*/);
+
       set_scheduler(sched);
     }
   }

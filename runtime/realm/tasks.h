@@ -29,6 +29,7 @@
 #include "realm/bytearray.h"
 #include "realm/atomics.h"
 #include "realm/mutex.h"
+#include "realm/bgwork.h"
 
 namespace Realm {
 
@@ -84,7 +85,7 @@ namespace Realm {
 	DeferredSpawn(void);
 	void setup(ProcessorImpl *_proc, Task *_task, Event _wait_on);
         void defer(EventImpl *_wait_impl, EventImpl::gen_t _wait_gen);
-	virtual void event_triggered(bool poisoned);
+	virtual void event_triggered(bool poisoned, TimeLimit work_until);
 	virtual void print(std::ostream& os) const;
 	virtual Event get_finish_event(void) const;
 
@@ -100,13 +101,24 @@ namespace Realm {
 	Mutex pending_list_mutex;
 	TaskList pending_list;
 	bool is_triggered, is_poisoned;
+	size_t list_length;
       };
       DeferredSpawn deferred_spawn;
       
     protected:
       virtual void mark_completed(void);
 
+      virtual Status::Result get_state(void);
+
       Thread *executing_thread;
+
+      // to spread out the cost of marking a long list of tasks ready, we
+      //  keep a 'marked_ready' bit in the head task of the list and the rest
+      //  have a pointer to the head task (which uses a uintptr_t so we can
+      //  borrow the bottom bit for avoiding races)
+      atomic<bool> marked_ready;
+    public: // HACK for debug - should be protected
+      atomic<uintptr_t> pending_head;
     };
 
     class TaskQueue {
@@ -145,7 +157,7 @@ namespace Realm {
 				 int& task_priority);
 
       void enqueue_task(Task *task);
-      void enqueue_tasks(Task::TaskList& tasks);
+      void enqueue_tasks(Task::TaskList& tasks, size_t num_tasks);
     };
 
     // an internal task is an arbitrary blob of work that needs to happen on
@@ -177,6 +189,10 @@ namespace Realm {
       virtual void add_task_queue(TaskQueue *queue);
 
       virtual void remove_task_queue(TaskQueue *queue);
+
+      virtual void configure_bgworker(BackgroundWorkManager *manager,
+				      long long max_timeslice,
+				      int numa_domain);
 
       virtual void start(void) = 0;
       virtual void shutdown(void) = 0;
@@ -243,6 +259,8 @@ namespace Realm {
 	WorkCounter(void);
 	~WorkCounter(void);
 
+	void set_interrupt_flag(atomic<bool> *_interrupt_flag);
+
 	// called whenever new work is available
 	void increment_counter(void);
 
@@ -260,6 +278,7 @@ namespace Realm {
 	// 64-bit counters are used to avoid dealing with wrap-around cases
 	// consider trying to fit in 32 to use futexes?
 	atomic<long long> counter, wait_value;
+	atomic<bool> *interrupt_flag;
 	Mutex mutex;
 	CondVar condvar;
       };
@@ -295,6 +314,10 @@ namespace Realm {
 
       WorkCounterUpdater<TaskQueue> wcu_task_queues;
       WorkCounterUpdater<ResumableQueue> wcu_resume_queue;
+
+      BackgroundWorkManager::Worker bgworker;
+      atomic<bool> bgworker_interrupt;
+      long long max_bgwork_timeslice;
 
     public:
       // various configurable settings

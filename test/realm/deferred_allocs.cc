@@ -570,9 +570,13 @@ void top_level_task(const void *args, size_t arglen,
 			   "3 a1 s0 a2 s1 d0 d1 a2 a1 t1 s3 t0 s2");
 #endif
 
-      // test queuing up of chains of allocations that are not currently
-      //  possible but will be once their preconditions trigger
-      alloc_chain_test(m, p, 4, 10);
+      // workaround for issue 892: don't attempt alloc chain test on remote
+      //  memories for now
+      if(m.address_space() == p.address_space()) {
+	// test queuing up of chains of allocations that are not currently
+	//  possible but will be once their preconditions trigger
+	alloc_chain_test(m, p, 4, 10);
+      }
     }
 
 #ifdef RANDOM_TESTS

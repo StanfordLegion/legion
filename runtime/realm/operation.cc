@@ -31,11 +31,12 @@ namespace Realm {
   Operation::~Operation(void)
   {
     // delete all of the async work items we were given to track
-    for(std::set<AsyncWorkItem *>::iterator it = all_work_items.begin();
-	it != all_work_items.end();
-	it++)
-      delete *it;
-    all_work_items.clear();
+    AsyncWorkItem *awi_head = all_work_items.load();
+    while(awi_head != 0) {
+      AsyncWorkItem *next = awi_head->next_item;
+      delete awi_head;
+      awi_head = next;
+    }
   }
 
   bool Operation::mark_ready(void)
@@ -135,11 +136,11 @@ namespace Realm {
     failed_work_items.fetch_add(1);
 
     // if this operation has async work items, try to cancel them
-    if(!all_work_items.empty()) {
-      for(std::set<AsyncWorkItem *>::iterator it = all_work_items.begin();
-	  it != all_work_items.end();
-	  it++)
-	(*it)->request_cancellation();
+    AsyncWorkItem *awi_head = all_work_items.load();
+    while(awi_head != 0) {
+      AsyncWorkItem *next = awi_head->next_item;
+      awi_head->request_cancellation();
+      awi_head = next;
     }
 
     // can't trigger the finish event immediately if async work items are pending
@@ -225,12 +226,8 @@ namespace Realm {
   {
     // there should be no race conditions for this - state should be WAITING because we
     //  know there's a precondition that didn't successfully trigger
-    Status::Result prev = Status::WAITING;
-    if(state.compare_exchange(prev, Status::CANCELLED)) {
-      status.result = Status::CANCELLED;
-      status.error_code = Faults::ERROR_POISONED_PRECONDITION;
-      status.error_details.set(&pre, sizeof(pre));
-
+    if(attempt_cancellation(Faults::ERROR_POISONED_PRECONDITION,
+			    &pre, sizeof(pre))) {
       mark_finished(false /*unsuccessful*/);
     } else {
       assert(0);
@@ -268,8 +265,11 @@ namespace Realm {
 
   void Operation::trigger_finish_event(bool poisoned)
   {
-    if(finish_event)
-      finish_event->trigger(finish_gen, Network::my_node_id, poisoned);
+    if(finish_event) {
+      // don't spend a long time here triggering events
+      finish_event->trigger(finish_gen, Network::my_node_id, poisoned,
+			    TimeLimit::responsive());
+    }
 #ifndef REALM_USE_OPERATION_TABLE
     // no operation table to decrement the refcount, so do it ourselves
     // SJT: should this always be done for operations without finish events?
@@ -293,21 +293,27 @@ namespace Realm {
       timeline.record_create_time();
   }
 
-  std::ostream& operator<<(std::ostream& os, const Operation *op)
+  Operation::Status::Result Operation::get_state(void)
+  {
+    return state.load();
+  }
+
+  std::ostream& operator<<(std::ostream& os, Operation *op)
   {
     op->print(os);
-    os << " status=" << op->state.load()
+    os << " status=" << op->get_state()
        << "(" << op->timeline.ready_time
        << "," << op->timeline.start_time
        << ") work=" << op->pending_work_items.load();
-    if(!op->all_work_items.empty()) {
+    Operation::AsyncWorkItem *awi_head = op->all_work_items.load();
+    if(awi_head != 0) {
       os << " { ";
-      std::set<Operation::AsyncWorkItem *>::const_iterator it = op->all_work_items.begin();
-      (*it)->print(os);
-      while(++it != op->all_work_items.end()) {
-	os << ", ";
-	(*it)->print(os);
-      }
+      do {
+	awi_head->print(os);
+	awi_head = awi_head->next_item;
+	if(awi_head != 0)
+	  os << ", ";
+      } while(awi_head != 0);
       os << " }\n";
     }
     return os;
@@ -328,7 +334,8 @@ namespace Realm {
   {}
 #endif
 
-  void OperationTable::TableEntry::event_triggered(bool poisoned)
+  void OperationTable::TableEntry::event_triggered(bool poisoned,
+						   TimeLimit work_until)
   {
     table->event_triggered(finish_event);
   }

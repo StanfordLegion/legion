@@ -43,6 +43,9 @@
 #include "realm/module.h"
 #include "realm/network.h"
 
+#include "realm/bgwork.h"
+#include "realm/activemsg.h"
+
 namespace Realm {
 
   class ProcessorGroupImpl;
@@ -188,6 +191,7 @@ namespace Realm {
       int concurrent_io_threads;
       size_t sysmem_size, stack_size;
       bool pin_util_procs;
+      long long cpu_bgwork_timeslice, util_bgwork_timeslice;
     };
 
     REGISTER_REALM_MODULE(CoreModule);
@@ -331,6 +335,9 @@ namespace Realm {
 
       CoreMap *core_map;
       CoreReservationSet *core_reservations;
+      BackgroundWorkManager bgwork;
+      IncomingMessageManager *message_manager;
+      EventTriggerNotifier event_triggerer;
 
       OperationTable optable;
 
@@ -340,7 +347,7 @@ namespace Realm {
       public:
 	void defer(RuntimeImpl *_runtime, Event wait_on);
 
-	virtual void event_triggered(bool poisoned);
+	virtual void event_triggered(bool poisoned, TimeLimit work_until);
 	virtual void print(std::ostream& os) const;
 	virtual Event get_finish_event(void) const;
 

@@ -50,13 +50,14 @@ namespace Realm {
     EventImpl::add_waiter(wait_on, this);
   }
 
-  void RegionInstanceImpl::DeferredCreate::event_triggered(bool poisoned)
+  void RegionInstanceImpl::DeferredCreate::event_triggered(bool poisoned,
+							   TimeLimit work_until)
   {
     if(poisoned)
       log_poison.info() << "poisoned deferred instance creation skipped - inst=" << inst;
     
     mem->deferred_creation_triggered(inst, bytes, align,
-				     need_alloc_result, poisoned);
+				     need_alloc_result, poisoned, work_until);
   }
 
   void RegionInstanceImpl::DeferredCreate::print(std::ostream& os) const
@@ -84,12 +85,13 @@ namespace Realm {
     EventImpl::add_waiter(wait_on, this);
   }
 
-  void RegionInstanceImpl::DeferredDestroy::event_triggered(bool poisoned)
+  void RegionInstanceImpl::DeferredDestroy::event_triggered(bool poisoned,
+							    TimeLimit work_until)
   {
     if(poisoned)
       log_poison.info() << "poisoned deferred instance destruction skipped - POSSIBLE LEAK - inst=" << inst;
     
-    mem->deferred_destruction_triggered(inst, poisoned);
+    mem->deferred_destruction_triggered(inst, poisoned, work_until);
   }
 
   void RegionInstanceImpl::DeferredDestroy::print(std::ostream& os) const
@@ -980,8 +982,8 @@ namespace Realm {
       }
     }
 
-  void RegionInstanceImpl::notify_allocation(MemoryImpl::AllocationResult result,
-					     size_t offset)
+    void RegionInstanceImpl::notify_allocation(MemoryImpl::AllocationResult result,
+					       size_t offset, TimeLimit work_until)
     {
       using namespace ProfilingMeasurements;
 
@@ -1062,7 +1064,7 @@ namespace Realm {
 	measurements.clear();
 
 	if(ready_event.exists())
-	  GenEventImpl::trigger(ready_event, true /*poisoned*/);
+	  GenEventImpl::trigger(ready_event, true /*poisoned*/, work_until);
 	return;
       }
 
@@ -1141,7 +1143,7 @@ namespace Realm {
 	}
       }
       if(ready_event.exists())
-	GenEventImpl::trigger(ready_event, false /*!poisoned*/);
+	GenEventImpl::trigger(ready_event, false /*!poisoned*/, work_until);
 
       // metadata is now valid and can be shared
       NodeSet early_reqs;
@@ -1260,7 +1262,8 @@ namespace Realm {
     /*static*/ void InstanceMetadataPrefetchRequest::handle_message(NodeID sender,
 								    const InstanceMetadataPrefetchRequest& msg,
 								    const void *data,
-								    size_t datalen)
+								    size_t datalen,
+								    TimeLimit work_until)
     {
       // make a local request and trigger the remote event based on the local one
       RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(msg.inst);
@@ -1275,7 +1278,7 @@ namespace Realm {
 	m->add_precondition(e);
 	m->arm_merger();
       } else {
-	GenEventImpl::trigger(msg.valid_event, false /*!poisoned*/);
+	GenEventImpl::trigger(msg.valid_event, false /*!poisoned*/, work_until);
       }	
     }
 

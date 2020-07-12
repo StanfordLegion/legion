@@ -900,7 +900,8 @@ namespace Realm {
     EventImpl::add_waiter(wait_on, this);
   }
 
-  void SubgraphImpl::DeferredDestroy::event_triggered(bool poisoned)
+  void SubgraphImpl::DeferredDestroy::event_triggered(bool poisoned,
+						      TimeLimit work_until)
   {
     assert(!poisoned);
     subgraph->destroy();

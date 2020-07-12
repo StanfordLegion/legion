@@ -90,7 +90,7 @@ namespace Realm {
 	AutoLock<> al(mutex);
 
 	// remember to add ourselves to the worker if we didn't already have work
-	add_to_worker = pending_copies.empty();
+	add_to_worker = pending_copies.empty() && pending_events.empty();
 
 	pending_copies.push_back(copy);
       }
@@ -139,7 +139,7 @@ namespace Realm {
 	AutoLock<> al(mutex);
 
 	// remember to add ourselves to the worker if we didn't already have work
-	add_to_worker = pending_events.empty();
+	add_to_worker = pending_events.empty() && pending_copies.empty();
 
 	PendingEvent e;
 	e.event = event;
@@ -176,20 +176,30 @@ namespace Realm {
       }
     }
 
+    bool GPUStream::has_work(void) const
+    {
+      return(!pending_events.empty() || !pending_copies.empty());
+    }
+
     // to be called by a worker (that should already have the GPU context
     //   current) - returns true if any work remains
-    bool GPUStream::issue_copies(void)
+    bool GPUStream::issue_copies(TimeLimit work_until)
     {
       while(true) {
+	// if we cause the list to go empty, we stop even if more copies show
+	//  up because we don't want to requeue ourselves twice
+	bool list_exhausted = false;
 	GPUMemcpy *copy = 0;
 	{
 	  AutoLock<> al(mutex);
 
 	  if(pending_copies.empty())
-	    return false;  // no work left
+	    // no copies left, but stream might have other work left
+	    return has_work();
 
 	  copy = pending_copies.front();
 	  pending_copies.pop_front();
+	  list_exhausted = !has_work();
 	}
 
 	{
@@ -200,11 +210,17 @@ namespace Realm {
 	// TODO: recycle these
 	delete copy;
 
-	// no backpressure on copies yet - keep going until list is empty
+	// if the list was exhausted, let the caller know
+	if(list_exhausted)
+	  return false;
+
+	// if we still have work, but time's up, return also
+	if(work_until.is_expired())
+	  return true;
       }
     }
 
-    bool GPUStream::reap_events(void)
+    bool GPUStream::reap_events(TimeLimit work_until)
     {
       // peek at the first event
       CUevent event;
@@ -213,13 +229,15 @@ namespace Realm {
 	AutoLock<> al(mutex);
 
 	if(pending_events.empty())
-	  return false;  // no work left
+	  // no events left, but stream might have other work left
+	  return has_work();
 
 	event = pending_events.front().event;
 	event_valid = true;
       }
 
       // we'll keep looking at events until we find one that hasn't triggered
+      bool work_left = true;
       while(event_valid) {
 	CUresult res = cuEventQuery(event);
 
@@ -257,9 +275,10 @@ namespace Realm {
 	  notification = e.notification;
 	  pending_events.pop_front();
 
-	  if(pending_events.empty())
+	  if(pending_events.empty()) {
 	    event_valid = false;
-	  else
+	    work_left = has_work();
+	  } else
 	    event = pending_events.front().event;
 	}
 
@@ -271,10 +290,15 @@ namespace Realm {
 
 	if(notification)
 	  notification->request_completed();
+
+	// don't repeat if we're out of time
+	if(event_valid && work_until.is_expired())
+	  return true;
       }
 
-      // if we get all the way to here, we're (temporarily, at least) out of work
-      return false;
+      // if we get here, we ran out of events, but there might have been
+      //  other kinds of work that we need to let the caller know about
+      return work_left;
     }
 
 
@@ -1588,6 +1612,12 @@ namespace Realm {
     //  application's calls, and the cuda module needs to know that)
     /*extern*/ bool cudart_hijack_active = false;
 
+    // for most CUDART API entry points, calling them from a non-GPU task is
+    //  a fatal error - for others (e.g. cudaDeviceSynchronize), it's either
+    //  silently permitted (0), warned (1), or a fatal error (2) based on this
+    //  setting
+    /*extern*/ int cudart_hijack_nongpu_sync = 2;
+
     // used in GPUTaskScheduler<T>::execute_task below
     static bool already_issued_hijack_warning = false;
 #endif
@@ -2077,8 +2107,11 @@ namespace Realm {
     }
 
     GPUWorker::GPUWorker(void)
-      : condvar(lock)
-      , core_rsrv(0), worker_thread(0), worker_shutdown_requested(false)
+      : BackgroundWorkItem("gpu worker")
+      , condvar(lock)
+      , core_rsrv(0), worker_thread(0)
+      , thread_sleeping(false)
+      , worker_shutdown_requested(false)
     {}
 
     GPUWorker::~GPUWorker(void)
@@ -2090,6 +2123,9 @@ namespace Realm {
     void GPUWorker::start_background_thread(Realm::CoreReservationSet &crs,
 					    size_t stack_size)
     {
+      // shouldn't be doing this if we've registered as a background work item
+      assert(manager == 0);
+
       core_rsrv = new Realm::CoreReservation("GPU worker thread", crs,
 					     Realm::CoreReservationParameters());
 
@@ -2106,8 +2142,11 @@ namespace Realm {
     {
       {
 	AutoLock<> al(lock);
-	worker_shutdown_requested = true;
-	condvar.broadcast();
+	worker_shutdown_requested.store(true);
+	if(thread_sleeping) {
+	  thread_sleeping = false;
+	  condvar.broadcast();
+	}
       }
 
       worker_thread->join();
@@ -2120,60 +2159,132 @@ namespace Realm {
 
     void GPUWorker::add_stream(GPUStream *stream)
     {
-      AutoLock<> al(lock);
+      bool was_empty = false;
+      {
+	AutoLock<> al(lock);
 
-      // if the stream is already in the set, nothing to do
-      if(active_streams.count(stream) > 0)
-	return;
+#ifdef DEBUG_REALM
+	// insist that the caller de-duplicate these
+	for(ActiveStreamQueue::iterator it = active_streams.begin();
+	    it != active_streams.end();
+	    ++it)
+	  assert(*it != stream);
+#endif
+	was_empty = active_streams.empty();
+	active_streams.push_back(stream);
 
-      active_streams.insert(stream);
+	if(thread_sleeping) {
+	  thread_sleeping = false;
+	  condvar.broadcast();
+	}
+      }
 
-      condvar.broadcast();
+      // if we're a background work item, request attention if needed
+      if(was_empty && (manager != 0))
+	make_active();
+    }
+
+    void GPUWorker::do_work(TimeLimit work_until)
+    {
+      // pop the first stream off the list and immediately become re-active
+      //  if more streams remain
+      GPUStream *stream = 0;
+      bool still_not_empty = false;
+      {
+	AutoLock<> al(lock);
+
+	assert(!active_streams.empty());
+	stream = active_streams.front();
+	active_streams.pop_front();
+	still_not_empty = !active_streams.empty();
+      }
+      if(still_not_empty)
+	make_active();
+
+      // do work for the stream we popped, paying attention to the cutoff
+      //  time
+      bool requeue_stream = false;
+
+      if(stream->reap_events(work_until)) {
+	// still work (e.g. copies) to do
+	if(work_until.is_expired()) {
+	  // out of time - save it for later
+	  requeue_stream = true;
+	} else {
+	  if(stream->issue_copies(work_until))
+	    requeue_stream = true;
+	}
+      }
+
+      bool was_empty = false;
+      if(requeue_stream) {
+	AutoLock<> al(lock);
+
+	was_empty = active_streams.empty();
+	active_streams.push_back(stream);
+      }
+      // note that this can happen even if we called make_active above!
+      if(was_empty)
+	make_active();
     }
 
     bool GPUWorker::process_streams(bool sleep_on_empty)
     {
-      // we start by grabbing the list of active streams, replacing it with an
-      //  empty list - this way we don't have to hold the lock the whole time
-      // for any stream that we leave work on, we'll add it back in
-      std::set<GPUStream *> streams;
-      {
-	AutoLock<> al(lock);
+      GPUStream *cur_stream = 0;
+      GPUStream *first_stream = 0;
+      bool requeue_stream = false;
 
-	while(active_streams.empty()) {
-	  if(!sleep_on_empty || worker_shutdown_requested) return false;
-	  condvar.wait();
+      while(true) {
+	// grab the front stream in the list
+	{
+	  AutoLock<> al(lock);
+
+	  // if we didn't finish work on the stream from the previous
+	  //  iteration, add it back to the end
+	  if(requeue_stream)
+	    active_streams.push_back(cur_stream);
+
+	  while(active_streams.empty()) {
+	    // sleep only if this was the first attempt to get a stream
+	    if(sleep_on_empty && (first_stream == 0) &&
+	       !worker_shutdown_requested.load()) {
+	      thread_sleeping = true;
+	      condvar.wait();
+	    } else
+	      return false;
+	  }
+
+	  cur_stream = active_streams.front();
+	  // did we wrap around?  if so, stop for now
+	  if(cur_stream == first_stream)
+	    return true;
+
+	  active_streams.pop_front();
+	  if(!first_stream)
+	    first_stream = cur_stream;
 	}
 
-	streams.swap(active_streams);
+	// and do some work for it
+	requeue_stream = false;
+
+	// both reap_events and issue_copies report whether any kind of work
+	//  remains, so we have to be careful to avoid double-requeueing -
+	//  if the first call returns false, we can't try the second one
+	//  because we may be doing (or failing to do and then requeuing)
+	//  somebody else's work
+	if(!cur_stream->reap_events(TimeLimit())) continue;
+	if(!cur_stream->issue_copies(TimeLimit())) continue;
+
+	// if we fall all the way through, the queues never went empty at
+	//  any time, so it's up to us to requeue
+	requeue_stream = true;
       }
-
-      bool any_work_left = false;
-      for(std::set<GPUStream *>::const_iterator it = streams.begin();
-	  it != streams.end();
-	  it++) {
-	GPUStream *s = *it;
-	bool stream_work_left = false;
-
-	if(s->issue_copies())
-	  stream_work_left = true;
-
-	if(s->reap_events())
-	  stream_work_left = true;
-
-	if(stream_work_left) {
-	  add_stream(s);
-	  any_work_left = true;
-	}
-      }
-
-      return any_work_left;
     }
 
     void GPUWorker::thread_main(void)
     {
       // TODO: consider busy-waiting in some cases to reduce latency?
-      while(!worker_shutdown_requested) {
+      while(!worker_shutdown_requested.load()) {
 	bool work_left = process_streams(true);
 
 	// if there was work left, yield our thread for now to avoid a tight spin loop
@@ -2199,14 +2310,11 @@ namespace Realm {
       virtual void wait(void);
 
     public:
-      Mutex mutex;
-      CondVar cv;
-      bool completed;
+      atomic<bool> completed;
     };
 
     BlockingCompletionNotification::BlockingCompletionNotification(void)
-      : cv(mutex)
-      , completed(false)
+      : completed(false)
     {}
 
     BlockingCompletionNotification::~BlockingCompletionNotification(void)
@@ -2214,19 +2322,24 @@ namespace Realm {
 
     void BlockingCompletionNotification::request_completed(void)
     {
-      AutoLock<> a(mutex);
-
-      assert(!completed);
-      completed = true;
-      cv.broadcast();
+      // no condition variable needed - the waiter is spinning
+      completed.store(true);
     }
 
     void BlockingCompletionNotification::wait(void)
     {
-      AutoLock<> a(mutex);
+      // blocking completion is horrible and should die as soon as possible
+      // in the mean time, we need to assist with background work to avoid
+      //  the risk of deadlock
+      // note that this means you can get NESTED blocking completion
+      //  notifications, which is just one of the ways this is horrible
+      BackgroundWorkManager::Worker worker;
 
-      while(!completed)
-	cv.wait();
+      worker.set_manager(&(get_runtime()->bgwork));
+
+      while(!completed.load())
+	worker.do_work(-1 /* as long as it takes */,
+		       &completed /* until this is set */);
     }
 	
 
@@ -3049,7 +3162,7 @@ namespace Realm {
       , cfg_fb_mem_size(256 << 20)
       , cfg_num_gpus(0)
       , cfg_gpu_streams(12)
-      , cfg_use_background_workers(true)
+      , cfg_use_worker_threads(false)
       , cfg_use_shared_worker(true)
       , cfg_pin_sysmem(true)
       , cfg_fences_use_callbacks(false)
@@ -3144,13 +3257,15 @@ namespace Realm {
 	  .add_option_int_units("-ll:ib_zsize", m->cfg_zc_ib_size, 'm')
 	  .add_option_int("-ll:gpu", m->cfg_num_gpus)
 	  .add_option_int("-ll:streams", m->cfg_gpu_streams)
+	  .add_option_int("-ll:gpuworkthread", m->cfg_use_worker_threads)
 	  .add_option_int("-ll:gpuworker", m->cfg_use_shared_worker)
 	  .add_option_int("-ll:pin", m->cfg_pin_sysmem)
 	  .add_option_bool("-cuda:callbacks", m->cfg_fences_use_callbacks)
 	  .add_option_bool("-cuda:nohijack", m->cfg_suppress_hijack_warning)
 	  .add_option_int("-cuda:skipgpus", m->cfg_skip_gpu_count)
 	  .add_option_bool("-cuda:skipbusy", m->cfg_skip_busy_gpus)
-	  .add_option_int_units("-cuda:minavailmem", m->cfg_min_avail_mem, 'm');
+	  .add_option_int_units("-cuda:minavailmem", m->cfg_min_avail_mem, 'm')
+	  .add_option_int("-cuda:nongpusync", cudart_hijack_nongpu_sync);
 	
 	bool ok = cp.parse_command_line(cmdline);
 	if(!ok) {
@@ -3172,9 +3287,11 @@ namespace Realm {
       if(cfg_use_shared_worker) {
 	shared_worker = new GPUWorker;
 
-	if(cfg_use_background_workers)
+	if(cfg_use_worker_threads)
 	  shared_worker->start_background_thread(runtime->core_reservation_set(),
 						 1 << 20); // hardcoded worker stack size
+	else
+	  shared_worker->add_to_manager(&(runtime->bgwork));
       }
 
       gpus.resize(cfg_num_gpus);
@@ -3219,9 +3336,11 @@ namespace Realm {
 	} else {
 	  worker = new GPUWorker;
 
-	  if(cfg_use_background_workers)
+	  if(cfg_use_worker_threads)
 	    worker->start_background_thread(runtime->core_reservation_set(),
 					    1 << 20); // hardcoded worker stack size
+	  else
+	    worker->add_to_manager(&(runtime->bgwork));
 	}
 
 	GPU *g = new GPU(this, gpu_info[i], worker, context, cfg_gpu_streams);
@@ -3438,7 +3557,10 @@ namespace Realm {
     {
       // clean up worker(s)
       if(shared_worker) {
-	if(cfg_use_background_workers)
+#ifdef DEBUG_REALM
+	shared_worker->shutdown_work_item();
+#endif
+	if(cfg_use_worker_threads)
 	  shared_worker->shutdown_background_thread();
 
 	delete shared_worker;
@@ -3449,7 +3571,10 @@ namespace Realm {
 	  it++) {
 	GPUWorker *worker = it->second;
 
-	if(cfg_use_background_workers)
+#ifdef DEBUG_REALM
+	worker->shutdown_work_item();
+#endif
+	if(cfg_use_worker_threads)
 	  worker->shutdown_background_thread();
 
 	delete worker;

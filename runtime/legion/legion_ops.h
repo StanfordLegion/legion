@@ -1380,7 +1380,7 @@ namespace Legion {
       virtual IndexSpaceNode* get_collective_space(void) const 
         { return launch_space; }
     public:
-      void enumerate_points(void);
+      void enumerate_points(bool replaying);
       void handle_point_commit(RtEvent point_committed);
       void check_point_requirements(void);
     protected:
@@ -1489,6 +1489,8 @@ namespace Legion {
       FenceOp& operator=(const FenceOp &rhs);
     public:
       Future initialize(InnerContext *ctx, FenceKind kind, bool need_future);
+      inline void add_mapping_applied_condition(RtEvent precondition)
+        { map_applied_conditions.insert(precondition); }
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -3288,7 +3290,7 @@ namespace Legion {
       virtual IndexSpaceNode* get_collective_space(void) const 
         { return launch_space; }
     public:
-      void enumerate_points(void);
+      void enumerate_points(bool replaying);
       void handle_point_commit(void);
       void check_point_requirements(void);
     protected:
