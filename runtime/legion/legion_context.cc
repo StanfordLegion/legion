@@ -5002,6 +5002,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexSpace InnerContext::create_index_space_union(IndexPartition parent,
                                                       const void *realm_color,
+                                                      size_t color_size,
                                                       TypeTag type_tag,
                                         const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
@@ -5024,6 +5025,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexSpace InnerContext::create_index_space_union(IndexPartition parent,
                                                       const void *realm_color,
+                                                      size_t color_size,
                                                       TypeTag type_tag,
                                                       IndexPartition handle)
     //--------------------------------------------------------------------------
@@ -5047,6 +5049,7 @@ namespace Legion {
     IndexSpace InnerContext::create_index_space_intersection(
                                                       IndexPartition parent,
                                                       const void *realm_color,
+                                                      size_t color_size,
                                                       TypeTag type_tag,
                                         const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
@@ -5070,6 +5073,7 @@ namespace Legion {
     IndexSpace InnerContext::create_index_space_intersection(
                                                       IndexPartition parent,
                                                       const void *realm_color,
+                                                      size_t color_size,
                                                       TypeTag type_tag,
                                                       IndexPartition handle)
     //--------------------------------------------------------------------------
@@ -5093,6 +5097,7 @@ namespace Legion {
     IndexSpace InnerContext::create_index_space_difference(
                                                     IndexPartition parent,
                                                     const void *realm_color,
+                                                    size_t color_size,
                                                     TypeTag type_tag,
                                                     IndexSpace initial,
                                         const std::vector<IndexSpace> &handles)
@@ -12899,11 +12904,24 @@ namespace Legion {
     IndexSpace ReplicateContext::create_index_space_union(
                                                     IndexPartition parent,
                                                     const void *realm_color,
+                                                    size_t color_size,
                                                     TypeTag type_tag,
                                         const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_CREATE_INDEX_SPACE_UNION);
+        hasher.hash(parent);
+        hasher.hash(realm_color, color_size);
+        hasher.hash(type_tag);
+        for (std::vector<IndexSpace>::const_iterator it = 
+              handles.begin(); it != handles.end(); it++)
+          hasher.hash(*it);
+        verify_replicable(hasher, "create_index_space_union");
+      }
 #ifdef DEBUG_LEGION
       log_index.debug("Creating index space union in task %s (ID %lld)", 
                       get_task_name(), get_unique_id());
@@ -12922,11 +12940,22 @@ namespace Legion {
     IndexSpace ReplicateContext::create_index_space_union(
                                                       IndexPartition parent,
                                                       const void *realm_color,
+                                                      size_t color_size,
                                                       TypeTag type_tag,
                                                       IndexPartition handle)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_CREATE_INDEX_SPACE_UNION);
+        hasher.hash(parent);
+        hasher.hash(realm_color, color_size);
+        hasher.hash(type_tag);
+        hasher.hash(handle);
+        verify_replicable(hasher, "create_index_space_union");
+      }
 #ifdef DEBUG_LEGION
       log_index.debug("Creating index space union in task %s (ID %lld)", 
                       get_task_name(), get_unique_id());
@@ -12945,11 +12974,24 @@ namespace Legion {
     IndexSpace ReplicateContext::create_index_space_intersection(
                                                     IndexPartition parent,
                                                     const void *realm_color,
+                                                    size_t color_size,
                                                     TypeTag type_tag,
                                         const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_CREATE_INDEX_SPACE_INTERSECTION);
+        hasher.hash(parent);
+        hasher.hash(realm_color, color_size);
+        hasher.hash(type_tag);
+        for (std::vector<IndexSpace>::const_iterator it = 
+              handles.begin(); it != handles.end(); it++)
+          hasher.hash(*it);
+        verify_replicable(hasher, "create_index_space_intersection");
+      }
 #ifdef DEBUG_LEGION
       log_index.debug("Creating index space intersection in task %s (ID %lld)", 
                       get_task_name(), get_unique_id());
@@ -12968,11 +13010,22 @@ namespace Legion {
     IndexSpace ReplicateContext::create_index_space_intersection(
                                                     IndexPartition parent,
                                                     const void *realm_color,
+                                                    size_t color_size,
                                                     TypeTag type_tag,
                                                     IndexPartition handle)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_CREATE_INDEX_SPACE_INTERSECTION);
+        hasher.hash(parent);
+        hasher.hash(realm_color, color_size);
+        hasher.hash(type_tag);
+        hasher.hash(handle);
+        verify_replicable(hasher, "create_index_space_intersection");
+      }
 #ifdef DEBUG_LEGION
       log_index.debug("Creating index space intersection in task %s (ID %lld)", 
                       get_task_name(), get_unique_id());
@@ -12991,12 +13044,26 @@ namespace Legion {
     IndexSpace ReplicateContext::create_index_space_difference(
                                                     IndexPartition parent,
                                                     const void *realm_color,
+                                                    size_t color_size,
                                                     TypeTag type_tag,
                                                     IndexSpace initial,
                                         const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_CREATE_INDEX_SPACE_DIFFERENCE);
+        hasher.hash(parent);
+        hasher.hash(realm_color, color_size);
+        hasher.hash(type_tag);
+        hasher.hash(initial);
+        for (std::vector<IndexSpace>::const_iterator it = 
+              handles.begin(); it != handles.end(); it++)
+          hasher.hash(*it);
+        verify_replicable(hasher, "create_index_space_difference");
+      }
 #ifdef DEBUG_LEGION
       log_index.debug("Creating index space difference in task %s (ID %lld)", 
                       get_task_name(), get_unique_id());
@@ -13264,6 +13331,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_CREATE_FIELD_SPACE);
+        verify_replicable(hasher, "create_field_space");
+      }
       // Seed this with the first field space broadcast
       if (pending_field_spaces.empty())
         increase_pending_field_spaces(1/*count*/, false/*double*/);
@@ -13426,6 +13499,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication && !unordered)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_DESTROY_FIELD_SPACE);
+        hasher.hash(handle);
+        verify_replicable(hasher, "destroy_field_space");
+      }
       if (!handle.exists())
         return;
 #ifdef DEBUG_LEGION
@@ -13504,6 +13584,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_ALLOCATE_FIELD);
+        hasher.hash(space);
+        hasher.hash(field_size);
+        hasher.hash(fid);
+        hasher.hash(local);
+        hasher.hash(serdez_id);
+        verify_replicable(hasher, "allocate_field");
+      }
       if (local)
         REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
                       "Local field creation is not currently supported "
@@ -13615,6 +13706,19 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_ALLOCATE_FIELD);
+        hasher.hash(space);
+        const size_t *size = static_cast<size_t*>(
+              field_size.impl->get_untyped_result(true,NULL,true/*internal*/));
+        hasher.hash(*size);
+        hasher.hash(fid);
+        hasher.hash(local);
+        hasher.hash(serdez_id);
+        verify_replicable(hasher, "allocate_field");
+      }
       if (local)
         REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
                       "Local field creation is not currently supported "
@@ -13701,6 +13805,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_FREE_FIELD);
+        hasher.hash(space);
+        hasher.hash(fid);
+        verify_replicable(hasher, "free_field");
+      }
       {
         AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
         const std::pair<FieldSpace,FieldID> key(space, fid);
@@ -13739,6 +13851,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_ALLOCATE_FIELDS);
+        hasher.hash(space);
+        for (std::vector<size_t>::const_iterator it = 
+              sizes.begin(); it != sizes.end(); it++)
+          hasher.hash(*it);
+        for (std::vector<FieldID>::const_iterator it = 
+              resulting_fields.begin(); it != resulting_fields.end(); it++)
+          hasher.hash(*it);
+        hasher.hash(local);
+        hasher.hash(serdez_id);
+        verify_replicable(hasher, "allocate_fields");
+      }
       if (local)
         REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
                       "Local field creation is not currently supported "
@@ -13823,6 +13950,25 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_ALLOCATE_FIELDS);
+        hasher.hash(space);
+        for (std::vector<Future>::const_iterator it = 
+              sizes.begin(); it != sizes.end(); it++)
+        {
+          const size_t *size = static_cast<size_t*>(
+                it->impl->get_untyped_result(true,NULL,true/*internal*/));
+          hasher.hash(*size);
+        }
+        for (std::vector<FieldID>::const_iterator it = 
+              resulting_fields.begin(); it != resulting_fields.end(); it++)
+          hasher.hash(*it);
+        hasher.hash(local);
+        hasher.hash(serdez_id);
+        verify_replicable(hasher, "allocate_fields");
+      }
       if (local)
         REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
                       "Local field creation is not currently supported "
@@ -13917,6 +14063,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication && !unordered)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_FREE_FIELDS);
+        hasher.hash(space);
+        for (std::set<FieldID>::const_iterator it = 
+              to_free.begin(); it != to_free.end(); it++)
+          hasher.hash(*it);
+        verify_replicable(hasher, "free_fields");
+      }
       std::set<FieldID> free_now;
       {
         AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
@@ -13964,6 +14120,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_CREATE_LOGICAL_REGION);
+        hasher.hash(index_space);
+        hasher.hash(field_space);
+        hasher.hash(task_local);
+        verify_replicable(hasher, "create_logical_region");
+      }
       // Seed this with the first field space broadcast
       if (pending_region_trees.empty())
         increase_pending_region_trees(1/*count*/, false/*double*/);
@@ -14079,6 +14244,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_CREATE_SHARED_OWNERSHIP);
+        hasher.hash(handle);
+        verify_replicable(hasher, "create_shared_ownership");
+      }
       if (!handle.exists())
         return;
       if (!runtime->forest->is_top_level_region(handle))
@@ -14108,6 +14280,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication && !unordered)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_DESTROY_LOGICAL_REGION);
+        hasher.hash(handle);
+        verify_replicable(hasher, "destroy_logical_region");
+      }
       if (!handle.exists())
         return;
 #ifdef DEBUG_LEGION
@@ -14179,6 +14358,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_CREATE_FIELD_ALLOCATOR);
+        hasher.hash(handle);
+        verify_replicable(hasher, "create_field_allocator");
+      }
       {
         AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
         std::map<FieldSpace,FieldAllocatorImpl*>::const_iterator finder = 
@@ -14252,6 +14438,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_DESTROY_FIELD_ALLOCATOR);
+        hasher.hash(handle);
+        verify_replicable(hasher, "destroy_field_allocator");
+      }
       bool found = false;
       std::pair<ShardID,bool> result;
       {
@@ -18148,6 +18341,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexSpace LeafContext::create_index_space_union(IndexPartition parent,
                                                      const void *realm_color,
+                                                     size_t color_size,
                                                      TypeTag type_tag,
                                         const std::vector<IndexSpace> &handles) 
     //--------------------------------------------------------------------------
@@ -18161,6 +18355,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexSpace LeafContext::create_index_space_union(IndexPartition parent,
                                                      const void *realm_color,
+                                                     size_t color_size,
                                                      TypeTag type_tag,
                                                      IndexPartition handle)
     //--------------------------------------------------------------------------
@@ -18175,6 +18370,7 @@ namespace Legion {
     IndexSpace LeafContext::create_index_space_intersection(
                                                      IndexPartition parent,
                                                      const void *realm_color,
+                                                     size_t color_size,
                                                      TypeTag type_tag,
                                         const std::vector<IndexSpace> &handles) 
     //--------------------------------------------------------------------------
@@ -18189,6 +18385,7 @@ namespace Legion {
     IndexSpace LeafContext::create_index_space_intersection(
                                                      IndexPartition parent,
                                                      const void *realm_color,
+                                                     size_t color_size,
                                                      TypeTag type_tag,
                                                      IndexPartition handle)
     //--------------------------------------------------------------------------
@@ -18203,6 +18400,7 @@ namespace Legion {
     IndexSpace LeafContext::create_index_space_difference(
                                                   IndexPartition parent,
                                                   const void *realm_color,
+                                                  size_t color_size,
                                                   TypeTag type_tag,
                                                   IndexSpace initial,
                                           const std::vector<IndexSpace> &handles)
@@ -19867,61 +20065,66 @@ namespace Legion {
     IndexSpace InlineContext::create_index_space_union(
                                                   IndexPartition parent,
                                                   const void *realm_color,
+                                                  size_t color_size,
                                                   TypeTag type_tag,
                                         const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
     {
       return enclosing->create_index_space_union(parent, realm_color, 
-                                                 type_tag, handles);
+                                                 color_size, type_tag, handles);
     }
 
     //--------------------------------------------------------------------------
     IndexSpace InlineContext::create_index_space_union(
                                                   IndexPartition parent,
                                                   const void *realm_color,
+                                                  size_t color_size,
                                                   TypeTag type_tag,
                                                   IndexPartition handle)
     //--------------------------------------------------------------------------
     {
       return enclosing->create_index_space_union(parent, realm_color, 
-                                                 type_tag, handle);
+                                                 color_size, type_tag, handle);
     }
 
     //--------------------------------------------------------------------------
     IndexSpace InlineContext::create_index_space_intersection(
                                                   IndexPartition parent,
                                                   const void *realm_color,
+                                                  size_t color_size,
                                                   TypeTag type_tag,
                                         const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
     {
       return enclosing->create_index_space_intersection(parent, realm_color, 
-                                                        type_tag, handles);
+                                              color_size, type_tag, handles);
     }
 
     //--------------------------------------------------------------------------
     IndexSpace InlineContext::create_index_space_intersection(
                                                   IndexPartition parent,
                                                   const void *realm_color,
+                                                  size_t color_size,
                                                   TypeTag type_tag,
                                                   IndexPartition handle)
     //--------------------------------------------------------------------------
     {
       return enclosing->create_index_space_intersection(parent, realm_color, 
-                                                        type_tag, handle);
+                                              color_size, type_tag, handle);
     }
 
     //--------------------------------------------------------------------------
     IndexSpace InlineContext::create_index_space_difference(
                                                   IndexPartition parent,
                                                   const void *realm_color,
+                                                  size_t color_size,
                                                   TypeTag type_tag,
                                                   IndexSpace initial,
                                         const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
     {
       return enclosing->create_index_space_difference(parent, realm_color, 
-                                                    type_tag, initial, handles);
+                                  color_size, type_tag, initial, handles);
     }
 
     //--------------------------------------------------------------------------

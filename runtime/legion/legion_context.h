@@ -256,26 +256,31 @@ namespace Legion {
       virtual IndexSpace create_index_space_union(
                                             IndexPartition parent,
                                             const void *realm_color,
+                                            size_t color_size,
                                             TypeTag type_tag,
                                 const std::vector<IndexSpace> &handles) = 0;
       virtual IndexSpace create_index_space_union(
                                             IndexPartition parent,
                                             const void *realm_color,
+                                            size_t color_size,
                                             TypeTag type_tag,
                                             IndexPartition handle) = 0;
       virtual IndexSpace create_index_space_intersection(
                                             IndexPartition parent,
                                             const void *realm_color,
+                                            size_t color_size,
                                             TypeTag type_tag,
                                 const std::vector<IndexSpace> &handles) = 0;
       virtual IndexSpace create_index_space_intersection(
                                             IndexPartition parent,
                                             const void *realm_color,
+                                            size_t color_size,
                                             TypeTag type_tag,
                                             IndexPartition handle) = 0;
       virtual IndexSpace create_index_space_difference(
                                             IndexPartition parent,
                                             const void *realm_color,
+                                            size_t color_size,
                                             TypeTag type_tag,
                                             IndexSpace initial,
                                 const std::vector<IndexSpace> &handles) = 0;
@@ -1026,26 +1031,31 @@ namespace Legion {
       virtual IndexSpace create_index_space_union(
                                             IndexPartition parent,
                                             const void *realm_color,
+                                            size_t color_size,
                                             TypeTag type_tag,
                                 const std::vector<IndexSpace> &handles);
       virtual IndexSpace create_index_space_union(
                                             IndexPartition parent,
                                             const void *realm_color,
+                                            size_t color_size,
                                             TypeTag type_tag,
                                             IndexPartition handle);
       virtual IndexSpace create_index_space_intersection(
                                             IndexPartition parent,
                                             const void *realm_color,
+                                            size_t color_size,
                                             TypeTag type_tag,
                                 const std::vector<IndexSpace> &handles);
       virtual IndexSpace create_index_space_intersection(
                                             IndexPartition parent,
                                             const void *realm_color,
+                                            size_t color_size,
                                             TypeTag type_tag,
                                             IndexPartition handle);
       virtual IndexSpace create_index_space_difference(
                                             IndexPartition parent,
                                             const void *realm_color,
+                                            size_t color_size,
                                             TypeTag type_tag,
                                             IndexSpace initial,
                                 const std::vector<IndexSpace> &handles);
@@ -1545,6 +1555,19 @@ namespace Legion {
         REPLICATE_CREATE_PARTITION_BY_PREIMAGE,
         REPLICATE_CREATE_PARTITION_BY_PREIMAGE_RANGE,
         REPLICATE_CREATE_PENDING_PARTITION,
+        REPLICATE_CREATE_INDEX_SPACE_UNION,
+        REPLICATE_CREATE_INDEX_SPACE_INTERSECTION,
+        REPLICATE_CREATE_INDEX_SPACE_DIFFERENCE,
+        REPLICATE_CREATE_FIELD_SPACE,
+        REPLICATE_DESTROY_FIELD_SPACE,
+        REPLICATE_ALLOCATE_FIELD,
+        REPLICATE_FREE_FIELD,
+        REPLICATE_ALLOCATE_FIELDS,
+        REPLICATE_FREE_FIELDS,
+        REPLICATE_CREATE_LOGICAL_REGION,
+        REPLICATE_DESTROY_LOGICAL_REGION,
+        REPLICATE_CREATE_FIELD_ALLOCATOR,
+        REPLICATE_DESTROY_FIELD_ALLOCATOR,
       };
     public:
       ReplicateContext(Runtime *runtime, ShardTask *owner,int d,bool full_inner,
@@ -1814,26 +1837,31 @@ namespace Legion {
       virtual IndexSpace create_index_space_union(
                                             IndexPartition parent,
                                             const void *realm_color,
+                                            size_t color_size,
                                             TypeTag type_tag,
                                 const std::vector<IndexSpace> &handles);
       virtual IndexSpace create_index_space_union(
                                             IndexPartition parent,
                                             const void *realm_color,
+                                            size_t color_size,
                                             TypeTag type_tag,
                                             IndexPartition handle);
       virtual IndexSpace create_index_space_intersection(
                                             IndexPartition parent,
                                             const void *realm_color,
+                                            size_t color_size,
                                             TypeTag type_tag,
                                 const std::vector<IndexSpace> &handles);
       virtual IndexSpace create_index_space_intersection(
                                             IndexPartition parent,
                                             const void *realm_color,
+                                            size_t color_size,
                                             TypeTag type_tag,
                                             IndexPartition handle);
       virtual IndexSpace create_index_space_difference(
                                             IndexPartition parent,
                                             const void *realm_color,
+                                            size_t color_size,
                                             TypeTag type_tag,
                                             IndexSpace initial,
                                 const std::vector<IndexSpace> &handles);
@@ -2450,26 +2478,31 @@ namespace Legion {
       virtual IndexSpace create_index_space_union(
                                             IndexPartition parent,
                                             const void *realm_color,
+                                            size_t color_size,
                                             TypeTag type_tag,
                                 const std::vector<IndexSpace> &handles);
       virtual IndexSpace create_index_space_union(
                                             IndexPartition parent,
                                             const void *realm_color,
+                                            size_t color_size,
                                             TypeTag type_tag,
                                             IndexPartition handle);
       virtual IndexSpace create_index_space_intersection(
                                             IndexPartition parent,
                                             const void *realm_color,
+                                            size_t color_size,
                                             TypeTag type_tag,
                                 const std::vector<IndexSpace> &handles);
       virtual IndexSpace create_index_space_intersection(
                                             IndexPartition parent,
                                             const void *realm_color,
+                                            size_t color_size,
                                             TypeTag type_tag,
                                             IndexPartition handle);
       virtual IndexSpace create_index_space_difference(
                                             IndexPartition parent,
                                             const void *realm_color,
+                                            size_t color_size,
                                             TypeTag type_tag,
                                             IndexSpace initial,
                                 const std::vector<IndexSpace> &handles);
@@ -2835,26 +2868,31 @@ namespace Legion {
       virtual IndexSpace create_index_space_union(
                                             IndexPartition parent,
                                             const void *realm_color,
+                                            size_t color_size,
                                             TypeTag type_tag,
                                 const std::vector<IndexSpace> &handles);
       virtual IndexSpace create_index_space_union(
                                             IndexPartition parent,
                                             const void *realm_color,
+                                            size_t color_size,
                                             TypeTag type_tag,
                                             IndexPartition handle);
       virtual IndexSpace create_index_space_intersection(
                                             IndexPartition parent,
                                             const void *realm_color,
+                                            size_t color_size,
                                             TypeTag type_tag,
                                 const std::vector<IndexSpace> &handles);
       virtual IndexSpace create_index_space_intersection(
                                             IndexPartition parent,
                                             const void *realm_color,
+                                            size_t color_size,
                                             TypeTag type_tag,
                                             IndexPartition handle);
       virtual IndexSpace create_index_space_difference(
                                             IndexPartition parent,
                                             const void *realm_color,
+                                            size_t color_size,
                                             TypeTag type_tag,
                                             IndexSpace initial,
                                 const std::vector<IndexSpace> &handles);

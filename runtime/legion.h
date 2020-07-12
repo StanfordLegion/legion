@@ -8446,24 +8446,26 @@ namespace Legion {
                                       PartitionKind part_kind, Color color);
       IndexSpace create_index_space_union_internal(Context ctx,
                                       IndexPartition parent,
-                                      const void *realm_color, TypeTag type_tag,
+                                      const void *realm_color,size_t color_size,
+                                      TypeTag type_tag,
                                       const std::vector<IndexSpace> &handles);
       IndexSpace create_index_space_union_internal(Context ctx, 
                                       IndexPartition parent, 
-                                      const void *realm_color, TypeTag type_tag,
-                                      IndexPartition handle);
+                                      const void *realm_color,size_t color_size,
+                                      TypeTag type_tag, IndexPartition handle);
       IndexSpace create_index_space_intersection_internal(Context ctx,
                                       IndexPartition parent,
-                                      const void *realm_color, TypeTag type_tag,
+                                      const void *realm_color,size_t color_size,
+                                      TypeTag type_tag,
                                       const std::vector<IndexSpace> &handles);
       IndexSpace create_index_space_intersection_internal(Context ctx, 
                                       IndexPartition parent, 
-                                      const void *realm_color, TypeTag type_tag,
-                                      IndexPartition handle);
+                                      const void *realm_color,size_t color_size,
+                                      TypeTag type_tag, IndexPartition handle);
       IndexSpace create_index_space_difference_internal(Context ctx,
                                       IndexPartition paretn,
-                                      const void *realm_color, TypeTag type_tag,
-                                      IndexSpace initial,
+                                      const void *realm_color, size_t color_size,
+                                      TypeTag type_tag, IndexSpace initial,
                                       const std::vector<IndexSpace> &handles);
       IndexSpace get_index_subspace_internal(IndexPartition handle, 
                                       const void *realm_color,TypeTag type_tag);

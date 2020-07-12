@@ -4029,8 +4029,8 @@ namespace Legion {
         case DIM: \
           { \
             Point<DIM,coord_t> point = color; \
-            return ctx->create_index_space_union(parent, &point, \
-                                     TYPE_TAG_##DIM##D, handles); \
+            return ctx->create_index_space_union(parent, &point, sizeof(point),\
+                                                 TYPE_TAG_##DIM##D, handles); \
           }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -4042,11 +4042,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space_union_internal(Context ctx,
-                    IndexPartition parent, const void *color, TypeTag type_tag,
-                    const std::vector<IndexSpace> &handles)
+                    IndexPartition parent, const void *color, size_t color_size,
+                    TypeTag type_tag, const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
     {
-      return ctx->create_index_space_union(parent, color, type_tag, handles);
+      return ctx->create_index_space_union(parent, color, color_size, 
+                                           type_tag, handles);
     }
 
     //--------------------------------------------------------------------------
@@ -4061,8 +4062,8 @@ namespace Legion {
         case DIM: \
           { \
             Point<DIM,coord_t> point = color; \
-            return ctx->create_index_space_union(parent, &point, \
-                                     TYPE_TAG_##DIM##D, handle); \
+            return ctx->create_index_space_union(parent, &point, sizeof(point),\
+                                                 TYPE_TAG_##DIM##D, handle); \
           }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -4075,10 +4076,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space_union_internal(Context ctx,
                         IndexPartition parent, const void *realm_color, 
-                        TypeTag type_tag, IndexPartition handle)
+                        size_t size, TypeTag type_tag, IndexPartition handle)
     //--------------------------------------------------------------------------
     {
-      return ctx->create_index_space_union(parent, realm_color,type_tag,handle);
+      return ctx->create_index_space_union(parent, realm_color, size,
+                                           type_tag, handle);
     }
 
     //--------------------------------------------------------------------------
@@ -4094,7 +4096,7 @@ namespace Legion {
         { \
           Point<DIM,coord_t> point = color; \
           return ctx->create_index_space_intersection(parent, &point, \
-                                          TYPE_TAG_##DIM##D, handles); \
+                          sizeof(point), TYPE_TAG_##DIM##D, handles); \
         }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -4106,11 +4108,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space_intersection_internal(Context ctx,
-                    IndexPartition parent, const void *color, TypeTag type_tag,
-                    const std::vector<IndexSpace> &handles)
+                    IndexPartition parent, const void *color, size_t color_size,
+                    TypeTag type_tag, const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
     {
-      return ctx->create_index_space_intersection(parent, color, 
+      return ctx->create_index_space_intersection(parent, color, color_size, 
                                                   type_tag, handles);
     }
 
@@ -4127,7 +4129,7 @@ namespace Legion {
         { \
           Point<DIM,coord_t> point = color; \
           return ctx->create_index_space_intersection(parent, &point, \
-                                           TYPE_TAG_##DIM##D, handle); \
+                            sizeof(point), TYPE_TAG_##DIM##D, handle); \
         }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -4139,12 +4141,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space_intersection_internal(Context ctx,
-                        IndexPartition parent, const void *realm_color, 
-                        TypeTag type_tag, IndexPartition handle)
+                     IndexPartition parent, const void *realm_color, 
+                     size_t color_size, TypeTag type_tag, IndexPartition handle)
     //--------------------------------------------------------------------------
     {
-      return ctx->create_index_space_intersection(parent, realm_color,
-                                                  type_tag, handle);
+      return ctx->create_index_space_intersection(parent, realm_color, 
+                                                  color_size, type_tag, handle);
     }
 
     //--------------------------------------------------------------------------
@@ -4160,7 +4162,7 @@ namespace Legion {
         { \
           Point<DIM,coord_t> point = color; \
           return ctx->create_index_space_difference(parent, &point, \
-                              TYPE_TAG_##DIM##D, initial, handles); \
+                sizeof(point), TYPE_TAG_##DIM##D, initial, handles); \
         }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -4172,12 +4174,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space_difference_internal(Context ctx,
-        IndexPartition parent, const void *realm_color, TypeTag type_tag,
-        IndexSpace initial, const std::vector<IndexSpace> &handles)
+        IndexPartition parent, const void *realm_color, size_t color_size,
+        TypeTag type_tag, IndexSpace initial, 
+        const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
     {
-      return ctx->create_index_space_difference(parent, realm_color, type_tag, 
-                                                initial, handles);
+      return ctx->create_index_space_difference(parent, realm_color, color_size,
+                                                type_tag, initial, handles);
     }
 
     //--------------------------------------------------------------------------

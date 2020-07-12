@@ -14068,7 +14068,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < handles.size(); idx++)
         untyped_handles[idx] = handles[idx];
       return IndexSpaceT<DIM,T>(create_index_space_union_internal(ctx, 
-            IndexPartition(parent), &color, 
+            IndexPartition(parent), &color, sizeof(color), 
             Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>(),
             untyped_handles));
     }
@@ -14082,7 +14082,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return IndexSpaceT<DIM,T>(create_index_space_union_internal(ctx,
-          IndexPartition(parent), &color, 
+          IndexPartition(parent), &color, sizeof(color),
           Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>(),
           IndexPartition(handle)));
     }
@@ -14100,7 +14100,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < handles.size(); idx++)
         untyped_handles[idx] = handles[idx];
       return IndexSpaceT<DIM,T>(create_index_space_intersection_internal(ctx,
-            IndexPartition(parent), &color,
+            IndexPartition(parent), &color, sizeof(color),
             Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>(), 
             untyped_handles));
     }
@@ -14114,7 +14114,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return IndexSpaceT<DIM,T>(create_index_space_intersection_internal(ctx,
-          IndexPartition(parent), &color, 
+          IndexPartition(parent), &color, sizeof(color),
           Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>(),
           IndexPartition(handle)));
     }
@@ -14133,7 +14133,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < handles.size(); idx++)
         untyped_handles[idx] = handles[idx];
       return IndexSpaceT<DIM,T>(create_index_space_difference_internal(ctx,
-            IndexPartition(parent), &color,
+            IndexPartition(parent), &color, sizeof(color),
             Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>(), 
             IndexSpace(initial), untyped_handles));
     }
