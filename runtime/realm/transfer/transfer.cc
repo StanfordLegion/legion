@@ -1688,7 +1688,7 @@ namespace Realm {
   bool AddressSplitXferDes<N,T>::progress_xd(AddressSplitChannel *channel,
 					     TimeLimit work_until)
   {
-    assert(!iteration_completed);
+    assert(!iteration_completed.load());
 
     size_t output_bytes = 0;
     bool input_done = false;
@@ -1787,7 +1787,7 @@ namespace Realm {
       memcpy(dstptr, &cword, sizeof(unsigned));
 
       if(input_done) {
-	iteration_completed = true;
+	iteration_completed.store_release(true);
 	// mark all address streams as done (dummy write update)
 	for(size_t i = 0; i < spaces.size(); i++)
 	  update_bytes_write(i, output_ports[i].local_bytes_total, 0);
