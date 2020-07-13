@@ -738,7 +738,7 @@ namespace Legion {
       void receive_results(std::vector<Processor> &processor_mapping,
                const std::vector<unsigned> &constraint_indexes,
                std::vector<std::vector<Mapping::PhysicalInstance> > &mappings,
-               std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired);
+               std::map<PhysicalManager*,unsigned> &acquired);
     protected:
       std::vector<Processor> processors;
       std::vector<std::vector<DistributedID> > instances;
@@ -779,7 +779,7 @@ namespace Legion {
               const std::vector<unsigned> &constraint_indexes,
               std::vector<std::vector<Mapping::PhysicalInstance> > &mappings,
               const std::vector<int> &mapping_weights,
-              std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired);
+              std::map<PhysicalManager*,unsigned> &acquired);
     protected:
       std::map<DomainPoint,Processor> processors;
       std::map<unsigned/*constraint index*/,ConstraintInfo> constraints;
@@ -1304,6 +1304,7 @@ namespace Legion {
       virtual ApEvent exchange_indirect_records(const unsigned index,
           const ApEvent local_done, const PhysicalTraceInfo &trace_info,
           const InstanceSet &instances, const IndexSpace space,
+          const DomainPoint &key,
           LegionVector<IndirectRecord>::aligned &records, const bool sources);
     public:
       void initialize_replication(ReplicateContext *ctx,

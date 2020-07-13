@@ -2467,6 +2467,72 @@ namespace Legion {
       Internal::PhysicalRegionImpl::fail_privilege_check(d, fid, mode);
     }
 
+    /////////////////////////////////////////////////////////////
+    // Piece Iterator
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    PieceIterator::PieceIterator(void)
+      : impl(NULL), index(-1)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    PieceIterator::PieceIterator(const PhysicalRegion &region, FieldID fid,
+                                 bool privilege_only)
+      : impl(NULL), index(-1)
+    //--------------------------------------------------------------------------
+    {
+      if (region.impl != NULL)
+        impl = region.impl->get_piece_iterator(fid, privilege_only);
+      if (impl != NULL)
+      {
+        impl->add_reference();
+        index = impl->get_next(index, current_piece);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    PieceIterator::PieceIterator(const PieceIterator &rhs)
+      : impl(rhs.impl), index(rhs.index), current_piece(rhs.current_piece)
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+        impl->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    PieceIterator::~PieceIterator(void)
+    //--------------------------------------------------------------------------
+    {
+      if ((impl != NULL) && impl->remove_reference())
+        delete impl;
+    }
+
+    //--------------------------------------------------------------------------
+    PieceIterator& PieceIterator::operator=(const PieceIterator &rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((impl != NULL) && impl->remove_reference())
+        delete impl;
+      impl = rhs.impl;
+      index = rhs.index;
+      current_piece = rhs.current_piece;
+      if (impl != NULL)
+        impl->add_reference();
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    bool PieceIterator::step(void)
+    //--------------------------------------------------------------------------
+    {
+      if ((impl != NULL) && (index >= 0))
+        index = impl->get_next(index, current_piece);
+      return valid();
+    }
+
 #ifdef __GNUC__
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
@@ -6566,6 +6632,16 @@ namespace Legion {
     {
       return Internal::Runtime::get_reduction_op(redop_id);
     }
+
+#ifdef LEGION_GPU_REDUCTIONS
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::preregister_gpu_reduction_op(ReductionOpID redop,
+                                                     const CodeDescriptor &desc)
+    //--------------------------------------------------------------------------
+    {
+      Internal::Runtime::preregister_gpu_reduction_op(redop, desc);
+    }
+#endif
 
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::register_custom_serdez_op(CustomSerdezID serdez_id,

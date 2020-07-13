@@ -539,7 +539,6 @@ namespace Realm {
   template <typename FT, int N, typename T>
   std::ostream& operator<<(std::ostream& os, const AffineAccessor<FT,N,T>& a);
 
-
   // a multi-affine accessor handles instances with multiple pieces, but only
   //  if all of them are affine
   template <typename FT, int N, typename T = int>

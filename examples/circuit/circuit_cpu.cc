@@ -20,42 +20,6 @@
 #endif
 #include <cmath>
 
-const float AccumulateCharge::identity = 0.0f;
-
-template <>
-void AccumulateCharge::apply<true>(LHS &lhs, RHS rhs) 
-{
-  lhs += rhs;
-}
-
-template<>
-void AccumulateCharge::apply<false>(LHS &lhs, RHS rhs)
-{
-  volatile int *target = (volatile int *)&lhs;
-  union { int as_int; float as_float; } oldval, newval;
-  do {
-    oldval.as_int = *target;
-    newval.as_float = oldval.as_float + rhs;
-  } while (!__sync_bool_compare_and_swap(target, oldval.as_int, newval.as_int));
-}
-
-template <>
-void AccumulateCharge::fold<true>(RHS &rhs1, RHS rhs2) 
-{
-  rhs1 += rhs2;
-}
-
-template<>
-void AccumulateCharge::fold<false>(RHS &rhs1, RHS rhs2)
-{
-  volatile int *target = (volatile int *)&rhs1;
-  union { int as_int; float as_float; } oldval, newval;
-  do {
-    oldval.as_int = *target;
-    newval.as_float = oldval.as_float + rhs2;
-  } while (!__sync_bool_compare_and_swap(target, oldval.as_int, newval.as_int));
-}
-
 CalcNewCurrentsTask::CalcNewCurrentsTask(LogicalPartition lp_pvt_wires,
                                          LogicalPartition lp_pvt_nodes,
                                          LogicalPartition lp_shr_nodes,
@@ -554,7 +518,7 @@ bool DistributeChargeTask::launch_check_fields(Context ctx, Runtime *runtime)
   return success;
 }
 
-typedef ReductionAccessor<AccumulateCharge,false/*exclusive*/,1,coord_t,
+typedef ReductionAccessor<SumReduction<float>,false/*exclusive*/,1,coord_t,
                           Realm::AffineAccessor<float,1,coord_t> > AccessorRDfloat;
 
 static inline void reduce_node(const AccessorRWfloat &priv,
@@ -565,7 +529,7 @@ static inline void reduce_node(const AccessorRWfloat &priv,
   switch (loc)
   {
     case PRIVATE_PTR:
-      AccumulateCharge::apply<true/*exclusive*/>(priv[ptr], value);
+      SumReduction<float>::apply<true/*exclusive*/>(priv[ptr], value);
       break;
     case SHARED_PTR:
       shr[ptr] <<= value;

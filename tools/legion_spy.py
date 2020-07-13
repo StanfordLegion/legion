@@ -4822,7 +4822,30 @@ class EquivalenceSet(object):
                 self.version_number += 1
                 # Clear our old stale reductions
                 self.pending_reductions = list()
-            self.pending_reductions.append(inst)
+            # Check to see if this instance is already in the list
+            # of reduction instances, also check for the ABA problem
+            # The instance could also be the restricted instance
+            found = inst is self.restricted_inst
+            for prev in self.pending_reductions:
+                if prev is not inst:
+                    if found and prev.redop != inst.redop:
+                        print("ERROR: Reduction ABA violation for field "+
+                                str(self.field)+" of region requirement "+
+                                str(req.index)+" of "+str(op)+" (UID "+
+                                str(op.uid)+") between reduction operators "+
+                                str(inst.redop)+" and "+str(prev.redop))
+                        if self.tree.state.eq_graph_on_error:
+                            self.tree.state.dump_eq_graph(
+                                    (self.point, self.field, self.tree.tree_id))
+                        if self.tree.state.assert_on_error:
+                            assert False
+                        return False
+                else:
+                    found = True # Keep going to for ABA
+            if not found:
+                if not self.issue_reduction_initialization(inst, op, req, perform_checks):
+                    return False
+                self.pending_reductions.append(inst)
         elif req.is_write_only():
             assert inst.redop == 0
             # We overwrite everything else
@@ -4915,6 +4938,58 @@ class EquivalenceSet(object):
         if self.pending_reductions:
             return self.issue_update_reductions(inst, op, req, False, error_str)
         return True
+
+    def issue_reduction_initialization(self, inst, op, req, perform_checks):
+        if perform_checks:
+            key = (self.point, self.field, self.tree.tree_id)
+            if op.eq_incoming and key in op.eq_incoming:
+                incoming = op.eq_incoming[key]
+                if incoming:
+                    for fill in incoming:
+                        if not isinstance(fill, RealmFill):
+                            continue
+                        if inst not in fill.dsts:
+                            continue
+                        if fill.record_version_number(self):
+                            continue
+                        preconditions = inst.find_verification_copy_dependences(
+                                self.depth, self.field, self.point, op, req.index,
+                                False, 0, self.version_number)
+                        bad = check_preconditions(preconditions, fill)
+                        if bad is not None:
+                            print("ERROR: Missing destination precondition for "+str(fill)+
+                                    " on field "+str(self.field)+" for region "+
+                                    "requirement "+str(req.index)+" of "+str(op)+
+                                    " (UID "+str(op.uid)+")")
+                            if self.tree.state.eq_graph_on_error:
+                                self.tree.state.dump_eq_graph(
+                                        (self.point, self.field, self.tree.tree_id))
+                            if self.tree.state.assert_on_error:
+                                assert False
+                            return False
+                        inst.add_verification_copy_user(self.depth, self.field,
+                                self.point, fill, req.index, False, 0, self.version_number)
+                        return True
+            print("ERROR: Missing fill to initialize reduction instance "+str(inst)+
+                    " for field "+str(self.field)+" of region requirement "+
+                    str(req.index)+" of "+str(op)+" (UID "+str(op.uid)+")")
+            if self.tree.state.eq_graph_on_error:
+                self.tree.state.dump_eq_graph((self.point, self.field, self.tree.tree_id))
+            if self.tree.state.assert_on_error:
+                assert False
+            return False
+        else:
+            fill = op.find_or_create_fill(req, self.field, inst, None)
+            # Record this point for the copy operation so it renders properly
+            fill.record_version_number(self)
+            preconditions = inst.find_verification_copy_dependences(self.depth, 
+                self.field, self.point, op, req.index, False, 0, self.version_number)
+            for pre in preconditions:
+                pre.physical_outgoing.add(fill)
+                fill.physical_incoming.add(pre)
+            inst.add_verification_copy_user(self.depth, self.field, 
+                self.point, fill, req.index, False, 0, self.version_number)
+            return True
 
     def issue_update_reductions(self, inst, op, req, perform_checks, 
                                 error_str, restricted = False):
@@ -5833,7 +5908,8 @@ class Operation(object):
         fill.set_tree_properties(None, req.field_space, req.tid)
         fill.add_field(field.fid, dst)
         self.realm_fills.append(fill)
-        fill.set_fill_op(fill_op)
+        if fill_op is not None:
+            fill.set_fill_op(fill_op)
         return fill
 
     def find_verification_copy_across(self, src_field, dst_field, point,
@@ -9801,7 +9877,10 @@ class RealmFill(RealmBase):
     def is_across(self):
         if self.across is not None:
             return self.across
-        assert self.fill_op is not None
+        # This happens when we do a fill for initializing a reduction instance
+        if self.fill_op is None:
+            self.across = False
+            return self.across
         req = self.fill_op.reqs[0]
         if req.tid != self.dst_tree_id:
             self.across = True
@@ -10713,8 +10792,10 @@ def parse_legion_spy_line(line, state):
         field_space = state.get_field_space(int(m.group('fspace')))
         tree_id = int(m.group('tid'))
         fill.set_tree_properties(index_expr, field_space, tree_id)
-        fill_op = state.get_operation(int(m.group('fill_uid')))
-        fill.set_fill_op(fill_op)
+        fill_uid = int(m.group('fill_uid'))
+        if fill_uid > 0:
+            fill_op = state.get_operation(fill_uid)
+            fill.set_fill_op(fill_op)
         return True
     m = realm_fill_field_pat.match(line)
     if m is not None:

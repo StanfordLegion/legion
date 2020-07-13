@@ -23,6 +23,7 @@
 #include "legion/legion_mapping.h"
 #include "legion/legion_utilities.h"
 #include "legion/legion_allocation.h"
+#include "legion/legion_instances.h"
 #include "legion/legion_analysis.h"
 #include "legion/mapper_manager.h"
 
@@ -331,9 +332,9 @@ namespace Legion {
       // acquired instances until the very end of the operation as they
       // will not hurt anything.
       RtEvent release_nonempty_acquired_instances(RtEvent precondition,
-          std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired_insts);
+          std::map<PhysicalManager*,unsigned> &acquired_insts);
       static void release_acquired_instances(
-          std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired_insts);
+          std::map<PhysicalManager*,unsigned> &acquired_insts);
       static void handle_deferred_release(const void *args);
     public:
       // Initialize this operation in a new parent context
@@ -408,13 +409,25 @@ namespace Legion {
                                   const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
+      virtual CollectiveManager* find_or_create_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const LayoutConstraintSet &constraints,
+                                  const std::vector<LogicalRegion> &regions,
+                                  Memory::Kind kind, size_t *footprint,
+                                  LayoutConstraintKind *unsat_kind,
+                                  unsigned *unsat_index,
+                                  DomainPoint &collective_point);
+      virtual bool finalize_collective_instance(MappingCallKind mapper_call,
+                                                unsigned index, bool success);
+      virtual void report_total_collective_instance_calls(MappingCallKind call,
+                                                          unsigned total_calls);
       virtual void report_uninitialized_usage(const unsigned index,
                                               LogicalRegion handle,
                                               const RegionUsage usage,
                                               const char *field_string,
                                               RtUserEvent reported);
       // Get a reference to our data structure for tracking acquired instances
-      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+      virtual std::map<PhysicalManager*,unsigned>*
                                        get_acquired_instances_ref(void);
       // Update the set of atomic locks for this operation
       virtual void update_atomic_locks(const unsigned index, 
@@ -671,6 +684,47 @@ namespace Legion {
       // Dependence trackers for detecting when it is safe to map and commit
       MappingDependenceTracker *mapping_tracker;
       CommitDependenceTracker  *commit_tracker;
+    };
+
+    /**
+     * \class CollectiveInstanceCreator
+     * This class provides a common base class for operations that need to 
+     * provide support for the creation of collective instances
+     */
+    template<typename OP>
+    class CollectiveInstanceCreator : public OP {
+    public:
+      CollectiveInstanceCreator(Runtime *rt);
+      CollectiveInstanceCreator(const CollectiveInstanceCreator<OP> &rhs);
+    public:
+      virtual IndexSpaceNode* get_collective_space(void) const = 0;
+    public:
+      // For collective instances
+      virtual CollectiveManager* find_or_create_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const LayoutConstraintSet &constraints,
+                                  const std::vector<LogicalRegion> &regions,
+                                  Memory::Kind kind, size_t *footprint,
+                                  LayoutConstraintKind *unsat_kind,
+                                  unsigned *unsat_index,
+                                  DomainPoint &collective_point);
+      virtual bool finalize_collective_instance(MappingCallKind mapper_call,
+                                                unsigned index, bool success);
+      virtual void report_total_collective_instance_calls(MappingCallKind call,
+                                                          unsigned total_calls);
+    protected:
+      typedef std::pair<MappingCallKind,unsigned> CollectiveKey;
+      struct CollectiveInstance {
+      public:
+        CollectiveInstance(void) : manager(NULL), remaining(0), pending(0) { }
+      public:
+        CollectiveManager *manager;
+        RtUserEvent ready_event;
+        ApUserEvent instance_event;
+        size_t remaining;
+        size_t pending;
+      };
+      std::map<CollectiveKey,CollectiveInstance> collective_instances;
     };
 
     /**
@@ -1034,7 +1088,7 @@ namespace Legion {
                                   const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
-      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+      virtual std::map<PhysicalManager*,unsigned>*
                    get_acquired_instances_ref(void);
       virtual void update_atomic_locks(const unsigned index,
                                        Reservation lock, bool exclusive);
@@ -1056,6 +1110,7 @@ namespace Legion {
       virtual void handle_profiling_update(int count);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
+      virtual DomainPoint get_shard_point(void) const;
     protected:
       bool remap_region;
       ApUserEvent termination_event;
@@ -1063,7 +1118,7 @@ namespace Legion {
       RegionTreePath privilege_path;
       unsigned parent_req_index;
       VersionInfo version_info;
-      std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
+      std::map<PhysicalManager*,unsigned> acquired_instances;
       std::map<Reservation,bool> atomic_locks;
       std::set<RtEvent> map_applied_conditions;
     protected:
@@ -1182,7 +1237,8 @@ namespace Legion {
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
       virtual ApEvent exchange_indirect_records(const unsigned index,
           const ApEvent local_done, const PhysicalTraceInfo &trace_info,
-          const InstanceSet &instances, const IndexSpace space,
+          const InstanceSet &instances, const IndexSpace space, 
+          const DomainPoint &key,
           LegionVector<IndirectRecord>::aligned &records, const bool sources);
     public:
       virtual bool query_speculate(bool &value, bool &mapping_only);
@@ -1194,7 +1250,7 @@ namespace Legion {
                                   const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
-      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+      virtual std::map<PhysicalManager*,unsigned>*
                    get_acquired_instances_ref(void);
       virtual void update_atomic_locks(const unsigned index,
                                        Reservation lock, bool exclusive);
@@ -1268,7 +1324,7 @@ namespace Legion {
     protected: // for support with mapping
       MapperManager*              mapper;
     protected:
-      std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
+      std::map<PhysicalManager*,unsigned> acquired_instances;
       std::vector<std::map<Reservation,bool> > atomic_locks;
       std::set<RtEvent> map_applied_conditions;
     public:
@@ -1297,7 +1353,7 @@ namespace Legion {
      * except it is an index space operation for performing
      * multiple copies with projection functions
      */
-    class IndexCopyOp : public CopyOp {
+    class IndexCopyOp : public CollectiveInstanceCreator<CopyOp> {
     public:
       IndexCopyOp(Runtime *rt);
       IndexCopyOp(const IndexCopyOp &rhs);
@@ -1324,10 +1380,15 @@ namespace Legion {
       virtual ApEvent exchange_indirect_records(const unsigned index,
           const ApEvent local_done, const PhysicalTraceInfo &trace_info,
           const InstanceSet &instances, const IndexSpace space,
-          LegionVector<IndirectRecord>::aligned &records, const bool sources);
+          const DomainPoint &key,
+          LegionVector<IndirectRecord>::aligned &records, const bool sources); 
     public:
       // From MemoizableOp
       virtual void replay_analysis(void);
+    public:
+      // From CollectiveInstanceCreator
+      virtual IndexSpaceNode* get_collective_space(void) const 
+        { return launch_space; }
     public:
       void enumerate_points(bool replaying);
       void handle_point_commit(RtEvent point_committed);
@@ -1353,7 +1414,7 @@ namespace Legion {
       std::set<RtEvent>                                  commit_preconditions;
     protected:
       // For checking aliasing of points in debug mode only
-      std::set<std::pair<unsigned,unsigned> > interfering_requirements;
+      std::set<std::pair<unsigned,unsigned> > interfering_requirements; 
     };
 
     /**
@@ -1384,7 +1445,22 @@ namespace Legion {
       virtual ApEvent exchange_indirect_records(const unsigned index,
           const ApEvent local_done, const PhysicalTraceInfo &trace_info,
           const InstanceSet &instances, const IndexSpace space,
+          const DomainPoint &key,
           LegionVector<IndirectRecord>::aligned &records, const bool sources);
+    public:
+      // For collective instances
+      virtual CollectiveManager* find_or_create_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const LayoutConstraintSet &constraints,
+                                  const std::vector<LogicalRegion> &regions,
+                                  Memory::Kind kind, size_t *footprint,
+                                  LayoutConstraintKind *unsat_kind,
+                                  unsigned *unsat_index,
+                                  DomainPoint &collective_point);
+      virtual bool finalize_collective_instance(MappingCallKind mapper_call,
+                                                unsigned index, bool success);
+      virtual void report_total_collective_instance_calls(MappingCallKind call,
+                                                          unsigned total_calls);
     public:
       // From ProjectionPoint
       virtual const DomainPoint& get_domain_point(void) const;
@@ -1792,7 +1868,7 @@ namespace Legion {
                                   const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
-      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+      virtual std::map<PhysicalManager*,unsigned>*
                    get_acquired_instances_ref(void);
       virtual void record_reference_mutation_effect(RtEvent event);
     protected:
@@ -1807,7 +1883,7 @@ namespace Legion {
     protected:
       unsigned parent_idx;
       InstanceSet target_instances;
-      std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
+      std::map<PhysicalManager*,unsigned> acquired_instances;
       std::set<RtEvent> map_applied_conditions;
     protected:
       MapperManager *mapper;
@@ -1913,7 +1989,7 @@ namespace Legion {
     public:
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
-      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+      virtual std::map<PhysicalManager*,unsigned>*
                    get_acquired_instances_ref(void);
       virtual void record_reference_mutation_effect(RtEvent event);
     public: 
@@ -1950,7 +2026,7 @@ namespace Legion {
       RegionTreePath    privilege_path;
       VersionInfo       version_info;
       unsigned          parent_req_index;
-      std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
+      std::map<PhysicalManager*,unsigned> acquired_instances;
       std::set<RtEvent> map_applied_conditions;
     protected:
       MapperManager*    mapper;
@@ -2026,7 +2102,7 @@ namespace Legion {
                                   const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
-      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+      virtual std::map<PhysicalManager*,unsigned>*
                    get_acquired_instances_ref(void);
       virtual void record_reference_mutation_effect(RtEvent event);
     public:
@@ -2063,7 +2139,7 @@ namespace Legion {
       RegionTreePath    privilege_path;
       VersionInfo       version_info;
       unsigned          parent_req_index;
-      std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
+      std::map<PhysicalManager*,unsigned> acquired_instances;
       std::set<RtEvent> map_applied_conditions;
     protected:
       MapperManager*    mapper;
@@ -2403,7 +2479,7 @@ namespace Legion {
                                         Mapper::MapTaskInput &input,
                                         Mapper::MapTaskOutput &output);
       // Get a reference to our data structure for tracking acquired instances
-      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+      virtual std::map<PhysicalManager*,unsigned>*
                                        get_acquired_instances_ref(void);
     public:
       // Make this a virtual method to override it for control replication
@@ -2477,7 +2553,7 @@ namespace Legion {
       // Used for computing the constraints
       std::vector<std::set<SingleTask*> > task_sets;
       // Track the physical instances that we've acquired
-      std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
+      std::map<PhysicalManager*,unsigned> acquired_instances;
     protected:
       std::map<std::pair<unsigned/*task index*/,unsigned/*req index*/>,
                unsigned/*dependence index*/> dependence_map;
@@ -2861,7 +2937,8 @@ namespace Legion {
      * which are dependent on mapping a region in order to compute
      * the resulting partition.
      */
-    class DependentPartitionOp : public ExternalPartition, public Operation,
+    class DependentPartitionOp : public ExternalPartition, 
+                                 public CollectiveInstanceCreator<Operation>,
                                  public LegionHeapify<DependentPartitionOp> {
     public:
       static const AllocationType alloc_type = DEPENDENT_PARTITION_OP_ALLOC;
@@ -3005,7 +3082,8 @@ namespace Legion {
       virtual void finalize_mapping(void);
       virtual ApEvent trigger_thunk(IndexSpace handle,
                                     const InstanceSet &mapped_instances,
-                                    const PhysicalTraceInfo &info);
+                                    const PhysicalTraceInfo &info,
+                                    const DomainPoint &key);
       virtual unsigned find_parent_index(unsigned idx);
       virtual bool is_partition_op(void) const { return true; }
     public:
@@ -3030,7 +3108,7 @@ namespace Legion {
                                   const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
-      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+      virtual std::map<PhysicalManager*,unsigned>*
                    get_acquired_instances_ref(void);
       virtual void record_reference_mutation_effect(RtEvent event);
       virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
@@ -3042,6 +3120,24 @@ namespace Legion {
       virtual void handle_profiling_update(int count);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
+    public:
+      // From CollectiveInstanceCreator
+      virtual IndexSpaceNode* get_collective_space(void) const 
+        { return launch_space; }
+    public:
+      // For collective instances
+      virtual CollectiveManager* find_or_create_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const LayoutConstraintSet &constraints,
+                                  const std::vector<LogicalRegion> &regions,
+                                  Memory::Kind kind, size_t *footprint,
+                                  LayoutConstraintKind *unsat_kind,
+                                  unsigned *unsat_index,
+                                  DomainPoint &collective_point);
+      virtual bool finalize_collective_instance(MappingCallKind mapper_call,
+                                                unsigned index, bool success);
+      virtual void report_total_collective_instance_calls(MappingCallKind call,
+                                                          unsigned total_calls);
     protected:
       void check_privilege(void);
       void compute_parent_index(void);
@@ -3056,7 +3152,7 @@ namespace Legion {
       VersionInfo version_info;
       RegionTreePath privilege_path;
       unsigned parent_req_index;
-      std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
+      std::map<PhysicalManager*,unsigned> acquired_instances;
       std::set<RtEvent> map_applied_conditions;
       DepPartThunk *thunk;
       ApEvent partition_ready;
@@ -3113,9 +3209,24 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual ApEvent trigger_thunk(IndexSpace handle,
                                     const InstanceSet &mapped_instances,
-                                    const PhysicalTraceInfo &trace_info);
+                                    const PhysicalTraceInfo &trace_info,
+                                    const DomainPoint &key);
       virtual void trigger_commit(void);
       virtual PartitionKind get_partition_kind(void) const;
+    public:
+      // For collective instances
+      virtual CollectiveManager* find_or_create_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const LayoutConstraintSet &constraints,
+                                  const std::vector<LogicalRegion> &regions,
+                                  Memory::Kind kind, size_t *footprint,
+                                  LayoutConstraintKind *unsat_kind,
+                                  unsigned *unsat_index,
+                                  DomainPoint &collective_point);
+      virtual bool finalize_collective_instance(MappingCallKind mapper_call,
+                                                unsigned index, bool success);
+      virtual void report_total_collective_instance_calls(MappingCallKind call,
+                                                          unsigned total_calls);
     public:
       // From ProjectionPoint
       virtual const DomainPoint& get_domain_point(void) const;
@@ -3171,7 +3282,7 @@ namespace Legion {
       virtual size_t get_context_index(void) const;
       virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
-      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+      virtual std::map<PhysicalManager*,unsigned>*
                                        get_acquired_instances_ref(void);
       virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests, bool fill);
@@ -3226,7 +3337,7 @@ namespace Legion {
      * applying a number of fill operations over an 
      * index space of points with projection functions.
      */
-    class IndexFillOp : public FillOp {
+    class IndexFillOp : public CollectiveInstanceCreator<FillOp> {
     public:
       IndexFillOp(Runtime *rt);
       IndexFillOp(const IndexFillOp &rhs);
@@ -3252,6 +3363,10 @@ namespace Legion {
     public:
       // From MemoizableOp
       virtual void replay_analysis(void);
+    public:
+      // From CollectiveInstanceCreator
+      virtual IndexSpaceNode* get_collective_space(void) const 
+        { return launch_space; }
     public:
       void perform_base_dependence_analysis(void);
       void enumerate_points(bool replaying);
@@ -3291,6 +3406,20 @@ namespace Legion {
       virtual void trigger_ready(void);
       // trigger_mapping same as base class
       virtual void trigger_commit(void);
+    public:
+      // For collective instances
+      virtual CollectiveManager* find_or_create_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const LayoutConstraintSet &constraints,
+                                  const std::vector<LogicalRegion> &regions,
+                                  Memory::Kind kind, size_t *footprint,
+                                  LayoutConstraintKind *unsat_kind,
+                                  unsigned *unsat_index,
+                                  DomainPoint &collective_point);
+      virtual bool finalize_collective_instance(MappingCallKind mapper_call,
+                                                unsigned index, bool success);
+      virtual void report_total_collective_instance_calls(MappingCallKind call,
+                                                          unsigned total_calls);
     public:
       // From ProjectionPoint
       virtual const DomainPoint& get_domain_point(void) const;
@@ -3521,7 +3650,7 @@ namespace Legion {
       virtual void deactivate(void);
       virtual const char* get_logging_name(void) const = 0;
       virtual OpKind get_operation_kind(void) const = 0;
-      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+      virtual std::map<PhysicalManager*,unsigned>*
                                        get_acquired_instances_ref(void);
       // This should be the only mapper call that we need to handle
       virtual void select_sources(const unsigned index,

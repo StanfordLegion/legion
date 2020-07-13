@@ -272,23 +272,22 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent Operation::release_nonempty_acquired_instances(RtEvent perform,
-       std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired_instances)
+                        std::map<PhysicalManager*,unsigned> &acquired_instances)
     //--------------------------------------------------------------------------
     {
       if (perform.exists() && !perform.has_triggered())
       {
         std::vector<std::pair<PhysicalManager*,unsigned> > *to_release = NULL;
-        for (std::map<PhysicalManager*,std::pair<unsigned,bool> >::iterator
-              it = acquired_instances.begin(); it != acquired_instances.end(); )
+        for (std::map<PhysicalManager*,unsigned>::iterator it = 
+              acquired_instances.begin(); it != acquired_instances.end(); )
         {
           if (it->first->instance_footprint > 0)
           {
             if (to_release == NULL)
               to_release = 
                 new std::vector<std::pair<PhysicalManager*,unsigned> >();
-            to_release->push_back(std::make_pair(it->first, it->second.first));
-            std::map<PhysicalManager*,std::pair<unsigned,bool> >::iterator
-              to_delete = it++;
+            to_release->push_back(std::make_pair(it->first, it->second));
+            std::map<PhysicalManager*,unsigned>::iterator to_delete = it++;
             acquired_instances.erase(to_delete);
           }
           else
@@ -303,16 +302,15 @@ namespace Legion {
         else
           return perform;
       }
-      for (std::map<PhysicalManager*,std::pair<unsigned,bool> >::iterator it = 
+      for (std::map<PhysicalManager*,unsigned>::iterator it = 
             acquired_instances.begin(); it != acquired_instances.end(); )
       {
         if (it->first->instance_footprint > 0)
         {
           if (it->first->remove_base_valid_ref(MAPPING_ACQUIRE_REF, 
-                                NULL/*mutator*/, it->second.first))
+                                NULL/*mutator*/, it->second))
             delete it->first;
-          std::map<PhysicalManager*,std::pair<unsigned,bool> >::iterator
-            to_delete = it++;
+          std::map<PhysicalManager*,unsigned>::iterator to_delete = it++;
           acquired_instances.erase(to_delete);
         }
         else
@@ -323,13 +321,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void Operation::release_acquired_instances(
-       std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired_instances)
+                        std::map<PhysicalManager*,unsigned> &acquired_instances)
     //--------------------------------------------------------------------------
     {
-      for (std::map<PhysicalManager*,std::pair<unsigned,bool> >::iterator it = 
+      for (std::map<PhysicalManager*,unsigned>::iterator it = 
             acquired_instances.begin(); it != acquired_instances.end(); it++)
         if (it->first->remove_base_valid_ref(MAPPING_ACQUIRE_REF, 
-                              NULL/*mutator*/, it->second.first))
+                              NULL/*mutator*/, it->second))
           delete it->first;
       acquired_instances.clear();
     }
@@ -561,6 +559,39 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    CollectiveManager* Operation::find_or_create_collective_instance(
+                                  MappingCallKind call_kind, unsigned index,
+                                  const LayoutConstraintSet &constraints,
+                                  const std::vector<LogicalRegion> &regions,
+                                  Memory::Kind kind, size_t *footprint,
+                                  LayoutConstraintKind *unsat_kind,
+                                  unsigned *unsat_index, 
+                                  DomainPoint &collective_point)
+    //--------------------------------------------------------------------------
+    {
+      // we do not do anything here in this case
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    bool Operation::finalize_collective_instance(MappingCallKind call,
+                                              unsigned total_calls, bool succes)
+    //--------------------------------------------------------------------------
+    {
+      // should only be called for inherited types
+      assert(false);
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::report_total_collective_instance_calls(
+                              MappingCallKind mapper_call, unsigned total_calls)
+    //--------------------------------------------------------------------------
+    {
+      // Nothing to do here for this case
+    }
+
+    //--------------------------------------------------------------------------
     void Operation::report_uninitialized_usage(const unsigned index,
                                  LogicalRegion handle, const RegionUsage usage, 
                                  const char *field_string, RtUserEvent reported)
@@ -607,7 +638,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
+    std::map<PhysicalManager*,unsigned>* 
                                      Operation::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
@@ -1315,11 +1346,8 @@ namespace Legion {
       for (unsigned idx = 0; idx < valid.size(); idx++)
       {
         const InstanceRef &ref = valid[idx];
-#ifdef DEBUG_LEGION
-        assert(!ref.is_virtual_ref());
-#endif
-        if (visible_filter.find(ref.get_manager()->get_memory()) == 
-            visible_filter.end())
+        PhysicalManager *manager = ref.get_instance_manager();
+        if (!manager->has_visible_from(visible_filter))
           continue;
         input_valid.resize(next_index+1);
         MappingInstance &inst = input_valid[next_index++];
@@ -1338,7 +1366,7 @@ namespace Legion {
       for (std::deque<MappingInstance>::const_iterator it = 
             output.begin(); it != output.end(); it++)
       {
-        const PhysicalManager *manager = it->impl;
+        const InstanceManager *manager = it->impl;
         bool found = false;
         for (unsigned idx = 0; idx < sources.size(); idx++)
         {
@@ -3151,8 +3179,7 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
-                                         MapOp::get_acquired_instances_ref(void)
+    std::map<PhysicalManager*,unsigned>* MapOp::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
       return &acquired_instances;
@@ -3439,7 +3466,7 @@ namespace Legion {
       RegionTreeID bad_tree = 0;
       std::vector<FieldID> missing_fields;
       std::vector<PhysicalManager*> unacquired;
-      int composite_index = runtime->forest->physical_convert_mapping(this,
+      int virtual_index = runtime->forest->physical_convert_mapping(this,
                                 requirement, output.chosen_instances, 
                                 chosen_instances, bad_tree, missing_fields,
                                 &acquired_instances, unacquired, 
@@ -3503,7 +3530,7 @@ namespace Legion {
                         parent_ctx->get_task_name(), 
                         parent_ctx->get_unique_id())
       }
-      if (composite_index >= 0)
+      if (virtual_index >= 0)
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                       "Invalid mapper output from invocation of 'map_inline' "
                       "on mapper %s. Mapper requested creation of a composite "
@@ -3532,7 +3559,7 @@ namespace Legion {
         runtime->find_visible_memories(exec_proc, visible_memories);
         for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
         {
-          Memory mem = chosen_instances[idx].get_memory();   
+          const Memory mem = chosen_instances[idx].get_memory();
           if (visible_memories.find(mem) == visible_memories.end())
             REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                           "Invalid mapper output from invocation of "
@@ -3550,8 +3577,8 @@ namespace Legion {
       std::vector<LogicalRegion> regions_to_check(1, requirement.region);
       for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
       {
-        if (!chosen_instances[idx].get_manager()->meets_regions(
-                                                        regions_to_check))
+        PhysicalManager *manager = chosen_instances[idx].get_instance_manager();
+        if (!manager->meets_regions(regions_to_check))
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of 'map_inline' "
                         "on mapper %s. Mapper specified an instance that does "
@@ -3565,7 +3592,6 @@ namespace Legion {
       if (IS_REDUCE(requirement))
       {
         for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
-        {
           if (!chosen_instances[idx].get_manager()->is_reduction_manager())
             REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                           "Invalid mapper output from invocation of "
@@ -3575,23 +3601,6 @@ namespace Legion {
                           "inline mapping operation in task %s (ID %lld).",
                           mapper->get_mapper_name(),parent_ctx->get_task_name(),
                           parent_ctx->get_unique_id())
-          std::map<PhysicalManager*,std::pair<unsigned,bool> >::const_iterator 
-            finder = acquired_instances.find(
-                chosen_instances[idx].get_manager());
-#ifdef DEBUG_LEGION
-          assert(finder != acquired_instances.end());
-#endif
-          if (!finder->second.second)
-            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                          "Invalid mapper output from invocatino of "
-                          "'map_inline' on mapper %s. Mapper made an illegal "
-                          "decision to re-use a reduction instance for an "
-                          "inline mapping in task %s (ID %lld). Reduction "
-                          "instances are not currently permitted to be "
-                          "recycled.", mapper->get_mapper_name(),
-                          parent_ctx->get_task_name(), 
-                          parent_ctx->get_unique_id())
-        }
       }
       else
       {
@@ -3615,9 +3624,10 @@ namespace Legion {
           runtime->find_layout_constraints(layout_constraint_id);
         for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
         {
-          PhysicalManager *manager = chosen_instances[idx].get_manager();
+          InstanceManager *manager = chosen_instances[idx].get_manager();
           const LayoutConstraint *conflict_constraint = NULL;
-          if (manager->conflicts(constraints, &conflict_constraint))
+          if (manager->conflicts(constraints, get_shard_point(), 
+                                 &conflict_constraint))
             REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                           "Invalid mapper output. Mapper %s selected "
                           "instance for inline mapping (ID %lld) in task %s "
@@ -3723,6 +3733,14 @@ namespace Legion {
         rez.serialize(response);
         applied_events.insert(response);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    DomainPoint MapOp::get_shard_point(void) const
+    //--------------------------------------------------------------------------
+    {
+      // We have no shard point in the non control replicated case
+      return DomainPoint();
     }
 
     /////////////////////////////////////////////////////////////
@@ -4967,7 +4985,7 @@ namespace Legion {
         indirect_done = Runtime::create_ap_user_event(&trace_info);
         copy_done = exchange_indirect_records(index, indirect_done, trace_info,
             src_targets, src_requirements[index].region.get_index_space(), 
-            src_records, true/*sources*/);
+            index_point, src_records, true/*sources*/);
       }
       if (scatter_targets != NULL)
       {
@@ -4980,7 +4998,7 @@ namespace Legion {
         // from the gather case if this is a full-on indirection
         copy_done = exchange_indirect_records(index, indirect_done, trace_info,
             dst_targets, dst_requirements[index].region.get_index_space(),
-            dst_records, false/*sources*/);
+            index_point, dst_records, false/*sources*/);
       }
       if (scatter_targets == NULL)
       {
@@ -5031,7 +5049,8 @@ namespace Legion {
               src_requirements[index], src_indirect_requirements[index],
               dst_requirements[index], dst_indirect_requirements[index],
               src_records, (*gather_targets)[0],
-              dst_records, (*scatter_targets)[0], gather_is_range[index],
+              dst_records, (*scatter_targets)[0], 
+              this, gather_is_range[index],
               local_init_precondition, predication_guard, trace_info,
               possible_src_indirect_out_of_range,
               possible_dst_indirect_out_of_range,
@@ -5161,9 +5180,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent CopyOp::exchange_indirect_records(const unsigned index,
-             const ApEvent local_done, const PhysicalTraceInfo &trace_info,
-             const InstanceSet &insts, const IndexSpace space,
-             LegionVector<IndirectRecord>::aligned &records, const bool sources)
+       const ApEvent local_done, const PhysicalTraceInfo &trace_info,
+       const InstanceSet &insts, const IndexSpace space, const DomainPoint &key,
+       LegionVector<IndirectRecord>::aligned &records, const bool sources)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *node = runtime->forest->get_node(space);
@@ -5175,7 +5194,7 @@ namespace Legion {
         {
           const InstanceRef &ref = insts[idx];
           records.push_back(IndirectRecord(ref.get_valid_fields(),
-                ref.get_manager(), space, ref.get_ready_event(), dom));
+                ref.get_manager(), key, space, ref.get_ready_event(), dom));
         }
       }
       else
@@ -5187,13 +5206,13 @@ namespace Legion {
           if (inst_ready.exists() && !inst_ready.has_triggered())
           {
             records.push_back(IndirectRecord(ref.get_valid_fields(),
-                  ref.get_manager(), space,
+                  ref.get_manager(), key, space,
                   Runtime::merge_events(&trace_info, domain_ready, inst_ready),
                   dom));
           }
           else
             records.push_back(IndirectRecord(ref.get_valid_fields(),
-                  ref.get_manager(), space, domain_ready, dom));
+                  ref.get_manager(), key, space, domain_ready, dom));
         }
       }
       return local_done;
@@ -5276,7 +5295,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
+    std::map<PhysicalManager*,unsigned>* 
                                         CopyOp::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
@@ -5991,9 +6010,10 @@ namespace Legion {
       for (unsigned idx = 0; idx < targets.size(); idx++)
       {
         const InstanceRef &ref = targets[idx];
-        PhysicalManager *manager = ref.get_manager();
-        if (manager->is_virtual_instance())
+        InstanceManager *man = ref.get_manager();
+        if (man->is_virtual_manager())
           continue;
+        PhysicalManager *manager = man->as_instance_manager();
         if (!manager->meets_regions(regions_to_check))
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of 'map_copy' "
@@ -6005,6 +6025,22 @@ namespace Legion {
                         get_req_type_name<REQ_TYPE>(), idx, 
                         parent_ctx->get_task_name(),
                         parent_ctx->get_unique_id())
+        if (manager->is_collective_manager())
+        {
+          CollectiveManager *collective_manager = 
+            manager->as_collective_manager();
+          if (!collective_manager->point_space->contains_point(index_point))
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of 'map_copy' "
+                        "on mapper %s. Mapper selected a collective instance "
+                        "for %s region requirement at index %d but point copy "
+                        "(ID %lld) launched in task %s (ID %lld) is not "
+                        "contained within the point space for the collective "
+                        "instace.", mapper->get_mapper_name(), 
+                        get_req_type_name<REQ_TYPE>(), idx,
+                        get_unique_op_id(), parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id())
+        }
       }
       // Make sure all the destinations are real instances, this has
       // to be true for all kinds of explicit copies including reductions
@@ -6130,7 +6166,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexCopyOp::IndexCopyOp(Runtime *rt)
-      : CopyOp(rt)
+      : CollectiveInstanceCreator<CopyOp>(rt)
     //--------------------------------------------------------------------------
     {
       this->is_index_space = true;
@@ -6138,7 +6174,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexCopyOp::IndexCopyOp(const IndexCopyOp &rhs)
-      : CopyOp(rhs)
+      : CollectiveInstanceCreator<CopyOp>(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -6832,17 +6868,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent IndexCopyOp::exchange_indirect_records(const unsigned index,
-             const ApEvent local_done, const PhysicalTraceInfo &trace_info,
-             const InstanceSet &insts, const IndexSpace space,
-             LegionVector<IndirectRecord>::aligned &records, const bool sources)
+       const ApEvent local_done, const PhysicalTraceInfo &trace_info,
+       const InstanceSet &insts, const IndexSpace space, const DomainPoint &key,
+       LegionVector<IndirectRecord>::aligned &records, const bool sources)
     //--------------------------------------------------------------------------
     {
       if (sources && !collective_src_indirect_points)
         return CopyOp::exchange_indirect_records(index, local_done, trace_info,
-                                                insts, space, records, sources);
+                                           insts, space, key, records, sources);
       if (!sources && !collective_dst_indirect_points)
         return CopyOp::exchange_indirect_records(index, local_done, trace_info,
-                                                insts, space, records, sources);
+                                           insts, space, key, records, sources);
 #ifdef DEBUG_LEGION
       assert(local_done.exists());
 #endif
@@ -6864,13 +6900,13 @@ namespace Legion {
               const ApEvent inst_ready = ref.get_ready_event();
               if (inst_ready.exists() && !inst_ready.has_triggered())
                 src_records[index].push_back(IndirectRecord(
-                      ref.get_valid_fields(), ref.get_manager(), space,
+                      ref.get_valid_fields(), ref.get_manager(), key, space,
                       Runtime::merge_events(&trace_info, domain_ready,
                         inst_ready), dom));
               else
                 src_records[index].push_back(IndirectRecord(
                       ref.get_valid_fields(), ref.get_manager(), 
-                      space, domain_ready, dom));
+                      key, space, domain_ready, dom));
             }
           }
           else
@@ -6880,7 +6916,7 @@ namespace Legion {
               const InstanceRef &ref = insts[idx];
               src_records[index].push_back(IndirectRecord(
                     ref.get_valid_fields(), ref.get_manager(), 
-                    space, ref.get_ready_event(), dom));
+                    key, space, ref.get_ready_event(), dom));
             }
           }
           src_exchange_events[index].insert(local_done);
@@ -6901,13 +6937,13 @@ namespace Legion {
               const ApEvent inst_ready = ref.get_ready_event();
               if (inst_ready.exists() && !inst_ready.has_triggered())
                 dst_records[index].push_back(IndirectRecord(
-                      ref.get_valid_fields(), ref.get_manager(), space,
+                      ref.get_valid_fields(), ref.get_manager(), key, space,
                       Runtime::merge_events(&trace_info, domain_ready,
                         inst_ready), dom));
               else
                 dst_records[index].push_back(IndirectRecord(
                       ref.get_valid_fields(), ref.get_manager(), 
-                      space, domain_ready, dom));
+                      key, space, domain_ready, dom));
             }
           }
           else
@@ -6917,7 +6953,7 @@ namespace Legion {
               const InstanceRef &ref = insts[idx];
               dst_records[index].push_back(IndirectRecord(
                     ref.get_valid_fields(), ref.get_manager(), 
-                    space, ref.get_ready_event(), dom));
+                    key, space, ref.get_ready_event(), dom));
             }
           }
           dst_exchange_events[index].insert(local_done);
@@ -7250,14 +7286,50 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent PointCopyOp::exchange_indirect_records(const unsigned index,
-             const ApEvent local_done, const PhysicalTraceInfo &trace_info,
-             const InstanceSet &insts, const IndexSpace space,
-             LegionVector<IndirectRecord>::aligned &records, const bool sources)
+       const ApEvent local_done, const PhysicalTraceInfo &trace_info,
+       const InstanceSet &insts, const IndexSpace space, const DomainPoint &key,
+       LegionVector<IndirectRecord>::aligned &records, const bool sources)
     //--------------------------------------------------------------------------
     {
       // Exchange via the owner
       return owner->exchange_indirect_records(index, local_done, trace_info, 
-                                              insts, space, records, sources);
+                                insts, space, index_point, records, sources);
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveManager* PointCopyOp::find_or_create_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const LayoutConstraintSet &constraints,
+                                  const std::vector<LogicalRegion> &regions,
+                                  Memory::Kind kind, size_t *footprint,
+                                  LayoutConstraintKind *unsat_kind,
+                                  unsigned *unsat_index,
+                                  DomainPoint &collective_point)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(index_point.get_dim() > 0);
+#endif
+      collective_point = index_point;
+      return owner->find_or_create_collective_instance(mapper_call, index,
+          constraints, regions, kind, footprint, unsat_kind, unsat_index, 
+          collective_point);
+    }
+
+    //--------------------------------------------------------------------------
+    bool PointCopyOp::finalize_collective_instance(MappingCallKind call_kind,
+                                                   unsigned index, bool success)
+    //--------------------------------------------------------------------------
+    {
+      return owner->finalize_collective_instance(call_kind, index, success);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointCopyOp::report_total_collective_instance_calls(
+                              MappingCallKind mapper_call, unsigned total_calls)
+    //--------------------------------------------------------------------------
+    {
+      owner->report_total_collective_instance_calls(mapper_call, total_calls);
     }
 
     //--------------------------------------------------------------------------
@@ -9102,7 +9174,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
+    std::map<PhysicalManager*,unsigned>* 
                                    PostCloseOp::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
@@ -9821,7 +9893,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
+    std::map<PhysicalManager*,unsigned>* 
                                      AcquireOp::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
@@ -10715,7 +10787,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
+    std::map<PhysicalManager*,unsigned>* 
                                      ReleaseOp::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
@@ -12928,7 +13000,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+    std::map<PhysicalManager*,unsigned>*
                                    MustEpochOp::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
@@ -13582,14 +13654,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     DependentPartitionOp::DependentPartitionOp(Runtime *rt)
-      : ExternalPartition(), Operation(rt), thunk(NULL)
+      : ExternalPartition(), CollectiveInstanceCreator<Operation>(rt), 
+        thunk(NULL)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     DependentPartitionOp::DependentPartitionOp(const DependentPartitionOp &rhs)
-      : ExternalPartition(), Operation(NULL)
+      : ExternalPartition(), CollectiveInstanceCreator<Operation>(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -14067,7 +14140,7 @@ namespace Legion {
                                               false/*track effects*/,
                                               record_valid);
       ApEvent done_event = trigger_thunk(requirement.region.get_index_space(),
-                                         mapped_instances, trace_info);
+                                     mapped_instances, trace_info, index_point);
       // Once we are done running these routines, we can mark
       // that the handles have all been completed
       finalize_mapping(); 
@@ -14095,7 +14168,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent DependentPartitionOp::trigger_thunk(IndexSpace handle,
-                 const InstanceSet &mapped_insts, const PhysicalTraceInfo &info)
+                                                const InstanceSet &mapped_insts,
+                                                const PhysicalTraceInfo &info, 
+                                                const DomainPoint &key)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -14112,9 +14187,9 @@ namespace Legion {
           instances.resize(instances.size() + 1);
           FieldDataDescriptor &desc = instances.back();
           const InstanceRef &ref = mapped_insts[0];
-          PhysicalManager *manager = ref.get_manager();
+          InstanceManager *manager = ref.get_manager();
           desc.index_space = handle;
-          desc.inst = manager->get_instance();
+          desc.inst = manager->get_instance(key);
           desc.field_offset = manager->layout->find_field_info(
                         *(requirement.privilege_fields.begin())).field_id;
           index_preconditions.insert(ref.get_ready_event());
@@ -14147,9 +14222,9 @@ namespace Legion {
         instances.resize(1);
         FieldDataDescriptor &desc = instances[0];
         const InstanceRef &ref = mapped_insts[0];
-        PhysicalManager *manager = ref.get_manager();
+        InstanceManager *manager = ref.get_manager();
         desc.index_space = handle;
-        desc.inst = manager->get_instance();
+        desc.inst = manager->get_instance(key);
         desc.field_offset = manager->layout->find_field_info(
                       *(requirement.privilege_fields.begin())).field_id;
         ApEvent ready_event = ref.get_ready_event();
@@ -14197,7 +14272,7 @@ namespace Legion {
       RegionTreeID bad_tree = 0;
       std::vector<FieldID> missing_fields;
       std::vector<PhysicalManager*> unacquired;
-      int composite_index = runtime->forest->physical_convert_mapping(this,
+      int virtual_index = runtime->forest->physical_convert_mapping(this,
                                 requirement, output.chosen_instances, 
                                 mapped_instances, bad_tree, missing_fields,
                                 &acquired_instances, unacquired, 
@@ -14260,7 +14335,7 @@ namespace Legion {
                         parent_ctx->get_task_name(), 
                         parent_ctx->get_unique_id())
       }
-      if (composite_index >= 0)
+      if (virtual_index >= 0)
       {
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                       "Invalid mapper output from invocation of 'map_partition'"
@@ -14277,7 +14352,7 @@ namespace Legion {
       std::vector<LogicalRegion> regions_to_check(1, requirement.region);
       for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
       {
-        PhysicalManager *manager = mapped_instances[idx].get_manager();
+        PhysicalManager *manager = mapped_instances[idx].get_instance_manager();
         if (!manager->meets_regions(regions_to_check))
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of "
@@ -14288,7 +14363,7 @@ namespace Legion {
                         mapper->get_mapper_name(),
                         parent_ctx->get_task_name(),
                         parent_ctx->get_unique_id())
-        if (!manager->is_instance_manager())
+        if (manager->is_reduction_manager())
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of "
                         "'map_partition' on mapper %s. Mapper selected an "
@@ -14296,13 +14371,29 @@ namespace Legion {
                         "partition operation in task %s (ID %lld).",
                         mapper->get_mapper_name(),parent_ctx->get_task_name(),
                         parent_ctx->get_unique_id())
+        if (manager->is_collective_manager())
+        {
+          CollectiveManager *collective_manager = 
+            manager->as_collective_manager();
+          if (!collective_manager->point_space->contains_point(index_point))
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of "
+                        "'map_partition' on mapper %s. Mapper selected a "
+                        "collective instance for region requirement %d but "
+                        "point partition (ID %lld) launched in task %s "
+                        "(ID %lld) is not contained within the point space "
+                        "for the collective instace.",
+                        mapper->get_mapper_name(), idx, 
+                        get_unique_op_id(), parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id())
+        }
         // This is a temporary check to guarantee that instances for 
         // dependent partitioning operations are in memories that 
         // Realm supports for now. In the future this should be fixed
         // so that realm supports all kinds of memories for dependent
         // partitioning operations (see issue #516)
-        const Memory mem = manager->get_memory();
-        const Memory::Kind mem_kind = mem.kind();
+        const Memory::Kind mem_kind = 
+          manager->layout->constraints->memory_constraint.get_kind();
         if ((mem_kind != Memory::GLOBAL_MEM) && 
             (mem_kind != Memory::SYSTEM_MEM) &&
             (mem_kind != Memory::REGDMA_MEM) && 
@@ -14318,14 +14409,14 @@ namespace Legion {
                         "Invalid mapper output from invocation of "
                         "'map_partition' on mapper %s for dependent partition "
                         "operation %lld in task %s (UID %lld). Mapper specified"
-                        " an instance in memory " IDFMT " with kind %s which is"
+                        " an instance in memory(memories) with kind %s which is"
                         " not supported for dependent partition operations "
                         "currently (see Legion issue #516). Please pick an "
                         "instance in a CPU-visible memory for now.",
                         mapper->get_mapper_name(), get_unique_op_id(),
                         parent_ctx->get_task_name(), 
                         parent_ctx->get_unique_id(), 
-                        mem.id, mem_names[mem_kind])
+                        mem_names[mem_kind])
         }
       }
       return output.track_valid_region;
@@ -14660,7 +14751,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
+    std::map<PhysicalManager*,unsigned>* 
                           DependentPartitionOp::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
@@ -14770,6 +14861,55 @@ namespace Legion {
         rez.serialize(response);
         applied_events.insert(response);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveManager* DependentPartitionOp::find_or_create_collective_instance(
+                                  MappingCallKind call_kind, unsigned index,
+                                  const LayoutConstraintSet &constraints,
+                                  const std::vector<LogicalRegion> &regions,
+                                  Memory::Kind kind, size_t *footprint,
+                                  LayoutConstraintKind *unsat_kind,
+                                  unsigned *unsat_index, 
+                                  DomainPoint &collective_point)
+    //--------------------------------------------------------------------------
+    {
+      if (points.empty())
+        return Operation::find_or_create_collective_instance(call_kind, index,
+                            constraints, regions, kind, footprint, unsat_kind, 
+                            unsat_index, collective_point);
+      else
+        return 
+          CollectiveInstanceCreator<Operation>::
+                find_or_create_collective_instance(
+                          call_kind, index, constraints, regions, kind,
+                          footprint, unsat_kind, unsat_index, collective_point);
+    }
+
+    //--------------------------------------------------------------------------
+    bool DependentPartitionOp::finalize_collective_instance(
+                        MappingCallKind call_kind, unsigned index, bool success)
+    //--------------------------------------------------------------------------
+    {
+      if (points.empty())
+        return Operation::finalize_collective_instance(call_kind,index,success);
+      else
+        return 
+          CollectiveInstanceCreator<Operation>::finalize_collective_instance(
+                                                    call_kind, index, success);
+    }
+
+    //--------------------------------------------------------------------------
+    void DependentPartitionOp::report_total_collective_instance_calls(
+                              MappingCallKind mapper_call, unsigned total_calls)
+    //--------------------------------------------------------------------------
+    {
+      if (points.empty())
+        Operation::report_total_collective_instance_calls(mapper_call, 
+                                                          total_calls);
+      else
+        CollectiveInstanceCreator<Operation>::
+          report_total_collective_instance_calls(mapper_call, total_calls);
     }
 
     //--------------------------------------------------------------------------
@@ -15055,10 +15195,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ApEvent PointDepPartOp::trigger_thunk(IndexSpace handle,
                                           const InstanceSet &mapped_instances,
-                                          const PhysicalTraceInfo &trace_info)
+                                          const PhysicalTraceInfo &trace_info,
+                                          const DomainPoint &key)
     //--------------------------------------------------------------------------
     {
-      return owner->trigger_thunk(handle, mapped_instances, trace_info);
+      return owner->trigger_thunk(handle, mapped_instances, 
+                                  trace_info, index_point);
     }
 
     //--------------------------------------------------------------------------
@@ -15072,6 +15214,42 @@ namespace Legion {
       commit_operation(false/*deactivate*/, profiling_reported);
       // Tell our owner that we are done, they will do the deactivate
       owner->handle_point_commit(profiling_reported);
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveManager* PointDepPartOp::find_or_create_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const LayoutConstraintSet &constraints,
+                                  const std::vector<LogicalRegion> &regions,
+                                  Memory::Kind kind, size_t *footprint,
+                                  LayoutConstraintKind *unsat_kind,
+                                  unsigned *unsat_index,
+                                  DomainPoint &collective_point)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(index_point.get_dim() > 0);
+#endif
+      collective_point = index_point;
+      return owner->find_or_create_collective_instance(mapper_call, index,
+          constraints, regions, kind, footprint, unsat_kind, unsat_index,
+          collective_point);
+    }
+
+    //--------------------------------------------------------------------------
+    bool PointDepPartOp::finalize_collective_instance(MappingCallKind call_kind,
+                                                   unsigned index, bool success)
+    //--------------------------------------------------------------------------
+    {
+      return owner->finalize_collective_instance(call_kind, index, success);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointDepPartOp::report_total_collective_instance_calls(
+                              MappingCallKind mapper_call, unsigned total_calls)
+    //--------------------------------------------------------------------------
+    {
+      owner->report_total_collective_instance_calls(mapper_call, total_calls);
     }
 
     //--------------------------------------------------------------------------
@@ -15353,7 +15531,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+    std::map<PhysicalManager*,unsigned>*
                                         FillOp::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
@@ -15886,7 +16064,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexFillOp::IndexFillOp(Runtime *rt)
-      : FillOp(rt)
+      : CollectiveInstanceCreator<FillOp>(rt)
     //--------------------------------------------------------------------------
     {
       this->is_index_space = true;
@@ -15894,7 +16072,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexFillOp::IndexFillOp(const IndexFillOp &rhs)
-      : FillOp(rhs)
+      : CollectiveInstanceCreator<FillOp>(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -16423,6 +16601,42 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    CollectiveManager* PointFillOp::find_or_create_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const LayoutConstraintSet &constraints,
+                                  const std::vector<LogicalRegion> &regions,
+                                  Memory::Kind kind, size_t *footprint,
+                                  LayoutConstraintKind *unsat_kind,
+                                  unsigned *unsat_index,
+                                  DomainPoint &collective_point)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(index_point.get_dim() > 0);
+#endif
+      collective_point = index_point;
+      return owner->find_or_create_collective_instance(mapper_call, index,
+          constraints, regions, kind, footprint, unsat_kind, unsat_index,
+          collective_point);
+    }
+
+    //--------------------------------------------------------------------------
+    bool PointFillOp::finalize_collective_instance(MappingCallKind call_kind,
+                                                   unsigned index, bool success)
+    //--------------------------------------------------------------------------
+    {
+      return owner->finalize_collective_instance(call_kind, index, success);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointFillOp::report_total_collective_instance_calls(
+                              MappingCallKind mapper_call, unsigned total_calls)
+    //--------------------------------------------------------------------------
+    {
+      owner->report_total_collective_instance_calls(mapper_call, total_calls);
+    }
+
+    //--------------------------------------------------------------------------
     const DomainPoint& PointFillOp::get_domain_point(void) const
     //--------------------------------------------------------------------------
     {
@@ -16790,11 +17004,9 @@ namespace Legion {
           assert(false);
       }
       // Register this instance with the memory manager
-      InstanceManager *external_manager = 
-        external_instance.get_manager()->as_instance_manager();
-      MemoryManager *memory_manager = external_manager->memory_manager;
-      const RtEvent attached = 
-        memory_manager->attach_external_instance(external_manager);
+      PhysicalManager *external_manager = 
+        external_instance.get_instance_manager();
+      const RtEvent attached = external_manager->attach_external_instance();
       if (attached.exists())
         attached.wait();
       const PhysicalTraceInfo trace_info(this, 0/*idx*/, true/*init*/);
@@ -16939,8 +17151,8 @@ namespace Legion {
           }
         case LEGION_EXTERNAL_INSTANCE:
           {
-            Realm::InstanceLayoutGeneric *ilg = 
-              node->create_layout(layout_constraint_set, field_set, sizes);
+            Realm::InstanceLayoutGeneric *ilg = node->create_layout(
+                layout_constraint_set, field_set, sizes, false/*compact*/);
             const PointerConstraint &pointer = 
                                       layout_constraint_set.pointer_constraint;
 #ifdef DEBUG_LEGION
@@ -17195,7 +17407,7 @@ namespace Legion {
       FieldMask all_allocated_fields;
       for (unsigned idx = 0; idx < references.size(); idx++)
       {
-        PhysicalManager *manager = references[idx].get_manager();
+        InstanceManager *manager = references[idx].get_manager();
         all_allocated_fields |= manager->layout->allocated_fields;
       }
       FieldSpaceNode *field_space = 
@@ -17341,12 +17553,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(references.size() == 1);
 #endif
-      InstanceRef reference = references[0];
-      // Check that this is actually a file
-      PhysicalManager *manager = reference.get_manager();
-#ifdef DEBUG_LEGION
-      assert(!manager->is_reduction_manager()); 
-#endif
+      InstanceRef reference = references[0]; 
       const PhysicalTraceInfo trace_info(this, 0/*idx*/, true/*init*/);
       std::set<ApEvent> detach_events;
       // If we need to flush then register this operation to bring the
@@ -17400,6 +17607,10 @@ namespace Legion {
                                         completion_event);
 #endif
       }
+      PhysicalManager *manager = reference.get_instance_manager();
+#ifdef DEBUG_LEGION
+      assert(!manager->is_reduction_manager()); 
+#endif
       // Also tell the runtime to detach the external instance from memory
       // This has to be done before we can consider this mapped
       RtEvent detached_event = manager->detach_external_instance();
@@ -18027,7 +18238,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+    std::map<PhysicalManager*,unsigned>*
                                       RemoteOp::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {

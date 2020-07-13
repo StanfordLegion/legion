@@ -742,49 +742,46 @@ namespace Legion {
       virtual void record_merge_events(ApEvent &lhs, 
                             const std::set<ApEvent>& rhs, Memoizable *memo);
     public:
-      virtual void record_issue_copy(Memoizable *memo,
-                             unsigned src_idx,
-                             unsigned dst_idx,
-                             ApEvent &lhs,
+      virtual void record_issue_copy(Memoizable *memo, ApEvent &lhs,
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
 #ifdef LEGION_SPY
-                             RegionTreeID src_tree_id,
-                             RegionTreeID dst_tree_id,
+                             RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
-                             ApEvent precondition,
-                             ReductionOpID redop,
-                             bool reduction_fold,
-                             const FieldMaskSet<InstanceView> &tracing_srcs,
-                             const FieldMaskSet<InstanceView> &tracing_dsts,
-                             std::set<RtEvent> &applied);
+                             ApEvent precondition, PredEvent pred_guard,
+                             ReductionOpID redop, bool reduction_fold);
       virtual void record_issue_indirect(Memoizable *memo, ApEvent &lhs,
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
                              const std::vector<void*> &indirections,
-                             ApEvent precondition);
-      virtual void record_issue_fill(Memoizable *memo, unsigned idx,
-                             ApEvent &lhs,
+                             ApEvent precondition, PredEvent pred_guard);
+      virtual void record_copy_views(ApEvent lhs, Memoizable *memo,
+                           unsigned src_idx, unsigned dst_idx,
+                           IndexSpaceExpression *expr,
+                           const FieldMaskSet<InstanceView> &tracing_srcs,
+                           const FieldMaskSet<InstanceView> &tracing_dsts,
+                           std::set<RtEvent> &applied);
+      virtual void record_issue_fill(Memoizable *memo, ApEvent &lhs,
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField> &fields,
                              const void *fill_value, size_t fill_size,
 #ifdef LEGION_SPY
-                             FieldSpace handle,
+                             FieldSpace handle, 
                              RegionTreeID tree_id,
 #endif
-                             ApEvent precondition,
-                             const FieldMaskSet<FillView> &tracing_srcs,
-                             const FieldMaskSet<InstanceView> &tracing_dsts,
-                             std::set<RtEvent> &applied);
-    private:
-      void record_issue_fill_for_reduction(Memoizable *memo,
-                                           unsigned idx,
-                                           InstanceView *view,
-                                           const FieldMask &user_mask,
-                                           IndexSpaceExpression *expr,
-                                           std::set<RtEvent> &applied);
+                             ApEvent precondition, PredEvent pred_guard);
+#ifdef LEGION_GPU_REDUCTIONS
+      virtual void record_gpu_reduction(Memoizable *memo, ApEvent &lhs,
+                           IndexSpaceExpression *expr,
+                           const std::vector<CopySrcDstField> &src_fields,
+                           const std::vector<CopySrcDstField> &dst_fields,
+                           Processor gpu, TaskID gpu_task_id,
+                           PhysicalManager *src, PhysicalManager *dst,
+                           ApEvent precondition, PredEvent pred_guard,
+                           ReductionOpID redop, bool reduction_fold);
+#endif
     public:
       virtual void get_reduction_ready_events(Memoizable *memo,
                                               std::set<ApEvent> &ready_events);
@@ -796,8 +793,12 @@ namespace Legion {
                                   const FieldMask &user_mask,
                                   bool update_validity,
                                   std::set<RtEvent> &applied);
-      virtual void record_fill_view(FillView *view, const FieldMask &user_mask,
-                                  std::set<RtEvent> &applied);
+      virtual void record_post_fill_view(FillView *view, const FieldMask &mask);
+      virtual void record_fill_views(ApEvent lhs, Memoizable *memo,
+                           unsigned idx, IndexSpaceExpression *expr, 
+                           const FieldMaskSet<FillView> &tracing_srcs,
+                           const FieldMaskSet<InstanceView> &tracing_dsts,
+                           std::set<RtEvent> &applied_events);
     protected:
       void record_views(unsigned entry,
                         IndexSpaceExpression *expr,
@@ -1052,45 +1053,30 @@ namespace Legion {
       virtual ApEvent get_completion_for_deletion(void) const;
       virtual void record_merge_events(ApEvent &lhs, 
                             const std::set<ApEvent>& rhs, Memoizable *memo);
-      virtual void record_issue_copy(Memoizable *memo,
-                             unsigned src_idx,
-                             unsigned dst_idx,
-                             ApEvent &lhs,
+      virtual void record_issue_copy(Memoizable *memo, ApEvent &lhs,
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
 #ifdef LEGION_SPY
-                             RegionTreeID src_tree_id,
-                             RegionTreeID dst_tree_id,
+                             RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
-                             ApEvent precondition,
-                             ReductionOpID redop,
-                             bool reduction_fold,
-                             const FieldMaskSet<InstanceView> &tracing_srcs,
-                             const FieldMaskSet<InstanceView> &tracing_dsts,
-                             std::set<RtEvent> &applied);
+                             ApEvent precondition, PredEvent guard_event,
+                             ReductionOpID redop, bool reduction_fold);
       virtual void record_issue_indirect(Memoizable *memo, ApEvent &lhs,
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
                              const std::vector<void*> &indirections,
-                             ApEvent precondition);
-      virtual void record_issue_fill(Memoizable *memo, unsigned idx,
-                             ApEvent &lhs,
+                             ApEvent precondition, PredEvent pred_guard);
+      virtual void record_issue_fill(Memoizable *memo, ApEvent &lhs,
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField> &fields,
                              const void *fill_value, size_t fill_size,
 #ifdef LEGION_SPY
-                             FieldSpace handle,
-                             RegionTreeID tree_id,
+                             FieldSpace handle, RegionTreeID tree_id,
 #endif
-                             ApEvent precondition,
-                             const FieldMaskSet<FillView> &tracing_srcs,
-                             const FieldMaskSet<InstanceView> &tracing_dsts,
-                             std::set<RtEvent> &applied);
+                             ApEvent precondition, PredEvent guard_event);
       virtual void record_set_op_sync_event(ApEvent &lhs, Memoizable *memo);
-      virtual void record_fill_view(FillView *view, const FieldMask &user_mask,
-                                    std::set<RtEvent> &applied);
     public:
       virtual void record_owner_shard(unsigned trace_local_id, ShardID owner);
       virtual void record_local_space(unsigned trace_local_id, IndexSpace sp);
@@ -1241,6 +1227,9 @@ namespace Legion {
       COMPLETE_REPLAY,
       BARRIER_ARRIVAL,
       BARRIER_ADVANCE,
+#ifdef LEGION_GPU_REDUCTIONS
+      GPU_REDUCTION,
+#endif
     };
 
     /**
@@ -1268,6 +1257,9 @@ namespace Legion {
       virtual CompleteReplay* as_complete_replay(void) { return NULL; }
       virtual BarrierArrival* as_barrier_arrival(void) { return NULL; }
       virtual BarrierAdvance* as_barrier_advance(void) { return NULL; }
+#ifdef LEGION_GPU_REDUCTIONS
+      virtual GPUReduction* as_gpu_reduction(void) { return NULL; }
+#endif
     protected:
       std::map<TraceLocalID, Memoizable*> &operations;
       std::vector<ApEvent> &events;
@@ -1399,8 +1391,7 @@ namespace Legion {
                 const std::vector<CopySrcDstField> &fields,
                 const void *fill_value, size_t fill_size,
 #ifdef LEGION_SPY
-                FieldSpace handle,
-                RegionTreeID tree_id,
+                FieldSpace handle, RegionTreeID tree_id,
 #endif
                 unsigned precondition_idx);
       virtual ~IssueFill(void);
@@ -1441,8 +1432,7 @@ namespace Legion {
                 const std::vector<CopySrcDstField>& src_fields,
                 const std::vector<CopySrcDstField>& dst_fields,
 #ifdef LEGION_SPY
-                RegionTreeID src_tree_id,
-                RegionTreeID dst_tree_id,
+                RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
                 unsigned precondition_idx,
                 ReductionOpID redop, bool reduction_fold);
@@ -1468,6 +1458,49 @@ namespace Legion {
       ReductionOpID redop;
       bool reduction_fold;
     };
+
+#ifdef LEGION_GPU_REDUCTIONS
+    /**
+     * \class GPUReduction
+     * This instruction has the following semantics:
+     * events[lhs] = expr->gpu_reduction(dst_fields, src_fields,
+     *                                   gpu, dst, src,
+     *                                   events[precondition_idx],
+     *                                   predicate_guard,
+     *                                   redop, reduction_fold)
+     */
+    class GPUReduction : public Instruction {
+    public:
+      GPUReduction(PhysicalTemplate &tpl,
+                   unsigned lhs, IndexSpaceExpression *expr,
+                   const TraceLocalID &op_key,
+                   const std::vector<CopySrcDstField>& src_fields,
+                   const std::vector<CopySrcDstField>& dst_fields,
+                   Processor gpu, TaskID gpu_task_id,
+                   PhysicalManager *src, PhysicalManager *dst,
+                   unsigned precondition_idx,
+                   ReductionOpID redop, bool reduction_fold);
+      virtual ~GPUReduction(void);
+      virtual void execute(void);
+      virtual std::string to_string(void);
+
+      virtual InstructionKind get_kind(void)
+        { return GPU_REDUCTION; }
+      virtual GPUReduction* as_gpu_reduction(void)
+        { return this; }
+    private:
+      friend class PhysicalTemplate;
+      unsigned lhs;
+      IndexSpaceExpression *expr;
+      std::vector<CopySrcDstField> src_fields, dst_fields;
+      Processor gpu;
+      TaskID gpu_task_id;
+      PhysicalManager *src, *dst;
+      unsigned precondition_idx;
+      ReductionOpID redop;
+      bool reduction_fold;
+    };
+#endif
 
     /**
      * \class SetOpSyncEvent

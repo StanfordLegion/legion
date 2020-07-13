@@ -1525,7 +1525,6 @@ namespace Legion {
       if (cache_policy == DEFAULT_CACHE_POLICY_ENABLE && finder != cached_task_mappings.end())
       {
         bool found = false;
-        bool has_reductions = false;
         // Iterate through and see if we can find one with our variant and hash
         for (std::list<CachedTaskMapping>::const_iterator it = 
               finder->second.begin(); it != finder->second.end(); it++)
@@ -1536,40 +1535,12 @@ namespace Legion {
             // Have to copy it before we do the external call which 
             // might invalidate our iterator
             output.chosen_instances = it->mapping;
-            has_reductions = it->has_reductions;
             found = true;
             break;
           }
         }
         if (found)
         {
-          // If we have reductions, make those instances now since we
-          // never cache the reduction instances
-          if (has_reductions)
-          {
-            const TaskLayoutConstraintSet &layout_constraints =
-              runtime->find_task_layout_constraints(ctx,
-                                  task.task_id, output.chosen_variant);
-            for (unsigned idx = 0; idx < task.regions.size(); idx++)
-            {
-              if (task.regions[idx].privilege == LEGION_REDUCE)
-              {
-                Memory target_memory = default_policy_select_target_memory(ctx,
-                                                         task.target_proc,
-                                                         task.regions[idx]);
-                std::set<FieldID> copy = task.regions[idx].privilege_fields;
-                size_t footprint;
-                if (!default_create_custom_instances(ctx, task.target_proc,
-                    target_memory, task.regions[idx], idx, copy, 
-                    layout_constraints, needs_field_constraint_check, 
-                    output.chosen_instances[idx], &footprint))
-                {
-                  default_report_failed_instance_creation(task, idx, 
-                        task.target_proc, target_memory, footprint);
-                }
-              }
-            }
-          }
           // See if we can acquire these instances still
           if (runtime->acquire_and_filter_instances(ctx, 
                                                      output.chosen_instances))
@@ -1604,7 +1575,6 @@ namespace Legion {
                               task.task_id, output.chosen_variant);
       // Now we need to go through and make instances for any of our
       // regions which do not have space for certain fields
-      bool has_reductions = false;
       for (unsigned idx = 0; idx < task.regions.size(); idx++)
       {
         if (done_regions[idx])
@@ -1620,7 +1590,6 @@ namespace Legion {
                                                          task.regions[idx]);
         if (task.regions[idx].privilege == LEGION_REDUCE)
         {
-          has_reductions = true;
           size_t footprint;
           if (!default_create_custom_instances(ctx, task.target_proc,
                   target_memory, task.regions[idx], idx, missing_fields[idx],
@@ -1686,15 +1655,6 @@ namespace Legion {
         cached_result.task_hash = task_hash;
         cached_result.variant = output.chosen_variant;
         cached_result.mapping = output.chosen_instances;
-        cached_result.has_reductions = has_reductions;
-        // We don't ever save reduction instances in our cache
-        if (has_reductions) {
-          for (unsigned idx = 0; idx < task.regions.size(); idx++) {
-            if (task.regions[idx].privilege != LEGION_REDUCE)
-              continue;
-            cached_result.mapping[idx].clear();
-          }
-        }
       }
     }
 

@@ -1826,7 +1826,7 @@ namespace Legion {
 #endif
             // Get the interference kind and report it if it is bad
             RegionUsage usage2(regions[indexes[j]]);
-            DependenceType dtype = check_dependence_type(usage1, usage2);
+            DependenceType dtype = check_dependence_type<false>(usage1, usage2);
             // We can only reporting interfering requirements precisely
             // if at least one of these is not a projection requireemnts
             if (((dtype == LEGION_TRUE_DEPENDENCE) || 
@@ -2802,7 +2802,7 @@ namespace Legion {
             InstanceSet &req_instances = physical_instances[idx];
             for (unsigned idx2 = 0; idx2 < req_instances.size(); idx2++)
             {
-              Memory mem = req_instances[idx2].get_memory();
+              const Memory mem = req_instances[idx2].get_memory();
               if (visible_memories.find(mem) == visible_memories.end())
               {
                 // Not visible from all target processors
@@ -2843,19 +2843,19 @@ namespace Legion {
         std::vector<FieldID> missing_fields;
         std::vector<PhysicalManager*> unacquired;
         bool free_acquired = false;
-        std::map<PhysicalManager*,std::pair<unsigned,bool> > *acquired = NULL;
+        std::map<PhysicalManager*,unsigned> *acquired = NULL;
         // Get the acquired instances only if we are checking
         if (!runtime->unsafe_mapper)
         {
           if (this->must_epoch != NULL)
           {
-            acquired = new std::map<PhysicalManager*,
-                     std::pair<unsigned,bool> >(*get_acquired_instances_ref());
+            acquired = new std::map<PhysicalManager*,unsigned>(
+                                  *get_acquired_instances_ref());
             free_acquired = true;
             // Merge the must epoch owners acquired instances too 
             // if we need to check for all our instances being acquired
-            std::map<PhysicalManager*,std::pair<unsigned,bool> > 
-              *epoch_acquired = this->must_epoch->get_acquired_instances_ref();
+            std::map<PhysicalManager*,unsigned> *epoch_acquired = 
+              this->must_epoch->get_acquired_instances_ref();
             if (epoch_acquired != NULL)
               acquired->insert(epoch_acquired->begin(), epoch_acquired->end());
           }
@@ -2903,8 +2903,8 @@ namespace Legion {
         }
         if (!unacquired.empty())
         {
-          std::map<PhysicalManager*,std::pair<unsigned,bool> > 
-            *acquired_instances = get_acquired_instances_ref();
+          std::map<PhysicalManager*,unsigned> *acquired_instances = 
+            get_acquired_instances_ref();
           for (std::vector<PhysicalManager*>::const_iterator it = 
                 unacquired.begin(); it != unacquired.end(); it++)
           {
@@ -2961,7 +2961,7 @@ namespace Legion {
                           "coherence.", "map_task", mapper->get_mapper_name(),
                           idx, get_task_name(), get_unique_id())
           virtual_mapped[idx] = true;
-        } 
+        }
         if (runtime->legion_spy_enabled)
           runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
                                                 idx, regions[idx],
@@ -2976,7 +2976,9 @@ namespace Legion {
           std::vector<LogicalRegion> regions_to_check(1, regions[idx].region);
           for (unsigned idx2 = 0; idx2 < result.size(); idx2++)
           {
-            if (!result[idx2].get_manager()->meets_regions(regions_to_check))
+            PhysicalManager *manager = 
+              result[idx2].get_manager()->as_instance_manager();
+            if (!manager->meets_regions(regions_to_check))
               // Doesn't satisfy the region requirement
               REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                             "Invalid mapper output from invocation of '%s' on "
@@ -2986,13 +2988,26 @@ namespace Legion {
                             "insufficient space for the requested logical "
                             "region.", "map_task", mapper->get_mapper_name(),
                             idx, get_task_name(), get_unique_id())
+            if (manager->is_collective_manager())
+            {
+              CollectiveManager *collective_manager = 
+                manager->as_collective_manager();
+              if (!collective_manager->point_space->contains_point(index_point))
+                REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                            "Invalid mapper output from invocation of '%s' on "
+                            "mapper %s. Mapper selected a collective instance "
+                            "for region requirement %d that does not contain "
+                            "the point for task %s (ID %lld).", "map_task",
+                            mapper->get_mapper_name(), idx, get_task_name(),
+                            get_unique_id())
+            }
           }
           if (!regions[idx].is_no_access() &&
               !variant_impl->is_no_access_region(idx))
           {
             for (unsigned idx2 = 0; idx2 < result.size(); idx2++)
             {
-              Memory mem = result[idx2].get_memory();
+              const Memory mem = result[idx2].get_memory();
               if (visible_memories.find(mem) == visible_memories.end())
                 // Not visible from all target processors
                 REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
@@ -3009,10 +3024,7 @@ namespace Legion {
           // managers are reduction instances
           if (IS_REDUCE(regions[idx]))
           {
-            std::map<PhysicalManager*,std::pair<unsigned,bool> > 
-              *acquired = get_acquired_instances_ref();
             for (unsigned idx2 = 0; idx2 < result.size(); idx2++)
-            {
               if (!result[idx2].get_manager()->is_reduction_manager())
                 REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                               "Invalid mapper output from invocation of '%s' "
@@ -3022,28 +3034,10 @@ namespace Legion {
                               "reduction privileges.", "map_task", 
                               mapper->get_mapper_name(), idx,
                               get_task_name(), get_unique_id())
-              std::map<PhysicalManager*,std::pair<unsigned,bool> >::
-                const_iterator finder = acquired->find(
-                    result[idx2].get_manager());
-#ifdef DEBUG_LEGION
-              assert(finder != acquired->end());
-#endif
-              // Permit this if we are doing replay mapping
-              if (!finder->second.second && (runtime->replay_file.empty()))
-                REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                              "Invalid mapper output from invocation of '%s' "
-                              "on mapper %s. Mapper made an illegal decision "
-                              "to re-use a reduction instance for region "
-                              "requirement %d of task %s (ID %lld). Reduction "
-                              "instances are not currently permitted to be "
-                              "recycled.", "map_task",mapper->get_mapper_name(),
-                              idx, get_task_name(), get_unique_id())
-            }
           }
           else
           {
             for (unsigned idx2 = 0; idx2 < result.size(); idx2++)
-            {
               if (!result[idx2].get_manager()->is_instance_manager())
                 REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                               "Invalid mapper output from invocation of '%s' "
@@ -3053,7 +3047,6 @@ namespace Legion {
                               "does not have reduction privileges.", "map_task",
                               mapper->get_mapper_name(), idx, 
                               get_task_name(), get_unique_id())
-            }
           }
         }
       }
@@ -3246,8 +3239,8 @@ namespace Legion {
           const FieldMask overlap = constraint_mask & ref.get_valid_fields();
           if (!overlap)
             continue;
-          PhysicalManager *manager = ref.get_manager();
-          if (manager->conflicts(constraints, &conflict_constraint))
+          InstanceManager *manager = ref.get_manager();
+          if (manager->conflicts(constraints, index_point,&conflict_constraint))
             break;
           // Check to see if we need an exact match on the layouts
           if (constraints->specialized_constraint.is_exact())
@@ -3315,7 +3308,7 @@ namespace Legion {
         RegionTreeID tree_id = 0;
         FieldSpaceNode *field_space_node = NULL;
         std::map<unsigned/*field index*/,
-          std::pair<PhysicalManager*,unsigned> > colocation_instances;
+          std::pair<InstanceManager*,unsigned> > colocation_instances;
         for (std::set<unsigned>::const_iterator iit = con_it->indexes.begin();
               iit != con_it->indexes.end(); iit++, idx++)
         {
@@ -3341,7 +3334,7 @@ namespace Legion {
               {
                 unsigned index = field_space_node->get_field_index(*it);
                 colocation_instances[index] = 
-                  std::pair<PhysicalManager*,unsigned>(NULL, *iit);
+                  std::pair<InstanceManager*,unsigned>(NULL, *iit);
                 colocation_mask.set_bit(index);
               }
             }
@@ -3355,7 +3348,7 @@ namespace Legion {
                   continue;
                 unsigned index = field_space_node->get_field_index(*it);
                 colocation_instances[index] = 
-                  std::pair<PhysicalManager*,unsigned>(NULL, *iit);
+                  std::pair<InstanceManager*,unsigned>(NULL, *iit);
                 colocation_mask.set_bit(index);
               }
             }
@@ -3366,7 +3359,7 @@ namespace Legion {
                 colocation_mask & ref.get_valid_fields();
               if (!overlap)
                 continue;
-              PhysicalManager *manager = ref.get_manager();
+              InstanceManager *manager = ref.get_manager();
               if (manager->is_virtual_manager())
                 REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                     "Invalid mapper output. Mapper %s selected a virtual "
@@ -3380,7 +3373,7 @@ namespace Legion {
               while (index >= 0)
               {
                 std::map<unsigned,
-                  std::pair<PhysicalManager*,unsigned> >::iterator finder = 
+                  std::pair<InstanceManager*,unsigned> >::iterator finder = 
                     colocation_instances.find(index);
 #ifdef DEBUG_LEGION
                 assert(finder != colocation_instances.end());
@@ -3414,7 +3407,7 @@ namespace Legion {
             for (unsigned idx = 0; idx < insts.size(); idx++)
             {
               const InstanceRef &ref = insts[idx];
-              PhysicalManager *manager = ref.get_manager();
+              InstanceManager *manager = ref.get_manager();
               if (manager->is_virtual_manager())
                 REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                     "Invalid mapper output. Mapper %s selected a virtual "
@@ -3432,11 +3425,12 @@ namespace Legion {
               while (index >= 0)
               {
                 std::map<unsigned,
-                  std::pair<PhysicalManager*,unsigned> >::const_iterator
+                  std::pair<InstanceManager*,unsigned> >::const_iterator
                     finder = colocation_instances.find(index);
                 if (finder != colocation_instances.end())
                 {
-                  if (finder->second.first->instance != manager->instance)
+                  if (finder->second.first->get_instance(index_point) != 
+                      manager->get_instance(index_point))
                     REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                           "Invalid mapper output. Mapper %s selected variant "
                           "%d for task %s (ID %lld). However, this variant "
@@ -3447,8 +3441,9 @@ namespace Legion {
                           local_mapper->get_mapper_name(), impl->vid, 
                           get_task_name(), get_unique_id(), 
                           field_names[name_index], *iit, finder->second.second,
-                          *iit, manager->instance.id, finder->second.second,
-                          finder->second.first->instance.id)
+                          *iit, manager->get_instance(index_point).id, 
+                          finder->second.second,
+                          finder->second.first->get_instance(index_point).id)
                 }
                 else
                 {
@@ -3727,7 +3722,8 @@ namespace Legion {
           {
             // If the mapper wants valid instances we first need to do our
             // versioning analysis and then call the mapper
-            if (defer_args == NULL/*first invocation*/)
+            if ((defer_args == NULL/*first invocation*/) ||
+                (defer_args->invocation_count == 0))
             {
               const RtEvent version_ready_event = 
                 perform_versioning_analysis(false/*post mapper*/);
@@ -3746,7 +3742,8 @@ namespace Legion {
           {
             // If the mapper doesn't need valid instances, we do the mapper
             // call first and then see if we need to do any versioning analysis
-            if (defer_args == NULL/*first invocation*/)
+            if ((defer_args == NULL/*first invocation*/) ||
+                (defer_args->invocation_count == 0))
             {
               if (is_replicated())
                 invoke_mapper_replicated(must_epoch_op);
@@ -4073,8 +4070,8 @@ namespace Legion {
                         regions[idx].region.get_tree_id())
         if (!unacquired.empty())
         {
-          std::map<PhysicalManager*,std::pair<unsigned,bool> > 
-            *acquired_instances = get_acquired_instances_ref();
+          std::map<PhysicalManager*,unsigned> *acquired_instances = 
+            get_acquired_instances_ref();
           for (std::vector<PhysicalManager*>::const_iterator uit = 
                 unacquired.begin(); uit != unacquired.end(); uit++)
           {
@@ -5540,7 +5537,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
+    std::map<PhysicalManager*,unsigned>* 
                                 IndividualTask::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
@@ -6699,7 +6696,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
+    std::map<PhysicalManager*,unsigned>* 
                                      PointTask::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
@@ -7060,6 +7057,43 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    CollectiveManager* PointTask::find_or_create_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const LayoutConstraintSet &constraints,
+                                  const std::vector<LogicalRegion> &regions,
+                                  Memory::Kind kind, size_t *footprint,
+                                  LayoutConstraintKind *unsat_kind,
+                                  unsigned *unsat_index,
+                                  DomainPoint &collective_point)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(index_point.get_dim() > 0);
+#endif
+      collective_point = index_point;
+      return slice_owner->find_or_create_collective_instance(mapper_call, index,
+          constraints, regions, kind, footprint, unsat_kind, unsat_index, 
+          collective_point);
+    }
+
+    //--------------------------------------------------------------------------
+    bool PointTask::finalize_collective_instance(MappingCallKind call_kind,
+                                                 unsigned index, bool success)
+    //--------------------------------------------------------------------------
+    {
+      return slice_owner->finalize_collective_instance(call_kind,index,success);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointTask::report_total_collective_instance_calls(
+                              MappingCallKind mapper_call, unsigned total_calls)
+    //--------------------------------------------------------------------------
+    {
+      slice_owner->report_total_collective_instance_calls(mapper_call, 
+                                                          total_calls);
+    }
+
+    //--------------------------------------------------------------------------
     void PointTask::record_intra_space_dependences(unsigned index,
                                     const std::vector<DomainPoint> &dependences)
     //--------------------------------------------------------------------------
@@ -7243,7 +7277,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+    std::map<PhysicalManager*,unsigned>*
                                      ShardTask::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
@@ -7702,14 +7736,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexTask::IndexTask(Runtime *rt)
-      : MultiTask(rt)
+      : CollectiveInstanceCreator<MultiTask>(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     IndexTask::IndexTask(const IndexTask &rhs)
-      : MultiTask(NULL)
+      : CollectiveInstanceCreator<MultiTask>(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -8483,8 +8517,8 @@ namespace Legion {
         }
         if (!unacquired.empty())
         {
-          std::map<PhysicalManager*,std::pair<unsigned,bool> > 
-            *acquired_instances = get_acquired_instances_ref();
+          std::map<PhysicalManager*,unsigned> *acquired_instances = 
+            get_acquired_instances_ref();
           for (std::vector<PhysicalManager*>::const_iterator uit = 
                 unacquired.begin(); uit != unacquired.end(); uit++)
           {
@@ -8531,8 +8565,9 @@ namespace Legion {
           for (unsigned check_idx = 0; 
                 check_idx < chosen_instances.size(); check_idx++)
           {
-            if (!chosen_instances[check_idx].get_manager()->meets_regions(
-                                                          regions_to_check))
+            PhysicalManager *manager = 
+              chosen_instances[check_idx].get_manager()->as_instance_manager();
+            if (!manager->meets_regions(regions_to_check))
               REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                             "Invalid mapper output from invocation of "
                             "'premap_task' on mapper %s. Mapper specified an "
@@ -8543,6 +8578,23 @@ namespace Legion {
                             get_task_name(), get_unique_id(), 
                             parent_ctx->get_task_name(), 
                             parent_ctx->get_unique_id())
+            if (manager->is_collective_manager())
+            {
+              CollectiveManager *collective_manager = 
+                manager->as_collective_manager();
+              if (collective_manager->point_space->handle != 
+                  launch_space->handle)
+                REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT, 
+                                "Invalid mapper output from invocation of "
+                                "'premap_task' on mapper %s. Mapper selected "
+                                "a collective instance with domain of index "
+                                "space %d for region requirement %d that does "
+                                "not match the launch index space %d for index "
+                                "task %s (UID %lld).",mapper->get_mapper_name(),
+                                collective_manager->point_space->handle.id,
+                                *it, launch_space->handle.id, get_task_name(),
+                                get_unique_id())
+            }
           }
         }
         // TODO: Implement physical tracing for premapped regions
@@ -8941,7 +8993,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
+    std::map<PhysicalManager*,unsigned>* 
                                      IndexTask::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
@@ -9889,7 +9941,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
+    std::map<PhysicalManager*,unsigned>* 
                                      SliceTask::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
@@ -9968,13 +10020,14 @@ namespace Legion {
       for (std::vector<PointTask*>::const_iterator it = 
             points.begin(); it != points.end(); it++)
       {
-        const RtEvent map_event = (*it)->perform_mapping(epoch_owner);
-        if (map_event.exists())
-          mapped_events.insert(map_event);
+        // Now that we support collective instance creation, we need to 
+        // enable all the point tasks to be mapping in parallel with
+        // each other in case they need to synchronize to create 
+        // collective instances
+        mapped_events.insert((*it)->defer_perform_mapping(RtEvent::NO_RT_EVENT,
+                                    epoch_owner, args, 0/*invocation count*/));
       }
-      if (!mapped_events.empty())
-        return Runtime::merge_events(mapped_events);
-      return RtEvent::NO_RT_EVENT;
+      return Runtime::merge_events(mapped_events);
     }
 
     //--------------------------------------------------------------------------
@@ -10015,7 +10068,13 @@ namespace Legion {
       for (unsigned idx = 0; idx < num_points; idx++)
       {
         PointTask *point = points[idx];
-        const RtEvent map_event = point->perform_mapping();
+        // Now that we support collective instance creation, we need to 
+        // enable all the point tasks to be mapping in parallel with
+        // each other in case they need to synchronize to create 
+        // collective instances
+        const RtEvent map_event = point->defer_perform_mapping(
+            RtEvent::NO_RT_EVENT, NULL/*must epoch*/, 
+            NULL/*defer args*/, 0/*invocation count*/);
         if (map_event.exists() && !map_event.has_triggered())
           point->defer_launch_task(map_event);
         else
@@ -11170,6 +11229,280 @@ namespace Legion {
       }
       else
         index_owner->record_intra_space_dependence(point, next, point_mapped);
+    }
+    
+    //--------------------------------------------------------------------------
+    CollectiveManager* SliceTask::find_or_create_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const LayoutConstraintSet &constraints,
+                                  const std::vector<LogicalRegion> &regions,
+                                  Memory::Kind kind, size_t *footprint,
+                                  LayoutConstraintKind *unsat_kind,
+                                  unsigned *unsat_index,
+                                  DomainPoint &collective_point)
+    //--------------------------------------------------------------------------
+    {
+      if (is_remote())
+      {
+        CollectiveManager *volatile result = NULL;
+        RtUserEvent ready_event = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(index_owner);
+          rez.serialize(mapper_call);
+          rez.serialize(SLICE_COLLECTIVE_FIND_OR_CREATE);
+          rez.serialize(index);
+          constraints.serialize(rez);
+          rez.serialize<size_t>(regions.size());
+          for (std::vector<LogicalRegion>::const_iterator it = 
+                regions.begin(); it != regions.end(); it++)
+            rez.serialize(*it);
+          rez.serialize(kind);
+          rez.serialize(footprint);
+          rez.serialize(unsat_kind);
+          rez.serialize(unsat_index);
+          rez.serialize(collective_point);
+          rez.serialize(&result);
+          rez.serialize(ready_event);
+        }
+        runtime->send_slice_collective_instance_request(orig_proc, rez);
+        ready_event.wait();
+        return result;
+      }
+      else
+        return index_owner->find_or_create_collective_instance(mapper_call, 
+            index, constraints, regions, kind, footprint, unsat_kind, 
+            unsat_index, collective_point);
+    }
+
+    //--------------------------------------------------------------------------
+    bool SliceTask::finalize_collective_instance(MappingCallKind call_kind,
+                                                 unsigned index, bool success)
+    //--------------------------------------------------------------------------
+    {
+      if (is_remote())
+      {
+        volatile bool result = success;
+        RtUserEvent ready_event = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(index_owner);
+          rez.serialize(call_kind);
+          rez.serialize(SLICE_COLLECTIVE_FINALIZE);
+          rez.serialize(index);
+          rez.serialize<bool>(success);
+          rez.serialize(&result);
+          rez.serialize(ready_event);
+        }
+        runtime->send_slice_collective_instance_request(orig_proc, rez);
+        ready_event.wait();
+        return result;
+      }
+      else
+        return index_owner->finalize_collective_instance(call_kind, index, 
+                                                         success);
+    }
+
+    //--------------------------------------------------------------------------
+    void SliceTask::report_total_collective_instance_calls(
+                              MappingCallKind mapper_call, unsigned total_calls)
+    //--------------------------------------------------------------------------
+    {
+      if (is_remote())
+      {
+        RtUserEvent applied_event = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(index_owner);
+          rez.serialize(mapper_call);
+          rez.serialize(SLICE_COLLECTIVE_REPORT);
+          rez.serialize(total_calls);
+          rez.serialize(applied_event);
+        }
+        runtime->send_slice_collective_instance_request(orig_proc, rez);
+        map_applied_conditions.insert(applied_event);
+      }
+      else
+        index_owner->report_total_collective_instance_calls(mapper_call,
+                                                            total_calls);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void SliceTask::handle_collective_instance_request(
+                   Deserializer &derez, AddressSpaceID source, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      IndexTask *index_owner;
+      derez.deserialize(index_owner);
+      MappingCallKind mapper_call;
+      derez.deserialize(mapper_call);
+      CollectiveInstMessage message;
+      derez.deserialize(message);
+      switch (message)
+      {
+        case SLICE_COLLECTIVE_FIND_OR_CREATE:
+          {
+            unsigned index;
+            derez.deserialize(index);
+            LayoutConstraintSet constraints;
+            constraints.deserialize(derez);
+            size_t num_regions;
+            derez.deserialize(num_regions);
+            std::vector<LogicalRegion> regions(num_regions);
+            for (unsigned idx = 0; idx < num_regions; idx++)
+              derez.deserialize(regions[idx]);
+            Memory::Kind mem_kind;
+            derez.deserialize(mem_kind);
+            size_t *remote_footprint;
+            derez.deserialize(remote_footprint);
+            LayoutConstraintKind *remote_unsat_kind;
+            derez.deserialize(remote_unsat_kind);
+            unsigned *remote_unsat_index;
+            derez.deserialize(remote_unsat_index);
+            DomainPoint point;
+            derez.deserialize(point);
+            CollectiveManager **target;
+            derez.deserialize(target);
+            RtUserEvent done_event;
+            derez.deserialize(done_event);
+
+            size_t footprint = 0;
+            LayoutConstraintKind unsat_kind = LEGION_SPECIALIZED_CONSTRAINT;
+            unsigned unsat_index = 0;
+            CollectiveManager *result = 
+              index_owner->find_or_create_collective_instance(mapper_call,
+                  index, constraints, regions, mem_kind, &footprint,
+                  &unsat_kind, &unsat_index, point);
+            if ((result != NULL) || (remote_footprint != NULL) || 
+                (remote_unsat_kind != NULL) || (remote_unsat_index != NULL))
+            {
+              Serializer rez;
+              {
+                RezCheck z2(rez);
+                rez.serialize(message);
+                if (result != NULL)
+                {
+                  rez.serialize(result->did);
+                  rez.serialize(target);
+                }
+                else
+                  rez.serialize<DistributedID>(0);
+                rez.serialize(remote_footprint);
+                if (remote_footprint != NULL)
+                  rez.serialize(footprint);
+                rez.serialize(remote_unsat_kind);
+                if (remote_unsat_kind != NULL)
+                  rez.serialize(unsat_kind);
+                rez.serialize(remote_unsat_index);
+                if (remote_unsat_index != NULL)
+                  rez.serialize(unsat_index);
+                rez.serialize(done_event);
+              }
+              runtime->send_slice_collective_instance_response(source, rez);
+            }
+            else // Nothing to send back so just trigger the event
+              Runtime::trigger_event(done_event);
+            break;
+          }
+        case SLICE_COLLECTIVE_FINALIZE:
+          {
+            unsigned index;
+            derez.deserialize(index);
+            bool success;
+            derez.deserialize(success);
+            bool *target;
+            derez.deserialize(target);
+            RtUserEvent done_event;
+            derez.deserialize(done_event);
+            const bool result = index_owner->finalize_collective_instance(
+                                              mapper_call, index, success);
+            if (result != success)
+            {
+              Serializer rez;
+              {
+                RezCheck z2(rez);
+                rez.serialize(message);
+                rez.serialize(target);
+                rez.serialize<bool>(result);
+                rez.serialize(done_event);
+              }
+              runtime->send_slice_collective_instance_response(source, rez);
+            }
+            else // Nothing to send back so just trigger the event
+              Runtime::trigger_event(done_event);
+            break;
+          }
+        case SLICE_COLLECTIVE_REPORT:
+          {
+            unsigned total_calls;
+            derez.deserialize(total_calls);
+            RtUserEvent done_event;
+            derez.deserialize(done_event);
+            index_owner->report_total_collective_instance_calls(mapper_call, 
+                                                                total_calls);            
+            Runtime::trigger_event(done_event);
+            break;
+          }
+        default:
+          assert(false);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void SliceTask::handle_collective_instance_response(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      CollectiveInstMessage message;
+      derez.deserialize(message);
+      switch (message)
+      {
+        case SLICE_COLLECTIVE_FIND_OR_CREATE:
+          {
+            DistributedID did;
+            derez.deserialize(did);
+            RtEvent ready_event;
+            if (did > 0)
+            {
+              CollectiveManager **target;
+              derez.deserialize(target);
+              *target = static_cast<CollectiveManager*>(
+                  runtime->find_or_request_instance_manager(did, ready_event)); 
+            }
+            size_t *footprint;
+            derez.deserialize(footprint);
+            if (footprint != NULL)
+              derez.deserialize(*footprint);
+            LayoutConstraintKind *unsat_kind;
+            derez.deserialize(unsat_kind);
+            if (unsat_kind != NULL)
+              derez.deserialize(*unsat_kind);
+            unsigned *unsat_index;
+            derez.deserialize(unsat_index);
+            if (unsat_index != NULL)
+              derez.deserialize(*unsat_index);
+            RtUserEvent done_event;
+            derez.deserialize(done_event);
+            Runtime::trigger_event(done_event, ready_event);
+            break;
+          }
+        case SLICE_COLLECTIVE_FINALIZE:
+          {
+            bool *target;
+            derez.deserialize(target);
+            derez.deserialize<bool>(*target);
+            RtUserEvent done_event;
+            derez.deserialize(done_event);
+            Runtime::trigger_event(done_event);
+          }
+        default:
+          assert(false);
+      }
     }
 
   }; // namespace Internal 

@@ -73,6 +73,7 @@ namespace Legion {
       bool is_virtual_instance(void) const;
       bool is_reduction_instance(void) const;
       bool is_external_instance(void) const;
+      bool is_collective_instance(void) const;
     public:
       bool has_field(FieldID fid) const;
       void has_fields(std::map<FieldID,bool> &fids) const;

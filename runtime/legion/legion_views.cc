@@ -75,19 +75,40 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InstanceView::InstanceView(RegionTreeForest *ctx, DistributedID did,
-                               AddressSpaceID owner_sp,
+                               PhysicalManager *man, AddressSpaceID owner_sp,
                                AddressSpaceID log_own,
                                UniqueID own_ctx, bool register_now)
-      : LogicalView(ctx, did, owner_sp, register_now), 
+      : LogicalView(ctx, did, owner_sp, register_now), manager(man),
         owner_context(own_ctx), logical_owner(log_own)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(manager != NULL);
+#endif
+      // Keep the manager from being collected
+      manager->add_nested_resource_ref(did);
     }
 
     //--------------------------------------------------------------------------
     InstanceView::~InstanceView(void)
     //--------------------------------------------------------------------------
     { 
+      if (manager->remove_nested_resource_ref(did))
+        delete manager;
+      if (!atomic_reservations.empty())
+      {
+        // If this is the owner view, delete any atomic reservations
+        if (is_owner())
+        {
+          for (std::map<FieldID,Reservation>::iterator it = 
+                atomic_reservations.begin(); it != 
+                atomic_reservations.end(); it++)
+          {
+            it->second.destroy_reservation();
+          }
+        }
+        atomic_reservations.clear();
+      }
     }
 
 #ifdef ENABLE_VIEW_REPLICATION
@@ -119,6 +140,181 @@ namespace Legion {
       assert(false);
     }
 #endif // ENABLE_VIEW_REPLICATION
+
+    //--------------------------------------------------------------------------
+    void InstanceView::find_atomic_reservations(const FieldMask &mask,
+                                 Operation *op, const unsigned index, bool excl)
+    //--------------------------------------------------------------------------
+    {
+      // Compute the field set
+      std::vector<FieldID> atomic_fields;
+      manager->field_space_node->get_field_set(mask, op->get_context(), 
+                                               atomic_fields);
+      // If we are the owner we can do this here
+      if (is_owner())
+      {
+        std::vector<Reservation> reservations(atomic_fields.size());
+        find_field_reservations(atomic_fields, reservations);
+        for (unsigned idx = 0; idx < reservations.size(); idx++)
+          op->update_atomic_locks(index, reservations[idx], excl);
+      }
+      else
+      {
+        // Figure out which fields we need requests for and send them
+        std::vector<FieldID> needed_fields;
+        {
+          AutoLock v_lock(view_lock, 1, false);
+          for (std::vector<FieldID>::const_iterator it = 
+                atomic_fields.begin(); it != atomic_fields.end(); it++)
+          {
+            std::map<FieldID,Reservation>::const_iterator finder = 
+              atomic_reservations.find(*it);
+            if (finder == atomic_reservations.end())
+              needed_fields.push_back(*it);
+            else
+              op->update_atomic_locks(index, finder->second, excl);
+          }
+        }
+        if (!needed_fields.empty())
+        {
+          RtUserEvent wait_on = Runtime::create_rt_user_event();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize<size_t>(needed_fields.size());
+            for (unsigned idx = 0; idx < needed_fields.size(); idx++)
+              rez.serialize(needed_fields[idx]);
+            rez.serialize(wait_on);
+          }
+          runtime->send_atomic_reservation_request(owner_space, rez);
+          wait_on.wait();
+          // Now retake the lock and get the remaining reservations
+          AutoLock v_lock(view_lock, 1, false);
+          for (std::vector<FieldID>::const_iterator it = 
+                needed_fields.begin(); it != needed_fields.end(); it++)
+          {
+            std::map<FieldID,Reservation>::const_iterator finder =
+              atomic_reservations.find(*it);
+#ifdef DEBUG_LEGION
+            assert(finder != atomic_reservations.end());
+#endif
+            op->update_atomic_locks(index, finder->second, excl);
+          }
+        }
+      }
+    } 
+
+    //--------------------------------------------------------------------------
+    void InstanceView::find_field_reservations(
+                                      const std::vector<FieldID> &needed_fields, 
+                                      std::vector<Reservation> &results)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner());
+      assert(needed_fields.size() == results.size());
+#endif
+      AutoLock v_lock(view_lock);
+      for (unsigned idx = 0; idx < needed_fields.size(); idx++)
+      {
+        std::map<FieldID,Reservation>::const_iterator finder = 
+          atomic_reservations.find(needed_fields[idx]);
+        if (finder == atomic_reservations.end())
+        {
+          // Make a new reservation and add it to the set
+          Reservation handle = Reservation::create_reservation();
+          atomic_reservations[needed_fields[idx]] = handle;
+          results[idx] = handle;
+        }
+        else
+          results[idx] = finder->second;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InstanceView::handle_send_atomic_reservation_request(
+                   Runtime *runtime, Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      size_t num_fields;
+      derez.deserialize(num_fields);
+      std::vector<FieldID> fields(num_fields);
+      for (unsigned idx = 0; idx < num_fields; idx++)
+        derez.deserialize(fields[idx]);
+      RtUserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
+#ifdef DEBUG_LEGION
+      InstanceView *target = dynamic_cast<InstanceView*>(dc);
+      assert(target != NULL);
+#else
+      InstanceView *target = static_cast<InstanceView*>(dc);
+#endif
+      std::vector<Reservation> reservations(num_fields);
+      target->find_field_reservations(fields, reservations);
+      Serializer rez;
+      {
+        RezCheck z2(rez);
+        rez.serialize(did);
+        rez.serialize(num_fields);
+        for (unsigned idx = 0; idx < num_fields; idx++)
+        {
+          rez.serialize(fields[idx]);
+          rez.serialize(reservations[idx]);
+        }
+        rez.serialize(to_trigger);
+      }
+      runtime->send_atomic_reservation_response(source, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceView::update_field_reservations(
+                                  const std::vector<FieldID> &fields, 
+                                  const std::vector<Reservation> &reservations)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!is_owner());
+      assert(fields.size() == reservations.size());
+#endif
+      AutoLock v_lock(view_lock);
+      for (unsigned idx = 0; idx < fields.size(); idx++)
+        atomic_reservations[fields[idx]] = reservations[idx];
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InstanceView::handle_send_atomic_reservation_response(
+                                          Runtime *runtime, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      size_t num_fields;
+      derez.deserialize(num_fields);
+      std::vector<FieldID> fields(num_fields);
+      std::vector<Reservation> reservations(num_fields);
+      for (unsigned idx = 0; idx < num_fields; idx++)
+      {
+        derez.deserialize(fields[idx]);
+        derez.deserialize(reservations[idx]);
+      }
+      RtUserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
+#ifdef DEBUG_LEGION
+      InstanceView *target = dynamic_cast<InstanceView*>(dc);
+      assert(target != NULL);
+#else
+      InstanceView *target = static_cast<InstanceView*>(dc);
+#endif
+      target->update_field_reservations(fields, reservations);
+      Runtime::trigger_event(to_trigger);
+    }
 
     //--------------------------------------------------------------------------
     /*static*/ void InstanceView::handle_view_register_user(Deserializer &derez,
@@ -203,6 +399,8 @@ namespace Legion {
 
       bool reading;
       derez.deserialize<bool>(reading);
+      ReductionOpID redop;
+      derez.deserialize(redop);
       FieldMask copy_mask;
       derez.deserialize(copy_mask);
       IndexSpaceExpression *copy_expr = 
@@ -224,7 +422,7 @@ namespace Legion {
       // to handle these since they are often expensive and we don't want to
       // block the virtual channel. Note that we can't do this with methods
       // that add users, but only non-modifying calls like this
-      DeferFindCopyPreconditionArgs args(view, reading, trace_recording, 
+      DeferFindCopyPreconditionArgs args(view, reading, trace_recording, redop,
                                          copy_mask, copy_expr, op_id, index, 
                                          source, remote_aggregator, done_event);
       // One-up the message priority here to keep us ahead of any other
@@ -238,8 +436,8 @@ namespace Legion {
         ready.wait();
       InstanceView *inst_view = view->as_instance_view();
       EventFieldExprs preconditions;
-      inst_view->find_copy_preconditions_remote(reading, copy_mask, copy_expr,
-                        op_id, index, preconditions, trace_recording, source);
+      inst_view->find_copy_preconditions_remote(reading, redop, copy_mask, 
+          copy_expr, op_id, index, preconditions, trace_recording, source);
       // Send back the response unless the preconditions are empty in
       // which case we can just trigger the done event
       if (!preconditions.empty())
@@ -286,7 +484,7 @@ namespace Legion {
 #endif
       InstanceView *inst_view = dargs->view->as_instance_view();
       EventFieldExprs preconditions;
-      inst_view->find_copy_preconditions_remote(dargs->reading,
+      inst_view->find_copy_preconditions_remote(dargs->reading, dargs->redop,
           *dargs->copy_mask, dargs->copy_expr, dargs->op_id, dargs->index, 
           preconditions, dargs->trace_recording, dargs->source);
       // Send back the response unless the preconditions are empty in
@@ -384,6 +582,8 @@ namespace Legion {
 
       bool reading;
       derez.deserialize(reading);
+      ReductionOpID redop;
+      derez.deserialize(redop);
       ApEvent term_event;
       derez.deserialize(term_event);
       RtEvent collect_event;
@@ -409,7 +609,7 @@ namespace Legion {
       InstanceView *inst_view = view->as_instance_view();
 
       std::set<RtEvent> applied_events;
-      inst_view->add_copy_user(reading, term_event, collect_event, copy_mask, 
+      inst_view->add_copy_user(reading,redop,term_event,collect_event,copy_mask,
           copy_expr, op_id, index, applied_events, trace_recording, source);
       if (!applied_events.empty())
       {
@@ -546,7 +746,7 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    ExprView::ExprView(RegionTreeForest *ctx, InstanceManager *man, 
+    ExprView::ExprView(RegionTreeForest *ctx, PhysicalManager *man, 
                        InstanceView *view, IndexSpaceExpression *exp) 
       : context(ctx), manager(man), inst_view(view),
         view_expr(exp), view_volume(view_expr->get_volume()),
@@ -2254,25 +2454,19 @@ namespace Legion {
     MaterializedView::MaterializedView(
                                RegionTreeForest *ctx, DistributedID did,
                                AddressSpaceID own_addr,
-                               AddressSpaceID log_own, InstanceManager *man,
+                               AddressSpaceID log_own, PhysicalManager *man,
                                UniqueID own_ctx, bool register_now)
-      : InstanceView(ctx, encode_materialized_did(did), own_addr,
+      : InstanceView(ctx, encode_materialized_did(did), man, own_addr,
                      log_own, own_ctx, register_now), 
-        manager(man), expr_cache_uses(0), outstanding_additions(0)
+        expr_cache_uses(0), outstanding_additions(0)
 #ifdef ENABLE_VIEW_REPLICATION
         , remote_added_users(0), remote_pending_users(NULL)
 #endif
     //--------------------------------------------------------------------------
     {
-      // Otherwise the instance lock will get filled in when we are unpacked
-#ifdef DEBUG_LEGION
-      assert(manager != NULL);
-#endif
 #ifdef ENABLE_VIEW_REPLICATION
       repl_ptr.replicated_copies = NULL;
 #endif
-      // Keep the manager from being collected
-      manager->add_nested_resource_ref(did);
       if (is_logical_owner())
       {
         current_users = new ExprView(ctx,manager,this,manager->instance_domain);
@@ -2289,7 +2483,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MaterializedView::MaterializedView(const MaterializedView &rhs)
-      : InstanceView(NULL, 0, 0, 0, 0, false), manager(NULL)
+      : InstanceView(NULL, 0, NULL, 0, 0, 0, false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -2300,22 +2494,6 @@ namespace Legion {
     MaterializedView::~MaterializedView(void)
     //--------------------------------------------------------------------------
     {
-      if (manager->remove_nested_resource_ref(did))
-        delete manager;
-      if (!atomic_reservations.empty())
-      {
-        // If this is the owner view, delete any atomic reservations
-        if (is_owner())
-        {
-          for (std::map<FieldID,Reservation>::iterator it = 
-                atomic_reservations.begin(); it != 
-                atomic_reservations.end(); it++)
-          {
-            it->second.destroy_reservation();
-          }
-        }
-        atomic_reservations.clear();
-      }
       if ((current_users != NULL) && current_users->remove_reference())
         delete current_users;
 #ifdef ENABLE_VIEW_REPLICATION
@@ -2341,13 +2519,6 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    Memory MaterializedView::get_location(void) const
-    //--------------------------------------------------------------------------
-    {
-      return manager->get_memory();
     }
 
     //--------------------------------------------------------------------------
@@ -2650,6 +2821,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent MaterializedView::find_copy_preconditions(bool reading,
+                                            ReductionOpID redop,
                                             const FieldMask &copy_mask,
                                             IndexSpaceExpression *copy_expr,
                                             UniqueID op_id, unsigned index,
@@ -2688,8 +2860,8 @@ namespace Legion {
               ApEvent start_use_event = manager->get_use_event();
               if (start_use_event.exists())
                 preconditions[start_use_event].insert(copy_expr, copy_mask);
-              const RegionUsage usage(reading ? READ_ONLY : READ_WRITE, 
-                                      EXCLUSIVE, 0);
+              const RegionUsage usage(reading ? LEGION_READ_ONLY : (redop > 0) ?
+                  LEGION_REDUCE : LEGION_READ_WRITE, LEGION_EXCLUSIVE, redop);
               const bool copy_dominates = 
                 (copy_expr->expr_id == current_users->view_expr->expr_id) ||
                 (copy_expr->get_volume() == current_users->view_volume);
@@ -2728,6 +2900,7 @@ namespace Legion {
             RezCheck z(rez);
             rez.serialize(did);
             rez.serialize<bool>(reading);
+            rez.serialize(redop);
             rez.serialize(copy_mask);
             copy_expr->pack_expression(rez, logical_owner);
             rez.serialize(op_id);
@@ -2798,8 +2971,8 @@ namespace Legion {
         const ApEvent start_use_event = manager->get_use_event();
         if (start_use_event.exists())
           preconditions[start_use_event].insert(copy_expr, copy_mask);
-        const RegionUsage usage(reading ? LEGION_READ_ONLY : LEGION_READ_WRITE,
-                                LEGION_EXCLUSIVE, 0);
+        const RegionUsage usage(reading ? LEGION_READ_ONLY : (redop > 0) ?
+            LEGION_REDUCE : LEGION_READ_WRITE, LEGION_EXCLUSIVE, redop);
         const bool copy_dominates = 
           (copy_expr->expr_id == current_users->view_expr->expr_id) ||
           (copy_expr->get_volume() == current_users->view_volume);
@@ -2819,6 +2992,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MaterializedView::find_copy_preconditions_remote(bool reading,
+                                                ReductionOpID redop,
                                                 const FieldMask &copy_mask,
                                                 IndexSpaceExpression *copy_expr,
                                                 UniqueID op_id, unsigned index,
@@ -2833,8 +3007,8 @@ namespace Legion {
       const ApEvent start_use_event = manager->get_use_event();
       if (start_use_event.exists())
         preconditions[start_use_event].insert(copy_expr, copy_mask);
-      const RegionUsage usage(reading ? LEGION_READ_ONLY : LEGION_READ_WRITE, 
-                              LEGION_EXCLUSIVE, 0);
+      const RegionUsage usage(reading ? LEGION_READ_ONLY : (redop > 0) ? 
+          LEGION_REDUCE : LEGION_READ_WRITE, LEGION_EXCLUSIVE, redop);
       const bool copy_dominates = 
           (copy_expr->expr_id == current_users->view_expr->expr_id) ||
           (copy_expr->get_volume() == current_users->view_volume);
@@ -2845,7 +3019,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MaterializedView::add_copy_user(bool reading, ApEvent term_event,
+    void MaterializedView::add_copy_user(bool reading, ReductionOpID redop,
+                                         ApEvent term_event,
                                          RtEvent collect_event,
                                          const FieldMask &copy_mask,
                                          IndexSpaceExpression *copy_expr,
@@ -2867,6 +3042,7 @@ namespace Legion {
             RezCheck z(rez);
             rez.serialize(did);
             rez.serialize<bool>(reading);
+            rez.serialize(redop);
             rez.serialize(term_event);
             rez.serialize(collect_event);
             rez.serialize(copy_mask);
@@ -2903,7 +3079,8 @@ namespace Legion {
               current_users->add_reference();
             }
           }
-          const RegionUsage usage(reading ? READ_ONLY:READ_WRITE,EXCLUSIVE,0);
+          const RegionUsage usage(reading ? LEGION_READ_ONLY: (redop > 0) ? 
+              LEGION_REDUCE : LEGION_READ_WRITE, LEGION_EXCLUSIVE, redop);
           add_internal_copy_user(usage, copy_expr, local_mask, term_event, 
                                  collect_event, op_id, index, trace_recording);
           // Increment the remote added users count
@@ -2979,6 +3156,7 @@ namespace Legion {
                 RezCheck z(rez);
                 rez.serialize(did);
                 rez.serialize<bool>(reading);
+                rez.serialize(redop);
                 rez.serialize(term_event);
                 rez.serialize(collect_event);
                 rez.serialize(copy_mask);
@@ -2995,8 +3173,8 @@ namespace Legion {
         }
 #endif
         // Now we can do our local analysis
-        const RegionUsage usage(reading ? LEGION_READ_ONLY : LEGION_READ_WRITE,
-                                LEGION_EXCLUSIVE, 0);
+        const RegionUsage usage(reading ? LEGION_READ_ONLY : (redop > 0) ?
+            LEGION_REDUCE : LEGION_READ_WRITE, LEGION_EXCLUSIVE, redop);
         add_internal_copy_user(usage, copy_expr, copy_mask, term_event, 
                                collect_event, op_id, index, trace_recording);
       }
@@ -3612,182 +3790,7 @@ namespace Legion {
       }
       runtime->send_materialized_view(target, rez);
       update_remote_instances(target);
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::find_atomic_reservations(const FieldMask &mask,
-                                 Operation *op, const unsigned index, bool excl)
-    //--------------------------------------------------------------------------
-    {
-      // Compute the field set
-      std::vector<FieldID> atomic_fields;
-      manager->field_space_node->get_field_set(mask, op->get_context(), 
-                                               atomic_fields);
-      // If we are the owner we can do this here
-      if (is_owner())
-      {
-        std::vector<Reservation> reservations(atomic_fields.size());
-        find_field_reservations(atomic_fields, reservations);
-        for (unsigned idx = 0; idx < reservations.size(); idx++)
-          op->update_atomic_locks(index, reservations[idx], excl);
-      }
-      else
-      {
-        // Figure out which fields we need requests for and send them
-        std::vector<FieldID> needed_fields;
-        {
-          AutoLock v_lock(view_lock, 1, false);
-          for (std::vector<FieldID>::const_iterator it = 
-                atomic_fields.begin(); it != atomic_fields.end(); it++)
-          {
-            std::map<FieldID,Reservation>::const_iterator finder = 
-              atomic_reservations.find(*it);
-            if (finder == atomic_reservations.end())
-              needed_fields.push_back(*it);
-            else
-              op->update_atomic_locks(index, finder->second, excl);
-          }
-        }
-        if (!needed_fields.empty())
-        {
-          RtUserEvent wait_on = Runtime::create_rt_user_event();
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(did);
-            rez.serialize<size_t>(needed_fields.size());
-            for (unsigned idx = 0; idx < needed_fields.size(); idx++)
-              rez.serialize(needed_fields[idx]);
-            rez.serialize(wait_on);
-          }
-          runtime->send_atomic_reservation_request(owner_space, rez);
-          wait_on.wait();
-          // Now retake the lock and get the remaining reservations
-          AutoLock v_lock(view_lock, 1, false);
-          for (std::vector<FieldID>::const_iterator it = 
-                needed_fields.begin(); it != needed_fields.end(); it++)
-          {
-            std::map<FieldID,Reservation>::const_iterator finder =
-              atomic_reservations.find(*it);
-#ifdef DEBUG_LEGION
-            assert(finder != atomic_reservations.end());
-#endif
-            op->update_atomic_locks(index, finder->second, excl);
-          }
-        }
-      }
     } 
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::find_field_reservations(
-                                    const std::vector<FieldID> &needed_fields, 
-                                    std::vector<Reservation> &results)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(is_owner());
-      assert(needed_fields.size() == results.size());
-#endif
-      AutoLock v_lock(view_lock);
-      for (unsigned idx = 0; idx < needed_fields.size(); idx++)
-      {
-        std::map<FieldID,Reservation>::const_iterator finder = 
-          atomic_reservations.find(needed_fields[idx]);
-        if (finder == atomic_reservations.end())
-        {
-          // Make a new reservation and add it to the set
-          Reservation handle = Reservation::create_reservation();
-          atomic_reservations[needed_fields[idx]] = handle;
-          results[idx] = handle;
-        }
-        else
-          results[idx] = finder->second;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void MaterializedView::handle_send_atomic_reservation_request(
-                   Runtime *runtime, Deserializer &derez, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      size_t num_fields;
-      derez.deserialize(num_fields);
-      std::vector<FieldID> fields(num_fields);
-      for (unsigned idx = 0; idx < num_fields; idx++)
-        derez.deserialize(fields[idx]);
-      RtUserEvent to_trigger;
-      derez.deserialize(to_trigger);
-      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
-#ifdef DEBUG_LEGION
-      MaterializedView *target = dynamic_cast<MaterializedView*>(dc);
-      assert(target != NULL);
-#else
-      MaterializedView *target = static_cast<MaterializedView*>(dc);
-#endif
-      std::vector<Reservation> reservations(num_fields);
-      target->find_field_reservations(fields, reservations);
-      Serializer rez;
-      {
-        RezCheck z2(rez);
-        rez.serialize(did);
-        rez.serialize(num_fields);
-        for (unsigned idx = 0; idx < num_fields; idx++)
-        {
-          rez.serialize(fields[idx]);
-          rez.serialize(reservations[idx]);
-        }
-        rez.serialize(to_trigger);
-      }
-      runtime->send_atomic_reservation_response(source, rez);
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::update_field_reservations(
-                                  const std::vector<FieldID> &fields, 
-                                  const std::vector<Reservation> &reservations)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!is_owner());
-      assert(fields.size() == reservations.size());
-#endif
-      AutoLock v_lock(view_lock);
-      for (unsigned idx = 0; idx < fields.size(); idx++)
-        atomic_reservations[fields[idx]] = reservations[idx];
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void MaterializedView::handle_send_atomic_reservation_response(
-                                          Runtime *runtime, Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      size_t num_fields;
-      derez.deserialize(num_fields);
-      std::vector<FieldID> fields(num_fields);
-      std::vector<Reservation> reservations(num_fields);
-      for (unsigned idx = 0; idx < num_fields; idx++)
-      {
-        derez.deserialize(fields[idx]);
-        derez.deserialize(reservations[idx]);
-      }
-      RtUserEvent to_trigger;
-      derez.deserialize(to_trigger);
-      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
-#ifdef DEBUG_LEGION
-      MaterializedView *target = dynamic_cast<MaterializedView*>(dc);
-      assert(target != NULL);
-#else
-      MaterializedView *target = static_cast<MaterializedView*>(dc);
-#endif
-      target->update_field_reservations(fields, reservations);
-      Runtime::trigger_event(to_trigger);
-    }
 
     //--------------------------------------------------------------------------
     /*static*/ void MaterializedView::handle_send_materialized_view(
@@ -3806,8 +3809,8 @@ namespace Legion {
       UniqueID context_uid;
       derez.deserialize(context_uid);
       RtEvent man_ready;
-      PhysicalManager *manager = 
-        runtime->find_or_request_physical_manager(manager_did, man_ready);
+      PhysicalManager *manager =
+        runtime->find_or_request_instance_manager(manager_did, man_ready);
       if (man_ready.exists() && !man_ready.has_triggered())
       {
         // Defer this until the manager is ready
@@ -3842,7 +3845,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(manager->is_instance_manager());
 #endif
-      InstanceManager *inst_manager = manager->as_instance_manager();
+      PhysicalManager *inst_manager = manager->as_instance_manager();
       void *location;
       MaterializedView *view = NULL;
       if (runtime->find_pending_collectable_location(did, location))
@@ -4547,7 +4550,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < local_insts.size(); idx++)
       {
         const InstanceRef &inst = local_insts[idx];
-        PhysicalManager *manager = inst.get_manager();
+        PhysicalManager *manager = inst.get_instance_manager();
         std::pair<std::set<PhysicalManager*>::iterator,bool> result = 
           local_instances.insert(manager);
         if (result.second)
@@ -4608,16 +4611,13 @@ namespace Legion {
     ReductionView::ReductionView(RegionTreeForest *ctx, DistributedID did,
                                  AddressSpaceID own_sp,
                                  AddressSpaceID log_own,
-                                 ReductionManager *man, UniqueID own_ctx, 
+                                 PhysicalManager *man, UniqueID own_ctx, 
                                  bool register_now)
-      : InstanceView(ctx, encode_reduction_did(did), own_sp, log_own, 
-                     own_ctx, register_now), manager(man)
+      : InstanceView(ctx, encode_reduction_did(did), man, own_sp, log_own, 
+                     own_ctx, register_now),
+        fill_view(runtime->find_or_create_reduction_fill_view(manager->redop))
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(manager != NULL);
-#endif
-      manager->add_nested_resource_ref(did);
 #ifdef LEGION_GC
       log_garbage.info("GC Reduction View %lld %d %lld", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space,
@@ -4627,7 +4627,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReductionView::ReductionView(const ReductionView &rhs)
-      : InstanceView(NULL, 0, 0, 0, 0, false), manager(NULL)
+      : InstanceView(NULL, 0, NULL, 0, 0, 0, false), fill_view(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -4637,15 +4637,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ReductionView::~ReductionView(void)
     //--------------------------------------------------------------------------
-    {
-      if (manager->remove_nested_resource_ref(did))
-      {
-        if (manager->is_list_manager())
-          delete (manager->as_list_manager());
-        else
-          delete (manager->as_fold_manager());
-      }
-      // Remove any initial users as well
+    { 
       if (!initial_user_events.empty())
       {
         for (std::set<ApEvent>::const_iterator it = initial_user_events.begin();
@@ -4686,6 +4678,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(is_logical_owner());
+      assert(IS_READ_ONLY(usage) || IS_REDUCE(usage));
 #endif
       // We don't use field versions for doing interference tests on
       // reductions so there is no need to record it
@@ -4718,10 +4711,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      if (IS_REDUCE(usage))
-        assert(usage.redop == manager->redop);
-      else
-        assert(IS_READ_ONLY(usage));
+      assert(usage.redop == manager->redop);
 #endif
       // Quick test for empty index space expressions
       if (user_expr->is_empty())
@@ -4763,15 +4753,10 @@ namespace Legion {
         ApEvent start_use_event = manager->get_use_event();
         if (start_use_event.exists())
           wait_on_events.insert(start_use_event);
-        if (IS_READ_ONLY(usage))
         {
           AutoLock v_lock(view_lock,1,false/*exclusive*/);
-          find_reading_preconditions(user_mask, user_expr,op_id,wait_on_events);
-        }
-        else
-        {
-          AutoLock v_lock(view_lock,1,false/*exclusive*/);
-          find_reducing_preconditions(user_mask,user_expr,op_id,wait_on_events);
+          find_reducing_preconditions(usage, user_mask, user_expr,
+                                      op_id, wait_on_events);
         }
         // Add our local user
         const bool issue_collect = add_user(usage, user_expr, user_mask, 
@@ -4794,6 +4779,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent ReductionView::find_copy_preconditions(bool reading,
+                                            ReductionOpID redop,
                                             const FieldMask &copy_mask,
                                             IndexSpaceExpression *copy_expr,
                                             UniqueID op_id, unsigned index,
@@ -4810,6 +4796,7 @@ namespace Legion {
           RezCheck z(rez);
           rez.serialize(did);
           rez.serialize<bool>(reading);
+          rez.serialize(redop);
           rez.serialize(copy_mask);
           copy_expr->pack_expression(rez, logical_owner);
           rez.serialize(op_id);
@@ -4832,10 +4819,19 @@ namespace Legion {
           AutoLock v_lock(view_lock,1,false/*exclusive*/);
           find_reading_preconditions(copy_mask, copy_expr, op_id,preconditions);
         }
-        else
+        else if (redop > 0)
         {
+#ifdef DEBUG_LEGION
+          assert(redop == manager->redop);
+#endif
           AutoLock v_lock(view_lock,1,false/*exclusive*/);
           find_reducing_preconditions(copy_mask, copy_expr,op_id,preconditions);
+        }
+        else
+        {
+          AutoLock v_lock(view_lock);
+          find_initializing_preconditions(copy_mask, copy_expr, 
+                                          op_id, preconditions);
         }
         // Return any preconditions we found to the aggregator
         if (!preconditions.empty())
@@ -4847,6 +4843,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReductionView::find_copy_preconditions_remote(bool reading,
+                                            ReductionOpID redop,
                                             const FieldMask &copy_mask,
                                             IndexSpaceExpression *copy_expr,
                                             UniqueID op_id, unsigned index,
@@ -4867,16 +4864,25 @@ namespace Legion {
         AutoLock v_lock(view_lock,1,false/*exclusive*/);
         find_reading_preconditions(copy_mask, copy_expr, op_id, preconditions);
       }
-      else
+      else if (redop > 0)
       {
+#ifdef DEBUG_LEGION
+        assert(redop == manager->redop);
+#endif
         AutoLock v_lock(view_lock,1,false/*exclusive*/);
         find_reducing_preconditions(copy_mask, copy_expr, op_id, preconditions);
+      }
+      else
+      {
+        AutoLock v_lock(view_lock);
+        find_initializing_preconditions(copy_mask, copy_expr, 
+                                        op_id, preconditions);
       }
     }
 
     //--------------------------------------------------------------------------
-    void ReductionView::add_copy_user(bool reading, ApEvent term_event, 
-                                      RtEvent collect_event,
+    void ReductionView::add_copy_user(bool reading, ReductionOpID redop,
+                                      ApEvent term_event, RtEvent collect_event,
                                       const FieldMask &copy_mask,
                                       IndexSpaceExpression *copy_expr,
                                       UniqueID op_id, unsigned index,
@@ -4893,6 +4899,7 @@ namespace Legion {
           RezCheck z(rez);
           rez.serialize(did);
           rez.serialize<bool>(reading);
+          rez.serialize(redop);
           rez.serialize(term_event);
           rez.serialize(collect_event);
           rez.serialize(copy_mask);
@@ -4911,8 +4918,10 @@ namespace Legion {
       }
       else
       {
-        const RegionUsage usage(reading ? LEGION_READ_ONLY : LEGION_REDUCE, 
-                                LEGION_EXCLUSIVE, manager->redop);
+        // Reduction copy users behave like simultaneous
+        const RegionUsage usage(reading ? LEGION_READ_ONLY : (redop > 0) ?
+            LEGION_REDUCE : LEGION_READ_WRITE, (redop > 0) ?
+            LEGION_SIMULTANEOUS : LEGION_EXCLUSIVE, redop);
         const bool issue_collect = add_user(usage, copy_expr, copy_mask,
             term_event, collect_event, op_id, index, true/*copy*/,
             applied_events, trace_recording);
@@ -4927,15 +4936,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReductionView::find_reducing_preconditions(const FieldMask &user_mask,
+    void ReductionView::find_reducing_preconditions(const RegionUsage &usage,
+                                               const FieldMask &user_mask,
                                                IndexSpaceExpression *user_expr,
                                                UniqueID op_id,
-                                               std::set<ApEvent> &wait_on)
+                                               std::set<ApEvent> &wait_on) const
     //--------------------------------------------------------------------------
     {
       // lock must be held by caller
-      for (EventFieldUsers::const_iterator uit = reading_users.begin();
-            uit != reading_users.end(); uit++)
+      // we know that fills are always done between readers and reducers so
+      // we just need to check the initialization users and not readers
+      for (EventFieldUsers::const_iterator uit = initialization_users.begin();
+            uit != initialization_users.end(); uit++)
       {
         const FieldMask event_mask = uit->second.get_valid_mask() & user_mask;
         if (!event_mask)
@@ -4943,8 +4955,6 @@ namespace Legion {
         for (EventUsers::const_iterator it = uit->second.begin();
               it != uit->second.end(); it++)
         {
-          if (it->first->op_id == op_id)
-            continue;
           const FieldMask overlap = event_mask & it->second;
           if (!overlap)
             continue;
@@ -4952,21 +4962,10 @@ namespace Legion {
             context->intersect_index_spaces(user_expr, it->first->expr);
           if (expr_overlap->is_empty())
             continue;
-          // Once we have one event precondition we are done
           wait_on.insert(uit->first);
-          break;
         }
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void ReductionView::find_reading_preconditions(const FieldMask &user_mask,
-                                              IndexSpaceExpression *user_expr,
-                                              UniqueID op_id,
-                                              std::set<ApEvent> &wait_on)
-    //--------------------------------------------------------------------------
-    {
-      // lock must be held by caller
+      // check for coherence dependences on previous reduction users
       for (EventFieldUsers::const_iterator uit = reduction_users.begin();
             uit != reduction_users.end(); uit++)
       {
@@ -4976,8 +4975,51 @@ namespace Legion {
         for (EventUsers::const_iterator it = uit->second.begin();
               it != uit->second.end(); it++)
         {
-          if (it->first->op_id == op_id)
+          const FieldMask overlap = event_mask & it->second;
+          if (!overlap)
             continue;
+          // If they are both simultaneous then we can skip
+          if (IS_SIMULT(usage) && IS_SIMULT(it->first->usage))
+            continue;
+          // If they are both atomic then we can skip
+          if (IS_ATOMIC(usage) && IS_ATOMIC(it->first->usage))
+            continue;
+          // Otherwise we need to check for dependences
+          IndexSpaceExpression *expr_overlap = 
+            context->intersect_index_spaces(user_expr, it->first->expr);
+          if (expr_overlap->is_empty())
+            continue;
+          wait_on.insert(uit->first);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReductionView::find_initializing_preconditions(
+                                                const FieldMask &user_mask,
+                                                IndexSpaceExpression *user_expr,
+                                                UniqueID op_id,
+                                                EventFieldExprs &preconditions)
+    //--------------------------------------------------------------------------
+    {
+      // lock must be held by caller
+      // we know that reduces dominate earlier fills so we don't need to check
+      // those, but we do need to check both reducers and readers since it is
+      // possible there were no readers of reduction instance
+      for (EventFieldUsers::iterator uit = reduction_users.begin();
+            uit != reduction_users.end(); /*nothing*/)
+      {
+        const FieldMask event_mask = uit->second.get_valid_mask() & user_mask;
+        if (!event_mask)
+        {
+          uit++;
+          continue;
+        }
+        std::vector<PhysicalUser*> to_delete;
+        EventFieldExprs::iterator event_finder = preconditions.find(uit->first);
+        for (EventUsers::iterator it = uit->second.begin();
+              it != uit->second.end(); it++)
+        {
           const FieldMask overlap = event_mask & it->second;
           if (!overlap)
             continue;
@@ -4985,23 +5027,133 @@ namespace Legion {
             context->intersect_index_spaces(user_expr, it->first->expr);
           if (expr_overlap->is_empty())
             continue;
-          // Once we have one event precondition we are done
-          wait_on.insert(uit->first);
-          break;
+          // Have a precondition so we need to record it
+          if (event_finder == preconditions.end())
+          {
+            preconditions[uit->first].insert(expr_overlap, overlap);
+            event_finder = preconditions.find(uit->first);
+          }
+          else
+          {
+            FieldMaskSet<IndexSpaceExpression>::iterator finder = 
+              event_finder->second.find(expr_overlap);
+            if (finder == event_finder->second.end())
+              event_finder->second.insert(expr_overlap, overlap);
+            else
+              finder.merge(overlap);
+          }
+          // See if we can prune out this user because it is dominated
+          if (expr_overlap->get_volume() == it->first->expr->get_volume())
+          {
+            it.filter(overlap);
+            if (!it->second)
+              to_delete.push_back(it->first);
+          }
         }
+        if (!to_delete.empty())
+        {
+          for (std::vector<PhysicalUser*>::const_iterator it = 
+                to_delete.begin(); it != to_delete.end(); it++)
+          {
+            uit->second.erase(*it);
+            if ((*it)->remove_reference())
+              delete (*it);
+          }
+          if (uit->second.empty())
+          {
+            EventFieldUsers::iterator to_erase = uit++;
+            reduction_users.erase(to_erase);
+          }
+          else
+          {
+            uit->second.tighten_valid_mask();
+            uit++;
+          }
+        }
+        else
+          uit++;
+      }
+      for (EventFieldUsers::iterator uit = reading_users.begin();
+            uit != reading_users.end(); /*nothing*/)
+      {
+        const FieldMask event_mask = uit->second.get_valid_mask() & user_mask;
+        if (!event_mask)
+        {
+          uit++;
+          continue;
+        }
+        std::vector<PhysicalUser*> to_delete;
+        EventFieldExprs::iterator event_finder = preconditions.find(uit->first);
+        for (EventUsers::iterator it = uit->second.begin();
+              it != uit->second.end(); it++)
+        {
+          const FieldMask overlap = event_mask & it->second;
+          if (!overlap)
+            continue;
+          IndexSpaceExpression *expr_overlap = 
+            context->intersect_index_spaces(user_expr, it->first->expr);
+          if (expr_overlap->is_empty())
+            continue;
+          // Have a precondition so we need to record it
+          if (event_finder == preconditions.end())
+          {
+            preconditions[uit->first].insert(expr_overlap, overlap);
+            event_finder = preconditions.find(uit->first);
+          }
+          else
+          {
+            FieldMaskSet<IndexSpaceExpression>::iterator finder = 
+              event_finder->second.find(expr_overlap);
+            if (finder == event_finder->second.end())
+              event_finder->second.insert(expr_overlap, overlap);
+            else
+              finder.merge(overlap);
+          }
+          // See if we can prune out this user because it is dominated
+          if (expr_overlap->get_volume() == it->first->expr->get_volume())
+          {
+            it.filter(overlap);
+            if (!it->second)
+              to_delete.push_back(it->first);
+          }
+        }
+        if (!to_delete.empty())
+        {
+          for (std::vector<PhysicalUser*>::const_iterator it = 
+                to_delete.begin(); it != to_delete.end(); it++)
+          {
+            uit->second.erase(*it);
+            if ((*it)->remove_reference())
+              delete (*it);
+          }
+          if (uit->second.empty())
+          {
+            EventFieldUsers::iterator to_erase = uit++;
+            reading_users.erase(to_erase);
+          }
+          else
+          {
+            uit->second.tighten_valid_mask();
+            uit++;
+          }
+        }
+        else
+          uit++;
       }
     }
 
     //--------------------------------------------------------------------------
     void ReductionView::find_reducing_preconditions(const FieldMask &user_mask,
-                                               IndexSpaceExpression *user_expr,
-                                               UniqueID op_id,
-                                               EventFieldExprs &preconditions)
+                                           IndexSpaceExpression *user_expr,
+                                           UniqueID op_id,
+                                           EventFieldExprs &preconditions) const
     //--------------------------------------------------------------------------
     {
       // lock must be held by caller
-      for (EventFieldUsers::const_iterator uit = reading_users.begin();
-            uit != reading_users.end(); uit++)
+      // we know that fills are always done between readers and reducers so
+      // we just need to check the initialization users for reader deps
+      for (EventFieldUsers::const_iterator uit = initialization_users.begin();
+            uit != initialization_users.end(); uit++)
       {
         const FieldMask event_mask = uit->second.get_valid_mask() & user_mask;
         if (!event_mask)
@@ -5010,11 +5162,49 @@ namespace Legion {
         for (EventUsers::const_iterator it = uit->second.begin();
               it != uit->second.end(); it++)
         {
-          if (it->first->op_id == op_id)
-            continue;
           const FieldMask overlap = event_mask & it->second;
           if (!overlap)
             continue;
+          IndexSpaceExpression *expr_overlap = 
+            context->intersect_index_spaces(user_expr, it->first->expr);
+          if (expr_overlap->is_empty())
+            continue;
+          // Have a precondition so we need to record it
+          if (event_finder == preconditions.end())
+          {
+            preconditions[uit->first].insert(expr_overlap, overlap);
+            event_finder = preconditions.find(uit->first);
+          }
+          else
+          {
+            FieldMaskSet<IndexSpaceExpression>::iterator finder = 
+              event_finder->second.find(expr_overlap);
+            if (finder == event_finder->second.end())
+              event_finder->second.insert(expr_overlap, overlap);
+            else
+              finder.merge(overlap);
+          }
+        }
+      }
+      // reduction copies into reduction instances operate atomically so 
+      // we just need to check for dependences on other exclusive and atomic
+      for (EventFieldUsers::const_iterator uit = reduction_users.begin();
+            uit != reduction_users.end(); uit++)
+      {
+        const FieldMask event_mask = uit->second.get_valid_mask() & user_mask;
+        if (!event_mask)
+          continue;
+        EventFieldExprs::iterator event_finder = preconditions.find(uit->first);
+        for (EventUsers::const_iterator it = uit->second.begin();
+              it != uit->second.end(); it++)
+        {
+          const FieldMask overlap = event_mask & it->second;
+          if (!overlap)
+            continue;
+          // We can run in parallel with simultaneous users
+          if (IS_SIMULT(it->first->usage))
+            continue;
+          // Otherwise we need to check for dependences
           IndexSpaceExpression *expr_overlap = 
             context->intersect_index_spaces(user_expr, it->first->expr);
           if (expr_overlap->is_empty())
@@ -5040,12 +5230,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReductionView::find_reading_preconditions(const FieldMask &user_mask,
-                                               IndexSpaceExpression *user_expr,
-                                               UniqueID op_id,
-                                               EventFieldExprs &preconditions)
+                                           IndexSpaceExpression *user_expr,
+                                           UniqueID op_id,
+                                           EventFieldExprs &preconditions) const
     //--------------------------------------------------------------------------
     {
       // lock must be held by caller
+      // readers only need to check reducers because we know that the only way
+      // to get an initialization is for there to be a reducer that dominates
       for (EventFieldUsers::const_iterator uit = reduction_users.begin();
             uit != reduction_users.end(); uit++)
       {
@@ -5056,8 +5248,6 @@ namespace Legion {
         for (EventUsers::const_iterator it = uit->second.begin();
               it != uit->second.end(); it++)
         {
-          if (it->first->op_id == op_id)
-            continue;
           const FieldMask overlap = event_mask & it->second;
           if (!overlap)
             continue;
@@ -5126,8 +5316,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Better already be holding the lock
-      EventUsers &event_users = reading ? 
-        reading_users[term_event] : reduction_users[term_event];
+      EventUsers &event_users = reading ? reading_users[term_event] : 
+                 IS_REDUCE(user->usage) ? reduction_users[term_event] : 
+                                          initialization_users[term_event];
 #ifdef DEBUG_LEGION
       assert(event_users.find(user) == event_users.end());
 #endif
@@ -5145,7 +5336,17 @@ namespace Legion {
         outstanding_gc_events.find(term_event);
       if (event_finder != outstanding_gc_events.end())
       {
-        EventFieldUsers::iterator finder = reduction_users.find(term_event);
+        EventFieldUsers::iterator finder = 
+          initialization_users.find(term_event);
+        if (finder != initialization_users.end())
+        {
+          for (EventUsers::const_iterator it = finder->second.begin();
+                it != finder->second.end(); it++)
+            if (it->first->remove_reference())
+              delete it->first;
+          initialization_users.erase(finder);
+        }
+        finder = reduction_users.find(term_event);
         if (finder != reduction_users.end())
         {
           for (EventUsers::const_iterator it = finder->second.begin();
@@ -5303,13 +5504,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Memory ReductionView::get_location(void) const
-    //--------------------------------------------------------------------------
-    {
-      return manager->get_memory();
-    }
-
-    //--------------------------------------------------------------------------
     ReductionOpID ReductionView::get_redop(void) const
     //--------------------------------------------------------------------------
     {
@@ -5334,8 +5528,8 @@ namespace Legion {
       derez.deserialize(context_uid);
 
       RtEvent man_ready;
-      PhysicalManager *manager = 
-        runtime->find_or_request_physical_manager(manager_did, man_ready);
+      PhysicalManager *manager =
+        runtime->find_or_request_instance_manager(manager_did, man_ready);
       if (man_ready.exists() && !man_ready.has_triggered())
       {
         // Defer this until the manager is ready
@@ -5370,16 +5564,15 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(manager->is_reduction_manager());
 #endif
-      ReductionManager *red_manager = manager->as_reduction_manager();
       void *location;
       ReductionView *view = NULL;
       if (runtime->find_pending_collectable_location(did, location))
         view = new(location) ReductionView(runtime->forest, did, owner_space, 
-                                           logical_owner, red_manager,
+                                           logical_owner, manager,
                                            context_uid, false/*register now*/);
       else
         view = new ReductionView(runtime->forest, did, owner_space,
-                                 logical_owner, red_manager, 
+                                 logical_owner, manager, 
                                  context_uid, false/*register now*/);
       // Only register after construction
       view->register_with_runtime(NULL/*remote registration not needed*/);

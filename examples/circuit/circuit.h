@@ -54,7 +54,7 @@ enum {
 };
 
 enum {
-  REDUCE_ID = 1,
+  REDUCE_ID = LEGION_REDOP_SUM_FLOAT32,
 };
 
 enum NodeFields {
@@ -122,18 +122,6 @@ struct Partitions {
   LogicalPartition pvt_wires;
   LogicalPartition pvt_nodes, shr_nodes, ghost_nodes;
   LogicalPartition node_locations;
-};
-
-// Reduction Op
-class AccumulateCharge {
-public:
-  typedef float LHS;
-  typedef float RHS;
-  static const float identity;
-
-  template <bool EXCLUSIVE> static void apply(LHS &lhs, RHS rhs);
-
-  template <bool EXCLUSIVE> static void fold(RHS &rhs1, RHS rhs2);
 };
 
 class CalcNewCurrentsTask : public IndexLauncher {

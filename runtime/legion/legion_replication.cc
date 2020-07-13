@@ -2012,15 +2012,16 @@ namespace Legion {
     ApEvent ReplIndexCopyOp::exchange_indirect_records(const unsigned index,
              const ApEvent local_done, const PhysicalTraceInfo &trace_info,
              const InstanceSet &instances, const IndexSpace space,
+             const DomainPoint &key,
              LegionVector<IndirectRecord>::aligned &records, const bool sources)
     //--------------------------------------------------------------------------
     {
       if (sources && !collective_src_indirect_points)
         return CopyOp::exchange_indirect_records(index, local_done, trace_info,
-                                            instances, space, records, sources);
+                                        instances, space, key, records, sources);
       if (!sources && !collective_dst_indirect_points)
         return CopyOp::exchange_indirect_records(index, local_done, trace_info,
-                                            instances, space, records, sources);
+                                        instances, space, key, records, sources);
 #ifdef DEBUG_LEGION
       assert(local_done.exists());
       assert(index < indirection_barriers.size());
@@ -2045,12 +2046,12 @@ namespace Legion {
               const ApEvent inst_ready = ref.get_ready_event();
               if (inst_ready.exists() && !inst_ready.has_triggered())
                 src_records[index].push_back(IndirectRecord(
-                      ref.get_valid_fields(), ref.get_manager(), space,
+                      ref.get_valid_fields(), ref.get_manager(), key, space,
                       Runtime::merge_events(&trace_info, domain_ready,
                         inst_ready), dom));
               else
                 src_records[index].push_back(IndirectRecord(
-                      ref.get_valid_fields(), ref.get_manager(),
+                      ref.get_valid_fields(), ref.get_manager(), key,
                       space, domain_ready, dom));
             }
           }
@@ -2060,7 +2061,7 @@ namespace Legion {
             {
               const InstanceRef &ref = instances[idx];
               src_records[index].push_back(IndirectRecord(
-                    ref.get_valid_fields(), ref.get_manager(),
+                    ref.get_valid_fields(), ref.get_manager(), key,
                     space, ref.get_ready_event(), dom));
             }
           }
@@ -2086,12 +2087,12 @@ namespace Legion {
               const ApEvent inst_ready = ref.get_ready_event();
               if (inst_ready.exists() && !inst_ready.has_triggered())
                 dst_records[index].push_back(IndirectRecord(
-                      ref.get_valid_fields(), ref.get_manager(), space,
+                      ref.get_valid_fields(), ref.get_manager(), key, space,
                       Runtime::merge_events(&trace_info, domain_ready,
                         inst_ready), dom));
               else
                 dst_records[index].push_back(IndirectRecord(
-                      ref.get_valid_fields(), ref.get_manager(),
+                      ref.get_valid_fields(), ref.get_manager(), key,
                       space, domain_ready, dom));
             }
           }
@@ -2101,7 +2102,7 @@ namespace Legion {
             {
               const InstanceRef &ref = instances[idx];
               dst_records[index].push_back(IndirectRecord(
-                    ref.get_valid_fields(), ref.get_manager(),
+                    ref.get_valid_fields(), ref.get_manager(), key,
                     space, ref.get_ready_event(), dom));
             }
           }
@@ -5100,8 +5101,8 @@ namespace Legion {
         exchange->initiate_exchange(attach_instances, attach_views);
         // Once we're ready to map we can tell the memory manager that
         // this instance can be safely acquired for use
-        InstanceManager *external_manager = 
-          external_instance.get_manager()->as_instance_manager();
+        IndividualManager *external_manager = 
+          external_instance.get_instance_manager()->as_individual_manager();
         MemoryManager *memory_manager = external_manager->memory_manager;
         memory_manager->attach_external_instance(external_manager);
         RegionNode *node = runtime->forest->get_node(requirement.region);
@@ -5200,8 +5201,8 @@ namespace Legion {
           attach_instances[0] = external_instance;
           // Once we're ready to map we can tell the memory manager that
           // this instance can be safely acquired for use
-          InstanceManager *external_manager = 
-            external_instance.get_manager()->as_instance_manager();
+          IndividualManager *external_manager = 
+            external_instance.get_instance_manager()->as_individual_manager();
           MemoryManager *memory_manager = external_manager->memory_manager;
           memory_manager->attach_external_instance(external_manager);
           // We can't broadcast the DID until after doing the attach
@@ -5261,7 +5262,7 @@ namespace Legion {
           DistributedID manager_did = did_broadcast->get_value();
           RtEvent ready;
           PhysicalManager *manager = 
-              runtime->find_or_request_physical_manager(manager_did, ready);
+              runtime->find_or_request_instance_manager(manager_did, ready);
           // Wait for the manager to be ready 
           if (ready.exists())
             ready.wait();
@@ -5386,7 +5387,7 @@ namespace Legion {
 #endif
       InstanceRef reference = references[0];
       // Check that this is actually a file
-      PhysicalManager *manager = reference.get_manager();
+      PhysicalManager *manager = reference.get_instance_manager();
 #ifdef DEBUG_LEGION
       assert(!manager->is_reduction_manager()); 
 #endif
@@ -5448,7 +5449,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < sources.size(); idx++)
       {
         const InstanceRef &ref = sources[idx];
-        PhysicalManager *manager = ref.get_manager();
+        PhysicalManager *manager = ref.get_instance_manager();
         if (manager->is_external_instance())
           continue;
         if (manager->owner_space == runtime->address_space)
@@ -7865,7 +7866,7 @@ namespace Legion {
 
       RtEvent ready;
       PhysicalManager *physical_manager = 
-        runtime->find_or_request_physical_manager(manager_did, ready); 
+        runtime->find_or_request_instance_manager(manager_did, ready); 
       ShardManager *manager = runtime->find_shard_manager(repl_id);
       if (!ready.has_triggered())
         ready.wait();
@@ -7887,7 +7888,7 @@ namespace Legion {
 
       RtEvent manager_ready, view_ready;
       PhysicalManager *manager = 
-        runtime->find_or_request_physical_manager(manager_did, manager_ready);
+        runtime->find_or_request_instance_manager(manager_did, manager_ready);
       InstanceView *view = static_cast<InstanceView*>(
           runtime->find_or_request_logical_view(view_did, view_ready));
       if (!manager_ready.has_triggered())
@@ -10547,11 +10548,12 @@ namespace Legion {
         for (unsigned idx2 = 0; idx2 < dids.size(); idx2++)
         {
           const Mapping::PhysicalInstance &inst = mappings[idx1][idx2];
-          dids[idx2] = inst.impl->did;
-          if (held_references.find(inst.impl) != held_references.end())
+          PhysicalManager *manager = inst.impl->as_instance_manager();
+          dids[idx2] = manager->did;
+          if (held_references.find(manager) != held_references.end())
             continue;
-          inst.impl->add_base_valid_ref(REPLICATION_REF, &mutator);
-          held_references.insert(inst.impl);
+          manager->add_base_valid_ref(REPLICATION_REF, &mutator);
+          held_references.insert(manager);
         }
       }
       perform_collective_async();
@@ -10562,7 +10564,7 @@ namespace Legion {
                 std::vector<Processor> &processor_mapping,
                 const std::vector<unsigned> &constraint_indexes,
                 std::vector<std::vector<Mapping::PhysicalInstance> > &mappings,
-                std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired)
+                std::map<PhysicalManager*,unsigned> &acquired)
     //--------------------------------------------------------------------------
     {
       perform_collective_wait();
@@ -10586,7 +10588,7 @@ namespace Legion {
         {
           RtEvent ready;
           mapping[idx].impl = 
-            runtime->find_or_request_physical_manager(dids[idx], ready);
+            runtime->find_or_request_instance_manager(dids[idx], ready);
           if (!ready.has_triggered())
             ready_events.insert(ready);   
         }
@@ -10610,14 +10612,14 @@ namespace Legion {
         for (std::vector<Mapping::PhysicalInstance>::const_iterator it = 
               mapping.begin(); it != mapping.end(); it++)
         {
+          PhysicalManager *manager = it->impl->as_instance_manager();
           // If we already had a reference to this instance
           // then we don't need to add any additional ones
-          if (acquired.find(it->impl) != acquired.end())
+          if (acquired.find(manager) != acquired.end())
             continue;
-          it->impl->add_base_resource_ref(INSTANCE_MAPPER_REF);
-          it->impl->add_base_valid_ref(MAPPING_ACQUIRE_REF, &mutator);
-          acquired[it->impl] = 
-            std::pair<unsigned,bool>(1/*count*/, false/*created*/);
+          manager->add_base_resource_ref(INSTANCE_MAPPER_REF);
+          manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &mutator);
+          acquired[manager] = 1/*count*/; 
         }
       }
     }
@@ -10777,7 +10779,7 @@ namespace Legion {
                 const std::vector<unsigned> &constraint_indexes,
                 std::vector<std::vector<Mapping::PhysicalInstance> > &mappings,
                 const std::vector<int> &mapping_weights,
-                std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired)
+                std::map<PhysicalManager*,unsigned> &acquired)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -10792,10 +10794,11 @@ namespace Legion {
         for (std::vector<Mapping::PhysicalInstance>::const_iterator it = 
               mappings[idx].begin(); it != mappings[idx].end(); it++)
         {
-          if (held_references.find(it->impl) != held_references.end())
+          PhysicalManager *manager = it->impl->as_instance_manager();
+          if (held_references.find(manager) != held_references.end())
             continue;
-          it->impl->add_base_valid_ref(REPLICATION_REF, &mutator);
-          held_references.insert(it->impl);
+          manager->add_base_valid_ref(REPLICATION_REF, &mutator);
+          held_references.insert(manager);
         }
       }
 #ifdef DEBUG_LEGION
@@ -10859,7 +10862,7 @@ namespace Legion {
         {
           RtEvent ready;
           mapping[idx2].impl = 
-            runtime->find_or_request_physical_manager(dids[idx2], ready);
+            runtime->find_or_request_instance_manager(dids[idx2], ready);
           if (!ready.has_triggered())
             ready_events.insert(ready);   
         }
@@ -10893,14 +10896,14 @@ namespace Legion {
         for (std::vector<Mapping::PhysicalInstance>::const_iterator it = 
               mapping.begin(); it != mapping.end(); it++)
         {
+          PhysicalManager *manager = it->impl->as_instance_manager();
           // If we already had a reference to this instance
           // then we don't need to add any additional ones
-          if (acquired.find(it->impl) != acquired.end())
+          if (acquired.find(manager) != acquired.end())
             continue;
-          it->impl->add_base_resource_ref(INSTANCE_MAPPER_REF);
-          it->impl->add_base_valid_ref(MAPPING_ACQUIRE_REF, &mutator);
-          acquired[it->impl] = 
-            std::pair<unsigned,bool>(1/*count*/, false/*created*/);
+          manager->add_base_resource_ref(INSTANCE_MAPPER_REF);
+          manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &mutator);
+          acquired[manager] = 1/*count*/;
         }
       }
     }

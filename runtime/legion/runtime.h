@@ -546,6 +546,7 @@ namespace Legion {
 #endif
     public:
       void get_bounds(void *realm_is, TypeTag type_tag);
+      PieceIteratorImpl* get_piece_iterator(FieldID fid, bool privilege_only);
       PhysicalInstance get_instance_info(PrivilegeMode mode, 
                                          FieldID fid, size_t field_size, 
                                          void *realm_is, TypeTag type_tag,
@@ -985,6 +986,10 @@ namespace Legion {
     public:
       MemoryManager& operator=(const MemoryManager &rhs);
     public:
+#ifdef LEGION_USE_CUDA
+      inline Processor get_local_gpu(void) const { return local_gpu; }
+#endif
+    public:
       void find_shutdown_preconditions(std::set<ApEvent> &preconditions);
       void prepare_for_shutdown(void);
       void finalize(void);
@@ -1006,6 +1011,7 @@ namespace Legion {
                                     GCPriority priority, bool tight_bounds,
                                     LayoutConstraintKind *unsat_kind, 
                                     unsigned *unsat_index, size_t *footprint, 
+                                    CollectiveManager *target, DomainPoint *p,
                                     UniqueID creator_id, bool remote = false);
       bool create_physical_instance(LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
@@ -1014,6 +1020,7 @@ namespace Legion {
                                     GCPriority priority, bool tight_bounds,
                                     LayoutConstraintKind *unsat_kind,
                                     unsigned *unsat_index, size_t *footprint, 
+                                    CollectiveManager *target, DomainPoint *p,
                                     UniqueID creator_id, bool remote = false);
       bool find_or_create_physical_instance(
                                     const LayoutConstraintSet &constraints,
@@ -1098,26 +1105,32 @@ namespace Legion {
                                     bool tight_region_bounds, bool remote);
       void release_candidate_references(const std::deque<PhysicalManager*>
                                                         &candidates) const;
+    public:
+      PhysicalManager* create_shadow_instance(InstanceBuilder &builder);
     protected:
       // We serialize all allocation attempts in a memory in order to 
       // ensure find_and_create calls will remain atomic
       RtEvent acquire_allocation_privilege(void);
       void release_allocation_privilege(void);
       PhysicalManager* allocate_physical_instance(InstanceBuilder &builder,
-                                            size_t *footprint,
-                                            LayoutConstraintKind *unsat_kind,
-                                            unsigned *unsat_index);
+                                          size_t *footprint,
+                                          LayoutConstraintKind *unsat_kind,
+                                          unsigned *unsat_index,
+                                          CollectiveManager *collective = NULL,
+                                          DomainPoint *collective_point = NULL);
     public:
       bool delete_by_size_and_state(const size_t needed_size, 
                                     InstanceState state, bool larger_only); 
       RtEvent attach_external_instance(PhysicalManager *manager);
       RtEvent detach_external_instance(PhysicalManager *manager);
+    public:
+      bool is_visible_memory(Memory other);
 #ifdef LEGION_MALLOC_INSTANCES
     public:
       uintptr_t allocate_legion_instance(size_t footprint, 
                                          bool needs_defer = true);
-      void record_legion_instance(PhysicalManager *manager, uintptr_t ptr);
-      void free_legion_instance(PhysicalManager *manager, RtEvent deferred);
+      void record_legion_instance(InstanceManager *manager, uintptr_t ptr);
+      void free_legion_instance(InstanceManager *manager, RtEvent deferred);
       void free_legion_instance(RtEvent deferred, uintptr_t ptr, 
                                 bool needs_defer = true);
       static void handle_malloc_instance(const void *args);
@@ -1148,13 +1161,16 @@ namespace Legion {
       // Keep track of outstanding requuests for allocations which 
       // will be tried in the order that they arrive
       std::deque<RtUserEvent> pending_allocation_attempts;
+    protected:
+      std::set<Memory> visible_memories;
+    protected:
 #ifdef LEGION_MALLOC_INSTANCES
-      std::map<PhysicalManager*,uintptr_t> legion_instances;
+      std::map<InstanceManager*,uintptr_t> legion_instances;
       std::map<uintptr_t,size_t> allocations;
       std::map<RtEvent,uintptr_t> pending_collectables;
+#endif
 #ifdef LEGION_USE_CUDA
       Processor local_gpu;
-#endif
 #endif
     };
 
@@ -2411,6 +2427,7 @@ namespace Legion {
                            bool permit_duplicates,
                            bool preregistered);
       const ReductionOp* get_reduction(ReductionOpID redop_id);
+      FillView* find_or_create_reduction_fill_view(ReductionOpID redop_id);
       const SerdezOp* get_serdez(CustomSerdezID serdez_id);
       const SerdezRedopFns* get_serdez_redop(ReductionOpID redop_id);
     public:
@@ -2590,6 +2607,10 @@ namespace Legion {
                                                   Serializer &rez);
       void send_slice_record_intra_space_dependence(Processor target,
                                                     Serializer &rez);
+      void send_slice_collective_instance_request(Processor target, 
+                                                  Serializer &rez);
+      void send_slice_collective_instance_response(AddressSpaceID target,
+                                                   Serializer &rez);
       void send_did_remote_registration(AddressSpaceID target, Serializer &rez);
       void send_did_remote_valid_update(AddressSpaceID target, Serializer &rez);
       void send_did_remote_gc_update(AddressSpaceID target, Serializer &rez);
@@ -2610,7 +2631,16 @@ namespace Legion {
       void send_sharded_view(AddressSpaceID target, Serializer &rez);
       void send_reduction_view(AddressSpaceID target, Serializer &rez);
       void send_instance_manager(AddressSpaceID target, Serializer &rez);
-      void send_reduction_manager(AddressSpaceID target, Serializer &rez);
+      void send_collective_instance_manager(AddressSpaceID target, 
+                                            Serializer &rez);
+      void send_collective_instance_message(AddressSpaceID target, 
+                                            Serializer &rez);
+#ifdef LEGION_GPU_REDUCTIONS
+      void send_create_shadow_reduction_request(AddressSpaceID target, 
+                                                Serializer &rez);
+      void send_create_shadow_reduction_response(AddressSpaceID target,
+                                                 Serializer &rez);
+#endif
       void send_create_top_view_request(AddressSpaceID target, Serializer &rez);
       void send_create_top_view_response(AddressSpaceID target,Serializer &rez);
       void send_view_register_user(AddressSpaceID target, Serializer &rez);
@@ -2869,6 +2899,9 @@ namespace Legion {
       void handle_slice_remote_commit(Deserializer &derez);
       void handle_slice_find_intra_dependence(Deserializer &derez);
       void handle_slice_record_intra_dependence(Deserializer &derez);
+      void handle_slice_collective_request(Deserializer &derez, 
+                                           AddressSpaceID source);
+      void handle_slice_collective_response(Deserializer &derez);
       void handle_did_remote_registration(Deserializer &derez, 
                                           AddressSpaceID source);
       void handle_did_remote_valid_update(Deserializer &derez);
@@ -2890,8 +2923,14 @@ namespace Legion {
                                       AddressSpaceID source);
       void handle_send_instance_manager(Deserializer &derez,
                                         AddressSpaceID source);
-      void handle_send_reduction_manager(Deserializer &derez,
-                                         AddressSpaceID source);
+      void handle_collective_instance_manager(Deserializer &derez,
+                                              AddressSpaceID source);
+      void handle_collective_instance_message(Deserializer &derez);
+#ifdef LEGION_GPU_REDUCTIONS
+      void handle_create_shadow_reduction_request(Deserializer &derez,
+                                                  AddressSpaceID source);
+      void handle_create_shadow_reduction_response(Deserializer &derez);
+#endif
       void handle_create_top_view_request(Deserializer &derez,
                                           AddressSpaceID source);
       void handle_create_top_view_response(Deserializer &derez);
@@ -3075,15 +3114,17 @@ namespace Legion {
                                     Processor processor, bool acquire, 
                                     GCPriority priority, bool tight_bounds,
                                     const LayoutConstraint **unsat,
-                                    size_t *footprint, UniqueID creator_id);
+                                    size_t *footprint, UniqueID creator_id,
+                                    CollectiveManager *target, DomainPoint *p);
       bool create_physical_instance(Memory target_memory, 
-                                    LayoutConstraintID layout_id,
+                                    LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, MapperID mapper_id,
                                     Processor processor, bool acquire, 
                                     GCPriority priority, bool tight_bounds,
                                     const LayoutConstraint **unsat,
-                                    size_t *footprint, UniqueID creator_id);
+                                    size_t *footprint, UniqueID creator_id,
+                                    CollectiveManager *target, DomainPoint *p);
       bool find_or_create_physical_instance(Memory target_memory,
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
@@ -3094,7 +3135,7 @@ namespace Legion {
                                     const LayoutConstraint **unsat,
                                     size_t *footprint, UniqueID creator_id);
       bool find_or_create_physical_instance(Memory target_memory,
-                                    LayoutConstraintID layout_id,
+                                    LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool &created, 
                                     MapperID mapper_id, Processor processor,
@@ -3108,7 +3149,7 @@ namespace Legion {
                                     MappingInstance &result, bool acquire,
                                     bool tight_region_bounds);
       bool find_physical_instance(Memory target_memory,
-                                    LayoutConstraintID layout_id,
+                                    LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool acquire,
                                     bool tight_region_bounds);
@@ -3118,7 +3159,7 @@ namespace Legion {
                                     std::vector<MappingInstance> &results, 
                                     bool acquire, bool tight_region_bounds);
       void find_physical_instances(Memory target_memory,
-                                    LayoutConstraintID layout_id,
+                                    LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     std::vector<MappingInstance> &result, 
                                     bool acquire, bool tight_region_bounds);
@@ -3162,7 +3203,7 @@ namespace Legion {
     public:
       LogicalView* find_or_request_logical_view(DistributedID did,
                                                 RtEvent &ready);
-      PhysicalManager* find_or_request_physical_manager(DistributedID did, 
+      PhysicalManager* find_or_request_instance_manager(DistributedID did, 
                                                         RtEvent &ready);
       EquivalenceSet* find_or_request_equivalence_set(DistributedID did,
                                                       RtEvent &ready);
@@ -3602,6 +3643,7 @@ namespace Legion {
                 std::set<RtUserEvent> >           pending_remote_callbacks;
     protected:
       mutable LocalLock redop_lock;
+      std::map<ReductionOpID,FillView*> redop_fill_views;
       mutable LocalLock serdez_lock;
     protected:
       mutable LocalLock projection_lock;
@@ -3850,6 +3892,13 @@ namespace Legion {
       static void perform_dynamic_registration_callback(
                                RegistrationCallbackFnptr callback, bool global);
       static ReductionOpTable& get_reduction_table(bool safe);
+#ifdef LEGION_GPU_REDUCTIONS
+      static GPUReductionTable& get_gpu_reduction_table(void);
+      static std::map<ReductionOpID,CodeDescriptor>& 
+                                get_pending_gpu_reduction_table(void);
+      static void preregister_gpu_reduction_op(ReductionOpID redop_id,
+                                            const CodeDescriptor &desc);
+#endif
       static SerdezOpTable& get_serdez_table(bool safe);
       static SerdezRedopTable& get_serdez_redop_table(bool safe);
       static void register_reduction_op(ReductionOpID redop_id,

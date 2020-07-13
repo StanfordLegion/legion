@@ -31,10 +31,10 @@ namespace Legion {
       RtUserEvent                       resume;
       MappingCallKind                   kind;
       Operation*                        operation;
-      std::map<PhysicalManager*,
-        std::pair<unsigned/*count*/,bool/*created*/> >* acquired_instances;
+      std::map<PhysicalManager*,unsigned/*count*/>* acquired_instances;
       unsigned long long                start_time;
       unsigned long long                stop_time;
+      unsigned                          collective_count;
     };
 
     /**
@@ -436,9 +436,9 @@ namespace Legion {
                                     std::vector<MappingInstance> > &instances);
     public:
       void record_acquired_instance(MappingCallInfo *info, 
-                                    PhysicalManager *manager, bool created);
+                                    InstanceManager *manager, bool created);
       void release_acquired_instance(MappingCallInfo *info,
-                                     PhysicalManager *manager);
+                                     InstanceManager *manager);
       void check_region_consistency(MappingCallInfo *info, const char *call,
                                     const std::vector<LogicalRegion> &regions);
       bool perform_local_acquires(MappingCallInfo *info,
