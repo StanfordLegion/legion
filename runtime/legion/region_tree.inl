@@ -20,6 +20,67 @@ namespace Legion {
 
 #ifdef DEFINE_NT_TEMPLATES
     /////////////////////////////////////////////////////////////
+    // PieceIteratorImplT
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    PieceIteratorImplT<DIM,T>::PieceIteratorImplT(const void *piece_list,
+                 size_t piece_list_size, IndexSpaceNodeT<DIM,T> *privilege_node)
+      : PieceIteratorImpl()
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert((piece_list_size % sizeof(Rect<DIM,T>)) == 0);
+#endif
+      const size_t num_pieces = piece_list_size / sizeof(Rect<DIM,T>);
+      const Rect<DIM,T> *rects = static_cast<const Rect<DIM,T>*>(piece_list);
+      if (privilege_node != NULL)
+      {
+        Realm::IndexSpace<DIM,T> privilege_space;
+        const ApEvent ready = 
+          privilege_node->get_realm_index_space(privilege_space, true/*tight*/);
+        if (ready.exists() && !ready.has_triggered())
+          ready.wait();
+        for (unsigned idx = 0; idx < num_pieces; idx++)
+        {
+          const Rect<DIM,T> &rect = rects[idx];
+          for (Realm::IndexSpaceIterator<DIM,T> itr(privilege_space); 
+                itr.valid; itr.step())
+          {
+            const Rect<DIM,T> overlap = rect.intersection(itr.rect);
+            if (!overlap.empty())
+              pieces.push_back(overlap);
+          }
+        }
+      }
+      else
+      {
+        pieces.resize(num_pieces);
+        for (unsigned idx = 0; idx < num_pieces; idx++)
+          pieces[idx] = rects[idx];
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    int PieceIteratorImplT<DIM,T>::get_next(int index, Domain &next_piece)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(index >= -1);
+#endif
+      const unsigned next = index + 1;
+      if (next < pieces.size())
+      {
+        next_piece = pieces[next];
+        return int(next);
+      }
+      else
+        return -1;
+    }
+
+    /////////////////////////////////////////////////////////////
     // Index Space Expression 
     /////////////////////////////////////////////////////////////
 
@@ -36,9 +97,7 @@ namespace Legion {
                                  FieldSpace handle,
                                  RegionTreeID tree_id,
 #endif
-                                 ApEvent precondition, PredEvent pred_guard,
-                                 const FieldMaskSet<FillView> *tracing_srcs,
-                                 const FieldMaskSet<InstanceView> *tracing_dsts)
+                                 ApEvent precondition, PredEvent pred_guard)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(forest->runtime, REALM_ISSUE_FILL_CALL);
@@ -104,26 +163,20 @@ namespace Legion {
       }
 #endif
 #ifdef LEGION_SPY
-      // We can skip this if fill_uid is 0
-      if (fill_uid != 0)
-      {
-        assert(trace_info.op != NULL);
-        LegionSpy::log_fill_events(trace_info.op->get_unique_op_id(), 
-            expr_id, handle, tree_id, precondition, result, fill_uid);
-        for (unsigned idx = 0; idx < dst_fields.size(); idx++)
-          LegionSpy::log_fill_field(result, dst_fields[idx].field_id,
-                                    dst_fields[idx].inst_event);
-      }
+      assert(trace_info.op != NULL);
+      LegionSpy::log_fill_events(trace_info.op->get_unique_op_id(), 
+          expr_id, handle, tree_id, precondition, result, fill_uid);
+      for (unsigned idx = 0; idx < dst_fields.size(); idx++)
+        LegionSpy::log_fill_field(result, dst_fields[idx].field_id,
+                                  dst_fields[idx].inst_event);
 #endif
       if (trace_info.recording)
-      {
         trace_info.record_issue_fill(result, this, dst_fields,
                                      fill_value, fill_size,
 #ifdef LEGION_SPY
                                      handle, tree_id,
 #endif
-                                     precondition, tracing_srcs, tracing_dsts);
-      }
+                                     precondition, pred_guard);
       return result;
     }
 
@@ -140,9 +193,7 @@ namespace Legion {
                                  RegionTreeID dst_tree_id,
 #endif
                                  ApEvent precondition, PredEvent pred_guard,
-                                 ReductionOpID redop, bool reduction_fold,
-                                 const FieldMaskSet<InstanceView> *tracing_srcs,
-                                 const FieldMaskSet<InstanceView> *tracing_dsts)
+                                 ReductionOpID redop, bool reduction_fold)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(forest->runtime, REALM_ISSUE_COPY_CALL);
@@ -214,14 +265,11 @@ namespace Legion {
 #endif
       }
       if (trace_info.recording)
-      {
         trace_info.record_issue_copy(result, this, src_fields, dst_fields,
 #ifdef LEGION_SPY
                                      src_tree_id, dst_tree_id,
 #endif
-                                     precondition, redop, reduction_fold,
-                                     tracing_srcs, tracing_dsts);
-      }
+                         precondition, pred_guard, redop, reduction_fold);
 #ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!result.exists())
       {
@@ -405,7 +453,7 @@ namespace Legion {
       }
       if (trace_info.recording)
         trace_info.record_issue_indirect(result, this, src_fields, dst_fields,
-                                         indirects, precondition);
+                                         indirects, precondition, pred_guard);
 #ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!result.exists())
       {
@@ -465,13 +513,136 @@ namespace Legion {
       return(a * b / gcd(a, b));
     }
 
+#ifdef LEGION_GPU_REDUCTIONS
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    ApEvent IndexSpaceExpression::gpu_reduction_internal(
+                                 RegionTreeForest *forest,
+                                 const Realm::IndexSpace<DIM,T> &space,
+                                 const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 const std::vector<CopySrcDstField> &src_fields,
+                                 Processor gpu, TaskID gpu_task_id,
+                                 PhysicalManager *dst, PhysicalManager *src,
+                                 ApEvent precondition, PredEvent pred_guard, 
+                                 ReductionOpID redop, bool reduction_fold)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!space.empty());
+      assert(dst_fields.size() == src_fields.size());
+#endif
+      // We need to compute the rectangles for which we can get dense accessors
+      // for each of these reduction operations
+      const Rect<DIM,T> *src_piece_list = 
+        static_cast<const Rect<DIM,T>*>(src->piece_list);
+      const Rect<DIM,T> *dst_piece_list =
+        static_cast<const Rect<DIM,T>*>(dst->piece_list);
+      std::vector<Rect<DIM,T> > piece_rects;
+      if (dst_piece_list != NULL)
+      {
+        if (src_piece_list != NULL)
+        {
+          for (unsigned idx1 = 0; idx1 < src->piece_list_size; idx1++)
+            for (unsigned idx2 = 0; idx2 < dst->piece_list_size; idx2++)
+            {
+              const Rect<DIM,T> intersect = 
+                src_piece_list[idx1].intersection(dst_piece_list[idx2]);
+              if (intersect.empty())
+                continue;
+              const Rect<DIM,T> intersect2 = 
+                intersect.intersection(space.bounds);
+              if (!intersect2.empty())
+                piece_rects.push_back(intersect2);
+            }
+        }
+        else
+        {
+          for (unsigned idx = 0; idx < piece_rects.size(); idx++)
+          {
+            const Rect<DIM,T> intersect = 
+              dst_piece_list[idx].intersection(space.bounds);
+            if (!intersect.empty())
+              piece_rects.push_back(intersect);
+          }
+        }
+      }
+      else
+      {
+        if (src_piece_list != NULL)
+        {
+          for (unsigned idx = 0; idx < piece_rects.size(); idx++)
+          {
+            const Rect<DIM,T> intersect = 
+              src_piece_list[idx].intersection(space.bounds);
+            if (!intersect.empty())
+              piece_rects.push_back(intersect);
+          }
+        }
+        else
+          piece_rects.push_back(space.bounds);
+      }
+      Realm::ProfilingRequestSet requests;
+      if (forest->runtime->profiler != NULL)
+        forest->runtime->profiler->add_task_request(requests, gpu_task_id,
+            0/*vid*/, forest->runtime->get_unique_operation_id(), gpu);
+      // Pack the arguments for this task
+      Serializer rez;
+      rez.serialize(type_tag);
+      rez.serialize(space);
+      rez.serialize<bool>(reduction_fold);
+      rez.serialize<bool>(false); // exclusive
+      rez.serialize<size_t>(dst_fields.size());
+      for (unsigned idx = 0; idx < dst_fields.size(); idx++)
+      {
+        rez.serialize(dst_fields[idx].inst);
+        rez.serialize(src_fields[idx].inst);
+        rez.serialize(dst_fields[idx].field_id);
+        rez.serialize(src_fields[idx].field_id);
+      }
+      rez.serialize<size_t>(piece_rects.size());
+      for (unsigned idx = 0; idx < piece_rects.size(); idx++)
+        rez.serialize(piece_rects[idx]);
+      ApEvent result;
+      if (pred_guard.exists())
+      {
+        ApEvent pred_pre = 
+          Runtime::merge_events(&trace_info, precondition, ApEvent(pred_guard));
+        if (trace_info.recording)
+          trace_info.record_merge_events(pred_pre, precondition,
+                                          ApEvent(pred_guard));
+        result = Runtime::ignorefaults(gpu.spawn(gpu_task_id,
+              rez.get_buffer(), rez.get_used_bytes(), requests, pred_pre));
+      }
+      else
+        result = ApEvent(gpu.spawn(gpu_task_id,
+              rez.get_buffer(), rez.get_used_bytes(), requests, precondition));
+      if (trace_info.recording)
+        trace_info.record_gpu_reduction(result, this, src_fields, dst_fields,
+                                    gpu, gpu_task_id, src, dst, precondition, 
+                                    pred_guard, redop, reduction_fold);
+#ifdef LEGION_DISABLE_EVENT_PRUNING
+      if (!result.exists())
+      {
+        ApUserEvent new_result = Runtime::create_ap_user_event(NULL);
+        Runtime::trigger_event(NULL, new_result);
+        result = new_result;
+      }
+#endif
+      return result;
+    }
+#endif
+
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     Realm::InstanceLayoutGeneric* IndexSpaceExpression::create_layout_internal(
-                                   const Realm::IndexSpace<DIM,T> &space,
-                                   const LayoutConstraintSet &constraints,
-                                   const std::vector<FieldID> &field_ids,
-                                   const std::vector<size_t> &field_sizes) const
+                                 const Realm::IndexSpace<DIM,T> &space,
+                                 const LayoutConstraintSet &constraints,
+                                 const std::vector<FieldID> &field_ids,
+                                 const std::vector<size_t> &field_sizes,
+                                 bool compact, LayoutConstraintKind *unsat_kind,
+                                 unsigned *unsat_index, void **piece_list,
+                                 size_t *piece_list_size) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -483,12 +654,65 @@ namespace Legion {
       // Start with 32-byte alignment for AVX instructions
       layout->alignment_reqd = 32;
       layout->space = space;
-      const Rect<DIM,T> &bounds = space.bounds;
+      std::vector<Rect<DIM,T> > piece_bounds;
+      if (space.dense() || !compact)
+      {
+        if (!space.bounds.empty())
+          piece_bounds.push_back(space.bounds);
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(piece_list != NULL);
+        assert((*piece_list) == NULL);
+        assert(piece_list_size != NULL);
+        assert((*piece_list_size) == 0);
+#endif
+        const SpecializedConstraint &spec = constraints.specialized_constraint;
+        if (spec.max_overhead > 0)
+        {
+          std::vector<Realm::Rect<DIM,T> > covering;
+          if (!space.compute_covering(spec.max_pieces, spec.max_overhead,
+                                      covering))
+          {
+            if (unsat_kind != NULL)
+              *unsat_kind = LEGION_SPECIALIZED_CONSTRAINT;
+            if (unsat_index != NULL)
+              *unsat_index = 0;
+            return NULL;
+          }
+          // Container problem is stupid
+          piece_bounds.resize(covering.size());
+          for (unsigned idx = 0; idx < covering.size(); idx++)
+            piece_bounds[idx] = covering[idx];
+        }
+        else
+        {
+          for (Realm::IndexSpaceIterator<DIM,T> itr(space); 
+                itr.valid; itr.step())
+            if (!itr.rect.empty())
+              piece_bounds.push_back(itr.rect);
+          if (spec.max_pieces < piece_bounds.size())
+          {
+            if (unsat_kind != NULL)
+              *unsat_kind = LEGION_SPECIALIZED_CONSTRAINT;
+            if (unsat_index != NULL)
+              *unsat_index = 0;
+            return NULL;
+          }
+        }
+        if (!piece_bounds.empty())
+        {
+          *piece_list_size = piece_bounds.size() * sizeof(Rect<DIM,T>);
+          *piece_list = malloc(*piece_list_size);
+          Rect<DIM,T> *pieces = static_cast<Rect<DIM,T>*>(*piece_list);
+          for (unsigned idx = 0; idx < piece_bounds.size(); idx++)
+            pieces[idx] = piece_bounds[idx];
+        }
+      }
 
-      // We already know that this index space is tight so we don't need to
-      // do any extra work on the bounds
       // If the bounds are empty we can use the same piece list for all fields
-      if (bounds.empty())
+      if (piece_bounds.empty())
       {
         layout->piece_lists.resize(1);
         for (unsigned idx = 0; idx < field_ids.size(); idx++)
@@ -545,10 +769,15 @@ namespace Legion {
           it1 = it2;
         }
       }
-      // Find out how many elements exists between fields
+      const OrderingConstraint &order = constraints.ordering_constraint;  
+#ifdef DEBUG_LEGION
+      assert(order.ordering.size() == (DIM+1));
+#endif
+      // Single affine piece or AOS on all pieces 
+      // In this case we know fsize and falign are the same for
+      // each of the pieces
       int field_index = -1;
-      size_t elements_between_fields = 1;
-      const OrderingConstraint &order = constraints.ordering_constraint;
+      std::vector<size_t> elements_between_per_piece(piece_bounds.size(), 1);
       for (unsigned idx = 0; order.ordering.size(); idx++)
       {
         const DimensionKind dim = order.ordering[idx];
@@ -557,17 +786,22 @@ namespace Legion {
           field_index = idx;
           break;
         }
-        else
-        {
 #ifdef DEBUG_LEGION
-          assert(int(dim) < DIM);
+        assert(int(dim) < DIM);
 #endif
-          elements_between_fields *= (bounds.hi[dim] - bounds.lo[dim] + 1);
+        for (unsigned pidx = 0; pidx < piece_bounds.size(); pidx++)
+        {
+          const Rect<DIM,T> &bounds = piece_bounds[pidx];
+          elements_between_per_piece[pidx] *=
+            (bounds.hi[dim] - bounds.lo[dim] + 1);
         }
       }
 #ifdef DEBUG_LEGION
       assert(field_index >= 0);
 #endif
+      size_t elements_between_fields = elements_between_per_piece.front();
+      for (unsigned idx = 1; idx < elements_between_per_piece.size(); idx++)
+        elements_between_fields += elements_between_per_piece[idx];
       // This code borrows from choose_instance_layout but
       // there are subtle differences to handle Legion's layout constraints
       // What we want to compute is the size of the field dimension
@@ -589,8 +823,8 @@ namespace Legion {
           offset += offset_finder->second;
         std::map<FieldID,size_t>::const_iterator alignment_finder = 
           alignments.find(it->second);
-        const size_t field_alignment = (alignment_finder != alignments.end()) ?
-          alignment_finder->second : 1;
+        const size_t field_alignment = (alignment_finder != alignments.end())
+          ? alignment_finder->second : 1;
         if (field_alignment > 1)
         {
           offset = round_up(offset, field_alignment);
@@ -604,9 +838,34 @@ namespace Legion {
       if (falign > 1)
       {
         // group size needs to be rounded up to match group alignment
-	fsize = round_up(fsize, falign);
-	// overall instance alignment layout must be compatible with group
-	layout->alignment_reqd = lcm(layout->alignment_reqd, falign);
+        fsize = round_up(fsize, falign);
+        // overall instance alignment layout must be compatible with group
+        layout->alignment_reqd = lcm(layout->alignment_reqd, falign);
+      }
+      // Check if it is safe to re-use piece lists
+      // It's only safe if fsize describes the size of a piece, which
+      // is true if we only have a single piece or we're doing AOS
+      const bool safe_reuse = 
+        ((piece_bounds.size() == 1) || (order.ordering.back() == LEGION_DIM_F));
+      // compute the starting offsets for each piece
+      std::vector<size_t> piece_offsets(piece_bounds.size());
+      if (safe_reuse)
+      {
+        for (unsigned pidx = 0; pidx < piece_bounds.size(); pidx++)
+        {
+          const Rect<DIM,T> &bounds = piece_bounds[pidx];
+          piece_offsets[pidx] = round_up(layout->bytes_used, falign);
+          size_t piece_size = fsize;
+          for (unsigned idx = field_index+1; idx < order.ordering.size(); idx++)
+          {
+            const DimensionKind dim = order.ordering[idx];
+#ifdef DEBUG_LEGION
+            assert(int(dim) < DIM);
+#endif
+            piece_size *= (bounds.hi[dim] - bounds.lo[dim] + 1);
+          }
+          layout->bytes_used = piece_offsets[pidx] + piece_size;
+        }
       }
       // we've handled the offsets and alignment for every field across
       // all dimensions so we can just use the size of the field to 
@@ -618,7 +877,7 @@ namespace Legion {
       {
         unsigned li;
         std::map<size_t,unsigned>::const_iterator finder =
-          pl_indexes.find(it->first);
+          safe_reuse ? pl_indexes.find(it->first) : pl_indexes.end();
         if (finder == pl_indexes.end())
         {
           li = layout->piece_lists.size();
@@ -628,30 +887,52 @@ namespace Legion {
           layout->piece_lists.resize(li + 1);
           pl_indexes[it->first] = li;
 
-          // create the piece
-          Realm::AffineLayoutPiece<DIM,T> *piece = 
-            new Realm::AffineLayoutPiece<DIM,T>;
-          piece->bounds = bounds; 
-          piece->offset = 0;
-          size_t stride = it->first;
-          for (std::vector<DimensionKind>::const_iterator dit = 
-                order.ordering.begin(); dit != order.ordering.end(); dit++)
+          // create the piece list
+          Realm::InstancePieceList<DIM,T>& pl = layout->piece_lists[li];
+          pl.pieces.reserve(piece_bounds.size());
+
+          size_t next_piece = safe_reuse ? 0 : field_offsets[it->second];
+          for (unsigned pidx = 0; pidx < piece_bounds.size(); pidx++)
           {
-            if ((*dit) != LEGION_DIM_F)
-            {
-#ifdef DEBUG_LEGION
-              assert(int(*dit) < DIM);
-#endif
-              piece->strides[*dit] = stride;
-              piece->offset -= bounds.lo[*dit] * stride;
-              stride *= (bounds.hi[*dit] - bounds.lo[*dit] + 1);
-            }
+            const Rect<DIM,T> &bounds = piece_bounds[pidx];
+            // create the piece
+            Realm::AffineLayoutPiece<DIM,T> *piece = 
+              new Realm::AffineLayoutPiece<DIM,T>;
+            piece->bounds = bounds; 
+            size_t piece_start;
+            if (safe_reuse)
+              piece_start = piece_offsets[pidx];
             else
-              // Reset the stride to the fsize for the next dimension
-              // since it already incorporates everything prior to it
-              stride = fsize;
+              piece_start = next_piece;
+            piece->offset = piece_start;
+            size_t stride = it->first;
+            for (std::vector<DimensionKind>::const_iterator dit = 
+                  order.ordering.begin(); dit != order.ordering.end(); dit++)
+            {
+              if ((*dit) != LEGION_DIM_F)
+              {
+#ifdef DEBUG_LEGION
+                assert(int(*dit) < DIM);
+#endif
+                piece->strides[*dit] = stride;
+                piece->offset -= bounds.lo[*dit] * stride;
+                stride *= (bounds.hi[*dit] - bounds.lo[*dit] + 1);
+              }
+              else
+              {
+                // Update the location for the next piece to start
+                if (!safe_reuse)
+                  next_piece = piece_start + stride;
+                // Reset the stride to the fsize for the next dimension
+                // since it already incorporates everything prior to it
+                stride = fsize;
+              }
+            }
+            // Update the total bytes used for the last piece
+            if (!safe_reuse && ((pidx+1) == piece_bounds.size()))
+              layout->bytes_used = piece_start + stride;
+            pl.pieces.push_back(piece);
           }
-          layout->piece_lists[li].pieces.push_back(piece);
         }
         else
           li = finder->second;
@@ -661,20 +942,147 @@ namespace Legion {
         Realm::InstanceLayoutGeneric::FieldLayout &fl = 
           layout->fields[it->second];
         fl.list_idx = li;
-        fl.rel_offset = field_offsets[it->second];
+        fl.rel_offset = safe_reuse ? field_offsets[it->second] : 0;
         fl.size_in_bytes = it->first;
       }
-      // Lastly compute the size of the layout, which is the size of the 
-      // field dimension times the extents of all the remaning dimensions
-      layout->bytes_used = fsize;
-      for (unsigned idx = field_index+1; idx < order.ordering.size(); idx++)
+#if 0
+      // We have a two different implementations of how to compute the layout 
+      // 1. In cases where we either have just one piece or we know we're
+      //    doing AOS then we know the alignment and fsize will be the same
+      //    across all the pieces, therefore we can share piece lists
+      // 2. In more general cases, we can have SOA or hybrid with multiple
+      //    pieces so we can't deduplicate piece lists safely given Realm's
+      //    current encoding so instead we build a piece list per field and
+      //    build up the representation for each piece individually
+
+      // This is formerly case 2 that would lay out SOA and hybrid
+      // layouts for each piece individually rather than grouping
+      // pieces together for each field
       {
-        const DimensionKind dim = order.ordering[idx];
+        // We have multiple pieces and we're not AOS so the per-field
+        // offsets can be different in each piece dependent upon the
+        // size of the piece and which dimensions are before the fields
+        // In this case we're going to have one piece list for each field
+        for (unsigned idx = 0; idx < zip_fields.size(); idx++)
+        {
+          layout->piece_lists[idx].pieces.reserve(piece_bounds.size());
+          const std::pair<size_t,FieldID> &field = zip_fields[idx];
+          Realm::InstanceLayoutGeneric::FieldLayout &fl = 
+            layout->fields[field.second];
+          fl.list_idx = idx;
+          fl.rel_offset = 0;
+          fl.size_in_bytes = field.first;
+        }
+        // We'll compute each piece infidivudaly and the piece list per field
+        for (typename std::vector<Rect<DIM,T> >::const_iterator pit =
+              piece_bounds.begin(); pit != piece_bounds.end(); pit++)
+        {
+          const Rect<DIM,T> &bounds = *pit;
+          int field_index = -1;
+          size_t elements_between_fields = 1;
+          for (unsigned idx = 0; order.ordering.size(); idx++)
+          {
+            const DimensionKind dim = order.ordering[idx];
+            if (dim == DIM_F)
+            {
+              field_index = idx;
+              break;
+            }
 #ifdef DEBUG_LEGION
-        assert(int(dim) < DIM);
+            assert(int(dim) < DIM);
 #endif
-        layout->bytes_used *= (bounds.hi[dim] - bounds.lo[dim] + 1);
+            elements_between_fields *= (bounds.hi[dim] - bounds.lo[dim] + 1);
+          }
+#ifdef DEBUG_LEGION
+          assert(field_index >= 0);
+#endif
+          // This code borrows from choose_instance_layout but
+          // there are subtle differences to handle Legion's layout constraints
+          // What we want to compute is the size of the field dimension
+          // in a way that guarantees that all fields maintain their alignments
+          size_t fsize = 0;
+          size_t falign = 1;
+          // We can't make the piece lists yet because we don't know the 
+          // extent of the field dimension needed to ensure alignment 
+          std::map<FieldID, size_t> field_offsets;
+          for (std::vector<std::pair<size_t,FieldID> >::const_iterator it = 
+                zip_fields.begin(); it != zip_fields.end(); it++)
+          {
+            // if not specified, field goes at the end of all known fields
+            // (or a bit past if alignment is a concern)
+            size_t offset = fsize;
+            std::map<FieldID,off_t>::const_iterator offset_finder = 
+              offsets.find(it->second);
+            if (offset_finder != offsets.end())
+              offset += offset_finder->second;
+            std::map<FieldID,size_t>::const_iterator alignment_finder = 
+              alignments.find(it->second);
+            const size_t field_alignment = 
+              (alignment_finder != alignments.end()) ? 
+                alignment_finder->second : 1;
+            if (field_alignment > 1)
+            {
+              offset = round_up(offset, field_alignment);
+              if ((falign % field_alignment) != 0)
+                falign = lcm(falign, field_alignment);
+            }
+            // increase size and alignment if needed
+            fsize = max(fsize, offset + it->first * elements_between_fields);
+            field_offsets[it->second] = offset;
+          }
+          if (falign > 1)
+          {
+            // group size needs to be rounded up to match group alignment
+            fsize = round_up(fsize, falign);
+            // overall instance alignment layout must be compatible with group
+            layout->alignment_reqd = lcm(layout->alignment_reqd, falign);
+          }
+          // starting point for piece is first aligned location above
+          // existing pieces
+          const size_t piece_start = round_up(layout->bytes_used, falign);
+          unsigned fidx = 0;
+          for (std::vector<std::pair<size_t,FieldID> >::const_iterator it = 
+                zip_fields.begin(); it != zip_fields.end(); it++, fidx++)
+          {
+            // create the piece
+            Realm::AffineLayoutPiece<DIM,T> *piece = 
+              new Realm::AffineLayoutPiece<DIM,T>;
+            piece->bounds = bounds; 
+            piece->offset = piece_start + field_offsets[it->second];
+            size_t stride = it->first;
+            for (std::vector<DimensionKind>::const_iterator dit = 
+                  order.ordering.begin(); dit != order.ordering.end(); dit++)
+            {
+              if ((*dit) != DIM_F)
+              {
+#ifdef DEBUG_LEGION
+                assert(int(*dit) < DIM);
+#endif
+                piece->strides[*dit] = stride;
+                piece->offset -= bounds.lo[*dit] * stride;
+                stride *= (bounds.hi[*dit] - bounds.lo[*dit] + 1);
+              }
+              else
+                // Reset the stride to the fsize for the next dimension
+                // since it already incorporates everything prior to it
+                stride = fsize;
+            }
+            layout->piece_lists[fidx].pieces.push_back(piece);
+          }
+          // Lastly we need to update the bytes used for this piece
+          size_t piece_bytes = fsize;
+          for (unsigned idx = field_index+1; idx < order.ordering.size(); idx++)
+          {
+            const DimensionKind dim = order.ordering[idx];
+#ifdef DEBUG_LEGION
+            assert(int(dim) < DIM);
+#endif
+            piece_bytes *= (bounds.hi[dim] - bounds.lo[dim] + 1);
+          }
+          layout->bytes_used = piece_start + piece_bytes;
+        }
       }
+#endif
       return layout;
     }
 
@@ -870,6 +1278,24 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    PieceIteratorImpl* IndexSpaceOperationT<DIM,T>::create_piece_iterator(
+      const void *piece_list, size_t piece_list_size, IndexSpaceNode *priv_node)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      IndexSpaceNodeT<DIM,T> *privilege_node = 
+        dynamic_cast<IndexSpaceNodeT<DIM,T>*>(priv_node);
+      assert(privilege_node != NULL);
+#else
+      IndexSpaceNodeT<DIM,T> *privilege_node = 
+        static_cast<IndexSpaceNodeT<DIM,T>*>(priv_node);
+#endif
+      return new PieceIteratorImplT<DIM,T>(piece_list, piece_list_size, 
+                                           privilege_node);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     ApEvent IndexSpaceOperationT<DIM,T>::issue_fill(
                                  const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
@@ -879,9 +1305,7 @@ namespace Legion {
                                  FieldSpace handle,
                                  RegionTreeID tree_id,
 #endif
-                                 ApEvent precondition, PredEvent pred_guard,
-                                 const FieldMaskSet<FillView> *tracing_srcs,
-                                 const FieldMaskSet<InstanceView> *tracing_dsts)
+                                 ApEvent precondition, PredEvent pred_guard)
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> local_space;
@@ -892,24 +1316,22 @@ namespace Legion {
 #ifdef LEGION_SPY
             fill_uid, handle, tree_id,
 #endif
-            Runtime::merge_events(&trace_info, space_ready, precondition), 
-            pred_guard, tracing_srcs, tracing_dsts);
+            Runtime::merge_events(&trace_info, space_ready, precondition),
+            pred_guard);
       else if (space_ready.exists())
         return issue_fill_internal(context, local_space, trace_info, 
                                    dst_fields, fill_value, fill_size,
 #ifdef LEGION_SPY
                                    fill_uid, handle, tree_id,
 #endif
-                                   space_ready, pred_guard,
-                                   tracing_srcs, tracing_dsts);
+                                   space_ready, pred_guard);
       else
         return issue_fill_internal(context, local_space, trace_info, 
                                    dst_fields, fill_value, fill_size,
 #ifdef LEGION_SPY
                                    fill_uid, handle, tree_id,
 #endif
-                                   precondition, pred_guard,
-                                   tracing_srcs, tracing_dsts);
+                                   precondition, pred_guard);
     }
 
     //--------------------------------------------------------------------------
@@ -923,9 +1345,7 @@ namespace Legion {
                                  RegionTreeID dst_tree_id,
 #endif
                                  ApEvent precondition, PredEvent pred_guard,
-                                 ReductionOpID redop, bool reduction_fold,
-                                 const FieldMaskSet<InstanceView> *tracing_srcs,
-                                 const FieldMaskSet<InstanceView> *tracing_dsts)
+                                 ReductionOpID redop, bool reduction_fold)
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> local_space;
@@ -937,23 +1357,21 @@ namespace Legion {
             src_tree_id, dst_tree_id,
 #endif
             Runtime::merge_events(&trace_info, precondition, space_ready),
-            pred_guard, redop, reduction_fold, tracing_srcs, tracing_dsts);
+            pred_guard, redop, reduction_fold);
       else if (space_ready.exists())
         return issue_copy_internal(context, local_space, trace_info, 
                 dst_fields, src_fields, 
 #ifdef LEGION_SPY
                 src_tree_id, dst_tree_id,
 #endif
-                space_ready, pred_guard, redop, reduction_fold,
-                tracing_srcs, tracing_dsts);
+                space_ready, pred_guard, redop, reduction_fold);
       else
         return issue_copy_internal(context, local_space, trace_info, 
                 dst_fields, src_fields, 
 #ifdef LEGION_SPY
                 src_tree_id, dst_tree_id,
 #endif
-                precondition, pred_guard, redop, reduction_fold,
-                tracing_srcs, tracing_dsts);
+                precondition, pred_guard, redop, reduction_fold);
     }
 
     //--------------------------------------------------------------------------
@@ -1033,19 +1451,55 @@ namespace Legion {
                                        precondition, pred_guard);
     }
 
+#ifdef LEGION_GPU_REDUCTIONS
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    ApEvent IndexSpaceOperationT<DIM,T>::gpu_reduction(
+                                 const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 const std::vector<CopySrcDstField> &src_fields,
+                                 Processor gpu, TaskID gpu_task_id,
+                                 PhysicalManager *dst, PhysicalManager *src,
+                                 ApEvent precondition, PredEvent pred_guard, 
+                                 ReductionOpID redop, bool reduction_fold)
+    //--------------------------------------------------------------------------
+    {
+      Realm::IndexSpace<DIM,T> local_space;
+      ApEvent space_ready = get_realm_index_space(local_space, true/*tight*/);
+      if (space_ready.exists() && precondition.exists())
+        return gpu_reduction_internal(context, local_space, trace_info, 
+            dst_fields, src_fields, gpu, gpu_task_id, dst, src,
+            Runtime::merge_events(&trace_info, precondition, space_ready),
+            pred_guard, redop, reduction_fold);
+      else if (space_ready.exists())
+        return gpu_reduction_internal(context, local_space, trace_info, 
+                dst_fields, src_fields, gpu, gpu_task_id, dst, src,
+                space_ready, pred_guard, redop, reduction_fold);
+      else
+        return gpu_reduction_internal(context, local_space, trace_info, 
+                dst_fields, src_fields, gpu, gpu_task_id, dst, src,
+                precondition, pred_guard, redop, reduction_fold);
+    }
+#endif
+
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     Realm::InstanceLayoutGeneric* IndexSpaceOperationT<DIM,T>::create_layout(
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<FieldID> &field_ids,
-                                    const std::vector<size_t> &field_sizes)
+                                    const std::vector<size_t> &field_sizes,
+                                    bool compact, 
+                                    LayoutConstraintKind *unsat_kind,
+                                    unsigned *unsat_index, void **piece_list,
+                                    size_t *piece_list_size)
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> local_is;
       ApEvent space_ready = get_realm_index_space(local_is, true/*tight*/);
       if (space_ready.exists())
         space_ready.wait();
-      return create_layout_internal(local_is,constraints,field_ids,field_sizes);
+      return create_layout_internal(local_is, constraints,field_ids,field_sizes,
+                 compact, unsat_kind, unsat_index, piece_list, piece_list_size);
     }
 
     //--------------------------------------------------------------------------
@@ -1977,6 +2431,24 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    PieceIteratorImpl* IndexSpaceNodeT<DIM,T>::create_piece_iterator(
+      const void *piece_list, size_t piece_list_size, IndexSpaceNode *priv_node)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      IndexSpaceNodeT<DIM,T> *privilege_node = 
+        dynamic_cast<IndexSpaceNodeT<DIM,T>*>(priv_node);
+      assert(privilege_node != NULL);
+#else
+      IndexSpaceNodeT<DIM,T> *privilege_node = 
+        static_cast<IndexSpaceNodeT<DIM,T>*>(priv_node);
+#endif
+      return new PieceIteratorImplT<DIM,T>(piece_list, piece_list_size, 
+                                           privilege_node);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     void IndexSpaceNodeT<DIM,T>::log_index_space_points(
                               const Realm::IndexSpace<DIM,T> &tight_space) const
     //--------------------------------------------------------------------------
@@ -2311,6 +2783,15 @@ namespace Legion {
       // Wait for a tight space on which to perform the test
       get_realm_index_space(test_space, true/*tight*/);
       return test_space.contains(*point);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    bool IndexSpaceNodeT<DIM,T>::contains_point(const DomainPoint &point)
+    //--------------------------------------------------------------------------
+    {
+      const Point<DIM,T> p = point;
+      return contains_point(p); 
     }
 
     //--------------------------------------------------------------------------
@@ -4340,9 +4821,7 @@ namespace Legion {
                                  FieldSpace handle,
                                  RegionTreeID tree_id,
 #endif
-                                 ApEvent precondition, PredEvent pred_guard,
-                                 const FieldMaskSet<FillView> *tracing_srcs,
-                                 const FieldMaskSet<InstanceView> *tracing_dsts)
+                                 ApEvent precondition, PredEvent pred_guard)
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> local_space;
@@ -4354,23 +4833,21 @@ namespace Legion {
                                    fill_uid, handle, tree_id,
 #endif
             Runtime::merge_events(&trace_info, space_ready, precondition),
-            pred_guard, tracing_srcs, tracing_dsts);
+            pred_guard);
       else if (space_ready.exists())
         return issue_fill_internal(context, local_space, trace_info, 
                                    dst_fields, fill_value, fill_size,
 #ifdef LEGION_SPY
                                    fill_uid, handle, tree_id,
 #endif
-                                   space_ready, pred_guard,
-                                   tracing_srcs, tracing_dsts);
+                                   space_ready, pred_guard);
       else
         return issue_fill_internal(context, local_space, trace_info, 
                                    dst_fields, fill_value, fill_size,
 #ifdef LEGION_SPY
                                    fill_uid, handle, tree_id,
 #endif
-                                   precondition, pred_guard,
-                                   tracing_srcs, tracing_dsts);
+                                   precondition, pred_guard);
     }
 
     //--------------------------------------------------------------------------
@@ -4384,9 +4861,7 @@ namespace Legion {
                                  RegionTreeID dst_tree_id,
 #endif
                                  ApEvent precondition, PredEvent pred_guard,
-                                 ReductionOpID redop, bool reduction_fold,
-                                 const FieldMaskSet<InstanceView> *tracing_srcs,
-                                 const FieldMaskSet<InstanceView> *tracing_dsts)
+                                 ReductionOpID redop, bool reduction_fold)
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> local_space;
@@ -4398,23 +4873,21 @@ namespace Legion {
             src_tree_id, dst_tree_id,
 #endif
             Runtime::merge_events(&trace_info, space_ready, precondition),
-            pred_guard, redop, reduction_fold, tracing_srcs, tracing_dsts);
+            pred_guard, redop, reduction_fold);
       else if (space_ready.exists())
         return issue_copy_internal(context, local_space, trace_info, 
                 dst_fields, src_fields, 
 #ifdef LEGION_SPY
                 src_tree_id, dst_tree_id,
 #endif
-                space_ready, pred_guard, redop, reduction_fold,
-                tracing_srcs, tracing_dsts);
+                space_ready, pred_guard, redop, reduction_fold);
       else
         return issue_copy_internal(context, local_space, trace_info, 
                 dst_fields, src_fields, 
 #ifdef LEGION_SPY
                 src_tree_id, dst_tree_id,
 #endif
-                precondition, pred_guard, redop, reduction_fold,
-                tracing_srcs, tracing_dsts);
+                precondition, pred_guard, redop, reduction_fold);
     }
 
     //--------------------------------------------------------------------------
@@ -4494,19 +4967,55 @@ namespace Legion {
                                        precondition, pred_guard);
     }
 
+#ifdef LEGION_GPU_REDUCTIONS
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    ApEvent IndexSpaceNodeT<DIM,T>::gpu_reduction(
+                                 const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 const std::vector<CopySrcDstField> &src_fields,
+                                 Processor gpu, TaskID gpu_task_id,
+                                 PhysicalManager *dst, PhysicalManager *src,
+                                 ApEvent precondition, PredEvent pred_guard, 
+                                 ReductionOpID redop, bool reduction_fold)
+    //--------------------------------------------------------------------------
+    {
+      Realm::IndexSpace<DIM,T> local_space;
+      ApEvent space_ready = get_realm_index_space(local_space, true/*tight*/);
+      if (precondition.exists() && space_ready.exists())
+        return gpu_reduction_internal(context, local_space, trace_info, 
+            dst_fields, src_fields, gpu, gpu_task_id, dst, src,
+            Runtime::merge_events(&trace_info, space_ready, precondition),
+            pred_guard, redop, reduction_fold);
+      else if (space_ready.exists())
+        return gpu_reduction_internal(context, local_space, trace_info, 
+                dst_fields, src_fields, gpu, gpu_task_id, dst, src,
+                space_ready, pred_guard, redop, reduction_fold);
+      else
+        return gpu_reduction_internal(context, local_space, trace_info, 
+                dst_fields, src_fields, gpu, gpu_task_id, dst, src,
+                precondition, pred_guard, redop, reduction_fold);
+    }
+#endif
+
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     Realm::InstanceLayoutGeneric* IndexSpaceNodeT<DIM,T>::create_layout(
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<FieldID> &field_ids,
-                                    const std::vector<size_t> &field_sizes)
+                                    const std::vector<size_t> &field_sizes,
+                                    bool compact, 
+                                    LayoutConstraintKind *unsat_kind,
+                                    unsigned *unsat_index, void **piece_list, 
+                                    size_t *piece_list_size)
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> local_is;
       ApEvent space_ready = get_realm_index_space(local_is, true/*tight*/);
       if (space_ready.exists())
         space_ready.wait();
-      return create_layout_internal(local_is,constraints,field_ids,field_sizes);
+      return create_layout_internal(local_is, constraints,field_ids,field_sizes,
+                 compact, unsat_kind, unsat_index, piece_list, piece_list_size);
     }
     
     //--------------------------------------------------------------------------

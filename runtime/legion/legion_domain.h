@@ -617,6 +617,131 @@ namespace Legion {
     DomainPoint     divisor;
   };
 
+  /**
+   * \class Span
+   * A span class is used for handing back allocations of elements with
+   * a uniform stride that users can safely access simply by indexing
+   * the pointer as an array of elements. Note that the Legion definition
+   * of a span does not guarantee that elements are contiguous the same
+   * as the c++20 definition of a span.
+   */
+  template<typename FT, PrivilegeMode PM = LEGION_READ_WRITE>
+  class Span {
+  public:
+    class iterator : 
+      public std::iterator<std::random_access_iterator_tag,FT> {
+    public:
+      iterator(void) : ptr(NULL), stride(0) { } 
+    private:
+      iterator(char *p, size_t s) : ptr(p), stride(s) { }
+    public:
+      inline iterator& operator=(const iterator &rhs) 
+        { ptr = rhs.ptr; stride = rhs.stride; return *this; }
+      inline iterator& operator+=(int rhs) { ptr += stride; return *this; }
+      inline iterator& operator-=(int rhs) { ptr -= stride; return *this; }
+      inline FT& operator*(void) { return *static_cast<FT*>(ptr); }
+      inline FT* operator->(void) { return static_cast<FT*>(ptr); }
+      inline FT& operator[](int rhs) 
+        { return *static_cast<FT*>(ptr + rhs * stride); }
+    public:
+      inline iterator& operator++(void) { ptr += stride; return *this; }
+      inline iterator& operator--(void) { ptr -= stride; return *this; }
+      inline iterator operator++(int) 
+        { iterator it(ptr, stride); ptr += stride; return it; }
+      inline iterator operator--(int) 
+        { iterator it(ptr, stride); ptr -= stride; return it; }
+      inline iterator operator+(int rhs) const 
+        { return iterator(ptr + stride * rhs, stride); }
+      inline iterator operator-(int rhs) const 
+        { return iterator(ptr - stride * rhs, stride); }
+    public:
+      inline bool operator==(const iterator &rhs) { return (ptr == rhs.ptr); }
+      inline bool operator!=(const iterator &rhs) { return (ptr != rhs.ptr); }
+      inline bool operator<(const iterator &rhs) { return (ptr < rhs.ptr); }
+      inline bool operator>(const iterator &rhs) { return (ptr > rhs.ptr); }
+      inline bool operator<=(const iterator &rhs) { return (ptr <= rhs.ptr); }
+      inline bool operator>=(const iterator &rhs) { return (ptr >= rhs.ptr); }
+    private:
+      char *ptr;
+      size_t stride;
+    };
+    class reverse_iterator : 
+      public std::iterator<std::random_access_iterator_tag,FT> {
+    public:
+      reverse_iterator(void) : ptr(NULL), stride(0) { } 
+    private:
+      reverse_iterator(char *p, size_t s) : ptr(p), stride(s) { }
+    public:
+      inline reverse_iterator& operator=(const reverse_iterator &rhs) 
+        { ptr = rhs.ptr; stride = rhs.stride; return *this; }
+      inline reverse_iterator& operator+=(int rhs) 
+        { ptr -= stride; return *this; }
+      inline reverse_iterator& operator-=(int rhs) 
+        { ptr += stride; return *this; }
+      inline FT& operator*(void) { return *static_cast<FT*>(ptr); }
+      inline FT* operator->(void) { return static_cast<FT*>(ptr); }
+      inline FT& operator[](int rhs) 
+        { return *static_cast<FT*>(ptr - rhs * stride); }
+    public:
+      inline reverse_iterator& operator++(void) 
+        { ptr -= stride; return *this; }
+      inline reverse_iterator& operator--(void) 
+        { ptr += stride; return *this; }
+      inline reverse_iterator operator++(int) 
+        { reverse_iterator it(ptr, stride); ptr -= stride; return it; }
+      inline reverse_iterator operator--(int) 
+        { reverse_iterator it(ptr, stride); ptr += stride; return it; }
+      inline reverse_iterator operator+(int rhs) const 
+        { return reverse_iterator(ptr - stride * rhs, stride); }
+      inline reverse_iterator operator-(int rhs) const 
+        { return reverse_iterator(ptr + stride * rhs, stride); }
+    public:
+      inline bool operator==(const reverse_iterator &rhs) 
+        { return (ptr == rhs.ptr); }
+      inline bool operator!=(const reverse_iterator &rhs) 
+        { return (ptr != rhs.ptr); }
+      inline bool operator<(const reverse_iterator &rhs) 
+        { return (ptr > rhs.ptr); }
+      inline bool operator>(const reverse_iterator &rhs) 
+        { return (ptr < rhs.ptr); }
+      inline bool operator<=(const reverse_iterator &rhs) 
+        { return (ptr >= rhs.ptr); }
+      inline bool operator>=(const reverse_iterator &rhs) 
+        { return (ptr <= rhs.ptr); }
+    private:
+      char *ptr;
+      size_t stride;
+    };
+  public:
+    Span(void) : base(NULL), extent(0), stride(0) { }
+    Span(FT *b, size_t e, size_t s = sizeof(FT))
+      : base(static_cast<char*>(b)), extent(e), stride(s) { }
+  public:
+    inline iterator begin(void) const { return iterator(base, stride); }
+    inline iterator end(void) const 
+      { return iterator(base + extent*stride, stride); }
+    inline reverse_iterator rbegin(void) const
+      { return reverse_iterator(base + (extent-1) * stride, stride); }
+    inline reverse_iterator rend(void) const
+      { return reverse_iterator(base - stride, stride); }
+  public:
+    inline FT& front(void) { return *static_cast<FT*>(base); }
+    inline FT& back(void) 
+      { return *static_cast<FT*>(base + (extent-1)*stride); }
+    inline FT& operator[](int index)
+      { return *static_cast<FT*>(base + index * stride); }
+    inline FT* data(void) { return static_cast<FT*>(base); }
+    inline uintptr_t get_base(void) const { return uintptr_t(base); }
+  public:
+    inline size_t size(void) const { return extent; }
+    inline size_t step(void) const { return stride; }
+    inline bool empty(void) const { return (extent == 0); }
+  private:
+    char *base;
+    size_t extent; // number of elements
+    size_t stride; // byte stride
+  };
+
 }; // namespace Legion
 
 #include "legion/legion_domain.inl"

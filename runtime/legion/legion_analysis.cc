@@ -513,10 +513,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteTraceRecorder::record_issue_copy(Memoizable *memo,
-                                             unsigned src_idx,
-                                             unsigned dst_idx,
-                                             ApEvent &lhs,
+    void RemoteTraceRecorder::record_issue_copy(Memoizable *memo, ApEvent &lhs,
                                              IndexSpaceExpression *expr,
                                  const std::vector<CopySrcDstField>& src_fields,
                                  const std::vector<CopySrcDstField>& dst_fields,
@@ -524,11 +521,10 @@ namespace Legion {
                                              RegionTreeID src_tree_id,
                                              RegionTreeID dst_tree_id,
 #endif
-                                             ApEvent precondition,
+                                             ApEvent precondition, 
+                                             PredEvent pred_guard,
                                              ReductionOpID redop,
-                                             bool reduction_fold,
-                                 const FieldMaskSet<InstanceView> &tracing_srcs,
-                                 const FieldMaskSet<InstanceView> &tracing_dsts)
+                                             bool reduction_fold)
     //--------------------------------------------------------------------------
     {
       if (local_space != origin_space)
@@ -541,8 +537,6 @@ namespace Legion {
           rez.serialize(REMOTE_TRACE_ISSUE_COPY);
           rez.serialize(done);
           memo->pack_remote_memoizable(rez, origin_space);
-          rez.serialize(src_idx);
-          rez.serialize(dst_idx);
           rez.serialize(&lhs);
           rez.serialize(lhs);
           expr->pack_expression(rez, origin_space);
@@ -560,8 +554,45 @@ namespace Legion {
           rez.serialize(dst_tree_id);
 #endif
           rez.serialize(precondition);
+          rez.serialize(pred_guard);
           rez.serialize(redop);
-          rez.serialize<bool>(reduction_fold);
+          rez.serialize<bool>(reduction_fold); 
+        }
+        runtime->send_remote_trace_update(origin_space, rez);
+        // Wait to see if lhs changes
+        done.wait();
+      }
+      else
+        remote_tpl->record_issue_copy(memo, lhs, expr, src_fields, dst_fields,
+#ifdef LEGION_SPY
+                              src_tree_id, dst_tree_id,
+#endif
+                              precondition, pred_guard, redop, reduction_fold);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteTraceRecorder::record_copy_views(ApEvent lhs, Memoizable *memo,
+                                              unsigned src_idx,unsigned dst_idx,
+                                              IndexSpaceExpression *expr,
+                                 const FieldMaskSet<InstanceView> &tracing_srcs,
+                                 const FieldMaskSet<InstanceView> &tracing_dsts,
+                                              std::set<RtEvent> &applied)
+    //--------------------------------------------------------------------------
+    {
+      if (local_space != origin_space)
+      {
+        const RtUserEvent done = Runtime::create_rt_user_event(); 
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(remote_tpl);
+          rez.serialize(REMOTE_TRACE_COPY_VIEWS);
+          rez.serialize(done);
+          memo->pack_remote_memoizable(rez, origin_space);
+          rez.serialize(lhs);
+          rez.serialize(src_idx);
+          rez.serialize(dst_idx);
+          expr->pack_expression(rez, origin_space);
           rez.serialize<size_t>(tracing_srcs.size());
           for (FieldMaskSet<InstanceView>::const_iterator it = 
                 tracing_srcs.begin(); it != tracing_srcs.end(); it++)
@@ -578,17 +609,11 @@ namespace Legion {
           }
         }
         runtime->send_remote_trace_update(origin_space, rez);
-        // Wait to see if lhs changes
-        done.wait();
+        applied.insert(done);
       }
       else
-        remote_tpl->record_issue_copy(memo, src_idx, dst_idx, lhs, expr,
-                                      src_fields, dst_fields,
-#ifdef LEGION_SPY
-                                      src_tree_id, dst_tree_id,
-#endif
-                                      precondition, redop, reduction_fold,
-                                      tracing_srcs, tracing_dsts);
+        remote_tpl->record_copy_views(lhs, memo, src_idx, dst_idx, expr,
+                                      tracing_srcs, tracing_dsts, applied);
     }
 
     //--------------------------------------------------------------------------
@@ -597,7 +622,7 @@ namespace Legion {
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
                              const std::vector<void*> &indirections,
-                             ApEvent precondition)
+                             ApEvent precondition, PredEvent pred_guard)
     //--------------------------------------------------------------------------
     {
       if (local_space != origin_space)
@@ -607,13 +632,11 @@ namespace Legion {
       }
       else
         remote_tpl->record_issue_indirect(memo, lhs, expr,src_fields,dst_fields,
-                                          indirections, precondition);
+                                          indirections,precondition,pred_guard);
     }
 
     //--------------------------------------------------------------------------
-    void RemoteTraceRecorder::record_issue_fill(Memoizable *memo,
-                                             unsigned idx,
-                                             ApEvent &lhs,
+    void RemoteTraceRecorder::record_issue_fill(Memoizable *memo, ApEvent &lhs,
                                              IndexSpaceExpression *expr,
                                  const std::vector<CopySrcDstField> &fields,
                                              const void *fill_value, 
@@ -623,8 +646,7 @@ namespace Legion {
                                              RegionTreeID tree_id,
 #endif
                                              ApEvent precondition,
-                                 const FieldMaskSet<FillView> &tracing_srcs,
-                                 const FieldMaskSet<InstanceView> &tracing_dsts)
+                                             PredEvent pred_guard)
     //--------------------------------------------------------------------------
     {
       if (local_space != origin_space)
@@ -637,7 +659,6 @@ namespace Legion {
           rez.serialize(REMOTE_TRACE_ISSUE_FILL);
           rez.serialize(done);
           memo->pack_remote_memoizable(rez, origin_space);
-          rez.serialize(idx);
           rez.serialize(&lhs);
           rez.serialize(lhs);
           expr->pack_expression(rez, origin_space);
@@ -651,6 +672,42 @@ namespace Legion {
           rez.serialize(tree_id);
 #endif
           rez.serialize(precondition);
+          rez.serialize(pred_guard);  
+        }
+        runtime->send_remote_trace_update(origin_space, rez);
+        // Wait to see if lhs changes
+        done.wait();
+      }
+      else
+        remote_tpl->record_issue_fill(memo, lhs, expr, fields, 
+                                      fill_value, fill_size, 
+#ifdef LEGION_SPY
+                                      handle, tree_id,
+#endif
+                                      precondition, pred_guard);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteTraceRecorder::record_fill_views(ApEvent lhs, Memoizable *memo,
+                                 unsigned idx, IndexSpaceExpression *expr, 
+                                 const FieldMaskSet<FillView> &tracing_srcs,
+                                 const FieldMaskSet<InstanceView> &tracing_dsts,
+                                 std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      if (local_space != origin_space)
+      {
+        const RtUserEvent done = Runtime::create_rt_user_event(); 
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(remote_tpl);
+          rez.serialize(REMOTE_TRACE_FILL_VIEWS);
+          rez.serialize(done);
+          memo->pack_remote_memoizable(rez, origin_space);
+          rez.serialize(idx);
+          rez.serialize(lhs);
+          expr->pack_expression(rez, origin_space);
           rez.serialize<size_t>(tracing_srcs.size());
           for (FieldMaskSet<FillView>::const_iterator it = 
                 tracing_srcs.begin(); it != tracing_srcs.end(); it++)
@@ -667,26 +724,74 @@ namespace Legion {
           }
         }
         runtime->send_remote_trace_update(origin_space, rez);
-        // Wait to see if lhs changes
-        done.wait();
+        applied_events.insert(done);
       }
       else
-        remote_tpl->record_issue_fill(memo, idx, lhs, expr, fields,
-                                      fill_value, fill_size,
-#ifdef LEGION_SPY
-                                      handle, tree_id,
-#endif
-                                      precondition, tracing_srcs, tracing_dsts);
+        remote_tpl->record_fill_views(lhs, memo, idx, expr, tracing_srcs,
+                                      tracing_dsts, applied_events);
     }
 
     //--------------------------------------------------------------------------
-    void RemoteTraceRecorder::record_fill_view(FillView *view,
-                                               const FieldMask &user_mask)
+    void RemoteTraceRecorder::record_post_fill_view(FillView *view,
+                                                    const FieldMask &user_mask)
     //--------------------------------------------------------------------------
     {
       // this should never be called on remote nodes
       assert(false);
     }
+
+#ifdef LEGION_GPU_REDUCTIONS
+    //--------------------------------------------------------------------------
+    void RemoteTraceRecorder::record_gpu_reduction(Memoizable *memo, 
+                                 ApEvent &lhs, IndexSpaceExpression *expr,
+                                 const std::vector<CopySrcDstField>& src_fields,
+                                 const std::vector<CopySrcDstField>& dst_fields,
+                                 Processor gpu, TaskID gpu_task_id,
+                                 PhysicalManager *src, PhysicalManager *dst,
+                                 ApEvent precondition, PredEvent pred_guard,
+                                 ReductionOpID redop, bool reduction_fold)
+    //--------------------------------------------------------------------------
+    {
+      if (local_space != origin_space)
+      {
+        RtUserEvent done = Runtime::create_rt_user_event(); 
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(remote_tpl);
+          rez.serialize(REMOTE_TRACE_GPU_REDUCTION);
+          rez.serialize(done);
+          memo->pack_remote_memoizable(rez, origin_space);
+          rez.serialize(&lhs);
+          rez.serialize(lhs);
+          expr->pack_expression(rez, origin_space);
+#ifdef DEBUG_LEGION
+          assert(src_fields.size() == dst_fields.size());
+#endif
+          rez.serialize<size_t>(src_fields.size());
+          for (unsigned idx = 0; idx < src_fields.size(); idx++)
+          {
+            pack_src_dst_field(rez, src_fields[idx]);
+            pack_src_dst_field(rez, dst_fields[idx]);
+          }
+          rez.serialize(gpu);
+          rez.serialize(gpu_task_id);
+          rez.serialize(src->did);
+          rez.serialize(dst->did);
+          rez.serialize(precondition);
+          rez.serialize(pred_guard);
+          rez.serialize(redop);
+          rez.serialize<bool>(reduction_fold); 
+        }
+        runtime->send_remote_trace_update(origin_space, rez);
+        // Wait to see if lhs changes
+        done.wait();
+      }
+      else
+        remote_tpl->record_gpu_reduction(memo, lhs, expr, src_fields,dst_fields,
+          gpu,gpu_task_id,src,dst,precondition,pred_guard,redop,reduction_fold);
+    }
+#endif
 
     //--------------------------------------------------------------------------
     void RemoteTraceRecorder::record_op_view(Memoizable *memo,
@@ -996,9 +1101,6 @@ namespace Legion {
             derez.deserialize(done);
             Memoizable *memo = RemoteMemoizable::unpack_remote_memoizable(derez,
                                                            NULL/*op*/, runtime);
-            unsigned src_idx, dst_idx;
-            derez.deserialize(src_idx);
-            derez.deserialize(dst_idx);
             ApUserEvent *lhs_ptr;
             derez.deserialize(lhs_ptr);
             ApUserEvent lhs;
@@ -1022,10 +1124,54 @@ namespace Legion {
 #endif
             ApEvent precondition;
             derez.deserialize(precondition);
+            PredEvent pred_guard;
+            derez.deserialize(pred_guard);
             ReductionOpID redop;
             derez.deserialize(redop);
             bool reduction_fold;
             derez.deserialize<bool>(reduction_fold);
+            // Use this to track if lhs changes
+            const ApUserEvent lhs_copy = lhs;
+            // Do the base call
+            tpl->record_issue_copy(memo, lhs, expr,
+                                   src_fields, dst_fields,
+#ifdef LEGION_SPY
+                                   src_tree_id, dst_tree_id,
+#endif
+                                   precondition, pred_guard,
+                                   redop, reduction_fold);
+            if (lhs != lhs_copy)
+            {
+              Serializer rez;
+              {
+                RezCheck z2(rez);
+                rez.serialize(REMOTE_TRACE_ISSUE_COPY);
+                rez.serialize(lhs_ptr);
+                rez.serialize(lhs);
+                rez.serialize(done);
+              }
+              runtime->send_remote_trace_response(source, rez);
+            }
+            else // lhs was unchanged
+              Runtime::trigger_event(done);
+            if (memo->get_origin_space() != runtime->address_space)
+              delete memo;
+            break;
+          }
+        case REMOTE_TRACE_COPY_VIEWS:
+          {
+            RtUserEvent done;
+            derez.deserialize(done);
+            Memoizable *memo = RemoteMemoizable::unpack_remote_memoizable(derez,
+                                                           NULL/*op*/, runtime);
+            ApUserEvent lhs;
+            derez.deserialize(lhs);
+            unsigned src_idx, dst_idx;
+            derez.deserialize(src_idx);
+            derez.deserialize(dst_idx);
+            RegionTreeForest *forest = runtime->forest;
+            IndexSpaceExpression *expr = 
+              IndexSpaceExpression::unpack_expression(derez, forest, source);
             FieldMaskSet<InstanceView> tracing_srcs, tracing_dsts;
             std::set<RtEvent> ready_events;
             size_t num_srcs;
@@ -1057,36 +1203,19 @@ namespace Legion {
               FieldMask mask;
               derez.deserialize(mask);
               tracing_dsts.insert(view, mask);
-            }
-            // Use this to track if lhs changes
-            const ApUserEvent lhs_copy = lhs;
+            } 
             if (!ready_events.empty())
             {
               const RtEvent wait_on = Runtime::merge_events(ready_events);
+              ready_events.clear();
               if (wait_on.exists() && !wait_on.has_triggered())
                 wait_on.wait();
             }
-            // Do the base call
-            tpl->record_issue_copy(memo, src_idx, dst_idx, lhs, expr,
-                                   src_fields, dst_fields,
-#ifdef LEGION_SPY
-                                   src_tree_id, dst_tree_id,
-#endif
-                                   precondition, redop, reduction_fold,
-                                   tracing_srcs, tracing_dsts);
-            if (lhs != lhs_copy)
-            {
-              Serializer rez;
-              {
-                RezCheck z2(rez);
-                rez.serialize(REMOTE_TRACE_ISSUE_COPY);
-                rez.serialize(lhs_ptr);
-                rez.serialize(lhs);
-                rez.serialize(done);
-              }
-              runtime->send_remote_trace_response(source, rez);
-            }
-            else // lhs was unchanged
+            tpl->record_copy_views(lhs, memo, src_idx, dst_idx, expr,
+                                   tracing_srcs, tracing_dsts, ready_events);
+            if (!ready_events.empty())
+              Runtime::trigger_event(done, Runtime::merge_events(ready_events));
+            else
               Runtime::trigger_event(done);
             if (memo->get_origin_space() != runtime->address_space)
               delete memo;
@@ -1098,8 +1227,6 @@ namespace Legion {
             derez.deserialize(done);
             Memoizable *memo = RemoteMemoizable::unpack_remote_memoizable(derez,
                                                            NULL/*op*/, runtime);
-            unsigned index;
-            derez.deserialize(index);
             ApUserEvent *lhs_ptr;
             derez.deserialize(lhs_ptr);
             ApUserEvent lhs;
@@ -1124,6 +1251,48 @@ namespace Legion {
 #endif
             ApEvent precondition;
             derez.deserialize(precondition);
+            PredEvent pred_guard;
+            derez.deserialize(pred_guard);
+            // Use this to track if lhs changes
+            const ApUserEvent lhs_copy = lhs; 
+            // Do the base call
+            tpl->record_issue_fill(memo, lhs, expr, fields,
+                                   fill_value, fill_size,
+#ifdef LEGION_SPY
+                                   handle, tree_id,
+#endif
+                                   precondition, pred_guard);
+            if (lhs != lhs_copy)
+            {
+              Serializer rez;
+              {
+                RezCheck z2(rez);
+                rez.serialize(REMOTE_TRACE_ISSUE_FILL);
+                rez.serialize(lhs_ptr);
+                rez.serialize(lhs);
+                rez.serialize(done);
+              }
+              runtime->send_remote_trace_response(source, rez);
+            }
+            else // lhs was unchanged
+              Runtime::trigger_event(done);
+            if (memo->get_origin_space() != runtime->address_space)
+              delete memo;
+            break;
+          }
+        case REMOTE_TRACE_FILL_VIEWS:
+          {
+            RtUserEvent done;
+            derez.deserialize(done);
+            Memoizable *memo = RemoteMemoizable::unpack_remote_memoizable(derez,
+                                                           NULL/*op*/, runtime);
+            unsigned index;
+            derez.deserialize(index);
+            ApUserEvent lhs;
+            derez.deserialize(lhs);
+            RegionTreeForest *forest = runtime->forest;
+            IndexSpaceExpression *expr = 
+              IndexSpaceExpression::unpack_expression(derez, forest, source);
             FieldMaskSet<FillView> tracing_srcs;
             std::set<RtEvent> ready_events;
             size_t num_srcs;
@@ -1157,27 +1326,82 @@ namespace Legion {
               derez.deserialize(mask);
               tracing_dsts.insert(view, mask);
             }
-            // Use this to track if lhs changes
-            const ApUserEvent lhs_copy = lhs;
             if (!ready_events.empty())
             {
               const RtEvent wait_on = Runtime::merge_events(ready_events);
+              ready_events.clear();
               if (wait_on.exists() && !wait_on.has_triggered())
                 wait_on.wait();
             }
+            tpl->record_fill_views(lhs, memo, index, expr, tracing_srcs,
+                                   tracing_dsts, ready_events);
+            if (!ready_events.empty())
+              Runtime::trigger_event(done, Runtime::merge_events(ready_events));
+            else
+              Runtime::trigger_event(done);
+            if (memo->get_origin_space() != runtime->address_space)
+              delete memo;
+            break;
+          }
+#ifdef LEGION_GPU_REDUCTIONS
+        case REMOTE_TRACE_GPU_REDUCTION:
+          {
+            RtUserEvent done;
+            derez.deserialize(done);
+            Memoizable *memo = RemoteMemoizable::unpack_remote_memoizable(derez,
+                                                           NULL/*op*/, runtime);
+            ApUserEvent *lhs_ptr;
+            derez.deserialize(lhs_ptr);
+            ApUserEvent lhs;
+            derez.deserialize(lhs);
+            RegionTreeForest *forest = runtime->forest;
+            IndexSpaceExpression *expr = 
+              IndexSpaceExpression::unpack_expression(derez, forest, source);
+            size_t num_fields;
+            derez.deserialize(num_fields);
+            std::vector<CopySrcDstField> src_fields(num_fields);
+            std::vector<CopySrcDstField> dst_fields(num_fields);
+            for (unsigned idx = 0; idx < num_fields; idx++)
+            {
+              unpack_src_dst_field(derez, src_fields[idx]);
+              unpack_src_dst_field(derez, dst_fields[idx]);
+            }
+            Processor gpu;
+            derez.deserialize(gpu);
+            TaskID gpu_task_id;
+            derez.deserialize(gpu_task_id);
+            DistributedID src_did, dst_did;
+            derez.deserialize(src_did);
+            derez.deserialize(dst_did);
+            RtEvent src_ready, dst_ready;
+            PhysicalManager *src = 
+              runtime->find_or_request_instance_manager(src_did, src_ready);
+            PhysicalManager *dst = 
+              runtime->find_or_request_instance_manager(dst_did, dst_ready);
+            ApEvent precondition;
+            derez.deserialize(precondition);
+            PredEvent pred_guard;
+            derez.deserialize(pred_guard);
+            ReductionOpID redop;
+            derez.deserialize(redop);
+            bool reduction_fold;
+            derez.deserialize<bool>(reduction_fold);
+            // Use this to track if lhs changes
+            const ApUserEvent lhs_copy = lhs;
+            if (src_ready.exists() && !src_ready.has_triggered())
+              src_ready.wait();
+            if (dst_ready.exists() && !dst_ready.has_triggered())
+              dst_ready.wait();
             // Do the base call
-            tpl->record_issue_fill(memo, index, lhs, expr, fields,
-                                   fill_value, fill_size,
-#ifdef LEGION_SPY
-                                   handle, tree_id,
-#endif
-                                   precondition, tracing_srcs, tracing_dsts);
+            tpl->record_gpu_reduction(memo, lhs, expr, src_fields, dst_fields,
+                                      gpu, gpu_task_id, src, dst, precondition,
+                                      pred_guard, redop, reduction_fold);
             if (lhs != lhs_copy)
             {
               Serializer rez;
               {
                 RezCheck z2(rez);
-                rez.serialize(REMOTE_TRACE_ISSUE_FILL);
+                rez.serialize(REMOTE_TRACE_GPU_REDUCTION);
                 rez.serialize(lhs_ptr);
                 rez.serialize(lhs);
                 rez.serialize(done);
@@ -1190,6 +1414,7 @@ namespace Legion {
               delete memo;
             break;
           }
+#endif
         case REMOTE_TRACE_RECORD_OP_VIEW:
           {
             RtUserEvent applied;
@@ -1367,6 +1592,9 @@ namespace Legion {
         case REMOTE_TRACE_ISSUE_COPY:
         case REMOTE_TRACE_ISSUE_FILL:
         case REMOTE_TRACE_SET_OP_SYNC:
+#ifdef LEGION_GPU_REDUCTIONS
+        case REMOTE_TRACE_GPU_REDUCTION:
+#endif
           {
             ApUserEvent *event_ptr;
             derez.deserialize(event_ptr);
@@ -3833,15 +4061,13 @@ namespace Legion {
                                          CopyAcrossHelper *helper /*=NULL*/)
     //--------------------------------------------------------------------------
     {
-      // No need to record the destination as we already did that the first
-      // time through on our way to finding this fill view
 #ifdef DEBUG_LEGION
-      assert(all_views.find(dst_view) != all_views.end());
       assert(!!fill_mask);
       assert(!expr->is_empty());
 #endif
       update_fields |= fill_mask;
       record_view(src_view);
+      record_view(dst_view);
       FillUpdate *update = new FillUpdate(src_view, fill_mask, expr, helper); 
       if (helper == NULL)
         sources[dst_view].insert(update, fill_mask);
@@ -3867,6 +4093,19 @@ namespace Legion {
       for (std::vector<ReductionView*>::const_iterator it = 
             src_views.begin(); it != src_views.end(); it++)
         record_view(*it);
+#ifdef LEGION_GPU_REDUCTIONS
+#ifndef LEGION_SPY
+      // Realm is really bad at applying reductions to GPU instances right
+      // now so let's help it out by moving data into a shadow instance in
+      // the same memory which will allow us to run our own GPU reduction
+      // application kernels, see github issues #372 and #821
+      PhysicalManager *dst_manager = dst_view->get_manager();
+      const bool gpu_dst = (Memory::GPU_FB_MEM == 
+        dst_manager->layout->constraints->memory_constraint.get_kind());
+      const GPUReductionTable &gpu_reduction_tasks = 
+        Runtime::get_gpu_reduction_table();
+#endif
+#endif
       const std::pair<InstanceView*,unsigned> dst_key(dst_view, dst_fidx);
       std::vector<ReductionOpID> &redop_epochs = reduction_epochs[dst_key];
       FieldMask src_mask, dst_mask;
@@ -3878,8 +4117,38 @@ namespace Legion {
             src_views.begin(); it != src_views.end(); it++)
       {
         const ReductionOpID redop = (*it)->get_redop();
-        CopyUpdate *update = 
-          new CopyUpdate(*it, src_mask, expr, redop, across_helper);
+        CopyUpdate *update;
+#ifdef LEGION_GPU_REDUCTIONS
+#ifndef LEGION_SPY
+        // See if we're reducing into a remote GPU memory 
+        // for a reduction operator that we have a reduction task for
+        if (gpu_dst && 
+            (gpu_reduction_tasks.find(redop) != gpu_reduction_tasks.end()) &&
+            !dst_manager->is_gpu_visible((*it)->get_manager()))
+        {
+          // Get the shadow reduction instance for this manager
+          ReductionView *shadow_reduction = 
+            dst_manager->find_or_create_shadow_reduction(dst_fidx, redop,
+                                    local_space, op->get_unique_op_id());
+          // If we fail to make the shadow instance then we'll fall back
+          // to the slow path of asking Realm to do it for us
+          if (shadow_reduction != NULL)
+          {
+            // Record a copy update to the shadow instance
+            FieldMaskSet<LogicalView> src_views;
+            src_views.insert(*it, src_mask);
+            record_updates(shadow_reduction, src_views, src_mask,
+                           expr, 0/*no reduction here*/, across_helper);
+            // The update is then performed solely by the shadow reduction
+            update = new CopyUpdate(shadow_reduction, dst_mask, expr, redop);
+          }
+          else 
+            update = new CopyUpdate(*it, src_mask, expr, redop, across_helper);
+        }
+        else
+#endif
+#endif
+          update = new CopyUpdate(*it, src_mask, expr, redop, across_helper);
         // Scan along looking for a reduction op epoch that matches
         while ((redop_index < redop_epochs.size()) &&
                 (redop_epochs[redop_index] != redop))
@@ -3981,9 +4250,9 @@ namespace Legion {
         if (!sources.empty())
         {
           const RtEvent deferral_event = 
-            perform_updates(sources, trace_info, precondition,
-                has_src_preconditions, has_dst_preconditions, 
-                need_pass_preconditions);
+            perform_updates(sources, trace_info, precondition, 
+                -1/*redop index*/, has_src_preconditions, 
+                has_dst_preconditions, need_pass_preconditions);
           if (deferral_event.exists())
           {
             CopyFillAggregation args(this, trace_info, precondition, 
@@ -4009,8 +4278,8 @@ namespace Legion {
         {
           const RtEvent deferral_event = 
             perform_updates(reductions[idx], trace_info, precondition,
-                            has_src_preconditions, has_dst_preconditions, 
-                            need_pass_preconditions);
+                            idx/*redop index*/, has_src_preconditions, 
+                            has_dst_preconditions, need_pass_preconditions);
           if (deferral_event.exists())
           {
             CopyFillAggregation args(this, trace_info, precondition, 
@@ -4060,11 +4329,73 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void CopyFillAggregator::find_reduction_preconditions(InstanceView *view,
+        const PhysicalTraceInfo &trace_info, IndexSpaceExpression *copy_expr,
+        const FieldMask &copy_mask, UniqueID op_id, unsigned redop_index,
+        std::set<RtEvent> &preconditions_ready)
+    //--------------------------------------------------------------------------
+    {
+      // Break up the fields in the copy mask based on their
+      // different reduction operators, we'll handle the special
+      // case where they all have the same reduction ID since
+      // it is going to be very common
+      FieldMask first_mask;
+      ReductionOpID first_redop = 0;
+      LegionMap<ReductionOpID,FieldMask>::aligned *other_masks = NULL;
+      int fidx = copy_mask.find_first_set();
+      while (fidx >= 0)
+      {
+        const std::pair<InstanceView*,unsigned> key(view, fidx);
+#ifdef DEBUG_LEGION
+        assert(reduction_epochs.find(key) != reduction_epochs.end());
+        assert(redop_index < reduction_epochs[key].size());
+#endif
+        const ReductionOpID op = reduction_epochs[key][redop_index];
+        if (op != first_redop)
+        {
+          if (first_redop != 0)
+          {
+            if (other_masks == NULL)
+              other_masks = new LegionMap<ReductionOpID,FieldMask>::aligned();
+            (*other_masks)[op].set_bit(fidx);
+          }
+          else
+          {
+            first_redop = op;
+            first_mask.set_bit(fidx);
+          }
+        }
+        else
+          first_mask.set_bit(fidx);
+        fidx = copy_mask.find_next_set(fidx+1);
+      }
+      RtEvent first_ready = view->find_copy_preconditions(
+          false/*reading*/, first_redop, first_mask, copy_expr, op_id,
+          dst_index, *this, trace_info.recording, local_space);
+      if (first_ready.exists())
+        preconditions_ready.insert(first_ready);
+      if (other_masks != NULL)
+      {
+        for (LegionMap<ReductionOpID,FieldMask>::aligned::
+              const_iterator it = other_masks->begin(); 
+              it != other_masks->end(); it++)
+        {
+          RtEvent pre_ready = view->find_copy_preconditions(
+              false/*reading*/, it->first, it->second, copy_expr, op_id, 
+              dst_index, *this, trace_info.recording, local_space);
+          if (pre_ready.exists())
+            preconditions_ready.insert(pre_ready);
+        }
+        delete other_masks;
+      }
+    }
+
+    //--------------------------------------------------------------------------
     RtEvent CopyFillAggregator::perform_updates(
          const LegionMap<InstanceView*,FieldMaskSet<Update> >::aligned &updates,
          const PhysicalTraceInfo &trace_info, const ApEvent all_precondition,
-         const bool has_src_preconditions, const bool has_dst_preconditions,
-         const bool needs_preconditions)
+         int redop_index, const bool has_src_preconditions, 
+         const bool has_dst_preconditions, const bool needs_preconditions)
     //--------------------------------------------------------------------------
     {
       if (needs_preconditions && 
@@ -4112,11 +4443,19 @@ namespace Legion {
               // No need to do any kind of sorts here
               IndexSpaceExpression *copy_expr = dit->second.begin()->first;
               const FieldMask &copy_mask = dit->second.get_valid_mask();
-              RtEvent pre_ready = dit->first->find_copy_preconditions(
-                              false/*reading*/, copy_mask, copy_expr, op_id, 
-                              dst_index,*this,trace_info.recording,local_space);
-              if (pre_ready.exists())
-                preconditions_ready.insert(pre_ready);
+              // See if we're doing reductions or not
+              if (redop_index < 0)
+              {
+                // No reductions so do the normal precondition test
+                RtEvent pre_ready = dit->first->find_copy_preconditions(
+                    false/*reading*/, 0/*redop*/, copy_mask, copy_expr, op_id, 
+                    dst_index, *this, trace_info.recording, local_space);
+                if (pre_ready.exists())
+                  preconditions_ready.insert(pre_ready);
+              }
+              else
+                find_reduction_preconditions(dit->first, trace_info, copy_expr,
+                    copy_mask, op_id, redop_index, preconditions_ready);
             }
             else
             {
@@ -4132,11 +4471,17 @@ namespace Legion {
                 IndexSpaceExpression *copy_expr = (it->elements.size() == 1) ?
                   *(it->elements.begin()) : 
                   forest->union_index_spaces(it->elements);
-                RtEvent pre_ready = dit->first->find_copy_preconditions(
-                          false/*reading*/, copy_mask, copy_expr, op_id,
-                          dst_index, *this, trace_info.recording, local_space);
-                if (pre_ready.exists())
-                  preconditions_ready.insert(pre_ready);
+                if (redop_index < 0)
+                {
+                  RtEvent pre_ready = dit->first->find_copy_preconditions(
+                      false/*reading*/, 0/*redop*/, copy_mask, copy_expr, op_id,
+                      dst_index, *this, trace_info.recording, local_space);
+                  if (pre_ready.exists())
+                    preconditions_ready.insert(pre_ready);
+                }
+                else
+                  find_reduction_preconditions(dit->first, trace_info,copy_expr,
+                      copy_mask, op_id, redop_index, preconditions_ready);
               }
             }
           }
@@ -4153,8 +4498,8 @@ namespace Legion {
               IndexSpaceExpression *copy_expr = sit->second.begin()->first;
               const FieldMask &copy_mask = sit->second.get_valid_mask();
               RtEvent pre_ready = sit->first->find_copy_preconditions(
-                            true/*reading*/, copy_mask, copy_expr, op_id, 
-                            src_index, *this, trace_info.recording,local_space);
+                  true/*reading*/, 0/*redop*/, copy_mask, copy_expr, op_id, 
+                  src_index, *this, trace_info.recording, local_space);
               if (pre_ready.exists())
                 preconditions_ready.insert(pre_ready);
             }
@@ -4173,8 +4518,8 @@ namespace Legion {
                   *(it->elements.begin()) : 
                   forest->union_index_spaces(it->elements);
                 RtEvent pre_ready = sit->first->find_copy_preconditions(
-                          true/*reading*/, copy_mask, copy_expr, op_id,
-                          src_index, *this, trace_info.recording, local_space);
+                    true/*reading*/, 0/*redop*/, copy_mask, copy_expr, op_id,
+                    src_index, *this, trace_info.recording, local_space);
                 if (pre_ready.exists())
                   preconditions_ready.insert(pre_ready);
               }
@@ -4569,9 +4914,9 @@ namespace Legion {
         const ApEvent result = manager->fill_from(fill_view, precondition,
                                                   predicate_guard, fill_expr,
                                                   fill_mask, trace_info, 
-                                                  fills[0]->across_helper,
-                                                  tracing_src_fills, 
-                                                  tracing_dsts);
+                                                  tracing_src_fills,
+                                                  tracing_dsts, effects,
+                                                  fills[0]->across_helper);
         // Record the fill result in the destination 
         if (result.exists())
         {
@@ -4580,7 +4925,7 @@ namespace Legion {
           {
             const FieldMask dst_mask = 
                 update->across_helper->convert_src_to_dst(fill_mask);
-            target->add_copy_user(false/*reading*/, result, collect_event,
+            target->add_copy_user(false/*reading*/, 0, result, collect_event,
                                   dst_mask, fill_expr, op_id, dst_index,
                                   effects, trace_info.recording, local_space);
             // Record this for the next iteration if necessary
@@ -4590,7 +4935,7 @@ namespace Legion {
           }
           else
           {
-            target->add_copy_user(false/*reading*/, result, collect_event,
+            target->add_copy_user(false/*reading*/, 0, result, collect_event,
                                   fill_mask, fill_expr, op_id,dst_index,
                                   effects, trace_info.recording, local_space);
             // Record this for the next iteration if necessary
@@ -4654,13 +4999,13 @@ namespace Legion {
           const ApEvent result = manager->fill_from(it->first, precondition,
                                                     predicate_guard, fill_expr,
                                                     fill_mask, trace_info,
-                                                    fills[0]->across_helper,
                                                     tracing_src_fills,
-                                                    tracing_dsts);
+                                                    tracing_dsts, effects,
+                                                    fills[0]->across_helper);
           const RtEvent collect_event = trace_info.get_collect_event();
           if (result.exists())
           {
-            target->add_copy_user(false/*reading*/, result, collect_event,
+            target->add_copy_user(false/*reading*/, 0, result, collect_event,
                                   dst_mask, fill_expr, op_id, dst_index,
                                   effects, trace_info.recording, local_space);
             if (track_events)
@@ -4731,21 +5076,21 @@ namespace Legion {
                                     source->get_manager(), precondition,
                                     predicate_guard, update->redop,
                                     copy_expr, copy_mask, trace_info,
-                                    cit->second[0]->across_helper,
-                                    tracing_srcs, tracing_dsts);
+                                    tracing_srcs, tracing_dsts, effects,
+                                    cit->second[0]->across_helper);
           if (result.exists())
           {
             const RtEvent collect_event = trace_info.get_collect_event();
-            source->add_copy_user(true/*reading*/, result, collect_event,
+            source->add_copy_user(true/*reading*/, 0, result, collect_event,
                                   copy_mask, copy_expr, op_id,src_index,
                                   effects, trace_info.recording, local_space);
             if (update->across_helper != NULL)
             {
               const FieldMask dst_mask = 
                 update->across_helper->convert_src_to_dst(copy_mask);
-              target->add_copy_user(false/*reading*/, result, collect_event,
-                                  dst_mask, copy_expr, op_id, dst_index,
-                                  effects, trace_info.recording, local_space);
+              target->add_copy_user(false/*reading*/, update->redop, result, 
+                        collect_event, dst_mask, copy_expr, op_id, dst_index,
+                        effects, trace_info.recording, local_space);
               // Record this for the next iteration if necessary
               if (has_dst_preconditions)
                 record_precondition(target, false/*reading*/, result,
@@ -4753,9 +5098,9 @@ namespace Legion {
             }
             else
             {
-              target->add_copy_user(false/*reading*/, result, collect_event,
-                                  copy_mask, copy_expr, op_id,dst_index,
-                                  effects, trace_info.recording, local_space);
+              target->add_copy_user(false/*reading*/, update->redop, result, 
+                  collect_event, copy_mask, copy_expr, op_id,dst_index,
+                  effects, trace_info.recording, local_space);
               // Record this for the next iteration if necessary
               if (has_dst_preconditions)
                 record_precondition(target, false/*reading*/, result,
@@ -4815,15 +5160,15 @@ namespace Legion {
                                     it->first->get_manager(), precondition,
                                     predicate_guard, redop, copy_expr,
                                     copy_mask, trace_info, 
-                                    cit->second[0]->across_helper,
-                                    tracing_srcs, tracing_dsts);
+                                    tracing_srcs, tracing_dsts, effects,
+                                    cit->second[0]->across_helper);
             const RtEvent collect_event = trace_info.get_collect_event();
             if (result.exists())
             {
-              it->first->add_copy_user(true/*reading*/, result, collect_event,
+              it->first->add_copy_user(true/*reading*/, 0, result,collect_event,
                                   copy_mask, copy_expr, op_id,src_index,
                                   effects, trace_info.recording, local_space);
-              target->add_copy_user(false/*reading*/, result, collect_event,
+              target->add_copy_user(false/*reading*/,redop,result,collect_event,
                                   dst_mask, copy_expr, op_id, dst_index,
                                   effects, trace_info.recording, local_space);
               if (track_events)
@@ -6270,8 +6615,8 @@ namespace Legion {
         DistributedID did;
         derez.deserialize(did);
         RtEvent ready;
-        PhysicalManager *manager = 
-          runtime->find_or_request_physical_manager(did, ready);
+        InstanceManager *manager = 
+          runtime->find_or_request_instance_manager(did, ready);
         if (ready.exists())
           ready_events.insert(ready);
         derez.deserialize(did);
@@ -7387,8 +7732,8 @@ namespace Legion {
       for (unsigned idx = 0; idx < dst_instances.size(); idx++)
       {
         result[idx] = new CopyAcrossHelper(src_mask, src_indexes, dst_indexes);
-        InstanceManager *manager = 
-          dst_instances[idx].get_manager()->as_instance_manager();
+        IndividualManager *manager = 
+          dst_instances[idx].get_manager()->as_individual_manager();
         manager->initialize_across_helper(result[idx],
                               dst_mask, src_indexes, dst_indexes);
       }
@@ -10153,8 +10498,7 @@ namespace Legion {
             for (std::vector<ReductionView*>::const_reverse_iterator it = 
                   current->second.rbegin(); it != current->second.rend(); it++)
             {
-              ReductionManager *manager = 
-                (*it)->get_manager()->as_reduction_manager();
+              PhysicalManager *manager = (*it)->get_manager();
               if (manager->redop != analysis.redop)
                 break;
               analysis.record_instance(*it, local_mask);
@@ -10417,24 +10761,129 @@ namespace Legion {
         // empty equivalence sets which can lead to leaked instances
         if (!set_expr->is_empty())
         {
+          CopyFillAggregator *fill_aggregator = NULL;
+          // See if we have an input aggregator that we can use now
+          // for any fills that need to be done to initialize instances
+          std::map<RtEvent,CopyFillAggregator*>::const_iterator finder = 
+            analysis.input_aggregators.find(RtEvent::NO_RT_EVENT);
+          if (finder != analysis.input_aggregators.end())
+            fill_aggregator = finder->second;
+          FieldMask guard_fill_mask;
           // Record the reduction instances
           for (unsigned idx = 0; idx < analysis.target_views.size(); idx++)
           {
             ReductionView *red_view = 
               analysis.target_views[idx]->as_reduction_view();
+            const ReductionOpID view_redop = red_view->get_redop(); 
 #ifdef DEBUG_LEGION
-            assert(red_view->get_redop() == analysis.usage.redop);
+            assert(view_redop == analysis.usage.redop);
 #endif
             const FieldMask &update_fields = 
               analysis.target_instances[idx].get_valid_fields(); 
+            // Track the case where this reduction view is also
+            // stored in the valid instances in which case we 
+            // do not need to do any fills. This will only happen
+            // if these fields are restricted.
+            bool already_valid = false;
+            if (!!restricted_fields && !(update_fields * restricted_fields) &&
+                (valid_instances.find(red_view) != valid_instances.end()))
+              already_valid = true;
             int fidx = update_fields.find_first_set();
+            // Figure out which fields require a fill operation
+            // in order initialize the reduction instances
+            FieldMask fill_mask;
             while (fidx >= 0)
             {
               std::vector<ReductionView*> &field_views = 
                 reduction_instances[fidx];
-              red_view->add_nested_valid_ref(did, &mutator); 
-              field_views.push_back(red_view);
+              // Scan through the reduction instances to see if we're
+              // already in the list of valid reductions, if not then
+              // we're going to need a fill to initialize the instance
+              // Also check for the ABA problem on reduction instances
+              // described in Legion issue #545 where we start out
+              // with reductions of kind A, switch to reductions of
+              // kind B, and then switch back to reductions of kind A
+              // which will make it unsafe to re-use the instance
+              bool found = already_valid && restricted_fields.is_set(fidx);
+              for (std::vector<ReductionView*>::const_iterator it =
+                    field_views.begin(); it != field_views.end(); it++)
+              {
+                if ((*it) != red_view)
+                {
+                  if (found && ((*it)->get_redop() != view_redop))
+                    REPORT_LEGION_FATAL(LEGION_FATAL_REDUCTION_ABA_PROBLEM,
+                        "Unsafe re-use of reduction instance detected due "
+                        "to alternating un-flushed reduction operations "
+                        "%d and %d. Please report this use case to the "
+                        "Legion developer's mailing list so that we can "
+                        "help you address it.", view_redop, (*it)->get_redop())
+                }
+                else 
+                  // we've seen it now so we don't need a fill
+                  // keep going to check for ABA problem
+                  found = true;
+              }
+              if (!found)
+              {
+                red_view->add_nested_valid_ref(did, &mutator); 
+                field_views.push_back(red_view);
+                // We need a fill for this field to initialize it
+                fill_mask.set_bit(fidx); 
+              }
+              else
+                guard_fill_mask.set_bit(fidx);
               fidx = update_fields.find_next_set(fidx+1);
+            }
+            if (!!fill_mask)
+            {
+              if (fill_aggregator == NULL)
+              {
+                fill_aggregator = new CopyFillAggregator(runtime->forest,
+                    analysis.op, analysis.index, analysis.index,
+                    RtEvent::NO_RT_EVENT, false/*track events*/);
+                analysis.input_aggregators[RtEvent::NO_RT_EVENT] = 
+                  fill_aggregator;
+              }
+              // Record the fill operation on the aggregator
+              fill_aggregator->record_fill(red_view, red_view->fill_view,
+                                           fill_mask, set_expr);
+              // Record this as a guard for later operations
+              update_guards.insert(fill_aggregator, fill_mask);
+#ifdef DEBUG_LEGION
+              if (!fill_aggregator->record_guard_set(this))
+                assert(false);
+#else
+              fill_aggregator->record_guard_set(this);
+#endif
+            }
+          }
+          // If we have any fills that were issued by a prior operation
+          // that we need to reuse then check for them here. This is a
+          // slight over-approximation for the mapping dependences because
+          // we really only need to wait for fills to instances that we
+          // care about it, but it should be minimal overhead and the
+          // resulting event graph will still be precise
+          if (!update_guards.empty() && !!guard_fill_mask &&
+              !(update_guards.get_valid_mask() * guard_fill_mask))
+          {
+            for (FieldMaskSet<CopyFillGuard>::iterator it = 
+                  update_guards.begin(); it != update_guards.end(); it++)
+            {
+              if (it->first == fill_aggregator)
+                continue;
+              const FieldMask guard_mask = guard_fill_mask & it->second;
+              if (!guard_mask)
+                continue;
+              // No matter what record our dependences on the prior guards
+#ifdef NON_AGGRESSIVE_AGGREGATORS
+              const RtEvent guard_event = it->first->effects_applied;
+#else
+              const RtEvent guard_event = 
+                (analysis.original_source == local_space) ?
+                it->first->guard_postcondition :
+                it->first->effects_applied;
+#endif
+              analysis.guard_events.insert(guard_event);
             }
           }
           // Flush any restricted fields
@@ -12039,25 +12488,28 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(finder != reduction_instances.end());
 #endif
-        // Find the target targets and record them
-        for (FieldMaskSet<LogicalView>::const_iterator it = 
-              valid_instances.begin(); it != valid_instances.end(); it++)
+        if (!finder->second.empty())
         {
-          if (!it->second.is_set(fidx))
-            continue;
-          // Shouldn't have any deferred views here
-          InstanceView *dst_view = it->first->as_instance_view();
-          if (aggregator == NULL)
-            aggregator = new CopyFillAggregator(runtime->forest, op, index,
-                                                guard_event, trace_events);
-          aggregator->record_reductions(dst_view, finder->second, fidx, 
-                                        fidx, set_expr);
+          // Find the target targets and record them
+          for (FieldMaskSet<LogicalView>::const_iterator it = 
+                valid_instances.begin(); it != valid_instances.end(); it++)
+          {
+            if (!it->second.is_set(fidx))
+              continue;
+            // Shouldn't have any deferred views here
+            InstanceView *dst_view = it->first->as_instance_view();
+            if (aggregator == NULL)
+              aggregator = new CopyFillAggregator(runtime->forest, op, index,
+                                                  guard_event, trace_events);
+            aggregator->record_reductions(dst_view, finder->second, fidx, 
+                                          fidx, set_expr);
+          }
+          // Remove the reduction views from those available
+          for (std::vector<ReductionView*>::const_iterator it = 
+                finder->second.begin(); it != finder->second.end(); it++)
+            if ((*it)->remove_nested_valid_ref(did))
+              delete (*it);
         }
-        // Remove the reduction views from those available
-        for (std::vector<ReductionView*>::const_iterator it = 
-              finder->second.begin(); it != finder->second.end(); it++)
-          if ((*it)->remove_nested_valid_ref(did))
-            delete (*it);
         reduction_instances.erase(finder);
         fidx = reduce_mask.find_next_set(fidx+1);
       }
@@ -14110,7 +14562,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InstanceRef::InstanceRef(PhysicalManager *man, const FieldMask &m,ApEvent r)
+    InstanceRef::InstanceRef(InstanceManager *man, const FieldMask &m,ApEvent r)
       : valid_fields(m), ready_event(r), manager(man), local(true)
     //--------------------------------------------------------------------------
     {
@@ -14220,7 +14672,20 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(manager != NULL);
 #endif
-      return manager->get_memory();
+      if (!manager->is_instance_manager())
+        return Memory::NO_MEMORY;
+      return manager->as_instance_manager()->get_memory();
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalManager* InstanceRef::get_instance_manager(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(manager != NULL);
+      assert(manager->is_instance_manager());
+#endif
+      return manager->as_instance_manager();
     }
 
     //--------------------------------------------------------------------------
@@ -14281,7 +14746,7 @@ namespace Legion {
       derez.deserialize(did);
       if (did == 0)
         return;
-      manager = runtime->find_or_request_physical_manager(did, ready);
+      manager = runtime->find_or_request_instance_manager(did, ready);
       local = false;
     } 
 

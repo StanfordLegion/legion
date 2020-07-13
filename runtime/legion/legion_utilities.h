@@ -264,6 +264,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    template<bool REDUCTIONS_INTERFERE>
     static inline DependenceType check_dependence_type(const RegionUsage &u1,
                                                        const RegionUsage &u2)
     //--------------------------------------------------------------------------
@@ -273,7 +274,7 @@ namespace Legion {
       {
         return LEGION_NO_DEPENDENCE;
       }
-      else if (IS_REDUCE(u1) && IS_REDUCE(u2))
+      else if (!REDUCTIONS_INTERFERE && IS_REDUCE(u1) && IS_REDUCE(u2))
       {
         // If they are the same kind of reduction, no dependence, 
         // otherwise true dependence
@@ -284,7 +285,7 @@ namespace Legion {
       }
       else
       {
-        // Everything in here has at least one right
+        // Everything in here has at least one write
 #ifdef DEBUG_LEGION
         assert(HAS_WRITE(u1) || HAS_WRITE(u2));
 #endif

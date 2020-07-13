@@ -150,6 +150,11 @@ namespace Legion {
     template<typename, PrivilegeMode> class AccessorRefHelper;
     template<typename> class AffineRefHelper;
   }
+  class PieceIterator;
+  template<int,typename>
+  class PieceIteratorT;
+  template<PrivilegeMode,typename,int,typename>
+  class SpanIterator;
   class IndexIterator;
   template<typename T> struct ColoredPoints; 
   struct InputArgs;
@@ -377,8 +382,8 @@ namespace Legion {
       LG_DEFER_PERFORM_REMOTE_TASK_ID,
       LG_DEFER_PERFORM_UPDATE_TASK_ID,
       LG_DEFER_PERFORM_OUTPUT_TASK_ID,
-      LG_DEFER_INSTANCE_MANAGER_TASK_ID,
-      LG_DEFER_REDUCTION_MANAGER_TASK_ID,
+      LG_DEFER_INDIVIDUAL_MANAGER_TASK_ID,
+      LG_DEFER_COLLECTIVE_MANAGER_TASK_ID,
       LG_DEFER_VERIFY_PARTITION_TASK_ID,
       LG_DEFER_RELEASE_ACQUIRED_TASK_ID,
       LG_MALLOC_INSTANCE_TASK_ID,
@@ -397,12 +402,7 @@ namespace Legion {
     enum {
       LG_INITIALIZE_TASK_ID   = Realm::Processor::TASK_ID_PROCESSOR_INIT,
       LG_SHUTDOWN_TASK_ID     = Realm::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
-#ifdef LEGION_GPU_REDUCTIONS
-      LG_REDOP_TASK_ID        = Realm::Processor::TASK_ID_FIRST_AVAILABLE,
-      LG_TASK_ID              = LG_REDOP_TASK_ID + LEGION_REDOP_LAST - LEGION_REDOP_BASE,
-#else
       LG_TASK_ID              = Realm::Processor::TASK_ID_FIRST_AVAILABLE,
-#endif
 #ifdef LEGION_SEPARATE_META_TASKS
       LG_LEGION_PROFILING_ID  = LG_TASK_ID+LG_LAST_TASK_ID+1,
       LG_STARTUP_TASK_ID      = LG_TASK_ID+LG_LAST_TASK_ID+2,
@@ -736,6 +736,8 @@ namespace Legion {
       SLICE_REMOTE_COMMIT,
       SLICE_FIND_INTRA_DEP,
       SLICE_RECORD_INTRA_DEP,
+      SLICE_COLLECTIVE_REQUEST,
+      SLICE_COLLECTIVE_RESPONSE,
       DISTRIBUTED_REMOTE_REGISTRATION,
       DISTRIBUTED_VALID_UPDATE,
       DISTRIBUTED_GC_UPDATE,
@@ -750,7 +752,10 @@ namespace Legion {
       SEND_PHI_VIEW,
       SEND_REDUCTION_VIEW,
       SEND_INSTANCE_MANAGER,
-      SEND_REDUCTION_MANAGER,
+      SEND_COLLECTIVE_MANAGER,
+      SEND_COLLECTIVE_MESSAGE,
+      SEND_CREATE_SHADOW_REQUEST,
+      SEND_CREATE_SHADOW_RESPONSE,
       SEND_CREATE_TOP_VIEW_REQUEST,
       SEND_CREATE_TOP_VIEW_RESPONSE,
       SEND_VIEW_REQUEST,
@@ -913,6 +918,8 @@ namespace Legion {
         "Slice Remote Commit",                                        \
         "Slice Find Intra-Space Dependence",                          \
         "Slice Record Intra-Space Dependence",                        \
+        "Slice Collective Instance Request",                          \
+        "Slice Collective Instance Response",                         \
         "Distributed Remote Registration",                            \
         "Distributed Valid Update",                                   \
         "Distributed GC Update",                                      \
@@ -927,7 +934,10 @@ namespace Legion {
         "Send Phi View",                                              \
         "Send Reduction View",                                        \
         "Send Instance Manager",                                      \
-        "Send Reduction Manager",                                     \
+        "Send Collective Instance Manager",                           \
+        "Send Collective Instance Message",                           \
+        "Send Create Shadow Reduction Instance Request",              \
+        "Send Create Shadow Reduction Instance Response",             \
         "Send Create Top View Request",                               \
         "Send Create Top View Response",                              \
         "Send View Request",                                          \
@@ -1358,6 +1368,7 @@ namespace Legion {
     class FutureImpl;
     class FutureMapImpl;
     class PhysicalRegionImpl;
+    class PieceIteratorImpl;
     class GrantImpl;
     class PredicateImpl;
     class LegionHandshakeImpl;
@@ -1519,6 +1530,9 @@ namespace Legion {
     class SetOpSyncEvent;
     class SetEffects;
     class CompleteReplay;
+#ifdef LEGION_GPU_REDUCTIONS
+    class GPUReduction;
+#endif
 
     // region_tree.h
     class RegionTreeForest;
@@ -1560,10 +1574,9 @@ namespace Legion {
     class NeverReferenceMutator;
     class DistributedCollectable;
     class LayoutDescription;
-    class PhysicalManager; // base class for instance and reduction
+    class InstanceManager; // base class for all instances
     class CopyAcrossHelper;
     class LogicalView; // base class for instance and reduction
-    class InstanceManager;
     class InstanceKey;
     class InstanceView;
     class CollectableView; // pure virtual class
@@ -1575,10 +1588,10 @@ namespace Legion {
     class InstanceRef;
     class InstanceSet;
     class InnerTaskView;
-    class ReductionManager;
-    class ListReductionManager;
-    class FoldReductionManager;
     class VirtualManager;
+    class PhysicalManager;
+    class IndividualManager;
+    class CollectiveManager;
     class ReductionView;
     class InstanceBuilder;
 
@@ -1674,11 +1687,9 @@ namespace Legion {
     friend class Internal::MaterializedView;                \
     friend class Internal::FillView;                        \
     friend class Internal::LayoutDescription;               \
-    friend class Internal::PhysicalManager;                 \
     friend class Internal::InstanceManager;                 \
-    friend class Internal::ReductionManager;                \
-    friend class Internal::ListReductionManager;            \
-    friend class Internal::FoldReductionManager;            \
+    friend class Internal::IndividualManager;               \
+    friend class Internal::CollectiveManager;               \
     friend class Internal::TreeStateLogger;                 \
     friend class Internal::MapperManager;                   \
     friend class Internal::InstanceRef;                     \
@@ -1784,13 +1795,16 @@ namespace Legion {
       const std::vector<Future> futures);
   typedef void (*RealmFnptr)(const void*,size_t,
                              const void*,size_t,Processor);
+#ifdef LEGION_GPU_REDUCTIONS
+  typedef std::map<ReductionOpID,TaskID> GPUReductionTable;
+#endif
   // Magical typedefs 
   // (don't forget to update ones in old HighLevel namespace in legion.inl)
   typedef Internal::TaskContext* Context;
   // Anothing magical typedef
   namespace Mapping {
     typedef Internal::MappingCallInfo* MapperContext;
-    typedef Internal::PhysicalManager* PhysicalInstanceImpl;
+    typedef Internal::InstanceManager* PhysicalInstanceImpl;
   };
 
   namespace Internal { 

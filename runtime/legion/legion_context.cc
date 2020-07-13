@@ -1730,7 +1730,7 @@ namespace Legion {
       // Finally if everything has overlapped, do a dependence analysis
       // on the privileges and coherence
       RegionUsage usage(req);
-      switch (check_dependence_type(our_usage,usage))
+      switch (check_dependence_type<true>(our_usage,usage))
       {
         // Only allow no-dependence, or simultaneous dependence through
         case LEGION_NO_DEPENDENCE:
@@ -8219,7 +8219,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < targets.size(); idx++)
         {
           // See if we can find it
-          PhysicalManager *manager = targets[idx].get_manager();
+          PhysicalManager *manager = targets[idx].get_instance_manager();
           std::map<PhysicalManager*,InstanceView*>::const_iterator finder = 
             instance_top_views.find(manager);     
           if (finder != instance_top_views.end())
@@ -8235,7 +8235,7 @@ namespace Legion {
         for (std::vector<unsigned>::const_iterator it = 
               still_needed.begin(); it != still_needed.end(); it++)
         {
-          PhysicalManager *manager = targets[*it].get_manager();
+          PhysicalManager *manager = targets[*it].get_instance_manager();
           RtEvent ready;
           target_views[*it] = 
             create_instance_top_view(manager, local_space, &ready);

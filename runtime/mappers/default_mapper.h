@@ -109,7 +109,6 @@ namespace Legion {
         unsigned long long                          task_hash;
         VariantID                                   variant;
         std::vector<std::vector<PhysicalInstance> > mapping;
-        bool                                        has_reductions;
       };
       struct MapperMsgHdr {
       public:

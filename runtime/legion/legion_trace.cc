@@ -2104,7 +2104,8 @@ namespace Legion {
           log_tracing.info() << "  "
                     <<(view->is_reduction_view() ? "Reduction" : "Materialized")
                     << " view: " << view << ", Inst: " << std::hex
-                    << view->get_manager()->get_instance().id << std::dec
+                    << view->get_manager()->get_instance(DomainPoint()).id 
+                    << std::dec
                     << ", Index expr: " << eit->first->set_expr->expr_id
                     << ", Name: " << (name_size > 0 ? (const char*)name : "")
                     << ", Field Mask: " << mask;
@@ -2615,6 +2616,17 @@ namespace Legion {
               num_merges += generator_kind != MERGE_EVENT;
               break;
             }
+#ifdef LEGION_GPU_REDUCTIONS
+        case GPU_REDUCTION:
+            {
+              unsigned precondition_idx =
+                (*it)->as_gpu_reduction()->precondition_idx;
+              InstructionKind generator_kind =
+                instructions[precondition_idx]->get_kind();
+              num_merges += generator_kind != MERGE_EVENT;
+              break;
+            }
+#endif
           default:
             {
               break;
@@ -2673,6 +2685,20 @@ namespace Legion {
               precondition_idx = &fill->precondition_idx;
               break;
             }
+#ifdef LEGION_GPU_REDUCTIONS
+          case GPU_REDUCTION:
+            {
+              GPUReduction *reduction = inst->as_gpu_reduction();
+              std::map<unsigned, ViewExprs>::iterator finder =
+                copy_views.find(reduction->lhs);
+#ifdef DEBUG_LEGION
+              assert(finder != copy_views.end());
+#endif
+              find_all_last_users(finder->second, users);
+              precondition_idx = &reduction->precondition_idx;
+              break;
+            }
+#endif
           default:
             {
               break;
@@ -2765,6 +2791,14 @@ namespace Legion {
               used[gen[fill->precondition_idx]] = true;
               break;
             }
+#ifdef LEGION_GPU_REDUCTIONS
+          case GPU_REDUCTION:
+            {
+              GPUReduction *reduction = inst->as_gpu_reduction();
+              used[gen[reduction->precondition_idx]] = true;
+              break;
+            }
+#endif
           case SET_EFFECTS:
             {
               SetEffects *effects = inst->as_set_effects();
@@ -2974,6 +3008,13 @@ namespace Legion {
                 event_to_check = &inst->as_issue_fill()->precondition_idx;
                 break;
               }
+#ifdef LEGION_GPU_REDUCTIONS
+            case GPU_REDUCTION:
+              {
+                event_to_check = &inst->as_gpu_reduction()->precondition_idx;
+                break;
+              }
+#endif
             case SET_EFFECTS :
               {
                 event_to_check = &inst->as_set_effects()->rhs;
@@ -3094,6 +3135,15 @@ namespace Legion {
               outgoing[fill->precondition_idx].push_back(fill->lhs);
               break;
             }
+#ifdef LEGION_GPU_REDUCTIONS
+          case GPU_REDUCTION:
+            {
+              GPUReduction *reduction = inst->as_gpu_reduction();
+              incoming[reduction->lhs].push_back(reduction->precondition_idx);
+              outgoing[reduction->precondition_idx].push_back(reduction->lhs);
+              break;
+            }
+#endif
           case SET_OP_SYNC_EVENT :
             {
               SetOpSyncEvent *sync = inst->as_set_op_sync_event();
@@ -3347,6 +3397,16 @@ namespace Legion {
               lhs = fill->lhs;
               break;
             }
+#ifdef LEGION_GPU_REDUCTIONS
+          case GPU_REDUCTION:
+            {
+              GPUReduction *reduction = inst->as_gpu_reduction();
+              int subst = substs[reduction->precondition_idx];
+              if (subst >= 0) reduction->precondition_idx = (unsigned)subst;
+              lhs = reduction->lhs;
+              break;
+            }
+#endif
           case SET_EFFECTS :
             {
               SetEffects *effects = inst->as_set_effects();
@@ -3437,6 +3497,17 @@ namespace Legion {
               used[gen[fill->precondition_idx]] = true;
               break;
             }
+#ifdef LEGION_GPU_REDUCTIONS
+          case GPU_REDUCTION:
+            {
+              GPUReduction *reduction = inst->as_gpu_reduction();
+#ifdef DEBUG_LEGION
+              assert(gen[reduction->precondition_idx] != -1U);
+#endif
+              used[gen[reduction->precondition_idx]] = true;
+              break;
+            }
+#endif
           case SET_EFFECTS:
             {
               SetEffects *effects = inst->as_set_effects();
@@ -3796,10 +3867,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_issue_copy(Memoizable *memo,
-                                             unsigned src_idx,
-                                             unsigned dst_idx,
-                                             ApEvent &lhs,
+    void PhysicalTemplate::record_issue_copy(Memoizable *memo, ApEvent &lhs,
                                              IndexSpaceExpression *expr,
                                  const std::vector<CopySrcDstField>& src_fields,
                                  const std::vector<CopySrcDstField>& dst_fields,
@@ -3808,10 +3876,9 @@ namespace Legion {
                                              RegionTreeID dst_tree_id,
 #endif
                                              ApEvent precondition,
+                                             PredEvent pred_guard,
                                              ReductionOpID redop,
-                                             bool reduction_fold,
-                                 const FieldMaskSet<InstanceView> &tracing_srcs,
-                                 const FieldMaskSet<InstanceView> &tracing_dsts)
+                                             bool reduction_fold)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3822,22 +3889,7 @@ namespace Legion {
         Realm::UserEvent rename(Realm::UserEvent::create_user_event());
         rename.trigger();
         lhs = ApEvent(rename);
-      }
-
-      LegionList<FieldSet<EquivalenceSet*> >::aligned src_eqs, dst_eqs;
-      // Get these before we take the lock
-      {
-        FieldMaskSet<EquivalenceSet> eq_sets;
-        const FieldMask &src_mask = tracing_srcs.get_valid_mask();
-        memo->find_equivalence_sets(trace->runtime, src_idx, src_mask, eq_sets);
-        eq_sets.compute_field_sets(src_mask, src_eqs);
-      }
-      {
-        FieldMaskSet<EquivalenceSet> eq_sets;
-        const FieldMask &dst_mask = tracing_dsts.get_valid_mask();
-        memo->find_equivalence_sets(trace->runtime, dst_idx, dst_mask, eq_sets);
-        eq_sets.compute_field_sets(dst_mask, dst_eqs);
-      }
+      } 
 
       AutoLock tpl_lock(template_lock);
 #ifdef DEBUG_LEGION
@@ -3851,14 +3903,7 @@ namespace Legion {
 #ifdef LEGION_SPY
             src_tree_id, dst_tree_id,
 #endif
-            find_event(precondition), redop, reduction_fold));
-
-      record_views(lhs_, expr, RegionUsage(LEGION_READ_ONLY, 
-            LEGION_EXCLUSIVE, 0), tracing_srcs, src_eqs);
-      record_copy_views(lhs_, expr, tracing_srcs);
-      record_views(lhs_, expr, RegionUsage(LEGION_WRITE_ONLY, 
-            LEGION_EXCLUSIVE, 0), tracing_dsts, dst_eqs);
-      record_copy_views(lhs_, expr, tracing_dsts);
+            find_event(precondition), redop, reduction_fold)); 
     }
 
     //--------------------------------------------------------------------------
@@ -3867,7 +3912,7 @@ namespace Legion {
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
                              const std::vector<void*> &indirections,
-                             ApEvent precondition)
+                             ApEvent precondition, PredEvent pred_guard)
     //--------------------------------------------------------------------------
     {
       // TODO: support for tracing of gather/scatter/indirect operations
@@ -3875,9 +3920,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_issue_fill(Memoizable *memo,
-                                             unsigned idx,
-                                             ApEvent &lhs,
+    void PhysicalTemplate::record_issue_fill(Memoizable *memo, ApEvent &lhs,
                                              IndexSpaceExpression *expr,
                                  const std::vector<CopySrcDstField> &fields,
                                              const void *fill_value, 
@@ -3887,8 +3930,7 @@ namespace Legion {
                                              RegionTreeID tree_id,
 #endif
                                              ApEvent precondition,
-                                 const FieldMaskSet<FillView> &tracing_srcs,
-                                 const FieldMaskSet<InstanceView> &tracing_dsts)
+                                             PredEvent pred_guard)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3899,15 +3941,6 @@ namespace Legion {
         Realm::UserEvent rename(Realm::UserEvent::create_user_event());
         rename.trigger();
         lhs = ApEvent(rename);
-      }
-
-      // Do this before we take the lock
-      LegionList<FieldSet<EquivalenceSet*> >::aligned eqs;
-      {
-        FieldMaskSet<EquivalenceSet> eq_sets;
-        const FieldMask &dst_mask = tracing_dsts.get_valid_mask();
-        memo->find_equivalence_sets(trace->runtime, idx, dst_mask, eq_sets);
-        eq_sets.compute_field_sets(dst_mask, eqs);
       }
 
       AutoLock tpl_lock(template_lock);
@@ -3922,63 +3955,43 @@ namespace Legion {
 #ifdef LEGION_SPY
                                        handle, tree_id,
 #endif
-                                       find_event(precondition)));
-
-      record_fill_views(tracing_srcs);
-      record_views(lhs_, expr, RegionUsage(LEGION_WRITE_ONLY, 
-            LEGION_EXCLUSIVE, 0), tracing_dsts, eqs);
-      record_copy_views(lhs_, expr, tracing_dsts);
+                                       find_event(precondition))); 
     }
 
+#ifdef LEGION_GPU_REDUCTIONS
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_issue_fill_for_reduction(Memoizable *memo,
-                                                           unsigned idx,
-                                                           InstanceView *view,
-                                                     const FieldMask &user_mask,
-                                                     IndexSpaceExpression *expr)
+    void PhysicalTemplate::record_gpu_reduction(Memoizable *memo, ApEvent &lhs,
+                                 IndexSpaceExpression *expr,
+                                 const std::vector<CopySrcDstField> &src_fields,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 Processor gpu, TaskID gpu_task_id,
+                                 PhysicalManager *src, PhysicalManager *dst,
+                                 ApEvent precondition, PredEvent pred_guard,
+                                 ReductionOpID redop, bool reduction_fold)
     //--------------------------------------------------------------------------
     {
-      if (expr->is_empty()) return;
-
-      TraceLocalID op_key = find_trace_local_id(memo);
-      ReductionView *reduction_view = view->as_reduction_view();
-      ReductionManager *manager = reduction_view->manager;
-      LayoutDescription *const layout = manager->layout;
-      const ReductionOp *reduction_op = manager->op;
-
-      std::vector<CopySrcDstField> fields;
-      std::vector<FieldID> fill_fields;
-      manager->field_space_node->get_field_set(user_mask,
-          trace->logical_trace->ctx, fill_fields);
-      layout->compute_copy_offsets(fill_fields, manager, fields);
-
-      size_t fill_size = reduction_op->sizeof_rhs;
-      void *fill_value = malloc(fill_size);
-      reduction_op->init(fill_value, 1);
-
-      ApEvent lhs;
-      {
-        Realm::UserEvent e(Realm::UserEvent::create_user_event());
-        e.trigger();
-        lhs = ApEvent(e);
-      }
-      unsigned lhs_ = convert_event(lhs);
-      insert_instruction(new IssueFill(*this, lhs_, expr, op_key,
-                                       fields, fill_value, fill_size,
-#ifdef LEGION_SPY
-                                       manager->field_space_node->handle,
-                                       manager->tree_id,
+#ifdef DEBUG_LEGION
+      assert(memo != NULL);
 #endif
-                                       fence_completion_id));
-      reduction_ready_events[op_key].insert(lhs);
+      if (!lhs.exists())
+      {
+        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+        rename.trigger();
+        lhs = ApEvent(rename);
+      } 
 
-      FieldMaskSet<InstanceView> views;
-      views.insert(view, user_mask);
-      record_copy_views(lhs_, expr, views);
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
 
-      const RegionUsage usage(LEGION_WRITE_ONLY, LEGION_EXCLUSIVE, 0);
-      add_view_user(view, usage, lhs_, expr, user_mask);
+      unsigned lhs_ = convert_event(lhs);
+      insert_instruction(new GPUReduction(
+            *this, lhs_, expr, find_trace_local_id(memo),
+            src_fields, dst_fields, gpu, gpu_task_id, src, dst,
+            find_event(precondition), redop, reduction_fold));
     }
+#endif
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::get_reduction_ready_events(
@@ -4029,8 +4042,6 @@ namespace Legion {
           views.insert(expr, mask);
           if (update_validity)
           {
-            if (view->is_reduction_view() && IS_REDUCE(usage))
-              record_issue_fill_for_reduction(memo, idx, view, mask, expr);
             update_valid_views(view, *eit, usage, mask, true);
             add_view_user(view, usage, entry, expr, mask);
           }
@@ -4039,7 +4050,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_fill_view(
+    void PhysicalTemplate::record_post_fill_view(
                                      FillView *view, const FieldMask &user_mask)
     //--------------------------------------------------------------------------
     {
@@ -4048,6 +4059,77 @@ namespace Legion {
       assert(is_recording());
 #endif
       post_fill_views.insert(view, user_mask);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_fill_views(ApEvent lhs, Memoizable *memo,
+                                 unsigned idx, IndexSpaceExpression *expr,
+                                 const FieldMaskSet<FillView> &tracing_srcs,
+                                 const FieldMaskSet<InstanceView> &tracing_dsts,
+                                 std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(memo != NULL);
+#endif
+      // Do this before we take the lock
+      LegionList<FieldSet<EquivalenceSet*> >::aligned eqs;
+      {
+        FieldMaskSet<EquivalenceSet> eq_sets;
+        const FieldMask &dst_mask = tracing_dsts.get_valid_mask();
+        memo->find_equivalence_sets(trace->runtime, idx, dst_mask, eq_sets);
+        eq_sets.compute_field_sets(dst_mask, eqs);
+      }
+
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
+      const unsigned lhs_ = find_event(lhs);
+      record_fill_views(tracing_srcs);
+      record_views(lhs_, expr, RegionUsage(LEGION_WRITE_ONLY, 
+            LEGION_EXCLUSIVE, 0), tracing_dsts, eqs);
+      record_copy_views(lhs_, expr, tracing_dsts);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_copy_views(ApEvent lhs, Memoizable *memo,
+                                 unsigned src_idx, unsigned dst_idx,
+                                 IndexSpaceExpression *expr,
+                                 const FieldMaskSet<InstanceView> &tracing_srcs,
+                                 const FieldMaskSet<InstanceView> &tracing_dsts,
+                                 std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(memo != NULL);
+#endif
+      LegionList<FieldSet<EquivalenceSet*> >::aligned src_eqs, dst_eqs;
+      // Get these before we take the lock
+      {
+        FieldMaskSet<EquivalenceSet> eq_sets;
+        const FieldMask &src_mask = tracing_srcs.get_valid_mask();
+        memo->find_equivalence_sets(trace->runtime, src_idx, src_mask, eq_sets);
+        eq_sets.compute_field_sets(src_mask, src_eqs);
+      }
+      {
+        FieldMaskSet<EquivalenceSet> eq_sets;
+        const FieldMask &dst_mask = tracing_dsts.get_valid_mask();
+        memo->find_equivalence_sets(trace->runtime, dst_idx, dst_mask, eq_sets);
+        eq_sets.compute_field_sets(dst_mask, dst_eqs);
+      }
+
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
+      const unsigned lhs_ = find_event(lhs);
+      record_views(lhs_, expr, RegionUsage(LEGION_READ_ONLY, 
+            LEGION_EXCLUSIVE, 0), tracing_srcs, src_eqs);
+      record_copy_views(lhs_, expr, tracing_srcs);
+      record_views(lhs_, expr, RegionUsage(LEGION_WRITE_ONLY, 
+            LEGION_EXCLUSIVE, 0), tracing_dsts, dst_eqs);
+      record_copy_views(lhs_, expr, tracing_dsts);
     }
 
     //--------------------------------------------------------------------------
@@ -4164,7 +4246,7 @@ namespace Legion {
           continue;
 
         DependenceType dep =
-          check_dependence_type(it->first->usage, user->usage);
+          check_dependence_type<false>(it->first->usage, user->usage);
         if (dep == LEGION_NO_DEPENDENCE)
           continue;
 
@@ -4741,7 +4823,7 @@ namespace Legion {
                                      src_tree_id, dst_tree_id,
 #endif
                                      precondition, PredEvent::NO_PRED_EVENT,
-                                     redop, reduction_fold, NULL, NULL);
+                                     redop, reduction_fold);
     }
 
     //--------------------------------------------------------------------------
@@ -4777,6 +4859,102 @@ namespace Legion {
 
       return ss.str();
     }
+
+#ifdef LEGION_GPU_REDUCTIONS
+    /////////////////////////////////////////////////////////////
+    // GPUReduction
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    GPUReduction::GPUReduction(PhysicalTemplate& tpl,
+                               unsigned l, IndexSpaceExpression *e,
+                               const TraceLocalID& key,
+                               const std::vector<CopySrcDstField>& s,
+                               const std::vector<CopySrcDstField>& d,
+                               Processor g, TaskID tid, 
+                               PhysicalManager *sm, PhysicalManager *dm,
+                               unsigned pi, ReductionOpID ro, bool rf)
+      : Instruction(tpl, key), lhs(l), expr(e), src_fields(s), dst_fields(d), 
+        gpu(g), gpu_task_id(tid), src(sm), dst(dm),
+        precondition_idx(pi), redop(ro), reduction_fold(rf)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(lhs < events.size());
+      assert(operations.find(owner) != operations.end());
+      assert(src_fields.size() > 0);
+      assert(dst_fields.size() > 0);
+      assert(precondition_idx < events.size());
+      assert(expr != NULL);
+#endif
+      expr->add_expression_reference();
+      src->add_base_resource_ref(TRACE_REF);
+      dst->add_base_resource_ref(TRACE_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    GPUReduction::~GPUReduction(void)
+    //--------------------------------------------------------------------------
+    {
+      if (expr->remove_expression_reference())
+        delete expr;
+      if (src->remove_base_resource_ref(TRACE_REF))
+        delete src;
+      if (dst->remove_base_resource_ref(TRACE_REF))
+        delete dst;
+    }
+
+    //--------------------------------------------------------------------------
+    void GPUReduction::execute(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(operations.find(owner) != operations.end());
+      assert(operations.find(owner)->second != NULL);
+#endif
+      Memoizable *memo = operations[owner];
+      ApEvent precondition = events[precondition_idx];
+      const PhysicalTraceInfo trace_info(memo->get_operation(), -1U, false);
+      events[lhs] = expr->gpu_reduction(trace_info, dst_fields, src_fields,
+                                     gpu, gpu_task_id, dst, src,
+                                     precondition, PredEvent::NO_PRED_EVENT,
+                                     redop, reduction_fold);
+    }
+
+    //--------------------------------------------------------------------------
+    std::string GPUReduction::to_string(void)
+    //--------------------------------------------------------------------------
+    {
+      std::stringstream ss;
+      ss << "events[" << lhs << "] = gpu_reduction(operations[" << owner << "],"
+         << " Index expr: " << expr->expr_id << ", {";
+      for (unsigned idx = 0; idx < src_fields.size(); ++idx)
+      {
+        ss << "(" << std::hex << src_fields[idx].inst.id
+           << "," << std::dec << src_fields[idx].subfield_offset
+           << "," << src_fields[idx].size
+           << "," << src_fields[idx].field_id
+           << "," << src_fields[idx].serdez_id << ")";
+        if (idx != src_fields.size() - 1) ss << ",";
+      }
+      ss << "}, {";
+      for (unsigned idx = 0; idx < dst_fields.size(); ++idx)
+      {
+        ss << "(" << std::hex << dst_fields[idx].inst.id
+           << "," << std::dec << dst_fields[idx].subfield_offset
+           << "," << dst_fields[idx].size
+           << "," << dst_fields[idx].field_id
+           << "," << dst_fields[idx].serdez_id << ")";
+        if (idx != dst_fields.size() - 1) ss << ",";
+      }
+      ss << "}, events[" << precondition_idx << "]";
+
+      if (redop != 0) ss << ", " << redop;
+      ss << ")";
+
+      return ss.str();
+    }
+#endif // LEGION_GPU_REDUCTIONS
 
     /////////////////////////////////////////////////////////////
     // IssueFill
@@ -4835,8 +5013,7 @@ namespace Legion {
                                      trace_info.op->get_unique_op_id(),
                                      handle, tree_id,
 #endif
-                                     precondition, PredEvent::NO_PRED_EVENT,
-                                     NULL, NULL);
+                                     precondition, PredEvent::NO_PRED_EVENT);
     }
 
     //--------------------------------------------------------------------------

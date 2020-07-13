@@ -2070,6 +2070,36 @@ namespace Legion {
       runtime->get_index_space_domain(req.region.get_index_space(),
                                       realm_is, type_tag);
     }
+
+    //--------------------------------------------------------------------------
+    PieceIteratorImpl* PhysicalRegionImpl::get_piece_iterator(FieldID fid,
+                                                            bool privilege_only)
+    //--------------------------------------------------------------------------
+    {
+      if (req.privilege_fields.find(fid) == req.privilege_fields.end())
+        REPORT_LEGION_ERROR(ERROR_INVALID_FIELD_PRIVILEGES, 
+                       "Piece iterator construction in task %s on "
+                       "PhysicalRegion that does not contain field %d!", 
+                       context->get_task_name(), fid)
+      for (unsigned idx = 0; idx < references.size(); idx++)
+      {
+        const InstanceRef &ref = references[idx];
+        if (ref.is_field_set(fid))
+        {
+          PhysicalManager *manager = ref.get_instance_manager();
+          if (privilege_only)
+          {
+            IndexSpaceNode *privilege_node =
+              runtime->forest->get_node(req.region.get_index_space());
+            return manager->create_piece_iterator(privilege_node);
+          }
+          else
+            return manager->create_piece_iterator(NULL);
+        }
+      }
+      assert(false);
+      return NULL;
+    }
     
     //--------------------------------------------------------------------------
     PhysicalInstance PhysicalRegionImpl::get_instance_info(PrivilegeMode mode, 
@@ -2220,7 +2250,7 @@ namespace Legion {
         const InstanceRef &ref = references[idx];
         if (ref.is_field_set(fid))
         {
-          PhysicalManager *manager = ref.get_manager();
+          PhysicalManager *manager = ref.get_instance_manager();
           if (check_field_size)
           {
             const size_t actual_size = 
@@ -2232,9 +2262,9 @@ namespace Legion {
                             "originally allocated with a size of %zd bytes "
                             "in task %s (UID %lld)",
                             fid, field_size, actual_size, 
-                            context->get_task_name(), context->get_unique_id())
+                            context->get_task_name(), context->get_unique_id()) 
           }
-          return manager->get_instance();
+          return manager->get_instance(context->owner_task->index_point);
         }
       }
       // should never get here at worst there should have been an
@@ -3893,7 +3923,7 @@ namespace Legion {
         capacity(m.capacity()), remaining_capacity(capacity), runtime(rt)
     //--------------------------------------------------------------------------
     {
-#if defined(LEGION_USE_CUDA) && defined(LEGION_MALLOC_INSTANCES)
+#ifdef LEGION_USE_CUDA
       if (memory.kind() == Memory::GPU_FB_MEM)
       {
         Machine::ProcessorQuery finder(runtime->machine);
@@ -4129,7 +4159,6 @@ namespace Legion {
     void MemoryManager::deactivate_instance(PhysicalManager *manager)
     //--------------------------------------------------------------------------
     {
-      bool perform_deletion = false;
       bool remove_reference = false;
 #ifdef LEGION_MALLOC_INSTANCES
       std::pair<RtEvent,uintptr_t> to_free(RtEvent::NO_RT_EVENT, 0);
@@ -4181,21 +4210,9 @@ namespace Legion {
           assert(finder->second.pending_acquires > 0);
 #endif
         }
-        else if (is_owner && manager->is_reduction_manager())
-        {
-          // Always eagerly delete reduction instances since we don't
-          // currently allow the mappers to reuse them
-          perform_deletion = true;
-          remove_reference = true;
-          tree_finder->second.erase(finder);
-          if (tree_finder->second.empty())
-            current_instances.erase(tree_finder);
-        }
         else // didn't collect it yet
           info.current_state = COLLECTABLE_STATE;
       }
-      if (perform_deletion)
-        manager->perform_deletion(RtEvent::NO_RT_EVENT);
       if (remove_reference)
       {
         if (manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
@@ -4317,6 +4334,7 @@ namespace Legion {
                                 GCPriority priority, bool tight_bounds,
                                 LayoutConstraintKind *unsat_kind,
                                 unsigned *unsat_index, size_t *footprint, 
+                                CollectiveManager *target, DomainPoint *point,
                                 UniqueID creator_id, bool remote)
     //--------------------------------------------------------------------------
     {
@@ -4335,6 +4353,13 @@ namespace Legion {
           for (unsigned idx = 0; idx < regions.size(); idx++)
             rez.serialize(regions[idx]);
           rez.serialize<bool>(acquire);
+          if (target != NULL)
+          {
+            rez.serialize(target->did);
+            rez.serialize(*point);
+          }
+          else
+            rez.serialize<DistributedID>(0);
           constraints.serialize(rez);
           rez.serialize(mapper_id);
           rez.serialize(processor);
@@ -4363,7 +4388,7 @@ namespace Legion {
           wait_on.wait();
         // Try to make the result
         PhysicalManager *manager = allocate_physical_instance(builder, 
-            footprint, unsat_kind, unsat_index);
+            footprint, unsat_kind, unsat_index, target, point);
         if (manager != NULL)
         {
           if (runtime->legion_spy_enabled)
@@ -4387,6 +4412,7 @@ namespace Legion {
                                      GCPriority priority, bool tight_bounds,
                                      LayoutConstraintKind *unsat_kind,
                                      unsigned *unsat_index, size_t *footprint, 
+                                     CollectiveManager *target, DomainPoint *p,
                                      UniqueID creator_id, bool remote)
     //--------------------------------------------------------------------------
     {
@@ -4405,6 +4431,13 @@ namespace Legion {
           for (unsigned idx = 0; idx < regions.size(); idx++)
             rez.serialize(regions[idx]);
           rez.serialize<bool>(acquire);
+          if (target != NULL)
+          {
+            rez.serialize(target->did);
+            rez.serialize(*p);
+          }
+          else
+            rez.serialize<DistributedID>(0);
           rez.serialize(constraints->layout_id);
           rez.serialize(mapper_id);
           rez.serialize(processor);
@@ -4433,7 +4466,7 @@ namespace Legion {
           wait_on.wait();
         // Try to make the instance
         PhysicalManager *manager = allocate_physical_instance(builder, 
-            footprint, unsat_kind, unsat_index);
+            footprint, unsat_kind, unsat_index, target, p);
         if (manager != NULL)
         {
           if (runtime->legion_spy_enabled)
@@ -5136,6 +5169,18 @@ namespace Legion {
       {
         case CREATE_INSTANCE_CONSTRAINTS:
           {
+            DistributedID collective_did;
+            derez.deserialize(collective_did);
+            RtEvent collective_ready;
+            DomainPoint point;
+            CollectiveManager *collective = NULL;
+            if (collective_did > 0)
+            {
+              collective = static_cast<CollectiveManager*>(
+                  runtime->find_or_request_instance_manager(collective_did, 
+                                                            collective_ready));
+              derez.deserialize(point);
+            }
             LayoutConstraintSet constraints;
             constraints.deserialize(derez);
             MapperID mapper_id;
@@ -5162,11 +5207,13 @@ namespace Legion {
             size_t local_footprint;
             LayoutConstraintKind local_kind;
             unsigned local_index;
+            if (collective_ready.exists() && !collective_ready.has_triggered())
+              collective_ready.wait();
             bool success = create_physical_instance(constraints, regions, 
-                                   result, mapper_id, processor, acquire, 
-                                   priority, tight_region_bounds,
-                                   &local_kind, &local_index,
-                                   &local_footprint, creator_id,true/*remote*/);
+                                 result, mapper_id, processor, acquire, 
+                                 priority, tight_region_bounds,
+                                 &local_kind, &local_index, &local_footprint,
+                                 collective, &point, creator_id,true/*remote*/);
             if (success || (remote_footprint != NULL) || 
                 (remote_kind != NULL) || (remote_index != NULL))
             {
@@ -5179,7 +5226,7 @@ namespace Legion {
                 rez.serialize<bool>(success);
                 if (success)
                 {
-                  PhysicalManager *manager = result.impl;
+                  InstanceManager *manager = result.impl;
                   rez.serialize(manager->did);
                   rez.serialize<bool>(acquire);
                   rez.serialize(remote_target);
@@ -5210,6 +5257,18 @@ namespace Legion {
           }
         case CREATE_INSTANCE_LAYOUT:
           {
+            DistributedID collective_did;
+            derez.deserialize(collective_did);
+            RtEvent collective_ready;
+            CollectiveManager *collective = NULL;
+            DomainPoint point;
+            if (collective_did > 0)
+            {
+              collective = static_cast<CollectiveManager*>(
+                  runtime->find_or_request_instance_manager(collective_did, 
+                                                            collective_ready));
+              derez.deserialize(point);
+            }
             LayoutConstraintID layout_id;
             derez.deserialize(layout_id);
             MapperID mapper_id;
@@ -5238,11 +5297,13 @@ namespace Legion {
             size_t local_footprint;
             LayoutConstraintKind local_kind;
             unsigned local_index;
+            if (collective_ready.exists() && !collective_ready.has_triggered())
+              collective_ready.wait();
             bool success = create_physical_instance(constraints, regions, 
-                                   result, mapper_id, processor, acquire, 
-                                   priority, tight_region_bounds,
-                                   &local_kind, &local_index,
-                                   &local_footprint, creator_id,true/*remote*/);
+                                 result, mapper_id, processor, acquire, 
+                                 priority, tight_region_bounds,
+                                 &local_kind, &local_index, &local_footprint,
+                                 collective, &point, creator_id,true/*remote*/);
             if (success || (remote_footprint != NULL) ||
                 (remote_kind != NULL) || (remote_index != NULL))
             {
@@ -5254,7 +5315,7 @@ namespace Legion {
                 rez.serialize<bool>(success);
                 if (success)
                 {
-                  PhysicalManager *manager = result.impl;
+                  InstanceManager *manager = result.impl;
                   rez.serialize(manager->did);
                   rez.serialize<bool>(acquire);
                   rez.serialize(remote_target);
@@ -5329,7 +5390,7 @@ namespace Legion {
                 rez.serialize<bool>(success);
                 if (success)
                 {
-                  PhysicalManager *manager = result.impl;
+                  InstanceManager *manager = result.impl;
                   rez.serialize(manager->did);
                   rez.serialize<bool>(acquire);
                   rez.serialize(remote_target);
@@ -5411,7 +5472,7 @@ namespace Legion {
                 rez.serialize<bool>(success);
                 if (success)
                 {
-                  PhysicalManager *manager = result.impl;
+                  InstanceManager *manager = result.impl;
                   rez.serialize(manager->did);
                   rez.serialize<bool>(acquire);
                   rez.serialize(remote_target);
@@ -5460,7 +5521,7 @@ namespace Legion {
                         result, acquire, tight_bounds, true/*remote*/);
             if (success)
             {
-              PhysicalManager *manager = result.impl;
+              InstanceManager *manager = result.impl;
               Serializer rez;
               {
                 RezCheck z(rez);
@@ -5503,7 +5564,7 @@ namespace Legion {
                         result, acquire, tight_bounds, true/*remote*/);
             if (success)
             {
-              PhysicalManager *manager = result.impl;
+              InstanceManager *manager = result.impl;
               Serializer rez;
               {
                 RezCheck z(rez);
@@ -5556,7 +5617,7 @@ namespace Legion {
                 rez.serialize<size_t>(results.size());
                 for (unsigned idx = 0; idx < results.size(); idx++)
                 {
-                  PhysicalManager *manager = results[idx].impl;
+                  InstanceManager *manager = results[idx].impl;
                   rez.serialize(manager->did);
                 }
                 // No things for us to pass back here
@@ -5602,7 +5663,7 @@ namespace Legion {
                 rez.serialize<size_t>(results.size());
                 for (unsigned idx = 0; idx < results.size(); idx++)
                 {
-                  PhysicalManager *manager = results[idx].impl;
+                  InstanceManager *manager = results[idx].impl;
                   rez.serialize(manager->did);
                 }
                 // No things for us to pass back here
@@ -5652,7 +5713,7 @@ namespace Legion {
 #endif
         RtEvent manager_ready = RtEvent::NO_RT_EVENT;
         PhysicalManager *manager = 
-          runtime->find_or_request_physical_manager(did, manager_ready);
+          runtime->find_or_request_instance_manager(did, manager_ready);
         WrapperReferenceMutator mutator(preconditions);
         // If the manager isn't ready yet, then we need to wait for it
         if (manager_ready.exists())
@@ -5787,7 +5848,7 @@ namespace Legion {
             derez.deserialize(did);
             RtEvent manager_ready = RtEvent::NO_RT_EVENT;
             PhysicalManager *manager = 
-              runtime->find_or_request_physical_manager(did, manager_ready);
+              runtime->find_or_request_instance_manager(did, manager_ready);
             // If the manager isn't ready yet, then we need to wait for it
             if (manager_ready.exists())
               manager_ready.wait();
@@ -6082,7 +6143,7 @@ namespace Legion {
         {
           if (!(*it)->meets_expression(space_expr, tight_region_bounds))
             continue;
-          if ((*it)->entails(constraints, NULL))
+          if ((*it)->entails(constraints, DomainPoint(), NULL))
           {
             // Check to see if we need to acquire
             // If we fail to acquire then keep going
@@ -6151,7 +6212,7 @@ namespace Legion {
         {
           if (!(*it)->meets_expression(space_expr, tight_region_bounds))
             continue;
-          if ((*it)->entails(constraints, NULL))
+          if ((*it)->entails(constraints, DomainPoint(), NULL))
           {
             // Check to see if we need to acquire
             // If we fail to acquire then keep going
@@ -6220,7 +6281,7 @@ namespace Legion {
         {
           if (!(*it)->meets_expression(space_expr, tight_region_bounds))
             continue;
-          if ((*it)->entails(constraints, NULL))
+          if ((*it)->entails(constraints, DomainPoint(), NULL))
           {
             // Check to see if we need to acquire
             // If we fail to acquire then keep going
@@ -6286,7 +6347,7 @@ namespace Legion {
         {
           if (!(*it)->meets_expression(space_expr, tight_region_bounds))
             continue;
-          if ((*it)->entails(constraints, NULL))
+          if ((*it)->entails(constraints, DomainPoint(), NULL))
           {
             // Check to see if we need to acquire
             // If we fail to acquire then keep going
@@ -6354,7 +6415,7 @@ namespace Legion {
         {
           if (!(*it)->meets_expression(space_expr, tight_region_bounds))
             continue;
-          if ((*it)->entails(constraints, NULL))
+          if ((*it)->entails(constraints, DomainPoint(), NULL))
           {
             // Check to see if we need to acquire
             // If we fail to acquire then keep going
@@ -6424,7 +6485,7 @@ namespace Legion {
         {
           if (!(*it)->meets_expression(space_expr, tight_region_bounds))
             continue;
-          if ((*it)->entails(constraints, NULL))
+          if ((*it)->entails(constraints, DomainPoint(), NULL))
           {
             // Check to see if we need to acquire
             // If we fail to acquire then keep going
@@ -6453,6 +6514,23 @@ namespace Legion {
         if ((*it)->remove_base_resource_ref(MEMORY_MANAGER_REF))
           delete (*it);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalManager* MemoryManager::create_shadow_instance(
+                                                       InstanceBuilder &builder)
+    //--------------------------------------------------------------------------
+    {
+      // Acquire allocation privilege before doing anything
+      const RtEvent wait_on = acquire_allocation_privilege();
+      if (wait_on.exists())
+        wait_on.wait();
+      // Try to make the result
+      PhysicalManager *manager = allocate_physical_instance(builder, 
+          NULL/*footprint*/, NULL/*unsat kind*/, NULL/*unsat index*/);
+      // Release our allocation privilege after doing the record
+      release_allocation_privilege();
+      return manager;
     }
 
     //--------------------------------------------------------------------------
@@ -6493,7 +6571,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalManager* MemoryManager::allocate_physical_instance(
                         InstanceBuilder &builder, size_t *footprint,
-                        LayoutConstraintKind *unsat_kind, unsigned *unsat_index)
+                        LayoutConstraintKind *unsat_kind, unsigned *unsat_index,
+                        CollectiveManager *collective, DomainPoint *point)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -6502,7 +6581,7 @@ namespace Legion {
       // First, just try to make the instance as is, if it works we are done 
       size_t needed_size;
       PhysicalManager *manager = builder.create_physical_instance(
-          runtime->forest, unsat_kind, unsat_index, &needed_size);
+          runtime->forest,collective,point,unsat_kind,unsat_index,&needed_size);
       if (footprint != NULL)
         *footprint = needed_size;
       if ((manager != NULL) || (needed_size == 0))
@@ -6520,7 +6599,7 @@ namespace Legion {
       {
         // See if we can make the instance
         PhysicalManager *result = builder.create_physical_instance(
-            runtime->forest, unsat_kind, unsat_index);
+            runtime->forest, collective, point, unsat_kind, unsat_index);
         if (result != NULL)
           return result;
       }
@@ -6530,7 +6609,7 @@ namespace Legion {
       {
         // See if we can make the instance
         PhysicalManager *result = builder.create_physical_instance(
-            runtime->forest, unsat_kind, unsat_index);
+            runtime->forest, collective, point, unsat_kind, unsat_index);
         if (result != NULL)
           return result;
       }
@@ -6540,7 +6619,7 @@ namespace Legion {
       {
         // See if we can make the instance
         PhysicalManager *result = builder.create_physical_instance(
-            runtime->forest, unsat_kind, unsat_index);
+            runtime->forest, collective, point, unsat_kind, unsat_index);
         if (result != NULL)
           return result;
       }
@@ -6550,7 +6629,7 @@ namespace Legion {
       {
         // See if we can make the instance
         PhysicalManager *result = builder.create_physical_instance(
-            runtime->forest, unsat_kind, unsat_index);
+            runtime->forest, collective, point, unsat_kind, unsat_index);
         if (result != NULL)
           return result;
       }
@@ -6817,6 +6896,28 @@ namespace Legion {
       return RtEvent::NO_RT_EVENT;
     }
 
+    //--------------------------------------------------------------------------
+    bool MemoryManager::is_visible_memory(Memory other)
+    //--------------------------------------------------------------------------
+    {
+      if (other == memory)
+        return true;
+      {
+        AutoLock m_lock(manager_lock,1,false);
+        if (!visible_memories.empty())
+          return (visible_memories.find(other) != visible_memories.end());
+      }
+      // Do the query while not holding the lock
+      Machine::MemoryQuery vis_mems(runtime->machine);
+      vis_mems.has_affinity_to(memory);
+      AutoLock m_lock(manager_lock);
+      if (visible_memories.empty())
+        for (Machine::MemoryQuery::iterator it = vis_mems.begin();
+              it != vis_mems.end(); it++)
+          visible_memories.insert(*it);
+      return (visible_memories.find(other) != visible_memories.end());
+    }
+
 #ifdef LEGION_MALLOC_INSTANCES
     //--------------------------------------------------------------------------
     uintptr_t MemoryManager::allocate_legion_instance(size_t footprint,
@@ -6915,7 +7016,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MemoryManager::record_legion_instance(PhysicalManager *man,uintptr_t p)
+    void MemoryManager::record_legion_instance(InstanceManager *man,uintptr_t p)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -6929,7 +7030,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MemoryManager::free_legion_instance(PhysicalManager *man,RtEvent defer)
+    void MemoryManager::free_legion_instance(InstanceManager *man,RtEvent defer)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -6938,7 +7039,7 @@ namespace Legion {
       uintptr_t ptr;
       {
         AutoLock m_lock(manager_lock);
-        std::map<PhysicalManager*,uintptr_t>::iterator finder = 
+        std::map<InstanceManager*,uintptr_t>::iterator finder = 
           legion_instances.find(man);
 #ifdef DEBUG_LEGION
         assert(finder != legion_instances.end());
@@ -7926,6 +8027,17 @@ namespace Legion {
               runtime->handle_slice_record_intra_dependence(derez);
               break;
             }
+          case SLICE_COLLECTIVE_REQUEST:
+            {
+              runtime->handle_slice_collective_request(derez,
+                                                       remote_address_space);
+              break;
+            }
+          case SLICE_COLLECTIVE_RESPONSE:
+            {
+              runtime->handle_slice_collective_response(derez);
+              break;
+            }
           case DISTRIBUTED_REMOTE_REGISTRATION:
             {
               runtime->handle_did_remote_registration(derez, 
@@ -8001,12 +8113,30 @@ namespace Legion {
                                                     remote_address_space);
               break;
             }
-          case SEND_REDUCTION_MANAGER:
+          case SEND_COLLECTIVE_MANAGER:
             {
-              runtime->handle_send_reduction_manager(derez,
-                                                     remote_address_space);
+              runtime->handle_collective_instance_manager(derez,
+                                                          remote_address_space);
               break;
             }
+          case SEND_COLLECTIVE_MESSAGE:
+            {
+              runtime->handle_collective_instance_message(derez);
+              break;
+            }
+#ifdef LEGION_GPU_REDUCTIONS
+          case SEND_CREATE_SHADOW_REQUEST:
+            {
+              runtime->handle_create_shadow_reduction_request(derez, 
+                                              remote_address_space);
+              break;
+            }
+          case SEND_CREATE_SHADOW_RESPONSE:
+            {
+              runtime->handle_create_shadow_reduction_response(derez);
+              break;
+            }
+#endif
           case SEND_CREATE_TOP_VIEW_REQUEST:
             {
               runtime->handle_create_top_view_request(derez,
@@ -11059,6 +11189,9 @@ namespace Legion {
         unique_field_id(LEGION_MAX_APPLICATION_FIELD_ID + 
                         ((unique == 0) ? runtime_stride : unique)),
         unique_code_descriptor_id(LG_TASK_ID_AVAILABLE +
+#ifdef LEGION_GPU_REDUCTIONS
+                        get_gpu_reduction_table().size() + 
+#endif
                         ((unique == 0) ? runtime_stride : unique)),
         unique_constraint_id((unique == 0) ? runtime_stride : unique),
         unique_is_expr_id((unique == 0) ? runtime_stride : unique),
@@ -11986,9 +12119,7 @@ namespace Legion {
       std::vector<CustomSerdezID> serdez;
       std::vector<std::pair<FieldID,size_t> > field_sizes;
       LayoutDescription *layout = new LayoutDescription(all_ones, constraints);
-      PointerConstraint pointer_constraint(Memory::NO_MEMORY, 0);
-      virtual_manager = 
-        new VirtualManager(forest, layout, pointer_constraint, 0/*did*/);
+      virtual_manager = new VirtualManager(this, 0/*did*/, layout);
       virtual_manager->add_base_resource_ref(NEVER_GC_REF);
     }
 
@@ -16266,6 +16397,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_slice_collective_instance_request(Processor target,
+                                                         Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SLICE_COLLECTIVE_REQUEST,
+                                  DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_slice_collective_instance_response(AddressSpaceID target,
+                                                          Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SLICE_COLLECTIVE_RESPONSE,
+                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_did_remote_registration(AddressSpaceID target, 
                                                Serializer &rez)
     //--------------------------------------------------------------------------
@@ -16387,12 +16536,45 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_reduction_manager(AddressSpaceID target,Serializer &rez)
+    void Runtime::send_collective_instance_manager(AddressSpaceID target, 
+                                                   Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_message(rez, SEND_REDUCTION_MANAGER,
+      find_messenger(target)->send_message(rez, SEND_COLLECTIVE_MANAGER,
                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_collective_instance_message(AddressSpaceID target,
+                                                   Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      // Put all these messages on the reference virtual channel to keep them
+      // all in order and make sure that we never send any of this messages
+      // once the references on the collective instance are removed
+      find_messenger(target)->send_message(rez, SEND_COLLECTIVE_MESSAGE,
+                                   REFERENCE_VIRTUAL_CHANNEL, true/*flush*/); 
+    }
+
+#ifdef LEGION_GPU_REDUCTIONS
+    //--------------------------------------------------------------------------
+    void Runtime::send_create_shadow_reduction_request(AddressSpaceID target,
+                                                       Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_CREATE_SHADOW_REQUEST,
+                                    DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_create_shadow_reduction_response(AddressSpaceID target,
+                                                        Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_CREATE_SHADOW_RESPONSE,
+                  DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+#endif // LEGION_GPU_REDUCTIONS
 
     //--------------------------------------------------------------------------
     void Runtime::send_create_top_view_request(AddressSpaceID target,
@@ -17913,6 +18095,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_slice_collective_request(Deserializer &derez,
+                                                  AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      SliceTask::handle_collective_instance_request(derez, source, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_slice_collective_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      SliceTask::handle_collective_instance_response(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_did_remote_registration(Deserializer &derez,
                                                  AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -17968,15 +18165,14 @@ namespace Legion {
                                                          AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      MaterializedView::handle_send_atomic_reservation_request(this, derez, 
-                                                               source);
+      InstanceView::handle_send_atomic_reservation_request(this, derez, source);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::handle_send_atomic_reservation_response(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      MaterializedView::handle_send_atomic_reservation_response(this, derez);
+      InstanceView::handle_send_atomic_reservation_response(this, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -18016,16 +18212,40 @@ namespace Legion {
                                                AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      InstanceManager::handle_send_manager(this, source, derez);
+      IndividualManager::handle_send_manager(this, source, derez);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_send_reduction_manager(Deserializer &derez,
-                                                AddressSpaceID source)
+    void Runtime::handle_collective_instance_manager(Deserializer &derez,
+                                                     AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      ReductionManager::handle_send_manager(this, source, derez);
+      CollectiveManager::handle_send_manager(this, source, derez);
     }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_collective_instance_message(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      CollectiveManager::handle_collective_message(derez, this);
+    }
+
+#ifdef LEGION_GPU_REDUCTIONS
+    //--------------------------------------------------------------------------
+    void Runtime::handle_create_shadow_reduction_request(Deserializer &derez,
+                                                         AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      IndividualManager::handle_create_shadow_request(this, source, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_create_shadow_reduction_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      IndividualManager::handle_create_shadow_response(this, derez);
+    }
+#endif // LEGION_GPU_REDUCTIONS
 
     //--------------------------------------------------------------------------
     void Runtime::handle_create_top_view_request(Deserializer &derez,
@@ -18591,7 +18811,7 @@ namespace Legion {
       derez.deserialize(did);
       RtEvent manager_ready;
       PhysicalManager *manager = 
-        find_or_request_physical_manager(did, manager_ready);
+        find_or_request_instance_manager(did, manager_ready);
       RtUserEvent done_event;
       derez.deserialize(done_event);
       MemoryManager *memory_manager = find_memory_manager(target_memory);
@@ -18612,7 +18832,7 @@ namespace Legion {
       derez.deserialize(did);
       RtEvent manager_ready;
       PhysicalManager *manager = 
-        find_or_request_physical_manager(did, manager_ready);
+        find_or_request_instance_manager(did, manager_ready);
       RtUserEvent done_event;
       derez.deserialize(done_event);
       MemoryManager *memory_manager = find_memory_manager(target_memory);
@@ -19101,17 +19321,19 @@ namespace Legion {
                                      bool acquire, GCPriority priority,
                                      bool tight_bounds, 
                                      const LayoutConstraint **unsat,
-                                     size_t *footprint, UniqueID creator_id)
+                                     size_t *footprint, UniqueID creator_id,
+                                     CollectiveManager *target, DomainPoint *p)
     //--------------------------------------------------------------------------
     {
       MemoryManager *manager = find_memory_manager(target_memory);
       if (unsat != NULL)
       {
-        LayoutConstraintKind unsat_kind;
-        unsigned unsat_index;
+        LayoutConstraintKind unsat_kind = LEGION_SPECIALIZED_CONSTRAINT;
+        unsigned unsat_index = 0;
         if (!manager->create_physical_instance(constraints, regions, result,
                          mapper_id, processor, acquire, priority, tight_bounds,
-                         &unsat_kind, &unsat_index, footprint, creator_id))
+                         &unsat_kind, &unsat_index, footprint, target, p,
+                         creator_id))
         {
           *unsat = constraints.convert_unsatisfied(unsat_kind, unsat_index);
           return false;
@@ -19122,30 +19344,31 @@ namespace Legion {
       else
         return manager->create_physical_instance(constraints, regions, result,
                          mapper_id, processor, acquire, priority, tight_bounds,
-                         NULL, NULL, footprint, creator_id);
+                         NULL, NULL, footprint, target, p, creator_id);
     }
 
     //--------------------------------------------------------------------------
     bool Runtime::create_physical_instance(Memory target_memory,
-                                     LayoutConstraintID layout_id,
+                                     LayoutConstraints *constraints,
                                      const std::vector<LogicalRegion> &regions,
                                      MappingInstance &result,
                                      MapperID mapper_id, Processor processor,
                                      bool acquire, GCPriority priority,
                                      bool tight_bounds, 
                                      const LayoutConstraint **unsat,
-                                     size_t *footprint, UniqueID creator_id)
+                                     size_t *footprint, UniqueID creator_id,
+                                     CollectiveManager *target, DomainPoint *p)
     //--------------------------------------------------------------------------
-    {
-      LayoutConstraints *constraints = find_layout_constraints(layout_id);
+    { 
       MemoryManager *manager = find_memory_manager(target_memory);
       if (unsat != NULL)
       {
-        LayoutConstraintKind unsat_kind;
-        unsigned unsat_index;
+        LayoutConstraintKind unsat_kind = LEGION_SPECIALIZED_CONSTRAINT;
+        unsigned unsat_index = 0;
         if (!manager->create_physical_instance(constraints, regions, result,
                          mapper_id, processor, acquire, priority, tight_bounds,
-                         &unsat_kind, &unsat_index, footprint, creator_id))
+                         &unsat_kind, &unsat_index, footprint, target, p,
+                         creator_id))
         {
           *unsat = constraints->convert_unsatisfied(unsat_kind, unsat_index);
           return false;
@@ -19156,7 +19379,7 @@ namespace Legion {
       else
         return manager->create_physical_instance(constraints, regions, result,
                          mapper_id, processor, acquire, priority, tight_bounds,
-                         NULL, NULL, footprint, creator_id);
+                         NULL, NULL, footprint, target, p, creator_id);
     }
 
     //--------------------------------------------------------------------------
@@ -19174,8 +19397,8 @@ namespace Legion {
       MemoryManager *manager = find_memory_manager(target_memory);
       if (unsat != NULL)
       {
-        LayoutConstraintKind unsat_kind;
-        unsigned unsat_index;
+        LayoutConstraintKind unsat_kind = LEGION_SPECIALIZED_CONSTRAINT;
+        unsigned unsat_index = 0;
         if (!manager->find_or_create_physical_instance(constraints, regions, 
                          result, created, mapper_id, processor, acquire, 
                          priority, tight_bounds, &unsat_kind, &unsat_index,
@@ -19195,7 +19418,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool Runtime::find_or_create_physical_instance(Memory target_memory,
-                                    LayoutConstraintID layout_id,
+                                    LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool &created, 
                                     MapperID mapper_id, Processor processor,
@@ -19204,13 +19427,12 @@ namespace Legion {
                                     const LayoutConstraint **unsat,
                                     size_t *footprint, UniqueID creator_id)
     //--------------------------------------------------------------------------
-    {
-      LayoutConstraints *constraints = find_layout_constraints(layout_id);
+    { 
       MemoryManager *manager = find_memory_manager(target_memory);
       if (unsat != NULL)
       {
-        LayoutConstraintKind unsat_kind;
-        unsigned unsat_index;
+        LayoutConstraintKind unsat_kind = LEGION_SPECIALIZED_CONSTRAINT;
+        unsigned unsat_index = 0;
         if (!manager->find_or_create_physical_instance(constraints, regions,
                            result, created, mapper_id, processor, acquire, 
                            priority, tight_bounds, &unsat_kind, &unsat_index,
@@ -19243,13 +19465,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool Runtime::find_physical_instance(Memory target_memory,
-                                      LayoutConstraintID layout_id,
+                                      LayoutConstraints *constraints,
                                       const std::vector<LogicalRegion> &regions,
                                       MappingInstance &result, bool acquire,
                                       bool tight_region_bounds)
     //--------------------------------------------------------------------------
     {
-      LayoutConstraints *constraints = find_layout_constraints(layout_id);
       MemoryManager *manager = find_memory_manager(target_memory);
       return manager->find_physical_instance(constraints, regions, 
                                      result, acquire, tight_region_bounds);
@@ -19270,13 +19491,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::find_physical_instances(Memory target_memory,
-                                      LayoutConstraintID layout_id,
+                                      LayoutConstraints *constraints,
                                       const std::vector<LogicalRegion> &regions,
                                       std::vector<MappingInstance> &results, 
                                       bool acquire, bool tight_region_bounds)
     //--------------------------------------------------------------------------
     {
-      LayoutConstraints *constraints = find_layout_constraints(layout_id);
       MemoryManager *manager = find_memory_manager(target_memory);
       return manager->find_physical_instances(constraints, regions, 
                                      results, acquire, tight_region_bounds);
@@ -19677,22 +19897,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalManager* Runtime::find_or_request_physical_manager(
+    PhysicalManager* Runtime::find_or_request_instance_manager(
                                               DistributedID did, RtEvent &ready)
     //--------------------------------------------------------------------------
     {
       DistributedCollectable *dc = NULL;
-      if (PhysicalManager::is_instance_did(did))
+      if (InstanceManager::is_collective_did(did))
         dc = find_or_request_distributed_collectable<
-          InstanceManager, SEND_MANAGER_REQUEST, DEFAULT_VIRTUAL_CHANNEL>(did, 
-                                                                        ready);
-      else if (PhysicalManager::is_reduction_fold_did(did))
-        dc = find_or_request_distributed_collectable<
-          FoldReductionManager, SEND_MANAGER_REQUEST, DEFAULT_VIRTUAL_CHANNEL>(
+          CollectiveManager, SEND_MANAGER_REQUEST, DEFAULT_VIRTUAL_CHANNEL>(
                                                                     did, ready);
-      else if (PhysicalManager::is_reduction_list_did(did))
+      else if (InstanceManager::is_instance_did(did))
         dc = find_or_request_distributed_collectable<
-          ListReductionManager, SEND_MANAGER_REQUEST, DEFAULT_VIRTUAL_CHANNEL>(
+          IndividualManager, SEND_MANAGER_REQUEST, DEFAULT_VIRTUAL_CHANNEL>(
                                                                     did, ready);
       else
         assert(false);
@@ -20073,6 +20289,15 @@ namespace Legion {
             if ((*it)->remove_base_gc_ref(APPLICATION_REF, &mutator))
               delete (*it);
         }
+      }
+      if (!redop_fill_views.empty())
+      {
+        WrapperReferenceMutator mutator(applied);
+        for (std::map<ReductionOpID,FillView*>::const_iterator it = 
+              redop_fill_views.begin(); it != redop_fill_views.end(); it++)
+          if (it->second->remove_base_valid_ref(RUNTIME_REF, &mutator))
+            delete it->second;
+        redop_fill_views.clear();
       }
       if (!applied.empty())
       {
@@ -22702,7 +22927,7 @@ namespace Legion {
 
 #ifdef LEGION_GPU_REDUCTIONS
     extern void register_builtin_gpu_reduction_tasks(
-        const std::set<Processor> &gpus, std::set<RtEvent> &registered_events);
+      GPUReductionTable &gpu_reductions, std::set<RtEvent> &registered_events);
 #endif
 
     //--------------------------------------------------------------------------
@@ -22755,6 +22980,29 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_NO_PROCESSORS, "Machine model contains "
             "no CPU processors and no utility processors! At least one "
             "CPU or one utility processor is required for Legion.")
+      Realm::ProfilingRequestSet no_requests;
+      // Keep track of all the registration events
+      std::set<RtEvent> registered_events;
+#ifdef LEGION_GPU_REDUCTIONS
+      // Do this here to make sure we get the gpu reduction table
+      // setup before we make the runtime object
+      register_builtin_gpu_reduction_tasks(get_gpu_reduction_table(),
+                                           registered_events);
+      GPUReductionTable &gpu_reduction_table = get_gpu_reduction_table();
+      const std::map<ReductionOpID,CodeDescriptor> &pending_gpu_reductions =
+        get_pending_gpu_reduction_table();
+      for (std::map<ReductionOpID,CodeDescriptor>::const_iterator it = 
+            pending_gpu_reductions.begin(); it != 
+            pending_gpu_reductions.end(); it++)
+      {
+        const TaskID task_id = 
+          LG_TASK_ID_AVAILABLE + gpu_reduction_table.size();
+        registered_events.insert(RtEvent(Processor::register_task_by_kind(
+                Processor::TOC_PROC, false/*global*/, task_id, it->second,
+                no_requests, NULL, 0)));
+        gpu_reduction_table[it->first] = task_id;
+      }
+#endif
       // Now build the data structures for all processors 
       std::map<Processor,Runtime*> processor_mapping;
       if (config.separate_runtime_instances)
@@ -22846,10 +23094,7 @@ namespace Legion {
       CodeDescriptor lg_task(Runtime::legion_runtime_task);
       CodeDescriptor rt_profiling_task(Runtime::profiling_runtime_task);
       CodeDescriptor startup_task(Runtime::startup_runtime_task);
-      CodeDescriptor endpoint_task(Runtime::endpoint_runtime_task);
-      Realm::ProfilingRequestSet no_requests;
-      // Keep track of all the registration events
-      std::set<RtEvent> registered_events;
+      CodeDescriptor endpoint_task(Runtime::endpoint_runtime_task); 
       for (std::map<Processor,Runtime*>::const_iterator it = 
             processor_mapping.begin(); it != processor_mapping.end(); it++)
       {
@@ -22898,16 +23143,12 @@ namespace Legion {
               it->first.register_task(LG_LEGION_PROFILING_ID, rt_profiling_task,
                 no_requests, &it->second, sizeof(it->second))));
       }
-#if defined(LEGION_GPU_REDUCTIONS) || \
-      (defined(LEGION_MALLOC_INSTANCES) && defined(LEGION_USE_CUDA))
+#if defined(LEGION_MALLOC_INSTANCES) && defined(LEGION_USE_CUDA)
       std::set<Processor> gpu_procs;
       for (std::set<Processor>::const_iterator it = 
             local_procs.begin(); it != local_procs.end(); it++)
         if (it->kind() == Processor::TOC_PROC)
           gpu_procs.insert(*it);
-#endif
-#ifdef LEGION_GPU_REDUCTIONS
-      register_builtin_gpu_reduction_tasks(gpu_procs, registered_events); 
 #endif
 #if defined(LEGION_MALLOC_INSTANCES) && defined(LEGION_USE_CUDA)
 #ifdef LEGION_SEPARATE_META_TASKS
@@ -23084,6 +23325,40 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    FillView* Runtime::find_or_create_reduction_fill_view(ReductionOpID redop)
+    //--------------------------------------------------------------------------
+    {
+      {
+        AutoLock r_lock(redop_lock,1,false/*exclusive*/);
+        std::map<ReductionOpID,FillView*>::const_iterator finder = 
+          redop_fill_views.find(redop);
+        if (finder != redop_fill_views.end())
+          return finder->second;
+      }
+      AutoLock r_lock(redop_lock);
+      // Check to see if we lost the race
+      std::map<ReductionOpID,FillView*>::const_iterator finder = 
+        redop_fill_views.find(redop);
+      if (finder != redop_fill_views.end())
+        return finder->second;
+      const ReductionOp *reduction_op = 
+        get_reduction_op(redop, true/*has lock*/);
+      void *fill_buffer = malloc(reduction_op->sizeof_rhs);
+      reduction_op->init(fill_buffer, 1);
+      FillView::FillViewValue *fill_value = 
+        new FillView::FillViewValue(fill_buffer, reduction_op->sizeof_rhs);
+      FillView *fill_view = new FillView(forest, get_available_distributed_id(),
+                                 address_space, fill_value, true/*register now*/
+#ifdef LEGION_SPY
+                                 , 0/*no creator*/
+#endif
+                                 );
+      fill_view->add_base_valid_ref(RUNTIME_REF);
+      redop_fill_views[redop] = fill_view;
+      return fill_view;
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ const SerdezOp* Runtime::get_serdez_op(CustomSerdezID serdez_id,
                                                       bool has_lock/*=false*/)
     //--------------------------------------------------------------------------
@@ -23200,6 +23475,35 @@ namespace Legion {
         assert(false);
       return table;
     }
+
+#ifdef LEGION_GPU_REDUCTIONS
+    //--------------------------------------------------------------------------
+    /*static*/ GPUReductionTable& Runtime::get_gpu_reduction_table(void)
+    //--------------------------------------------------------------------------
+    {
+      static GPUReductionTable table;
+      return table;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ std::map<ReductionOpID,CodeDescriptor>&
+                                  Runtime::get_pending_gpu_reduction_table(void)
+    //--------------------------------------------------------------------------
+    {
+      static std::map<ReductionOpID,CodeDescriptor> pending_table;
+      return pending_table;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::preregister_gpu_reduction_op(ReductionOpID redop,
+                                                     const CodeDescriptor &desc)
+    //--------------------------------------------------------------------------
+    {
+      std::map<ReductionOpID,CodeDescriptor> &pending_table = 
+        get_pending_gpu_reduction_table();
+      pending_table[redop] = desc;
+    }
+#endif
 
     //--------------------------------------------------------------------------
     /*static*/ SerdezOpTable& Runtime::get_serdez_table(bool safe)
@@ -24281,14 +24585,14 @@ namespace Legion {
             PhysicalAnalysis::handle_deferred_output(args);
             break;
           }
-        case LG_DEFER_INSTANCE_MANAGER_TASK_ID:
+        case LG_DEFER_INDIVIDUAL_MANAGER_TASK_ID:
           {
-            InstanceManager::handle_defer_manager(args, runtime);
+            IndividualManager::handle_defer_manager(args, runtime);
             break;
           }
-        case LG_DEFER_REDUCTION_MANAGER_TASK_ID:
+        case LG_DEFER_COLLECTIVE_MANAGER_TASK_ID:
           {
-            ReductionManager::handle_defer_manager(args, runtime);
+            CollectiveManager::handle_defer_manager(args, runtime);
             break;
           }
         case LG_DEFER_VERIFY_PARTITION_TASK_ID:

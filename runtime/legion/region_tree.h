@@ -49,8 +49,9 @@ namespace Legion {
     struct IndirectRecord {
     public:
       IndirectRecord(void) { }
-      IndirectRecord(const FieldMask &m, PhysicalManager *p,
-                     IndexSpace handle, ApEvent e, const Domain &d);
+      IndirectRecord(const FieldMask &m, InstanceManager *p, 
+                     const DomainPoint &key, IndexSpace handle, 
+                     ApEvent e, const Domain &d);
     public:
       FieldMask fields;
       PhysicalInstance inst;
@@ -543,7 +544,7 @@ namespace Legion {
                       const LegionVector<IndirectRecord>::aligned &src_records,
                               const InstanceRef &src_idx_target,
                       const LegionVector<IndirectRecord>::aligned &dst_records,
-                              const InstanceRef &dst_idx_target,
+                              const InstanceRef &dst_idx_target, CopyOp *op,
                               const bool both_are_range,
                               const ApEvent precondition, 
                               const PredEvent pred_guard,
@@ -600,8 +601,7 @@ namespace Legion {
                                const std::vector<MappingInstance> &chosen,
                                InstanceSet &result, RegionTreeID &bad_tree,
                                std::vector<FieldID> &missing_fields,
-                               std::map<PhysicalManager*,
-                                    std::pair<unsigned,bool> > *acquired,
+                               std::map<PhysicalManager*,unsigned> *acquired,
                                std::vector<PhysicalManager*> &unacquired,
                                const bool do_acquire_checks,
                                const bool allow_partial_virtual = false);
@@ -609,8 +609,7 @@ namespace Legion {
                                const RegionRequirement &req,
                                const std::vector<MappingInstance> &chosen,
                                InstanceSet &result, RegionTreeID &bad_tree,
-                               std::map<PhysicalManager*,
-                                    std::pair<unsigned,bool> > *acquired,
+                               std::map<PhysicalManager*,unsigned> *acquired,
                                std::vector<PhysicalManager*> &unacquired,
                                const bool do_acquire_checks);
       void log_mapping_decision(const UniqueID unique_id, TaskContext *context,
@@ -620,7 +619,7 @@ namespace Legion {
                                 bool postmapping = false);
     public: // helper method for the above two methods
       void perform_missing_acquires(Operation *op,
-                 std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired,
+                               std::map<PhysicalManager*,unsigned> &acquired,
                                const std::vector<PhysicalManager*> &unacquired);
     public:
       // Debugging method for checking context state
@@ -873,6 +872,33 @@ namespace Legion {
     };
 
     /**
+     * \class PieceIteratorImpl
+     * This is an interface for iterating over pieces 
+     * which in this case are just a list of rectangles
+     */
+    class PieceIteratorImpl : public Collectable {
+    public:
+      virtual ~PieceIteratorImpl(void) { }
+      virtual int get_next(int index, Domain &next_piece) = 0;
+    };
+
+    /**
+     * \class PieceIteratorImplT
+     * This is the templated version of this class that is
+     * instantiated for each cominbation of type and dimensoinality
+     */
+    template<int DIM, typename T>
+    class PieceIteratorImplT : public PieceIteratorImpl {
+    public:
+      PieceIteratorImplT(const void *piece_list, size_t piece_list_size,
+                         IndexSpaceNodeT<DIM,T> *privilege_node); 
+      virtual ~PieceIteratorImplT(void) { }
+      virtual int get_next(int index, Domain &next_piece);
+    protected:
+      std::vector<Rect<DIM,T> > pieces;
+    };
+
+    /**
      * \class IndexSpaceExpression
      * An IndexSpaceExpression represents a set computation
      * one on or more index spaces. IndexSpaceExpressions
@@ -963,6 +989,8 @@ namespace Legion {
       virtual IndexSpaceNode* create_node(IndexSpace handle,
                       DistributedID did, RtEvent initialized,
                       std::set<RtEvent> *applied) = 0;
+      virtual PieceIteratorImpl* create_piece_iterator(const void *piece_list,
+                    size_t piece_list_size, IndexSpaceNode *privilege_node) = 0;
     public:
       virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
@@ -972,10 +1000,7 @@ namespace Legion {
                            FieldSpace handle,
                            RegionTreeID tree_id,
 #endif
-                           ApEvent precondition, PredEvent pred_guard,
-                           // Can be NULL if we're not tracing
-                           const FieldMaskSet<FillView> *tracing_srcs,
-                           const FieldMaskSet<InstanceView> *tracing_dsts) = 0;
+                           ApEvent precondition, PredEvent pred_guard) = 0;
       virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
@@ -984,10 +1009,7 @@ namespace Legion {
                            RegionTreeID dst_tree_id,
 #endif
                            ApEvent precondition, PredEvent pred_guard,
-                           ReductionOpID redop, bool reduction_fold,
-                           // Can be NULL if we're not tracing
-                           const FieldMaskSet<InstanceView> *tracing_srcs,
-                           const FieldMaskSet<InstanceView> *tracing_dsts) = 0;
+                           ReductionOpID redop, bool reduction_fold) = 0;
       virtual void construct_indirections(
                            const std::vector<unsigned> &field_indexes,
                            const FieldID indirect_field,
@@ -1012,10 +1034,22 @@ namespace Legion {
                            unsigned unique_indirections_identifier,
 #endif
                            ApEvent precondition, PredEvent pred_guard) = 0;
+#ifdef LEGION_GPU_REDUCTIONS
+      virtual ApEvent gpu_reduction(const PhysicalTraceInfo &trace_info,
+                           const std::vector<CopySrcDstField> &dst_fields,
+                           const std::vector<CopySrcDstField> &src_fields,
+                           Processor gpu, TaskID gpu_task_id, 
+                           PhysicalManager *dst, PhysicalManager *src,
+                           ApEvent precondition, PredEvent pred_guard, 
+                           ReductionOpID redop, bool reduction_fold) = 0;
+#endif
       virtual Realm::InstanceLayoutGeneric* create_layout(
                            const LayoutConstraintSet &constraints,
                            const std::vector<FieldID> &field_ids,
-                           const std::vector<size_t> &field_sizes) = 0;
+                           const std::vector<size_t> &field_sizes,
+                           bool compact,LayoutConstraintKind *unsat_kind = NULL,
+                           unsigned *unsat_index = NULL,void **piece_list =NULL,
+                           size_t *piece_list_size = NULL) = 0;
     public:
       static void handle_tighten_index_space(const void *args);
       static AddressSpaceID get_owner_space(IndexSpaceExprID id, Runtime *rt);
@@ -1047,9 +1081,7 @@ namespace Legion {
                                FieldSpace handle,
                                RegionTreeID tree_id,
 #endif
-                               ApEvent precondition, PredEvent pred_guard,
-                               const FieldMaskSet<FillView> *tracing_srcs,
-                               const FieldMaskSet<InstanceView> *tracing_dsts);
+                               ApEvent precondition, PredEvent pred_guard);
       template<int DIM, typename T>
       inline ApEvent issue_copy_internal(RegionTreeForest *forest,
                                const Realm::IndexSpace<DIM,T> &space,
@@ -1061,9 +1093,7 @@ namespace Legion {
                                RegionTreeID dst_tree_id,
 #endif
                                ApEvent precondition, PredEvent pred_guard,
-                               ReductionOpID redop, bool reduction_fold,
-                               const FieldMaskSet<InstanceView> *tracing_srcs,
-                               const FieldMaskSet<InstanceView> *tracing_dsts);
+                               ReductionOpID redop, bool reduction_fold);
       template<int DIM, typename T>
       inline void construct_indirections_internal(
                                const std::vector<unsigned> &field_indexes,
@@ -1094,12 +1124,27 @@ namespace Legion {
                                unsigned unique_indirections_identifier,
 #endif
                                ApEvent precondition, PredEvent pred_guard);
+#ifdef LEGION_GPU_REDUCTIONS
+      template<int DIM, typename T>
+      inline ApEvent gpu_reduction_internal(RegionTreeForest *forest,
+                               const Realm::IndexSpace<DIM,T> &space,
+                               const PhysicalTraceInfo &trace_info,
+                               const std::vector<CopySrcDstField> &dst_fields,
+                               const std::vector<CopySrcDstField> &src_fields,
+                               Processor gpu, TaskID gpu_task_id,
+                               PhysicalManager *dst, PhysicalManager *src,
+                               ApEvent precondition, PredEvent pred_guard, 
+                               ReductionOpID redop, bool reduction_fold);
+#endif
       template<int DIM, typename T>
       inline Realm::InstanceLayoutGeneric* create_layout_internal(
                                const Realm::IndexSpace<DIM,T> &space,
                                const LayoutConstraintSet &constraints,
                                const std::vector<FieldID> &field_ids,
-                               const std::vector<size_t> &field_sizes) const;
+                               const std::vector<size_t> &field_sizes,
+                               bool compact, LayoutConstraintKind *unsat_kind,
+                               unsigned *unsat_index, void **piece_list = NULL,
+                               size_t *piece_list_size = NULL) const;
     public:
       static IndexSpaceExpression* unpack_expression(Deserializer &derez,
                          RegionTreeForest *forest, AddressSpaceID source);
@@ -1232,6 +1277,8 @@ namespace Legion {
       virtual IndexSpaceNode* create_node(IndexSpace handle,
                           DistributedID did, RtEvent initialized,
                           std::set<RtEvent> *applied);
+      virtual PieceIteratorImpl* create_piece_iterator(const void *piece_list,
+                      size_t piece_list_size, IndexSpaceNode *privilege_node);
       virtual IndexSpaceExpression* find_congruence(void) = 0;
     public:
       virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
@@ -1242,10 +1289,7 @@ namespace Legion {
                            FieldSpace handle,
                            RegionTreeID tree_id,
 #endif
-                           ApEvent precondition, PredEvent pred_guard,
-                           // Can be NULL if we're not tracing
-                           const FieldMaskSet<FillView> *tracing_srcs,
-                           const FieldMaskSet<InstanceView> *tracing_dsts);
+                           ApEvent precondition, PredEvent pred_guard);
       virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
@@ -1254,10 +1298,7 @@ namespace Legion {
                            RegionTreeID dst_tree_id,
 #endif
                            ApEvent precondition, PredEvent pred_guard,
-                           ReductionOpID redop, bool reduction_fold,
-                           // Can be NULL if we're not tracing
-                           const FieldMaskSet<InstanceView> *tracing_srcs,
-                           const FieldMaskSet<InstanceView> *tracing_dsts);
+                           ReductionOpID redop, bool reduction_fold);
       virtual void construct_indirections(
                            const std::vector<unsigned> &field_indexes,
                            const FieldID indirect_field,
@@ -1282,10 +1323,22 @@ namespace Legion {
                            unsigned unique_indirections_identifier,
 #endif
                            ApEvent precondition, PredEvent pred_guard);
+#ifdef LEGION_GPU_REDUCTIONS
+      virtual ApEvent gpu_reduction(const PhysicalTraceInfo &trace_info,
+                           const std::vector<CopySrcDstField> &dst_fields,
+                           const std::vector<CopySrcDstField> &src_fields,
+                           Processor gpu, TaskID gpu_task_id,
+                           PhysicalManager *dst, PhysicalManager *src,
+                           ApEvent precondition, PredEvent pred_guard, 
+                           ReductionOpID redop, bool reduction_fold);
+#endif
       virtual Realm::InstanceLayoutGeneric* create_layout(
                            const LayoutConstraintSet &constraints,
                            const std::vector<FieldID> &field_ids,
-                           const std::vector<size_t> &field_sizes);
+                           const std::vector<size_t> &field_sizes,
+                           bool compact,LayoutConstraintKind *unsat_kind = NULL,
+                           unsigned *unsat_index = NULL,void **piece_list =NULL, 
+                           size_t *piece_list_size = NULL);
     public:
       ApEvent get_realm_index_space(Realm::IndexSpace<DIM,T> &space,
                                     bool need_tight_result);
@@ -1790,6 +1843,8 @@ namespace Legion {
       virtual IndexSpaceNode* create_node(IndexSpace handle,
                     DistributedID did, RtEvent initialized,
                     std::set<RtEvent> *applied) = 0; 
+      virtual PieceIteratorImpl* create_piece_iterator(const void *piece_list,
+                    size_t piece_list_size, IndexSpaceNode *privilege_node) = 0;
     public:
       virtual ApEvent compute_pending_space(Operation *op,
             const std::vector<IndexSpace> &handles, bool is_union) = 0;
@@ -1801,6 +1856,7 @@ namespace Legion {
       virtual size_t get_volume(void) = 0;
       virtual size_t get_num_dims(void) const = 0;
       virtual bool contains_point(const void *realm_point,TypeTag type_tag) = 0;
+      virtual bool contains_point(const DomainPoint &point) = 0;
     public:
       virtual LegionColor get_max_linearized_color(void) = 0;
       virtual LegionColor linearize_color(const void *realm_color,
@@ -1966,6 +2022,8 @@ namespace Legion {
       virtual IndexSpaceNode* create_node(IndexSpace handle,
                                 DistributedID did, RtEvent initialized,
                                 std::set<RtEvent> *applied);
+      virtual PieceIteratorImpl* create_piece_iterator(const void *piece_list,
+                      size_t piece_list_size, IndexSpaceNode *privilege_node);
     public:
       void log_index_space_points(const Realm::IndexSpace<DIM,T> &space) const;
       void log_profiler_index_space_points(
@@ -1981,6 +2039,7 @@ namespace Legion {
       virtual size_t get_volume(void);
       virtual size_t get_num_dims(void) const;
       virtual bool contains_point(const void *realm_point, TypeTag type_tag);
+      virtual bool contains_point(const DomainPoint &point);
     public:
       virtual LegionColor get_max_linearized_color(void);
       virtual LegionColor linearize_color(const void *realm_color,
@@ -2135,10 +2194,7 @@ namespace Legion {
                            FieldSpace handle,
                            RegionTreeID tree_id,
 #endif
-                           ApEvent precondition, PredEvent pred_guard,
-                           // Can be NULL if we're not tracing
-                           const FieldMaskSet<FillView> *tracing_srcs,
-                           const FieldMaskSet<InstanceView> *tracing_dsts);
+                           ApEvent precondition, PredEvent pred_guard);
       virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
@@ -2147,10 +2203,7 @@ namespace Legion {
                            RegionTreeID dst_tree_id,
 #endif
                            ApEvent precondition, PredEvent pred_guard,
-                           ReductionOpID redop, bool reduction_fold,
-                           // Can be NULL if we're not tracing
-                           const FieldMaskSet<InstanceView> *tracing_srcs,
-                           const FieldMaskSet<InstanceView> *tracing_dsts);
+                           ReductionOpID redop, bool reduction_fold);
       virtual void construct_indirections(
                            const std::vector<unsigned> &field_indexes,
                            const FieldID indirect_field,
@@ -2175,10 +2228,22 @@ namespace Legion {
                            unsigned unique_indirections_identifier,
 #endif
                            ApEvent precondition, PredEvent pred_guard);
+#ifdef LEGION_GPU_REDUCTIONS
+      virtual ApEvent gpu_reduction(const PhysicalTraceInfo &trace_info,
+                           const std::vector<CopySrcDstField> &dst_fields,
+                           const std::vector<CopySrcDstField> &src_fields,
+                           Processor gpu, TaskID gpu_task_id,
+                           PhysicalManager *dst, PhysicalManager *src,
+                           ApEvent precondition, PredEvent pred_guard, 
+                           ReductionOpID redop, bool reduction_fold);
+#endif
       virtual Realm::InstanceLayoutGeneric* create_layout(
                            const LayoutConstraintSet &constraints,
                            const std::vector<FieldID> &field_ids,
-                           const std::vector<size_t> &field_sizes);
+                           const std::vector<size_t> &field_sizes,
+                           bool compact,LayoutConstraintKind *unsat_kind = NULL,
+                           unsigned *unsat_index = NULL,void **piece_list =NULL, 
+                           size_t *piece_list_size = NULL);
     public:
       virtual void get_launch_space_domain(Domain &launch_domain);
       virtual void validate_slicing(const std::vector<IndexSpace> &slice_spaces,
@@ -2956,7 +3021,7 @@ namespace Legion {
     public:
       InstanceRef create_external_instance(
             const std::vector<FieldID> &fields, RegionNode *node, AttachOp *op);
-      InstanceManager* create_external_manager(PhysicalInstance inst,
+      PhysicalManager* create_external_manager(PhysicalInstance inst,
             ApEvent ready_event, size_t instance_footprint, 
             LayoutConstraintSet &constraints, 
             const std::vector<FieldID> &field_set,

@@ -54,7 +54,6 @@ void CircuitMapper::map_task(const MapperContext      ctx,
     bool map_to_gpu = task.target_proc.kind() == Processor::TOC_PROC;
     Memory sysmem = proc_sysmems[task.target_proc];
     Memory fbmem = proc_fbmems[task.target_proc];
-    Memory zcmem = proc_zcmems[task.target_proc];
 
     for (unsigned idx = 0; idx < task.regions.size(); idx++)
     {
@@ -62,63 +61,14 @@ void CircuitMapper::map_task(const MapperContext      ctx,
           (task.regions[idx].privilege_fields.empty())) continue;
 
       Memory target_memory;
-      if (!map_to_gpu) target_memory = sysmem;
-      else {
-        switch (task.task_id)
-        {
-          case CALC_NEW_CURRENTS_TASK_ID:
-            {
-              if (idx < 3)
-                target_memory = fbmem;
-              else
-                target_memory = zcmem;
-              break;
-            }
-
-          case DISTRIBUTE_CHARGE_TASK_ID:
-            {
-              if (idx < 2)
-                target_memory = fbmem;
-              else
-                target_memory = zcmem;
-              break;
-            }
-
-          case UPDATE_VOLTAGES_TASK_ID:
-            {
-              if (idx != 1)
-                target_memory = fbmem;
-              else
-                target_memory = zcmem;
-              break;
-            }
-
-          default:
-            {
-              assert(false);
-              break;
-            }
-        }
-      }
-      if (task.regions[idx].privilege == REDUCE)
-      {
-        // Reduction instances always have to make new instances
-        const TaskLayoutConstraintSet &layout_constraints =
-          runtime->find_task_layout_constraints(ctx,
-                              task.task_id, output.chosen_variant);
-        std::set<FieldID> fields(task.regions[idx].privilege_fields);
-        if (!default_create_custom_instances(ctx, task.target_proc,
-                target_memory, task.regions[idx], idx, fields,
-                layout_constraints, true,
-                output.chosen_instances[idx]))
-        {
-          default_report_failed_instance_creation(task, idx,
-                                    task.target_proc, target_memory);
-        }
-      }
+      if (!map_to_gpu) 
+        target_memory = sysmem;
       else
-        map_circuit_region(ctx, task.regions[idx].region, target_memory,
-                           output.chosen_instances[idx]);
+        target_memory = fbmem;
+      const RegionRequirement &req = task.regions[idx];
+      map_circuit_region(ctx, req.region, target_memory,
+                         output.chosen_instances[idx], 
+                         req.privilege_fields, req.redop);
     }
     runtime->acquire_instances(ctx, output.chosen_instances);
   }
@@ -169,20 +119,36 @@ void CircuitMapper::map_inline(const MapperContext    ctx,
 
 void CircuitMapper::map_circuit_region(const MapperContext ctx,
                                        LogicalRegion region, Memory target,
-                                       std::vector<PhysicalInstance> &instances)
+                                       std::vector<PhysicalInstance> &instances,
+                                       const std::set<FieldID> &privilege_fields,
+                                       ReductionOpID redop)
 {
   const std::pair<LogicalRegion,Memory> key(region, target);
-  std::map<std::pair<LogicalRegion,Memory>,PhysicalInstance>::const_iterator
-    finder = local_instances.find(key);
-  if (finder != local_instances.end()) {
-    instances.push_back(finder->second);
-    return;
+  if (redop > 0) {
+    assert(redop == REDUCE_ID);
+    std::map<std::pair<LogicalRegion,Memory>,PhysicalInstance>::const_iterator
+      finder = reduction_instances.find(key);
+    if (finder != reduction_instances.end()) {
+      instances.push_back(finder->second);
+      return;
+    }
+  } else {
+    std::map<std::pair<LogicalRegion,Memory>,PhysicalInstance>::const_iterator
+      finder = local_instances.find(key);
+    if (finder != local_instances.end()) {
+      instances.push_back(finder->second);
+      return;
+    }
   }
   // First time through, then we make an instance
   std::vector<LogicalRegion> regions(1, region);  
   LayoutConstraintSet layout_constraints;
   // No specialization
-  layout_constraints.add_constraint(SpecializedConstraint());
+  if (redop > 0)
+    layout_constraints.add_constraint(
+        SpecializedConstraint(LEGION_AFFINE_REDUCTION_SPECIALIZE, redop));
+  else
+    layout_constraints.add_constraint(SpecializedConstraint(LEGION_AFFINE_SPECIALIZE));
   // SOA-Fortran dimension ordering
   std::vector<DimensionKind> dimension_ordering(4);
   dimension_ordering[0] = DIM_X;
@@ -195,7 +161,10 @@ void CircuitMapper::map_circuit_region(const MapperContext ctx,
   layout_constraints.add_constraint(MemoryConstraint(target.kind()));
   // Have all the field for the instance available
   std::vector<FieldID> all_fields;
-  runtime->get_field_space_fields(ctx, region.get_field_space(), all_fields);
+  if (redop > 0)
+    all_fields.insert(all_fields.end(), privilege_fields.begin(), privilege_fields.end());
+  else
+    runtime->get_field_space_fields(ctx, region.get_field_space(), all_fields);
   layout_constraints.add_constraint(FieldConstraint(all_fields, false/*contiguous*/,
                                                     false/*inorder*/));
 
@@ -207,7 +176,10 @@ void CircuitMapper::map_circuit_region(const MapperContext ctx,
   }
   instances.push_back(result);
   // Save the result for future use
-  local_instances[key] = result;
+  if (redop > 0)
+    reduction_instances[key] = result;
+  else
+    local_instances[key] = result;
 }
 
 void update_mappers(Machine machine, Runtime *runtime,
