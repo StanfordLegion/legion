@@ -634,7 +634,6 @@ namespace Legion {
             rez.serialize(it->first->did);
             rez.serialize(it->second);
           }
-          rez.serialize(applied);
         }
         runtime->send_remote_trace_update(origin_space, rez);
         applied.insert(done);
@@ -1254,7 +1253,6 @@ namespace Legion {
               FieldMask mask;
               derez.deserialize(mask);
               tracing_dsts.insert(view, mask);
-
             } 
             if (!ready_events.empty())
             {
