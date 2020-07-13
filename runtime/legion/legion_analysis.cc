@@ -1462,10 +1462,6 @@ namespace Legion {
             }
             else // lhs was unchanged
               Runtime::trigger_event(done);
-            if (!effects.empty())
-              Runtime::trigger_event(applied, Runtime::merge_events(effects));
-            else
-              Runtime::trigger_event(applied);
             if (memo->get_origin_space() != runtime->address_space)
               delete memo;
             break;

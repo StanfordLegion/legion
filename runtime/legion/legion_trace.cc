@@ -2780,7 +2780,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
               assert(finder != copy_views.end());
 #endif
-              find_all_last_users(finder->second, users);
+              find_all_last_users(finder->second, users, ready_events);
               precondition_idx = &reduction->precondition_idx;
               break;
             }
@@ -4156,12 +4156,12 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_recording());
 #endif
-
+      unsigned rhs_ = find_event(precondition, tpl_lock);
       unsigned lhs_ = convert_event(lhs);
       insert_instruction(new GPUReduction(
             *this, lhs_, expr, find_trace_local_id(memo),
             src_fields, dst_fields, gpu, gpu_task_id, src, dst,
-            find_event(precondition), redop, reduction_fold));
+            rhs_, redop, reduction_fold));
     }
 #endif
 
