@@ -1950,11 +1950,11 @@ class _TaskLauncher(object):
         if is_index_launch:
             def add_region_normal(launcher, handle, *args):
                 return c.legion_index_launcher_add_region_requirement_logical_region(
-                    launcher, handle, 0, # projection
+                    launcher, handle, 100, # projection
                     *args)
             def add_region_reduction(launcher, handle, *args):
                 return c.legion_index_launcher_add_region_requirement_logical_region_reduction(
-                    launcher, handle, 0, # projection
+                    launcher, handle, 100, # projection
                     *args)
             add_partition_normal = c.legion_index_launcher_add_region_requirement_logical_partition
             add_partition_reduction = c.legion_index_launcher_add_region_requirement_logical_partition_reduction
@@ -1988,7 +1988,7 @@ class _TaskLauncher(object):
                 elif isinstance(arg, SymbolicExpr):
                     # FIXME: Support non-trivial projection functors
                     assert isinstance(arg, SymbolicIndexAccess) and (isinstance(arg.index, SymbolicLoopIndex) or isinstance(arg.index, ConcreteLoopIndex))
-                    proj_id = 0
+                    proj_id = 100
 
                     parent = arg.parent if arg.parent is not None else arg
                     parent = parent.parent if parent.parent is not None else parent
