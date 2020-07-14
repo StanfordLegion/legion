@@ -114,7 +114,7 @@ namespace Realm {
       // an inner node - we can create that ourselves
       typename ALLOCATOR::INNER_TYPE *inner = new typename ALLOCATOR::INNER_TYPE(level, first_index, last_index);
       for(size_t i = 0; i < ALLOCATOR::INNER_TYPE::SIZE; i++)
-	inner->elems[i] = 0;
+	inner->elems[i].store(0);
       return inner;
     } else {
       return ALLOCATOR::new_leaf_node(first_index, last_index, owner, free_list);
@@ -176,7 +176,7 @@ namespace Realm {
       assert((i >= 0) && (((size_t)i) < ALLOCATOR::INNER_TYPE::SIZE));
 #endif
 
-      NodeBase *child = inner->elems[i];
+      NodeBase *child = inner->elems[i].load_acquire();
       if(child == 0) {
 	return false;	
       }
@@ -235,7 +235,7 @@ namespace Realm {
 	  IT parent_last = (((n->last_index + 1) << ALLOCATOR::INNER_BITS) - 1);
 	  NodeBase *parent = new_tree_node(parent_level, parent_first, parent_last, owner, free_list);
 	  typename ALLOCATOR::INNER_TYPE *inner = static_cast<typename ALLOCATOR::INNER_TYPE *>(parent);
-	  inner->elems[0] = n;
+	  inner->elems[0].store_release(n);
 	  n = parent;
 	  n_level = parent_level;
 	  root_and_level.store_release(encode_root_and_level(n, n_level));
@@ -267,7 +267,7 @@ namespace Realm {
       assert((i >= 0) && (((size_t)i) < ALLOCATOR::INNER_TYPE::SIZE));
 #endif
 
-      NodeBase *child = inner->elems[i];
+      NodeBase *child = inner->elems[i].load_acquire();
       if(child == 0) {
 	// need to populate subtree
 
@@ -275,7 +275,7 @@ namespace Realm {
 	inner->lock.lock();
 
 	// now that lock is held, see if we really need to make new node
-	child = inner->elems[i];
+	child = inner->elems[i].load_acquire();
 	if(child == 0) {
 	  int child_level = n_level - 1;
 	  int child_shift = (ALLOCATOR::LEAF_BITS + child_level * ALLOCATOR::INNER_BITS);
@@ -283,7 +283,7 @@ namespace Realm {
 	  IT child_last = inner->first_index + ((i + 1) << child_shift) - 1;
 
 	  child = new_tree_node(child_level, child_first, child_last, owner, free_list);
-	  inner->elems[i] = child;
+	  inner->elems[i].store_release(child);
 
 	  prepend_alloced_node(child);
 	}

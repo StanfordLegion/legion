@@ -297,8 +297,8 @@ namespace Realm {
       // ID of the node that launches this XferDes
       NodeID launch_node;
       //uint64_t /*bytes_submit, */bytes_read, bytes_write/*, bytes_total*/;
-      bool iteration_completed;
-      bool transfer_completed;
+      atomic<bool> iteration_completed;
+      atomic<bool> transfer_completed;
       // current input and output port mask
       uint64_t current_in_port_mask, current_out_port_mask;
       uint64_t current_in_port_remain, current_out_port_remain;

@@ -766,11 +766,12 @@ namespace Realm {
       //  count and finalize if needed - the contributions (or at least the
       //  portions that know how many pieces there were) happened before we
       //  got here
-      int v = remaining_contributor_count.fetch_add(count) + count;
+      int v = remaining_contributor_count.fetch_add_acqrel(count) + count;
       if(v == 0) {
 	int pcount = total_piece_count.load();
 	bool have_all_pieces = ((pcount == 0) ||
-				((remaining_piece_count.fetch_add(pcount) + pcount) == 0));
+				((remaining_piece_count.fetch_add_acqrel(pcount) +
+				  pcount) == 0));
 	if(have_all_pieces)
 	  finalize();
       }
@@ -799,14 +800,15 @@ namespace Realm {
     }
 
     // count is allowed to go negative if we get contributions before we know the total expected
-    int left = remaining_contributor_count.fetch_sub(1) - 1;
+    int left = remaining_contributor_count.fetch_sub_acqrel(1) - 1;
     if(left == 0) {
       // we didn't have anything to contribute to the total piece count, but
       //  it's our job to incorporate it into the remaining piece count and
       //  finalize if needed
       int pcount = total_piece_count.load();
       bool have_all_pieces = ((pcount == 0) ||
-			      ((remaining_piece_count.fetch_add(pcount) + pcount) == 0));
+			      ((remaining_piece_count.fetch_add_acqrel(pcount) +
+				pcount) == 0));
       if(have_all_pieces)
 	finalize();
     }
@@ -1006,14 +1008,15 @@ namespace Realm {
       //  then see if we are the final contributor
       total_piece_count.fetch_add(piece_count);
 
-      bool last_contrib = (remaining_contributor_count.fetch_sub(1) == 1);
+      bool last_contrib = (remaining_contributor_count.fetch_sub_acqrel(1) == 1);
       if(last_contrib) {
 	// refetch the total piece count and add it to the remaining count,
 	//  minus one for this piece we're doing now - if the count comes out
 	//  to zero, we're the last count
 	int pcount = total_piece_count.load() - 1;
 	have_all_pieces = ((pcount == 0) ||
-			   ((remaining_piece_count.fetch_add(pcount) + pcount) == 0));
+			   ((remaining_piece_count.fetch_add_acqrel(pcount) +
+			     pcount) == 0));
       } else {
 	// decrement remaining count for our piece - if count goes to zero,
 	//  we were the last piece
@@ -1022,7 +1025,7 @@ namespace Realm {
     } else {
       // decrement remaining count for our piece - if count goes to zero,
       //  we were the last piece
-      have_all_pieces = (remaining_piece_count.fetch_sub(1) == 1);
+      have_all_pieces = (remaining_piece_count.fetch_sub_acqrel(1) == 1);
     }
     
     if(have_all_pieces) {
