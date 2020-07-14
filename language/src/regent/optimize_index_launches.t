@@ -1198,10 +1198,11 @@ function init_bitmask_false(bitmask)
   return util.mk_stat_for_num(idx, values, util.mk_block(stats))
 end
 
-function get_check_stats(bitmask, value, conflict, index_expr, volume)
+function get_check_stats(preamble, value, index_expr, bitmask, conflict, volume)
   local stats = terralib.newlist()
 
   -- Compute value = index_expr(i)
+  preamble:map(function(stat) stats:insert(stat) end)
   stats:insert(util.mk_stat_assignment(util.mk_expr_id_rawref(value), index_expr))
 
   local then_block = terralib.newlist()
@@ -1257,7 +1258,7 @@ function insert_dynamic_check(index_launch_ast, unoptimized_loop_ast)
   else
     index_expr = index_launch_ast.call.args[1].index
   end
-  local check_stats = get_check_stats(bitmask, value, conflict, index_expr, volume)
+  local check_stats = get_check_stats(index_launch_ast.preamble, value, index_expr, bitmask, conflict, volume)
 
   local i = index_launch_ast.symbol
   local bounds
