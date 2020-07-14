@@ -1241,8 +1241,13 @@ end
 function insert_dynamic_check(index_launch_ast, unoptimized_loop_ast)
   local stats = terralib.newlist()
 
-  -- Generating the AST for var volume = p.colors.bounds:volume()
-  local p_symbol = index_launch_ast.call.args[1].value.value
+  -- Optimize only if we are indexing into a partition
+  local proceed, p_symbol = pcall(function() return index_launch_ast.call.args[1].value.value end)
+  if not proceed then
+    return unoptimized_loop_ast
+  end
+
+  -- Generate the AST for var volume = p.colors.bounds:volume()
   local p_colors = util.mk_expr_field_access(util.mk_expr_id(p_symbol), "colors", std.ispace(std.int1d))
   local p_bounds = util.mk_expr_field_access(p_colors, "bounds", std.rect1d)
   local p_volume = util.mk_expr_method_call(p_bounds, int32, "volume", terralib.newlist())
@@ -1271,7 +1276,7 @@ function insert_dynamic_check(index_launch_ast, unoptimized_loop_ast)
 
   local i = index_launch_ast.symbol
   local bounds
-  -- Generating the AST based on loop type
+  -- Generate the AST based on loop type
   if unoptimized_loop_ast.node_type:is(ast.typed.stat.ForNum) then
     bounds = index_launch_ast.values
     stats:insert(util.mk_stat_for_num(i, bounds, util.mk_block(check_stats)))
@@ -1284,9 +1289,7 @@ function insert_dynamic_check(index_launch_ast, unoptimized_loop_ast)
   local final_check = util.mk_stat_if_else(util.mk_expr_id(conflict), unoptimized_loop_ast, index_launch_ast)
   stats:insert(final_check)
 
-  local block = util.mk_block(stats)
-  local stat_block = util.mk_stat_block(block)
-  return stat_block
+  return util.mk_stat_block(util.mk_block(stats))
 end
 
 function optimize_index_launch.stat_for_num(cx, node)
