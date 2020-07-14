@@ -25,6 +25,7 @@ local report = require("common/report")
 local std = require("regent/std")
 
 local skip_interference_check = std.config["override-demand-index-launch"]
+local emit_dynamic_check = std.config["index-launch-dynamic"]
 
 local context = {}
 
@@ -1332,7 +1333,7 @@ function optimize_index_launch.stat_for_num(cx, node)
         span = node.span,
     }
 
-    if not body.needs_dynamic_check then
+    if not emit_dynamic_check or not body.needs_dynamic_check then
       return index_launch_ast
     else
       return insert_dynamic_check(index_launch_ast, node {
@@ -1393,7 +1394,7 @@ function optimize_index_launch.stat_for_list(cx, node)
       span = node.span,
     }
 
-    if not body.needs_dynamic_check then
+    if not emit_dynamic_check or not body.needs_dynamic_check then
       return index_launch_ast
     else
       return insert_dynamic_check(index_launch_ast, node {
