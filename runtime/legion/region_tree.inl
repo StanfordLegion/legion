@@ -725,7 +725,15 @@ namespace Legion {
         }
         return layout;
       }
-      
+      const OrderingConstraint &order = constraints.ordering_constraint;  
+#ifdef DEBUG_LEGION
+      assert(order.ordering.size() == (DIM+1));
+#endif
+      // Check if it is safe to re-use piece lists
+      // It's only safe if fsize describes the size of a piece, which
+      // is true if we only have a single piece or we're doing AOS
+      const bool safe_reuse = 
+       ((piece_bounds.size() == 1) || (order.ordering.front() == LEGION_DIM_F));
       // Get any alignment and offset constraints for individual fields
       std::map<FieldID,size_t> alignments;
       for (std::vector<AlignmentConstraint>::const_iterator it = 
@@ -749,7 +757,8 @@ namespace Legion {
       {
         zip_fields.push_back(
             std::pair<size_t,FieldID>(field_sizes[idx], field_ids[idx]));
-        unique_sizes.insert(field_sizes[idx]);
+        if (safe_reuse)
+          unique_sizes.insert(field_sizes[idx]);
       }
       if (!constraints.field_constraint.inorder)
       {
@@ -768,11 +777,7 @@ namespace Legion {
           std::reverse(it1, it2);
           it1 = it2;
         }
-      }
-      const OrderingConstraint &order = constraints.ordering_constraint;  
-#ifdef DEBUG_LEGION
-      assert(order.ordering.size() == (DIM+1));
-#endif
+      } 
       // Single affine piece or AOS on all pieces 
       // In this case we know fsize and falign are the same for
       // each of the pieces
@@ -841,12 +846,7 @@ namespace Legion {
         fsize = round_up(fsize, falign);
         // overall instance alignment layout must be compatible with group
         layout->alignment_reqd = lcm(layout->alignment_reqd, falign);
-      }
-      // Check if it is safe to re-use piece lists
-      // It's only safe if fsize describes the size of a piece, which
-      // is true if we only have a single piece or we're doing AOS
-      const bool safe_reuse = 
-        ((piece_bounds.size() == 1) || (order.ordering.back() == LEGION_DIM_F));
+      } 
       // compute the starting offsets for each piece
       std::vector<size_t> piece_offsets(piece_bounds.size());
       if (safe_reuse)
@@ -871,7 +871,8 @@ namespace Legion {
       // all dimensions so we can just use the size of the field to 
       // determine the piece list
       std::map<size_t,unsigned> pl_indexes;
-      layout->piece_lists.reserve(unique_sizes.size());
+      layout->piece_lists.reserve(safe_reuse ? 
+          unique_sizes.size() : zip_fields.size());
       for (std::vector<std::pair<size_t,FieldID> >::const_iterator it = 
             zip_fields.begin(); it != zip_fields.end(); it++)
       {
@@ -882,7 +883,7 @@ namespace Legion {
         {
           li = layout->piece_lists.size();
 #ifdef DEBUG_LEGION
-          assert(li < unique_sizes.size());
+          assert(li < (safe_reuse ? unique_sizes.size() : zip_fields.size()));
 #endif
           layout->piece_lists.resize(li + 1);
           pl_indexes[it->first] = li;
