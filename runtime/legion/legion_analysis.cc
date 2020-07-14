@@ -4128,18 +4128,37 @@ namespace Legion {
         {
           // Get the shadow reduction instance for this manager
           ReductionView *shadow_reduction = 
-            dst_manager->find_or_create_shadow_reduction(dst_fidx, redop,
+            dst_manager->find_or_create_shadow_reduction(dst_fidx, redop, 
                                     local_space, op->get_unique_op_id());
           // If we fail to make the shadow instance then we'll fall back
           // to the slow path of asking Realm to do it for us
           if (shadow_reduction != NULL)
           {
-            // Record a copy update to the shadow instance
-            FieldMaskSet<LogicalView> src_views;
-            src_views.insert(*it, src_mask);
-            record_updates(shadow_reduction, src_views, src_mask,
-                           expr, 0/*no reduction here*/, across_helper);
-            // The update is then performed solely by the shadow reduction
+            const std::pair<InstanceView*,unsigned> 
+              shadow_key(shadow_reduction, dst_fidx);     
+            std::vector<ReductionOpID> &shadow_epochs = 
+              reduction_epochs[shadow_key];
+            // put this in the next epoch for this shadow instance
+            // so that all the copies to the shadow instance are serialized
+            const unsigned shadow_index = shadow_epochs.size();
+            // These need to count by 2 because the intermediate epoch
+            // is going to be the one that reads the shadow instance
+            shadow_epochs.resize(shadow_index + 2, 0/*no reduction*/);
+            if (reductions.size() == shadow_index)
+              reductions.resize(shadow_index + 1);
+            update = new CopyUpdate(*it, src_mask, expr, 
+                  0/*no reduction here*/, across_helper);
+            // Also bump the redop_index for so the next application happens
+            // in the following reduction epoch
+            reductions[shadow_index][shadow_reduction].insert(update, dst_mask);
+            // Need to make sure the application of the reduction happens
+            // in the next epoch so figure out what that is
+            redop_index = (redop_index >= (shadow_index + 1)) ? redop_index : 
+                                                          (shadow_index + 1);
+            if (redop_index >= redop_epochs.size())
+              redop_epochs.resize(redop_index + 1, 0);
+            if (redop_index >= reductions.size())
+              reductions.resize(redop_index + 1);
             update = new CopyUpdate(shadow_reduction, dst_mask, expr, redop);
           }
           else 
