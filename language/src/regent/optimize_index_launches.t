@@ -1139,17 +1139,23 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
           local passed = analyze_noninterference_self(
             loop_cx, task, arg, partition_type, mapping, loop_vars)
           if not passed then
-            report_pass(call, "static loop optimization failed, emitting dynamic check")
-            return {
-              preamble = preamble,
-              call = call,
-              reduce_lhs = reduce_lhs,
-              reduce_op = reduce_op,
-              args_provably = args_provably,
-              free_variables = free_vars,
-              loop_variables = loop_vars,
-              needs_dynamic_check = true
-            }
+            if emit_dynamic_check then
+              report_pass(call, "static loop optimization failed, emitting dynamic check")
+              return {
+                preamble = preamble,
+                call = call,
+                reduce_lhs = reduce_lhs,
+                reduce_op = reduce_op,
+                args_provably = args_provably,
+                free_variables = free_vars,
+                loop_variables = loop_vars,
+                needs_dynamic_check = true
+              }
+            else
+              report_fail(call, "loop optimization failed: argument " .. tostring(i) ..
+                " interferes with itself")
+              return
+            end
           end
         end
       end
@@ -1312,7 +1318,7 @@ function optimize_index_launch.stat_for_num(cx, node)
         span = node.span,
     }
 
-    if not emit_dynamic_check or not body.needs_dynamic_check then
+    if not body.needs_dynamic_check then
       return index_launch_ast
     else
       return insert_dynamic_check(index_launch_ast, node {
@@ -1367,7 +1373,7 @@ function optimize_index_launch.stat_for_list(cx, node)
       span = node.span,
     }
 
-    if not emit_dynamic_check or not body.needs_dynamic_check then
+    if not body.needs_dynamic_check then
       return index_launch_ast
     else
       return insert_dynamic_check(index_launch_ast, node {
