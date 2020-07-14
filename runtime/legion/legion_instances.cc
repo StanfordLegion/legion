@@ -3565,6 +3565,8 @@ namespace Legion {
                                            true/*register now*/, 
                                            instance_footprint, ready,
                                            false/*external instance*/);
+            // manager takes ownership of the piece list
+            piece_list = NULL;
             break;
           }
         case LEGION_AFFINE_REDUCTION_SPECIALIZE:
@@ -3579,6 +3581,8 @@ namespace Legion {
                                            instance_footprint, ready,
                                            false/*external instance*/,
                                            reduction_op, shadow_instance);
+            // manager takes ownership of the piece list
+            piece_list = NULL;
             break;
           }
         default:
