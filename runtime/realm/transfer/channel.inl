@@ -184,6 +184,20 @@ namespace Realm {
   // class XferDes
   //
 
+  // transfer descriptors are reference counted rather than explcitly
+  //  deleted
+  inline void XferDes::add_reference(void)
+  {
+    reference_count.fetch_add(1);
+  }
+
+  inline void XferDes::remove_reference(void)
+  {
+    unsigned prev = reference_count.fetch_sub_acqrel(1);
+    if(prev == 1)
+      delete this;
+  }
+
   inline unsigned XferDes::current_progress(void)
   {
     unsigned val = progress_counter.load();

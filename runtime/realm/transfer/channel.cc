@@ -222,7 +222,7 @@ namespace Realm {
           max_req_size(_max_req_size), priority(_priority),
           guid(_guid),
           channel(NULL), complete_fence(_complete_fence),
-	  progress_counter(0)
+	  progress_counter(0), reference_count(1)
       {
 	input_ports.resize(inputs_info.size());
 	int gather_control_port = -1;
@@ -1572,7 +1572,6 @@ namespace Realm {
 	int dst_port_idx = req->dst_port_idx;
 	size_t write_seq_pos = req->write_seq_pos;
 	size_t write_seq_count = req->write_seq_count;
-        enqueue_request(req);
 	update_bytes_write(dst_port_idx, write_seq_pos, write_seq_count);
 #if 0
         if (req->dim == Request::DIM_1D)
@@ -1580,6 +1579,7 @@ namespace Realm {
         else
           simple_update_bytes_write(req->dst_off, req->nbytes * req->nlines);
 #endif
+        enqueue_request(req);
       }
 
       MemcpyXferDes::MemcpyXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
@@ -1699,6 +1699,7 @@ namespace Realm {
 	memcpy_req_in_use = true;
 	memcpy_req.is_read_done = false;
 	memcpy_req.is_write_done = false;
+	// memcpy request is handled in-thread, so no need to mess with refcount
         return &memcpy_req;
       }
 
@@ -1753,7 +1754,7 @@ namespace Realm {
         gasnet_reqs = (GASNetRequest*) calloc(max_nr, sizeof(GASNetRequest));
         for (int i = 0; i < max_nr; i++) {
           gasnet_reqs[i].xd = this;
-          enqueue_request(&gasnet_reqs[i]);
+	  available_reqs.push(&gasnet_reqs[i]);
         }
       }
 
@@ -1844,7 +1845,7 @@ namespace Realm {
         for (int i = 0; i < max_nr; i++) {
           requests[i].xd = this;
           //requests[i].dst_node = dst_node;
-          enqueue_request(&requests[i]);
+          available_reqs.push(&requests[i]);
         }
       }
 
@@ -2000,7 +2001,7 @@ namespace Realm {
           GPURequest* gpu_req = new GPURequest;
           gpu_req->xd = this;
 	  gpu_req->event.req = gpu_req;
-          enqueue_request(gpu_req);
+          available_reqs.push(gpu_req);
         }
       }
 	
@@ -2123,6 +2124,8 @@ namespace Realm {
 	req_in_use = true;
 	hdf5_req.is_read_done = false;
 	hdf5_req.is_write_done = false;
+	// HDF5Request is handled by another thread, so must hold a reference
+	add_reference();
         return &hdf5_req;
       }
 
@@ -2131,6 +2134,7 @@ namespace Realm {
 	assert(req_in_use);
 	assert(req == &hdf5_req);
 	req_in_use = false;
+	remove_reference();
       }
 
      extern Logger log_hdf5;

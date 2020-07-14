@@ -55,7 +55,7 @@ namespace Realm {
       file_reqs = (FileRequest*) calloc(max_nr, sizeof(DiskRequest));
       for (int i = 0; i < max_nr; i++) {
         file_reqs[i].xd = this;
-        enqueue_request(&file_reqs[i]);
+        available_reqs.push(&file_reqs[i]);
       }
     }
     
@@ -190,7 +190,7 @@ namespace Realm {
       for (int i = 0; i < max_nr; i++) {
         disk_reqs[i].xd = this;
         disk_reqs[i].fd = fd;
-        enqueue_request(&disk_reqs[i]);
+        available_reqs.push(&disk_reqs[i]);
       }
     }
     
