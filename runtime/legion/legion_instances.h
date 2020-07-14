@@ -371,9 +371,9 @@ namespace Legion {
             Memory m, PhysicalInstance i, size_t f, bool local, 
             IndexSpaceExpression *lx, bool is, IndexSpace dh, 
             IndexSpaceExprID dx, FieldSpace h, RegionTreeID tid, 
-            LayoutConstraintID l, PointerConstraint &p, ApEvent use, 
-            ReductionOpID redop, const void *piece_list,
-            size_t piece_list_size, bool shadow_instance);
+            LayoutConstraintID l, ApEvent use, ReductionOpID redop, 
+            const void *piece_list, size_t piece_list_size, 
+            bool shadow_instance);
       public:
         const DistributedID did;
         const AddressSpaceID owner;
@@ -388,7 +388,6 @@ namespace Legion {
         const FieldSpace handle;
         const RegionTreeID tree_id;
         const LayoutConstraintID layout_id;
-        PointerConstraint *const pointer;
         const ApEvent use_event;
         const ReductionOpID redop;
         const void *const piece_list;
@@ -403,7 +402,6 @@ namespace Legion {
                         const void *piece_list, size_t piece_list_size,
                         FieldSpaceNode *node, RegionTreeID tree_id,
                         LayoutDescription *desc, ReductionOpID redop, 
-                        const PointerConstraint &constraint,
                         bool register_now, size_t footprint,
                         ApEvent use_event, bool external_instance,
                         const ReductionOp *op = NULL,
@@ -468,8 +466,7 @@ namespace Legion {
           const void *piece_list, size_t piece_list_size,
           FieldSpaceNode *space_node, RegionTreeID tree_id,
           LayoutConstraints *constraints, ApEvent use_event,
-          PointerConstraint &pointer_constraint, ReductionOpID redop, 
-          bool shadow_instance);
+          ReductionOpID redop, bool shadow_instance);
     public:
       virtual bool acquire_instance(ReferenceSource source, 
                                     ReferenceMutator *mutator);
@@ -492,7 +489,6 @@ namespace Legion {
     public:
       MemoryManager *const memory_manager;
       const PhysicalInstance instance;
-      const PointerConstraint pointer_constraint;
       // Event that needs to trigger before we can start using
       // this physical instance.
       const ApEvent use_event; 
