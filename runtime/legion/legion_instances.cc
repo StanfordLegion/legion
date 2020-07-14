@@ -1146,7 +1146,6 @@ namespace Legion {
                         const void *pl, size_t pl_size,
                         FieldSpaceNode *node, RegionTreeID tree_id,
                         LayoutDescription *desc, ReductionOpID redop_id, 
-                        const PointerConstraint &constraint,
                         bool register_now, size_t footprint,
                         ApEvent u_event, bool external_instance,
                         const ReductionOp *op /*= NULL*/, bool shadow/*=false*/)
@@ -1155,7 +1154,7 @@ namespace Legion {
           owner_space, footprint, redop_id, (op != NULL) ? op : 
             (redop_id == 0) ? NULL : ctx->runtime->get_reduction(redop_id), 
           node, instance_domain, pl, pl_size, tree_id, u_event, register_now), 
-        memory_manager(memory), instance(inst), pointer_constraint(constraint),
+        memory_manager(memory), instance(inst),
         use_event(fetch_metadata(inst, u_event)), shadow_instance(shadow)
     //--------------------------------------------------------------------------
     {
@@ -1321,7 +1320,10 @@ namespace Legion {
                                                    const DomainPoint &key) const
     //--------------------------------------------------------------------------
     {
-      return pointer_constraint;
+      if (use_event.exists() && !use_event.has_triggered())
+        use_event.wait();
+      void *inst_ptr = instance.pointer_untyped(0/*offset*/, 0/*elem size*/);
+      return PointerConstraint(memory_manager->memory, uintptr_t(inst_ptr));
     }
 
     //--------------------------------------------------------------------------
@@ -1506,7 +1508,6 @@ namespace Legion {
         rez.serialize(tree_id);
         rez.serialize(unique_event);
         layout->pack_layout_description(rez, target);
-        pointer_constraint.serialize(rez);
         rez.serialize(redop);
         rez.serialize<bool>(shadow_instance);
       }
@@ -1559,8 +1560,6 @@ namespace Legion {
       LayoutConstraints *constraints = 
         runtime->find_layout_constraints(layout_id, 
                     false/*can fail*/, &layout_ready);
-      PointerConstraint pointer_constraint;
-      pointer_constraint.deserialize(derez);
       ReductionOpID redop;
       derez.deserialize(redop);
       bool shadow_inst;
@@ -1574,8 +1573,8 @@ namespace Legion {
           // We need to defer this instance creation
           DeferIndividualManagerArgs args(did, owner_space, mem, inst,
               inst_footprint, local_is, inst_domain, domain_is, domain_handle, 
-              domain_expr_id, handle, tree_id, layout_id, pointer_constraint, 
-              unique_event, redop, piece_list, piece_list_size, shadow_inst);
+              domain_expr_id, handle, tree_id, layout_id, unique_event, redop, 
+              piece_list, piece_list_size, shadow_inst);
           runtime->issue_runtime_meta_task(args,
               LG_LATENCY_RESPONSE_PRIORITY, precondition);
           return;
@@ -1595,7 +1594,7 @@ namespace Legion {
       create_remote_manager(runtime, did, owner_space, mem, inst,inst_footprint,
                             inst_domain, piece_list, piece_list_size, 
                             space_node, tree_id, constraints, unique_event, 
-                            pointer_constraint, redop, shadow_inst);
+                            redop, shadow_inst);
     }
 
     //--------------------------------------------------------------------------
@@ -1603,14 +1602,14 @@ namespace Legion {
             DistributedID d, AddressSpaceID own, Memory m, PhysicalInstance i, 
             size_t f, bool local, IndexSpaceExpression *lx, bool is, 
             IndexSpace dh, IndexSpaceExprID dx, FieldSpace h, RegionTreeID tid,
-            LayoutConstraintID l, PointerConstraint &p, ApEvent u,
-            ReductionOpID r, const void *pl, size_t pl_size, bool shadow)
+            LayoutConstraintID l, ApEvent u, ReductionOpID r, const void *pl, 
+            size_t pl_size, bool shadow)
       : LgTaskArgs<DeferIndividualManagerArgs>(implicit_provenance),
             did(d), owner(own), mem(m), inst(i), footprint(f), local_is(local),
             domain_is(is), local_expr(local ? lx : NULL), domain_handle(dh), 
             domain_expr(dx), handle(h), tree_id(tid), layout_id(l), 
-            pointer(new PointerConstraint(p)), use_event(u), redop(r),
-            piece_list(pl), piece_list_size(pl_size), shadow_instance(shadow)
+            use_event(u), redop(r), piece_list(pl), piece_list_size(pl_size), 
+            shadow_instance(shadow)
     //--------------------------------------------------------------------------
     {
       if (local_is)
@@ -1633,10 +1632,7 @@ namespace Legion {
       create_remote_manager(runtime, dargs->did, dargs->owner, dargs->mem,
           dargs->inst, dargs->footprint, inst_domain, dargs->piece_list,
           dargs->piece_list_size, space_node, dargs->tree_id, constraints, 
-          dargs->use_event, *(dargs->pointer), dargs->redop, 
-          dargs->shadow_instance);
-      // Free up the pointer memory
-      delete dargs->pointer;
+          dargs->use_event, dargs->redop, dargs->shadow_instance);
       // Remove the local expression reference if necessary
       if (dargs->local_is && dargs->local_expr->remove_expression_reference())
         delete dargs->local_expr;
@@ -1649,8 +1645,7 @@ namespace Legion {
           IndexSpaceExpression *inst_domain, const void *piece_list,
           size_t piece_list_size, FieldSpaceNode *space_node, 
           RegionTreeID tree_id, LayoutConstraints *constraints, 
-          ApEvent use_event, PointerConstraint &pointer_constraint,
-          ReductionOpID redop, bool shadow_instance)
+          ApEvent use_event, ReductionOpID redop, bool shadow_instance)
     //--------------------------------------------------------------------------
     {
       LayoutDescription *layout = 
@@ -1667,17 +1662,16 @@ namespace Legion {
                                               memory, inst, inst_domain, 
                                               piece_list, piece_list_size, 
                                               space_node, tree_id, layout, 
-                                              redop, pointer_constraint,
-                                              false/*reg now*/, inst_footprint,
-                                              use_event, external_instance, op,
+                                              redop, false/*reg now*/, 
+                                              inst_footprint, use_event, 
+                                              external_instance, op,
                                               shadow_instance);
       else
         man = new IndividualManager(runtime->forest, did, owner_space, memory, 
                               inst, inst_domain, piece_list, piece_list_size,
                               space_node, tree_id, layout, redop, 
-                              pointer_constraint, false/*reg now*/, 
-                              inst_footprint, use_event, external_instance, op,
-                              shadow_instance);
+                              false/*reg now*/, inst_footprint, use_event, 
+                              external_instance, op, shadow_instance);
       // Hold-off doing the registration until construction is complete
       man->register_with_runtime(NULL/*no remote registration needed*/);
     }
@@ -3524,11 +3518,6 @@ namespace Legion {
 #ifdef LEGION_DEBUG
       assert(!constraints.pointer_constraint.is_valid);
 #endif
-      PointerConstraint pointer_constraint;
-      void *inst_ptr = instance.pointer_untyped(0/*offset*/, 0/*elem size*/);
-      if (inst_ptr == NULL)
-        pointer_constraint = 
-          PointerConstraint(memory_manager->memory, uintptr_t(inst_ptr));
       // If we successfully made it then we can 
       // switch over the polarity of our constraints, this
       // shouldn't be necessary once Realm gets its act together
@@ -3573,7 +3562,6 @@ namespace Legion {
                                            piece_list, piece_list_size,
                                            field_space_node, tree_id,
                                            layout, 0/*redop id*/,
-                                           pointer_constraint, 
                                            true/*register now*/, 
                                            instance_footprint, ready,
                                            false/*external instance*/);
@@ -3587,7 +3575,6 @@ namespace Legion {
                                            instance_domain, piece_list,
                                            piece_list_size, field_space_node,
                                            tree_id, layout, redop_id,
-                                           pointer_constraint,
                                            true/*register now*/,
                                            instance_footprint, ready,
                                            false/*external instance*/,

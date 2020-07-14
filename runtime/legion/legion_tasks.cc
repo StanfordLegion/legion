@@ -3021,11 +3021,13 @@ namespace Legion {
             }
           }
           // If this is a reduction region requirement make sure all the 
-          // managers are reduction instances
+          // managers are reduction instances with the right reduction ops
           if (IS_REDUCE(regions[idx]))
           {
             for (unsigned idx2 = 0; idx2 < result.size(); idx2++)
-              if (!result[idx2].get_manager()->is_reduction_manager())
+            {
+              PhysicalManager *manager = result[idx2].get_instance_manager();
+              if (!manager->is_reduction_manager())
                 REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                               "Invalid mapper output from invocation of '%s' "
                               "on mapper %s. Mapper failed to choose a "
@@ -3034,6 +3036,18 @@ namespace Legion {
                               "reduction privileges.", "map_task", 
                               mapper->get_mapper_name(), idx,
                               get_task_name(), get_unique_id())
+              else if (manager->redop != regions[idx].redop)
+                REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                              "Invalid mapper output from invocation of '%s' "
+                              "on mapper %s. Mapper failed selected a "
+                              "specialized reduction instance with reduction "
+                              "operator %d for region requirement %d of task "
+                              "%s (ID %lld) which has reduction privileges "
+                              "on a different reduction operator %d.", 
+                              "map_task", mapper->get_mapper_name(), 
+                              manager->redop, idx, get_task_name(), 
+                              get_unique_id(), regions[idx].redop)
+            }
           }
           else
           {

@@ -204,7 +204,7 @@ namespace Realm {
   inline void XferDes::update_progress(void)
   {
     // no point in doing an update on an xd that's known to be done
-    if(transfer_completed) return;
+    if(transfer_completed.load()) return;
 
     // add 2 to the counter (i.e. preserving the LSB) - if LSB was/is set,
     //  attempt to add 1 to clear it and if successful, wake up the xd

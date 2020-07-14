@@ -48,6 +48,7 @@ namespace Realm {
     int cfg_max_rects_in_approximation = 32;
     size_t cfg_max_bytes_per_packet = 2048;//32768;
     bool cfg_worker_threads_sleep = true;
+    bool cfg_allow_inline_operations = false;
   };
 
   // TODO: C++11 has type_traits and std::make_unsigned
@@ -602,7 +603,7 @@ namespace Realm {
   void PartitioningMicroOp::finish_dispatch(PartitioningOperation *op, bool inline_ok)
   {
     // make sure we generate work that other threads can help with
-    if(DeppartConfig::cfg_num_partitioning_workers > 1)
+    if(!DeppartConfig::cfg_allow_inline_operations)
       inline_ok = false;
     // if there were no registrations by caller (or if they're really fast), the count will be 2
     //  and we can execute this microop inline (if we're allowed to)
@@ -827,6 +828,7 @@ namespace Realm {
     cp.add_option_int("-dp:workers", DeppartConfig::cfg_num_partitioning_workers);
     cp.add_option_bool("-dp:noisectopt", DeppartConfig::cfg_disable_intersection_optimization);
     cp.add_option_int("-dp:sleep", DeppartConfig::cfg_worker_threads_sleep);
+    cp.add_option_int("-dp:inline_ok", DeppartConfig::cfg_allow_inline_operations);
 
     cp.parse_command_line(cmdline);
   }

@@ -13119,7 +13119,6 @@ namespace Legion {
     {
       // Pull out the pointer constraint so that we can use it separately
       // and not have it included in the layout constraints
-      PointerConstraint pointer_constraint = constraints.pointer_constraint;
       constraints.pointer_constraint = PointerConstraint();
       const unsigned total_dims = node->row_source->get_num_dims();
       // Get the layout
@@ -13148,8 +13147,8 @@ namespace Legion {
                                          0/*piece list size*/,
                                          node->column_source,
                                          node->handle.get_tree_id(),
-                                         layout, 0/*redop*/, pointer_constraint,
-                                         true/*register now*/, 
+                                         layout, 0/*redop*/, 
+                                         true/*register now*/,
                                          instance_footprint, ready_event,
                                          true/*external instance*/);
 #ifdef DEBUG_LEGION

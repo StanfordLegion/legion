@@ -430,7 +430,7 @@ namespace Realm {
 	while((idx < nr) && request_available()) {
 	  // TODO: we really shouldn't even be trying if the iteration
 	  //   is already done
-	  if(iteration_completed) break;
+	  if(iteration_completed.load()) break;
 
 	  // pull control information if we need it
 	  if(input_control.remaining_count == 0) {
@@ -459,7 +459,7 @@ namespace Realm {
 	    // if count is still zero, we're done
 	    if(input_control.remaining_count == 0) {
 	      assert(input_control.eos_received);
-	      iteration_completed = true;
+	      iteration_completed.store_release(true);
 	      break;
 	    }
 	  }
@@ -493,7 +493,7 @@ namespace Realm {
 	    // if count is still zero, we're done
 	    if(output_control.remaining_count == 0) {
 	      assert(output_control.eos_received);
-	      iteration_completed = true;
+	      iteration_completed.store_release(true);
 	      // give all output channels a chance to indicate completion
 	      for(size_t i = 0; i < output_ports.size(); i++)
 		update_bytes_write(i, output_ports[i].local_bytes_total, 0);
@@ -533,7 +533,7 @@ namespace Realm {
 	      if(((input_control.remaining_count == 0) && input_control.eos_received) ||
 		 ((output_control.remaining_count == 0) && output_control.eos_received)) {
 		log_xd.info() << "iteration completed via control port: xd=" << std::hex << guid << std::dec;
-		iteration_completed = true;
+		iteration_completed.store_release(true);
 		// give all output channels a chance to indicate completion
 		for(size_t i = 0; i < output_ports.size(); i++)
 		  update_bytes_write(i, output_ports[i].local_bytes_total, 0);
@@ -571,7 +571,7 @@ namespace Realm {
 	    if(((input_control.remaining_count == 0) && input_control.eos_received) ||
 	       ((output_control.remaining_count == 0) && output_control.eos_received)) {
 	      log_xd.info() << "iteration completed via control port: xd=" << std::hex << guid << std::dec;
-	      iteration_completed = true;
+	      iteration_completed.store_release(true);
 	      // give all output channels a chance to indicate completion
 	      for(size_t i = 0; i < output_ports.size(); i++)
 		update_bytes_write(i, output_ports[i].local_bytes_total, 0);
@@ -609,7 +609,7 @@ namespace Realm {
 		   out_port->iter->done());
 #endif
 
-	    iteration_completed = true;
+	    iteration_completed.store_release(true);
 
 	    // give all output channels a chance to indicate completion
 	    for(size_t i = 0; i < output_ports.size(); i++)
@@ -849,7 +849,7 @@ namespace Realm {
 		// otherwise, this shouldn't happen - we should detect this case
 		//  on the the transfer of those last bytes
 		assert(0);
-		iteration_completed = true;
+		iteration_completed.store_release(true);
 		break;
 	      }
 	      if(pre_max < max_bytes) {
@@ -1151,7 +1151,7 @@ namespace Realm {
 	    if(((input_control.remaining_count == 0) && input_control.eos_received) ||
 	       ((output_control.remaining_count == 0) && output_control.eos_received)) {
 	      log_xd.info() << "iteration completed via control port: xd=" << std::hex << guid << std::dec;
-	      iteration_completed = true;
+	      iteration_completed.store_release(true);
 
 	      // give all output channels a chance to indicate completion
 	      for(size_t i = 0; i < output_ports.size(); i++)
@@ -1171,8 +1171,8 @@ namespace Realm {
 	    // otherwise, we go by our iterators
 	    if(in_port->iter->done() || out_port->iter->done() ||
 	       (in_port->local_bytes_total == pbt_snapshot)) {
-	      assert(!iteration_completed);
-	      iteration_completed = true;
+	      assert(!iteration_completed.load());
+	      iteration_completed.store_release(true);
 	    
 	      // give all output channels a chance to indicate completion
 	      for(size_t i = 0; i < output_ports.size(); i++)
@@ -1381,13 +1381,13 @@ namespace Realm {
     bool XferDes::is_completed(void)
     {
       // check below is a bit expensive, do don't do it more than once
-      if(transfer_completed) return true;
+      if(transfer_completed.load()) return true;
       // to be complete, we need to have finished iterating (which may have been
       //  achieved by getting a pre_bytes_total update) and finished all of our
       //  writes
       // use the conservative byte write count here to make sure we don't
       //  trigger early when serializing
-      if(!iteration_completed) return false;
+      if(!iteration_completed.load_acquire()) return false;
       for(std::vector<XferPort>::iterator it = output_ports.begin();
 	  it != output_ports.end();
 	  ++it) {
@@ -1395,7 +1395,7 @@ namespace Realm {
 	if(it->seq_local.span_exists(0, lbc_snapshot) != lbc_snapshot)
 	  return false;
       }
-      transfer_completed = true;
+      transfer_completed.store(true);
       return true;
     }
 
@@ -1470,7 +1470,7 @@ namespace Realm {
 						  out_port->peer_port_idx,
 						  offset,
 						  inc_amt,
-						  (iteration_completed ?
+						  (iteration_completed.load_acquire() ?
 						     out_port->local_bytes_total :
 						     (size_t)-1));
 	  } else {
@@ -1918,7 +1918,7 @@ namespace Realm {
 	// if our oldest write was ack'd, update progress in case the xd
 	//  is just waiting for all writes to complete
 	if(inc_amt > 0) update_progress();
-	if((size == 0) && iteration_completed &&
+	if((size == 0) && iteration_completed.load_acquire() &&
 	   (out_port->peer_guid != XFERDES_NO_GUID)) {
 	  // have to send an update in this case
 	  assert(offset == out_port->local_bytes_total);
@@ -2153,7 +2153,7 @@ namespace Realm {
 	    // non-ib iterators should end at the same time
 	    assert((in_port->peer_guid != XFERDES_NO_GUID) || in_port->iter->done());
 	    assert((out_port->peer_guid != XFERDES_NO_GUID) || out_port->iter->done());
-	    iteration_completed = true;
+	    iteration_completed.store_release(true);
 	    break;
 	  }
 
@@ -2177,7 +2177,7 @@ namespace Realm {
 	      // otherwise, this shouldn't happen - we should detect this case
 	      //  on the the transfer of those last bytes
 	      assert(0);
-	      iteration_completed = true;
+	      iteration_completed.store_release(true);
 	      break;
 	    }
 	    if(pre_max < max_bytes) {
@@ -2297,7 +2297,7 @@ namespace Realm {
 	  //  process the request (so that multi-hop successors are notified
 	  //  properly)
 	  if(hdf5_iter->done())
-	    iteration_completed = true;
+	    iteration_completed.store_release(true);
 	}
 
 	return idx;
@@ -3158,7 +3158,7 @@ namespace Realm {
 	  // no serdez support
 	  assert((in_port->serdez_op == 0) && (out_port->serdez_op == 0));
 	  NodeID dst_node = ID(out_port->mem->me).memory_owner_node();
-	  size_t write_bytes_total = (req->xd->iteration_completed ?
+	  size_t write_bytes_total = (req->xd->iteration_completed.load_acquire() ?
 				        out_port->local_bytes_total :
 					size_t(-1));
 	  // send a request if there's data or if there's a next XD to update
