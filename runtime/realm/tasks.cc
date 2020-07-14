@@ -705,7 +705,10 @@ namespace Realm {
 	if(c <= MAX_WARNINGS)
 	  log_task.warning() << "missed work counter wakeup?"
 			     << ((c == MAX_WARNINGS) ? " - suppressing further messages" : "");
-	break;
+	// don't clear wait_value, since there may be other threads that did
+	//  want to get waken up, but we don't want to fall through to the
+	//  checks below either, so just return
+	return;
       }
 #else
       condvar.wait();
