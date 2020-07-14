@@ -229,7 +229,7 @@ namespace Realm {
     unsigned ofs = slot % BITMASK_BITS;
     
     BitMask mask = BitMask(1) << ofs;
-    BitMask prev = active_work_item_mask[elem].fetch_or(mask);
+    BitMask prev = active_work_item_mask[elem].fetch_or_acqrel(mask);
     assert((prev & mask) == 0);
 
     int prev_count = active_work_items.fetch_add(1);
@@ -514,7 +514,7 @@ namespace Realm {
 	// this leaves only the least significant 1 bit set
 	BitMask target_bit = mask & ~(mask - 1);
 	// attempt to clear this bit
-	BitMask prev = manager->active_work_item_mask[elem].fetch_and(~target_bit);
+	BitMask prev = manager->active_work_item_mask[elem].fetch_and_acqrel(~target_bit);
 	if(prev & target_bit) {
 	  // success!
 	  manager->active_work_items.fetch_sub(1);
