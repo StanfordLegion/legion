@@ -3264,9 +3264,11 @@ namespace Realm {
 	  .add_option_bool("-cuda:nohijack", m->cfg_suppress_hijack_warning)
 	  .add_option_int("-cuda:skipgpus", m->cfg_skip_gpu_count)
 	  .add_option_bool("-cuda:skipbusy", m->cfg_skip_busy_gpus)
-	  .add_option_int_units("-cuda:minavailmem", m->cfg_min_avail_mem, 'm')
-	  .add_option_int("-cuda:nongpusync", cudart_hijack_nongpu_sync);
-	
+	  .add_option_int_units("-cuda:minavailmem", m->cfg_min_avail_mem, 'm');
+#ifdef REALM_USE_CUDART_HIJACK
+	cp.add_option_int("-cuda:nongpusync", cudart_hijack_nongpu_sync);
+#endif
+
 	bool ok = cp.parse_command_line(cmdline);
 	if(!ok) {
 	  log_gpu.error() << "error reading CUDA command line parameters";
