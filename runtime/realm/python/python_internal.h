@@ -20,6 +20,10 @@
 
 #include "realm/python/python_source.h"
 
+#ifdef REALM_USE_OPENMP
+#include "realm/openmp/openmp_threadpool.h"
+#endif
+
 namespace Realm {
 
 #define USE_PYGILSTATE_CALLS
@@ -124,6 +128,9 @@ namespace Realm {
   public:
     LocalPythonProcessor(Processor _me, int _numa_node,
                          CoreReservationSet& crs, size_t _stack_size,
+#ifdef REALM_USE_OPENMP
+			 int _omp_workers,
+#endif
 			 const std::vector<std::string>& _import_modules,
 			 const std::vector<std::string>& _init_scripts);
     virtual ~LocalPythonProcessor(void);
@@ -181,6 +188,9 @@ namespace Realm {
 
     int numa_node;
     CoreReservation *core_rsrv;
+#ifdef REALM_USE_OPENMP
+    ThreadPool *omp_threadpool;
+#endif
     const std::vector<std::string>& import_modules;
     const std::vector<std::string>& init_scripts;
 
