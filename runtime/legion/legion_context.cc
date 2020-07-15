@@ -6866,8 +6866,9 @@ namespace Legion {
         // Outstanding children count has already been incremented for the
         // operation being launched so decrement it in case we wait and then
         // re-increment it when we wake up again
+        int diff = -1; // Need this for PGI dumbness
         const int outstanding_count = 
-          __sync_fetch_and_add(&outstanding_children_count,-1);
+          __sync_fetch_and_add(&outstanding_children_count, diff);
         // We already decided to wait, so we need to wait for any hysteresis
         // to play a role here
         if (outstanding_count >
@@ -7306,8 +7307,9 @@ namespace Legion {
         executing_children.erase(finder);
         // Add some hysteresis here so that we have some runway for when
         // the paused task resumes it can run for a little while.
+        int diff = -1; // Need this for PGI dumbness
         int outstanding_count = 
-          __sync_add_and_fetch(&outstanding_children_count,-1);
+          __sync_add_and_fetch(&outstanding_children_count, diff);
 #ifdef DEBUG_LEGION
         assert(outstanding_count >= 0);
 #endif
@@ -7397,8 +7399,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         outstanding_children.erase(op->get_ctx_index());
 #endif
+        int diff = -1; // Need this for PGI dumbness
         int outstanding_count = 
-          __sync_add_and_fetch(&outstanding_children_count,-1);
+          __sync_add_and_fetch(&outstanding_children_count, diff);
 #ifdef DEBUG_LEGION
         assert(outstanding_count >= 0);
 #endif

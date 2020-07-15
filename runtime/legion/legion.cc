@@ -2541,6 +2541,10 @@ namespace Legion {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 #endif
+#ifdef __PGIC__
+#pragma warning (push)
+#pragma diag_suppress 1445
+#endif
     /////////////////////////////////////////////////////////////
     // Index Iterator  
     /////////////////////////////////////////////////////////////
@@ -2687,6 +2691,9 @@ namespace Legion {
 #endif
 #ifdef __clang__
 #pragma clang diagnostic pop
+#endif
+#ifdef __PGIC__
+#pragma warning (pop)
 #endif
 
     /////////////////////////////////////////////////////////////
@@ -2887,8 +2894,14 @@ namespace Legion {
 
 // FIXME: This exists for backwards compatibility but it is tripping
 // over our own deprecation warnings. Turn those off inside this method.
+#ifdef __GNUC__
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
     //--------------------------------------------------------------------------
     LogicalRegion ProjectionFunctor::project(const Mappable *mappable, 
             unsigned index, LogicalRegion upper_bound, const DomainPoint &point)
@@ -2964,12 +2977,7 @@ namespace Legion {
       }
       return LogicalRegion::NO_REGION;
     }
-#pragma GCC diagnostic pop
 
-// FIXME: This exists for backwards compatibility but it is tripping
-// over our own deprecation warnings. Turn those off inside this method.
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     //--------------------------------------------------------------------------
     LogicalRegion ProjectionFunctor::project(const Mappable *mappable,
          unsigned index, LogicalPartition upper_bound, const DomainPoint &point)
@@ -3046,7 +3054,12 @@ namespace Legion {
       }
       return LogicalRegion::NO_REGION;
     }
+#ifdef __GNUC__
 #pragma GCC diagnostic pop
+#endif
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
 
     //--------------------------------------------------------------------------
     LogicalRegion ProjectionFunctor::project(LogicalRegion upper_bound,

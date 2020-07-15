@@ -59,6 +59,11 @@ namespace Legion {
 #pragma warning (push)
 #pragma warning (disable: 858)
 #endif
+#ifdef __PGIC__
+#pragma warning (push)
+#pragma diag_suppress 191
+#pragma diag_suppress 816
+#endif
 #define NEW_OPAQUE_WRAPPER(T_, T)                                       \
       static T_ wrap(T t) {                                             \
         T_ t_;                                                          \
@@ -141,6 +146,9 @@ namespace Legion {
 #ifdef __ICC
 // icpc complains about "error #858: type qualifier on return type is meaningless"
 // but it's pretty annoying to get this macro to handle all the cases right
+#pragma warning (pop)
+#endif
+#ifdef __PGIC__
 #pragma warning (pop)
 #endif
 

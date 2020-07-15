@@ -901,6 +901,10 @@ namespace Legion {
       virtual void remove_deleted_local_fields(FieldSpace space,
                                  const std::vector<FieldID> &to_remove);
     public:
+      using TaskContext::create_index_space;
+      using TaskContext::create_field_space;
+      using TaskContext::allocate_field;
+      using TaskContext::allocate_fields;
       // Interface to operations performed by a context
       virtual IndexSpace create_index_space(const Future &future, TypeTag tag);
       virtual void destroy_index_space(IndexSpace handle, const bool unordered,
@@ -2347,6 +2351,10 @@ namespace Legion {
       virtual void handle_registration_callback_effects(RtEvent effects);
       virtual bool is_leaf_context(void) const;
     public:
+      using TaskContext::create_index_space;
+      using TaskContext::create_field_space;
+      using TaskContext::allocate_field;
+      using TaskContext::allocate_fields;
       // Interface to operations performed by a context
       virtual IndexSpace create_index_space(const Future &future, TypeTag tag);
       virtual void destroy_index_space(IndexSpace handle, 

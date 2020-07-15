@@ -1095,6 +1095,7 @@ namespace Legion {
       virtual void end_inline_task(const void *result, 
                                    size_t result_size, bool owned);
       virtual VersionInfo& get_version_info(unsigned idx);
+      virtual const VersionInfo& get_version_info(unsigned idx) const;
       virtual std::map<PhysicalManager*,unsigned>*
                                        get_acquired_instances_ref(void);
     public:

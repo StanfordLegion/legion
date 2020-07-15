@@ -159,6 +159,15 @@ LEGION_LD_FLAGS += ${CRAY_UDREG_POST_LINK_OPTS}
 LEGION_LD_FLAGS += ${CRAY_PMI_POST_LINK_OPTS}
 endif
 
+USE_PGI ?= 0
+# Check to see if this is the PGI compiler 
+# in whch case we need to use different flags in some cases
+ifeq ($(strip $(USE_PGI)),0)
+ifeq ($(findstring pgc++,$(shell $(CXX) --version)),pgc++)
+  USE_PGI = 1
+endif
+endif
+
 # machine architecture (generally "native" unless cross-compiling)
 MARCH ?= native
 
@@ -166,11 +175,20 @@ ifneq (${MARCH},)
   # Summit/Summitdev are strange and want to have this specified via -mcpu
   # instead of -march. Unclear if this is true in general for PPC.
   ifeq ($(findstring ppc64le,$(shell uname -p)),ppc64le)
-    CC_FLAGS += -mcpu=${MARCH} -maltivec -mabi=altivec -mvsx
-    FC_FLAGS += -mcpu=${MARCH} -maltivec -mabi=altivec -mvsx
+    ifeq ($(strip $(USE_PGI)),0)
+      CC_FLAGS += -mcpu=${MARCH} -maltivec -mabi=altivec -mvsx
+      FC_FLAGS += -mcpu=${MARCH} -maltivec -mabi=altivec -mvsx
+    else
+      $(error PGI compilers do not currently support the PowerPC architecture)
+    endif
   else
-    CC_FLAGS += -march=${MARCH}
-    FC_FLAGS += -march=${MARCH}
+    ifeq ($(strip $(USE_PGI)),0)
+      CC_FLAGS += -march=${MARCH}
+      FC_FLAGS += -march=${MARCH}
+    else
+      CC_FLAGS += -tp=${MARCH}
+      FC_FLAGS += -tp=${MARCH}
+    endif
   endif
 endif
 
@@ -632,13 +650,21 @@ endif
 
 
 ifeq ($(strip $(DEBUG)),1)
-CC_FLAGS	+= -O0 -ggdb #-ggdb -Wall
-FC_FLAGS	+= -O0 -ggdb
-REALM_CC_FLAGS	+= -DDEBUG_REALM
-LEGION_CC_FLAGS	+= -DDEBUG_LEGION
+  ifeq ($(strip $(DARWIN)),1)
+    CC_FLAGS	+= -O0 -glldb
+    FC_FLAGS	+= -O0 -glldb
+  else ifeq ($(strip $(USE_PGI)),1)
+    CC_FLAGS	+= -O0 -g # --display_error_number
+    FC_FLAGS	+= -O0 -g
+  else
+    CC_FLAGS	+= -O0 -ggdb #-ggdb -Wall
+    FC_FLAGS	+= -O0 -ggdb
+  endif
+  REALM_CC_FLAGS	+= -DDEBUG_REALM
+  LEGION_CC_FLAGS	+= -DDEBUG_LEGION
 else
-CC_FLAGS	+= -O2 -fno-strict-aliasing #-ggdb
-FC_FLAGS	+= -O2 -fno-strict-aliasing
+  CC_FLAGS	+= -O2 -fno-strict-aliasing #-ggdb
+  FC_FLAGS	+= -O2 -fno-strict-aliasing
 endif
 
 BOUNDS_CHECKS ?= 0
@@ -677,8 +703,12 @@ endif
 REALM_CC_FLAGS	+= -DCOMPILE_TIME_MIN_LEVEL=$(OUTPUT_LEVEL)
 
 # demand warning-free compilation
-CC_FLAGS        += -Wall -Wno-strict-overflow
-FC_FLAGS	+= -Wall -Wno-strict-overflow
+CC_FLAGS        += -Wall
+FC_FLAGS	+= -Wall
+ifeq ($(strip $(USE_PGI)),0)
+CC_FLAGS	+= -Wno-strict-overflow
+FC_FLAGS	+= -Wno-strict-overflow
+endif
 ifeq ($(strip $(WARN_AS_ERROR)),1)
 CC_FLAGS        += -Werror
 FC_FLAGS	+= -Werror
