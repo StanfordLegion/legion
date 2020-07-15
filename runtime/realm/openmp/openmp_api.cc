@@ -31,7 +31,7 @@ namespace Realm {
   extern "C" {
     int omp_get_num_threads(void)
     {
-      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
       if(wi)
 	return wi->num_threads;
       else
@@ -40,7 +40,7 @@ namespace Realm {
 
     int omp_get_max_threads(void)
     {
-      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
       if(wi)
 	return wi->pool->get_num_workers() + 1;
       else
@@ -49,7 +49,7 @@ namespace Realm {
 
     int omp_get_thread_num(void)
     {
-      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
       if(wi)
 	return wi->thread_id;
       else
@@ -58,7 +58,7 @@ namespace Realm {
 
     int omp_get_level(void)
     {
-      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
       if(wi) {
 	int level = 0;
 	Realm::ThreadPool::WorkItem *item = wi->work_item;
@@ -73,7 +73,7 @@ namespace Realm {
 
     int omp_in_parallel(void)
     {
-      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
       if(wi) {
 	Realm::ThreadPool::WorkItem *item = wi->work_item;
 	if(item) {
@@ -89,7 +89,7 @@ namespace Realm {
 
     void omp_set_num_threads(int num_threads)
     {
-      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
       if(wi) {
 	wi->app_num_threads = num_threads; // TODO: connect this to something?
       } else {
@@ -103,11 +103,9 @@ namespace Realm {
     void GOMP_parallel_start(void (*fnptr)(void *data), void *data, int nthreads)
     {
       //printf("GOMP_parallel_start(%p, %p, %d)\n", fnptr, data, nthreads);
-      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
-      if(!wi) {
-	log_omp.warning() << "OpenMP-parallelized loop on non-OpenMP Realm processor!";
+      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(true);
+      if(!wi)
 	return;
-      }
 
       std::set<int> worker_ids;
       wi->pool->claim_workers(nthreads - 1, worker_ids);
@@ -131,7 +129,7 @@ namespace Realm {
     void GOMP_parallel_end(void)
     {
       //printf("GOMP_parallel_end()\n");
-      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
       // if this isn't called from a openmp-enabled thread, we already
       //  complained above
       if(!wi)
@@ -157,11 +155,9 @@ namespace Realm {
 
     bool GOMP_single_start(void)
     {
-      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
-      if(!wi) {
-	log_omp.warning() << "OpenMP-parallelized loop on non-OpenMP Realm processor!";
+      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(true);
+      if(!wi)
 	return true;  // trivially the winner
-      }
 
       if(!wi->work_item) {
 	// not inside a larger construct - treat as nop
@@ -181,11 +177,9 @@ namespace Realm {
 
     void GOMP_barrier(void)
     {
-      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
-      if(!wi) {
-	log_omp.warning() << "OpenMP barrier on non-OpenMP Realm processor!";
+      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(true);
+      if(!wi)
 	return;
-      }
 
       //log_omp.print() << "barrier enter: id=" << wi->thread_id;
 
@@ -224,9 +218,8 @@ namespace Realm {
     bool GOMP_loop_static_start(long start, long end, long incr, long chunk,
 				long *istart, long *iend)
     {
-      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(true);
       if(!wi) {
-	log_omp.warning() << "OpenMP-parallelized loop on non-OpenMP Realm processor!";
 	// give back the whole loop and hope for the best
 	*istart = start;
 	*iend = end;
@@ -256,9 +249,8 @@ namespace Realm {
     bool GOMP_loop_dynamic_start(long start, long end, long incr, long chunk,
 				 long *istart, long *iend)
     {
-      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(true);
       if(!wi) {
-	log_omp.warning() << "OpenMP-parallelized loop on non-OpenMP Realm processor!";
 	// give back the whole loop and hope for the best
 	*istart = start;
 	*iend = end;
@@ -285,8 +277,9 @@ namespace Realm {
 
     void GOMP_loop_end_nowait(void)
     {
-      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
-      if(!wi) return;  // complained already above
+      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
+      if(!wi)
+	return;  // complained already above
 
       // loops must be inside work items
       assert(wi->work_item != 0);
@@ -298,8 +291,9 @@ namespace Realm {
 
     void GOMP_loop_end(void)
     {
-      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
-      if(!wi) return;  // complained already above
+      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
+      if(!wi)
+	return;  // complained already above
 
       // loops must be inside work items
       assert(wi->work_item != 0);
@@ -311,12 +305,12 @@ namespace Realm {
 
     bool GOMP_loop_static_next(long *istart, long *iend)
     { 
-      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
-      if(!wi) return false;  // complained already above
+      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
+      if(!wi)
+	return false;  // complained already above
 
       // loops must be inside work items
       assert(wi->work_item != 0);
-
 
       int64_t span_start, span_end;
       bool more = wi->work_item->schedule.next_static(span_start, span_end);
@@ -334,8 +328,9 @@ namespace Realm {
 
     bool GOMP_loop_dynamic_next(long *istart, long *iend)
     {
-      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
-      if(!wi) return false;  // complained already above
+      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
+      if(!wi)
+	return false;  // complained already above
 
       // loops must be inside work items
       assert(wi->work_item != 0);
@@ -370,7 +365,7 @@ namespace Realm {
 
     void GOMP_critical_name_start(void **pptr)
     {
-      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
       if(!wi || !wi->work_item || (wi->num_threads == 1)) {
 	// already single-threaded, so no further effort needed
 	return;
@@ -389,7 +384,7 @@ namespace Realm {
 
     void GOMP_critical_name_end(void **pptr)
     {
-      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
       if(!wi || !wi->work_item || (wi->num_threads == 1)) {
 	// already single-threaded, so no further effort needed
 	return;
@@ -653,7 +648,7 @@ namespace Realm {
 
   kmp_int32 __kmpc_global_thread_num(ident_t *loc)
   {
-    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
     if(wi) {
       kmp_int32 gid = wi->thread_id;
       const ThreadPool::WorkItem *item = wi->work_item;
@@ -670,7 +665,7 @@ namespace Realm {
   void __kmpc_push_num_threads(ident_t *loc, kmp_int32 global_tid,
                                kmp_int32 num_threads)
   {
-    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
     if(wi) {
       wi->app_num_threads = num_threads; // TODO: connect this to something?
     } else {
@@ -712,9 +707,8 @@ namespace Realm {
       }
     }
 
-    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(true);
     if(!wi) {
-      log_omp.warning() << "OpenMP-parallelized loop on non-OpenMP Realm processor!";
       // invoke thunk directly and then return
       (*invoker)(&thunk);
       return;
@@ -763,7 +757,7 @@ namespace Realm {
 					  typename make_signed<T>::type incr,
 					  typename make_signed<T>::type chunk)
   {
-    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(true);
     // if running sequentially, or bounds are inside-out,
     //  just return with the bounds unchanged
     if(!wi ||
@@ -857,7 +851,7 @@ namespace Realm {
 			  typename make_signed<T>::type st,
 			  typename make_signed<T>::type chunk)
   {
-    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(true);
     if(!wi) {
       // no place to store the loop information, so this is a fatal error
       log_omp.fatal() << "OpenMP loop with dynamic scheduling on non-OpenMP Realm processor!";
@@ -925,7 +919,7 @@ namespace Realm {
 			 T *p_lb, T *p_ub,
 			 typename make_signed<T>::type *p_st)
   {
-    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
     if(!wi) return false;  // complained already above
 
     // loops must be inside work items
@@ -1007,11 +1001,9 @@ namespace Realm {
 
   void __kmpc_serialized_parallel(ident_t *loc, kmp_int32 global_tid)
   {
-    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
-    if(!wi) {
-      log_omp.warning() << "OpenMP-parallelized loop on non-OpenMP Realm processor!";
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(true);
+    if(!wi)
       return;
-    }
 
     // create a new work item that is just this thread
     ThreadPool::WorkItem *work = new ThreadPool::WorkItem(1);
@@ -1024,7 +1016,7 @@ namespace Realm {
 
   void __kmpc_end_serialized_parallel(ident_t *loc, kmp_int32 global_tid)
   {
-    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
     // if this isn't called from a openmp-enabled thread, we already
     //  complained above
     if(!wi) 
@@ -1039,11 +1031,9 @@ namespace Realm {
 
   kmp_int32 __kmpc_single(ident_t *loc, kmp_int32 global_tid)
   {
-    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
-    if(!wi) {
-      log_omp.warning() << "OpenMP-parallelized loop on non-OpenMP Realm processor!";
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(true);
+    if(!wi)
       return 1;  // trivially the winner
-    }
 
     if(!wi->work_item) {
       // not inside a larger construct - treat as nop
@@ -1068,11 +1058,9 @@ namespace Realm {
 
   void __kmpc_barrier(ident_t *loc, kmp_int32 global_tid)
   {
-    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
-    if(!wi) {
-      log_omp.warning() << "OpenMP barrier on non-OpenMP Realm processor!";
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(true);
+    if(!wi)
       return;
-    }
 
     //log_omp.print() << "barrier enter: id=" << wi->thread_id;
 
@@ -1121,7 +1109,7 @@ namespace Realm {
   void __kmpc_critical(ident_t *loc, kmp_int32 global_tid,
 		       kmp_critical_name *lck)
   {
-    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(true);
     if(!wi || !wi->work_item || (wi->num_threads == 1)) {
       // already single-threaded, so no further effort needed
       return;
@@ -1141,7 +1129,7 @@ namespace Realm {
   void __kmpc_end_critical(ident_t *loc, kmp_int32 global_tid,
 			   kmp_critical_name *lck)
   {
-    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
     if(!wi || !wi->work_item || (wi->num_threads == 1)) {
       // already single-threaded, so no further effort needed
       return;
