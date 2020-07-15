@@ -633,15 +633,15 @@ namespace Legion {
     public:
       iterator(void) : ptr(NULL), stride(0) { } 
     private:
-      iterator(char *p, size_t s) : ptr(p), stride(s) { }
+      iterator(uint8_t *p, size_t s) : ptr(p), stride(s) { }
     public:
       inline iterator& operator=(const iterator &rhs) 
         { ptr = rhs.ptr; stride = rhs.stride; return *this; }
       inline iterator& operator+=(int rhs) { ptr += stride; return *this; }
       inline iterator& operator-=(int rhs) { ptr -= stride; return *this; }
-      inline FT& operator*(void) { return *reinterpret_cast<FT*>(ptr); }
-      inline FT* operator->(void) { return reinterpret_cast<FT*>(ptr); }
-      inline FT& operator[](int rhs) 
+      inline FT& operator*(void) const { return *reinterpret_cast<FT*>(ptr); }
+      inline FT* operator->(void) const { return reinterpret_cast<FT*>(ptr); }
+      inline FT& operator[](int rhs) const
         { return *reinterpret_cast<FT*>(ptr + rhs * stride); }
     public:
       inline iterator& operator++(void) { ptr += stride; return *this; }
@@ -655,14 +655,20 @@ namespace Legion {
       inline iterator operator-(int rhs) const 
         { return iterator(ptr - stride * rhs, stride); }
     public:
-      inline bool operator==(const iterator &rhs) { return (ptr == rhs.ptr); }
-      inline bool operator!=(const iterator &rhs) { return (ptr != rhs.ptr); }
-      inline bool operator<(const iterator &rhs) { return (ptr < rhs.ptr); }
-      inline bool operator>(const iterator &rhs) { return (ptr > rhs.ptr); }
-      inline bool operator<=(const iterator &rhs) { return (ptr <= rhs.ptr); }
-      inline bool operator>=(const iterator &rhs) { return (ptr >= rhs.ptr); }
+      inline bool operator==(const iterator &rhs) const 
+        { return (ptr == rhs.ptr); }
+      inline bool operator!=(const iterator &rhs) const 
+        { return (ptr != rhs.ptr); }
+      inline bool operator<(const iterator &rhs) const 
+        { return (ptr < rhs.ptr); }
+      inline bool operator>(const iterator &rhs) const 
+        { return (ptr > rhs.ptr); }
+      inline bool operator<=(const iterator &rhs) const 
+        { return (ptr <= rhs.ptr); }
+      inline bool operator>=(const iterator &rhs) const
+        { return (ptr >= rhs.ptr); }
     private:
-      char *ptr;
+      uint8_t *ptr;
       size_t stride;
     };
     class reverse_iterator : 
@@ -670,7 +676,7 @@ namespace Legion {
     public:
       reverse_iterator(void) : ptr(NULL), stride(0) { } 
     private:
-      reverse_iterator(char *p, size_t s) : ptr(p), stride(s) { }
+      reverse_iterator(uint8_t *p, size_t s) : ptr(p), stride(s) { }
     public:
       inline reverse_iterator& operator=(const reverse_iterator &rhs) 
         { ptr = rhs.ptr; stride = rhs.stride; return *this; }
@@ -678,9 +684,9 @@ namespace Legion {
         { ptr -= stride; return *this; }
       inline reverse_iterator& operator-=(int rhs) 
         { ptr += stride; return *this; }
-      inline FT& operator*(void) { return *reinterpret_cast<FT*>(ptr); }
-      inline FT* operator->(void) { return reinterpret_cast<FT*>(ptr); }
-      inline FT& operator[](int rhs) 
+      inline FT& operator*(void) const { return *reinterpret_cast<FT*>(ptr); }
+      inline FT* operator->(void) const { return reinterpret_cast<FT*>(ptr); }
+      inline FT& operator[](int rhs) const
         { return *reinterpret_cast<FT*>(ptr - rhs * stride); }
     public:
       inline reverse_iterator& operator++(void) 
@@ -696,26 +702,26 @@ namespace Legion {
       inline reverse_iterator operator-(int rhs) const 
         { return reverse_iterator(ptr + stride * rhs, stride); }
     public:
-      inline bool operator==(const reverse_iterator &rhs) 
+      inline bool operator==(const reverse_iterator &rhs) const
         { return (ptr == rhs.ptr); }
-      inline bool operator!=(const reverse_iterator &rhs) 
+      inline bool operator!=(const reverse_iterator &rhs) const
         { return (ptr != rhs.ptr); }
-      inline bool operator<(const reverse_iterator &rhs) 
+      inline bool operator<(const reverse_iterator &rhs) const
         { return (ptr > rhs.ptr); }
-      inline bool operator>(const reverse_iterator &rhs) 
+      inline bool operator>(const reverse_iterator &rhs) const
         { return (ptr < rhs.ptr); }
-      inline bool operator<=(const reverse_iterator &rhs) 
+      inline bool operator<=(const reverse_iterator &rhs) const
         { return (ptr >= rhs.ptr); }
-      inline bool operator>=(const reverse_iterator &rhs) 
+      inline bool operator>=(const reverse_iterator &rhs) const
         { return (ptr <= rhs.ptr); }
     private:
-      char *ptr;
+      uint8_t *ptr;
       size_t stride;
     };
   public:
     Span(void) : base(NULL), extent(0), stride(0) { }
     Span(FT *b, size_t e, size_t s = sizeof(FT))
-      : base(reinterpret_cast<char*>(b)), extent(e), stride(s) { }
+      : base(reinterpret_cast<uint8_t*>(b)), extent(e), stride(s) { }
   public:
     inline iterator begin(void) const { return iterator(base, stride); }
     inline iterator end(void) const 
@@ -725,19 +731,19 @@ namespace Legion {
     inline reverse_iterator rend(void) const
       { return reverse_iterator(base - stride, stride); }
   public:
-    inline FT& front(void) { return *reinterpret_cast<FT*>(base); }
-    inline FT& back(void) 
+    inline FT& front(void) const { return *reinterpret_cast<FT*>(base); }
+    inline FT& back(void) const
       { return *reinterpret_cast<FT*>(base + (extent-1)*stride); }
-    inline FT& operator[](int index)
+    inline FT& operator[](int index) const
       { return *reinterpret_cast<FT*>(base + index * stride); }
-    inline FT* data(void) { return reinterpret_cast<FT*>(base); }
+    inline FT* data(void) const { return reinterpret_cast<FT*>(base); }
     inline uintptr_t get_base(void) const { return uintptr_t(base); }
   public:
     inline size_t size(void) const { return extent; }
     inline size_t step(void) const { return stride; }
     inline bool empty(void) const { return (extent == 0); }
   private:
-    char *base;
+    uint8_t *base;
     size_t extent; // number of elements
     size_t stride; // byte stride
   };
