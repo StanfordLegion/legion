@@ -18821,7 +18821,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline Domain PieceIterator::operator*(void) const
+    inline const Domain& PieceIterator::operator*(void) const
     //--------------------------------------------------------------------------
     {
       return current_piece;
@@ -18931,7 +18931,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    inline Rect<DIM,T> PieceIteratorT<DIM,T>::operator*(void) const
+    inline const Rect<DIM,T>& PieceIteratorT<DIM,T>::operator*(void) const
     //--------------------------------------------------------------------------
     {
       return current_rect;
@@ -19143,7 +19143,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<PrivilegeMode PM, typename FT, int DIM, typename T>
-    inline Span<FT,PM> SpanIterator<PM,FT,DIM,T>::operator*(void) const
+    inline const Span<FT,PM>& SpanIterator<PM,FT,DIM,T>::operator*(void) const
     //--------------------------------------------------------------------------
     {
       return current;

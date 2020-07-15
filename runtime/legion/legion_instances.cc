@@ -751,11 +751,12 @@ namespace Legion {
                                      IndexSpaceExpression *index_domain, 
                                      const void *pl, size_t pl_size,
                                      RegionTreeID tree_id, ApEvent u_event,
-                                     bool register_now)
+                                     bool register_now, bool shadow)
       : InstanceManager(ctx, owner_space, did, layout, node, index_domain,
                         tree_id, register_now), 
         instance_footprint(footprint), reduction_op(rop), redop(redop_id),
-        unique_event(u_event), piece_list(pl), piece_list_size(pl_size)
+        unique_event(u_event), piece_list(pl), piece_list_size(pl_size), 
+        shadow_instance(shadow)
     //--------------------------------------------------------------------------
     {
     }
@@ -1152,10 +1153,10 @@ namespace Legion {
       : PhysicalManager(ctx, desc, encode_instance_did(did, external_instance,
             (redop_id != 0), false/*collective*/),
           owner_space, footprint, redop_id, (op != NULL) ? op : 
-            (redop_id == 0) ? NULL : ctx->runtime->get_reduction(redop_id), 
-          node, instance_domain, pl, pl_size, tree_id, u_event, register_now), 
+           (redop_id == 0) ? NULL : ctx->runtime->get_reduction(redop_id), node,
+          instance_domain, pl, pl_size, tree_id, u_event, register_now, shadow),
         memory_manager(memory), instance(inst),
-        use_event(fetch_metadata(inst, u_event)), shadow_instance(shadow)
+        use_event(fetch_metadata(inst, u_event))
     //--------------------------------------------------------------------------
     {
       if (!is_owner() && !shadow_instance)
@@ -1183,9 +1184,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndividualManager::IndividualManager(const IndividualManager &rhs)
       : PhysicalManager(NULL, NULL, 0, 0, 0, 0, NULL, NULL, NULL, NULL, 0, 0, 
-                        ApEvent::NO_AP_EVENT, false),
-        memory_manager(NULL), instance(PhysicalInstance::NO_INST),
-        shadow_instance(false)
+                        ApEvent::NO_AP_EVENT, false, false),
+        memory_manager(NULL), instance(PhysicalInstance::NO_INST)
     //--------------------------------------------------------------------------
     {
       // should never be called

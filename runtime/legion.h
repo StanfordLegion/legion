@@ -2680,7 +2680,7 @@ namespace Legion {
     public:
       inline operator bool(void) const;
       inline bool operator()(void) const;
-      inline Domain operator*(void) const;
+      inline const Domain& operator*(void) const;
       inline const Domain* operator->(void) const;
       inline PieceIterator& operator++(void);
       inline PieceIterator operator++(int/*postfix*/);
@@ -2711,7 +2711,7 @@ namespace Legion {
       PieceIteratorT<DIM,COORD_T>& operator=(const PieceIteratorT &rhs);
     public:
       inline bool step(void);
-      inline Rect<DIM,COORD_T> operator*(void) const;
+      inline const Rect<DIM,COORD_T>& operator*(void) const;
       inline const Rect<DIM,COORD_T>* operator->(void) const;
       inline PieceIteratorT<DIM,COORD_T>& operator++(void);
       inline PieceIteratorT<DIM,COORD_T> operator++(int/*postfix*/);
@@ -2751,7 +2751,7 @@ namespace Legion {
     public:
       inline operator bool(void) const;
       inline bool operator()(void) const;
-      inline Span<FT,PM> operator*(void) const;
+      inline const Span<FT,PM>& operator*(void) const;
       inline const Span<FT,PM>* operator->(void) const;
       inline SpanIterator<PM,FT,DIM,COORD_T>& operator++(void);
       inline SpanIterator<PM,FT,DIM,COORD_T> operator++(int);
