@@ -1201,7 +1201,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
   }
 end
 
-function init_bitmask_false(bitmask)
+function init_bitmask_false(bitmask, volume)
   local stats = terralib.newlist()
 
   local idx = std.newsymbol(int32, "i")
@@ -1211,7 +1211,7 @@ function init_bitmask_false(bitmask)
 
   local values = terralib.newlist()
   values:insert(util.mk_expr_constant(0, int32))
-  values:insert(util.mk_expr_constant(1e2, int32))
+  values:insert(util.mk_expr_id(volume))
 
   return util.mk_stat_for_num(idx, values, util.mk_block(stats))
 end
@@ -1258,10 +1258,13 @@ function insert_dynamic_check(index_launch_ast, unoptimized_loop_ast)
   local volume = std.newsymbol(int32, "volume")
   stats:insert(util.mk_stat_var(volume, int32, p_volume))
 
-  -- Set colors = 1e2 for now
-  local bitmask = std.newsymbol(bool[1e2], "bitmask")
-  stats:insert(util.mk_stat_var(bitmask, bool[1e2], false))
-  stats:insert(init_bitmask_false(bitmask))
+  -- Malloc a bitmask of size volume and initialize it
+  local bitmask_raw = std.newsymbol(&opaque, "bitmask_raw")
+  local bitmask = std.newsymbol(&bool, "bitmask")
+  local malloc_call = util.mk_expr_call(std.c.malloc, util.mk_expr_cast(uint64, util.mk_expr_id(volume)))
+  stats:insert(util.mk_stat_var(bitmask_raw, &opaque, malloc_call))
+  stats:insert(util.mk_stat_var(bitmask, &bool, util.mk_expr_cast(&bool, util.mk_expr_id(bitmask_raw))))
+  stats:insert(init_bitmask_false(bitmask, volume))
 
   local value = std.newsymbol(int64, "value")
   stats:insert(util.mk_stat_var(value, int64))
