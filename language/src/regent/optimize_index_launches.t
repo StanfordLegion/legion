@@ -474,6 +474,9 @@ local function analyze_noninterference_self(
     if analyze_index_noninterference_self(index, cx, loop_vars)
     then
       return true
+    else
+      local needs_dynamic_check = true
+      return false, needs_dynamic_check
     end
   end
 
@@ -1144,10 +1147,10 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
         end
 
         do
-          local passed = analyze_noninterference_self(
+          local passed, needs_dynamic_check = analyze_noninterference_self(
             loop_cx, task, arg, partition_type, mapping, loop_vars)
           if not passed then
-            if emit_dynamic_check then
+            if emit_dynamic_check and needs_dynamic_check then
               report_pass(call, "static loop optimization failed, emitting dynamic check")
               return {
                 preamble = preamble,
