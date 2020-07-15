@@ -9728,7 +9728,8 @@ namespace Legion {
         }
       }
       // Remove profiling our guard and trigger the profiling event if necessary
-      if ((__sync_add_and_fetch(&outstanding_profiling_requests, -1) == 0) &&
+      int diff = -1; // need this for PGI dumbness
+      if ((__sync_add_and_fetch(&outstanding_profiling_requests, diff) == 0) &&
           profiling_reported.exists())
         Runtime::trigger_event(profiling_reported);
       if (is_recording())
@@ -10599,7 +10600,8 @@ namespace Legion {
         }
       }
       // Remove profiling our guard and trigger the profiling event if necessary
-      if ((__sync_add_and_fetch(&outstanding_profiling_requests, -1) == 0) &&
+      int diff = -1; // need this for PGI dumbness
+      if ((__sync_add_and_fetch(&outstanding_profiling_requests, diff) == 0) &&
           profiling_reported.exists())
         Runtime::trigger_event(profiling_reported);
       if (is_recording())

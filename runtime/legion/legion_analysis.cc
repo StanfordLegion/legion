@@ -6381,6 +6381,7 @@ namespace Legion {
     {
       // should never be called
       assert(false);
+      return *this;
     }
 
     //--------------------------------------------------------------------------

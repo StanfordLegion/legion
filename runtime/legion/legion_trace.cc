@@ -1808,6 +1808,7 @@ namespace Legion {
     {
       // should never be called
       assert(false);
+      return *(new PhysicalTrace(NULL,NULL));
     }
 
     //--------------------------------------------------------------------------

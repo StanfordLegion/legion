@@ -8013,6 +8013,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    const VersionInfo& IndexTask::get_version_info(unsigned idx) const
+    //--------------------------------------------------------------------------
+    {
+      std::map<unsigned,VersionInfo>::const_iterator finder = 
+        version_infos.find(idx);
+#ifdef DEBUG_LEGION
+      assert(finder != version_infos.end());
+#endif
+      return finder->second;
+    }
+
+    //--------------------------------------------------------------------------
     std::map<PhysicalManager*,unsigned>* 
                                      IndexTask::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------

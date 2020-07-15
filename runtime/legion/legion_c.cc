@@ -34,6 +34,10 @@
 #pragma clang diagnostic ignored "-Wdeprecated"
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 #endif
+#ifdef __PGIC__
+#pragma diag_suppress 816
+#pragma diag_suppress 1445
+#endif
 
 using namespace Legion;
 using namespace Legion::Mapping;
@@ -6413,6 +6417,8 @@ public:
       assert(!partition_functor);
     }
   }
+
+  using ProjectionFunctor::project;
 
   virtual LogicalRegion project(const Mappable *mappable, unsigned index,
                                 LogicalRegion upper_bound,

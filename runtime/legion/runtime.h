@@ -1470,6 +1470,7 @@ namespace Legion {
       IdentityProjectionFunctor(Legion::Runtime *rt);
       virtual ~IdentityProjectionFunctor(void);
     public:
+      using ProjectionFunctor::project;
       virtual LogicalRegion project(const Mappable *mappable, unsigned index,
                                     LogicalRegion upper_bound,
                                     const DomainPoint &point);
