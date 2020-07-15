@@ -639,10 +639,10 @@ namespace Legion {
         { ptr = rhs.ptr; stride = rhs.stride; return *this; }
       inline iterator& operator+=(int rhs) { ptr += stride; return *this; }
       inline iterator& operator-=(int rhs) { ptr -= stride; return *this; }
-      inline FT& operator*(void) { return *static_cast<FT*>(ptr); }
-      inline FT* operator->(void) { return static_cast<FT*>(ptr); }
+      inline FT& operator*(void) { return *reinterpret_cast<FT*>(ptr); }
+      inline FT* operator->(void) { return reinterpret_cast<FT*>(ptr); }
       inline FT& operator[](int rhs) 
-        { return *static_cast<FT*>(ptr + rhs * stride); }
+        { return *reinterpret_cast<FT*>(ptr + rhs * stride); }
     public:
       inline iterator& operator++(void) { ptr += stride; return *this; }
       inline iterator& operator--(void) { ptr -= stride; return *this; }
@@ -678,10 +678,10 @@ namespace Legion {
         { ptr -= stride; return *this; }
       inline reverse_iterator& operator-=(int rhs) 
         { ptr += stride; return *this; }
-      inline FT& operator*(void) { return *static_cast<FT*>(ptr); }
-      inline FT* operator->(void) { return static_cast<FT*>(ptr); }
+      inline FT& operator*(void) { return *reinterpret_cast<FT*>(ptr); }
+      inline FT* operator->(void) { return reinterpret_cast<FT*>(ptr); }
       inline FT& operator[](int rhs) 
-        { return *static_cast<FT*>(ptr - rhs * stride); }
+        { return *reinterpret_cast<FT*>(ptr - rhs * stride); }
     public:
       inline reverse_iterator& operator++(void) 
         { ptr -= stride; return *this; }
@@ -715,7 +715,7 @@ namespace Legion {
   public:
     Span(void) : base(NULL), extent(0), stride(0) { }
     Span(FT *b, size_t e, size_t s = sizeof(FT))
-      : base(static_cast<char*>(b)), extent(e), stride(s) { }
+      : base(reinterpret_cast<char*>(b)), extent(e), stride(s) { }
   public:
     inline iterator begin(void) const { return iterator(base, stride); }
     inline iterator end(void) const 
@@ -725,12 +725,12 @@ namespace Legion {
     inline reverse_iterator rend(void) const
       { return reverse_iterator(base - stride, stride); }
   public:
-    inline FT& front(void) { return *static_cast<FT*>(base); }
+    inline FT& front(void) { return *reinterpret_cast<FT*>(base); }
     inline FT& back(void) 
-      { return *static_cast<FT*>(base + (extent-1)*stride); }
+      { return *reinterpret_cast<FT*>(base + (extent-1)*stride); }
     inline FT& operator[](int index)
-      { return *static_cast<FT*>(base + index * stride); }
-    inline FT* data(void) { return static_cast<FT*>(base); }
+      { return *reinterpret_cast<FT*>(base + index * stride); }
+    inline FT* data(void) { return reinterpret_cast<FT*>(base); }
     inline uintptr_t get_base(void) const { return uintptr_t(base); }
   public:
     inline size_t size(void) const { return extent; }
