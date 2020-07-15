@@ -4994,6 +4994,50 @@ namespace Legion {
           }
         }
       }
+#ifdef LEGION_GPU_REDUCTIONS
+      // If the base instance is a shadow instance then we also need to 
+      // check initializers since we might just get initialized and then
+      // read from as a bounce buffer, which contradicts the logic above
+      // about their always being a reducer for an initializer
+      if (manager->shadow_instance)
+      {
+        for (EventFieldUsers::const_iterator uit = initialization_users.begin();
+              uit != initialization_users.end(); uit++)
+        {
+          const FieldMask event_mask = uit->second.get_valid_mask() & user_mask;
+          if (!event_mask)
+            continue;
+          EventFieldExprs::iterator event_finder = 
+            preconditions.find(uit->first);
+          for (EventUsers::const_iterator it = uit->second.begin();
+                it != uit->second.end(); it++)
+          {
+            const FieldMask overlap = event_mask & it->second;
+            if (!overlap)
+              continue;
+            IndexSpaceExpression *expr_overlap = 
+              context->intersect_index_spaces(user_expr, it->first->expr);
+            if (expr_overlap->is_empty())
+              continue;
+            // Have a precondition so we need to record it
+            if (event_finder == preconditions.end())
+            {
+              preconditions[uit->first].insert(expr_overlap, overlap);
+              event_finder = preconditions.find(uit->first);
+            }
+            else
+            {
+              FieldMaskSet<IndexSpaceExpression>::iterator finder = 
+                event_finder->second.find(expr_overlap);
+              if (finder == event_finder->second.end())
+                event_finder->second.insert(expr_overlap, overlap);
+              else
+                finder.merge(overlap);
+            }
+          }
+        }
+      }
+#endif
     }
 
     //--------------------------------------------------------------------------

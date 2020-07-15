@@ -229,7 +229,8 @@ namespace Legion {
                       const ReductionOp *rop, FieldSpaceNode *node,
                       IndexSpaceExpression *index_domain, 
                       const void *piece_list, size_t piece_list_size,
-                      RegionTreeID tree_id, ApEvent unique, bool register_now);
+                      RegionTreeID tree_id, ApEvent unique, 
+                      bool register_now, bool shadow_instance = false);
       virtual ~PhysicalManager(void);
     public:
       virtual ApEvent get_unique_event(void) const { return unique_event; }
@@ -309,6 +310,7 @@ namespace Legion {
       const ApEvent unique_event;
       const void *const piece_list;
       const size_t piece_list_size;
+      const bool shadow_instance;
     protected:
       mutable LocalLock inst_lock;
       std::set<InnerContext*> active_contexts;
@@ -492,7 +494,6 @@ namespace Legion {
       // Event that needs to trigger before we can start using
       // this physical instance.
       const ApEvent use_event; 
-      const bool shadow_instance;
     };
 
     /**
