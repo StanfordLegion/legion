@@ -1988,10 +1988,6 @@ namespace Legion {
       derez.deserialize(did);
       DomainPoint point;
       derez.deserialize(point);
-      DistributedID future_did;
-      derez.deserialize(future_did);
-      RtUserEvent done;
-      derez.deserialize(done);
       
       // Should always find it since this is the source node
       DistributedCollectable *dc = runtime->find_distributed_collectable(did);
@@ -2007,6 +2003,8 @@ namespace Legion {
       // Add it to the map
       impl->set_future(point, future, &mutator);
       // Trigger the done event
+      RtUserEvent done;
+      derez.deserialize(done);
       if (!done_events.empty())
         Runtime::trigger_event(done, Runtime::merge_events(done_events));
       else
