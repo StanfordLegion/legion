@@ -83,6 +83,8 @@ namespace Legion {
       virtual void pack_remote_context(Serializer &rez, 
                                        AddressSpaceID target,
                                        bool replicate = false) = 0;
+      virtual void compute_task_tree_coordinates(
+          std::vector<std::pair<size_t,DomainPoint> > &coordinates) = 0;
       virtual bool attempt_children_complete(void) = 0;
       virtual bool attempt_children_commit(void) = 0;
       virtual void inline_child_task(TaskOp *child) = 0;
@@ -880,6 +882,8 @@ namespace Legion {
           AddressSpaceID target, bool replicate = false);
       virtual void unpack_remote_context(Deserializer &derez,
                                          std::set<RtEvent> &preconditions);
+      virtual void compute_task_tree_coordinates(
+          std::vector<std::pair<size_t,DomainPoint> > &coordinates);
       virtual RtEvent compute_equivalence_sets(VersionManager *manager,
                         RegionTreeID tree_id, IndexSpace handle,
                         IndexSpaceExpression *expr, const FieldMask &mask,
@@ -1303,6 +1307,7 @@ namespace Legion {
       const bool full_inner_context;
     protected:
       Mapper::ContextConfigOutput           context_configuration;
+      std::vector<std::pair<size_t,DomainPoint> > context_coordinates;
     protected:
       const std::vector<unsigned>           &parent_req_indexes;
       const std::vector<bool>               &virtual_mapped;
@@ -2332,6 +2337,8 @@ namespace Legion {
       virtual ContextID get_context_id(void) const;
       virtual void pack_remote_context(Serializer &rez, 
           AddressSpaceID target, bool replicate = false);
+      virtual void compute_task_tree_coordinates(
+          std::vector<std::pair<size_t,DomainPoint> > &coordinates);
       virtual bool attempt_children_complete(void);
       virtual bool attempt_children_commit(void);
       virtual void inline_child_task(TaskOp *child);
@@ -2712,6 +2719,8 @@ namespace Legion {
       virtual UniqueID get_context_uid(void) const;
       virtual void pack_remote_context(Serializer &rez, 
           AddressSpaceID target, bool replicate);
+      virtual void compute_task_tree_coordinates(
+          std::vector<std::pair<size_t,DomainPoint> > &coordinates);
       virtual bool attempt_children_complete(void);
       virtual bool attempt_children_commit(void);
       virtual void inline_child_task(TaskOp *child);

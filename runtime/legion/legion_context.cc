@@ -2749,6 +2749,7 @@ namespace Legion {
       runtime->forest->check_context_state(tree_context);
 #endif
       // If we have an owner, clone our local fields from its context
+      // and also compute the coordinates for this context in the task tree
       if (owner != NULL)
       {
         TaskContext *owner_ctx = owner_task->get_context();
@@ -2759,6 +2760,11 @@ namespace Legion {
         InnerContext *parent_ctx = static_cast<InnerContext*>(owner_ctx);
 #endif
         parent_ctx->clone_local_fields(local_field_infos);
+        // Get the coordinates for the parent task
+        parent_ctx->compute_task_tree_coordinates(context_coordinates);
+        // Then add our coordinates for our task
+        context_coordinates.push_back(std::make_pair(
+              owner_task->get_context_index(), owner_task->index_point));
       }
       if (!remote_context)
         runtime->register_local_context(context_uid, this);
@@ -3862,6 +3868,13 @@ namespace Legion {
         rez.serialize(virtual_indexes[idx]);
       rez.serialize(owner_task->get_task_completion());
       rez.serialize(find_parent_context()->get_context_uid());
+      rez.serialize<size_t>(context_coordinates.size());
+      for (std::vector<std::pair<size_t,DomainPoint> >::const_iterator it =
+            context_coordinates.begin(); it != context_coordinates.end(); it++)
+      {
+        rez.serialize(it->first);
+        rez.serialize(it->second);
+      }
       // Finally pack the local field infos
       AutoLock local_lock(local_field_lock,1,false/*exclusive*/);
       rez.serialize<size_t>(local_field_infos.size());
@@ -3883,6 +3896,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       assert(false); // should only be called for RemoteContext
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::compute_task_tree_coordinates(
+                       std::vector<std::pair<size_t,DomainPoint> > &coordinates)
+    //--------------------------------------------------------------------------
+    {
+      coordinates = context_coordinates;
     }
 
     //--------------------------------------------------------------------------
@@ -17639,6 +17660,15 @@ namespace Legion {
       }
       derez.deserialize(remote_completion_event);
       derez.deserialize(parent_context_uid);
+      size_t num_coordinates;
+      derez.deserialize(num_coordinates);
+      context_coordinates.resize(num_coordinates);
+      for (unsigned idx = 0; idx < num_coordinates; idx++)
+      {
+        std::pair<size_t,DomainPoint> &coordinate = context_coordinates[idx];
+        derez.deserialize(coordinate.first);
+        derez.deserialize(coordinate.second);
+      }
       // Unpack any local fields that we have
       unpack_local_field_update(derez);
       bool replicate;
@@ -17895,6 +17925,23 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::compute_task_tree_coordinates(
+                       std::vector<std::pair<size_t,DomainPoint> > &coordinates)
+    //--------------------------------------------------------------------------
+    {
+      TaskContext *owner_ctx = owner_task->get_context();
+#ifdef DEBUG_LEGION
+      InnerContext *parent_ctx = dynamic_cast<InnerContext*>(owner_ctx);
+      assert(parent_ctx != NULL);
+#else
+      InnerContext *parent_ctx = static_cast<InnerContext*>(owner_ctx);
+#endif
+      parent_ctx->compute_task_tree_coordinates(coordinates);
+      coordinates.push_back(std::make_pair(
+            owner_task->get_context_index(), owner_task->index_point));
     }
 
     //--------------------------------------------------------------------------
@@ -19770,6 +19817,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::compute_task_tree_coordinates(
+                       std::vector<std::pair<size_t,DomainPoint> > &coordinates)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->compute_task_tree_coordinates(coordinates);
+      coordinates.push_back(std::make_pair(
+            owner_task->get_context_index(), owner_task->index_point));
     }
 
     //--------------------------------------------------------------------------
