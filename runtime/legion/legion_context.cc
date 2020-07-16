@@ -10433,7 +10433,7 @@ namespace Legion {
               coordinates.begin(); it != coordinates.end(); it++)
         {
           hasher.hash(it->first);
-          for (unsigned idx = 0; idx < it->second.get_dim(); idx++)
+          for (int idx = 0; idx < it->second.get_dim(); idx++)
             hasher.hash(it->second[idx]);
         }
       }
