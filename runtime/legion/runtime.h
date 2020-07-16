@@ -2499,6 +2499,7 @@ namespace Legion {
       AddressSpaceID find_address_space(Memory handle) const;
 #ifdef LEGION_MALLOC_INSTANCES
       uintptr_t allocate_deferred_instance(Memory memory,size_t size,bool free);
+      void free_deferred_instance(Memory memory, uintptr_t ptr);
 #endif
     public:
       // Messaging functions

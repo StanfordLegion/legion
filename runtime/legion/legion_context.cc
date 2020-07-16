@@ -2321,6 +2321,41 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    PhysicalInstance TaskContext::create_task_local_instance(Memory memory, 
+                                           Realm::InstanceLayoutGeneric *layout)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalInstance instance;
+      Realm::ProfilingRequestSet no_requests;
+#ifdef LEGION_MALLOC_INSTANCES
+      uintptr_t ptr = runtime->allocate_deferred_instance(memory, 
+                              layout->bytes_used, false/*free*/); 
+      const RtEvent wait_on(Realm::RegionInstance::create_external(instance,
+                                          memory, ptr, layout, no_requests));
+      task_local_instances.push_back(std::make_pair(instance, ptr));
+#else
+      const RtEvent wait_on(Realm::RegionInstance::create_instance(instance, 
+                                              memory, layout, no_requests));
+      if (!instance.exists())
+      {
+        const char *mem_names[] = {
+#define MEM_NAMES(name, desc) desc,
+          REALM_MEMORY_KINDS(MEM_NAMES) 
+#undef MEM_NAMES
+        };
+        REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+            "Failed to allocate DeferredBuffer/Value/Reductionin task %s "
+            "(UID %lld) because %s memory " IDFMT " is full.", get_task_name(),
+            get_unique_id(), mem_names[memory.kind()], memory.id) 
+      }
+      task_local_instances.push_back(instance);
+#endif
+      if (wait_on.exists() && !wait_on.has_triggered())
+        wait_on.wait();
+      return instance;
+    }
+
+    //--------------------------------------------------------------------------
     void TaskContext::begin_misspeculation(void)
     //--------------------------------------------------------------------------
     {
@@ -2459,6 +2494,35 @@ namespace Legion {
       begin_task_wait(false/*from runtime*/);
       wait_for.wait();
       end_task_wait();
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskContext::release_task_local_instances(PhysicalInstance return_inst)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < task_local_instances.size(); idx++)
+      {
+#ifdef LEGION_MALLOC_INSTANCES
+        std::pair<PhysicalInstance,uintptr_t> inst = task_local_instances[idx];
+        if (inst.first == return_inst)
+          task_local_instances.front() = inst; // save this for clean up
+        else
+          inst.first.destroy(Processor::get_current_finish_event());
+#else
+        PhysicalInstance inst = task_local_instances[idx];
+        // Don't delete the return inst for now, the cleanup code will do that
+        if (inst != return_inst)
+          inst.destroy(Processor::get_current_finish_event());
+#endif
+      }
+#ifdef LEGION_MALLOC_INSTANCES
+      task_local_instances.resize(1);
+#ifdef DEBUG_LEGION
+      assert(task_local_instances.front().first == return_inst);
+#endif
+#else
+      task_local_instances.clear();
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -7086,9 +7150,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void InnerContext::add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
                                               const void *result, size_t size, 
-#ifdef LEGION_MALLOC_INSTANCES
-                                              uintptr_t allocation,
-#endif
                                               PhysicalInstance inst)
     //--------------------------------------------------------------------------
     {
@@ -7105,11 +7166,7 @@ namespace Legion {
           add_reference();
         }
         post_task_queue.push_back(
-            PostTaskArgs(ctx, task_index, result, size, 
-#ifdef LEGION_MALLOC_INSTANCES
-                         allocation,
-#endif
-                         inst, wait_on));
+            PostTaskArgs(ctx, task_index, result, size, inst, wait_on));
         if (post_task_comp_queue.exists())
         {
           // If we've already got a completion queue then use it
@@ -7262,7 +7319,15 @@ namespace Legion {
             // Get the pointer and free it
             MemoryManager *manager = 
               runtime->find_memory_manager(it->instance.get_location());      
-            manager->free_legion_instance(RtEvent::NO_RT_EVENT, it->allocation);
+#ifdef DEBUG_LEGION
+            assert(task_local_instances.size() == 1);
+#endif
+            const std::pair<PhysicalInstance,uintptr_t> &inst = 
+              task_local_instances.back();
+#ifdef DEBUG
+            assert(inst.first == it->instance);
+#endif
+            manager->free_legion_instance(RtEvent::NO_RT_EVENT, inst.second);
 #endif
             // Once we've copied the data then we can destroy the instance
             it->instance.destroy();
@@ -8789,12 +8854,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::end_task(const void *res, size_t res_size, bool owned,
-#ifdef LEGION_MALLOC_INSTANCES
-                                uintptr_t allocation,
-#endif
                                 PhysicalInstance deferred_result_instance)
     //--------------------------------------------------------------------------
-    { 
+    {
       // See if we have any local regions or fields that need to be deallocated
       std::vector<LogicalRegion> local_regions_to_delete;
       std::map<FieldSpace,std::set<FieldID> > local_fields_to_delete;
@@ -8840,6 +8902,8 @@ namespace Legion {
         const long long diff = current - previous_profiling_time;
         overhead_tracker->application_time += diff;
       }
+      if (!task_local_instances.empty())
+        release_task_local_instances(deferred_result_instance);
       // Safe to cast to a single task here because this will never
       // be called while inlining an index space task
 #ifdef DEBUG_LEGION
@@ -8968,9 +9032,6 @@ namespace Legion {
       if (deferred_result_instance.exists())
           parent_ctx->add_to_post_task_queue(this, effects_done,
                                              res, res_size, 
-#ifdef LEGION_MALLOC_INSTANCES
-                                             allocation,
-#endif
                                              deferred_result_instance);
       else if (!owned)
       {
@@ -19177,9 +19238,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LeafContext::add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
                                              const void *result, size_t size, 
-#ifdef LEGION_MALLOC_INSTANCES
-                                             uintptr_t allocation,
-#endif
                                              PhysicalInstance instance)
     //--------------------------------------------------------------------------
     {
@@ -19468,9 +19526,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LeafContext::end_task(const void *res, size_t res_size, bool owned,
-#ifdef LEGION_MALLOC_INSTANCES
-                               uintptr_t allocation,
-#endif
                                PhysicalInstance deferred_result_instance)
     //--------------------------------------------------------------------------
     {
@@ -19481,6 +19536,8 @@ namespace Legion {
         const long long diff = current - previous_profiling_time;
         overhead_tracker->application_time += diff;
       }
+      if (!task_local_instances.empty())
+        release_task_local_instances(deferred_result_instance);
       // Unmap any physical regions that we mapped
       for (std::vector<PhysicalRegion>::const_iterator it = 
             physical_regions.begin(); it != physical_regions.end(); it++)
@@ -19514,9 +19571,6 @@ namespace Legion {
       if (deferred_result_instance.exists())
         parent_ctx->add_to_post_task_queue(this, effects_done,
                                            res, res_size, 
-#ifdef LEGION_MALLOC_INSTANCES
-                                           allocation,
-#endif
                                            deferred_result_instance);
       else if (!owned)
       {
@@ -20601,18 +20655,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void InlineContext::add_to_post_task_queue(TaskContext *ctx,RtEvent wait_on, 
                                                const void *result, size_t size, 
-#ifdef LEGION_MALLOC_INSTANCES
-                                               uintptr_t allocation,
-#endif
                                                PhysicalInstance inst)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_MALLOC_INSTANCES
-      enclosing->add_to_post_task_queue(ctx, wait_on, result, size, 
-                                        allocation, inst);
-#else
       enclosing->add_to_post_task_queue(ctx, wait_on, result, size, inst);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -20908,17 +20954,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    PhysicalInstance InlineContext::create_task_local_instance(Memory memory, 
+                                           Realm::InstanceLayoutGeneric *layout)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_task_local_instance(memory, layout);
+    }
+
+    //--------------------------------------------------------------------------
     void InlineContext::end_task(const void *res, size_t res_size, bool owned,
-#ifdef LEGION_MALLOC_INSTANCES
-                                 uintptr_t allocation,
-#endif
                                  PhysicalInstance deferred_result_instance)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-#ifdef LEGION_MALLOC_INSTANCES
-      assert(allocation == 0);
-#endif
       assert(!deferred_result_instance.exists());
 #endif
       inline_task->end_inline_task(res, res_size, owned);

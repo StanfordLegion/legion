@@ -163,7 +163,7 @@ USE_PGI ?= 0
 # Check to see if this is the PGI compiler 
 # in whch case we need to use different flags in some cases
 ifeq ($(strip $(USE_PGI)),0)
-ifeq ($(findstring pgc++,$(shell $(CXX) --version)),pgc++)
+ifeq ($(findstring nvc++,$(shell $(CXX) --version)),nvc++)
   USE_PGI = 1
 endif
 endif

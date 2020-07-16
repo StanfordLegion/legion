@@ -2772,10 +2772,7 @@ namespace Legion {
      * but we don't want to wait for the asynchronous operations to be returned. 
      * This object should be returned directly as the result of a Legion task, 
      * but its value will not be read until all of the "effects" of the task 
-     * are done. It is important that this object be returned from the task in
-     * order to ensure its memory is cleaned up. Not returning any created
-     * DeferredValue objects will result in a memory leak. It supports the 
-     * following methods during task execution:
+     * are done. The following methods are supported during task execution:
      *  - T read(void) const
      *  - void write(T val) const
      *  - T* ptr(void) const
@@ -2804,16 +2801,12 @@ namespace Legion {
     protected:
       Realm::RegionInstance instance;
       Realm::AffineAccessor<T,1,coord_t> accessor;
-#ifdef LEGION_MALLOC_INSTANCES
-      uintptr_t allocation;
-#endif
     };
 
     /**
      * \class DeferredReduction 
      * This is a special case of a DeferredValue that also supports
-     * a reduction operator. It should be returned directly as the
-     * result of a Legion task. It supports all the same methods
+     * a reduction operator. It supports all the same methods
      * as the DeferredValue as well as an additional method for
      * doing reductions using a reduction operator.
      *  - void reduce(REDOP::RHS val)
@@ -8451,9 +8444,6 @@ namespace Legion {
                                         const void *retvalptr = NULL,
                                         size_t retvalsize = 0,
                                         bool owned = false,
-#ifdef LEGION_MALLOC_INSTANCES
-                                        uintptr_t allocation = 0,
-#endif
                                         Realm::RegionInstance inst = 
                                           Realm::RegionInstance::NO_INST);
     public:
@@ -8635,14 +8625,13 @@ namespace Legion {
       friend class LegionTaskWrapper;
       friend class LegionSerialization;
       Future from_value(const void *value, size_t value_size, bool owned);
-#ifdef LEGION_MALLOC_INSTANCES
+    private:
       template<typename T>
       friend class DeferredValue;
       template<typename T, int DIM, typename COORD_T, bool CHECK_BOUNDS>
       friend class DeferredBuffer;
-      uintptr_t allocate_deferred_instance(Memory memory, size_t size, 
-                                           bool free = true);
-#endif
+      Realm::RegionInstance create_task_local_instance(Memory memory,
+                                Realm::InstanceLayoutGeneric *layout);
     public:
       // This method is hidden down here and not publicly documented because
       // users shouldn't really need it for anything, however there are some
