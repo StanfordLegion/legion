@@ -29,6 +29,7 @@
 #define STATIC_MEMOIZE                false
 #define STATIC_MAP_LOCALLY            false
 #define STATIC_REPLICATION_ENABLED    true
+#define STATIC_SAME_ADDRESS_SPACE     false
 
 // This is the default implementation of the mapper interface for 
 // the general low level runtime
@@ -72,7 +73,8 @@ namespace Legion {
         max_schedule_count(STATIC_MAX_SCHEDULE_COUNT),
         memoize(STATIC_MEMOIZE),
         map_locally(STATIC_MAP_LOCALLY),
-        replication_enabled(STATIC_REPLICATION_ENABLED)
+        replication_enabled(STATIC_REPLICATION_ENABLED),
+        same_address_space(STATIC_SAME_ADDRESS_SPACE)
     //--------------------------------------------------------------------------
     {
       log_mapper.spew("Initializing the default mapper for "
@@ -103,6 +105,7 @@ namespace Legion {
           BOOL_ARG("-dm:memoize", memoize);
           BOOL_ARG("-dm:map_locally", map_locally);
           BOOL_ARG("-dm:replicate", replication_enabled);
+          BOOL_ARG("-dm:same_address_space", same_address_space);
 #undef BOOL_ARG
 #undef INT_ARG
         }
@@ -1317,7 +1320,7 @@ namespace Legion {
       // simple one-level decomposition across all the processors.
       Machine::ProcessorQuery all_procs(machine);
       all_procs.only_kind(local[0].kind());
-      if ((task.tag & SAME_ADDRESS_SPACE) != 0)
+      if ((task.tag & SAME_ADDRESS_SPACE) != 0 || same_address_space)
 	all_procs.local_address_space();
       std::vector<Processor> procs(all_procs.begin(), all_procs.end());
 

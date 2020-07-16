@@ -576,6 +576,7 @@ namespace Legion {
       // Whether to enable control replication
       // Controlled by -dm:replicate (true by default)
       bool replication_enabled;
+      bool same_address_space;
     };
 
   }; // namespace Mapping
