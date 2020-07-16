@@ -2252,7 +2252,17 @@ namespace Legion {
       const RtEvent wait_on(Realm::RegionInstance::create_instance(instance, 
                                               memory, layout, no_requests));
       if (!instance.exists())
-        assert(false);
+      {
+        const char *mem_names[] = {
+#define MEM_NAMES(name, desc) desc,
+          REALM_MEMORY_KINDS(MEM_NAMES) 
+#undef MEM_NAMES
+        };
+        REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+            "Failed to allocate DeferredBuffer/Value/Reductionin task %s "
+            "(UID %lld) because %s memory " IDFMT " is full.", get_task_name(),
+            get_unique_id(), mem_names[memory.kind()], memory.id) 
+      }
       task_local_instances.push_back(instance);
 #endif
       if (wait_on.exists() && !wait_on.has_triggered())

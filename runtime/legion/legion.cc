@@ -6447,7 +6447,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (Internal::implicit_context == NULL)
-        REPORT_LEGION_ERROR(ERROR_CONFUSED_USER,
+        REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
             "It is illegal to request the creation of DeferredBuffer, Deferred"
             "Value, or DeferredReduction objects outside of Legion tasks.")
       return 
