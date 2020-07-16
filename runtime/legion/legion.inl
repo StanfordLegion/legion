@@ -15285,24 +15285,8 @@ namespace Legion {
         Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
             constraints, dim_order);
       layout->alignment_reqd = alignment;
-      Realm::ProfilingRequestSet no_requests; 
-#ifdef LEGION_MALLOC_INSTANCES
-      // Ask Legion to malloc this instance for us
       Runtime *runtime = Runtime::get_runtime();
-      const size_t footprint = bounds.bounds.volume() * sizeof(T);
-      allocation = runtime->allocate_deferred_instance(memory, footprint, 
-                                                    false/*do not free*/);
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
-            instance, memory, allocation, layout, no_requests));
-#else
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
-            instance, memory, layout, no_requests));
-#endif
-      // Note we do not destroy this eagerly because we know this value is
-      // going to be returned as the future value and Legion will free it
-      // once it reads the value internally
-      if (wait_on.exists())
-        wait_on.wait();
+      instance = runtime->create_task_local_instance(memory, layout);
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
       const bool is_compatible = 
@@ -15370,15 +15354,9 @@ namespace Legion {
     inline void DeferredValue<T>::finalize(Runtime *runtime, Context ctx) const
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_MALLOC_INSTANCES
-      Runtime::legion_task_postamble(runtime, ctx, 
-                    accessor.ptr(Point<1,coord_t>(0)), sizeof(T),
-                    false/*owner*/, allocation, instance);
-#else
       Runtime::legion_task_postamble(runtime, ctx,
                     accessor.ptr(Point<1,coord_t>(0)), sizeof(T),
                     false/*owner*/, instance);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -15612,29 +15590,18 @@ namespace Legion {
         Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
             constraints, dim_order);
       layout->alignment_reqd = alignment;
-      Realm::ProfilingRequestSet no_requests; 
-#ifdef LEGION_MALLOC_INSTANCES
-      // Ask Legion to malloc this instance for us
       Runtime *runtime = Runtime::get_runtime();
-      const size_t footprint = bounds.bounds.volume() * sizeof(FT);
-      uintptr_t ptr = runtime->allocate_deferred_instance(memory, footprint);
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
-            instance, memory, ptr, layout, no_requests)); 
-#else
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
-            instance, memory, layout, no_requests));
-#endif
+      instance = runtime->create_task_local_instance(memory, layout);
       if (initial_value != NULL)
       {
+        Realm::ProfilingRequestSet no_requests; 
         std::vector<Realm::CopySrcDstField> dsts(1);
         dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
-        wait_on = Internal::LgEvent(bounds.fill(dsts, no_requests, 
-                            initial_value, sizeof(FT), wait_on));
+        const Internal::LgEvent wait_on(
+            bounds.fill(dsts, no_requests, initial_value, sizeof(FT)));
+        if (wait_on.exists())
+          wait_on.wait();
       }
-      // Delete the instance when the currently executing task is done
-      instance.destroy(Processor::get_current_finish_event());
-      if (wait_on.exists())
-        wait_on.wait();
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
       const bool is_compatible = 
@@ -15702,28 +15669,17 @@ namespace Legion {
         Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
             constraints, dim_order);
       layout->alignment_reqd = alignment;
-      Realm::ProfilingRequestSet no_requests; 
-#ifdef LEGION_MALLOC_INSTANCES
-      // Ask Legion to malloc this instance for us
-      const size_t footprint = bounds.bounds.volume() * sizeof(FT);
-      uintptr_t ptr = runtime->allocate_deferred_instance(memory, footprint);
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
-            instance, memory, ptr, layout, no_requests));
-#else
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
-            instance, memory, layout, no_requests));
-#endif
+      instance = runtime->create_task_local_instance(memory, layout);
       if (initial_value != NULL)
       {
+        Realm::ProfilingRequestSet no_requests; 
         std::vector<Realm::CopySrcDstField> dsts(1);
         dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
-        wait_on = Internal::LgEvent(bounds.fill(dsts, no_requests, 
-                            initial_value, sizeof(FT), wait_on));
+        const Internal::LgEvent wait_on(
+            bounds.fill(dsts, no_requests, initial_value, sizeof(FT)));
+        if (wait_on.exists())
+          wait_on.wait();
       }
-      // Delete the instance when the currently executing task is done
-      instance.destroy(Processor::get_current_finish_event());
-      if (wait_on.exists())
-        wait_on.wait();
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
       const bool is_compatible = 
@@ -15789,29 +15745,18 @@ namespace Legion {
         Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
             constraints, dim_order);
       layout->alignment_reqd = alignment;
-      Realm::ProfilingRequestSet no_requests; 
-#ifdef LEGION_MALLOC_INSTANCES
-      // Ask Legion to malloc this instance for us
       Runtime *runtime = Runtime::get_runtime();
-      const size_t footprint = bounds.bounds.volume() * sizeof(FT);
-      uintptr_t ptr = runtime->allocate_deferred_instance(memory, footprint);
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
-            instance, memory, ptr, layout, no_requests));
-#else
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
-            instance, memory, layout, no_requests));
-#endif
+      instance = runtime->create_task_local_instance(memory, layout);
       if (initial_value != NULL)
       {
+        Realm::ProfilingRequestSet no_requests; 
         std::vector<Realm::CopySrcDstField> dsts(1);
         dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
-        wait_on = Internal::LgEvent(bounds.fill(dsts, no_requests, 
-                            initial_value, sizeof(FT), wait_on));
+        const Internal::LgEvent wait_on(
+            bounds.fill(dsts, no_requests, initial_value, sizeof(FT)));
+        if (wait_on.exists())
+          wait_on.wait();
       }
-      // Delete the instance when the currently executing task is done
-      instance.destroy(Processor::get_current_finish_event());
-      if (wait_on.exists())
-        wait_on.wait();
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
       const bool is_compatible = 
@@ -15878,28 +15823,17 @@ namespace Legion {
         Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
             constraints, dim_order);
       layout->alignment_reqd = alignment;
-      Realm::ProfilingRequestSet no_requests; 
-#ifdef LEGION_MALLOC_INSTANCES
-      // Ask Legion to malloc this instance for us
-      const size_t footprint = bounds.bounds.volume() * sizeof(FT);
-      uintptr_t ptr = runtime->allocate_deferred_instance(memory, footprint);
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
-            instance, memory, ptr, layout, no_requests));
-#else
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
-            instance, memory, layout, no_requests));
-#endif
+      instance = runtime->create_task_local_instance(memory, layout);
       if (initial_value != NULL)
       {
+        Realm::ProfilingRequestSet no_requests; 
         std::vector<Realm::CopySrcDstField> dsts(1);
         dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
-        wait_on = Internal::LgEvent(bounds.fill(dsts, no_requests, 
-                            initial_value, sizeof(FT), wait_on));
+        const Internal::LgEvent wait_on(
+            bounds.fill(dsts, no_requests, initial_value, sizeof(FT)));
+        if (wait_on.exists())
+          wait_on.wait();
       }
-      // Delete the instance when the currently executing task is done
-      instance.destroy(Processor::get_current_finish_event());
-      if (wait_on.exists())
-        wait_on.wait();
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
       const bool is_compatible =
@@ -15947,29 +15881,18 @@ namespace Legion {
         Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
             constraints, dim_order);
       layout->alignment_reqd = alignment;
-      Realm::ProfilingRequestSet no_requests; 
-#ifdef LEGION_MALLOC_INSTANCES
-      // Ask Legion to malloc this instance for us
       Runtime *runtime = Runtime::get_runtime();
-      const size_t footprint = bounds.bounds.volume() * sizeof(FT);
-      uintptr_t ptr = runtime->allocate_deferred_instance(memory, footprint);
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
-            instance, memory, ptr, layout, no_requests)); 
-#else
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
-            instance, memory, layout, no_requests));
-#endif
+      instance = runtime->create_task_local_instance(memory, layout);
       if (initial_value != NULL)
       {
+        Realm::ProfilingRequestSet no_requests; 
         std::vector<Realm::CopySrcDstField> dsts(1);
         dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
-        wait_on = Internal::LgEvent(bounds.fill(dsts, no_requests, 
-                            initial_value, sizeof(FT), wait_on));
+        const Internal::LgEvent wait_on(
+            bounds.fill(dsts, no_requests, initial_value, sizeof(FT)));
+        if (wait_on.exists())
+          wait_on.wait();
       }
-      // Delete the instance when the currently executing task is done
-      instance.destroy(Processor::get_current_finish_event());
-      if (wait_on.exists())
-        wait_on.wait();
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
       const bool is_compatible = 
@@ -16019,28 +15942,17 @@ namespace Legion {
         Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
             constraints, dim_order);
       layout->alignment_reqd = alignment;
-      Realm::ProfilingRequestSet no_requests; 
-#ifdef LEGION_MALLOC_INSTANCES
-      // Ask Legion to malloc this instance for us
-      const size_t footprint = bounds.bounds.volume() * sizeof(FT);
-      uintptr_t ptr = runtime->allocate_deferred_instance(memory, footprint);
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
-            instance, memory, ptr, layout, no_requests));
-#else
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
-            instance, memory, layout, no_requests));
-#endif
+      instance = runtime->create_task_local_instance(memory, layout);
       if (initial_value != NULL)
       {
+        Realm::ProfilingRequestSet no_requests; 
         std::vector<Realm::CopySrcDstField> dsts(1);
         dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
-        wait_on = Internal::LgEvent(bounds.fill(dsts, no_requests, 
-                            initial_value, sizeof(FT), wait_on));
+        const Internal::LgEvent wait_on(
+            bounds.fill(dsts, no_requests, initial_value, sizeof(FT)));
+        if (wait_on.exists())
+          wait_on.wait();
       }
-      // Delete the instance when the currently executing task is done
-      instance.destroy(Processor::get_current_finish_event());
-      if (wait_on.exists())
-        wait_on.wait();
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
       const bool is_compatible = 
@@ -16088,29 +16000,18 @@ namespace Legion {
         Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
             constraints, dim_order);
       layout->alignment_reqd = alignment;
-      Realm::ProfilingRequestSet no_requests; 
-#ifdef LEGION_MALLOC_INSTANCES
-      // Ask Legion to malloc this instance for us
       Runtime *runtime = Runtime::get_runtime();
-      const size_t footprint = bounds.bounds.volume() * sizeof(FT);
-      uintptr_t ptr = runtime->allocate_deferred_instance(memory, footprint);
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
-            instance, memory, ptr, layout, no_requests));
-#else
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
-            instance, memory, layout, no_requests));
-#endif
+      instance = runtime->create_task_local_instance(memory, layout);
       if (initial_value != NULL)
       {
+        Realm::ProfilingRequestSet no_requests; 
         std::vector<Realm::CopySrcDstField> dsts(1);
         dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
-        wait_on = Internal::LgEvent(bounds.fill(dsts, no_requests, 
-                            initial_value, sizeof(FT), wait_on));
+        const Internal::LgEvent wait_on(
+            bounds.fill(dsts, no_requests, initial_value, sizeof(FT)));
+        if (wait_on.exists())
+          wait_on.wait();
       }
-      // Delete the instance when the currently executing task is done
-      instance.destroy(Processor::get_current_finish_event());
-      if (wait_on.exists())
-        wait_on.wait();
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
       const bool is_compatible = 
@@ -16159,28 +16060,17 @@ namespace Legion {
         Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
             constraints, dim_order);
       layout->alignment_reqd = alignment;
-      Realm::ProfilingRequestSet no_requests; 
-#ifdef LEGION_MALLOC_INSTANCES
-      // Ask Legion to malloc this instance for us
-      const size_t footprint = bounds.bounds.volume() * sizeof(FT);
-      uintptr_t ptr = runtime->allocate_deferred_instance(memory, footprint);
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
-            instance, memory, ptr, layout, no_requests));
-#else
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
-            instance, memory, layout, no_requests));
-#endif
+      instance = runtime->create_task_local_instance(memory, layout);
       if (initial_value != NULL)
       {
+        Realm::ProfilingRequestSet no_requests; 
         std::vector<Realm::CopySrcDstField> dsts(1);
         dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
-        wait_on = Internal::LgEvent(bounds.fill(dsts, no_requests, 
-                            initial_value, sizeof(FT), wait_on));
+        const Internal::LgEvent wait_on(
+            bounds.fill(dsts, no_requests, initial_value, sizeof(FT)));
+        if (wait_on.exists())
+          wait_on.wait();
       }
-      // Delete the instance when the currently executing task is done
-      instance.destroy(Processor::get_current_finish_event());
-      if (wait_on.exists())
-        wait_on.wait();
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
       const bool is_compatible =
@@ -16389,29 +16279,18 @@ namespace Legion {
         Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
             constraints, dim_order);
       layout->alignment_reqd = alignment;
-      Realm::ProfilingRequestSet no_requests; 
-#ifdef LEGION_MALLOC_INSTANCES
-      // Ask Legion to malloc this instance for us
       Runtime *runtime = Runtime::get_runtime();
-      const size_t footprint = bounds.bounds.volume() * sizeof(FT);
-      uintptr_t ptr = runtime->allocate_deferred_instance(memory, footprint);
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
-            instance, memory, ptr, layout, no_requests));
-#else
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
-            instance, memory, layout, no_requests));
-#endif
+      instance = runtime->create_task_local_instance(memory, layout);
       if (initial_value != NULL)
       {
+        Realm::ProfilingRequestSet no_requests; 
         std::vector<Realm::CopySrcDstField> dsts(1);
         dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
-        wait_on = Internal::LgEvent(bounds.fill(dsts, no_requests, 
-                            initial_value, sizeof(FT), wait_on));
+        const Internal::LgEvent wait_on(
+            bounds.fill(dsts, no_requests, initial_value, sizeof(FT)));
+        if (wait_on.exists())
+          wait_on.wait();
       }
-      // Delete the instance when the currently executing task is done
-      instance.destroy(Processor::get_current_finish_event());
-      if (wait_on.exists())
-        wait_on.wait();
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
       const bool is_compatible = 
@@ -16478,28 +16357,17 @@ namespace Legion {
         Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
             constraints, dim_order);
       layout->alignment_reqd = alignment;
-      Realm::ProfilingRequestSet no_requests; 
-#ifdef LEGION_MALLOC_INSTANCES
-      // Ask Legion to malloc this instance for us
-      const size_t footprint = bounds.bounds.volume() * sizeof(FT);
-      uintptr_t ptr = runtime->allocate_deferred_instance(memory, footprint);
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
-            instance, memory, ptr, layout, no_requests));
-#else
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
-            instance, memory, layout, no_requests));
-#endif
+      instance = runtime->create_task_local_instance(memory, layout);
       if (initial_value != NULL)
       {
+        Realm::ProfilingRequestSet no_requests; 
         std::vector<Realm::CopySrcDstField> dsts(1);
         dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
-        wait_on = Internal::LgEvent(bounds.fill(dsts, no_requests, 
-                            initial_value, sizeof(FT), wait_on));
+        const Internal::LgEvent wait_on(
+            bounds.fill(dsts, no_requests, initial_value, sizeof(FT)));
+        if (wait_on.exists())
+          wait_on.wait();
       }
-      // Delete the instance when the currently executing task is done
-      instance.destroy(Processor::get_current_finish_event());
-      if (wait_on.exists())
-        wait_on.wait();
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
       const bool is_compatible =
@@ -16565,29 +16433,18 @@ namespace Legion {
         Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
             constraints, dim_order);
       layout->alignment_reqd = alignment;
-      Realm::ProfilingRequestSet no_requests; 
-#ifdef LEGION_MALLOC_INSTANCES
-      // Ask Legion to malloc this instance for us
       Runtime *runtime = Runtime::get_runtime();
-      const size_t footprint = bounds.bounds.volume() * sizeof(FT);
-      uintptr_t ptr = runtime->allocate_deferred_instance(memory, footprint);
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
-            instance, memory, ptr, layout, no_requests));
-#else
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
-            instance, memory, layout, no_requests));
-#endif
+      instance = runtime->create_task_local_instance(memory, layout);
       if (initial_value != NULL)
       {
+        Realm::ProfilingRequestSet no_requests; 
         std::vector<Realm::CopySrcDstField> dsts(1);
         dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
-        wait_on = Internal::LgEvent(bounds.fill(dsts, no_requests, 
-                            initial_value, sizeof(FT), wait_on));
+        const Internal::LgEvent wait_on(
+            bounds.fill(dsts, no_requests, initial_value, sizeof(FT)));
+        if (wait_on.exists())
+          wait_on.wait();
       }
-      // Delete the instance when the currently executing task is done
-      instance.destroy(Processor::get_current_finish_event());
-      if (wait_on.exists())
-        wait_on.wait();
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
       const bool is_compatible =
@@ -16654,28 +16511,17 @@ namespace Legion {
         Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
             constraints, dim_order);
       layout->alignment_reqd = alignment;
-      Realm::ProfilingRequestSet no_requests; 
-#ifdef LEGION_MALLOC_INSTANCES
-      // Ask Legion to malloc this instance for us
-      const size_t footprint = bounds.bounds.volume() * sizeof(FT);
-      uintptr_t ptr = runtime->allocate_deferred_instance(memory, footprint);
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
-            instance, memory, ptr, layout, no_requests));
-#else
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
-            instance, memory, layout, no_requests));
-#endif
+      instance = runtime->create_task_local_instance(memory, layout);
       if (initial_value != NULL)
       {
+        Realm::ProfilingRequestSet no_requests; 
         std::vector<Realm::CopySrcDstField> dsts(1);
         dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
-        wait_on = Internal::LgEvent(bounds.fill(dsts, no_requests, 
-                            initial_value, sizeof(FT), wait_on));
+        const Internal::LgEvent wait_on(
+            bounds.fill(dsts, no_requests, initial_value, sizeof(FT)));
+        if (wait_on.exists())
+          wait_on.wait();
       }
-      // Delete the instance when the currently executing task is done
-      instance.destroy(Processor::get_current_finish_event());
-      if (wait_on.exists())
-        wait_on.wait();
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
       const bool is_compatible =
@@ -16723,29 +16569,18 @@ namespace Legion {
         Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
             constraints, dim_order);
       layout->alignment_reqd = alignment;
-      Realm::ProfilingRequestSet no_requests; 
-#ifdef LEGION_MALLOC_INSTANCES
-      // Ask Legion to malloc this instance for us
       Runtime *runtime = Runtime::get_runtime();
-      const size_t footprint = bounds.bounds.volume() * sizeof(FT);
-      uintptr_t ptr = runtime->allocate_deferred_instance(memory, footprint);
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
-            instance, memory, ptr, layout, no_requests));
-#else
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
-            instance, memory, layout, no_requests));
-#endif
+      instance = runtime->create_task_local_instance(memory, layout);
       if (initial_value != NULL)
       {
+        Realm::ProfilingRequestSet no_requests; 
         std::vector<Realm::CopySrcDstField> dsts(1);
         dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
-        wait_on = Internal::LgEvent(bounds.fill(dsts, no_requests, 
-                            initial_value, sizeof(FT), wait_on));
+        const Internal::LgEvent wait_on(
+            bounds.fill(dsts, no_requests, initial_value, sizeof(FT)));
+        if (wait_on.exists())
+          wait_on.wait();
       }
-      // Delete the instance when the currently executing task is done
-      instance.destroy(Processor::get_current_finish_event());
-      if (wait_on.exists())
-        wait_on.wait();
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
       const bool is_compatible = 
@@ -16794,28 +16629,17 @@ namespace Legion {
         Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
             constraints, dim_order);
       layout->alignment_reqd = alignment;
-      Realm::ProfilingRequestSet no_requests; 
-#ifdef LEGION_MALLOC_INSTANCES
-      // Ask Legion to malloc this instance for us
-      const size_t footprint = bounds.bounds.volume() * sizeof(FT);
-      uintptr_t ptr = runtime->allocate_deferred_instance(memory, footprint);
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
-            instance, memory, ptr, layout, no_requests));
-#else
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
-            instance, memory, layout, no_requests));
-#endif
+      instance = runtime->create_task_local_instance(memory, layout);
       if (initial_value != NULL)
       {
+        Realm::ProfilingRequestSet no_requests; 
         std::vector<Realm::CopySrcDstField> dsts(1);
         dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
-        wait_on = Internal::LgEvent(bounds.fill(dsts, no_requests, 
-                            initial_value, sizeof(FT), wait_on));
+        const Internal::LgEvent wait_on(
+            bounds.fill(dsts, no_requests, initial_value, sizeof(FT)));
+        if (wait_on.exists())
+          wait_on.wait();
       }
-      // Delete the instance when the currently executing task is done
-      instance.destroy(Processor::get_current_finish_event());
-      if (wait_on.exists())
-        wait_on.wait();
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
       const bool is_compatible =
@@ -16863,29 +16687,18 @@ namespace Legion {
         Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
             constraints, dim_order);
       layout->alignment_reqd = alignment;
-      Realm::ProfilingRequestSet no_requests; 
-#ifdef LEGION_MALLOC_INSTANCES
-      // Ask Legion to malloc this instance for us
       Runtime *runtime = Runtime::get_runtime();
-      const size_t footprint = bounds.bounds.volume() * sizeof(FT);
-      uintptr_t ptr = runtime->allocate_deferred_instance(memory, footprint);
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
-            instance, memory, ptr, layout, no_requests));
-#else
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
-            instance, memory, layout, no_requests));
-#endif
+      instance = runtime->create_task_local_instance(memory, layout);
       if (initial_value != NULL)
       {
+        Realm::ProfilingRequestSet no_requests; 
         std::vector<Realm::CopySrcDstField> dsts(1);
         dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
-        wait_on = Internal::LgEvent(bounds.fill(dsts, no_requests, 
-                            initial_value, sizeof(FT), wait_on));
+        const Internal::LgEvent wait_on(
+            bounds.fill(dsts, no_requests, initial_value, sizeof(FT)));
+        if (wait_on.exists())
+          wait_on.wait();
       }
-      // Delete the instance when the currently executing task is done
-      instance.destroy(Processor::get_current_finish_event());
-      if (wait_on.exists())
-        wait_on.wait();
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
       const bool is_compatible =
@@ -16934,28 +16747,17 @@ namespace Legion {
         Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
             constraints, dim_order);
       layout->alignment_reqd = alignment;
-      Realm::ProfilingRequestSet no_requests; 
-#ifdef LEGION_MALLOC_INSTANCES
-      // Ask Legion to malloc this instance for us
-      const size_t footprint = bounds.bounds.volume() * sizeof(FT);
-      uintptr_t ptr = runtime->allocate_deferred_instance(memory, footprint);
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_external(
-            instance, memory, ptr, layout, no_requests));
-#else
-      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(
-            instance, memory, layout, no_requests));
-#endif
+      instance = runtime->create_task_local_instance(memory, layout);
       if (initial_value != NULL)
       {
+        Realm::ProfilingRequestSet no_requests; 
         std::vector<Realm::CopySrcDstField> dsts(1);
         dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
-        wait_on = Internal::LgEvent(bounds.fill(dsts, no_requests, 
-                            initial_value, sizeof(FT), wait_on));
+        const Internal::LgEvent wait_on(
+            bounds.fill(dsts, no_requests, initial_value, sizeof(FT)));
+        if (wait_on.exists())
+          wait_on.wait();
       }
-      // Delete the instance when the currently executing task is done
-      instance.destroy(Processor::get_current_finish_event());
-      if (wait_on.exists())
-        wait_on.wait();
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
       const bool is_compatible =

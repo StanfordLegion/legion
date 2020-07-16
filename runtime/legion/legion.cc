@@ -6441,15 +6441,18 @@ namespace Legion {
       return result;
     }
 
-#ifdef LEGION_MALLOC_INSTANCES
     //--------------------------------------------------------------------------
-    uintptr_t Runtime::allocate_deferred_instance(Memory memory, size_t size,
-                                                  bool free)
+    Realm::RegionInstance Runtime::create_task_local_instance(Memory memory,
+                                           Realm::InstanceLayoutGeneric *layout)
     //--------------------------------------------------------------------------
     {
-      return runtime->allocate_deferred_instance(memory, size, free);
+      if (Internal::implicit_context == NULL)
+        REPORT_LEGION_ERROR(ERROR_CONFUSED_USER,
+            "It is illegal to request the creation of DeferredBuffer, Deferred"
+            "Value, or DeferredReduction objects outside of Legion tasks.")
+      return 
+         Internal::implicit_context->create_task_local_instance(memory, layout);
     }
-#endif
 
     //--------------------------------------------------------------------------
     /*static*/ int Runtime::start(int argc, char **argv, bool background,
@@ -6800,17 +6803,10 @@ namespace Legion {
                                                    const void *retvalptr,
                                                    size_t retvalsize,
                                                    bool owned,
-#ifdef LEGION_MALLOC_INSTANCES
-                                                   uintptr_t allocation,
-#endif
                                                    Realm::RegionInstance inst)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_MALLOC_INSTANCES
-      ctx->end_task(retvalptr, retvalsize, owned, allocation, inst);
-#else
       ctx->end_task(retvalptr, retvalsize, owned, inst);
-#endif
     }
 
     //--------------------------------------------------------------------------
