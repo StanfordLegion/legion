@@ -10374,7 +10374,7 @@ namespace Legion {
       {
         rez.serialize(it->first);
         if (it->second.impl != NULL)
-          rez.serialize(it->second.impl->did);
+          it->second.impl->pack_future(rez);
         else
           rez.serialize<DistributedID>(0);
       }
@@ -10387,21 +10387,14 @@ namespace Legion {
     {
       size_t num_futures;
       derez.deserialize(num_futures);
+      Runtime *runtime = context->runtime;
       for (unsigned idx = 0; idx < num_futures; idx++)
       {
         DomainPoint point;
         derez.deserialize(point);
-        DistributedID did;
-        derez.deserialize(did);
-        if (did > 0)
+        FutureImpl *impl = FutureImpl::unpack_future(runtime, derez, mutator);
+        if (impl != NULL)
         {
-          FutureImpl *impl = 
-            context->runtime->find_or_create_future(did, mutator,
-                  future_map->op, future_map->op_gen,
-#ifdef LEGION_SPY
-                  future_map->op_uid,
-#endif
-                  future_map->op_depth);
           // Add the reference ourselves so we can capture the effects
           impl->add_base_gc_ref(FUTURE_HANDLE_REF, mutator);
           results[point] = Future(impl, false/*need referece*/);

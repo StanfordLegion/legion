@@ -613,7 +613,8 @@ namespace Legion {
       void release_task_local_instances(PhysicalInstance return_inst);
     protected:
       Future predicate_task_false(const TaskLauncher &launcher);
-      FutureMap predicate_index_task_false(const IndexTaskLauncher &launcher);
+      FutureMap predicate_index_task_false(size_t context_index,
+                                           const IndexTaskLauncher &launcher);
       Future predicate_index_task_reduce_false(const IndexTaskLauncher &launch);
     public:
       // Find an index space name for a concrete launch domain
@@ -2048,6 +2049,8 @@ namespace Legion {
       void create_new_replicate_barrier(RtBarrier &bar, size_t arrivals);
       void create_new_replicate_barrier(ApBarrier &bar, size_t arrivals);
     public:
+      static void hash_future(Murmur3Hasher &hasher, const Future &future);
+      static void hash_future_map(Murmur3Hasher &hasher, const FutureMap &map);
       void verify_replicable(Murmur3Hasher &hasher, const char *func_name);
     public:
       // A little help for ConsensusMatchExchange since it is templated
@@ -2681,6 +2684,7 @@ namespace Legion {
     protected:
       mutable LocalLock                            leaf_lock;
       std::set<RtEvent>                            execution_events;
+      size_t                                       inlined_tasks;
     public:
       virtual TaskPriority get_current_priority(void) const;
       virtual void set_current_priority(TaskPriority priority);

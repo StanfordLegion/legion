@@ -444,7 +444,7 @@ namespace Legion {
                                         const void *orig, size_t orig_length);
       virtual void handle_profiling_update(int count);
       // Compute the initial precondition for this operation
-      virtual ApEvent compute_init_precondition(const TraceInfo &info);
+      virtual ApEvent compute_init_precondition(const TraceInfo &info); 
     protected:
       void filter_copy_request_kinds(MapperManager *mapper,
           const std::set<ProfilingMeasurementID> &requests,
@@ -573,6 +573,10 @@ namespace Legion {
       InnerContext* find_logical_context(unsigned index);
       InnerContext* find_physical_context(unsigned index,
                                           const RegionRequirement &req);
+    public:
+      // Support for operations that compute futures
+      void compute_future_coordinates(
+                     std::vector<std::pair<size_t,DomainPoint> > &coordinates);
     public: // Support for mapping operations
       static void prepare_for_mapping(const InstanceRef &ref,
                                       MappingInstance &instance);

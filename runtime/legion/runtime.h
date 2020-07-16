@@ -205,7 +205,7 @@ namespace Legion {
     public:
       FutureImpl(Runtime *rt, bool register_future, DistributedID did, 
                  AddressSpaceID owner_space, ApEvent complete,
-                 Operation *op = NULL);
+                 Operation *op = NULL, bool compute_coordinates = true);
       FutureImpl(Runtime *rt, bool register_future, DistributedID did, 
                  AddressSpaceID owner_space, ApEvent complete, 
                  Operation *op, GenerationID gen,
@@ -247,6 +247,14 @@ namespace Legion {
       // internal use which means we can see the value before
       // the future actually completes
       RtEvent subscribe_internal(void);
+      // Set the task tree coordinates for this future
+      void set_future_coordinates(
+          std::vector<std::pair<size_t,DomainPoint> > &coordinates);
+      const std::vector<std::pair<size_t,DomainPoint> >&
+        get_future_coordinates(void) const;
+      void pack_future(Serializer &rez) const;
+      static FutureImpl* unpack_future(Runtime *runtime, 
+          Deserializer &derez, ReferenceMutator *mutator);
     public:
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_valid(ReferenceMutator *mutator);
@@ -289,6 +297,10 @@ namespace Legion {
       RtUserEvent subscription_internal;
       // On the owner node, keep track of the registered waiters
       std::set<AddressSpaceID> subscribers;
+      // These are the coordinates in the task tree for the operation
+      // that produced this future. Currently it is only valid if we
+      // are running with -lg:safe_ctrlrepl but we could relax that
+      std::vector<std::pair<size_t,DomainPoint> > coordinates;
       void *result; 
       size_t result_size;
       AddressSpaceID result_set_space; // space on which the result was set
@@ -313,7 +325,7 @@ namespace Legion {
                     Runtime *rt, DistributedID did, AddressSpaceID owner_space,
                     RtUserEvent deletion_trigger=RtUserEvent::NO_RT_USER_EVENT);
       FutureMapImpl(TaskContext *ctx, Runtime *rt, const Domain &domain,
-                    DistributedID did, AddressSpaceID owner_space,
+                    DistributedID did, size_t index, AddressSpaceID owner_space,
                     RtEvent ready_event, bool register_now = true, // remote
                     RtUserEvent deletion_trigger=RtUserEvent::NO_RT_USER_EVENT);
       FutureMapImpl(const FutureMapImpl &rhs);
@@ -345,6 +357,12 @@ namespace Legion {
       // map which is mainly needed in control replication
       virtual void argument_map_wrap(void) { }
     public:
+      void set_future_map_coordinates(
+          std::vector<std::pair<size_t,DomainPoint> > &coordinates);
+      void pack_future_map(Serializer &rez) const;
+      static FutureMapImpl* unpack_future_map(Runtime *runtime,
+          Deserializer &derez, ReferenceMutator *mutator, TaskContext *ctx);
+    public:
       virtual void get_all_futures(std::map<DomainPoint,Future> &futures);
       void set_all_futures(const std::map<DomainPoint,Future> &futures);
       // Dump helper method for template classes
@@ -367,6 +385,7 @@ namespace Legion {
       TaskContext *const context;
       // Either an index space task or a must epoch op
       Operation *const op;
+      const size_t op_ctx_index;
       const GenerationID op_gen;
       const int op_depth;
 #ifdef LEGION_SPY
@@ -378,6 +397,13 @@ namespace Legion {
       RtEvent ready_event;
       RtUserEvent delete_event;
       std::map<DomainPoint,Future> futures;
+    protected:
+      // These are the coordinates for the parent task of the operation
+      // that made this future map, with the op_ctx_index above we can
+      // compute coordinates for each of the futures, Currently this is
+      // only valid in the case of running with `-lg:safe_ctrlrepl but
+      // it could be all the time if needed
+      std::vector<std::pair<size_t,DomainPoint> > coordinates; 
     };
 
     /**
@@ -462,8 +488,6 @@ namespace Legion {
       // in case they have to make futures from remote shards
       const int op_depth; 
       const UniqueID op_uid;
-      // Use this for checking safety of control replication
-      const size_t op_ctx_index;
     protected:
       std::vector<PendingRequest> pending_future_map_requests;
       std::set<RtEvent> exchange_events;
@@ -3216,6 +3240,7 @@ namespace Legion {
     public:
       FutureImpl* find_or_create_future(DistributedID did,
                                         ReferenceMutator *mutator,
+                      std::vector<std::pair<size_t,DomainPoint> > &coordinates,
                                         Operation *op = NULL,
                                         GenerationID op_gen = 0, 
 #ifdef LEGION_SPY
@@ -3223,8 +3248,9 @@ namespace Legion {
 #endif
                                         int op_depth = 0);
       FutureMapImpl* find_or_create_future_map(DistributedID did, 
-                          TaskContext *ctx, const Domain &domain, 
-                          RtEvent complete, ReferenceMutator *mutator);
+                          TaskContext *ctx, size_t index, const Domain &domain,
+                          RtEvent complete, ReferenceMutator *mutator,
+                          std::vector<std::pair<size_t,DomainPoint> > &coords);
       IndexSpace find_or_create_index_slice_space(const Domain &launch_domain,
                                                   TypeTag type_tag);
     public:

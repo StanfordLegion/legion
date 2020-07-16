@@ -2560,7 +2560,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMap TaskContext::predicate_index_task_false(
+    FutureMap TaskContext::predicate_index_task_false(size_t context_index,
                                               const IndexTaskLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -2570,7 +2570,7 @@ namespace Legion {
                                                   launch_domain);
       FutureMapImpl *result = new FutureMapImpl(this, runtime, 
           launch_domain, runtime->get_available_distributed_id(),
-          runtime->address_space, RtEvent::NO_RT_EVENT);
+          context_index, runtime->address_space, RtEvent::NO_RT_EVENT);
       if (launcher.predicate_false_future.impl != NULL)
       {
         ApEvent ready_event = 
@@ -6006,7 +6006,8 @@ namespace Legion {
       }
       // Quick out for predicate false
       if (launcher.predicate == Predicate::FALSE_PRED)
-        return predicate_index_task_false(launcher);
+        return predicate_index_task_false(
+            __sync_add_and_fetch(&outstanding_children_count,1), launcher);
       IndexSpace launch_space = launcher.launch_space;
       if (!launch_space.exists())
         launch_space = find_index_launch_space(launcher.launch_domain);
@@ -10420,6 +10421,49 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ void ReplicateContext::hash_future(Murmur3Hasher &hasher,
+                                                  const Future &future)
+    //--------------------------------------------------------------------------
+    {
+      const std::vector<std::pair<size_t,DomainPoint> > &coordinates =
+        future.impl->get_future_coordinates();
+      if (!coordinates.empty())
+      {
+        for (std::vector<std::pair<size_t,DomainPoint> >::const_iterator it =
+              coordinates.begin(); it != coordinates.end(); it++)
+        {
+          hasher.hash(it->first);
+          for (unsigned idx = 0; idx < it->second.get_dim(); idx++)
+            hasher.hash(it->second[idx]);
+        }
+      }
+      else
+      {
+        const void *result =
+          future.impl->get_untyped_result(true,NULL,true/*internal*/);
+        const size_t size = future.impl->get_untyped_size(true/*internal*/);
+        hasher.hash(result, size);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ReplicateContext::hash_future_map(Murmur3Hasher &hasher,
+                                                      const FutureMap &map)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(map.impl != NULL);
+      ReplFutureMapImpl *impl = 
+        dynamic_cast<ReplFutureMapImpl*>(map.impl);
+      assert(impl != NULL);
+#else
+      ReplFutureMapImpl *impl = 
+        static_cast<ReplFutureMapImpl*>(map.impl);
+#endif
+      hasher.hash(impl->op_ctx_index);
+    }
+
+    //--------------------------------------------------------------------------
     void ReplicateContext::verify_replicable(Murmur3Hasher &hasher,
                                              const char *func_name)
     //--------------------------------------------------------------------------
@@ -10429,6 +10473,7 @@ namespace Legion {
       VerifyReplicableExchange exchange(COLLECTIVE_LOC_82, this);
       const VerifyReplicableExchange::ShardHashes &hashes =
         exchange.exchange(hash);
+      
       // If all shards had the same hashes then we are done
       if (hashes.size() == 1)
         return;
@@ -10816,11 +10861,7 @@ namespace Legion {
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_INDEX_SPACE);
-        const Domain *domain = static_cast<Domain*>(
-                future.impl->get_untyped_result(true,NULL,true/*internal*/));
-        Serializer rez;
-        rez.serialize(*domain);
-        hasher.hash(rez.get_buffer(), rez.get_used_bytes());
+        hash_future(hasher, future);
         hasher.hash(type_tag);
         verify_replicable(hasher, "create_index_space");
       }
@@ -11625,16 +11666,7 @@ namespace Legion {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_PARTITION_BY_WEIGHTS);
         hasher.hash(parent);
-#ifdef DEBUG_LEGION
-        assert(weights.impl != NULL);
-        ReplFutureMapImpl *impl = 
-          dynamic_cast<ReplFutureMapImpl*>(weights.impl);
-        assert(impl != NULL);
-#else
-        ReplFutureMapImpl *impl = 
-          static_cast<ReplFutureMapImpl*>(weights.impl);
-#endif
-        hasher.hash(impl->op_ctx_index);
+        hash_future_map(hasher, weights);
         hasher.hash(color_space);
         hasher.hash(granularity);
         hasher.hash(color);
@@ -12359,6 +12391,7 @@ namespace Legion {
       }
       const DistributedID did = runtime->get_available_distributed_id();
       FutureMap future_map(new FutureMapImpl(this, runtime, fm_domain, did,
+            __sync_add_and_fetch(&outstanding_children_count, 1),
             runtime->address_space, RtEvent::NO_RT_EVENT, true/*reg now*/,
             deletion_precondition));
       // Prune out every N-th one for this shard and then pass through
@@ -12395,16 +12428,7 @@ namespace Legion {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_PARTITION_BY_DOMAIN);
         hasher.hash(parent);
-#ifdef DEBUG_LEGION
-        assert(domains.impl != NULL);
-        ReplFutureMapImpl *impl = 
-          dynamic_cast<ReplFutureMapImpl*>(domains.impl);
-        assert(impl != NULL);
-#else
-        ReplFutureMapImpl *impl = 
-          static_cast<ReplFutureMapImpl*>(domains.impl);
-#endif
-        hasher.hash(impl->op_ctx_index);
+        hash_future_map(hasher, domains);
         hasher.hash(color_space);
         hasher.hash(perform_intersections);
         hasher.hash(part_kind);
@@ -13796,9 +13820,7 @@ namespace Legion {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_ALLOCATE_FIELD);
         hasher.hash(space);
-        const size_t *size = static_cast<size_t*>(
-              field_size.impl->get_untyped_result(true,NULL,true/*internal*/));
-        hasher.hash(*size);
+        hash_future(hasher, field_size);
         hasher.hash(fid);
         hasher.hash(local);
         hasher.hash(serdez_id);
@@ -14042,11 +14064,7 @@ namespace Legion {
         hasher.hash(space);
         for (std::vector<Future>::const_iterator it = 
               sizes.begin(); it != sizes.end(); it++)
-        {
-          const size_t *size = static_cast<size_t*>(
-                it->impl->get_untyped_result(true,NULL,true/*internal*/));
-          hasher.hash(*size);
-        }
+          hash_future(hasher, *it);
         for (std::vector<FieldID>::const_iterator it = 
               resulting_fields.begin(); it != resulting_fields.end(); it++)
           hasher.hash(*it);
@@ -14761,6 +14779,7 @@ namespace Legion {
                                                     launch_domain);
         FutureMapImpl *result = new FutureMapImpl(this, runtime,
             launch_domain, runtime->get_available_distributed_id(), 
+            __sync_add_and_fetch(&outstanding_children_count, 1),
             runtime->address_space, RtEvent::NO_RT_EVENT);
         if (launcher.predicate_false_future.impl != NULL)
         {
@@ -17854,7 +17873,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LeafContext::LeafContext(Runtime *rt, TaskOp *owner)
-      : TaskContext(rt, owner, owner->get_depth(), owner->regions)
+      : TaskContext(rt, owner, owner->get_depth(), owner->regions), 
+        inlined_tasks(0)
     //--------------------------------------------------------------------------
     {
     }
@@ -18801,10 +18821,9 @@ namespace Legion {
       {
         if (launcher.predicate == Predicate::FALSE_PRED)
           return predicate_task_false(launcher);
-
         IndividualTask *task = runtime->get_available_individual_task(); 
         InnerContext *parent = owner_task->get_context();
-        Future result = task->initialize_task(parent, launcher, false/*track*/);
+        Future result = task->initialize_task(parent, launcher);
         inline_child_task(task);
         task->deactivate();
         return result;
@@ -18826,14 +18845,13 @@ namespace Legion {
       if (!launcher.must_parallelism && launcher.enable_inlining)
       {
         if (launcher.predicate == Predicate::FALSE_PRED)
-          return predicate_index_task_false(launcher); 
+          return predicate_index_task_false(++inlined_tasks, launcher); 
         IndexTask *task = runtime->get_available_index_task();
         InnerContext *parent = owner_task->get_context();
         IndexSpace launch_space = launcher.launch_space;
         if (!launch_space.exists())
           launch_space = find_index_launch_space(launcher.launch_domain);
-        FutureMap result = task->initialize_task(parent, launcher, 
-                                                 launch_space, false/*track*/);
+        FutureMap result = task->initialize_task(parent, launcher,launch_space);
         inline_child_task(task);
         task->deactivate();
         return result;
@@ -18862,7 +18880,7 @@ namespace Legion {
         if (!launch_space.exists())
           launch_space = find_index_launch_space(launcher.launch_domain);
         Future result = task->initialize_task(parent, launcher, launch_space, 
-                                        redop, deterministic, false/*track*/);
+                                              redop, deterministic);
         inline_child_task(task);
         task->deactivate();
         return result;
@@ -19246,8 +19264,10 @@ namespace Legion {
                     const std::vector<StaticDependence> *dependences)
     //--------------------------------------------------------------------------
     {
-      assert(false);
-      return 0;
+#ifdef DEBUG_LEGION
+      assert(op->get_operation_kind() == Operation::TASK_OP_KIND);
+#endif
+      return ++inlined_tasks;
     }
 
     //--------------------------------------------------------------------------
@@ -19309,21 +19329,21 @@ namespace Legion {
     void LeafContext::register_child_complete(Operation *op)
     //--------------------------------------------------------------------------
     {
-      assert(false);
+      // Nothing to do
     }
 
     //--------------------------------------------------------------------------
     void LeafContext::register_child_commit(Operation *op)
     //--------------------------------------------------------------------------
     {
-      assert(false);
+      // Nothing to do
     }
 
     //--------------------------------------------------------------------------
     void LeafContext::unregister_child_operation(Operation *op)
     //--------------------------------------------------------------------------
     {
-      assert(false);
+      // Nothing to do
     }
 
     //--------------------------------------------------------------------------

@@ -369,7 +369,7 @@ namespace Legion {
       rez.serialize(futures.size());
       // If we are remote we can just do the normal pack
       for (unsigned idx = 0; idx < futures.size(); idx++)
-        rez.serialize(futures[idx].impl->did);
+        futures[idx].impl->pack_future(rez);
       rez.serialize(grants.size());
       for (unsigned idx = 0; idx < grants.size(); idx++)
         pack_grant(grants[idx], rez);
@@ -420,10 +420,7 @@ namespace Legion {
       futures.resize(num_futures);
       for (unsigned idx = 0; idx < futures.size(); idx++)
       {
-        DistributedID future_did;
-        derez.deserialize(future_did);
-        FutureImpl *impl = 
-          runtime->find_or_create_future(future_did, mutator);
+        FutureImpl *impl = FutureImpl::unpack_future(runtime, derez, mutator);
         impl->add_base_gc_ref(FUTURE_HANDLE_REF, mutator);
         futures[idx] = Future(impl, false/*need reference*/);
       }
@@ -5988,9 +5985,9 @@ namespace Legion {
       rez.serialize(remote_unique_id);
       rez.serialize(remote_owner_uid);
       rez.serialize(top_level_task);
-      rez.serialize(result.impl->did);
+      result.impl->pack_future(rez);
       if (predicate_false_future.impl != NULL)
-        rez.serialize(predicate_false_future.impl->did);
+        predicate_false_future.impl->pack_future(rez);
       else
         rez.serialize<DistributedID>(0);
       rez.serialize(predicate_false_size);
@@ -6034,25 +6031,18 @@ namespace Legion {
         deactivate();
         return false;
       }
-      DistributedID future_did;
-      derez.deserialize(future_did);
       {
         WrapperReferenceMutator mutator(ready_events);
-        FutureImpl *impl = 
-          runtime->find_or_create_future(future_did, &mutator);
+        FutureImpl *impl = FutureImpl::unpack_future(runtime, derez, &mutator);
         impl->add_base_gc_ref(FUTURE_HANDLE_REF, &mutator);
         result = Future(impl, false/*need reference*/);
-      }
-      // Unpack the predicate false infos
-      DistributedID pred_false_did;
-      derez.deserialize(pred_false_did);
-      if (pred_false_did != 0)
-      {
-        WrapperReferenceMutator mutator(ready_events);
-        FutureImpl *impl = 
-          runtime->find_or_create_future(pred_false_did, &mutator);
-        impl->add_base_gc_ref(FUTURE_HANDLE_REF, &mutator);
-        predicate_false_future = Future(impl, false/*need reference*/);
+        // Unpack the predicate false infos
+        impl = FutureImpl::unpack_future(runtime, derez, &mutator);
+        if (impl != NULL)
+        {
+          impl->add_base_gc_ref(FUTURE_HANDLE_REF, &mutator);
+          predicate_false_future = Future(impl, false/*need reference*/);
+        }
       }
       derez.deserialize(predicate_false_size);
       if (predicate_false_size > 0)
@@ -10145,12 +10135,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(future_map.impl != NULL);
 #endif
-        rez.serialize(future_map.impl->did);
-        rez.serialize(future_map.impl->future_map_domain);
-        rez.serialize(future_map.impl->get_ready_event());
+        future_map.impl->pack_future_map(rez);
       }
       if (predicate_false_future.impl != NULL)
-        rez.serialize(predicate_false_future.impl->did);
+        predicate_false_future.impl->pack_future(rez);
       else
         rez.serialize<DistributedID>(0);
       rez.serialize(predicate_false_size);
@@ -10192,20 +10180,14 @@ namespace Legion {
 #endif
         }
         if (point_arguments.impl != NULL)
-        {
-          rez.serialize(point_arguments.impl->did);
-          rez.serialize(point_arguments.impl->future_map_domain);
-          rez.serialize(point_arguments.impl->get_ready_event());
-        }
+          point_arguments.impl->pack_future_map(rez);
         else
           rez.serialize<DistributedID>(0);
         rez.serialize<size_t>(point_futures.size());
         for (unsigned idx = 0; idx < point_futures.size(); idx++)
         {
           FutureMapImpl *impl = point_futures[idx].impl;
-          rez.serialize(impl->did);
-          rez.serialize(impl->future_map_domain);
-          rez.serialize(impl->get_ready_event());
+          impl->pack_future_map(rez);
         }
       }
       if (is_origin_mapped())
@@ -10263,27 +10245,19 @@ namespace Legion {
         parent_ctx = index_owner->parent_ctx;
       if (redop == 0)
       {
-        DistributedID future_map_did;
-        derez.deserialize(future_map_did);
-        Domain future_map_domain;
-        derez.deserialize(future_map_domain);
-        RtEvent ready_event;
-        derez.deserialize(ready_event);
         WrapperReferenceMutator mutator(ready_events);
-        future_map = FutureMap(
-            runtime->find_or_create_future_map(future_map_did, parent_ctx, 
-                                future_map_domain, ready_event, &mutator)); 
+        future_map = FutureMap(FutureMapImpl::unpack_future_map(runtime, 
+                                            derez, &mutator, parent_ctx));
       }
       // Unpack the predicate false infos
-      DistributedID pred_false_did;
-      derez.deserialize(pred_false_did);
-      if (pred_false_did != 0)
       {
         WrapperReferenceMutator mutator(ready_events);
-        FutureImpl *impl = 
-          runtime->find_or_create_future(pred_false_did, &mutator);
-        impl->add_base_gc_ref(FUTURE_HANDLE_REF, &mutator);
-        predicate_false_future = Future(impl, false/*need reference*/);
+        FutureImpl *impl = FutureImpl::unpack_future(runtime, derez, &mutator);
+        if (impl != NULL)
+        {
+          impl->add_base_gc_ref(FUTURE_HANDLE_REF, &mutator);
+          predicate_false_future = Future(impl, false/*need reference*/);
+        }
       }
       derez.deserialize(predicate_false_size);
       if (predicate_false_size > 0)
@@ -10313,39 +10287,30 @@ namespace Legion {
 #endif
         remote_trace_info = 
           TraceInfo::unpack_remote_trace_info(derez, this, runtime);
-        DistributedID future_map_did;
-        derez.deserialize(future_map_did);
-        if (future_map_did > 0)
+        WrapperReferenceMutator mutator(ready_events);
         {
-          Domain future_map_domain;
-          derez.deserialize(future_map_domain);
-          RtEvent ready_event;
-          derez.deserialize(ready_event);
-          WrapperReferenceMutator mutator(ready_events);
-          FutureMapImpl *impl = runtime->find_or_create_future_map(
-              future_map_did, parent_ctx, future_map_domain, 
-              ready_event, &mutator);
-          impl->add_base_gc_ref(FUTURE_HANDLE_REF, &mutator);
-          point_arguments = FutureMap(impl, false/*need reference*/);
+          FutureMapImpl *impl = FutureMapImpl::unpack_future_map(runtime,
+              derez, &mutator, parent_ctx);
+          if (impl != NULL)
+          {
+            impl->add_base_gc_ref(FUTURE_HANDLE_REF, &mutator);
+            point_arguments = FutureMap(impl, false/*need reference*/);
+          }
         }
         size_t num_point_futures;
         derez.deserialize(num_point_futures);
         if (num_point_futures > 0)
         {
-          RtEvent ready_event;
-          Domain future_map_domain;
           point_futures.resize(num_point_futures);
-          WrapperReferenceMutator mutator(ready_events);
           for (unsigned idx = 0; idx < num_point_futures; idx++)
           {
-            derez.deserialize(future_map_did);
-            derez.deserialize(future_map_domain);
-            derez.deserialize(ready_event);
-            FutureMapImpl *impl = runtime->find_or_create_future_map(
-                    future_map_did, parent_ctx, future_map_domain,
-                    ready_event, &mutator);
-            impl->add_base_gc_ref(FUTURE_HANDLE_REF, &mutator);
-            point_futures[idx] = FutureMap(impl, false/*need reference*/);
+            FutureMapImpl *impl = FutureMapImpl::unpack_future_map(
+                runtime, derez, &mutator, parent_ctx);
+            if (impl != NULL)
+            {
+              impl->add_base_gc_ref(FUTURE_HANDLE_REF, &mutator);
+              point_futures[idx] = FutureMap(impl, false/*need reference*/);
+            }
           }
         }
         // Set the first mapping to false since we know things are mapped

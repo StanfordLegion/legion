@@ -711,6 +711,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Operation::compute_future_coordinates(
+                       std::vector<std::pair<size_t,DomainPoint> > &coordinates)
+    //--------------------------------------------------------------------------
+    {
+      parent_ctx->compute_task_tree_coordinates(coordinates);
+      coordinates.push_back(std::make_pair(context_index, DomainPoint()));
+    }
+
+    //--------------------------------------------------------------------------
     void Operation::filter_copy_request_kinds(MapperManager *mapper,
         const std::set<ProfilingMeasurementID> &requests,
         std::vector<ProfilingMeasurementID> &results, bool warn_if_not_copy)
