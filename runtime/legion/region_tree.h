@@ -3105,7 +3105,7 @@ namespace Legion {
     protected:
       // Assume we are already holding the node lock
       // when calling these methods
-      int allocate_index(RtEvent &ready_event);
+      int allocate_index(RtEvent &ready_event, bool initializing = false);
       void free_index(unsigned index, RtEvent free_event);
       void invalidate_layouts(unsigned index, std::set<RtEvent> &applied,
                               AddressSpaceID source, bool need_lock = true);
