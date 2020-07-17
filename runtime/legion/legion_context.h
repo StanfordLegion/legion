@@ -1682,9 +1682,11 @@ namespace Legion {
                           std::vector<IndexPartition> &parts,
                           std::set<RtEvent> &preconditions);
     public:
+#ifdef LEGION_USE_LIBDL
       virtual void perform_global_registration_callbacks(
                      Realm::DSOReferenceImplementation *dso, RtEvent local_done,
                      RtEvent global_done, std::set<RtEvent> &preconditions);
+#endif
       virtual void handle_registration_callback_effects(RtEvent effects);
       virtual void print_once(FILE *f, const char *message) const;
       virtual void log_once(Realm::LoggerMessage &message) const;

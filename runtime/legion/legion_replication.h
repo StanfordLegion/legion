@@ -2151,9 +2151,11 @@ namespace Legion {
                                     ReplicateContext *request_context,
                                     AddressSpaceID request_source,
                                     bool handle_now = false);
+#ifdef LEGION_USE_LIBDL
       void perform_global_registration_callbacks(
                      Realm::DSOReferenceImplementation *dso, RtEvent local_done,
                      RtEvent global_done, std::set<RtEvent> &preconditions);
+#endif
       bool perform_semantic_attach(void);
     public:
       Runtime *const runtime;
@@ -2215,8 +2217,10 @@ namespace Legion {
     protected:
       // A unique set of address spaces on which shards exist 
       std::set<AddressSpaceID> unique_shard_spaces;
+#ifdef LEGION_USE_LIBDL
       std::set<std::pair<std::string,std::string> > 
                                unique_registration_callbacks;
+#endif
     };
 
   }; // namespace Internal

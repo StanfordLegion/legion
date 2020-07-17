@@ -9983,6 +9983,7 @@ namespace Legion {
       return *this;
     }
 
+#ifdef LEGION_USE_LIBDL
     //--------------------------------------------------------------------------
     void ReplicateContext::perform_global_registration_callbacks(
                      Realm::DSOReferenceImplementation *dso, RtEvent local_done,
@@ -10000,6 +10001,7 @@ namespace Legion {
       shard_manager->perform_global_registration_callbacks(dso, local_done, 
                                                 global_done, preconditions);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void ReplicateContext::handle_registration_callback_effects(RtEvent effects)

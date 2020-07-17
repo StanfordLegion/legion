@@ -8039,6 +8039,7 @@ namespace Legion {
       }
     }
 
+#ifdef LEGION_USE_LIBDL
     //--------------------------------------------------------------------------
     void ShardManager::perform_global_registration_callbacks(
                      Realm::DSOReferenceImplementation *dso, RtEvent local_done,
@@ -8102,6 +8103,7 @@ namespace Legion {
             "Need support for refreshing exhausted callback phase "
             "barrier generations.")
     }
+#endif // LEGION_USE_LIBDL
 
     //--------------------------------------------------------------------------
     bool ShardManager::perform_semantic_attach(void)
