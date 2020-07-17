@@ -397,7 +397,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         LegionSpy::log_field_space(space.id);
 
-      runtime->forest->create_field_space(space, did);
+      FieldSpaceNode *node = runtime->forest->create_field_space(space, did);
       register_field_space_creation(space);
       if (resulting_fields.size() < sizes.size())
         resulting_fields.resize(sizes.size(), LEGION_AUTO_GENERATE_ID);
@@ -417,14 +417,8 @@ namespace Legion {
           LegionSpy::log_field_creation(space.id, 
                                         resulting_fields[idx], sizes[idx]);
       }
-      std::set<RtEvent> done_events;
-      runtime->forest->allocate_fields(space, sizes,resulting_fields,serdez_id);
+      node->initialize_fields(sizes, resulting_fields, serdez_id);
       register_all_field_creations(space, false/*local*/, resulting_fields);
-      if (!done_events.empty())
-      {
-        RtEvent wait_on = Runtime::merge_events(done_events);
-        wait_on.wait();
-      }
       return space;
     }
 
@@ -5313,9 +5307,38 @@ namespace Legion {
                                          CustomSerdezID serdez_id)
     //--------------------------------------------------------------------------
     {
-      FieldSpace result = TaskContext::create_field_space();
-      allocate_fields(result, sizes, resulting_fields,false/*local*/,serdez_id);
-      return result;
+      const FieldSpace space = TaskContext::create_field_space();
+      AutoRuntimeCall call(this);
+      FieldSpaceNode *node = runtime->forest->get_node(space);
+      if (resulting_fields.size() < sizes.size())
+        resulting_fields.resize(sizes.size(), LEGION_AUTO_GENERATE_ID);
+      for (unsigned idx = 0; idx < resulting_fields.size(); idx++)
+      {
+        if (resulting_fields[idx] == LEGION_AUTO_GENERATE_ID)
+          resulting_fields[idx] = runtime->get_unique_field_id();
+#ifdef DEBUG_LEGION
+        else if (resulting_fields[idx] >= LEGION_MAX_APPLICATION_FIELD_ID)
+          REPORT_LEGION_ERROR(ERROR_TASK_ATTEMPTED_ALLOCATE_FIELD,
+            "Task %s (ID %lld) attempted to allocate a field with "
+            "ID %d which exceeds the LEGION_MAX_APPLICATION_FIELD_ID "
+            "bound set in legion_config.h", get_task_name(),
+            get_unique_id(), resulting_fields[idx])
+#endif
+      }
+      for (unsigned idx = 0; idx < sizes.size(); idx++)
+        if (sizes[idx].impl == NULL)
+          REPORT_LEGION_ERROR(ERROR_REQUEST_FOR_EMPTY_FUTURE,
+              "Invalid empty future passed to field allocation for field %d "
+              "in task %s (UID %lld)", resulting_fields[idx],
+              get_task_name(), get_unique_id())
+      // Get a new creation operation
+      CreationOp *creator_op = runtime->get_available_creation_op();  
+      const ApEvent ready = creator_op->get_completion_event();
+      node->initialize_fields(ready, resulting_fields, serdez_id);
+      creator_op->initialize_fields(this, node, resulting_fields, sizes);
+      register_all_field_creations(space, false/*local*/, resulting_fields);
+      add_to_dependence_queue(creator_op);
+      return space;
     }
 
     //--------------------------------------------------------------------------

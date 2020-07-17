@@ -303,8 +303,8 @@ namespace Legion {
       bool is_index_partition_complete(IndexPartition p);
       bool has_index_partition(IndexSpace parent, Color color);
     public:
-      void create_field_space(FieldSpace handle, DistributedID did,
-                              std::set<RtEvent> *applied = NULL);
+      FieldSpaceNode* create_field_space(FieldSpace handle, DistributedID did,
+                                         std::set<RtEvent> *applied = NULL);
       void destroy_field_space(FieldSpace handle,
                                std::set<RtEvent> &preconditions);
       RtEvent create_field_space_allocator(FieldSpace handle);
@@ -2967,6 +2967,12 @@ namespace Legion {
           RtUserEvent ready = RtUserEvent::NO_RT_USER_EVENT);
       RtEvent destroy_allocator(AddressSpaceID source);
     public:
+      void initialize_fields(const std::vector<size_t> &sizes,
+                             const std::vector<FieldID> &resulting_fields,
+                             CustomSerdezID serdez_id);
+      void initialize_fields(ApEvent sizes_ready,
+                             const std::vector<FieldID> &resulting_fields,
+                             CustomSerdezID serdez_id);
       RtEvent allocate_field(FieldID fid, size_t size,
                              CustomSerdezID serdez_id);
       RtEvent allocate_field(FieldID fid, ApEvent size_ready,

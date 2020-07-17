@@ -1001,11 +1001,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::create_field_space(FieldSpace handle,
+    FieldSpaceNode* RegionTreeForest::create_field_space(FieldSpace handle,
                                   DistributedID did, std::set<RtEvent> *applied)
     //--------------------------------------------------------------------------
     {
-      create_node(handle, did, RtEvent::NO_RT_EVENT, applied);
+      return create_node(handle, did, RtEvent::NO_RT_EVENT, applied);
     }
 
     //--------------------------------------------------------------------------
@@ -10747,6 +10747,64 @@ namespace Legion {
           }
         }
         return RtEvent::NO_RT_EVENT;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldSpaceNode::initialize_fields(const std::vector<size_t> &sizes,
+                     const std::vector<FieldID> &fids, CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < fids.size(); idx++)
+      {
+        FieldID fid = fids[idx];
+        if (field_infos.find(fid) != field_infos.end())
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_DUPLICATE_FIELD_ID,
+            "Illegal duplicate field ID %d used by the "
+            "application in field space %d", fid, handle.id)
+        // Find an index in which to allocate this field  
+        RtEvent dummy_event;
+        int result = allocate_index(dummy_event);
+        if (result < 0)
+          REPORT_LEGION_ERROR(ERROR_EXCEEDED_MAXIMUM_NUMBER_ALLOCATED_FIELDS,
+            "Exceeded maximum number of allocated fields for "
+            "field space %x. Change LEGION_MAX_FIELDS from %d "
+            "and related macros at the top of legion_config.h "
+            "and recompile.", handle.id, LEGION_MAX_FIELDS)
+#ifdef DEBUG_LEGION
+        assert(!dummy_event.exists());
+#endif
+        const unsigned index = result;
+        field_infos[fid] = FieldInfo(sizes[idx], index, serdez_id);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldSpaceNode::initialize_fields(ApEvent sizes_ready,
+                     const std::vector<FieldID> &fids, CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < fids.size(); idx++)
+      {
+        FieldID fid = fids[idx];
+        if (field_infos.find(fid) != field_infos.end())
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_DUPLICATE_FIELD_ID,
+            "Illegal duplicate field ID %d used by the "
+                          "application in field space %d", fid, handle.id)
+        // Find an index in which to allocate this field  
+        RtEvent dummy_event;
+        int result = allocate_index(dummy_event);
+        if (result < 0)
+          REPORT_LEGION_ERROR(ERROR_EXCEEDED_MAXIMUM_NUMBER_ALLOCATED_FIELDS,
+            "Exceeded maximum number of allocated fields for "
+                          "field space %x. Change LEGION_MAX_FIELDS from %d "
+                          "and related macros at the top of legion_config.h "
+                          "and recompile.", handle.id, LEGION_MAX_FIELDS)
+#ifdef DEBUG_LEGION
+        assert(!dummy_event.exists());
+#endif
+        const unsigned index = result;
+        field_infos[fid] = FieldInfo(sizes_ready, index, serdez_id);
       }
     }
 
