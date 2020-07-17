@@ -125,7 +125,7 @@ void AllToAllMapper::slice_task(const MapperContext ctx,
   size_t idx = 0;
   for (PointInRectIterator<1> pir(rect); pir(); ++pir, ++idx) {
     Rect<1> slice(*pir, *pir);
-    output.slices.emplace_back(slice, local_cpus[idx % local_cpus.size()], false, false);
+    output.slices.push_back(TaskSlice(slice, local_cpus[idx % local_cpus.size()], false, false));
   }
 }
 
