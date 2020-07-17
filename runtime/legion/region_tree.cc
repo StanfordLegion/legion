@@ -11579,7 +11579,7 @@ namespace Legion {
             "application in field space %d", fid, handle.id)
         // Find an index in which to allocate this field  
         RtEvent dummy_event;
-        int result = allocate_index(dummy_event);
+        int result = allocate_index(dummy_event, true/*initializing*/);
         if (result < 0)
           REPORT_LEGION_ERROR(ERROR_EXCEEDED_MAXIMUM_NUMBER_ALLOCATED_FIELDS,
             "Exceeded maximum number of allocated fields for "
@@ -11609,7 +11609,7 @@ namespace Legion {
                           "application in field space %d", fid, handle.id)
         // Find an index in which to allocate this field  
         RtEvent dummy_event;
-        int result = allocate_index(dummy_event);
+        int result = allocate_index(dummy_event, true/*initializing*/);
         if (result < 0)
           REPORT_LEGION_ERROR(ERROR_EXCEEDED_MAXIMUM_NUMBER_ALLOCATED_FIELDS,
             "Exceeded maximum number of allocated fields for "
@@ -13691,12 +13691,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    int FieldSpaceNode::allocate_index(RtEvent &ready_event)
+    int FieldSpaceNode::allocate_index(RtEvent &ready_event, bool initializing)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert((allocation_state == FIELD_ALLOC_EXCLUSIVE) || 
-              (allocation_state == FIELD_ALLOC_COLLECTIVE));
+              (allocation_state == FIELD_ALLOC_COLLECTIVE) || initializing);
 #endif
       // Check to see if we still have spots
       int result = unallocated_indexes.find_first_set();
