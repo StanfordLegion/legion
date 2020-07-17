@@ -1814,6 +1814,8 @@ namespace Legion {
     {
       DistributedID future_map_did;
       derez.deserialize(future_map_did);
+      if (future_map_did == 0)
+        return NULL;
       Domain future_map_domain;
       derez.deserialize(future_map_domain);
       RtEvent ready_event;
