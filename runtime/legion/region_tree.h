@@ -3209,6 +3209,12 @@ namespace Legion {
       RtEvent destroy_allocator(AddressSpaceID source,
           bool sharded_owner_context = false, bool owner_shard = false);
     public:
+      void initialize_fields(const std::vector<size_t> &sizes,
+                             const std::vector<FieldID> &resulting_fields,
+                             CustomSerdezID serdez_id, bool collective = false);
+      void initialize_fields(ApEvent sizes_ready,
+                             const std::vector<FieldID> &resulting_fields,
+                             CustomSerdezID serdez_id, bool collective = false);
       RtEvent allocate_field(FieldID fid, size_t size,
                              CustomSerdezID serdez_id,
                              bool sharded_non_owner = false);
