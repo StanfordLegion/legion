@@ -345,6 +345,8 @@ endif()
 #------------------------------------------------------------------------------#
 option(Legion_USE_LIBDL "Enable support for libdl" ON)
 if(Legion_USE_LIBDL)
+  # define variable for legion_defines.h
+  set(LEGION_USE_LIBDL ON)
   # define variable for realm_defines.h
   set(REALM_USE_LIBDL ON)
 endif()

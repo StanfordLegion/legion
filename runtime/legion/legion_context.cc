@@ -128,6 +128,7 @@ namespace Legion {
       return false;
     }
 
+#ifdef LEGION_USE_LIBDL
     //--------------------------------------------------------------------------
     void TaskContext::perform_global_registration_callbacks(
                      Realm::DSOReferenceImplementation *dso, RtEvent local_done,
@@ -144,6 +145,7 @@ namespace Legion {
                                             preconditions);
       }
     }
+#endif
 
     //--------------------------------------------------------------------------
     void TaskContext::print_once(FILE *f, const char *message) const

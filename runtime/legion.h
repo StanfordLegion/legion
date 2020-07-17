@@ -8104,8 +8104,10 @@ namespace Legion {
        * @param global whether this registration needs to be performed
        *               in all address spaces or just the local one
        */
+#ifdef LEGION_USE_LIBDL
       static void perform_registration_callback(
                                RegistrationCallbackFnptr callback, bool global);
+#endif
 
       /**
        * @deprecated

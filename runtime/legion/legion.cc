@@ -6684,6 +6684,7 @@ namespace Legion {
       Internal::Runtime::add_registration_callback(callback);
     }
 
+#ifdef LEGION_USE_LIBDL
     //--------------------------------------------------------------------------
     void Runtime::perform_registration_callback(
                                 RegistrationCallbackFnptr callback, bool global)
@@ -6691,6 +6692,7 @@ namespace Legion {
     {
       Internal::Runtime::perform_dynamic_registration_callback(callback,global);
     }
+#endif
 
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::set_registration_callback(

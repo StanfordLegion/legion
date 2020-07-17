@@ -8846,11 +8846,13 @@ namespace Legion {
               runtime->handle_advertisement(derez);
               break;
             }
+#ifdef LEGION_USE_LIBDL
           case SEND_REGISTRATION_CALLBACK:
             {
               runtime->handle_registration_callback(derez);
               break;
             }
+#endif
           case SEND_REMOTE_TASK_REPLAY:
             {
               runtime->handle_remote_task_replay(derez);
@@ -14078,6 +14080,7 @@ namespace Legion {
       }
     }
 
+#ifdef LEGION_USE_LIBDL
     //--------------------------------------------------------------------------
     void Runtime::send_registration_callback(AddressSpaceID target,
                                          Realm::DSOReferenceImplementation *dso,
@@ -14102,6 +14105,7 @@ namespace Legion {
                                         DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
       applied_events.insert(done_event);
     }
+#endif // LEGION_USE_LIBDL
 
     //--------------------------------------------------------------------------
     RtEvent Runtime::perform_registration_callback(
@@ -14111,8 +14115,9 @@ namespace Legion {
       if (inside_registration_callback)
         REPORT_LEGION_ERROR(ERROR_NESTED_REGISTRATION_CALLBACKS,
             "Nested registration callbacks are not permitted in Legion")
-      Realm::DSOReferenceImplementation *dso = NULL;
       std::pair<std::string,std::string> global_key;
+#ifdef LEGION_USE_LIBDL
+      Realm::DSOReferenceImplementation *dso = NULL;
       if (global)
       {
         // No such thing as global registration if there's only one addres space
@@ -14147,6 +14152,9 @@ namespace Legion {
         else
           global = false;
       }
+#else
+      assert(!global);
+#endif
       RtEvent local_done, global_done;
       RtUserEvent local_perform, global_perform;
       {
@@ -14214,6 +14222,7 @@ namespace Legion {
         if (!global)
           return local_perform;
       }
+#ifdef LEGION_USE_LIBDL
 #ifdef DEBUG_LEGION
       assert(global);
 #endif
@@ -14260,6 +14269,7 @@ namespace Legion {
           Runtime::trigger_event(global_perform);
       }
       delete dso;
+#endif // LEGION_USE_LIBDL
       return global_perform;
     }
 
@@ -19826,6 +19836,7 @@ namespace Legion {
       }
     }
 
+#ifdef LEGION_USE_LIBDL
     //--------------------------------------------------------------------------
     void Runtime::handle_registration_callback(Deserializer &derez)
     //--------------------------------------------------------------------------
@@ -19937,6 +19948,7 @@ namespace Legion {
       // Delete our resources that we allocated
       delete impl;
     }
+#endif // LEGION_USE_LIBDL
 
     //--------------------------------------------------------------------------
     void Runtime::handle_remote_task_replay(Deserializer &derez)
@@ -26546,6 +26558,7 @@ namespace Legion {
                       "calls to be done after the runtime has started.")
     }
 
+#ifdef LEGION_USE_LIBDL
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::perform_dynamic_registration_callback(
                                 RegistrationCallbackFnptr callback, bool global)
@@ -26581,6 +26594,7 @@ namespace Legion {
       else // can safely ignore global as this call must be done everywhere
         add_registration_callback(callback);
     }
+#endif
 
     //--------------------------------------------------------------------------
     /*static*/ ReductionOpTable& Runtime::get_reduction_table(bool safe)

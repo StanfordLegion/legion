@@ -238,6 +238,7 @@ endif
 
 USE_LIBDL ?= 1
 ifeq ($(strip $(USE_LIBDL)),1)
+LEGION_CC_FLAGS += -DLEGION_USE_LIBDL
 REALM_CC_FLAGS += -DREALM_USE_LIBDL
 ifneq ($(strip $(DARWIN)),1)
 #CC_FLAGS += -rdynamic
