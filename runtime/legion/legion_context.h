@@ -1566,6 +1566,26 @@ namespace Legion {
         REPLICATE_DESTROY_LOGICAL_REGION,
         REPLICATE_CREATE_FIELD_ALLOCATOR,
         REPLICATE_DESTROY_FIELD_ALLOCATOR,
+        REPLICATE_EXECUTE_TASK,
+        REPLICATE_EXECUTE_INDEX_SPACE,
+        REPLICATE_REDUCE_FUTURE_MAP,
+        REPLICATE_MAP_REGION,
+        REPLICATE_REMAP_REGION,
+        REPLICATE_FILL_FIELDS,
+        REPLICATE_ISSUE_COPY,
+        REPLICATE_ATTACH_RESOURCE,
+        REPLICATE_DETACH_RESOURCE,
+        REPLICATE_MUST_EPOCH,
+        REPLICATE_TIMING_MEASUREMENT,
+        REPLICATE_MAPPING_FENCE,
+        REPLICATE_EXECUTION_FENCE,
+        REPLICATE_BEGIN_TRACE,
+        REPLICATE_END_TRACE,
+        REPLICATE_CREATE_PHASE_BARRIER,
+        REPLICATE_DESTROY_PHASE_BARRIER,
+        REPLICATE_ADVANCE_PHASE_BARRIER,
+        REPLICATE_ADVANCE_DYNAMIC_COLLECTIVE,
+        REPLICATE_END_TASK,
       };
     public:
       ReplicateContext(Runtime *runtime, ShardTask *owner,int d,bool full_inner,
@@ -1932,6 +1952,8 @@ namespace Legion {
       virtual void begin_trace(TraceID tid, bool logical_only,
           bool static_trace, const std::set<RegionTreeID> *managed, bool dep);
       virtual void end_trace(TraceID tid, bool deprecated);
+      virtual void end_task(const void *res, size_t res_size, bool owned,
+                            PhysicalInstance inst = PhysicalInstance::NO_INST);
       virtual ApEvent add_to_dependence_queue(Operation *op, 
                                               bool unordered = false,
                                               bool outermost = true);
@@ -2051,6 +2073,22 @@ namespace Legion {
     public:
       static void hash_future(Murmur3Hasher &hasher, const Future &future);
       static void hash_future_map(Murmur3Hasher &hasher, const FutureMap &map);
+      static void hash_index_space_requirements(Murmur3Hasher &hasher,
+          const std::vector<IndexSpaceRequirement> &index_requirements);
+      static void hash_region_requirements(Murmur3Hasher &hasher,
+          const std::vector<RegionRequirement> &region_requirements);
+      static void hash_grants(Murmur3Hasher &hasher, 
+          const std::vector<Grant> &grants);
+      static void hash_phase_barriers(Murmur3Hasher &hasher,
+          const std::vector<PhaseBarrier> &phase_barriers);
+      static void hash_argument(Murmur3Hasher &hasher, const TaskArgument &arg);
+      static void hash_predicate(Murmur3Hasher &hasher, const Predicate &pred);
+      static void hash_static_dependences(Murmur3Hasher &hasher,
+          const std::vector<StaticDependence> *dependences);
+      static void hash_task_launcher(Murmur3Hasher &hasher, 
+          const TaskLauncher &launcher);
+      void hash_index_launcher(Murmur3Hasher &hasher,
+          const IndexTaskLauncher &launcher);
       void verify_replicable(Murmur3Hasher &hasher, const char *func_name);
     public:
       // A little help for ConsensusMatchExchange since it is templated

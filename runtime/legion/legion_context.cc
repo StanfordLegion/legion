@@ -10425,6 +10425,8 @@ namespace Legion {
                                                   const Future &future)
     //--------------------------------------------------------------------------
     {
+      if (future.impl == NULL)
+        return;
       const std::vector<std::pair<size_t,DomainPoint> > &coordinates =
         future.impl->get_future_coordinates();
       if (!coordinates.empty())
@@ -10451,8 +10453,9 @@ namespace Legion {
                                                       const FutureMap &map)
     //--------------------------------------------------------------------------
     {
+      if (map.impl == NULL)
+        return;
 #ifdef DEBUG_LEGION
-      assert(map.impl != NULL);
       ReplFutureMapImpl *impl = 
         dynamic_cast<ReplFutureMapImpl*>(map.impl);
       assert(impl != NULL);
@@ -10461,6 +10464,174 @@ namespace Legion {
         static_cast<ReplFutureMapImpl*>(map.impl);
 #endif
       hasher.hash(impl->op_ctx_index);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ReplicateContext::hash_index_space_requirements(
+          Murmur3Hasher &hasher, const std::vector<IndexSpaceRequirement> &reqs)
+    //--------------------------------------------------------------------------
+    {
+      if (reqs.empty())
+        return;
+      Serializer rez;
+      for (std::vector<IndexSpaceRequirement>::const_iterator it = 
+            reqs.begin(); it != reqs.end(); it++)
+        ExternalMappable::pack_index_space_requirement(*it, rez);
+      hasher.hash(rez.get_buffer(), rez.get_used_bytes());
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ReplicateContext::hash_region_requirements(
+           Murmur3Hasher &hasher, const std::vector<RegionRequirement> &regions)
+    //--------------------------------------------------------------------------
+    {
+      if (regions.empty())
+        return;
+      Serializer rez;
+      for (std::vector<RegionRequirement>::const_iterator it = 
+            regions.begin(); it != regions.end(); it++)
+        ExternalMappable::pack_region_requirement(*it, rez);
+      hasher.hash(rez.get_buffer(), rez.get_used_bytes());
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ReplicateContext::hash_grants(Murmur3Hasher &hasher,
+                                               const std::vector<Grant> &grants)
+    //--------------------------------------------------------------------------
+    {
+      if (grants.empty())
+        return;
+      Serializer rez;
+      for (std::vector<Grant>::const_iterator it = 
+            grants.begin(); it != grants.end(); it++)
+        ExternalMappable::pack_grant(*it, rez);
+      hasher.hash(rez.get_buffer(), rez.get_used_bytes());
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ReplicateContext::hash_phase_barriers(Murmur3Hasher &hasher,
+                                      const std::vector<PhaseBarrier> &barriers)
+    //--------------------------------------------------------------------------
+    {
+      if (barriers.empty())
+        return;
+      Serializer rez;
+      for (std::vector<PhaseBarrier>::const_iterator it = 
+            barriers.begin(); it != barriers.end(); it++)
+        ExternalMappable::pack_phase_barrier(*it, rez);
+      hasher.hash(rez.get_buffer(), rez.get_used_bytes());
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ReplicateContext::hash_argument(Murmur3Hasher &hasher,
+                                                   const TaskArgument &argument)
+    //--------------------------------------------------------------------------
+    {
+      if (argument.get_size() > 0)
+        hasher.hash(argument.get_ptr(), argument.get_size());
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ReplicateContext::hash_predicate(Murmur3Hasher &hasher,
+                                                     const Predicate &pred)
+    //--------------------------------------------------------------------------
+    {
+      if (pred == Predicate::TRUE_PRED)
+        hasher.hash(0);
+      else if (pred == Predicate::FALSE_PRED)
+        hasher.hash(SIZE_MAX);
+      else
+        hasher.hash(pred.impl->get_ctx_index());
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ReplicateContext::hash_static_dependences(
+        Murmur3Hasher &hasher, const std::vector<StaticDependence> *dependences)
+    //--------------------------------------------------------------------------
+    {
+      if ((dependences == NULL) || dependences->empty())
+        return;
+      Serializer rez;
+      for (std::vector<StaticDependence>::const_iterator it = 
+            dependences->begin(); it != dependences->end(); it++)
+      {
+        hasher.hash(it->previous_offset);
+        hasher.hash(it->previous_req_index);
+        hasher.hash(it->current_req_index);
+        hasher.hash(it->dependence_type);
+        hasher.hash(it->validates);
+        hasher.hash(it->shard_only);
+        for (std::set<FieldID>::const_iterator fit = 
+              it->dependent_fields.begin(); fit != 
+              it->dependent_fields.end(); fit++)
+          hasher.hash(*fit);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ReplicateContext::hash_task_launcher(Murmur3Hasher &hasher,
+                                                   const TaskLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      hasher.hash(launcher.task_id);
+      hash_index_space_requirements(hasher, launcher.index_requirements);
+      hash_region_requirements(hasher, launcher.region_requirements);
+      for (std::vector<Future>::const_iterator it = 
+            launcher.futures.begin(); it != launcher.futures.end(); it++)
+        hash_future(hasher, *it);
+      hash_grants(hasher, launcher.grants);
+      hash_phase_barriers(hasher, launcher.wait_barriers);
+      hash_phase_barriers(hasher, launcher.arrive_barriers);
+      hash_argument(hasher, launcher.argument);
+      hash_predicate(hasher, launcher.predicate);
+      hasher.hash(launcher.map_id);
+      hasher.hash(launcher.tag);
+      for (int idx = 0; idx < launcher.point.get_dim(); idx++)
+        hasher.hash(launcher.point[idx]);
+      hasher.hash(launcher.sharding_space);
+      hash_future(hasher, launcher.predicate_false_future);
+      hash_argument(hasher, launcher.predicate_false_result);
+      hash_static_dependences(hasher, launcher.static_dependences);
+      hasher.hash(launcher.enable_inlining);
+      hasher.hash(launcher.local_function_task);
+      hasher.hash(launcher.independent_requirements);
+      hasher.hash(launcher.silence_warnings);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::hash_index_launcher(Murmur3Hasher &hasher,
+                                              const IndexTaskLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      hasher.hash(launcher.task_id);
+      hasher.hash(launcher.launch_domain);
+      hasher.hash(launcher.launch_space);
+      hasher.hash(launcher.sharding_space);
+      hash_index_space_requirements(hasher, launcher.index_requirements);
+      hash_region_requirements(hasher, launcher.region_requirements);
+      for (std::vector<Future>::const_iterator it =
+            launcher.futures.begin(); it != launcher.futures.end(); it++)
+        hash_future(hasher, *it);
+      for (std::vector<ArgumentMap>::const_iterator it =
+            launcher.point_futures.begin(); it != 
+            launcher.point_futures.end(); it++)
+        hash_future_map(hasher, it->impl->freeze(this));
+      hash_grants(hasher, launcher.grants);
+      hash_phase_barriers(hasher, launcher.wait_barriers);
+      hash_phase_barriers(hasher, launcher.arrive_barriers);
+      hash_argument(hasher, launcher.global_arg);
+      if (launcher.argument_map.impl != NULL)
+        hash_future_map(hasher, launcher.argument_map.impl->freeze(this));
+      hash_predicate(hasher, launcher.predicate);
+      hasher.hash(launcher.must_parallelism);
+      hasher.hash(launcher.map_id);
+      hasher.hash(launcher.tag);
+      hash_future(hasher, launcher.predicate_false_future);
+      hash_argument(hasher, launcher.predicate_false_result);
+      hash_static_dependences(hasher, launcher.static_dependences);
+      hasher.hash(launcher.enable_inlining);
+      hasher.hash(launcher.independent_requirements);
+      hasher.hash(launcher.silence_warnings);
     }
 
     //--------------------------------------------------------------------------
@@ -14689,6 +14860,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_EXECUTE_TASK);
+        hash_task_launcher(hasher, launcher); 
+        verify_replicable(hasher, "execute_task");
+      }
       // Quick out for predicate false
       if (launcher.predicate == Predicate::FALSE_PRED)
       {
@@ -14763,6 +14941,13 @@ namespace Legion {
         return result;
       }
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_EXECUTE_INDEX_SPACE);
+        hash_index_launcher(hasher, launcher); 
+        verify_replicable(hasher, "execute_index_space");
+      }
       if (launcher.launch_domain.exists() && 
           (launcher.launch_domain.get_volume() == 0))
       {
@@ -14885,6 +15070,15 @@ namespace Legion {
             "all future values. This feature is not currently implemented.",
             get_task_name(), get_unique_id())
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_EXECUTE_INDEX_SPACE);
+        hash_index_launcher(hasher, launcher); 
+        hasher.hash(redop);
+        hasher.hash<bool>(deterministic);
+        verify_replicable(hasher, "execute_index_space");
+      }
       // Quick out for predicate false
       if (launcher.predicate == Predicate::FALSE_PRED)
       {
@@ -14957,6 +15151,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_REDUCE_FUTURE_MAP);
+        hash_future_map(hasher, future_map);
+        hasher.hash(redop);
+        hasher.hash(deterministic);
+        verify_replicable(hasher, "reduce_future_map");
+      }
       if (future_map.impl == NULL)
         return Future();
       // Check to see if this is just a normal future map, if so then 
@@ -14977,6 +15180,22 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_MAP_REGION);
+        Serializer rez;
+        ExternalMappable::pack_region_requirement(launcher.requirement, rez);
+        hasher.hash(rez.get_buffer(), rez.get_used_bytes());
+        hash_grants(hasher, launcher.grants);
+        hash_phase_barriers(hasher, launcher.wait_barriers);
+        hash_phase_barriers(hasher, launcher.arrive_barriers);
+        hasher.hash(launcher.map_id);
+        hasher.hash(launcher.tag);
+        hasher.hash(launcher.layout_constraint_id);
+        hash_static_dependences(hasher, launcher.static_dependences);
+        verify_replicable(hasher, "map_region");
+      }
       if (IS_NO_ACCESS(launcher.requirement))
         return PhysicalRegion();
       ReplMapOp *map_op = runtime->get_available_repl_map_op();
@@ -15028,6 +15247,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_REMAP_REGION);
+        Serializer rez;
+        ExternalMappable::pack_region_requirement(
+            region.impl->get_requirement(), rez);
+        hasher.hash(rez.get_buffer(), rez.get_used_bytes());
+        hasher.hash<bool>(region.is_mapped());
+        verify_replicable(hasher, "remap_region");
+      }
       // Check to see if the region is already mapped,
       // if it is then we are done
       if (region.is_mapped())
@@ -15046,6 +15276,30 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_FILL_FIELDS);
+        hasher.hash(launcher.handle);
+        hasher.hash(launcher.parent);
+        hash_argument(hasher, launcher.argument);
+        hash_future(hasher, launcher.future);
+        hash_predicate(hasher, launcher.predicate);
+        for (std::set<FieldID>::const_iterator it = 
+              launcher.fields.begin(); it != launcher.fields.end(); it++)
+          hasher.hash(*it);
+        hash_grants(hasher, launcher.grants);
+        hash_phase_barriers(hasher, launcher.wait_barriers);
+        hash_phase_barriers(hasher, launcher.arrive_barriers);
+        hasher.hash(launcher.map_id);
+        hasher.hash(launcher.tag);
+        for (int idx = 0; idx < launcher.point.get_dim(); idx++)
+          hasher.hash(launcher.point[idx]);
+        hasher.hash(launcher.sharding_space);
+        hash_static_dependences(hasher, launcher.static_dependences);
+        hasher.hash(launcher.silence_warnings);
+        verify_replicable(hasher, "fill_fields");
+      }
       ReplFillOp *fill_op = runtime->get_available_repl_fill_op();
       fill_op->initialize(this, launcher);
 #ifdef DEBUG_LEGION
@@ -15085,6 +15339,32 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_FILL_FIELDS);
+        hasher.hash(launcher.launch_domain);
+        hasher.hash(launcher.launch_space);
+        hasher.hash(launcher.sharding_space);
+        hasher.hash(launcher.region);
+        hasher.hash(launcher.partition);
+        hasher.hash(launcher.parent);
+        hasher.hash(launcher.projection);
+        hash_argument(hasher, launcher.argument);
+        hash_future(hasher, launcher.future);
+        hash_predicate(hasher, launcher.predicate);
+        for (std::set<FieldID>::const_iterator it = 
+              launcher.fields.begin(); it != launcher.fields.end(); it++)
+          hasher.hash(*it);
+        hash_grants(hasher, launcher.grants);
+        hash_phase_barriers(hasher, launcher.wait_barriers);
+        hash_phase_barriers(hasher, launcher.arrive_barriers);
+        hasher.hash(launcher.map_id);
+        hasher.hash(launcher.tag);
+        hash_static_dependences(hasher, launcher.static_dependences);
+        hasher.hash(launcher.silence_warnings);
+        verify_replicable(hasher, "fill_fields");
+      }
       if (launcher.launch_domain.exists() && 
           (launcher.launch_domain.get_volume() == 0))
       {
@@ -15133,6 +15413,38 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_ISSUE_COPY);
+        hash_region_requirements(hasher, launcher.src_requirements);
+        hash_region_requirements(hasher, launcher.dst_requirements);
+        hash_region_requirements(hasher, launcher.src_indirect_requirements);
+        hash_region_requirements(hasher, launcher.dst_indirect_requirements);
+        for (std::vector<bool>::const_iterator it = 
+              launcher.src_indirect_is_range.begin(); it != 
+              launcher.src_indirect_is_range.end(); it++)
+          hasher.hash<bool>(*it);
+        for (std::vector<bool>::const_iterator it = 
+              launcher.dst_indirect_is_range.begin(); it != 
+              launcher.dst_indirect_is_range.end(); it++)
+          hasher.hash<bool>(*it);
+        hash_grants(hasher, launcher.grants);
+        hash_phase_barriers(hasher, launcher.wait_barriers);
+        hash_phase_barriers(hasher, launcher.arrive_barriers);
+        hash_predicate(hasher, launcher.predicate);
+        hasher.hash(launcher.map_id);
+        hasher.hash(launcher.tag);
+        for (int idx = 0; idx < launcher.point.get_dim(); idx++)
+          hasher.hash(launcher.point[idx]);
+        hasher.hash(launcher.sharding_space);
+        hash_static_dependences(hasher, launcher.static_dependences);
+        hasher.hash(launcher.possible_src_indirect_out_of_range);
+        hasher.hash(launcher.possible_dst_indirect_out_of_range);
+        hasher.hash(launcher.possible_dst_indirect_aliasing);
+        hasher.hash(launcher.silence_warnings);
+        verify_replicable(hasher, "issue_copy"); 
+      }
       ReplCopyOp *copy_op = runtime->get_available_repl_copy_op();
       copy_op->initialize(this, launcher);
 #ifdef DEBUG_LEGION
@@ -15170,6 +15482,40 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_ISSUE_COPY);
+        hash_region_requirements(hasher, launcher.src_requirements);
+        hash_region_requirements(hasher, launcher.dst_requirements);
+        hash_region_requirements(hasher, launcher.src_indirect_requirements);
+        hash_region_requirements(hasher, launcher.dst_indirect_requirements);
+        for (std::vector<bool>::const_iterator it = 
+              launcher.src_indirect_is_range.begin(); it != 
+              launcher.src_indirect_is_range.end(); it++)
+          hasher.hash<bool>(*it);
+        for (std::vector<bool>::const_iterator it = 
+              launcher.dst_indirect_is_range.begin(); it != 
+              launcher.dst_indirect_is_range.end(); it++)
+          hasher.hash<bool>(*it);
+        hash_grants(hasher, launcher.grants);
+        hash_phase_barriers(hasher, launcher.wait_barriers);
+        hash_phase_barriers(hasher, launcher.arrive_barriers);
+        hash_predicate(hasher, launcher.predicate);
+        hasher.hash(launcher.map_id);
+        hasher.hash(launcher.tag);
+        hasher.hash(launcher.launch_domain);
+        hasher.hash(launcher.launch_space);
+        hasher.hash(launcher.sharding_space);
+        hash_static_dependences(hasher, launcher.static_dependences);
+        hasher.hash(launcher.possible_src_indirect_out_of_range);
+        hasher.hash(launcher.possible_dst_indirect_out_of_range);
+        hasher.hash(launcher.possible_dst_indirect_aliasing);
+        hasher.hash(launcher.collective_src_indirect_points);
+        hasher.hash(launcher.collective_dst_indirect_points);
+        hasher.hash(launcher.silence_warnings);
+        verify_replicable(hasher, "issue_copy");
+      }
       if (launcher.launch_domain.exists() &&
           (launcher.launch_domain.get_volume() == 0))
       {
@@ -15242,6 +15588,41 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_ATTACH_RESOURCE);
+        hasher.hash(launcher.resource);
+        hasher.hash(launcher.handle);
+        hasher.hash(launcher.parent);
+        hasher.hash(launcher.restricted);
+        hasher.hash(launcher.mapped);
+        if (launcher.file_name != NULL)
+          hasher.hash(launcher.file_name, strlen(launcher.file_name));
+        hasher.hash(launcher.mode);
+        for (std::vector<FieldID>::const_iterator it = 
+              launcher.file_fields.begin(); it != 
+              launcher.file_fields.end(); it++)
+          hasher.hash(*it);
+        for (std::map<FieldID,const char*>::const_iterator it = 
+              launcher.field_files.begin(); it != 
+              launcher.field_files.end(); it++)
+        {
+          hasher.hash(it->first);
+          hasher.hash(it->second, strlen(it->second));
+        }
+        hasher.hash(launcher.local_files);
+        Serializer rez;
+        launcher.constraints.serialize(rez);
+        hasher.hash(rez.get_buffer(), rez.get_used_bytes());
+        for (std::set<FieldID>::const_iterator it = 
+              launcher.privilege_fields.begin(); it !=
+              launcher.privilege_fields.end(); it++)
+          hasher.hash(*it);
+        hasher.hash(launcher.footprint);
+        hash_static_dependences(hasher, launcher.static_dependences);
+        verify_replicable(hasher, "attach_resource");
+      }
       if (launcher.restricted)
         REPORT_LEGION_ERROR(ERROR_REPLICATE_TASK_VIOLATION,
             "Attach operations in control replication context %s (UID %lld) "
@@ -15296,6 +15677,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication && !unordered)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_DETACH_RESOURCE);
+        Serializer rez;
+        ExternalMappable::pack_region_requirement(
+            region.impl->get_requirement(), rez);
+        hasher.hash(rez.get_buffer(), rez.get_used_bytes());
+        hasher.hash<bool>(region.is_mapped());
+        hasher.hash<bool>(flush);
+        verify_replicable(hasher, "detach_resource"); 
+      }
       ReplDetachOp *op = runtime->get_available_repl_detach_op();
       Future result = op->initialize_detach(this, region, flush, unordered);
       op->initialize_replication(this, external_resource_barrier); 
@@ -15321,6 +15714,26 @@ namespace Legion {
       issue_execution_fence(); 
 #endif
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_MUST_EPOCH);
+        hasher.hash(launcher.map_id);
+        hasher.hash(launcher.mapping_tag);
+        for (std::vector<TaskLauncher>::const_iterator it = 
+              launcher.single_tasks.begin(); it != 
+              launcher.single_tasks.end(); it++)
+          hash_task_launcher(hasher, *it);
+        for (std::vector<IndexTaskLauncher>::const_iterator it = 
+              launcher.index_tasks.begin(); it !=
+              launcher.index_tasks.end(); it++)
+          hash_index_launcher(hasher, *it);
+        hasher.hash(launcher.launch_domain);
+        hasher.hash(launcher.launch_space);
+        hasher.hash(launcher.sharding_space);
+        hasher.hash(launcher.silence_warnings);
+        verify_replicable(hasher, "execute_must_epoch");
+      }
       ReplMustEpochOp *epoch_op = runtime->get_available_repl_epoch_op();
       FutureMap result = epoch_op->initialize(this, launcher);
 #ifdef DEBUG_LEGION
@@ -15358,6 +15771,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_TIMING_MEASUREMENT);
+        hasher.hash(launcher.measurement);
+        for (std::set<Future>::const_iterator it = 
+              launcher.preconditions.begin(); it !=
+              launcher.preconditions.end(); it++)
+          hash_future(hasher, *it);
+        verify_replicable(hasher, "issue_timing_measurement");
+      }
 #ifdef DEBUG_LEGION
       if (owner_shard->shard_id == 0)
         log_run.debug("Issuing a timing measurement in task %s (ID %lld)",
@@ -15378,6 +15802,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_MAPPING_FENCE);
+        verify_replicable(hasher, "issue_mapping_fence");
+      }
 #ifdef DEBUG_LEGION
       if (owner_shard->shard_id == 0)
         log_run.debug("Issuing a mapping fence in task %s (ID %lld)",
@@ -15395,6 +15825,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_EXECUTION_FENCE);
+        verify_replicable(hasher, "issue_execution_fence");
+      }
 #ifdef DEBUG_LEGION
       if (owner_shard->shard_id == 0)
         log_run.debug("Issuing an execution fence in task %s (ID %lld)",
@@ -15412,10 +15848,23 @@ namespace Legion {
         bool static_trace, const std::set<RegionTreeID> *trees, bool deprecated)
     //--------------------------------------------------------------------------
     {
+      AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_BEGIN_TRACE);
+        hasher.hash(tid);
+        hasher.hash<bool>(logical_only);
+        hasher.hash<bool>(static_trace);
+        hasher.hash<bool>(deprecated);
+        if (trees != NULL)
+          for (std::set<RegionTreeID>::const_iterator it = 
+                trees->begin(); it != trees->end(); it++)
+            hasher.hash(*it);
+        verify_replicable(hasher, "begin_trace");
+      }
       if (runtime->no_tracing) return;
       if (runtime->no_physical_tracing) logical_only = true;
-
-      AutoRuntimeCall call(this);
 #ifdef DEBUG_LEGION
       log_run.debug("Beginning a trace in task %s (ID %lld)",
                     get_task_name(), get_unique_id());
@@ -15468,9 +15917,16 @@ namespace Legion {
     void ReplicateContext::end_trace(TraceID tid, bool deprecated)
     //--------------------------------------------------------------------------
     {
-      if (runtime->no_tracing) return;
-
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_END_TRACE);
+        hasher.hash(tid);
+        hasher.hash<bool>(deprecated);
+        verify_replicable(hasher, "end_trace");
+      }
+      if (runtime->no_tracing) return;
 #ifdef DEBUG_LEGION
       log_run.debug("Ending a trace in task %s (ID %lld)",
                     get_task_name(), get_unique_id());
@@ -15516,6 +15972,23 @@ namespace Legion {
       }
       // We no longer have a trace that we're executing 
       current_trace = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::end_task(const void *res, size_t res_size,bool owned,
+                                    PhysicalInstance deferred_result_instance)
+    //--------------------------------------------------------------------------
+    {
+      // We have an extra one of these here to handle the case where some
+      // shards do an extra runtime call than other shards. This should
+      // avoid that case hanging at least.
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_END_TASK);
+        verify_replicable(hasher, "end_task");
+      }
+      InnerContext::end_task(res, res_size, owned, deferred_result_instance);
     }
 
     //--------------------------------------------------------------------------
@@ -15577,6 +16050,16 @@ namespace Legion {
                                                      size_t init_size)
     //--------------------------------------------------------------------------
     {
+      AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_CREATE_PHASE_BARRIER);
+        hasher.hash(arrivals);
+        hasher.hash(redop);
+        hasher.hash(init_value, init_size);
+        verify_replicable(hasher, "create_phase_barrier");
+      }
       ValueBroadcast<ApBarrier> bar_collective(this, 0/*origin*/,
                                                COLLECTIVE_LOC_71); 
       // Shard 0 will make the barrier and broadcast it
@@ -15595,6 +16078,14 @@ namespace Legion {
     void ReplicateContext::destroy_phase_barrier(ApBarrier bar)
     //--------------------------------------------------------------------------
     {
+      AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_DESTROY_PHASE_BARRIER);
+        hasher.hash(bar);
+        verify_replicable(hasher, "destroy_phase_barrier");
+      }
       // Shard 0 has to wait for all the other shards to get here
       // too before it can do the deletion
       ShardSyncTree sync_point(this, 0/*origin*/, COLLECTIVE_LOC_72);
@@ -15607,6 +16098,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_ADVANCE_PHASE_BARRIER);
+        hasher.hash(bar);
+        verify_replicable(hasher, "advance_phase_barrier");
+      }
 #ifdef DEBUG_LEGION
       if (owner_shard->shard_id == 0)
         log_run.debug("Advancing phase barrier in task %s (ID %lld)",
@@ -15663,6 +16161,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication)
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_ADVANCE_DYNAMIC_COLLECTIVE);
+        hasher.hash(dc);
+        verify_replicable(hasher, "advance_dynamic_collective");
+      }
 #ifdef DEBUG_LEGION
       if (owner_shard->shard_id == 0)
         log_run.debug("Advancing dynamic collective in task %s (ID %lld)",
