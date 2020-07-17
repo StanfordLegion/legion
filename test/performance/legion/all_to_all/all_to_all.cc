@@ -274,13 +274,9 @@ void main_task(const Task *task,
 
   LogicalRegion r;
   {
-    // FIXME: This makes the runtiem crash
-    //std::vector<size_t> sizes(1, 8);
-    //std::vector<FieldID> fids(1, FID_X);
-    //FieldSpace fs = runtime->create_field_space(ctx, sizes, fids);
-    FieldSpace fs = runtime->create_field_space(ctx);
-    FieldAllocator allocator = runtime->create_field_allocator(ctx, fs);
-    allocator.allocate_field(sizeof(int64_t), FID_X);
+    std::vector<size_t> sizes(1, 8);
+    std::vector<FieldID> fids(1, FID_X);
+    FieldSpace fs = runtime->create_field_space(ctx, sizes, fids);
     r = runtime->create_logical_region(ctx, is, fs);
   }
 
@@ -288,12 +284,9 @@ void main_task(const Task *task,
   IndexSpace ranges_is = runtime->create_index_space(ctx, Rect<1>(0, num_colors * num_colors - 1));
   LogicalRegion ranges;
   {
-    //std::vector<size_t> sizes(1, sizeof(Rect<1>));
-    //std::vector<FieldID> fids(1, FID_X);
-    //FieldSpace fs = runtime->create_field_space(ctx, sizes, fids);
-    FieldSpace fs = runtime->create_field_space(ctx);
-    FieldAllocator allocator = runtime->create_field_allocator(ctx, fs);
-    allocator.allocate_field(sizeof(Rect<1>), FID_X);
+    std::vector<size_t> sizes(1, sizeof(Rect<1>));
+    std::vector<FieldID> fids(1, FID_X);
+    FieldSpace fs = runtime->create_field_space(ctx, sizes, fids);
     ranges = runtime->create_logical_region(ctx, ranges_is, fs);
   }
 
