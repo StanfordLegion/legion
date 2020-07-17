@@ -90,9 +90,11 @@ namespace Legion {
       virtual VariantImpl* select_inline_variant(TaskOp *child) const = 0;
       virtual bool is_leaf_context(void) const;
       virtual bool is_inner_context(void) const;
+#ifdef LEGION_USE_LIBDL
       virtual void perform_global_registration_callbacks(
                      Realm::DSOReferenceImplementation *dso, RtEvent local_done,
                      RtEvent global_done, std::set<RtEvent> &preconditions);
+#endif
       virtual void handle_registration_callback_effects(RtEvent effects) = 0;
     public:
       virtual VariantID register_variant(const TaskVariantRegistrar &registrar,

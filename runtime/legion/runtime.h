@@ -1814,9 +1814,11 @@ namespace Legion {
       void initialize_mappers(void);
       void initialize_virtual_manager(void);
       void initialize_runtime(void);
+#ifdef LEGION_USE_LIBDL
       void send_registration_callback(AddressSpaceID space,
                                       Realm::DSOReferenceImplementation *impl,
                                       RtEvent done, std::set<RtEvent> &applied);
+#endif
       RtEvent perform_registration_callback(RegistrationCallbackFnptr callback, 
                                        bool global, bool preregistered = false);
       void startup_runtime(void);
@@ -2445,7 +2447,9 @@ namespace Legion {
       void handle_task(Deserializer &derez);
       void handle_steal(Deserializer &derez);
       void handle_advertisement(Deserializer &derez);
+#ifdef LEGION_USE_LIBDL
       void handle_registration_callback(Deserializer &derez);
+#endif
       void handle_remote_task_replay(Deserializer &derez);
       void handle_remote_task_profiling_response(Deserializer &derez);
       void handle_shared_ownership(Deserializer &derez);
@@ -3149,9 +3153,11 @@ namespace Legion {
       unsigned unique_library_serdez_id;
     protected:
       mutable LocalLock callback_lock;
+#ifdef LEGION_USE_LIBDL
       // Have this be a member variable so that it keeps references
       // to all the dynamic objects that we load
       Realm::DSOCodeTranslator callback_translator;
+#endif
       std::map<RegistrationCallbackFnptr,RtEvent> local_callbacks_done;
       std::map<std::pair<std::string,std::string>,RtEvent> 
                                                   global_callbacks_done;
@@ -3365,8 +3371,10 @@ namespace Legion {
       static const SerdezRedopFns* get_serdez_redop_fns(ReductionOpID redop_id,
                                                         bool has_lock = false);
       static void add_registration_callback(RegistrationCallbackFnptr callback);
+#ifdef LEGION_USE_LIBDL
       static void perform_dynamic_registration_callback(
                                RegistrationCallbackFnptr callback, bool global);
+#endif
       static ReductionOpTable& get_reduction_table(bool safe);
 #ifdef LEGION_GPU_REDUCTIONS
       static GPUReductionTable& get_gpu_reduction_table(void);
