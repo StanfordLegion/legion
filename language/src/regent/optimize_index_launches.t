@@ -1216,7 +1216,7 @@ function init_bitmask_false(bitmask, volume)
   return util.mk_stat_for_num(idx, values, util.mk_block(stats))
 end
 
-function get_check_stats(preamble, value, index_expr, bitmask, conflict, volume)
+function get_check_stats(preamble, value, index_expr, bitmask, conflict, pos, loop_var, volume)
   local stats = terralib.newlist()
 
   -- Compute value = index_expr(i)
@@ -1232,7 +1232,8 @@ function get_check_stats(preamble, value, index_expr, bitmask, conflict, volume)
   local bitmask_assign_true = util.mk_stat_assignment(bitmask_value, util.mk_expr_constant(true, bool)) 
   then_block:insert(bitmask_assign_true)
 
-  local check_conflict = util.mk_stat_if(util.mk_expr_id(conflict), util.mk_stat_break())
+  local save_pos = util.mk_stat_assignment(util.mk_expr_id_rawref(pos), util.mk_expr_id(loop_var))
+  local check_conflict = util.mk_stat_if(util.mk_expr_id(conflict), terralib.newlist { save_pos, util.mk_stat_break() })
   then_block:insert(check_conflict)
 
   local cond = util.mk_expr_binary("<", util.mk_expr_id(value), util.mk_expr_id(volume))
@@ -1272,6 +1273,9 @@ function insert_dynamic_check(index_launch_ast, unoptimized_loop_ast)
   local conflict = std.newsymbol(bool, "conflict")
   stats:insert(util.mk_stat_var(conflict, bool, util.mk_expr_constant(false, bool)))
 
+  local pos = std.newsymbol(int64, "pos")
+  stats:insert(util.mk_stat_var(pos, int64))
+
   local index_expr
   -- Figure out what type of loop we've got and get its index expr
   if unoptimized_loop_ast.node_type:is(ast.typed.stat.ForNum) then
@@ -1279,9 +1283,10 @@ function insert_dynamic_check(index_launch_ast, unoptimized_loop_ast)
   else
     index_expr = index_launch_ast.call.args[1].index
   end
-  local check_stats = get_check_stats(index_launch_ast.preamble, value, index_expr, bitmask, conflict, volume)
 
   local i = index_launch_ast.symbol
+  local check_stats = get_check_stats(index_launch_ast.preamble, value, index_expr, bitmask, conflict, pos, i, volume)
+
   local bounds
   -- Generate the AST based on loop type
   if unoptimized_loop_ast.node_type:is(ast.typed.stat.ForNum) then
@@ -1292,7 +1297,7 @@ function insert_dynamic_check(index_launch_ast, unoptimized_loop_ast)
     stats:insert(util.mk_stat_for_list(i, bounds, util.mk_block(check_stats)))
   end
 
-  -- Finally check conflict outside the loop to decide whether to optimize or not
+  -- Finally check conflict outside the loop to decide if it's safe to launch or not
   local final_check = util.mk_stat_if_else(util.mk_expr_id(conflict), unoptimized_loop_ast, index_launch_ast)
   stats:insert(final_check)
 
