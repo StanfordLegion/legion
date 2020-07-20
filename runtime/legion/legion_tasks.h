@@ -300,8 +300,8 @@ namespace Legion {
                                std::set<RtEvent> &ready_events) = 0;
       virtual void perform_inlining(TaskContext *enclosing) = 0;
     public:
-      virtual void end_inline_task(const void *result, 
-                                   size_t result_size, bool owned);
+      virtual void end_inline_task(const void *result, size_t result_size, 
+                                   bool owned, FutureFunctor *functor);
     public:
       RtEvent defer_distribute_task(RtEvent precondition);
       RtEvent defer_perform_mapping(RtEvent precondition, MustEpochOp *op,
@@ -549,8 +549,8 @@ namespace Legion {
                                       AddressSpaceID target) = 0;
       virtual void perform_inlining(TaskContext *enclosing) = 0;
     public:
-      virtual void handle_future(const void *res, 
-                                 size_t res_size, bool owned) = 0; 
+      virtual void handle_future(const void *res, size_t res_size, 
+                                 bool owned, FutureFunctor *functor) = 0;
       virtual void handle_post_mapped(bool deferral,
                           RtEvent pre = RtEvent::NO_RT_EVENT) = 0;
       virtual void handle_misspeculation(void) = 0;
@@ -670,7 +670,7 @@ namespace Legion {
       virtual SliceTask* clone_as_slice_task(IndexSpace is,
                       Processor p, bool recurse, bool stealable) = 0;
       virtual void handle_future(const DomainPoint &point, const void *result,
-                                 size_t result_size, bool owner) = 0;
+                    size_t result_size, bool owner, FutureFunctor *functor) = 0;
       virtual void register_must_epoch(void) = 0;
     public:
       // Methods for supporting intra-index-space mapping dependences
@@ -775,8 +775,8 @@ namespace Legion {
       virtual void trigger_task_complete(bool deferred = false);
       virtual void trigger_task_commit(void);
     public:
-      virtual void handle_future(const void *res, 
-                                 size_t res_size, bool owned);
+      virtual void handle_future(const void *res, size_t res_size, 
+                                 bool owned, FutureFunctor *functor);
       virtual void handle_post_mapped(bool deferral, 
                           RtEvent pre = RtEvent::NO_RT_EVENT);
       virtual void handle_misspeculation(void);
@@ -789,8 +789,8 @@ namespace Legion {
       virtual void pack_as_shard_task(Serializer &rez, AddressSpaceID target);
       virtual void perform_inlining(TaskContext *enclosing);
       virtual bool is_top_level_task(void) const { return top_level_task; }
-      virtual void end_inline_task(const void *result, 
-                                   size_t result_size, bool owned);
+      virtual void end_inline_task(const void *result, size_t result_size, 
+                                   bool owned, FutureFunctor *functor);
     protected:
       void pack_remote_versions(Serializer &rez);
       void pack_remote_complete(Serializer &rez);
@@ -880,8 +880,8 @@ namespace Legion {
       virtual std::map<PhysicalManager*,unsigned>*
                                        get_acquired_instances_ref(void);
     public:
-      virtual void handle_future(const void *res, 
-                                 size_t res_size, bool owned);
+      virtual void handle_future(const void *res, size_t res_size, 
+                                 bool owned, FutureFunctor *functor);
       virtual void handle_post_mapped(bool deferral,
                           RtEvent pre = RtEvent::NO_RT_EVENT);
       virtual void handle_misspeculation(void);
@@ -989,8 +989,8 @@ namespace Legion {
       RtEvent unpack_shard_task(Deserializer &derez);
       virtual void perform_inlining(TaskContext *enclosing);
     public:
-      virtual void handle_future(const void *res, 
-                                 size_t res_size, bool owned); 
+      virtual void handle_future(const void *res, size_t res_size, 
+                                 bool owned, FutureFunctor *functor); 
       virtual void handle_post_mapped(bool deferral,
                           RtEvent pre = RtEvent::NO_RT_EVENT);
       virtual void handle_misspeculation(void);
@@ -1092,8 +1092,8 @@ namespace Legion {
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events);
       virtual void perform_inlining(TaskContext *enclosing);
-      virtual void end_inline_task(const void *result, 
-                                   size_t result_size, bool owned);
+      virtual void end_inline_task(const void *result, size_t result_size, 
+                                   bool owned, FutureFunctor *functor);
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual const VersionInfo& get_version_info(unsigned idx) const;
       virtual std::map<PhysicalManager*,unsigned>*
@@ -1103,7 +1103,7 @@ namespace Legion {
                   Processor p, bool recurse, bool stealable);
     public:
       virtual void handle_future(const DomainPoint &point, const void *result,
-                                 size_t result_size, bool owner);
+                        size_t result_size, bool owner, FutureFunctor *functor);
     public:
       virtual void pack_profiling_requests(Serializer &rez,
                                            std::set<RtEvent> &applied) const;
@@ -1255,7 +1255,7 @@ namespace Legion {
       virtual SliceTask* clone_as_slice_task(IndexSpace is,
                   Processor p, bool recurse, bool stealable);
       virtual void handle_future(const DomainPoint &point, const void *result,
-                                 size_t result_size, bool owner);
+                       size_t result_size, bool owner, FutureFunctor *functor);
     public:
       virtual void register_must_epoch(void);
       PointTask* clone_as_point_task(const DomainPoint &point);

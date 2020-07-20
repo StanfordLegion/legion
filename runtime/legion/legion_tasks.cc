@@ -1223,8 +1223,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskOp::end_inline_task(const void *result, 
-                                 size_t result_size, bool owned)
+    void TaskOp::end_inline_task(const void *result, size_t result_size, 
+                                 bool owned, FutureFunctor *functor)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -5892,10 +5892,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void IndividualTask::handle_future(const void *res, size_t res_size,
-                                       bool owned)
+                                       bool owned, FutureFunctor *functor)
     //--------------------------------------------------------------------------
     {
-      result.impl->set_result(res, res_size, owned);
+      if (functor != NULL)
+        result.impl->set_result(functor, owned);
+      else
+        result.impl->set_result(res, res_size, owned);
     }
 
     //--------------------------------------------------------------------------
@@ -6139,12 +6142,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndividualTask::end_inline_task(const void *res, 
-                                         size_t res_size, bool owned) 
+    void IndividualTask::end_inline_task(const void *res, size_t res_size, 
+                                         bool owned, FutureFunctor *functor) 
     //--------------------------------------------------------------------------
     {
       // Save the future result and trigger it
-      result.impl->set_result(res, res_size, owned);
+      if (functor != NULL)
+        result.impl->set_result(functor, owned);
+      else
+        result.impl->set_result(res, res_size, owned);
       // Trigger our completion event
       Runtime::trigger_event(NULL, completion_event);
       // Now we're done, someone else will deactivate us
@@ -6820,10 +6826,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PointTask::handle_future(const void *res, size_t res_size, bool owner)
+    void PointTask::handle_future(const void *res, size_t res_size, 
+                                  bool owner, FutureFunctor *functor)
     //--------------------------------------------------------------------------
     {
-      slice_owner->handle_future(index_point, res, res_size, owner);
+      slice_owner->handle_future(index_point, res, res_size, owner, functor);
     }
 
     //--------------------------------------------------------------------------
@@ -7434,9 +7441,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardTask::handle_future(const void *res, size_t res_size, bool owned)
+    void ShardTask::handle_future(const void *res, size_t res_size, 
+                                  bool owned, FutureFunctor *functor)
     //--------------------------------------------------------------------------
     {
+      if (functor != NULL)
+      {
+        res_size = functor->callback_get_future_size();
+        if (res_size > 0)
+        {
+          void *buffer = malloc(res_size);
+          functor->callback_pack_future(buffer, res_size);
+          res = buffer;
+        }
+        functor->callback_release_future();
+        if (owned)
+          delete functor;
+        owned = true;
+      }
       shard_manager->handle_post_execution(res, res_size, owned, true/*local*/);
     }
 
@@ -8977,16 +8999,40 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::end_inline_task(const void *res, size_t res_size,bool owned)
+    void IndexTask::end_inline_task(const void *res, size_t res_size,
+                                    bool owned, FutureFunctor *functor)
     //--------------------------------------------------------------------------
     {
       if (redop == 0)
       {
         Future f = future_map.impl->get_future(index_point, true/*internal*/);
-        f.impl->set_result(res, res_size, owned);
+        if (functor != NULL)
+          f.impl->set_result(functor, owned);
+        else
+          f.impl->set_result(res, res_size, owned);
       }
       else
+      {
+        if (functor != NULL)
+        {
+#ifdef DEBUG_LEGION
+          assert(res == NULL);
+#endif
+          // We need to materialized this now so we can apply it
+          res_size = functor->callback_get_future_size();
+          if (res_size > 0)
+          {
+            void *buffer = malloc(res_size);
+            functor->callback_pack_future(buffer, res_size);
+            res = buffer;
+          }
+          functor->callback_release_future();
+          if (owned)
+            delete functor;
+          owned = true;
+        }
         fold_reduction_future(res, res_size, owned, true/*exclusive*/);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -9042,13 +9088,31 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void IndexTask::handle_future(const DomainPoint &point, const void *result,
-                                  size_t result_size, bool owner)
+                         size_t result_size, bool owner, FutureFunctor *functor)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDEX_HANDLE_FUTURE);
 #ifdef DEBUG_LEGION
       assert(reduction_op != NULL);
 #endif
+      if (functor != NULL)
+      {
+#ifdef DEBUG_LEGION
+        assert(result == NULL);
+#endif
+        // We need to materialized this now so we can apply it
+        result_size = functor->callback_get_future_size();
+        if (result_size > 0)
+        {
+          void *buffer = malloc(result_size);
+          functor->callback_pack_future(buffer, result_size);
+          result = buffer;
+        }
+        functor->callback_release_future();
+        if (owner)
+          delete functor;
+        owner = true;
+      }
       // If we're doing a deterministic reduction then we need to 
       // buffer up these future values until we get all of them so
       // that we can fold them in a deterministic way
@@ -9443,7 +9507,7 @@ namespace Legion {
             size_t size;
             derez.deserialize(size);
             const void *ptr = derez.get_current_pointer();
-            handle_future(p, ptr, size, false/*owner*/);
+            handle_future(p, ptr, size, false/*owner*/, NULL/*functor*/);
             derez.advance_pointer(size);
           }
         }
@@ -10356,7 +10420,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void SliceTask::handle_future(const DomainPoint &point, const void *result,
-                                  size_t result_size, bool owner)
+                         size_t result_size, bool owner, FutureFunctor *functor)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, SLICE_HANDLE_FUTURE_CALL);
@@ -10364,6 +10428,24 @@ namespace Legion {
       {
         if (is_remote())
         {
+          if (functor != NULL)
+          {
+#ifdef DEBUG_LEGION
+            assert(result == NULL);
+#endif
+            // We need to materialized this now so we can apply it
+            result_size = functor->callback_get_future_size();
+            if (result_size > 0)
+            {
+              void *buffer = malloc(result_size);
+              functor->callback_pack_future(buffer, result_size);
+              result = buffer;
+            }
+            functor->callback_release_future();
+            if (owner)
+              delete functor;
+            owner = true;
+          }
           // Store the future result in our temporary futures unless we're 
           // doing a non-deterministic reduction in which case we can eagerly
           // fold this now into our reduction buffer
@@ -10397,12 +10479,15 @@ namespace Legion {
             fold_reduction_future(result, result_size,owner,false/*exclusive*/);
         }
         else
-          index_owner->handle_future(point, result, result_size, owner);
+          index_owner->handle_future(point, result, result_size, owner,functor);
       }
       else
       {
         Future f = future_map.impl->get_future(point, true/*internal only*/);
-        f.impl->set_result(result, result_size, owner);
+        if (functor != NULL)
+          f.impl->set_result(functor, owner);
+        else
+          f.impl->set_result(result, result_size, owner);
       }
     }
 

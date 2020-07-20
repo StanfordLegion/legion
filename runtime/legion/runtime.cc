@@ -641,7 +641,9 @@ namespace Legion {
         producer_uid((o == NULL) ? 0 : o->get_unique_op_id()),
 #endif
         future_complete(complete), result(NULL), result_size(0), 
-        result_set_space(local_space), empty(true), sampled(false)
+        result_set_space(local_space), callback_functor(NULL),
+        own_callback_functor(false), callback_invoked(false), 
+        empty(true), sampled(false)
     //--------------------------------------------------------------------------
     {
       if (producer_op != NULL)
@@ -722,6 +724,10 @@ namespace Legion {
       }
       if (producer_op != NULL)
         producer_op->remove_mapping_reference(op_gen);
+      if (callback_functor != NULL)
+        callback_functor->callback_release_future();
+      if (own_callback_functor)
+        delete callback_functor;
     }
 
     //--------------------------------------------------------------------------
@@ -824,6 +830,12 @@ namespace Legion {
             ready_event.wait();
         }
       }
+      if (callback_functor != NULL)
+      {
+        AutoLock f_lock(future_lock);
+        if (!callback_invoked)
+          invoke_callback();
+      }
       if (check_size)
       {
         if (empty)
@@ -901,7 +913,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock f_lock(future_lock);
-      if (!empty)
+      if (!empty || (callback_functor != NULL))
         REPORT_LEGION_ERROR(ERROR_DUPLICATE_FUTURE_SET,
             "Duplicate future set! This can be either a runtime bug or a "
             "user error. If you have a must epoch launch in this program "
@@ -919,6 +931,31 @@ namespace Legion {
         result = malloc(result_size);
         memcpy(result,args,result_size);
       }
+      finish_set_future();
+    }
+
+    //--------------------------------------------------------------------------
+    void FutureImpl::set_result(FutureFunctor *functor, bool own)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock f_lock(future_lock);
+      if (!empty || (callback_functor != NULL))
+        REPORT_LEGION_ERROR(ERROR_DUPLICATE_FUTURE_SET,
+            "Duplicate future set! This can be either a runtime bug or a "
+            "user error. If you have a must epoch launch in this program "
+            "please check that all of the point tasks that it creates have "
+            "unique index points. If your program has no must epoch launches "
+            "then this is likely a runtime bug.")
+      callback_functor = functor;
+      own_callback_functor = own;
+      finish_set_future();
+    }
+
+    //--------------------------------------------------------------------------
+    void FutureImpl::finish_set_future(void)
+    //--------------------------------------------------------------------------
+    {
+      // must be called while we are already holding the lock
       empty = false; 
       if (!is_owner())
       {
@@ -959,6 +996,23 @@ namespace Legion {
         if (remove_base_resource_ref(RUNTIME_REF))
           assert(false); // should always hold a reference from caller
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void FutureImpl::invoke_callback(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!callback_invoked);
+      assert(callback_functor != NULL);
+      assert(result == NULL);
+#endif
+      callback_invoked = true;
+      result_size = callback_functor->callback_get_future_size();
+      if (result_size == 0)
+        return;
+      result = malloc(result_size);
+      callback_functor->callback_pack_future(result, result_size);
     }
 
     //--------------------------------------------------------------------------
@@ -1023,6 +1077,9 @@ namespace Legion {
       {
         valid = !subscription_internal.exists() || 
                   subscription_internal.has_triggered();
+#ifdef DEBUG_LEGION
+        assert(callback_functor == NULL);
+#endif
         return *((const bool*)result); 
       }
       else
@@ -1256,6 +1313,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!empty);
 #endif
+      if ((callback_functor != NULL) && !callback_invoked)
+        invoke_callback();
       for (std::set<AddressSpaceID>::const_iterator it = 
             targets.begin(); it != targets.end(); it++)
       {
@@ -1316,6 +1375,8 @@ namespace Legion {
       }
       else
       {
+        if ((callback_functor != NULL) && !callback_invoked)
+          invoke_callback();
         // We've got the result so we can't send it back right away
         Serializer rez;
         {
@@ -1488,8 +1549,16 @@ namespace Legion {
                                          Runtime::protect_event(ready));
       }
       else // If we've already triggered, then we can do the arrival now
+      {
+        if (callback_functor != NULL)
+        {
+          AutoLock f_lock(future_lock);
+          if (!callback_invoked)
+            invoke_callback();
+        }
         Runtime::phase_barrier_arrive(dc, count, ApEvent::NO_AP_EVENT,
                                       result, result_size);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -25864,7 +25933,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // this is just a normal finish operation
-      ctx->end_task(NULL, 0, false/*owned*/);
+      ctx->end_task(NULL, 0, false/*owned*/, PhysicalInstance::NO_INST, NULL);
       // Record that this is no longer an implicit external task
       external_implicit_task = false; 
       implicit_runtime = NULL;

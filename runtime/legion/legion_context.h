@@ -414,7 +414,9 @@ namespace Legion {
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
                                           const void *result, size_t size, 
                                           PhysicalInstance instance = 
-                                            PhysicalInstance::NO_INST) = 0;
+                                            PhysicalInstance::NO_INST,
+                                          FutureFunctor *callback_functor=NULL,
+                                          bool own_functor = false) = 0;
       virtual void register_executing_child(Operation *op) = 0;
       virtual void register_child_executed(Operation *op) = 0;
       virtual void register_child_complete(Operation *op) = 0;
@@ -485,9 +487,9 @@ namespace Legion {
       virtual PhysicalInstance create_task_local_instance(Memory memory,
                                         Realm::InstanceLayoutGeneric *layout);
       virtual void end_task(const void *res, size_t res_size, bool owned,
-                    PhysicalInstance inst = PhysicalInstance::NO_INST) = 0;
-      virtual void post_end_task(const void *res, 
-                                 size_t res_size, bool owned) = 0;
+                    PhysicalInstance inst, FutureFunctor *callback_functor) = 0;
+      virtual void post_end_task(const void *res, size_t res_size, 
+                               bool owned, FutureFunctor *callback_functor) = 0;
       void begin_misspeculation(void);
       void end_misspeculation(const void *res, size_t res_size);
     public:
@@ -732,9 +734,9 @@ namespace Legion {
       struct PostTaskArgs {
       public:
         PostTaskArgs(TaskContext *ctx, size_t idx, const void *r, size_t s,
-                     PhysicalInstance i, RtEvent w)
+                     PhysicalInstance i, RtEvent w, FutureFunctor *f, bool o)
           : context(ctx), index(idx), result(r), size(s), 
-            instance(i), wait_on(w) { }
+            instance(i), wait_on(w), functor(f), owned(o) { }
       public:
         inline bool operator<(const PostTaskArgs &rhs) const
           { return index < rhs.index; }
@@ -745,6 +747,8 @@ namespace Legion {
         size_t size;
         PhysicalInstance instance;
         RtEvent wait_on;
+        FutureFunctor *functor;
+        bool owned;
       };
       struct PostDecrementArgs : public LgTaskArgs<PostDecrementArgs> {
       public:
@@ -1178,7 +1182,9 @@ namespace Legion {
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
                                           const void *result, size_t size, 
                                           PhysicalInstance instance =
-                                            PhysicalInstance::NO_INST);
+                                            PhysicalInstance::NO_INST,
+                                          FutureFunctor *callback_functor=NULL,
+                                          bool own_functor = false);
       bool process_post_end_tasks(void);
       virtual void register_executing_child(Operation *op);
       virtual void register_child_executed(Operation *op);
@@ -1257,8 +1263,9 @@ namespace Legion {
       virtual const std::vector<PhysicalRegion>& begin_task(
                                                     Legion::Runtime *&runtime);
       virtual void end_task(const void *res, size_t res_size, bool owned,
-                            PhysicalInstance inst = PhysicalInstance::NO_INST);
-      virtual void post_end_task(const void *res, size_t res_size, bool owned);
+                        PhysicalInstance inst, FutureFunctor *callback_functor);
+      virtual void post_end_task(const void *res, size_t res_size, 
+                                 bool owned, FutureFunctor *callback_functor);
     public:
       virtual void record_dynamic_collective_contribution(DynamicCollective dc,
                                                           const Future &f);
@@ -1957,7 +1964,7 @@ namespace Legion {
           bool static_trace, const std::set<RegionTreeID> *managed, bool dep);
       virtual void end_trace(TraceID tid, bool deprecated);
       virtual void end_task(const void *res, size_t res_size, bool owned,
-                            PhysicalInstance inst = PhysicalInstance::NO_INST);
+                      PhysicalInstance inst, FutureFunctor *callback_future);
       virtual ApEvent add_to_dependence_queue(Operation *op, 
                                               bool unordered = false,
                                               bool outermost = true);
@@ -2654,7 +2661,9 @@ namespace Legion {
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
                                           const void *result, size_t size, 
                                           PhysicalInstance instance =
-                                            PhysicalInstance::NO_INST);
+                                            PhysicalInstance::NO_INST,
+                                          FutureFunctor *callback_functor=NULL,
+                                          bool own_functor = false);
       virtual void register_executing_child(Operation *op);
       virtual void register_child_executed(Operation *op);
       virtual void register_child_complete(Operation *op);
@@ -2716,8 +2725,9 @@ namespace Legion {
                                                      AddressSpaceID source);
     public:
       virtual void end_task(const void *res, size_t res_size, bool owned,
-                            PhysicalInstance inst = PhysicalInstance::NO_INST);
-      virtual void post_end_task(const void *res, size_t res_size, bool owned);
+                        PhysicalInstance inst, FutureFunctor *callback_functor);
+      virtual void post_end_task(const void *res, size_t res_size, 
+                                 bool owned, FutureFunctor *callback_functor);
     public:
       virtual void record_dynamic_collective_contribution(DynamicCollective dc,
                                                           const Future &f);
@@ -3061,7 +3071,9 @@ namespace Legion {
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
                                           const void *result, size_t size, 
                                           PhysicalInstance instance =
-                                            PhysicalInstance::NO_INST);
+                                            PhysicalInstance::NO_INST,
+                                          FutureFunctor *callback_functor=NULL,
+                                          bool own_functor = false);
       virtual void register_executing_child(Operation *op);
       virtual void register_child_executed(Operation *op);
       virtual void register_child_complete(Operation *op);
@@ -3128,8 +3140,9 @@ namespace Legion {
       virtual PhysicalInstance create_task_local_instance(Memory memory,
                                         Realm::InstanceLayoutGeneric *layout);
       virtual void end_task(const void *res, size_t res_size, bool owned,
-                            PhysicalInstance inst = PhysicalInstance::NO_INST);
-      virtual void post_end_task(const void *res, size_t res_size, bool owned);
+                        PhysicalInstance inst, FutureFunctor *callback_functor);
+      virtual void post_end_task(const void *res, size_t res_size, 
+                                 bool owned, FutureFunctor *callback_functor);
     public:
       virtual void record_dynamic_collective_contribution(DynamicCollective dc,
                                                           const Future &f);

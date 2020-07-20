@@ -233,6 +233,7 @@ namespace Legion {
     public:
       // This will simply save the value of the future
       void set_result(const void *args, size_t arglen, bool own);
+      void set_result(FutureFunctor *callback_functor, bool own);
       // This will save the value of the future locally
       void unpack_future(Deserializer &derez);
       // Reset the future in case we need to restart the
@@ -264,6 +265,8 @@ namespace Legion {
       void register_dependence(Operation *consumer_op);
       void register_remote(AddressSpaceID sid, ReferenceMutator *mutator);
     protected:
+      void finish_set_future(void); // must be holding lock
+      void invoke_callback(void); // must be holding lock
       void mark_sampled(void);
       void broadcast_result(std::set<AddressSpaceID> &targets,
                             ApEvent complete, const bool need_lock);
@@ -304,6 +307,9 @@ namespace Legion {
       void *result; 
       size_t result_size;
       AddressSpaceID result_set_space; // space on which the result was set
+      FutureFunctor *callback_functor;
+      bool own_callback_functor;
+      bool callback_invoked;
       volatile bool empty;
       volatile bool sampled;
     };

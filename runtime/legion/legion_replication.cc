@@ -7124,8 +7124,8 @@ namespace Legion {
         }
         else
         {
-          original_task->handle_future(local_future_result,
-                                       local_future_size, true/*owned*/);
+          original_task->handle_future(local_future_result, local_future_size, 
+                                       true/*owned*/, NULL/*functor*/);
           local_future_result = NULL;
           local_future_size = 0;
           original_task->complete_execution();
