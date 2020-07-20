@@ -20448,7 +20448,7 @@ namespace Legion {
 
       (*TASK_PTR)(task, *regions, ctx, rt);
 
-      Runtime::legion_task_postamble(rt, ctx, NULL, 0);
+      Runtime::legion_task_postamble(rt, ctx);
     }
 
     //--------------------------------------------------------------------------
@@ -20507,7 +20507,7 @@ namespace Legion {
       (*TASK_PTR)(task, *regions, ctx, rt, *user_data); 
 
       // Send an empty return value back
-      Runtime::legion_task_postamble(rt, ctx, NULL, 0);
+      Runtime::legion_task_postamble(rt, ctx);
     }
 
     //--------------------------------------------------------------------------

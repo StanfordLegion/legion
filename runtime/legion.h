@@ -3847,6 +3847,30 @@ namespace Legion {
     };
 
     /**
+     * \class FutureFunctor
+     * A future functor object provides a callback interface
+     * for applications that wants to serialize data for
+     * a future only when it is absolutely necessary. Tasks
+     * can return a pointer to an object that implements the
+     * future functor interface. Legion will then perform
+     * callbacks if/when it becomes necessary to serialize the 
+     * future data. If serialization is necessary then Legion will 
+     * perform two callbacks: first to get the future size and then 
+     * a second one with a buffer of that size in which to pack the
+     * data. Finally, when the future is reclaimed, then Legion 
+     * will perform a callback to release the future functor from 
+     * its duties.
+     */
+    class FutureFunctor {
+    public:
+      virtual ~FutureFunctor(void) { }
+    public:
+      virtual size_t callback_get_future_size(void) = 0;
+      virtual void callback_pack_future(void *buffer, size_t size) = 0;
+      virtual void callback_release_future(void) = 0;
+    };
+
+    /**
      * \class Runtime
      * The Runtime class is the primary interface for
      * Legion.  Every task is given a reference to the runtime as
@@ -8417,8 +8441,8 @@ namespace Legion {
        * @param retvalptr pointer to the return value
        * @param retvalsize the size of the return value in bytes
        * @param owned whether the runtime now owns this result
-       * @param allocation internal runtime parameter, please ignore
-       * @param inst internal runtime parameter, please ignore
+       * @param inst optional Realm instance containing the data that
+       *              Legion should take ownership of
        */
       static void legion_task_postamble(Runtime *runtime, Context ctx,
                                         const void *retvalptr = NULL,
@@ -8426,6 +8450,20 @@ namespace Legion {
                                         bool owned = false,
                                         Realm::RegionInstance inst = 
                                           Realm::RegionInstance::NO_INST);
+
+      /**
+       * This variant of the Legion task postamble allows users to pass in
+       * a future functor object to serve as a callback interface for Legion
+       * to query so that it is only invoked in the case where futures actually
+       * need to be serialized. 
+       * @param runtime the runtime pointer
+       * @param ctx the context for the task
+       * @param callback_functor pointer to the callback object
+       * @param owned whether Legion should take ownership of the object
+       */
+      static void legion_task_postamble(Runtime *runtime, Context ctx,
+                                        FutureFunctor *callback_functor,
+                                        bool owned = false);
     public:
       // ------------------ Deprecated task registration -----------------------
       /**

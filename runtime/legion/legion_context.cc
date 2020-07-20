@@ -2289,7 +2289,7 @@ namespace Legion {
 #endif
       Runtime *runtime_ptr = runtime;
       // Call post end task
-      post_end_task(result, result_size, false/*owner*/);
+      post_end_task(result, result_size, false/*owner*/, NULL/*functor*/);
 #ifdef DEBUG_LEGION
       runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
                                                      false/*meta*/);
@@ -6922,7 +6922,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void InnerContext::add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
                                               const void *result, size_t size, 
-                                              PhysicalInstance inst)
+                                              PhysicalInstance inst,
+                                              FutureFunctor *callback_functor,
+                                              bool own_functor)
     //--------------------------------------------------------------------------
     {
       bool issue_task = false;
@@ -6937,8 +6939,8 @@ namespace Legion {
           // Add a reference to the context the first time we defer this
           add_reference();
         }
-        post_task_queue.push_back(
-            PostTaskArgs(ctx, task_index, result, size, inst, wait_on));
+        post_task_queue.push_back(PostTaskArgs(ctx, task_index, result, size, 
+              inst, wait_on, callback_functor, own_functor));
         if (post_task_comp_queue.exists())
         {
           // If we've already got a completion queue then use it
@@ -7086,7 +7088,7 @@ namespace Legion {
         {
           if (it->instance.exists())
           {
-            it->context->post_end_task(it->result, it->size, false/*owned*/);
+            it->context->post_end_task(it->result,it->size,false/*owned*/,NULL);
 #ifdef LEGION_MALLOC_INSTANCES
             // Get the pointer and free it
             MemoryManager *manager = 
@@ -7104,8 +7106,10 @@ namespace Legion {
             // Once we've copied the data then we can destroy the instance
             it->instance.destroy();
           }
+          else if (it->functor != NULL)
+            it->context->post_end_task(NULL, 0, it->owned, it->functor);
           else
-            it->context->post_end_task(it->result, it->size, true/*owned*/);
+            it->context->post_end_task(it->result,it->size,true/*owned*/,NULL);
         }
       }
       // If we didn't launch a next op, then we can remove the reference
@@ -8668,7 +8672,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::end_task(const void *res, size_t res_size, bool owned,
-                                PhysicalInstance deferred_result_instance)
+     PhysicalInstance deferred_result_instance, FutureFunctor *callback_functor)
     //--------------------------------------------------------------------------
     {
       // See if we have any local regions or fields that need to be deallocated
@@ -8836,9 +8840,12 @@ namespace Legion {
       if (last_registration.exists() && !last_registration.has_triggered())
         effects_done = Runtime::merge_events(effects_done, last_registration);
       if (deferred_result_instance.exists())
-          parent_ctx->add_to_post_task_queue(this, effects_done,
-                                             res, res_size, 
-                                             deferred_result_instance);
+        parent_ctx->add_to_post_task_queue(this, effects_done,
+                                           res, res_size, 
+                                           deferred_result_instance);
+      else if (callback_functor != NULL)
+        parent_ctx->add_to_post_task_queue(this, effects_done, res, res_size,
+                          deferred_result_instance, callback_functor, owned);
       else if (!owned)
       {
         void *result_copy = malloc(res_size);
@@ -8857,7 +8864,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::post_end_task(const void *res,size_t res_size,bool owned)
+    void InnerContext::post_end_task(const void *res,size_t res_size,
+                                     bool owned,FutureFunctor *callback_functor)
     //--------------------------------------------------------------------------
     {
       // Safe to cast to a single task here because this will never
@@ -8869,7 +8877,7 @@ namespace Legion {
       SingleTask *single_task = static_cast<SingleTask*>(owner_task);
 #endif
       // Handle the future result
-      single_task->handle_future(res, res_size, owned);
+      single_task->handle_future(res, res_size, owned, callback_functor);
       // If we weren't a leaf task, compute the conditions for being mapped
       // which is that all of our children are now mapped
       // Also test for whether we need to trigger any of our child
@@ -11365,7 +11373,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LeafContext::add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
                                              const void *result, size_t size, 
-                                             PhysicalInstance instance)
+                                             PhysicalInstance instance,
+                                             FutureFunctor *callback_functor,
+                                             bool own_functor)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -11640,7 +11650,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LeafContext::end_task(const void *res, size_t res_size, bool owned,
-                               PhysicalInstance deferred_result_instance)
+     PhysicalInstance deferred_result_instance, FutureFunctor *callback_functor)
     //--------------------------------------------------------------------------
     {
       // No local regions or fields permitted in leaf tasks
@@ -11686,6 +11696,9 @@ namespace Legion {
         parent_ctx->add_to_post_task_queue(this, effects_done,
                                            res, res_size, 
                                            deferred_result_instance);
+      else if (callback_functor != NULL)
+        parent_ctx->add_to_post_task_queue(this, effects_done, res, res_size,
+                          deferred_result_instance, callback_functor, owned);
       else if (!owned)
       {
         void *result_copy = malloc(res_size);
@@ -11704,7 +11717,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::post_end_task(const void *res, size_t res_size,bool owned)
+    void LeafContext::post_end_task(const void *res, size_t res_size,
+                                    bool owned, FutureFunctor *callback_functor)
     //--------------------------------------------------------------------------
     {
       // Safe to cast to a single task here because this will never
@@ -11716,7 +11730,7 @@ namespace Legion {
       SingleTask *single_task = static_cast<SingleTask*>(owner_task);
 #endif
       // Handle the future result
-      single_task->handle_future(res, res_size, owned);
+      single_task->handle_future(res, res_size, owned, callback_functor);
       bool need_complete = false;
       bool need_commit = false;
       {
@@ -12699,10 +12713,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void InlineContext::add_to_post_task_queue(TaskContext *ctx,RtEvent wait_on, 
                                                const void *result, size_t size, 
-                                               PhysicalInstance inst)
+                                               PhysicalInstance inst,
+                                               FutureFunctor *callback_functor,
+                                               bool own_functor)
     //--------------------------------------------------------------------------
     {
-      enclosing->add_to_post_task_queue(ctx, wait_on, result, size, inst);
+      enclosing->add_to_post_task_queue(ctx, wait_on, result, size, inst,
+                                        callback_functor, own_functor);
     }
 
     //--------------------------------------------------------------------------
@@ -12991,18 +13008,18 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InlineContext::end_task(const void *res, size_t res_size, bool owned,
-                                 PhysicalInstance deferred_result_instance)
+     PhysicalInstance deferred_result_instance, FutureFunctor *callback_functor)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!deferred_result_instance.exists());
 #endif
-      inline_task->end_inline_task(res, res_size, owned);
+      inline_task->end_inline_task(res, res_size, owned, callback_functor);
     }
 
     //--------------------------------------------------------------------------
-    void InlineContext::post_end_task(const void *res, 
-                                      size_t res_size, bool owned)
+    void InlineContext::post_end_task(const void *res, size_t res_size, 
+                                    bool owned, FutureFunctor *callback_functor)
     //--------------------------------------------------------------------------
     {
       assert(false);

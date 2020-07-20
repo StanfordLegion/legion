@@ -6808,7 +6808,16 @@ namespace Legion {
                                                    Realm::RegionInstance inst)
     //--------------------------------------------------------------------------
     {
-      ctx->end_task(retvalptr, retvalsize, owned, inst);
+      ctx->end_task(retvalptr, retvalsize, owned, inst, NULL/*functor*/);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::legion_task_postamble(Runtime *runtime,Context ctx,
+                                    FutureFunctor *callback_functor, bool owned)
+    //--------------------------------------------------------------------------
+    {
+      ctx->end_task(NULL, 0, owned, Realm::RegionInstance::NO_INST, 
+                    callback_functor);
     }
 
     //--------------------------------------------------------------------------
