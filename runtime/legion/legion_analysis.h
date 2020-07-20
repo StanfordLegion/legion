@@ -195,7 +195,8 @@ namespace Legion {
                            unsigned idx, IndexSpaceExpression *expr, 
                            const FieldMaskSet<FillView> &tracing_srcs,
                            const FieldMaskSet<InstanceView> &tracing_dsts,
-                           std::set<RtEvent> &applied_events) = 0;
+                           std::set<RtEvent> &applied_events,
+                           bool reduction_initialization) = 0;
     public:
       virtual void record_op_view(Memoizable *memo,
                           unsigned idx,
@@ -318,7 +319,8 @@ namespace Legion {
                            unsigned idx, IndexSpaceExpression *expr, 
                            const FieldMaskSet<FillView> &tracing_srcs,
                            const FieldMaskSet<InstanceView> &tracing_dsts,
-                           std::set<RtEvent> &applied_events);
+                           std::set<RtEvent> &applied_events,
+                           bool reduction_initialization);
     public:
       virtual void record_op_view(Memoizable *memo,
                           unsigned idx,
@@ -540,10 +542,12 @@ namespace Legion {
                                     IndexSpaceExpression *expr, 
                                     const FieldMaskSet<FillView> &srcs,
                                     const FieldMaskSet<InstanceView> &dsts,
-                                    std::set<RtEvent> &applied) const
+                                    std::set<RtEvent> &applied,
+                                    bool reduction_initialization) const
         {
           sanity_check();
-          rec->record_fill_views(lhs, memo, index, expr, srcs, dsts, applied);
+          rec->record_fill_views(lhs, memo, index, expr, 
+                                 srcs, dsts, applied, reduction_initialization);
         }
       inline void record_issue_indirect(ApEvent &result,
                              IndexSpaceExpression *expr,

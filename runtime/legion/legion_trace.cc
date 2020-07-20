@@ -4067,7 +4067,8 @@ namespace Legion {
                                  unsigned idx, IndexSpaceExpression *expr,
                                  const FieldMaskSet<FillView> &tracing_srcs,
                                  const FieldMaskSet<InstanceView> &tracing_dsts,
-                                 std::set<RtEvent> &applied_events)
+                                 std::set<RtEvent> &applied_events,
+                                 bool reduction_initialization)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4087,7 +4088,10 @@ namespace Legion {
       assert(is_recording());
 #endif
       const unsigned lhs_ = find_event(lhs);
-      record_fill_views(tracing_srcs);
+      // Don't record fill views for initializing reduction 
+      // istances since since we don't need to track them
+      if (!reduction_initialization)
+        record_fill_views(tracing_srcs);
       record_views(lhs_, expr, RegionUsage(LEGION_WRITE_ONLY, 
             LEGION_EXCLUSIVE, 0), tracing_dsts, eqs);
       record_copy_views(lhs_, expr, tracing_dsts);
