@@ -1355,7 +1355,7 @@ namespace Legion {
                                                  precondition, predicate_guard);
       if (trace_info.recording)
         trace_info.record_fill_views(result, fill_expression,
-              *tracing_srcs, *tracing_dsts, effects_applied);
+              *tracing_srcs, *tracing_dsts, effects_applied, (redop > 0));
       return result;
     }
 

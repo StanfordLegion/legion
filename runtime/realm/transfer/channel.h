@@ -355,6 +355,8 @@ namespace Realm {
       //  sleep xds that are stalled
       atomic<unsigned> progress_counter;
 
+      atomic<unsigned> reference_count;
+
       // intrusive list for queued XDs in a channel
       IntrusivePriorityListLink<XferDes> xd_link;
       typedef IntrusivePriorityList<XferDes, int, &XferDes::xd_link, &XferDes::priority, DummyLock> XferDesList;
@@ -370,8 +372,15 @@ namespace Realm {
               uint64_t _max_req_size, int _priority,
               XferDesFence* _complete_fence);
 
+      // transfer descriptors are reference counted rather than explcitly
+      //  deleted
+      void add_reference(void);
+      void remove_reference(void);
+
+    protected:
       virtual ~XferDes();
 
+    public:
       virtual Event request_metadata();
 
       virtual long get_requests(Request** requests, long nr) = 0;
@@ -438,11 +447,14 @@ namespace Realm {
 	available_reqs.pop();
 	req->is_read_done = false;
 	req->is_write_done = false;
+	// by default, an "active" request holds a reference on the xd
+	add_reference();
         return req;
       }
 
       virtual void enqueue_request(Request* req) {
         available_reqs.push(req);
+	remove_reference();
       }
 
       class DeferredXDEnqueue : public Realm::EventWaiter {
@@ -1355,7 +1367,7 @@ namespace Realm {
 	  xd = it->second.xd;
 	  guid_to_xd.erase(it);
 	}
-        delete xd;
+	xd->remove_reference();
       }
 
       // returns true if xd is ready, false if enqueue has been deferred

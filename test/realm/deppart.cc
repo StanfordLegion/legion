@@ -81,12 +81,14 @@ static int check_empty(Event e, const std::vector<IndexSpace<1> >& p, const char
 {
   int errors = 0;
   e.wait();
-  for(size_t i = 0; i < p.size(); i++)
+  for(size_t i = 0; i < p.size(); i++) {
+    p[i].make_valid().wait();
     if(p[i].volume() > 0) {
       log_app.error() << "HELP! " << pfx << "[" << i << "] space " << p[i] << " isn't empty?";
       dump_sparse_index_space(pfx, p[i]);
       errors++;
     }
+  }
   return errors;
 }
 
@@ -2274,6 +2276,8 @@ int main(int argc, char **argv)
 
   // now sleep this thread until that shutdown actually happens
   rt.wait_for_shutdown();
+
+  delete testcfg;
   
   return 0;
 }

@@ -34,12 +34,7 @@ namespace Realm {
   Logger log_uop_timing("uop_timing");
   Logger log_dpops("dpops");
 
-  namespace {
-    // module-level globals
-
-    PartitioningOpQueue *op_queue = 0;
-
-  };
+  PartitioningOpQueue *deppart_op_queue = 0;
 
   namespace DeppartConfig {
 
@@ -548,6 +543,12 @@ namespace Realm {
     : Operation::AsyncWorkItem(_op)
     , uop(_uop)
   {}
+
+  AsyncMicroOp::~AsyncMicroOp()
+  {
+    if(uop)
+      delete uop;
+  }
     
   void AsyncMicroOp::request_cancellation(void)
   {
@@ -584,11 +585,15 @@ namespace Realm {
     if(async_microop) {
       if(requestor == Network::my_node_id) {
 	async_microop->mark_finished(true /*successful*/);
+	// async micro op will delete us when it's ready
       } else {
 	ActiveMessage<RemoteMicroOpCompleteMessage> amsg(requestor);
 	amsg->async_microop = async_microop;
 	amsg.commit();
+	delete this;
       }
+    } else {
+      delete this;
     }
   }
 
@@ -597,7 +602,7 @@ namespace Realm {
   {
     int left = wait_count.fetch_sub(1) - 1;
     if(left == 0)
-      op_queue->enqueue_partitioning_microop(this);
+      deppart_op_queue->enqueue_partitioning_microop(this);
   }
 
   void PartitioningMicroOp::finish_dispatch(PartitioningOperation *op, bool inline_ok)
@@ -634,7 +639,7 @@ namespace Realm {
 	execute();
 	mark_finished();
       } else
-	op_queue->enqueue_partitioning_microop(this);
+	deppart_op_queue->enqueue_partitioning_microop(this);
     }
   }
 
@@ -739,7 +744,7 @@ namespace Realm {
 							      TimeLimit work_until)
   {
     assert(!poisoned); // TODO: POISON_FIXME
-    op_queue->enqueue_partitioning_operation(op);
+    deppart_op_queue->enqueue_partitioning_operation(op);
   }
 
   void PartitioningOperation::DeferredLaunch::print(std::ostream& os) const
@@ -765,8 +770,10 @@ namespace Realm {
 
   void PartitioningOperation::launch(Event wait_for)
   {
+    get_runtime()->optable.add_local_operation(get_finish_event(), this);
+
     if(wait_for.has_triggered())
-      op_queue->enqueue_partitioning_operation(this);
+      deppart_op_queue->enqueue_partitioning_operation(this);
     else
       deferred_launch.defer(this, wait_for);
   };
@@ -810,6 +817,7 @@ namespace Realm {
 					    BackgroundWorkManager *_bgwork)
     : BackgroundWorkItem("deppart op queue")
     , shutdown_flag(false), rsrv(_rsrv), condvar(mutex)
+    , work_advertised(false)
   {
     if(_bgwork)
       add_to_manager(_bgwork);
@@ -836,78 +844,80 @@ namespace Realm {
   /*static*/ void PartitioningOpQueue::start_worker_threads(CoreReservationSet& crs,
 				     BackgroundWorkManager *_bgwork)
   {
-    assert(op_queue == 0);
+    assert(deppart_op_queue == 0);
     CoreReservation *rsrv = 0;
     if(DeppartConfig::cfg_num_partitioning_workers > 0)
       rsrv = new CoreReservation("partitioning", crs,
 				 CoreReservationParameters());
-    op_queue = new PartitioningOpQueue(rsrv, _bgwork);
+    deppart_op_queue = new PartitioningOpQueue(rsrv, _bgwork);
     ThreadLaunchParameters tlp;
     for(int i = 0; i < DeppartConfig::cfg_num_partitioning_workers; i++) {
       Thread *t = Thread::create_kernel_thread<PartitioningOpQueue,
-					       &PartitioningOpQueue::worker_thread_loop>(op_queue,
+					       &PartitioningOpQueue::worker_thread_loop>(deppart_op_queue,
 											 tlp,
 											 *rsrv);
-      op_queue->workers.push_back(t);
+      deppart_op_queue->workers.push_back(t);
     }
   }
 
   /*static*/ void PartitioningOpQueue::stop_worker_threads(void)
   {
-    assert(op_queue != 0);
+    assert(deppart_op_queue != 0);
 
 #ifdef DEBUG_REALM
-    op_queue->shutdown_work_item();
+    deppart_op_queue->shutdown_work_item();
 #endif
 
-    op_queue->shutdown_flag.store(true);
+    deppart_op_queue->shutdown_flag.store(true);
     {
-      AutoLock<> al(op_queue->mutex);
-      op_queue->condvar.broadcast();
+      AutoLock<> al(deppart_op_queue->mutex);
+      deppart_op_queue->condvar.broadcast();
     }
-    for(size_t i = 0; i < op_queue->workers.size(); i++) {
-      op_queue->workers[i]->join();
-      delete op_queue->workers[i];
+    for(size_t i = 0; i < deppart_op_queue->workers.size(); i++) {
+      deppart_op_queue->workers[i]->join();
+      delete deppart_op_queue->workers[i];
     }
-    op_queue->workers.clear();
+    deppart_op_queue->workers.clear();
 
-    delete op_queue;
-    op_queue = 0;
+    delete deppart_op_queue;
+    deppart_op_queue = 0;
   }
       
   void PartitioningOpQueue::enqueue_partitioning_operation(PartitioningOperation *op)
   {
     op->mark_ready();
 
-    bool was_empty;
+    bool need_advertise;
     {
       AutoLock<> al(mutex);
 
-      was_empty = queued_ops.empty();
-      queued_ops.put(op, OPERATION_PRIORITY);
+      need_advertise = !work_advertised;
+      work_advertised = true;
+      op_list.push_back(op);
 
       if(!workers.empty())
-	op_queue->condvar.broadcast();
+	deppart_op_queue->condvar.broadcast();
     }
 
-    if(was_empty)
+    if(need_advertise)
       make_active();
   }
 
   void PartitioningOpQueue::enqueue_partitioning_microop(PartitioningMicroOp *uop)
   {
-    bool was_empty;
+    bool need_advertise;
     {
       AutoLock<> al(mutex);
 
-      was_empty = queued_ops.empty();
-      queued_ops.put(uop, MICROOP_PRIORITY);
+      need_advertise = !work_advertised;
+      work_advertised = true;
+      uop_list.push_back(uop);
 
       if(!workers.empty())
-	op_queue->condvar.broadcast();
+	deppart_op_queue->condvar.broadcast();
     }
 
-    if(was_empty)
+    if(need_advertise)
       make_active();
   }
 
@@ -915,41 +925,51 @@ namespace Realm {
   {
     // attempt to take one item off the work queue - readvertise work if
     //  more remains
-    void *op = 0;
-    int priority;
-    bool work_left = false;
+    PartitioningOperation *op = 0;
+    PartitioningMicroOp *uop = 0;
+    bool readvertise;
     {
       AutoLock<> al(mutex);
-      op = queued_ops.get(&priority);
-      work_left = !queued_ops.empty();
+
+      // prefer micro ops over operations
+      if(!uop_list.empty())
+	uop = uop_list.pop_front();
+      else if(!op_list.empty())
+	op = op_list.pop_front();
+
+#ifdef DEBUG_REALM
+      assert(work_advertised);
+#endif
+      work_advertised = !op_list.empty() || !uop_list.empty();
+      readvertise = work_advertised;
     }
-    if(!op) return;
-    if(op && work_left && manager)
+    if(readvertise) {
+      assert(((op != 0) || (uop != 0)) && (manager != 0));
       make_active();
+    }
 
     // now we can work on the op we got in parallel with everybody else
-    switch(priority) {
-    case OPERATION_PRIORITY:
-      {
-	PartitioningOperation *p_op = static_cast<PartitioningOperation *>(op);
-	log_part.info() << "worker " << this << " starting op " << p_op;
-	p_op->mark_started();
-	p_op->execute();
-	log_part.info() << "worker " << this << " finished op " << p_op;
-	p_op->mark_finished(true /*successful*/);
-	break;
+    //  (neither branch will be taken if there are dedicated workers and they
+    //  already got to the queued operations)
+    if(op != 0) {
+      bool ok_to_run = op->mark_started();
+      if(ok_to_run) {
+	log_part.info() << "worker " << this << " starting op " << op;
+	op->execute();
+	log_part.info() << "worker " << this << " finished op " << op;
+	op->mark_finished(true /*successful*/);
+      } else {
+	log_part.info() << "worker " << this << " cancelled op " << op;
+	op->mark_finished(false /*!successful*/);
       }
-    case MICROOP_PRIORITY:
-      {
-	PartitioningMicroOp *p_uop = static_cast<PartitioningMicroOp *>(op);
-	log_part.info() << "worker " << this << " starting uop " << p_uop;
-	p_uop->mark_started();
-	p_uop->execute();
-	log_part.info() << "worker " << this << " finished uop " << p_uop;
-	p_uop->mark_finished();
-	break;
-      }
-    default: assert(0);
+    }
+
+    if(uop != 0) {
+      log_part.info() << "worker " << this << " starting uop " << uop;
+      uop->mark_started();
+      uop->execute();
+      log_part.info() << "worker " << this << " finished uop " << uop;
+      uop->mark_finished();
     }
   }
 
@@ -958,12 +978,18 @@ namespace Realm {
     log_part.info() << "worker " << Thread::self() << " started for op queue " << this;
 
     while(!shutdown_flag.load()) {
-      void *op = 0;
-      int priority = -1; /*invalid value*/
-      while(!op && !shutdown_flag.load()) {
+      PartitioningOperation *op = 0;
+      PartitioningMicroOp *uop = 0;
+      while(!op && !uop && !shutdown_flag.load()) {
 	AutoLock<> al(mutex);
-	op = queued_ops.get(&priority);
-	if(!op && !shutdown_flag.load()) {
+
+	// prefer micro ops over operations
+	if(!uop_list.empty())
+	  uop = uop_list.pop_front();
+	else if(!op_list.empty())
+	  op = op_list.pop_front();
+
+	if(!op && !uop && !shutdown_flag.load()) {
           if(DeppartConfig::cfg_worker_threads_sleep) {
 	    condvar.wait();
           } else {
@@ -973,30 +999,26 @@ namespace Realm {
           }
         }
       }
+
       if(op) {
-	switch(priority) {
-	case OPERATION_PRIORITY:
-	  {
-	    PartitioningOperation *p_op = static_cast<PartitioningOperation *>(op);
-	    log_part.info() << "worker " << this << " starting op " << p_op;
-	    p_op->mark_started();
-	    p_op->execute();
-	    log_part.info() << "worker " << this << " finished op " << p_op;
-	    p_op->mark_finished(true /*successful*/);
-	    break;
-	  }
-	case MICROOP_PRIORITY:
-	  {
-	    PartitioningMicroOp *p_uop = static_cast<PartitioningMicroOp *>(op);
-	    log_part.info() << "worker " << this << " starting uop " << p_uop;
-	    p_uop->mark_started();
-	    p_uop->execute();
-	    log_part.info() << "worker " << this << " finished uop " << p_uop;
-	    p_uop->mark_finished();
-	    break;
-	  }
-	default: assert(0);
+	bool ok_to_run = op->mark_started();
+	if(ok_to_run) {
+	  log_part.info() << "worker " << this << " starting op " << op;
+	  op->execute();
+	  log_part.info() << "worker " << this << " finished op " << op;
+	  op->mark_finished(true /*successful*/);
+	} else {
+	  log_part.info() << "worker " << this << " cancelled op " << op;
+	  op->mark_finished(false /*!successful*/);
 	}
+      }
+
+      if(uop) {
+	log_part.info() << "worker " << this << " starting uop " << uop;
+	uop->mark_started();
+	uop->execute();
+	log_part.info() << "worker " << this << " finished uop " << uop;
+	uop->mark_finished();
       }
     }
 

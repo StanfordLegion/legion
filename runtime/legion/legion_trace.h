@@ -798,7 +798,8 @@ namespace Legion {
                            unsigned idx, IndexSpaceExpression *expr, 
                            const FieldMaskSet<FillView> &tracing_srcs,
                            const FieldMaskSet<InstanceView> &tracing_dsts,
-                           std::set<RtEvent> &applied_events);
+                           std::set<RtEvent> &applied_events,
+                           bool reduction_initialization);
     protected:
       void record_views(unsigned entry,
                         IndexSpaceExpression *expr,

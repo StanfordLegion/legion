@@ -719,7 +719,8 @@ namespace Legion {
                                  unsigned idx, IndexSpaceExpression *expr, 
                                  const FieldMaskSet<FillView> &tracing_srcs,
                                  const FieldMaskSet<InstanceView> &tracing_dsts,
-                                 std::set<RtEvent> &applied_events)
+                                 std::set<RtEvent> &applied_events,
+                                 bool reduction_initialization)
     //--------------------------------------------------------------------------
     {
       if (local_space != origin_space)
@@ -750,12 +751,13 @@ namespace Legion {
             rez.serialize(it->second);
           }
         }
+        rez.serialize<bool>(reduction_initialization);
         runtime->send_remote_trace_update(origin_space, rez);
         applied_events.insert(done);
       }
       else
         remote_tpl->record_fill_views(lhs, memo, idx, expr, tracing_srcs,
-                                      tracing_dsts, applied_events);
+                  tracing_dsts, applied_events, reduction_initialization);
     }
 
     //--------------------------------------------------------------------------
@@ -1376,6 +1378,8 @@ namespace Legion {
               derez.deserialize(mask);
               tracing_dsts.insert(view, mask);
             }
+            bool reduction_initialization;
+            derez.deserialize<bool>(reduction_initialization);
             if (!ready_events.empty())
             {
               const RtEvent wait_on = Runtime::merge_events(ready_events);
@@ -1384,7 +1388,7 @@ namespace Legion {
                 wait_on.wait();
             }
             tpl->record_fill_views(lhs, memo, index, expr, tracing_srcs,
-                                   tracing_dsts, ready_events);
+                   tracing_dsts, ready_events, reduction_initialization);
             if (!ready_events.empty())
               Runtime::trigger_event(done, Runtime::merge_events(ready_events));
             else
