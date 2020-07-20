@@ -1469,24 +1469,6 @@ namespace Realm {
   template <int N, typename T>
   /*static*/ ActiveMessageHandlerReg<XferDesCreateMessage<AddressSplitXferDes<N,T> > > AddressSplitXferDesFactory<N,T>::areg;
   
-  class AddressSplitXferDesBase : public XferDes {
-  protected:
-    AddressSplitXferDesBase(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
-			    const std::vector<XferDesPortInfo>& inputs_info,
-			    const std::vector<XferDesPortInfo>& outputs_info,
-			    bool _mark_start,
-			    uint64_t _max_req_size, long max_nr, int _priority,
-			    XferDesFence* _complete_fence);
-
-  public:
-    virtual bool progress_xd(AddressSplitChannel *channel, TimeLimit work_until) = 0;
-
-    long get_requests(Request** requests, long nr);
-    void notify_request_read_done(Request* req);
-    void notify_request_write_done(Request* req);
-    void flush();
-  };
-  
   template <int N, typename T>
   class AddressSplitXferDes : public AddressSplitXferDesBase {
   protected:
