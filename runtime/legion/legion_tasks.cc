@@ -2216,7 +2216,7 @@ namespace Legion {
       DETAILED_PROFILER(runtime, PACK_SINGLE_TASK_CALL);
       RezCheck z(rez);
       pack_base_task(rez, target);
-      if (map_origin)
+      if (is_origin_mapped())
       {
         rez.serialize(selected_variant);
         rez.serialize(task_priority);
@@ -2227,6 +2227,17 @@ namespace Legion {
           rez.serialize<bool>(virtual_mapped[idx]);
         rez.serialize(deferred_complete_mapping);
         deferred_complete_mapping = RtUserEvent::NO_RT_USER_EVENT;
+        rez.serialize<size_t>(physical_instances.size());
+        for (unsigned idx = 0; idx < physical_instances.size(); idx++)
+          physical_instances[idx].pack_references(rez);
+        rez.serialize<size_t>(task_profiling_requests.size());
+        for (unsigned idx = 0; idx < task_profiling_requests.size(); idx++)
+          rez.serialize(task_profiling_requests[idx]);
+        rez.serialize<size_t>(copy_profiling_requests.size());
+        for (unsigned idx = 0; idx < copy_profiling_requests.size(); idx++)
+          rez.serialize(copy_profiling_requests[idx]);
+        if (!task_profiling_requests.empty() || !copy_profiling_requests.empty())
+          rez.serialize(profiling_priority);
       }
       else
       {
@@ -2247,10 +2258,7 @@ namespace Legion {
           // Should be empty after too
           assert(map_applied_conditions.empty());
 #endif
-        }
-        rez.serialize<size_t>(copy_profiling_requests.size());
-        for (unsigned idx = 0; idx < copy_profiling_requests.size(); idx++)
-          rez.serialize(copy_profiling_requests[idx]);
+        } 
         if (!deferred_complete_mapping.exists())
         {
 #ifdef DEBUG_LEGION
@@ -2271,14 +2279,6 @@ namespace Legion {
           deferred_complete_mapping = RtUserEvent::NO_RT_USER_EVENT;
         }
       }
-      rez.serialize<size_t>(physical_instances.size());
-      for (unsigned idx = 0; idx < physical_instances.size(); idx++)
-        physical_instances[idx].pack_references(rez);
-      rez.serialize<size_t>(task_profiling_requests.size());
-      for (unsigned idx = 0; idx < task_profiling_requests.size(); idx++)
-        rez.serialize(task_profiling_requests[idx]);
-      if (!task_profiling_requests.empty() || !copy_profiling_requests.empty())
-        rez.serialize(profiling_priority);
     }
 
     //--------------------------------------------------------------------------
@@ -2310,14 +2310,21 @@ namespace Legion {
         }
         derez.deserialize(deferred_complete_mapping);
         complete_mapping(deferred_complete_mapping);
-      }
-      else
-      {
-#ifdef DEBUG_LEGION
-        assert(remote_trace_info == NULL);
-#endif
-        remote_trace_info = 
-          TraceInfo::unpack_remote_trace_info(derez, this, runtime);
+        size_t num_phy;
+        derez.deserialize(num_phy);
+        physical_instances.resize(num_phy);
+        for (unsigned idx = 0; idx < num_phy; idx++)
+          physical_instances[idx].unpack_references(runtime,
+                                                    derez, ready_events);
+        update_no_access_regions();
+        size_t num_task_requests;
+        derez.deserialize(num_task_requests);
+        if (num_task_requests > 0)
+        {
+          task_profiling_requests.resize(num_task_requests);
+          for (unsigned idx = 0; idx < num_task_requests; idx++)
+            derez.deserialize(task_profiling_requests[idx]);
+        }
         size_t num_copy_requests;
         derez.deserialize(num_copy_requests);
         if (num_copy_requests > 0)
@@ -2326,25 +2333,19 @@ namespace Legion {
           for (unsigned idx = 0; idx < num_copy_requests; idx++)
             derez.deserialize(copy_profiling_requests[idx]);
         }
+        if (!task_profiling_requests.empty() || 
+            !copy_profiling_requests.empty())
+          derez.deserialize(profiling_priority);
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(remote_trace_info == NULL);
+#endif
+        remote_trace_info = 
+          TraceInfo::unpack_remote_trace_info(derez, this, runtime); 
         derez.deserialize(deferred_complete_mapping);
       }
-      size_t num_phy;
-      derez.deserialize(num_phy);
-      physical_instances.resize(num_phy);
-      for (unsigned idx = 0; idx < num_phy; idx++)
-        physical_instances[idx].unpack_references(runtime,
-                                                  derez, ready_events);
-      update_no_access_regions();
-      size_t num_task_requests;
-      derez.deserialize(num_task_requests);
-      if (num_task_requests > 0)
-      {
-        task_profiling_requests.resize(num_task_requests);
-        for (unsigned idx = 0; idx < num_task_requests; idx++)
-          derez.deserialize(task_profiling_requests[idx]);
-      }
-      if (!task_profiling_requests.empty() || !copy_profiling_requests.empty())
-        derez.deserialize(profiling_priority);
     } 
 
     //--------------------------------------------------------------------------
@@ -10377,9 +10378,9 @@ namespace Legion {
             }
           }
         }
-        // Set the first mapping to false since we know things are mapped
-        first_mapping = false;
       }
+      else // Set the first mapping to false since we know things are mapped
+        first_mapping = false;
       // Return true to add this to the ready queue
       return true;
     }
